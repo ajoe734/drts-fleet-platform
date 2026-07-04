@@ -3367,6 +3367,92 @@ const en = {
   "callcenter.clearSearch": "Clear search",
   "callcenter.deadline.dueIn": "Due in {value} min",
   "callcenter.deadline.overdueBy": "Overdue by {value} min",
+  "callcenter.mapBooking.section.title": "Pickup and dropoff map verification",
+  "callcenter.mapBooking.section.description":
+    "Search or manually pin both stops before creating the phone booking.",
+  "callcenter.mapBooking.section.pickupTitle": "Pickup location",
+  "callcenter.mapBooking.section.dropoffTitle": "Dropoff location",
+  "callcenter.mapBooking.picker.searchLabel": "Search address",
+  "callcenter.mapBooking.picker.searchPlaceholder":
+    "Search a street, terminal, gate, or landmark",
+  "callcenter.mapBooking.picker.searchButton": "Search",
+  "callcenter.mapBooking.picker.searching": "Searching…",
+  "callcenter.mapBooking.picker.candidatesTitle": "Matching locations",
+  "callcenter.mapBooking.picker.noMatchTitle": "No matching address",
+  "callcenter.mapBooking.picker.noMatchBody":
+    "No reliable match yet. Refine the search or pin the coordinates manually.",
+  "callcenter.mapBooking.picker.manualToggle": "Enter coordinates manually",
+  "callcenter.mapBooking.picker.manualTitle": "Manual location",
+  "callcenter.mapBooking.picker.manualLatLabel": "Latitude",
+  "callcenter.mapBooking.picker.manualLngLabel": "Longitude",
+  "callcenter.mapBooking.picker.manualReasonLabel":
+    "Reason for manual location",
+  "callcenter.mapBooking.picker.manualReasonPlaceholder":
+    "e.g. caller confirmed the exact gate or curb position",
+  "callcenter.mapBooking.picker.manualApply": "Use this location",
+  "callcenter.mapBooking.picker.manualInvalid":
+    "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).",
+  "callcenter.mapBooking.picker.providerOutageTitle":
+    "Address lookup is unavailable",
+  "callcenter.mapBooking.picker.providerOutageBody":
+    "Address lookup is unavailable right now. Enter coordinates manually before creating the booking.",
+  "callcenter.mapBooking.picker.degradedNote":
+    "Address results may be limited right now.",
+  "callcenter.mapBooking.picker.confidenceLabel": "Match confidence",
+  "callcenter.mapBooking.picker.provenanceLabel": "Location source",
+  "callcenter.mapBooking.picker.coordinatesLabel": "Coordinates",
+  "callcenter.mapBooking.picker.mapEmpty":
+    "Search and pin the caller's location before creating the booking.",
+  "callcenter.mapBooking.picker.mapHint":
+    "Drag the pin or use arrow keys to fine-tune the location.",
+  "callcenter.mapBooking.picker.pinAdjustHint": "Pin adjusted manually.",
+  "callcenter.mapBooking.picker.clearSelection": "Clear",
+  "callcenter.mapBooking.picker.serviceableTitle":
+    "Serviceable for standard taxi dispatch",
+  "callcenter.mapBooking.picker.manualReviewTitle":
+    "Manual review required before release",
+  "callcenter.mapBooking.picker.notServiceableTitle":
+    "Outside the governed service area",
+  "callcenter.mapBooking.picker.serviceabilityPending":
+    "Checking service area…",
+  "callcenter.mapBooking.banner.pickupCoordinatesTitle":
+    "Pickup coordinates are required",
+  "callcenter.mapBooking.banner.pickupCoordinatesBody":
+    "Search or pin the pickup before creating the phone booking.",
+  "callcenter.mapBooking.banner.dropoffCoordinatesTitle":
+    "Dropoff coordinates are required",
+  "callcenter.mapBooking.banner.dropoffCoordinatesBody":
+    "Search or pin the dropoff before creating the phone booking.",
+  "callcenter.mapBooking.banner.pickupProvenanceTitle":
+    "Pickup provenance is required",
+  "callcenter.mapBooking.banner.pickupProvenanceBody":
+    "Re-select or manually pin the pickup so coordinate provenance is recorded.",
+  "callcenter.mapBooking.banner.dropoffProvenanceTitle":
+    "Dropoff provenance is required",
+  "callcenter.mapBooking.banner.dropoffProvenanceBody":
+    "Re-select or manually pin the dropoff so coordinate provenance is recorded.",
+  "callcenter.mapBooking.banner.previewPendingTitle":
+    "Checking service area before submit",
+  "callcenter.mapBooking.banner.previewPendingBody":
+    "Wait for the serviceability result before creating the booking.",
+  "callcenter.mapBooking.banner.previewUnavailableTitle":
+    "Service-area preview is unavailable",
+  "callcenter.mapBooking.banner.previewUnavailableBody":
+    "Do not create a normal dispatchable booking until the preview recovers.",
+  "callcenter.mapBooking.banner.blockedTitle":
+    "This trip is outside the service area",
+  "callcenter.mapBooking.banner.blockedBody":
+    "The booking cannot enter normal dispatch with the current pickup/dropoff.",
+  "callcenter.mapBooking.banner.serviceableTitle":
+    "Ready to create a dispatchable phone booking",
+  "callcenter.mapBooking.banner.serviceableBody":
+    "Pickup and dropoff coordinates are pinned and serviceable.",
+  "callcenter.mapBooking.banner.manualReviewTitle":
+    "This booking will enter manual review",
+  "callcenter.mapBooking.banner.manualReviewBody":
+    "Create the booking only if ops should review it before normal dispatch.",
+  "callcenter.mapBooking.banner.manualReviewHelper":
+    "Creates an order flagged for manual review instead of normal dispatch.",
 
   // ── Reports ──
   "reports.title": "Reports Center",
@@ -7521,6 +7607,76 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.clearSearch": "清除搜尋",
   "callcenter.deadline.dueIn": "{value} 分鐘後到期",
   "callcenter.deadline.overdueBy": "已逾期 {value} 分鐘",
+  "callcenter.mapBooking.section.title": "上下車定位確認",
+  "callcenter.mapBooking.section.description":
+    "建立電話訂車前，先搜尋或手動確認上下車座標與服務範圍。",
+  "callcenter.mapBooking.section.pickupTitle": "上車點",
+  "callcenter.mapBooking.section.dropoffTitle": "下車點",
+  "callcenter.mapBooking.picker.searchLabel": "搜尋地址",
+  "callcenter.mapBooking.picker.searchPlaceholder":
+    "搜尋街道、航廈、門口或地標",
+  "callcenter.mapBooking.picker.searchButton": "搜尋",
+  "callcenter.mapBooking.picker.searching": "搜尋中…",
+  "callcenter.mapBooking.picker.candidatesTitle": "候選地址",
+  "callcenter.mapBooking.picker.noMatchTitle": "找不到相符地址",
+  "callcenter.mapBooking.picker.noMatchBody":
+    "目前沒有可靠結果。請調整搜尋，或改為手動輸入座標。",
+  "callcenter.mapBooking.picker.manualToggle": "手動輸入座標",
+  "callcenter.mapBooking.picker.manualTitle": "手動定位",
+  "callcenter.mapBooking.picker.manualLatLabel": "緯度",
+  "callcenter.mapBooking.picker.manualLngLabel": "經度",
+  "callcenter.mapBooking.picker.manualReasonLabel": "手動定位原因",
+  "callcenter.mapBooking.picker.manualReasonPlaceholder":
+    "例如：來電者已確認精確上下車點",
+  "callcenter.mapBooking.picker.manualApply": "使用這個位置",
+  "callcenter.mapBooking.picker.manualInvalid":
+    "請輸入有效的緯度（-90 到 90）與經度（-180 到 180）。",
+  "callcenter.mapBooking.picker.providerOutageTitle": "地址查詢目前不可用",
+  "callcenter.mapBooking.picker.providerOutageBody":
+    "建立電話訂車前，請先手動輸入座標。",
+  "callcenter.mapBooking.picker.degradedNote": "地址結果目前可能不完整。",
+  "callcenter.mapBooking.picker.confidenceLabel": "比對信心",
+  "callcenter.mapBooking.picker.provenanceLabel": "定位來源",
+  "callcenter.mapBooking.picker.coordinatesLabel": "座標",
+  "callcenter.mapBooking.picker.mapEmpty": "先搜尋並確認位置，再建立電話訂車。",
+  "callcenter.mapBooking.picker.mapHint": "可拖曳圖釘，或用方向鍵微調位置。",
+  "callcenter.mapBooking.picker.pinAdjustHint": "已手動調整圖釘。",
+  "callcenter.mapBooking.picker.clearSelection": "清除",
+  "callcenter.mapBooking.picker.serviceableTitle": "符合標準計程車派遣範圍",
+  "callcenter.mapBooking.picker.manualReviewTitle": "需人工審查後才能釋出",
+  "callcenter.mapBooking.picker.notServiceableTitle": "超出受管制的服務範圍",
+  "callcenter.mapBooking.picker.serviceabilityPending": "正在檢查服務範圍…",
+  "callcenter.mapBooking.banner.pickupCoordinatesTitle": "必須先確認上車座標",
+  "callcenter.mapBooking.banner.pickupCoordinatesBody":
+    "建立電話訂車前，先搜尋或手動標記上車點。",
+  "callcenter.mapBooking.banner.dropoffCoordinatesTitle": "必須先確認下車座標",
+  "callcenter.mapBooking.banner.dropoffCoordinatesBody":
+    "建立電話訂車前，先搜尋或手動標記下車點。",
+  "callcenter.mapBooking.banner.pickupProvenanceTitle": "上車點缺少定位來源",
+  "callcenter.mapBooking.banner.pickupProvenanceBody":
+    "請重新選取或手動釘選上車點，保留定位 provenance。",
+  "callcenter.mapBooking.banner.dropoffProvenanceTitle": "下車點缺少定位來源",
+  "callcenter.mapBooking.banner.dropoffProvenanceBody":
+    "請重新選取或手動釘選下車點，保留定位 provenance。",
+  "callcenter.mapBooking.banner.previewPendingTitle":
+    "送出前必須完成服務範圍檢查",
+  "callcenter.mapBooking.banner.previewPendingBody":
+    "請等待 serviceability 結果後再建立電話訂車。",
+  "callcenter.mapBooking.banner.previewUnavailableTitle":
+    "服務範圍預覽目前不可用",
+  "callcenter.mapBooking.banner.previewUnavailableBody":
+    "在預覽恢復前，不要建立可正常派遣的電話訂單。",
+  "callcenter.mapBooking.banner.blockedTitle": "此趟行程不在服務範圍內",
+  "callcenter.mapBooking.banner.blockedBody":
+    "目前的上下車點不可進入正常派遣。",
+  "callcenter.mapBooking.banner.serviceableTitle": "可建立可派遣的電話訂單",
+  "callcenter.mapBooking.banner.serviceableBody":
+    "上下車座標已確認，且通過服務範圍檢查。",
+  "callcenter.mapBooking.banner.manualReviewTitle": "此訂單會先進人工審查",
+  "callcenter.mapBooking.banner.manualReviewBody":
+    "建立後不會直接進 normal dispatch，需先由營運審查。",
+  "callcenter.mapBooking.banner.manualReviewHelper":
+    "建立後會以人工審查狀態進入後續流程。",
 
   // ── Reports ──
   "reports.title": "報表",

@@ -269,6 +269,289 @@ async function assertShell(page: Page) {
   );
 }
 
+async function ensureCallcenterMapBookingForm(page: Page) {
+  const mapPair = page.locator(
+    '[data-address-map-pair-picker="callcenter-phone-booking-map"]',
+  );
+
+  await expect(page.locator("body")).not.toContainText(
+    /Loading workspace|載入工作區/i,
+    { timeout: 30_000 },
+  );
+
+  if ((await mapPair.count()) === 0) {
+    await page
+      .getByRole("button", {
+        name: /Open call work session|開啟通話工作階段/i,
+      })
+      .first()
+      .click();
+
+    const openSessionButton = page
+      .getByRole("button", { name: /^Open Session$|^開啟通話$/i })
+      .first();
+    const intakeForm = page.locator("form").filter({
+      has: openSessionButton,
+    });
+    await intakeForm
+      .locator('input[type="text"][required]')
+      .first()
+      .fill("0912-000-301");
+    await openSessionButton.click();
+  }
+
+  await expect(mapPair).toBeVisible({ timeout: 45_000 });
+  return mapPair;
+}
+
+async function installMockCallcenterMapRoutes(page: Page) {
+  const now = "2026-07-03T14:00:00.000Z";
+  const activeSession = {
+    callId: "CALL-SMOKE-001",
+    callType: "booking",
+    callerPhone: "0912-000-301",
+    agentId: "AGENT-OPS-001",
+    agentIdentityAnnounced: true,
+    agentIdentityAnnouncedAt: now,
+    status: "active",
+    startedAt: now,
+    endedAt: null,
+    recordingId: "REC-SMOKE-001",
+    providerRecordingRef: "prov-rec-smoke-001",
+    recordingUrl: null,
+    linkedOrderId: null,
+    linkedCaseNo: null,
+    lastEtaQuotedMinutes: null,
+    lastEtaQuotedAt: null,
+    callbackTask: null,
+    recordingState: "pending",
+    flags: [],
+  };
+  const pickupCandidate = {
+    candidateId: "mock-taipei-101",
+    provider: "mock-geo",
+    providerCandidateId: "place-101",
+    placeId: "place-101",
+    displayName: "Taipei 101",
+    address: "No. 7, Section 5, Xinyi Road, Xinyi District, Taipei",
+    normalizedAddress: "No.7 Sec.5 Xinyi Rd, Xinyi, Taipei",
+    district: "Xinyi",
+    locality: "Taipei",
+    countryCode: "TW",
+    location: { lat: 25.033964, lng: 121.564468 },
+    confidence: "exact",
+    accuracyM: 8,
+  };
+  const dropoffCandidate = {
+    candidateId: "mock-taipei-main",
+    provider: "mock-geo",
+    providerCandidateId: "place-main",
+    placeId: "place-main",
+    displayName: "Taipei Main Station",
+    address: "No. 3, Beiping West Road, Zhongzheng District, Taipei",
+    normalizedAddress: "No.3 Beiping W. Rd, Zhongzheng, Taipei",
+    district: "Zhongzheng",
+    locality: "Taipei",
+    countryCode: "TW",
+    location: { lat: 25.047762, lng: 121.517017 },
+    confidence: "interpolated",
+    accuracyM: 25,
+  };
+
+  await page.route("**/control-plane-proxy/health*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          status: "healthy",
+          degradedServices: [],
+          lastCheckedAt: now,
+        },
+      }),
+    });
+  });
+
+  await page.route(
+    "**/control-plane-proxy/callcenter/sessions*",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            items: [activeSession],
+            refresh: {
+              generatedAt: now,
+              staleAfterMs: 30_000,
+              dataFreshness: "fresh",
+              source: "live",
+            },
+            health: {
+              status: "healthy",
+              degradedServices: [],
+              lastCheckedAt: now,
+            },
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/callcenter/callbacks*",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            items: [],
+            refresh: {
+              generatedAt: now,
+              staleAfterMs: 30_000,
+              dataFreshness: "fresh",
+              source: "live",
+            },
+            health: {
+              status: "healthy",
+              degradedServices: [],
+              lastCheckedAt: now,
+            },
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route("**/control-plane-proxy/geo/health*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          provider: "mock-geo",
+          mode: "mock",
+          status: "healthy",
+          failClosed: false,
+          mockAllowed: true,
+          checks: [],
+        },
+      }),
+    });
+  });
+
+  await page.route("**/control-plane-proxy/geo/search*", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    const query = requestUrl.searchParams.get("q")?.toLowerCase() ?? "";
+    const candidates =
+      query.includes("101") || query.includes("pickup")
+        ? [pickupCandidate]
+        : query.includes("main") || query.includes("drop")
+          ? [dropoffCandidate]
+          : [];
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          candidates,
+          provider: "mock-geo",
+          generatedAt: now,
+        },
+      }),
+    });
+  });
+
+  await page.route(
+    "**/control-plane-proxy/service-area/evaluate*",
+    async (route) => {
+      const command = route.request().postDataJSON() as {
+        pickup: { lat: number; lng: number };
+        dropoff?: { lat: number; lng: number } | null;
+      };
+      const stops = [
+        {
+          kind: "pickup",
+          location: command.pickup,
+          serviceAreaCodes: ["mock-core"],
+          policyCodes: [],
+          geometryVersionRefs: ["mock-v1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        },
+      ];
+      if (command.dropoff) {
+        stops.push({
+          kind: "dropoff",
+          location: command.dropoff,
+          serviceAreaCodes: ["mock-core"],
+          policyCodes: [],
+          geometryVersionRefs: ["mock-v1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        });
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            decision: "serviceable",
+            serviceProductType: "taxi_realtime",
+            evaluatedAt: now,
+            stops,
+            serviceAreaCodes: ["mock-core"],
+            geometryVersionRefs: ["mock-v1"],
+            reasonCodes: [],
+            reasonMessages: [],
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/call-center/orders*",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            orderId: "ORD-SMOKE-001",
+            orderSource: "callcenter",
+            callId: activeSession.callId,
+            recordingId: activeSession.recordingId,
+            status: "pending_dispatch",
+          },
+        }),
+      });
+    },
+  );
+}
+
 test.describe("ops console parity smoke", () => {
   test.use({ viewport: { width: 1440, height: 950 } });
   test.setTimeout(180_000);
@@ -295,6 +578,134 @@ test.describe("ops console parity smoke", () => {
         fullPage: true,
       });
     }
+  });
+
+  test("callcenter phone booking captures coordinate provenance in request body", async ({
+    page,
+  }) => {
+    await installMockCallcenterMapRoutes(page);
+    await page.goto(`${baseUrl}/callcenter`, { waitUntil: "domcontentloaded" });
+
+    await expect(page).not.toHaveURL(/404/);
+    await expect(page.locator("body")).not.toContainText(
+      /404|Application error/i,
+    );
+    await assertShell(page);
+
+    const mapPair = await ensureCallcenterMapBookingForm(page);
+    await expect(mapPair).toHaveAttribute(
+      "data-service-product-type",
+      "taxi_realtime",
+    );
+    await expect(mapPair).toHaveAttribute(
+      "data-can-evaluate-service-area",
+      "true",
+    );
+    const bookingForm = mapPair.locator("xpath=ancestor::form[1]");
+
+    const bookingGate = page.locator("[data-callcenter-map-booking-gate]");
+    await expect(bookingGate).toHaveAttribute(
+      "data-callcenter-map-booking-gate",
+      "pickup_coordinates_required",
+    );
+
+    const submitButton = bookingForm
+      .getByRole("button", {
+        name: /Create phone booking|建立電話訂車/i,
+      })
+      .first();
+    await expect(submitButton).toBeDisabled();
+
+    const passengerNameInput = bookingForm
+      .locator('input[type="text"]')
+      .first();
+    await passengerNameInput.fill("Smoke Caller");
+    await expect(passengerNameInput).toHaveValue("Smoke Caller");
+
+    const pickupPicker = page.locator(
+      '[data-address-map-picker="callcenter-pickup-map"]',
+    );
+    const pickupSearchInput = pickupPicker
+      .locator('input[type="text"]')
+      .first();
+    await pickupSearchInput.fill("Taipei 101");
+    await expect(pickupSearchInput).toHaveValue("Taipei 101");
+    await pickupPicker.getByRole("button", { name: /Search|搜尋/i }).click();
+    const pickupCandidateButton = pickupPicker
+      .locator("button")
+      .filter({ hasText: /Taipei 101/i })
+      .first();
+    await expect(pickupCandidateButton).toBeVisible();
+    await pickupCandidateButton.click();
+
+    const dropoffPicker = page.locator(
+      '[data-address-map-picker="callcenter-dropoff-map"]',
+    );
+    const dropoffSearchInput = dropoffPicker
+      .locator('input[type="text"]')
+      .first();
+    await dropoffSearchInput.fill("Taipei Main");
+    await expect(dropoffSearchInput).toHaveValue("Taipei Main");
+    await dropoffPicker.getByRole("button", { name: /Search|搜尋/i }).click();
+    const dropoffCandidateButton = dropoffPicker
+      .locator("button")
+      .filter({ hasText: /Taipei Main Station/i })
+      .first();
+    await expect(dropoffCandidateButton).toBeVisible();
+    await dropoffCandidateButton.click();
+
+    await expect(bookingGate).toHaveAttribute(
+      "data-callcenter-map-booking-gate",
+      "serviceable",
+    );
+    await expect(submitButton).toBeEnabled();
+
+    const requestPromise = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        request.url().includes("/call-center/orders"),
+    );
+    page.once("dialog", (dialog) => dialog.accept());
+    await submitButton.click();
+
+    const request = await requestPromise;
+    const payload = request.postDataJSON() as {
+      passenger: { name: string; phone: string };
+      pickup: Record<string, unknown>;
+      dropoff: Record<string, unknown>;
+    };
+
+    expect(payload.passenger.name).toBe("Smoke Caller");
+    expect(payload.pickup).toMatchObject({
+      address: "No. 7, Section 5, Xinyi Road, Xinyi District, Taipei",
+      lat: 25.033964,
+      lng: 121.564468,
+      coordinateSource: "provider_candidate",
+      geocodeProvider: "mock-geo",
+      providerCandidateId: "place-101",
+      surface: "callcenter",
+    });
+    expect(payload.dropoff).toMatchObject({
+      address: "No. 3, Beiping West Road, Zhongzheng District, Taipei",
+      lat: 25.047762,
+      lng: 121.517017,
+      coordinateSource: "provider_candidate",
+      geocodeProvider: "mock-geo",
+      providerCandidateId: "place-main",
+      surface: "callcenter",
+    });
+    expect(payload.pickup.coordinateProvenance).toMatchObject({
+      coordinateSource: "provider_candidate",
+      geocodeProvider: "mock-geo",
+      providerCandidateId: "place-101",
+      surface: "callcenter",
+    });
+    expect(payload.dropoff.coordinateProvenance).toMatchObject({
+      coordinateSource: "provider_candidate",
+      geocodeProvider: "mock-geo",
+      providerCandidateId: "place-main",
+      surface: "callcenter",
+    });
   });
 
   test("dispatch map board exposes governed spatial readiness hooks", async ({

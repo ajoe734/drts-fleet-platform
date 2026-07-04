@@ -586,8 +586,22 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
         }
       : null,
   );
+  useEffect(() => {
+    if (!controlled) {
+      return;
+    }
+    setSelection(
+      value
+        ? {
+            address: value,
+            manualReason: value.manualOverrideReason ?? "",
+          }
+        : null,
+    );
+  }, [controlled, value]);
+
   const selectedAddress = controlled
-    ? (value ?? null)
+    ? (selection?.address ?? value ?? null)
     : (selection?.address ?? null);
 
   const [query, setQuery] = useState("");
@@ -642,11 +656,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
 
   const applySelection = useCallback(
     (address: AddressPayload | null, reason: string) => {
-      if (!controlled) {
-        setSelection(address ? { address, manualReason: reason } : null);
-      }
+      setSelection(address ? { address, manualReason: reason } : null);
     },
-    [controlled],
+    [],
   );
 
   const runServiceability = useCallback(
@@ -1394,7 +1406,6 @@ function mergeProviderStates(
     states[0] ?? { available: true, degraded: false, reasonCode: "available" }
   );
 }
-
 export interface AddressMapPairPickerProps<
   TServiceProduct extends string = string,
 > {
