@@ -2,9 +2,9 @@
   "taskId": "MAP-REL-001",
   "title": "Map/geofence production release gates",
   "owner": "Codex2",
-  "reviewer": "Gemini2",
+  "reviewer": "Codex",
   "branch": "codex2/map-rel-001",
-  "branchSha": "f718ceb3a34f9b26f36a98db8201d1d380767b8d",
+  "branchSha": "5833b0aafd4d820322f3b37861ea6e61c2b4adbb",
   "evidenceDate": "2026-07-04",
   "productionEvidence": [
     {
@@ -23,7 +23,7 @@
       "id": "FLEETS-MAP-002",
       "title": "Gate B governance safe to publish",
       "gate": "Gate B",
-      "status": "PASS",
+      "status": "FAIL",
       "artifacts": [
         "docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260703.md",
         "support/sidecars/MAP-UI-002/MAP-UI-002-INTEGRATE-001-CLOSEOUT.md",

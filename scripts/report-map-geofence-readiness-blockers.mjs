@@ -29,6 +29,11 @@ const outputMdPath = path.join(
 const finalEvidence = fs.readFileSync(finalEvidencePath, "utf8");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const gapDoc = fs.readFileSync(gapDocPath, "utf8");
+const driverEvidencePath = path.join(
+  repoRoot,
+  "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md",
+);
+const driverEvidence = fs.readFileSync(driverEvidencePath, "utf8");
 
 function hasPlaceholder(text) {
   return /<[^>\n]+>|{{|}}|\bREPLACE_ME\b|\bTODO\b|\bTBD\b/i.test(text);
@@ -36,6 +41,11 @@ function hasPlaceholder(text) {
 
 const blockers = [];
 const checks = [];
+const canonicalGovernanceRoutes = [
+  "apps/platform-admin-web/app/service-area-governance/page.tsx",
+  "apps/platform-admin-web/app/service-area-governance/service-areas/[serviceAreaId]/page.tsx",
+  "apps/platform-admin-web/app/service-area-governance/stop-policies/[stopPolicyId]/page.tsx",
+];
 
 for (const gate of ["Gate A", "Gate B", "Gate C", "Gate D", "Gate E"]) {
   const pass = new RegExp(`\\|\\s*\`${gate}\`\\s*\\|\\s*PASS\\s*\\|`).test(
@@ -58,6 +68,28 @@ for (const item of manifest.productionEvidence) {
       blockers.push(`${item.id} artifact missing: ${artifact}`);
     }
   }
+}
+
+const gateBRoutePublicationPass = canonicalGovernanceRoutes.every((routePath) =>
+  fs.existsSync(path.join(repoRoot, routePath)),
+);
+checks.push({ id: "gate-b-canonical-route-publication", pass: gateBRoutePublicationPass });
+if (!gateBRoutePublicationPass) {
+  blockers.push(
+    `Gate B lacks canonical /service-area-governance repo publication: expected ${canonicalGovernanceRoutes.join(", ")}.`,
+  );
+}
+
+const gateDMobileUatPass =
+  !driverEvidence.includes("Android/iOS simulator UAT was not run in this repo-local pass.") &&
+  !driverEvidence.includes(
+    "Gate D production readiness still needs simulator/device screenshots or video",
+  );
+checks.push({ id: "gate-d-mobile-uat", pass: gateDMobileUatPass });
+if (!gateDMobileUatPass) {
+  blockers.push(
+    "Gate D still lacks release-grade simulator/device UAT evidence in support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md.",
+  );
 }
 
 const prereqChecks = [
