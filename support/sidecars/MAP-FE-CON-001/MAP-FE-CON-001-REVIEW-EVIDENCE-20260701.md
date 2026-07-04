@@ -4,7 +4,7 @@
 - Owner: `Codex2`
 - Reviewer: `Codex`
 - Branch: `codex2/map-fe-con-001`
-- Current head: `dc7bb4898` (`MAP-FE-CON-001: fix playwright project argument narrowing`)
+- Review-approved implementation head: `16559987b731f6415973be02ddc48ad2bb638208` (`docs(MAP-FE-CON-001): add review evidence`)
 - Dependencies: `MAP-UI-001`, `MAP-BE-004`, `MAP-BE-005`
 
 ## Summary
@@ -77,3 +77,9 @@ Additional spot check:
 ## Integration Status
 
 Branch status at evidence capture: `branch_pushed`.
+
+## Owner Closeout Note
+
+- `2026-07-04`: owner final closeout resumed from `review_approved`.
+- Reviewer approval is recorded in machine truth for head `16559987b731f6415973be02ddc48ad2bb638208`.
+- Final owner closeout records branch-level delivery only; PR/CI/merge/dev deploy remain outside this task's `done` transition unless separately evidenced.
