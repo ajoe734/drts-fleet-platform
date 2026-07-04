@@ -2,7 +2,7 @@
 
 **Task:** `MAP-REL-001` - Map/geofence production release gates
 **Branch:** `codex2/map-rel-001`
-**Branch@SHA:** `codex2/map-rel-001@50b77973f0cc570b2911e22e06fd1947f8751f0c`
+**Branch@SHA:** `codex2/map-rel-001@815b425a4d5ec41bfa118712f02857b4180d17d3`
 **Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-map-rel-001`
 **Date:** `2026-07-04`
 **Reviewer:** `Codex`
