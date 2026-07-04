@@ -13,13 +13,13 @@ import {
   CanvasPill,
   buildCanvasTheme,
   createConfiguredMockAddressProvider,
-  evaluateAddressSubmitGate,
   type CanvasTheme,
   type AddressMapPairChange,
   type AddressProviderMode,
 } from "@drts/ui-web";
 import {
   getPartnerBookingFieldErrors,
+  getPartnerMapSubmitGate,
   getPartnerProgramCoverage,
   getPartnerProgramGate,
   getPartnerProgramLabel,
@@ -202,12 +202,23 @@ export function PartnerBookingForm({
     eligibilityVerificationId,
     locale,
   });
-  const mapGate = evaluateAddressSubmitGate({
+  const mapGate = getPartnerMapSubmitGate({
+    draft,
     pickup: mapSelection.pickup,
     dropoff: mapSelection.dropoff,
     serviceability: mapSelection.serviceability,
     providerState: mapSelection.providerState,
   });
+  const pickupTextFallbackHint =
+    !mapSelection.providerState.available &&
+    mapGate.code === "dispatch_manual_review_required"
+      ? t("book.map.textFallbackHint")
+      : null;
+  const dropoffTextFallbackHint =
+    !mapSelection.providerState.available &&
+    mapGate.code === "dispatch_manual_review_required"
+      ? t("book.map.outageFallback")
+      : null;
 
   function updateField(name: string, value: string) {
     setDraft((current) => ({
@@ -575,11 +586,37 @@ export function PartnerBookingForm({
               {...(mapLabels ? { labels: mapLabels } : {})}
             />
             <span style={{ ...hintStyle, color: theme.textMuted }}>
-              {mapGate.code === "dispatch_manual_review_required"
-                ? t("book.map.manualReview")
-                : t("book.map.hint")}
+              {mapSelection.providerState.available
+                ? mapGate.code === "dispatch_manual_review_required"
+                  ? t("book.map.manualReview")
+                  : t("book.map.hint")
+                : t("book.map.textFallbackHint")}
             </span>
+            {!mapSelection.providerState.available ? (
+              <CanvasBanner
+                theme={theme}
+                tone="warn"
+                title={t("book.map.manualReviewTitle")}
+                body={t("book.map.outageFallback")}
+              />
+            ) : null}
           </div>
+          {renderField({
+            name: "pickupAddress",
+            label: t("field.pickupAddress"),
+            fullSpan: true,
+            ...(pickupTextFallbackHint
+              ? { hint: pickupTextFallbackHint }
+              : {}),
+          })}
+          {renderField({
+            name: "dropoffAddress",
+            label: t("field.dropoffAddress"),
+            fullSpan: true,
+            ...(dropoffTextFallbackHint
+              ? { hint: dropoffTextFallbackHint }
+              : {}),
+          })}
           {renderField({
             name: "reservationWindowStart",
             label: t("field.reservationWindowStart"),

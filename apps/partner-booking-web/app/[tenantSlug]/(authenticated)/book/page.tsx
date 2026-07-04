@@ -19,15 +19,28 @@ export default async function PartnerBookPage({
 }: PageProps) {
   const { tenantSlug } = await params;
   const resolvedSearchParams = await searchParams;
+  const eligibilityVerificationId =
+    (Array.isArray(resolvedSearchParams.eligibilityVerificationId)
+      ? resolvedSearchParams.eligibilityVerificationId[0]
+      : resolvedSearchParams.eligibilityVerificationId) ?? null;
   try {
-    const { brand, entry } = await getPartnerRouteContext(tenantSlug);
-    const eligibilityVerificationId =
-      (Array.isArray(resolvedSearchParams.eligibilityVerificationId)
-        ? resolvedSearchParams.eligibilityVerificationId[0]
-        : resolvedSearchParams.eligibilityVerificationId) ?? null;
+    const { brand, entry, provenance } = await getPartnerRouteContext(
+      tenantSlug,
+      {
+        allowAuthorityOutage: true,
+      },
+    );
 
     if (!entry) {
-      redirect(`/${tenantSlug}/inactive`);
+      const persistentQuery = eligibilityVerificationId
+        ? `?${new URLSearchParams({
+            eligibilityVerificationId,
+          }).toString()}`
+        : "";
+      if (provenance.fallbackCode) {
+        redirect(`/${tenantSlug}/manual_review${persistentQuery}`);
+      }
+      redirect(`/${tenantSlug}/inactive${persistentQuery}`);
     }
 
     return (

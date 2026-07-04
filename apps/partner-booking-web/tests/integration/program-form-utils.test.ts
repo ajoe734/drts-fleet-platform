@@ -4,6 +4,7 @@ import { evaluateAddressSubmitGate } from "@drts/ui-web";
 import {
   createDefaultPartnerBookingDraft,
   getPartnerBookingFieldErrors,
+  getPartnerMapSubmitGate,
   getPartnerProgramCoverage,
   getPartnerProgramGate,
   getPartnerProgramLabel,
@@ -183,6 +184,29 @@ describe("partner booking program form utilities", () => {
       evaluateAddressSubmitGate({
         pickup: { address: "A", lat: 25, lng: 121 },
         dropoff: { address: "B", lat: 25.05, lng: 121.05 },
+        serviceability: null,
+        providerState: {
+          available: false,
+          degraded: true,
+          reasonCode: "request_failed",
+        },
+      }),
+    ).toEqual({
+      blocking: false,
+      code: "dispatch_manual_review_required",
+    });
+  });
+
+  it("allows text-only address fallback when the provider is unavailable", () => {
+    const draft = createDefaultPartnerBookingDraft();
+    draft.pickupAddress = "台北市信義區松仁路 100 號";
+    draft.dropoffAddress = "桃園機場第二航廈";
+
+    expect(
+      getPartnerMapSubmitGate({
+        draft,
+        pickup: null,
+        dropoff: null,
         serviceability: null,
         providerState: {
           available: false,
