@@ -1,7 +1,7 @@
 # MAP-REL-001 Readiness Blocker Report
 
-Generated: `2026-07-04T06:15:15.607Z`
-Branch@SHA: `codex/map-rel-001@8e7323e7d7998ca2637507940fc6530dc7a63480`
+Generated: `2026-07-04T06:33:03.361Z`
+Branch@SHA: `codex/map-rel-001@be98c76ae54f61e29622ca64a46f821327a95b97`
 Readiness verdict: `FAIL`
 
 ## Summary
