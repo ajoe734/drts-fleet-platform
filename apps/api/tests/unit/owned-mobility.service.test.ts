@@ -286,6 +286,85 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
+  it("keeps provider-outage call-center capture in manual review instead of normal ready", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-provider-001",
+          vehicleId: "vehicle-map-provider-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createCallCenterOrder({
+      callId: "call-map-provider-001",
+      agentId: "ops-agent-001",
+      recordingId: "recording-map-provider-001",
+      pickup: {
+        address: "台北市政府",
+        lat: 25.0375,
+        lng: 121.5637,
+      },
+      dropoff: {
+        address: "松山文創園區",
+        lat: 25.0438,
+        lng: 121.5601,
+      },
+      passenger: { name: "Fallback Rider", phone: "0912000000" },
+      mapFallbackReview: {
+        reasonCode: "map_provider_unavailable",
+        providerAvailable: false,
+        providerDegraded: true,
+        providerReasonCode: "request_failed",
+      },
+    });
+
+    const detail = service.getOrder(order.orderId);
+    const addressCaptureGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "address_capture",
+    );
+
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(detail.mapFallbackReview).toMatchObject({
+      reasonCode: "map_provider_unavailable",
+      providerAvailable: false,
+      providerDegraded: true,
+      providerReasonCode: "request_failed",
+    });
+    expect(addressCaptureGate).toMatchObject({
+      state: "review_required",
+      blocking: false,
+      evidenceRefs: expect.arrayContaining([
+        "map_provider_unavailable",
+        "request_failed",
+      ]),
+    });
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+    try {
+      service.dispatchOrder(order.orderId, { mode: "auto" });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "DISPATCH_REQUIRES_MANUAL_REVIEW",
+          details: {
+            gateTypes: expect.arrayContaining(["address_capture"]),
+            reasonCodes: expect.arrayContaining([
+              "map_provider_unavailable",
+              "request_failed",
+            ]),
+          },
+        },
+      });
+    }
+  });
+
   it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", () => {
     const { service, auditNotificationService } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),

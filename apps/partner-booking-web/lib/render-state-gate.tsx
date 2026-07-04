@@ -27,6 +27,7 @@ export async function renderPartnerStateGate(
   try {
     const { brand } = await getPartnerRouteContext(tenantSlug, {
       allowInactive: state === "inactive",
+      allowAuthorityOutage: true,
     });
     const eligibilityVerificationId =
       (Array.isArray(resolvedSearchParams?.eligibilityVerificationId)

@@ -16,6 +16,7 @@
     "react-dom": "^19.2.5"
   },
   "dependencies": {
+    "@drts/contracts": "workspace:*",
     "@drts/ui-tokens": "workspace:*"
   },
   "scripts": {
