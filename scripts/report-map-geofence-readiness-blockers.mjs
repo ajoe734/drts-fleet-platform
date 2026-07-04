@@ -29,6 +29,10 @@ const geoModulePath = path.join(
   repoRoot,
   "apps/api/src/modules/geo/geo.module.ts",
 );
+const externalGeoProviderPath = path.join(
+  repoRoot,
+  "apps/api/src/modules/geo/external-geo.provider.ts",
+);
 const geoProviderConfigPath = path.join(
   repoRoot,
   "apps/api/src/modules/geo/geo-provider-config.service.ts",
@@ -42,6 +46,7 @@ const finalEvidence = fs.readFileSync(finalEvidencePath, "utf8");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const gapDoc = fs.readFileSync(gapDocPath, "utf8");
 const geoModule = fs.readFileSync(geoModulePath, "utf8");
+const externalGeoProvider = fs.readFileSync(externalGeoProviderPath, "utf8");
 const geoProviderConfig = fs.readFileSync(geoProviderConfigPath, "utf8");
 const providerPreflight = fs.readFileSync(providerPreflightPath, "utf8");
 const driverEvidencePath = path.join(
@@ -120,23 +125,26 @@ if (!gateDMobileUatPass) {
   );
 }
 
-const geoRuntimeUsesMockOnly =
-  geoModule.includes("useExisting: MockGeoProvider") &&
-  geoProviderConfig.includes("External geo provider adapter is not implemented");
-checks.push({ id: "geo-runtime-provider-ready", pass: !geoRuntimeUsesMockOnly });
-if (geoRuntimeUsesMockOnly) {
+const geoRuntimeProviderReady =
+  geoModule.includes("health.mode === \"external\" ? externalProvider : mockProvider") &&
+  externalGeoProvider.includes("class ExternalGeoProvider") &&
+  externalGeoProvider.includes("https://maps.googleapis.com/maps/api/geocode/json") &&
+  geoProviderConfig.includes("External geo provider adapter is wired for runtime geocode and reverse-geocode requests.");
+checks.push({ id: "geo-runtime-provider-ready", pass: geoRuntimeProviderReady });
+if (!geoRuntimeProviderReady) {
   blockers.push(
-    "Geo runtime is still mock-only: GeoModule binds GEO_PROVIDER to MockGeoProvider and GeoProviderConfigService marks external_adapter fail.",
+    "Geo runtime is not provider-ready: expected external provider wiring in GeoModule plus a concrete ExternalGeoProvider adapter and pass-state config health.",
   );
 }
 
 const providerEnvAligned =
   providerPreflight.includes("MAP_PROVIDER_MODE") &&
-  !providerPreflight.includes("MAP_PROVIDER_BACKEND");
+  !providerPreflight.includes("MAP_PROVIDER_BACKEND") &&
+  providerPreflight.includes("MAP_PROVIDER_SERVER_KEY");
 checks.push({ id: "provider-env-alignment", pass: providerEnvAligned });
 if (!providerEnvAligned) {
   blockers.push(
-    "Provider preflight still keys off MAP_PROVIDER_BACKEND while the geofence runtime contract uses MAP_PROVIDER_MODE.",
+    "Provider preflight still diverges from the geofence runtime contract; expected MAP_PROVIDER_MODE plus MAP_PROVIDER_SERVER_KEY handling.",
   );
 }
 

@@ -456,6 +456,53 @@ describe("GeoService", () => {
     throw new Error("Expected external provider configuration to fail closed.");
   });
 
+  it("uses the injected external provider when external mode is configured", async () => {
+    const externalProvider = {
+      providerId: "google_maps",
+      search: vi.fn(async () => ({
+        provider: "google_maps",
+        generatedAt: "2026-07-04T08:00:00.000Z",
+        candidates: [
+          {
+            candidateId: "google:place-001",
+            provider: "google_maps",
+            providerCandidateId: "place-001",
+            placeId: "place-001",
+            displayName: "Taipei City Hall",
+            address: "No. 1, Shifu Rd, Xinyi District, Taipei City",
+            confidence: "exact" as const,
+            location: { lat: 25.0375, lng: 121.5637 },
+          },
+        ],
+      })),
+      resolve: vi.fn(),
+      reverse: vi.fn(),
+    };
+    const service = new GeoService(
+      externalProvider,
+      new GeoProviderConfigService({
+        DRTS_ENV: "staging",
+        MAP_PROVIDER_MODE: "external",
+        MAP_PROVIDER_SERVER_KEY: "server-key",
+        MAP_PROVIDER_ALLOWED_ORIGINS: "https://ops.example.com",
+      }),
+    );
+
+    expect(service.health()).toMatchObject({
+      mode: "external",
+      status: "healthy",
+      failClosed: false,
+    });
+
+    const result = await service.search({
+      q: "taipei city hall",
+      surface: "callcenter",
+    });
+
+    expect(result.provider).toBe("google_maps");
+    expect(externalProvider.search).toHaveBeenCalledOnce();
+  });
+
   it("rejects invalid search and coordinate input before hitting provider", async () => {
     const service = createService();
 

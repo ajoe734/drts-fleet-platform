@@ -1,7 +1,7 @@
 import { Controller, Get } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
 
-import { buildMapProviderHealthReport } from "../common/map-provider";
+import { GeoProviderConfigService } from "../modules/geo/geo-provider-config.service";
 import { RATE_LIMIT_SKIP_DEFAULT } from "../common/throttling/rate-limit.constants";
 
 export function buildHealthPayload(env: NodeJS.ProcessEnv = process.env) {
@@ -11,7 +11,7 @@ export function buildHealthPayload(env: NodeJS.ProcessEnv = process.env) {
     mode: "phase1_foundation",
     execution_mode: "supervisor_managed_execution",
     timestamp: new Date().toISOString(),
-    mapProvider: buildMapProviderHealthReport(env),
+    mapProvider: new GeoProviderConfigService(env).getHealth(),
   };
 }
 

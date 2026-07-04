@@ -78,8 +78,8 @@ Operational rules:
   must be restricted by bundle identifier.
 - Local development, CI, Playwright, and smoke paths default to the deterministic
   mock provider and must spend zero live-provider quota.
-- Staging / production `MAP_PROVIDER_BACKEND=google` must fail closed unless
-  both server credentials are present and quota/alert metadata is configured.
+- Staging / production `MAP_PROVIDER_MODE=external` must fail closed unless
+  `MAP_PROVIDER_SERVER_KEY` is present and quota/alert metadata is configured.
 - `scripts/check-map-provider-config.sh` is the shared preflight for local, CI,
   and deploy rails.
 - Provider health and quota readiness are surfaced through `/health`,

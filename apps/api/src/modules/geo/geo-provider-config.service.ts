@@ -109,14 +109,11 @@ export class GeoProviderConfigService {
         status: "pass",
         message: "Required server-side provider secret is configured.",
       });
-    }
-
-    if (mode === "external") {
       checks.push({
         name: "external_adapter",
-        status: "fail",
+        status: "pass",
         message:
-          "External geo provider adapter is not implemented in this runtime yet; keep production fail-closed until MAP-INFRA-001 is paired with a provider adapter task.",
+          "External geo provider adapter is wired for runtime geocode and reverse-geocode requests.",
       });
     }
 
