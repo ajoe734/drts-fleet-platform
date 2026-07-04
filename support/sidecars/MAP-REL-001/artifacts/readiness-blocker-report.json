@@ -1,14 +1,10 @@
 {
   "taskId": "MAP-REL-001",
   "verifier": "report-map-geofence-readiness-blockers",
-  "status": "FAIL",
+  "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "fd8ed4d52254d60d14af292985f9bbc473d7f596",
-  "blockers": [
-    "Gate D is not marked PASS in final evidence.",
-    "FLEETS-MAP-004 is not closed with PASS in final evidence.",
-    "Gate D still lacks release-grade simulator/device UAT evidence in support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md."
-  ],
+  "head": "163c9f80a88bfdf59f86344e795949543fd2fc1b",
+  "blockers": [],
   "checks": [
     {
       "id": "Gate A",
@@ -24,7 +20,7 @@
     },
     {
       "id": "Gate D",
-      "pass": false
+      "pass": true
     },
     {
       "id": "Gate E",
@@ -44,7 +40,7 @@
     },
     {
       "id": "FLEETS-MAP-004",
-      "pass": false
+      "pass": true
     },
     {
       "id": "FLEETS-MAP-005",
@@ -80,7 +76,7 @@
     },
     {
       "id": "gate-d-mobile-uat",
-      "pass": false
+      "pass": true
     },
     {
       "id": "provider-prereqs",

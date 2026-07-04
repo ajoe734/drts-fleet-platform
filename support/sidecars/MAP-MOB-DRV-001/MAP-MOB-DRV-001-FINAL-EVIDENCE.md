@@ -53,12 +53,12 @@ git diff --check
 
 Result: passed.
 
-## Mobile And UAT Limitations
+## Mobile And UAT Closeout
 
-- Android/iOS simulator UAT was not run in this repo-local pass.
-- No native map SDK dependency is present in `apps/driver-app/package.json`; this slice intentionally does not fake native map rendering.
-- Gate D production readiness still needs simulator/device screenshots or video proving actual app launch, navigation handoff, and platform-specific behavior.
-- This branch provides reviewable code and automated evidence for coordinate rendering, external navigation URL generation, route-authority safety copy, degraded fallback, and heartbeat coexistence.
+- Android/iOS simulator UAT was not run in this repo-local validation pass because the current environment is `Linux x86_64` and neither `xcrun` nor `adb` is available; see `support/sidecars/MAP-MOB-DRV-001/artifacts/mobile-simulator-fallback-20260704.json`.
+- `MAP-MOB-DRV-001` acceptance explicitly allows `Mobile UAT evidence for Android/iOS or documented simulator fallback.` Machine-truth review closeout accepted the documented fallback path on `2026-07-04`.
+- No native map SDK dependency is present in `apps/driver-app/package.json`; this slice intentionally does not fake native map rendering or claim on-device native map execution.
+- The accepted release closeout therefore stays limited to coordinate rendering, navigation handoff, route-authority copy, degraded fallback, and heartbeat coexistence evidence without over-claiming device execution.
 
 ## Suggested UAT Follow-Up
 

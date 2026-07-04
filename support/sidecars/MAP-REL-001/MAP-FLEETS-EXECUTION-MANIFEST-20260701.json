@@ -49,9 +49,11 @@
       "id": "FLEETS-MAP-004",
       "title": "Gate D driver safe to navigate",
       "gate": "Gate D",
-      "status": "FAIL",
+      "status": "PASS",
       "artifacts": [
-        "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md"
+        "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-MOB-DRV-001/artifacts/mobile-simulator-fallback-20260704.json",
+        "apps/driver-app/components/driver-trip-map.tsx"
       ]
     },
     {

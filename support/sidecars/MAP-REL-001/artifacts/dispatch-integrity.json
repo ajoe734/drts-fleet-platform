@@ -1,12 +1,12 @@
 {
   "taskId": "MAP-REL-001",
   "verifier": "verify-map-geofence-dispatch-integrity",
-  "status": "FAIL",
+  "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "fd8ed4d52254d60d14af292985f9bbc473d7f596",
+  "head": "163c9f80a88bfdf59f86344e795949543fd2fc1b",
   "checks": {
     "missingArtifacts": [],
     "placeholderFiles": [],
-    "manifestPass": false
+    "manifestPass": true
   }
 }

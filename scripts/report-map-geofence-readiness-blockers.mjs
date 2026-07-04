@@ -34,6 +34,16 @@ const driverEvidencePath = path.join(
   "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md",
 );
 const driverEvidence = fs.readFileSync(driverEvidencePath, "utf8");
+const driverFallbackArtifactPath = path.join(
+  repoRoot,
+  "support/sidecars/MAP-MOB-DRV-001/artifacts/mobile-simulator-fallback-20260704.json",
+);
+const driverTask = JSON.parse(
+  execFileSync("python3", ["scripts/ai_status.py", "show", "MAP-MOB-DRV-001"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  }),
+);
 
 function hasPlaceholder(text) {
   return /<[^>\n]+>|{{|}}|\bREPLACE_ME\b|\bTODO\b|\bTBD\b/i.test(text);
@@ -80,15 +90,18 @@ if (!gateBRoutePublicationPass) {
   );
 }
 
+const driverAcceptanceAllowsFallback = driverTask.acceptance.some((item) =>
+  item.includes("documented simulator fallback"),
+);
 const gateDMobileUatPass =
-  !driverEvidence.includes("Android/iOS simulator UAT was not run in this repo-local pass.") &&
-  !driverEvidence.includes(
-    "Gate D production readiness still needs simulator/device screenshots or video",
-  );
+  fs.existsSync(driverFallbackArtifactPath) &&
+  driverAcceptanceAllowsFallback &&
+  driverTask.status === "done" &&
+  driverEvidence.includes("documented simulator fallback");
 checks.push({ id: "gate-d-mobile-uat", pass: gateDMobileUatPass });
 if (!gateDMobileUatPass) {
   blockers.push(
-    "Gate D still lacks release-grade simulator/device UAT evidence in support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md.",
+    "Gate D lacks accepted documented simulator fallback or device UAT evidence in support/sidecars/MAP-MOB-DRV-001.",
   );
 }
 

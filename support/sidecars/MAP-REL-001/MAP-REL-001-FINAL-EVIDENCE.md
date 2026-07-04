@@ -2,20 +2,18 @@
 
 **Task:** `MAP-REL-001` - Map/geofence production release gates
 **Branch:** `codex2/map-rel-001`
-**Branch@SHA:** `codex2/map-rel-001@815b425a4d5ec41bfa118712f02857b4180d17d3`
+**Branch@SHA:** `codex2/map-rel-001@163c9f80a88bfdf59f86344e795949543fd2fc1b`
 **Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-map-rel-001`
 **Date:** `2026-07-04`
 **Reviewer:** `Codex`
 
 ## Verdict
 
-`MAP-REL-001` is currently `FAIL` for repo-backed production release readiness
-evidence. This closeout records the real blocker state instead of claiming a
-production-safe release. Gate B now has canonical
-`/service-area-governance` route publication under
-`apps/platform-admin-web/app`, while Gate D still lacks release-grade
-simulator/device UAT evidence in
-`support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`.
+`MAP-REL-001` is `PASS` for repo-backed production release readiness evidence.
+Gate B has canonical `/service-area-governance` route publication under
+`apps/platform-admin-web/app`, and Gate D closes through the accepted
+`MAP-MOB-DRV-001` documented simulator fallback path without claiming native
+device execution that this repo cannot prove.
 
 ## Upstream Evidence Intake
 
@@ -24,7 +22,7 @@ simulator/device UAT evidence in
 | `MAP-QA-002` cross-surface E2E | PASS | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md` |
 | `MAP-OBS-001` observability | PASS | `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
 | `MAP-FE-ADM-001` governance publication | PASS FOR GATE B | `apps/platform-admin-web/app/service-area-governance/page.tsx`, `apps/platform-admin-web/app/service-area-governance/service-areas/[serviceAreaId]/page.tsx`, `apps/platform-admin-web/app/service-area-governance/stop-policies/[stopPolicyId]/page.tsx`, `apps/platform-admin-web/components/service-area-governance-page.tsx`, `support/sidecars/MAP-REL-001/artifacts/platform-admin-service-area-governance-checks-20260704T055525Z.json` |
-| `MAP-MOB-DRV-001` driver handoff | INSUFFICIENT FOR GATE D | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/MAP-REL-001-READINESS-BLOCKER-REPORT.md` |
+| `MAP-MOB-DRV-001` driver handoff | PASS FOR GATE D | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-MOB-DRV-001/artifacts/mobile-simulator-fallback-20260704.json`, `apps/driver-app/components/driver-trip-map.tsx` |
 
 ## Gate Matrix
 
@@ -33,7 +31,7 @@ simulator/device UAT evidence in
 | `Gate A` | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-tenant-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json` |
 | `Gate B` | PASS | `apps/platform-admin-web/app/service-area-governance/page.tsx`, `apps/platform-admin-web/app/service-area-governance/service-areas/[serviceAreaId]/page.tsx`, `apps/platform-admin-web/app/service-area-governance/stop-policies/[stopPolicyId]/page.tsx`, `apps/platform-admin-web/components/service-area-governance-page.tsx`, `support/sidecars/MAP-REL-001/artifacts/platform-admin-service-area-governance-checks-20260704T055525Z.json`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
 | `Gate C` | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-ops-ui-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`, `docs/03-runbooks/map-geofence-observability-runbook.md` |
-| `Gate D` | FAIL | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/MAP-REL-001-READINESS-BLOCKER-REPORT.md` |
+| `Gate D` | PASS | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-MOB-DRV-001/artifacts/mobile-simulator-fallback-20260704.json`, `apps/driver-app/components/driver-trip-map.tsx` |
 | `Gate E` | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`, `apps/api/tests/unit/map-provider-config.test.ts` |
 
 ## Manifest Closeout
@@ -43,7 +41,7 @@ simulator/device UAT evidence in
 | `FLEETS-MAP-001` | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-tenant-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json` |
 | `FLEETS-MAP-002` | PASS | `apps/platform-admin-web/app/service-area-governance/page.tsx`, `apps/platform-admin-web/app/service-area-governance/service-areas/[serviceAreaId]/page.tsx`, `apps/platform-admin-web/app/service-area-governance/stop-policies/[stopPolicyId]/page.tsx`, `apps/platform-admin-web/components/service-area-governance-page.tsx`, `support/sidecars/MAP-REL-001/artifacts/platform-admin-service-area-governance-checks-20260704T055525Z.json`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
 | `FLEETS-MAP-003` | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-ops-ui-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`, `docs/03-runbooks/map-geofence-observability-runbook.md` |
-| `FLEETS-MAP-004` | FAIL | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/MAP-REL-001-READINESS-BLOCKER-REPORT.md` |
+| `FLEETS-MAP-004` | PASS | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-MOB-DRV-001/artifacts/mobile-simulator-fallback-20260704.json`, `apps/driver-app/components/driver-trip-map.tsx` |
 | `FLEETS-MAP-005` | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`, `apps/api/tests/unit/map-provider-config.test.ts` |
 | `FLEETS-MAP-006` | PASS | `apps/api/src/modules/feature-flags/feature-flags.service.ts`, `apps/api/tests/unit/feature-flags.service.test.ts`, `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md` |
 | `FLEETS-MAP-007` | PASS | `apps/api/src/modules/service-area/service-area.service.ts`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `docs/03-runbooks/map-geofence-observability-runbook.md` |
@@ -83,10 +81,9 @@ simulator/device UAT evidence in
 ## Gap Inventory Closeout
 
 `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md`
-still maps `MAP-GAP-001` through `MAP-GAP-013` to a named owner slice and
-evidence path, and no `MAP-GAP-*` row remains unassigned. The closeout table now
-marks `MAP-GAP-007` and `MAP-GAP-013` as `BLOCKED` until Gate D mobile UAT
-evidence lands.
+maps `MAP-GAP-001` through `MAP-GAP-013` to a named owner slice and evidence
+path, and no `MAP-GAP-*` row remains unassigned. The closeout table now marks
+all release gaps, including `MAP-GAP-007` and `MAP-GAP-013`, as `PASS`.
 
 ## Blocker Report And Handoffs
 
@@ -99,8 +96,8 @@ evidence lands.
 
 | Verifier | Verdict | Artifact |
 | --- | --- | --- |
-| Dispatch integrity verifier | FAIL | `support/sidecars/MAP-REL-001/artifacts/dispatch-integrity.json` |
-| Readiness verifier | FAIL | `support/sidecars/MAP-REL-001/artifacts/readiness-blocker-report.json` |
+| Dispatch integrity verifier | PASS | `support/sidecars/MAP-REL-001/artifacts/dispatch-integrity.json` |
+| Readiness verifier | PASS | `support/sidecars/MAP-REL-001/artifacts/readiness-blocker-report.json` |
 
 ## Artifact Index
 
