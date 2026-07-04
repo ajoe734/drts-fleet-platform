@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,8 @@ const manifest = JSON.parse(
     "utf8",
   ),
 );
+const branch = git(["branch", "--show-current"]);
+const sha = git(["rev-parse", "HEAD"]);
 
 const blockerItems = manifest.productionEvidence.filter(
   (item) => item.status === "FAIL",
@@ -26,7 +29,7 @@ const notes = [
   "# MAP-REL-001 Blocker Handoff Notes",
   "",
   `Generated: \`${new Date().toISOString()}\``,
-  `Branch@SHA: \`${manifest.branchAtSha}\``,
+  `Branch@SHA: \`${branch}@${sha}\``,
   "",
   "## Handoff Decisions",
   "",
@@ -81,3 +84,10 @@ writeFileSync(
 console.log(
   `MAP-REL blocker handoff notes written (${blockerItems.length} blockers reviewed).`,
 );
+
+function git(args) {
+  return execFileSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+  }).trim();
+}

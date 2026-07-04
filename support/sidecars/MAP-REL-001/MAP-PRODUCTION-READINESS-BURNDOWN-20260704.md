@@ -1,7 +1,7 @@
 # MAP Production Readiness Burndown
 
 Date: `2026-07-04`
-Branch@SHA: `codex/map-rel-001@be98c76ae54f61e29622ca64a46f821327a95b97`
+Branch@SHA: `codex/map-rel-001@fcfb8b6c2608d0e181268961e78a761828b375e6`
 
 ## Remaining Work To Reach Gate PASS
 
