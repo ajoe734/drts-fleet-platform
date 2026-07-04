@@ -92,6 +92,7 @@ const defaultWebServers = [
     timeout: 300_000,
   },
   conciergeWebServer,
+  partnerAuthorityMockServer,
   partnerWebServer,
 ];
 
