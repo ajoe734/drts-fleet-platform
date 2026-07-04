@@ -1,9 +1,9 @@
 {
   "taskId": "MAP-REL-001",
   "artifact": "platform-admin-service-area-governance-checks",
-  "recordedAt": "2026-07-04T05:55:25Z",
+  "recordedAt": "2026-07-04T06:12:21Z",
   "branch": "codex2/map-rel-001",
-  "head": "815b425a4d5ec41bfa118712f02857b4180d17d3",
+  "head": "ab109883b406a22086052186f23994dc05f4413b",
   "checks": [
     {
       "command": "pnpm --filter @drts/platform-admin-web typecheck",
