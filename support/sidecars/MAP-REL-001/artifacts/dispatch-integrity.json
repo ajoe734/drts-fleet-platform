@@ -3,7 +3,7 @@
   "verifier": "verify-map-geofence-dispatch-integrity",
   "status": "FAIL",
   "branch": "codex2/map-rel-001",
-  "head": "5833b0aafd4d820322f3b37861ea6e61c2b4adbb",
+  "head": "7d997b1bd5abff23da279cee03d4f1493ed8b75a",
   "checks": {
     "missingArtifacts": [],
     "placeholderFiles": [],
