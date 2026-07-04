@@ -3,17 +3,17 @@
   "verifier": "verify-map-geofence-dispatch-integrity",
   "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "03f4cf3a9e130ad9690fa58c23417c11f0b82db1",
+  "head": "8db98ccc7ec72e24b457a1e94164c1cf0813abf7",
   "checks": {
     "missingArtifacts": [],
     "placeholderFiles": [],
     "manifestPass": true,
     "branchShaConsistent": true,
     "checkoutMatchesEvidence": true,
-    "manifestBranchAtSha": "codex2/map-rel-001@03f4cf3a9e130ad9690fa58c23417c11f0b82db1",
-    "finalEvidenceBranchSha": "codex2/map-rel-001@03f4cf3a9e130ad9690fa58c23417c11f0b82db1",
+    "manifestBranchAtSha": "codex2/map-rel-001@8db98ccc7ec72e24b457a1e94164c1cf0813abf7",
+    "finalEvidenceBranchSha": "codex2/map-rel-001@8db98ccc7ec72e24b457a1e94164c1cf0813abf7",
     "manifestBranch": "codex2/map-rel-001",
-    "manifestBranchSha": "03f4cf3a9e130ad9690fa58c23417c11f0b82db1",
-    "currentHeadParent": "c6028eb2d1c45339f46dda14d9cec3214101beae"
+    "manifestBranchSha": "8db98ccc7ec72e24b457a1e94164c1cf0813abf7",
+    "currentHeadParent": "472750f33dcca880a0e7fa41f3dafaf4bce3c149"
   }
 }
