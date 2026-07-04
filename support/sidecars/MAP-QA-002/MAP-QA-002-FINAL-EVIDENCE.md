@@ -5,7 +5,7 @@
 **Verified code ref:** `codex/map-qa-002@83e38647fd4a848df7e3a1d281ade87e41ce83c0`
 **Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002`
 **Date:** `2026-07-04`
-**Reviewer:** `Gemini2`
+**Reviewer:** `Claude2`
 
 ## Verdict
 
