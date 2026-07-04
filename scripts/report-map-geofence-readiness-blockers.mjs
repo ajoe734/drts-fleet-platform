@@ -153,8 +153,16 @@ const prereqChecks = [
     id: "provider-prereqs",
     pass:
       finalEvidence.includes("Provider And PostGIS Prerequisites") &&
-      !/\|\s*`FLEETS-MAP-008`\s*\|\s*PASS\s*\|/.test(finalEvidence) &&
-      finalEvidence.includes("Geo runtime is still mock-only"),
+      /\|\s*`FLEETS-MAP-008`\s*\|\s*PASS\s*\|/.test(finalEvidence) &&
+      finalEvidence.includes("Geo runtime selects external provider when `MAP_PROVIDER_MODE=external`"),
+  },
+  {
+    id: "provider-prereq-rollout-contract",
+    pass:
+      finalEvidence.includes(
+        "Provider health/startup/preflight/deploy contracts are aligned on `MAP_PROVIDER_MODE` plus `MAP_PROVIDER_SERVER_KEY`",
+      ) &&
+      finalEvidence.includes("Provider preflight is fail-closed for staging/production"),
   },
   {
     id: "rollout-rollback",

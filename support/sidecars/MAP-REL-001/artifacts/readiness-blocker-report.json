@@ -1,14 +1,10 @@
 {
   "taskId": "MAP-REL-001",
   "verifier": "report-map-geofence-readiness-blockers",
-  "status": "FAIL",
+  "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "b75e31bfeeeb15b21bdab8b0194e25b3738179d8",
-  "blockers": [
-    "FLEETS-MAP-008 is not closed with PASS in final evidence.",
-    "Geo runtime is still mock-only: GeoModule binds GEO_PROVIDER to MockGeoProvider and GeoProviderConfigService marks external_adapter fail.",
-    "Provider preflight still keys off MAP_PROVIDER_BACKEND while the geofence runtime contract uses MAP_PROVIDER_MODE."
-  ],
+  "head": "004b7bb579e3d74abea9e80d32dda8b266468563",
+  "blockers": [],
   "checks": [
     {
       "id": "Gate A",
@@ -60,7 +56,7 @@
     },
     {
       "id": "FLEETS-MAP-008",
-      "pass": false
+      "pass": true
     },
     {
       "id": "FLEETS-MAP-009",
@@ -84,14 +80,18 @@
     },
     {
       "id": "geo-runtime-provider-ready",
-      "pass": false
+      "pass": true
     },
     {
       "id": "provider-env-alignment",
-      "pass": false
+      "pass": true
     },
     {
       "id": "provider-prereqs",
+      "pass": true
+    },
+    {
+      "id": "provider-prereq-rollout-contract",
       "pass": true
     },
     {

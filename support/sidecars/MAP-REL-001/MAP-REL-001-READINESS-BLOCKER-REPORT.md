@@ -2,9 +2,9 @@
 
 - Task: `MAP-REL-001`
 - Branch: `codex2/map-rel-001`
-- Head: `b75e31bfeeeb15b21bdab8b0194e25b3738179d8`
+- Head: `004b7bb579e3d74abea9e80d32dda8b266468563`
 - Verifier: `report-map-geofence-readiness-blockers`
-- Verdict: `FAIL`
+- Verdict: `PASS`
 
 ## Checks
 
@@ -22,22 +22,21 @@
 | `FLEETS-MAP-005` | PASS |
 | `FLEETS-MAP-006` | PASS |
 | `FLEETS-MAP-007` | PASS |
-| `FLEETS-MAP-008` | FAIL |
+| `FLEETS-MAP-008` | PASS |
 | `FLEETS-MAP-009` | PASS |
 | `FLEETS-MAP-010` | PASS |
 | `FLEETS-MAP-011` | PASS |
 | `gate-b-canonical-route-publication` | PASS |
 | `gate-d-mobile-uat` | PASS |
-| `geo-runtime-provider-ready` | FAIL |
-| `provider-env-alignment` | FAIL |
+| `geo-runtime-provider-ready` | PASS |
+| `provider-env-alignment` | PASS |
 | `provider-prereqs` | PASS |
+| `provider-prereq-rollout-contract` | PASS |
 | `rollout-rollback` | PASS |
 | `gap-closeout` | PASS |
 | `placeholder-free` | PASS |
 
 ## Blockers
 
-- FLEETS-MAP-008 is not closed with PASS in final evidence.
-- Geo runtime is still mock-only: GeoModule binds GEO_PROVIDER to MockGeoProvider and GeoProviderConfigService marks external_adapter fail.
-- Provider preflight still keys off MAP_PROVIDER_BACKEND while the geofence runtime contract uses MAP_PROVIDER_MODE.
+No readiness blockers remain in the repo-backed release evidence set.
 

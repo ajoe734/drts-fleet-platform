@@ -1,19 +1,19 @@
 {
   "taskId": "MAP-REL-001",
   "verifier": "verify-map-geofence-dispatch-integrity",
-  "status": "FAIL",
+  "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "b75e31bfeeeb15b21bdab8b0194e25b3738179d8",
+  "head": "004b7bb579e3d74abea9e80d32dda8b266468563",
   "checks": {
     "missingArtifacts": [],
     "placeholderFiles": [],
-    "manifestPass": false,
+    "manifestPass": true,
     "branchShaConsistent": true,
     "checkoutMatchesEvidence": true,
-    "manifestBranchAtSha": "codex2/map-rel-001@b75e31bfeeeb15b21bdab8b0194e25b3738179d8",
-    "finalEvidenceBranchSha": "codex2/map-rel-001@b75e31bfeeeb15b21bdab8b0194e25b3738179d8",
+    "manifestBranchAtSha": "codex2/map-rel-001@004b7bb579e3d74abea9e80d32dda8b266468563",
+    "finalEvidenceBranchSha": "codex2/map-rel-001@004b7bb579e3d74abea9e80d32dda8b266468563",
     "manifestBranch": "codex2/map-rel-001",
-    "manifestBranchSha": "b75e31bfeeeb15b21bdab8b0194e25b3738179d8",
-    "currentHeadParent": "1d53621418389e326892d48168475eb4e36a5ff9"
+    "manifestBranchSha": "004b7bb579e3d74abea9e80d32dda8b266468563",
+    "currentHeadParent": "70a53e83552f10b6f9055059183f4cc4ee418949"
   }
 }

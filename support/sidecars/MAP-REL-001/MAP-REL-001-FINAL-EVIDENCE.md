@@ -2,23 +2,21 @@
 
 **Task:** `MAP-REL-001` - Map/geofence production release gates
 **Branch:** `codex2/map-rel-001`
-**Branch@SHA:** `codex2/map-rel-001@b75e31bfeeeb15b21bdab8b0194e25b3738179d8`
+**Branch@SHA:** `codex2/map-rel-001@004b7bb579e3d74abea9e80d32dda8b266468563`
 **Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-map-rel-001`
 **Date:** `2026-07-04`
 **Reviewer:** `Codex`
 
 ## Verdict
 
-`MAP-REL-001` remains `BLOCKED` for repo-backed production release readiness.
-Gates A through E have repo-backed evidence for callcenter, governance, ops,
-driver fallback, and degraded behavior, but the production prerequisite closeout
-cannot pass yet. `apps/api/src/modules/geo/geo.module.ts` still binds
-`GEO_PROVIDER` to `MockGeoProvider`, `apps/api/src/modules/geo/geo-provider-config.service.ts`
-still marks `external_adapter` as `fail`, and
-`scripts/check-map-provider-config.sh` plus the deploy workflows still validate
-the older `MAP_PROVIDER_BACKEND` contract instead of the geofence runtime's
-`MAP_PROVIDER_MODE` contract. This evidence set now records that blocker rather
-than claiming a production-ready provider path the repo does not implement.
+`MAP-REL-001` is `PASS` for repo-backed production release readiness evidence.
+Gates A through E now close with concrete artifacts, the geo runtime no longer
+hard-binds `GEO_PROVIDER` to the mock provider, deploy/preflight rails use the
+same `MAP_PROVIDER_MODE` plus `MAP_PROVIDER_SERVER_KEY` contract, and the
+release closeout no longer carries unassigned `MAP-GAP-*` rows. This evidence
+is limited to branch-scoped repository readiness on
+`codex2/map-rel-001@004b7bb579e3d74abea9e80d32dda8b266468563`; it does not
+claim a staging or production deployment occurred from this branch.
 
 ## Upstream Evidence Intake
 
@@ -50,7 +48,7 @@ than claiming a production-ready provider path the repo does not implement.
 | `FLEETS-MAP-005` | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`, `apps/api/tests/unit/map-provider-config.test.ts` |
 | `FLEETS-MAP-006` | PASS | `apps/api/src/modules/feature-flags/feature-flags.service.ts`, `apps/api/tests/unit/feature-flags.service.test.ts`, `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md` |
 | `FLEETS-MAP-007` | PASS | `apps/api/src/modules/service-area/service-area.service.ts`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `docs/03-runbooks/map-geofence-observability-runbook.md` |
-| `FLEETS-MAP-008` | FAIL | `apps/api/src/modules/geo/geo.module.ts`, `apps/api/src/modules/geo/geo-provider-config.service.ts`, `scripts/check-map-provider-config.sh`, `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-prod.yml` |
+| `FLEETS-MAP-008` | PASS | `scripts/check-map-provider-config.sh`, `apps/api/src/modules/geo/geo.module.ts`, `apps/api/src/modules/geo/external-geo.provider.ts`, `apps/api/src/modules/geo/geo-provider-config.service.ts`, `apps/api/src/main.ts`, `apps/api/src/health/health.controller.ts`, `apps/api/tests/unit/external-geo.provider.test.ts`, `apps/api/tests/unit/map-provider-config.test.ts`, `apps/api/README.md`, `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-prod.yml` |
 | `FLEETS-MAP-009` | PASS | `infra/migrations/V0047__service_area_geofence_authority.sql`, `docs/03-runbooks/map-geofence-observability-runbook.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
 | `FLEETS-MAP-010` | PASS | `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md` |
 | `FLEETS-MAP-011` | PASS | `support/sidecars/MAP-REL-001/MAP-REL-001-READINESS-BLOCKER-REPORT.md`, `support/sidecars/MAP-REL-001/MAP-REL-001-BLOCKER-HANDOFF-NOTES.md`, `support/sidecars/MAP-REL-001/artifacts/readiness-blocker-report.json`, `support/sidecars/MAP-REL-001/artifacts/blocker-handoff-notes.json` |
@@ -71,27 +69,26 @@ than claiming a production-ready provider path the repo does not implement.
 | --- | --- | --- |
 | Rollout flags default disabled | PASS | `apps/api/src/modules/feature-flags/feature-flags.service.ts`, `apps/api/tests/unit/feature-flags.service.test.ts` |
 | Rollout order stays provider -> picker -> gate -> ops/admin -> driver | PASS | `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md` |
-| Provider preflight is fail-closed for staging/production | FAIL | `scripts/check-map-provider-config.sh`, `apps/api/src/modules/geo/geo-provider-config.service.ts`, `apps/api/src/modules/geo/geo.module.ts` |
+| Provider preflight is fail-closed for staging/production | PASS | `scripts/check-map-provider-config.sh`, `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-prod.yml`, `apps/api/src/main.ts` |
 | Rollback path uses boundary/policy retire plus flag disable | PASS | `apps/api/src/modules/service-area/service-area.service.ts`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `docs/03-runbooks/map-geofence-observability-runbook.md` |
 
 ## Provider And PostGIS Prerequisites
 
 | Prerequisite | Verdict | Evidence |
 | --- | --- | --- |
-| Geo runtime is still mock-only and deploy/preflight env contracts are split | FAIL | `apps/api/src/modules/geo/geo.module.ts`, `apps/api/src/modules/geo/geo-provider-config.service.ts`, `scripts/check-map-provider-config.sh`, `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-prod.yml` |
-| Browser/origin restrictions and quota thresholds documented | PASS | `apps/api/README.md`, `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-prod.yml` |
+| Geo runtime selects external provider when `MAP_PROVIDER_MODE=external` | PASS | `apps/api/src/modules/geo/geo.module.ts`, `apps/api/src/modules/geo/external-geo.provider.ts`, `apps/api/tests/unit/external-geo.provider.test.ts`, `apps/api/tests/unit/geo.service.test.ts` |
+| Provider health/startup/preflight/deploy contracts are aligned on `MAP_PROVIDER_MODE` plus `MAP_PROVIDER_SERVER_KEY` | PASS | `apps/api/src/modules/geo/geo-provider-config.service.ts`, `apps/api/src/main.ts`, `apps/api/src/health/health.controller.ts`, `scripts/check-map-provider-config.sh`, `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-prod.yml`, `apps/api/README.md` |
+| Browser/origin restrictions and quota thresholds documented | PASS | `apps/api/README.md`, `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-prod.yml`, `apps/api/tests/unit/map-provider-config.test.ts` |
 | PostGIS extension required before governed geometry tables | PASS | `infra/migrations/V0047__service_area_geofence_authority.sql` |
 | Evaluator/PostGIS outages are fail-closed and separately observable | PASS | `docs/03-runbooks/map-geofence-observability-runbook.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
 
 ## Gap Inventory Closeout
 
 `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md`
-still maps `MAP-GAP-001` through `MAP-GAP-013` to a named owner slice and
-evidence path, and no `MAP-GAP-*` row remains unassigned. The closeout view now
-records the real release state: `MAP-GAP-001` and `MAP-GAP-010` remain
-`BLOCKED` on provider runtime alignment, `MAP-GAP-013` remains `IN_PROGRESS`
-until release evidence can truthfully close with a provider-ready path, and the
-other mapped gaps retain repo-backed `PASS` evidence.
+now closes `MAP-GAP-001` through `MAP-GAP-013` with a named owner slice and
+evidence path. No gap row remains unassigned in the `MAP-REL-001` release
+closeout view, and the provider/runtime alignment rows (`MAP-GAP-001`,
+`MAP-GAP-010`, `MAP-GAP-013`) now carry repo-backed `PASS` evidence.
 
 ## Blocker Report And Handoffs
 
@@ -104,8 +101,8 @@ other mapped gaps retain repo-backed `PASS` evidence.
 
 | Verifier | Verdict | Artifact |
 | --- | --- | --- |
-| Dispatch integrity verifier | FAIL | `support/sidecars/MAP-REL-001/artifacts/dispatch-integrity.json` |
-| Readiness verifier | FAIL | `support/sidecars/MAP-REL-001/artifacts/readiness-blocker-report.json` |
+| Dispatch integrity verifier | PASS | `support/sidecars/MAP-REL-001/artifacts/dispatch-integrity.json` |
+| Readiness verifier | PASS | `support/sidecars/MAP-REL-001/artifacts/readiness-blocker-report.json` |
 
 ## Artifact Index
 
