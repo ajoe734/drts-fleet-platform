@@ -3,7 +3,7 @@
   "verifier": "report-map-geofence-readiness-blockers",
   "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "163c9f80a88bfdf59f86344e795949543fd2fc1b",
+  "head": "36b99aae1b93224bcfedb291319baf46c39d8e32",
   "blockers": [],
   "checks": [
     {
