@@ -125,7 +125,7 @@ if (manifest) {
 
 if (
   finalEvidence &&
-  !/Branch@SHA:\s*`[^`]+@[\da-f]{7,40}`/u.test(finalEvidence)
+  !/Branch@SHA:\**\s*`[^`]+@[\da-f]{7,40}`/u.test(finalEvidence)
 ) {
   failures.push("MAP-REL final evidence is missing a concrete Branch@SHA line");
 }

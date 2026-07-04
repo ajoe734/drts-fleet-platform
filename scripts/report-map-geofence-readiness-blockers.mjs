@@ -13,6 +13,7 @@ const sidecarDir = path.join(repoRoot, "support/sidecars/MAP-REL-001");
 mkdirSync(sidecarDir, { recursive: true });
 
 const today = new Date().toISOString().slice(0, 10);
+const stamp = `${today.replaceAll("-", "")}T000000Z`;
 const branch = git(["branch", "--show-current"]);
 const sha = git(["rev-parse", "HEAD"]);
 const branchAtSha = `${branch}@${sha}`;
@@ -379,7 +380,7 @@ ${blockerItems
 | --- | --- | --- |
 | \`node scripts/report-map-geofence-readiness-blockers.mjs\` | \`${manifest.summary.releaseVerdict}\` | \`support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md\` |
 | \`node scripts/note-map-geofence-blocker-handoffs.mjs\` | \`PASS\` | \`support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-HANDOFFS.md\` |
-| \`node scripts/verify-map-geofence-dispatch-integrity.mjs\` | \`pending from generated artifact set\` | \`support/sidecars/MAP-REL-001/MAP-FLEETS-EXECUTION-MANIFEST-20260701.json\` |
+| \`node scripts/verify-map-geofence-dispatch-integrity.mjs\` | \`see verifier output\` | \`support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-dispatch-integrity-${stamp}.txt\` |
 `;
 
 const blockerReport = `# MAP-REL-001 Readiness Blocker Report
