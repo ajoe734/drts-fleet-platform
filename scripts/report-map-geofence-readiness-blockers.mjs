@@ -39,6 +39,8 @@ const featureFlagTestsPath =
   "apps/api/tests/unit/feature-flags.service.test.ts";
 const providerConfigPath =
   "apps/api/src/modules/geo/geo-provider-config.service.ts";
+const googleProviderPath = "apps/api/src/modules/geo/google-geo.provider.ts";
+const geoModulePath = "apps/api/src/modules/geo/geo.module.ts";
 const providerCheckScriptPath = "scripts/check-map-provider-config.sh";
 const envExamplePath = ".env.example";
 const observabilityRunbookPath =
@@ -60,6 +62,8 @@ const obsEvidence = read(obsEvidencePath);
 const driverEvidence = read(driverEvidencePath);
 const ui002Closeout = read(ui002CloseoutPath);
 const providerConfig = read(providerConfigPath);
+const googleProvider = read(googleProviderPath);
+const geoModule = read(geoModulePath);
 const providerCheckScript = read(providerCheckScriptPath);
 const envExample = read(envExamplePath);
 const featureFlags = read(featureFlagsPath);
@@ -113,14 +117,17 @@ const providerScriptAligned =
   providerCheckScript.includes("MAP_PROVIDER_MODE") &&
   !providerCheckScript.includes("MAP_PROVIDER_BACKEND") &&
   !providerCheckScript.includes("GOOGLE_MAPS_GEOCODING_API_KEY");
-const providerAdapterBlocked = providerConfig.includes(
-  "External geo provider adapter is not implemented in this runtime yet",
-);
+const providerAdapterImplemented =
+  !providerConfig.includes(
+    "External geo provider adapter is not implemented in this runtime yet",
+  ) &&
+  googleProvider.includes("class GoogleGeoProvider") &&
+  geoModule.includes("GoogleGeoProvider");
 const providerPrereqsPass =
   providerEnvDocumented &&
   providerScriptAligned &&
   providerRunbook.includes("MAP_PROVIDER_MODE") &&
-  !providerAdapterBlocked;
+  providerAdapterImplemented;
 const postgisPrereqsPass =
   postgisMigrations.every(exists) &&
   observabilityRunbook.includes("## PostGIS / Evaluator Unavailable");
@@ -215,12 +222,14 @@ const manifest = {
         envExamplePath,
         providerCheckScriptPath,
         providerConfigPath,
+        googleProviderPath,
+        geoModulePath,
         providerRunbookPath,
       ],
       blocker: providerPrereqsPass
         ? ""
-        : providerAdapterBlocked
-          ? "Runtime keeps MAP_PROVIDER_MODE=external fail-closed because the live provider adapter is not implemented."
+        : !providerAdapterImplemented
+          ? "Runtime/provider wiring for MAP_PROVIDER_MODE=external is still incomplete."
           : "Provider prereq docs/script drift is still open.",
     }),
     item({
@@ -321,6 +330,31 @@ manifest.summary = {
 const blockerItems = manifest.productionEvidence.filter(
   (item) => item.status === "FAIL",
 );
+const blockerTitles = blockerItems.map((item) => item.title);
+const blockerNarrative =
+  blockerTitles.length === 0
+    ? "All repo-backed release checks passed for this audit scope."
+    : `This audit does **not** claim unsupported production readiness while these blockers remain: ${blockerTitles.join("; ")}.`;
+const blockerListMarkdown =
+  blockerItems.length === 0
+    ? "1. None."
+    : blockerItems
+        .map((item, index) => `${index + 1}. \`${item.id}\`: ${item.blocker}`)
+        .join("\n");
+const blockingConclusionsMarkdown =
+  blockerItems.length === 0
+    ? "1. No blocking conclusions remain for this repo-backed audit."
+    : blockerItems
+        .map(
+          (item, index) => `${index + 1}. ${item.title}: ${item.blocker}`,
+        )
+        .join("\n");
+const burndownMarkdown =
+  blockerItems.length === 0
+    ? "1. No remaining repo-backed release work is tracked by MAP-REL-001."
+    : blockerItems
+        .map((item, index) => `${index + 1}. ${item.blocker}`)
+        .join("\n");
 
 const finalEvidence = `# MAP-REL-001 Final Evidence
 
@@ -335,7 +369,7 @@ const finalEvidence = `# MAP-REL-001 Final Evidence
 
 ## Verdict
 
-\`MAP-REL-001\` is \`${manifest.summary.releaseVerdict}\` for production release closeout on this repo-backed audit. Repo-local QA and observability proof exist for large parts of the stack, but this audit does **not** claim unsupported production readiness: Governance UI publication, driver device UAT, and live-provider runtime readiness are still open blockers.
+\`MAP-REL-001\` is \`${manifest.summary.releaseVerdict}\` for production release closeout on this repo-backed audit. ${blockerNarrative}
 
 ## Gate Matrix
 
@@ -370,9 +404,7 @@ ${manifest.dependencyEvidence
 
 ## Open Production Blockers
 
-${blockerItems
-  .map((item, index) => `${index + 1}. \`${item.id}\`: ${item.blocker}`)
-  .join("\n")}
+${blockerListMarkdown}
 
 ## Verification Commands
 
@@ -410,9 +442,7 @@ ${manifest.productionEvidence
 
 ## Blocking Conclusions
 
-1. Governance release pass is still blocked because the canonical \`/service-area-governance\` UI publication and \`MAP-FE-ADM-001\` final evidence are not present.
-2. Driver release pass is still blocked because \`MAP-MOB-DRV-001\` does not include device/simulator UAT and \`E2E-MAP-007\` remains manual.
-3. Provider release pass is still blocked because runtime \`MAP_PROVIDER_MODE=external\` remains fail-closed until a live adapter exists, even after env/prereq reconciliation.
+${blockingConclusionsMarkdown}
 `;
 
 const burndown = `# MAP Production Readiness Burndown
@@ -422,9 +452,7 @@ Branch@SHA: \`${branchAtSha}\`
 
 ## Remaining Work To Reach Gate PASS
 
-1. Land canonical Platform Admin \`/service-area-governance\` screens and publish \`MAP-FE-ADM-001\` final evidence so Gate B can pass.
-2. Capture driver-app simulator/device UAT for pickup/dropoff coordinate handoff and navigation launch so Gate D can pass.
-3. Replace the external provider runtime placeholder with a real live-provider adapter and keep \`scripts/check-map-provider-config.sh\` / \`.env.example\` aligned with that runtime so Gates A/C/E can pass without unsupported claims.
+${burndownMarkdown}
 
 ## Already Closed Repo-Backed Proof
 

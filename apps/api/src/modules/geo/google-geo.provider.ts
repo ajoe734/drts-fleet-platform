@@ -326,18 +326,16 @@ export class GoogleGeoProvider implements GeoProvider {
       displayName: result.formatted_address,
       address: result.formatted_address,
       normalizedAddress: result.formatted_address,
-      district: this.addressComponent(
-        result,
+      district: this.addressComponent(result, [
         "sublocality_level_1",
         "administrative_area_level_3",
         "administrative_area_level_2",
-      ),
-      locality: this.addressComponent(
-        result,
+      ]),
+      locality: this.addressComponent(result, [
         "locality",
         "administrative_area_level_1",
-      ),
-      countryCode: this.addressComponent(result, "country", true),
+      ]),
+      countryCode: this.addressComponent(result, ["country"], true),
       location: result.geometry.location,
       confidence: this.confidenceFromLocationType(result.geometry.location_type),
       accuracyM: this.accuracyFromLocationType(result.geometry.location_type),
@@ -390,22 +388,15 @@ export class GoogleGeoProvider implements GeoProvider {
 
   private addressComponent(
     result: GoogleGeocodeResult,
-    primaryType: string,
-    fallbackType?: string | boolean,
+    types: string[],
     shortName = false,
   ) {
-    const fallbacks =
-      typeof fallbackType === "string"
-        ? [fallbackType]
-        : [];
-    const useShortName =
-      typeof fallbackType === "boolean" ? fallbackType : shortName;
     const components = result.address_components ?? [];
 
-    for (const type of [primaryType, ...fallbacks]) {
+    for (const type of types) {
       const match = components.find((component) => component.types.includes(type));
       if (match) {
-        return useShortName ? match.short_name : match.long_name;
+        return shortName ? match.short_name : match.long_name;
       }
     }
     return null;

@@ -78,15 +78,20 @@ Keep all map/geofence flags disabled by default, then enable in order:
 The disabled-by-default source of truth is
 `apps/api/src/modules/feature-flags/feature-flags.service.ts`.
 
-## Current Release Limitation
+## Current Runtime Status
 
-As of `2026-07-04`, the backend runtime still reports external mode as
-fail-closed because the live provider adapter is not implemented:
+As of `2026-07-04`, the backend runtime includes an external Google geocode
+adapter and provider selection wiring at:
 
+- `apps/api/src/modules/geo/google-geo.provider.ts`
+- `apps/api/src/modules/geo/geo.module.ts`
 - `apps/api/src/modules/geo/geo-provider-config.service.ts`
 
-`MAP-REL-001` therefore must not claim production readiness even when repo-local
-QA and observability evidence pass.
+`MAP-REL-001` can treat provider/runtime prerequisites as repo-backed only when
+the documented secrets, origin restrictions, mobile package restrictions, and
+quota inputs stay aligned with this runtime. This runbook still does **not**
+replace staged/prod secret provisioning evidence or the separate Governance and
+Driver release gates.
 
 ## Rollback
 
