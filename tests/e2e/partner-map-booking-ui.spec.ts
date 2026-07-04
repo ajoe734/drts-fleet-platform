@@ -47,9 +47,7 @@ test.describe("partner map booking UI", () => {
 
     await expect(page.getByText("表單驗證通過")).toBeVisible();
     await expect(
-      page.getByText(
-        "此 partner flow 已可把型別安全的 payload 交給已驗證的 booking transport。",
-      ),
+      page.getByText("此預約資料已準備完成，可交由合作通路後續建立訂單。"),
     ).toBeVisible();
   });
 
@@ -81,6 +79,9 @@ test.describe("partner map booking UI", () => {
         .getByText("目前可先記錄這趟行程，但正式派遣前仍需人工確認。")
         .first(),
     ).toBeVisible();
+    await expect(
+      page.getByTestId("partner-booking-review-summary"),
+    ).toHaveText("目前可先記錄這趟行程，但正式派遣前仍需人工確認。");
 
     const submit = page.getByRole("button", { name: "驗證下單表單" });
     await expect(submit).toBeEnabled();

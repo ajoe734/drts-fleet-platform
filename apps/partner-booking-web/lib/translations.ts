@@ -72,12 +72,12 @@ const en = {
   "book.map.outsideServiceArea":
     "The selected route falls outside the service area and cannot be submitted from this surface.",
   "book.ready":
-    "Program gate clear. Form can be submitted once all required fields are valid.",
+    "Program details and locations are confirmed. You can continue with submission.",
   "book.notReady": "Resolve the highlighted fields before submission.",
   "book.submit": "Validate booking form",
   "book.success": "Form validation passed",
   "book.success.detail":
-    "This partner flow is ready to hand a typed payload to the authenticated booking transport.",
+    "This booking is ready for the partner team to continue creating the order.",
   "book.summary.direction": "Airport direction",
   "book.summary.coverage": "Program coverage",
   "book.summary.window": "Reservation window",
@@ -533,12 +533,11 @@ const zh = {
   "book.map.manualReviewTitle": "派遣前需人工確認",
   "book.map.manualReview": "目前可先記錄這趟行程，但正式派遣前仍需人工確認。",
   "book.map.outsideServiceArea": "所選路線超出服務範圍，無法從此入口送出。",
-  "book.ready": "方案閘門已通過；只要必填欄位合法，就可提交。",
+  "book.ready": "方案資料與地址已確認，可繼續送出預約。",
   "book.notReady": "請先修正標示欄位，再進行提交。",
   "book.submit": "驗證下單表單",
   "book.success": "表單驗證通過",
-  "book.success.detail":
-    "此 partner flow 已可把型別安全的 payload 交給已驗證的 booking transport。",
+  "book.success.detail": "此預約資料已準備完成，可交由合作通路後續建立訂單。",
   "book.summary.direction": "接送方向",
   "book.summary.coverage": "方案欄位覆蓋",
   "book.summary.window": "預約時段",

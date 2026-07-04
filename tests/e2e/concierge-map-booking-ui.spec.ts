@@ -168,7 +168,7 @@ test.describe("concierge map booking UI", () => {
     }, conciergeSessionState);
   });
 
-  test("submits dispatchable coordinates to the assisted-entry order seam", async ({
+  test("submits dispatchable coordinates to the concierge booking seam", async ({
     page,
   }) => {
     const captured = { body: [] as unknown[] };
@@ -186,10 +186,10 @@ test.describe("concierge map booking UI", () => {
     );
 
     await expect(
-      page.getByRole("button", { name: "提交 assisted-entry 訂單" }),
+      page.getByRole("button", { name: "提交禮賓代訂" }),
     ).toBeEnabled();
     await page
-      .getByRole("button", { name: "提交 assisted-entry 訂單" })
+      .getByRole("button", { name: "提交禮賓代訂" })
       .click();
 
     await expect(page.getByText("訂單 ID")).toBeVisible();

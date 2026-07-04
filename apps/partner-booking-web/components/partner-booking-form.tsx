@@ -731,11 +731,16 @@ export function PartnerBookingForm({
 
       <CanvasCard theme={theme} title={t("book.section.review")}>
         <div style={{ display: "grid", gap: 12 }}>
-          <span style={{ color: theme.textMuted }}>
+          <span
+            data-testid="partner-booking-review-summary"
+            style={{ color: theme.textMuted }}
+          >
             {mapGate.code === "outside_service_area"
               ? t("book.map.outsideServiceArea")
               : mapGate.code === "coordinates_required"
                 ? t("book.map.coordinatesRequired")
+                : mapGate.code === "dispatch_manual_review_required"
+                  ? t("book.map.manualReview")
                 : ready
                   ? t("book.ready")
                   : t("book.notReady")}
