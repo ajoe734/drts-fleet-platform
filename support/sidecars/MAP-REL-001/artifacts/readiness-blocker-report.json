@@ -1,0 +1,90 @@
+{
+  "taskId": "MAP-REL-001",
+  "verifier": "report-map-geofence-readiness-blockers",
+  "status": "PASS",
+  "branch": "codex2/map-rel-001",
+  "head": "9a9817c13934075da4f49053cc868bce64f564a8",
+  "blockers": [],
+  "checks": [
+    {
+      "id": "Gate A",
+      "pass": true
+    },
+    {
+      "id": "Gate B",
+      "pass": true
+    },
+    {
+      "id": "Gate C",
+      "pass": true
+    },
+    {
+      "id": "Gate D",
+      "pass": true
+    },
+    {
+      "id": "Gate E",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-001",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-002",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-003",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-004",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-005",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-006",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-007",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-008",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-009",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-010",
+      "pass": true
+    },
+    {
+      "id": "FLEETS-MAP-011",
+      "pass": true
+    },
+    {
+      "id": "provider-prereqs",
+      "pass": true
+    },
+    {
+      "id": "rollout-rollback",
+      "pass": true
+    },
+    {
+      "id": "gap-closeout",
+      "pass": true
+    },
+    {
+      "id": "placeholder-free",
+      "pass": true
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "taskId": "MAP-REL-001",
+  "title": "Map/geofence production release gates",
+  "owner": "Codex2",
+  "reviewer": "Gemini2",
+  "branch": "codex2/map-rel-001",
+  "branchSha": "9a9817c13934075da4f49053cc868bce64f564a8",
+  "evidenceDate": "2026-07-04",
+  "productionEvidence": [
+    {
+      "id": "FLEETS-MAP-001",
+      "title": "Gate A callcenter safe to dispatch",
+      "gate": "Gate A",
+      "status": "PASS",
+      "artifacts": [
+        "support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json",
+        "support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-tenant-ui-20260704T0414Z.json",
+        "support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260704T0414Z.json",
+        "support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-002",
+      "title": "Gate B governance safe to publish",
+      "gate": "Gate B",
+      "status": "PASS",
+      "artifacts": [
+        "docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260703.md",
+        "support/sidecars/MAP-UI-002/MAP-UI-002-INTEGRATE-001-CLOSEOUT.md",
+        "support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-003",
+      "title": "Gate C ops safe to operate",
+      "gate": "Gate C",
+      "status": "PASS",
+      "artifacts": [
+        "support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-ops-ui-20260704T0414Z.json",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "docs/03-runbooks/map-geofence-observability-runbook.md"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-004",
+      "title": "Gate D driver safe to navigate",
+      "gate": "Gate D",
+      "status": "PASS",
+      "artifacts": [
+        "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-005",
+      "title": "Gate E degraded safe",
+      "gate": "Gate E",
+      "status": "PASS",
+      "artifacts": [
+        "support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json",
+        "support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "apps/api/tests/unit/map-provider-config.test.ts"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-006",
+      "title": "Flags default disabled and rollout staged",
+      "gate": "Governance",
+      "status": "PASS",
+      "artifacts": [
+        "apps/api/src/modules/feature-flags/feature-flags.service.ts",
+        "apps/api/tests/unit/feature-flags.service.test.ts",
+        "docs/03-runbooks/map-geofence-production-execution-packet-20260630.md"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-007",
+      "title": "Rollback and retire path documented",
+      "gate": "Governance",
+      "status": "PASS",
+      "artifacts": [
+        "apps/api/src/modules/service-area/service-area.service.ts",
+        "support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json",
+        "docs/03-runbooks/map-geofence-observability-runbook.md"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-008",
+      "title": "Provider prerequisites confirmed",
+      "gate": "Prereq",
+      "status": "PASS",
+      "artifacts": [
+        "scripts/check-map-provider-config.sh",
+        "apps/api/README.md",
+        ".github/workflows/deploy-staging.yml",
+        ".github/workflows/deploy-prod.yml"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-009",
+      "title": "PostGIS and evaluator prerequisites confirmed",
+      "gate": "Prereq",
+      "status": "PASS",
+      "artifacts": [
+        "infra/migrations/V0047__service_area_geofence_authority.sql",
+        "docs/03-runbooks/map-geofence-observability-runbook.md",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-010",
+      "title": "Gap inventory closeout updated with no unassigned MAP-GAP rows",
+      "gate": "Closeout",
+      "status": "PASS",
+      "artifacts": [
+        "docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md"
+      ]
+    },
+    {
+      "id": "FLEETS-MAP-011",
+      "title": "Readiness blocker report and handoff notes published",
+      "gate": "Closeout",
+      "status": "PASS",
+      "artifacts": [
+        "support/sidecars/MAP-REL-001/MAP-REL-001-READINESS-BLOCKER-REPORT.md",
+        "support/sidecars/MAP-REL-001/MAP-REL-001-BLOCKER-HANDOFF-NOTES.md",
+        "support/sidecars/MAP-REL-001/artifacts/readiness-blocker-report.json",
+        "support/sidecars/MAP-REL-001/artifacts/blocker-handoff-notes.json"
+      ]
+    }
+  ]
+}
