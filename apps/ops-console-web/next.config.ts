@@ -9,6 +9,25 @@ const nextConfig: NextConfig = {
   compress: false,
   outputFileTracingRoot: path.join(__dirname, "../../"),
   transpilePackages: ["@drts/shared-types", "@drts/ui-web"],
+  webpack(config) {
+    config.resolve.alias = {
+      ...(config.resolve.alias ?? {}),
+      "@drts/api-client$": path.join(
+        __dirname,
+        "../../packages/api-client/src/index.ts",
+      ),
+      "@drts/ui-web$": path.join(
+        __dirname,
+        "../../packages/ui-web/src/index.tsx",
+      ),
+      "@drts/ui-web/client$": path.join(
+        __dirname,
+        "../../packages/ui-web/src/client.tsx",
+      ),
+    };
+
+    return config;
+  },
 };
 
 export default nextConfig;

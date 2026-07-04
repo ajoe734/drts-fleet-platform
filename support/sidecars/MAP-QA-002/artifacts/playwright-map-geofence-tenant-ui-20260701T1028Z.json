@@ -1,0 +1,149 @@
+{
+  "config": {
+    "configFile": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/playwright.tenant-map-booking.config.ts",
+    "rootDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/tests/e2e",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "/tenant-map-booking-ui\\.spec\\.ts/"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tenant-map-booking-ui.spec.ts",
+      "file": "tenant-map-booking-ui.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "tenant console booking map alignment",
+          "file": "tenant-map-booking-ui.spec.ts",
+          "line": 137,
+          "column": 6,
+          "specs": [
+            {
+              "title": "serviceable stops pin and clear the service-area state",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4176,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-07-04T04:07:09.616Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "b91c2c6bc13573f325cd-252f8e9b9ff849eda5d3",
+              "file": "tenant-map-booking-ui.spec.ts",
+              "line": 138,
+              "column": 7
+            },
+            {
+              "title": "not_serviceable stop blocks booking submission",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3347,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-07-04T04:07:13.892Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "b91c2c6bc13573f325cd-63c5dfad588a75738310",
+              "file": "tenant-map-booking-ui.spec.ts",
+              "line": 154,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-07-04T04:06:59.042Z",
+    "duration": 18324.745,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
