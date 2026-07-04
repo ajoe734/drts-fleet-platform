@@ -24,6 +24,7 @@ import {
   getPartnerProgramGate,
   getPartnerProgramLabel,
   isPartnerBookingDraftReady,
+  type PartnerBookingDraftValues,
 } from "@/lib/partner-booking-form";
 import {
   getPartnerMapBookingBannerCode,
@@ -233,6 +234,7 @@ export function PartnerBookingForm({
   brand,
   entry,
   eligibilityVerificationId,
+  initialDraft,
   mapProviderState,
   referenceFallback = false,
 }: {
@@ -242,6 +244,7 @@ export function PartnerBookingForm({
     "businessDispatchSubtype" | "eligibilityMode" | "entrySlug" | "programCode"
   >;
   eligibilityVerificationId: string | null;
+  initialDraft?: PartnerBookingDraftValues;
   /**
    * Forces the self-contained mock geo provider health for this funnel. Lets QA
    * drive the provider-outage manual-review path per-navigation; defaults to the
@@ -258,7 +261,9 @@ export function PartnerBookingForm({
 }) {
   const { locale, t } = useTranslation();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
-  const [draft, setDraft] = useState(createDefaultPartnerBookingDraft);
+  const [draft, setDraft] = useState<PartnerBookingDraftValues>(
+    () => initialDraft ?? createDefaultPartnerBookingDraft(),
+  );
   const [submitted, setSubmitted] = useState(false);
   const [pickupPin, setPickupPin] = useState<AddressPayload | null>(null);
   const [dropoffPin, setDropoffPin] = useState<AddressPayload | null>(null);

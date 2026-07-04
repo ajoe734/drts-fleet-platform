@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { PartnerBookingForm } from "@/components/partner-booking-form";
+import { createDefaultPartnerBookingDraft } from "@/lib/partner-booking-form";
 import {
   PartnerAuthorityError,
   buildLocalReferencePartnerEntry,
@@ -25,6 +26,7 @@ export default async function PartnerBookPage({
 }: PageProps) {
   const { tenantSlug } = await params;
   const resolvedSearchParams = await searchParams;
+  const initialDraft = createDefaultPartnerBookingDraft(new Date());
   try {
     // Degrade to the local reference shell when the authority is unreachable so
     // the assisted-entry map picker still renders during a backend outage. A
@@ -50,6 +52,7 @@ export default async function PartnerBookPage({
         brand={brand}
         entry={entry ?? buildLocalReferencePartnerEntry(tenantSlug)}
         eligibilityVerificationId={eligibilityVerificationId}
+        initialDraft={initialDraft}
         mapProviderState={mapProviderState}
         referenceFallback={!entry}
       />

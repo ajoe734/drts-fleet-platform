@@ -17,6 +17,14 @@ export default defineConfig({
         __dirname,
         "../../packages/ui-tokens/src/index.ts",
       ),
+      "@drts/ui-web": path.resolve(
+        __dirname,
+        "../../packages/ui-web/src/index.tsx",
+      ),
+      "@drts/ui-web/partner-booking": path.resolve(
+        __dirname,
+        "../../packages/ui-web/src/partner-booking-funnel.tsx",
+      ),
     },
   },
   test: {
