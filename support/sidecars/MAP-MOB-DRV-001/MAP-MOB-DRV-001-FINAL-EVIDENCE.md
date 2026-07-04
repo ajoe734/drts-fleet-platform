@@ -2,10 +2,10 @@
 
 **Task:** MAP-MOB-DRV-001 - Driver trip map and navigation handoff
 **Branch:** `codex2/map-mob-drv-001`
-**Commit:** `bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2`
-**Branch@SHA:** `origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2`
+**Implementation Baseline Commit:** `a2c253d0fb0f55686946637504067b8cc5c5ddf0`
+**Implementation Baseline Branch@SHA:** `origin/codex2/map-mob-drv-001@a2c253d0fb0f55686946637504067b8cc5c5ddf0`
 **Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-map-mob-drv-001`
-**Date:** 2026-07-03
+**Date:** 2026-07-04
 **Reviewer:** Claude2
 
 ## Implementation Summary
@@ -53,14 +53,19 @@ git diff --check
 
 Result: passed.
 
-## Mobile And UAT Limitations
+## Mobile UAT Fallback Record
 
-- Android/iOS simulator UAT was not run in this repo-local pass.
-- No native map SDK dependency is present in `apps/driver-app/package.json`; this slice intentionally does not fake native map rendering.
-- Gate D production readiness still needs simulator/device screenshots or video proving actual app launch, navigation handoff, and platform-specific behavior.
-- This branch provides reviewable code and automated evidence for coordinate rendering, external navigation URL generation, route-authority safety copy, degraded fallback, and heartbeat coexistence.
+- Acceptance allows Android/iOS UAT evidence **or documented simulator fallback**. This pass records the fallback path because the assigned worker environment is `Linux x64`, not a macOS/Xcode or Android-emulator host.
+- `which xcrun` returned no path, so iOS Simulator tooling is unavailable in this environment.
+- `which adb` returned no path, so Android device/emulator tooling is unavailable in this environment.
+- No native map SDK dependency is present in `apps/driver-app/package.json`; this slice intentionally ships coordinate handoff mode and does not claim repo-local native map rendering.
+- Repo-local acceptance is therefore covered by automated verification plus this documented simulator fallback, not by a false claim of device/simulator execution.
 
-## Suggested UAT Follow-Up
+## Remaining Release Closeout Gap
+
+- Gate D production readiness still needs a later Android/iOS simulator or device capture proving actual app launch, trip-screen coordinate rendering, and platform navigation handoff on real mobile tooling.
+
+## Recommended UAT Capture When Mobile Tooling Is Available
 
 - Run Android or iOS simulator with an active trip fixture containing pickup/dropoff `lat/lng`.
 - Capture the trip screen showing coordinate handoff mode, pickup/dropoff coordinates, route-authority copy, and GPS freshness.
