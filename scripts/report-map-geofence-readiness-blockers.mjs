@@ -25,10 +25,25 @@ const outputMdPath = path.join(
   repoRoot,
   "support/sidecars/MAP-REL-001/MAP-REL-001-READINESS-BLOCKER-REPORT.md",
 );
+const geoModulePath = path.join(
+  repoRoot,
+  "apps/api/src/modules/geo/geo.module.ts",
+);
+const geoProviderConfigPath = path.join(
+  repoRoot,
+  "apps/api/src/modules/geo/geo-provider-config.service.ts",
+);
+const providerPreflightPath = path.join(
+  repoRoot,
+  "scripts/check-map-provider-config.sh",
+);
 
 const finalEvidence = fs.readFileSync(finalEvidencePath, "utf8");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const gapDoc = fs.readFileSync(gapDocPath, "utf8");
+const geoModule = fs.readFileSync(geoModulePath, "utf8");
+const geoProviderConfig = fs.readFileSync(geoProviderConfigPath, "utf8");
+const providerPreflight = fs.readFileSync(providerPreflightPath, "utf8");
 const driverEvidencePath = path.join(
   repoRoot,
   "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md",
@@ -105,12 +120,33 @@ if (!gateDMobileUatPass) {
   );
 }
 
+const geoRuntimeUsesMockOnly =
+  geoModule.includes("useExisting: MockGeoProvider") &&
+  geoProviderConfig.includes("External geo provider adapter is not implemented");
+checks.push({ id: "geo-runtime-provider-ready", pass: !geoRuntimeUsesMockOnly });
+if (geoRuntimeUsesMockOnly) {
+  blockers.push(
+    "Geo runtime is still mock-only: GeoModule binds GEO_PROVIDER to MockGeoProvider and GeoProviderConfigService marks external_adapter fail.",
+  );
+}
+
+const providerEnvAligned =
+  providerPreflight.includes("MAP_PROVIDER_MODE") &&
+  !providerPreflight.includes("MAP_PROVIDER_BACKEND");
+checks.push({ id: "provider-env-alignment", pass: providerEnvAligned });
+if (!providerEnvAligned) {
+  blockers.push(
+    "Provider preflight still keys off MAP_PROVIDER_BACKEND while the geofence runtime contract uses MAP_PROVIDER_MODE.",
+  );
+}
+
 const prereqChecks = [
   {
     id: "provider-prereqs",
     pass:
       finalEvidence.includes("Provider And PostGIS Prerequisites") &&
-      finalEvidence.includes("MAP_PROVIDER_BACKEND=google"),
+      !/\|\s*`FLEETS-MAP-008`\s*\|\s*PASS\s*\|/.test(finalEvidence) &&
+      finalEvidence.includes("Geo runtime is still mock-only"),
   },
   {
     id: "rollout-rollback",

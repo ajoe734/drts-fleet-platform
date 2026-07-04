@@ -1,10 +1,18 @@
 {
   "taskId": "MAP-REL-001",
-  "status": "PASS",
+  "status": "FAIL",
   "notes": [
     {
-      "action": "skip",
-      "reason": "No unique MAP-REL-001 readiness blockers remain after consuming MAP-QA-002, MAP-OBS-001, MAP-FE-ADM-001, and MAP-MOB-DRV-001 evidence."
+      "action": "handoff",
+      "reason": "FLEETS-MAP-008 is not closed with PASS in final evidence."
+    },
+    {
+      "action": "handoff",
+      "reason": "Geo runtime is still mock-only: GeoModule binds GEO_PROVIDER to MockGeoProvider and GeoProviderConfigService marks external_adapter fail."
+    },
+    {
+      "action": "handoff",
+      "reason": "Provider preflight still keys off MAP_PROVIDER_BACKEND while the geofence runtime contract uses MAP_PROVIDER_MODE."
     }
   ]
 }

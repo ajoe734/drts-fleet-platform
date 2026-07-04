@@ -4,8 +4,8 @@
   "owner": "Codex2",
   "reviewer": "Codex",
   "branch": "codex2/map-rel-001",
-  "branchSha": "f5142802d7f57c779c3b7c4620df72af081a05e9",
-  "branchAtSha": "codex2/map-rel-001@f5142802d7f57c779c3b7c4620df72af081a05e9",
+  "branchSha": "b75e31bfeeeb15b21bdab8b0194e25b3738179d8",
+  "branchAtSha": "codex2/map-rel-001@b75e31bfeeeb15b21bdab8b0194e25b3738179d8",
   "evidenceDate": "2026-07-04",
   "productionEvidence": [
     {
@@ -95,9 +95,11 @@
       "id": "FLEETS-MAP-008",
       "title": "Provider prerequisites confirmed",
       "gate": "Prereq",
-      "status": "PASS",
+      "status": "FAIL",
       "artifacts": [
         "scripts/check-map-provider-config.sh",
+        "apps/api/src/modules/geo/geo.module.ts",
+        "apps/api/src/modules/geo/geo-provider-config.service.ts",
         "apps/api/README.md",
         ".github/workflows/deploy-staging.yml",
         ".github/workflows/deploy-prod.yml"
