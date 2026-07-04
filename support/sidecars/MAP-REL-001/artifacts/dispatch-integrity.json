@@ -3,17 +3,17 @@
   "verifier": "verify-map-geofence-dispatch-integrity",
   "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "199516acfde7083649ed5c6bc4a402960db381fe",
+  "head": "83640c8b35b964197bb4ed9997f9e0fca8a7caff",
   "checks": {
     "missingArtifacts": [],
     "placeholderFiles": [],
     "manifestPass": true,
     "branchShaConsistent": true,
     "checkoutMatchesEvidence": true,
-    "manifestBranchAtSha": "codex2/map-rel-001@1310cf2035725929f3b48604b891eff59c0ea6ce",
-    "finalEvidenceBranchSha": "codex2/map-rel-001@1310cf2035725929f3b48604b891eff59c0ea6ce",
+    "manifestBranchAtSha": "codex2/map-rel-001@83640c8b35b964197bb4ed9997f9e0fca8a7caff",
+    "finalEvidenceBranchSha": "codex2/map-rel-001@83640c8b35b964197bb4ed9997f9e0fca8a7caff",
     "manifestBranch": "codex2/map-rel-001",
-    "manifestBranchSha": "1310cf2035725929f3b48604b891eff59c0ea6ce",
-    "currentHeadParent": "1310cf2035725929f3b48604b891eff59c0ea6ce"
+    "manifestBranchSha": "83640c8b35b964197bb4ed9997f9e0fca8a7caff",
+    "currentHeadParent": "199516acfde7083649ed5c6bc4a402960db381fe"
   }
 }
