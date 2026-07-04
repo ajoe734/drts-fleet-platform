@@ -9,6 +9,7 @@ const PRODUCTION_ENVIRONMENTS = new Set([
   "stage",
 ]);
 const SUPPORTED_PROVIDER_MODES = new Set(["mock", "external", "disabled"]);
+const SUPPORTED_EXTERNAL_PROVIDER_NAMES = new Set(["google"]);
 const DEFAULT_WARNING_THRESHOLD = 80;
 const DEFAULT_CRITICAL_THRESHOLD = 95;
 
@@ -26,6 +27,7 @@ export class GeoProviderConfigService {
   getHealth(): GeoProviderHealthResponse {
     const environment = this.environment();
     const rawMode = this.rawProviderMode();
+    const providerName = this.providerName();
     const mode: GeoProviderHealthResponse["mode"] =
       SUPPORTED_PROVIDER_MODES.has(rawMode)
         ? (rawMode as GeoProviderHealthResponse["mode"])
@@ -36,7 +38,9 @@ export class GeoProviderConfigService {
     const serverKeyConfigured = this.hasValue("MAP_PROVIDER_SERVER_KEY");
     const browserKeyConfigured = this.hasValue("MAP_PROVIDER_BROWSER_KEY");
     const requiredSecretNames =
-      mode === "external" ? ["MAP_PROVIDER_SERVER_KEY"] : [];
+      mode === "external"
+        ? ["MAP_PROVIDER_SERVER_KEY", "MAP_PROVIDER_BROWSER_KEY"]
+        : [];
     const missingSecretNames = requiredSecretNames.filter(
       (name) => !this.hasValue(name),
     );
@@ -107,17 +111,29 @@ export class GeoProviderConfigService {
       checks.push({
         name: "server_secret",
         status: "pass",
-        message: "Required server-side provider secret is configured.",
+        message: "Required provider server/browser secrets are configured.",
       });
     }
 
     if (mode === "external") {
-      checks.push({
-        name: "external_adapter",
-        status: "fail",
-        message:
-          "External geo provider adapter is not implemented in this runtime yet; keep production fail-closed until MAP-INFRA-001 is paired with a provider adapter task.",
-      });
+      if (!SUPPORTED_EXTERNAL_PROVIDER_NAMES.has(providerName)) {
+        checks.push({
+          name: "provider_name",
+          status: "fail",
+          message: `MAP_PROVIDER_NAME=${providerName} is not supported; runtime currently supports only google in external mode.`,
+        });
+      } else {
+        checks.push({
+          name: "provider_name",
+          status: "pass",
+          message: `MAP_PROVIDER_NAME=${providerName}.`,
+        });
+        checks.push({
+          name: "external_adapter",
+          status: "pass",
+          message: `External geo provider adapter is configured for ${providerName}.`,
+        });
+      }
     }
 
     const allowedOrigins = this.csv("MAP_PROVIDER_ALLOWED_ORIGINS");
@@ -139,7 +155,7 @@ export class GeoProviderConfigService {
         : "healthy";
 
     return {
-      provider: mode === "mock" ? "mock" : this.text("MAP_PROVIDER_NAME", mode),
+      provider: mode === "mock" ? "mock" : providerName,
       mode,
       status,
       environment,
@@ -184,6 +200,10 @@ export class GeoProviderConfigService {
 
   private rawProviderMode() {
     return this.text("MAP_PROVIDER_MODE", "mock").trim().toLowerCase();
+  }
+
+  private providerName() {
+    return this.text("MAP_PROVIDER_NAME", "google").trim().toLowerCase();
   }
 
   private hasValue(name: string) {

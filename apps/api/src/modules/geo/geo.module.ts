@@ -4,6 +4,7 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { MapGeofenceObservabilityModule } from "../operational-observability/map-geofence-observability.module";
 import { GeoProviderConfigService } from "./geo-provider-config.service";
 import { GeoController } from "./geo.controller";
+import { GoogleGeoProvider } from "./google-geo.provider";
 import { GEO_PROVIDER } from "./geo.provider";
 import { GeoService } from "./geo.service";
 import { MockGeoProvider } from "./mock-geo.provider";
@@ -14,9 +15,21 @@ import { MockGeoProvider } from "./mock-geo.provider";
   providers: [
     GeoProviderConfigService,
     MockGeoProvider,
+    GoogleGeoProvider,
     {
       provide: GEO_PROVIDER,
-      useExisting: MockGeoProvider,
+      inject: [GeoProviderConfigService, MockGeoProvider, GoogleGeoProvider],
+      useFactory: (
+        config: GeoProviderConfigService,
+        mockProvider: MockGeoProvider,
+        googleProvider: GoogleGeoProvider,
+      ) => {
+        const health = config.getHealth();
+        if (health.mode === "external" && health.provider === "google") {
+          return googleProvider;
+        }
+        return mockProvider;
+      },
     },
     GeoService,
   ],

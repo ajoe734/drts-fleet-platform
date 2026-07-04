@@ -3,13 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { GeoProviderConfigService } from "../../src/modules/geo/geo-provider-config.service";
 import { GeoController } from "../../src/modules/geo/geo.controller";
+import { GoogleGeoProvider } from "../../src/modules/geo/google-geo.provider";
+import type { GeoProvider } from "../../src/modules/geo/geo.provider";
 import { GeoService } from "../../src/modules/geo/geo.service";
 import { MockGeoProvider } from "../../src/modules/geo/mock-geo.provider";
 import { MapGeofenceObservabilityService } from "../../src/modules/operational-observability/map-geofence-observability.service";
 
-function createService(env: Record<string, string | undefined> = {}) {
+function createServiceWithProvider(
+  provider: GeoProvider,
+  env: Record<string, string | undefined> = {},
+) {
   return new GeoService(
-    new MockGeoProvider(),
+    provider,
     new GeoProviderConfigService({
       NODE_ENV: "test",
       DRTS_ENV: "test",
@@ -17,6 +22,10 @@ function createService(env: Record<string, string | undefined> = {}) {
       ...env,
     }),
   );
+}
+
+function createService(env: Record<string, string | undefined> = {}) {
+  return createServiceWithProvider(new MockGeoProvider(), env);
 }
 
 function createObservedService(env: Record<string, string | undefined> = {}) {
@@ -41,6 +50,36 @@ function createObservedService(env: Record<string, string | undefined> = {}) {
     observability,
   );
   return { service, auditNotificationService, observability };
+}
+
+function createExternalEnv(
+  overrides: Record<string, string | undefined> = {},
+): Record<string, string | undefined> {
+  return {
+    NODE_ENV: "test",
+    DRTS_ENV: "staging",
+    MAP_PROVIDER_MODE: "external",
+    MAP_PROVIDER_NAME: "google",
+    MAP_PROVIDER_SERVER_KEY: "server-key",
+    MAP_PROVIDER_BROWSER_KEY: "browser-key",
+    MAP_PROVIDER_ALLOWED_ORIGINS: "https://ops.example.com",
+    MAP_PROVIDER_MOBILE_BUNDLE_IDS: "com.example.driver.ios",
+    MAP_PROVIDER_MOBILE_PACKAGE_NAMES: "com.example.driver.android",
+    MAP_PROVIDER_DAILY_QUOTA: "1000",
+    MAP_PROVIDER_MINUTE_QUOTA: "60",
+    MAP_PROVIDER_QUOTA_WARNING_PERCENT: "80",
+    MAP_PROVIDER_QUOTA_CRITICAL_PERCENT: "95",
+    ...overrides,
+  };
+}
+
+function createJsonFetch(responses: unknown[]) {
+  let index = 0;
+  return vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => responses[index++],
+  }));
 }
 
 describe("GeoService", () => {
@@ -417,19 +456,213 @@ describe("GeoService", () => {
     });
   });
 
+  it("reports healthy external provider state when google adapter and required secrets are configured", () => {
+    const env = createExternalEnv();
+    const service = createServiceWithProvider(
+      new GoogleGeoProvider(env, createJsonFetch([]) as never),
+      env,
+    );
+
+    expect(service.health()).toMatchObject({
+      provider: "google",
+      mode: "external",
+      status: "healthy",
+      failClosed: false,
+      requiredSecretNames: [
+        "MAP_PROVIDER_SERVER_KEY",
+        "MAP_PROVIDER_BROWSER_KEY",
+      ],
+      missingSecretNames: [],
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: "provider_name",
+          status: "pass",
+        }),
+        expect.objectContaining({
+          name: "external_adapter",
+          status: "pass",
+        }),
+      ]),
+    });
+  });
+
+  it("uses the google external provider for search, resolve, and reverse geocode flows", async () => {
+    const env = createExternalEnv();
+    const fetchLike = createJsonFetch([
+      {
+        status: "OK",
+        results: [
+          {
+            formatted_address: "100 台灣台北市中正區北平西路3號",
+            place_id: "google-place-taipei-station",
+            types: ["street_address"],
+            geometry: {
+              location: { lat: 25.0478, lng: 121.5171 },
+              location_type: "ROOFTOP",
+            },
+            address_components: [
+              {
+                long_name: "3號",
+                short_name: "3號",
+                types: ["street_number"],
+              },
+              {
+                long_name: "北平西路",
+                short_name: "北平西路",
+                types: ["route"],
+              },
+              {
+                long_name: "中正區",
+                short_name: "中正區",
+                types: ["sublocality_level_1", "political"],
+              },
+              {
+                long_name: "臺北市",
+                short_name: "台北市",
+                types: ["locality", "political"],
+              },
+              {
+                long_name: "台灣",
+                short_name: "TW",
+                types: ["country", "political"],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        status: "OK",
+        results: [
+          {
+            formatted_address: "100 台灣台北市中正區北平西路3號",
+            place_id: "google-place-taipei-station",
+            types: ["street_address"],
+            geometry: {
+              location: { lat: 25.0478, lng: 121.5171 },
+              location_type: "ROOFTOP",
+            },
+            address_components: [
+              {
+                long_name: "中正區",
+                short_name: "中正區",
+                types: ["sublocality_level_1", "political"],
+              },
+              {
+                long_name: "臺北市",
+                short_name: "台北市",
+                types: ["locality", "political"],
+              },
+              {
+                long_name: "台灣",
+                short_name: "TW",
+                types: ["country", "political"],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        status: "OK",
+        results: [
+          {
+            formatted_address: "100 台灣桃園市大園區航站南路9號",
+            place_id: "google-place-taoyuan-airport",
+            types: ["airport"],
+            geometry: {
+              location: { lat: 25.0797, lng: 121.2342 },
+              location_type: "GEOMETRIC_CENTER",
+            },
+            address_components: [
+              {
+                long_name: "大園區",
+                short_name: "大園區",
+                types: ["sublocality_level_1", "political"],
+              },
+              {
+                long_name: "桃園市",
+                short_name: "桃園市",
+                types: ["locality", "political"],
+              },
+              {
+                long_name: "台灣",
+                short_name: "TW",
+                types: ["country", "political"],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const service = createServiceWithProvider(
+      new GoogleGeoProvider(env, fetchLike as never),
+      env,
+    );
+
+    const search = await service.search({
+      q: "台北車站",
+      near: { lat: 25.0478, lng: 121.5171 },
+      surface: "callcenter",
+    });
+    expect(search.provider).toBe("google");
+    expect(search.candidates[0]).toMatchObject({
+      candidateId: "google:google-place-taipei-station",
+      provider: "google",
+      providerCandidateId: "google-place-taipei-station",
+      placeId: "google-place-taipei-station",
+      countryCode: "TW",
+      locality: "臺北市",
+      district: "中正區",
+      confidence: "exact",
+    });
+
+    const resolved = await service.resolve({
+      candidateId: "google:google-place-taipei-station",
+      addressText: "台北車站",
+      selectedByActorId: "agent-009",
+      surface: "callcenter",
+    });
+    expect(resolved.address).toMatchObject({
+      placeId: "google-place-taipei-station",
+      geocodeProvider: "google",
+      geocodeConfidence: "exact",
+      coordinateSource: "provider_candidate",
+      selectedByActorId: "agent-009",
+      pinnedByActorId: "agent-009",
+    });
+
+    const reversed = await service.reverse({
+      location: { lat: 25.0798, lng: 121.2341 },
+      surface: "ops_console",
+      requestedByActorId: "ops-001",
+    });
+    expect(reversed.address).toMatchObject({
+      placeId: "google-place-taoyuan-airport",
+      geocodeProvider: "google",
+      coordinateSource: "reverse_geocode",
+      geocodeConfidence: "approximate",
+      selectedByActorId: "ops-001",
+    });
+
+    expect(fetchLike).toHaveBeenCalledTimes(3);
+  });
+
   it("fails closed when external provider mode is missing required secrets", async () => {
     const service = createService({
       DRTS_ENV: "staging",
       MAP_PROVIDER_MODE: "external",
       MAP_PROVIDER_ALLOWED_ORIGINS: "https://ops.example.com",
       MAP_PROVIDER_SERVER_KEY: "",
+      MAP_PROVIDER_BROWSER_KEY: "browser-key",
     });
 
     expect(service.health()).toMatchObject({
       mode: "external",
       status: "unhealthy",
       failClosed: true,
-      requiredSecretNames: ["MAP_PROVIDER_SERVER_KEY"],
+      requiredSecretNames: [
+        "MAP_PROVIDER_SERVER_KEY",
+        "MAP_PROVIDER_BROWSER_KEY",
+      ],
       missingSecretNames: ["MAP_PROVIDER_SERVER_KEY"],
     });
 
@@ -454,6 +687,34 @@ describe("GeoService", () => {
     }
 
     throw new Error("Expected external provider configuration to fail closed.");
+  });
+
+  it("fails closed when external provider name is unsupported", async () => {
+    const service = createService({
+      ...createExternalEnv({
+        MAP_PROVIDER_NAME: "unsupported-provider",
+      }),
+    });
+
+    expect(service.health()).toMatchObject({
+      provider: "unsupported-provider",
+      mode: "external",
+      status: "unhealthy",
+      failClosed: true,
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: "provider_name",
+          status: "fail",
+        }),
+      ]),
+    });
+
+    await expect(
+      service.search({
+        q: "台北車站",
+        surface: "callcenter",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
   });
 
   it("rejects invalid search and coordinate input before hitting provider", async () => {
