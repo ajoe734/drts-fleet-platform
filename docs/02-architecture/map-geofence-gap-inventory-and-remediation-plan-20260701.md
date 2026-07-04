@@ -78,3 +78,25 @@ The following are not part of `MAP-FE-ADM-001` unless separately assigned:
 3. Any new backend contract beyond the existing `/service-area/admin/*`,
    `/service-area/definitions`, `/service-area/admin/geojson`, and
    `/service-area/evaluate` surfaces.
+
+## Release Closeout Status For `MAP-REL-001`
+
+The release closeout snapshot for `MAP-REL-001` records every `MAP-GAP-*` item
+against an owning slice plus a concrete evidence path. No gap row remains
+unassigned in this release closeout view.
+
+| Gap ID | Release closeout owner slice | Closeout status | Evidence |
+| --- | --- | --- | --- |
+| `MAP-GAP-001` | provider abstraction / infra baseline | PASS | `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`, `apps/api/README.md` |
+| `MAP-GAP-002` | geo gateway and typed client | PASS | `docs/04-api/map-geofence-openapi-delta-20260630.md`, `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md` |
+| `MAP-GAP-003` | callcenter rollout | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json` |
+| `MAP-GAP-004` | booking gate authority | PASS | `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
+| `MAP-GAP-005` | platform admin geometry governance | PASS | `docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260703.md`, `support/sidecars/MAP-UI-002/MAP-UI-002-INTEGRATE-001-CLOSEOUT.md` |
+| `MAP-GAP-006` | ops geographic map | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-ops-ui-20260704T0414Z.json` |
+| `MAP-GAP-007` | driver trip map and navigation | PASS | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md` |
+| `MAP-GAP-008` | tenant and concierge coordinate consistency | PASS | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-tenant-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260704T0414Z.json` |
+| `MAP-GAP-009` | coordinate provenance metadata | PASS | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
+| `MAP-GAP-010` | provider degradation policy | PASS | `apps/api/tests/unit/map-provider-config.test.ts`, `docs/03-runbooks/map-geofence-observability-runbook.md` |
+| `MAP-GAP-011` | geometry publication workflow | PASS | `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
+| `MAP-GAP-012` | spatial audit trail | PASS | `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
+| `MAP-GAP-013` | map-based UAT and release evidence | PASS | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/MAP-REL-001-FINAL-EVIDENCE.md` |
