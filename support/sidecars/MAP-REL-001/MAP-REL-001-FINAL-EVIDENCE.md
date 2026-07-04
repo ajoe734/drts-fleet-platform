@@ -2,7 +2,7 @@
 
 **Task:** `MAP-REL-001` - Map/geofence production release gates
 **Branch:** `codex2/map-rel-001`
-**Branch@SHA:** `codex2/map-rel-001@fb70f22271bb846783c5ee3b992c25e862e77247`
+**Branch@SHA:** `codex2/map-rel-001@075821be12be305b2ab452853ada15bc77447371`
 **Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-map-rel-001`
 **Date:** `2026-07-04`
 **Reviewer:** `Codex`
@@ -17,7 +17,7 @@ rails publish it, deploy/docs now use the runtime-backed
 `MAP_PROVIDER_QUOTA_CRITICAL_PERCENT` contract, and the release closeout no
 longer carries unassigned `MAP-GAP-*` rows. This evidence is limited to
 branch-scoped repository readiness on
-`codex2/map-rel-001@fb70f22271bb846783c5ee3b992c25e862e77247`; it does not
+`codex2/map-rel-001@075821be12be305b2ab452853ada15bc77447371`; it does not
 claim a staging or production deployment occurred from this branch.
 
 ## Upstream Evidence Intake
