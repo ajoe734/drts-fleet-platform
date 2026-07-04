@@ -71,7 +71,11 @@ async function stubGeoProvider(
     const q = (url.searchParams.get("q") ?? "").toLowerCase();
     const candidate = q.includes("air") ? DROPOFF_CANDIDATE : PICKUP_CANDIDATE;
     route.fulfill({
-      json: { candidates: [candidate], provider: "mock", generatedAt: "2026-07-01T00:00:00.000Z" },
+      json: {
+        candidates: [candidate],
+        provider: "mock",
+        generatedAt: "2026-07-01T00:00:00.000Z",
+      },
     });
   });
   await page.route("**/api/geo/resolve", async (route) => {
@@ -113,11 +117,21 @@ async function pinBothStops(page: Page) {
   // Pickup is the first picker, drop-off the second (pair picker DOM order).
   await searchInputs.first().fill("Taipei 101");
   await page.getByRole("button", { name: "Search" }).first().click();
-  await page.getByRole("option").first().click();
+  await page
+    .getByRole("button", {
+      name: /Taipei 101 .*exact|Taipei 101 台北市信義區信義路五段 7 號 exact/i,
+    })
+    .first()
+    .click();
 
   await searchInputs.last().fill("Airport");
   await page.getByRole("button", { name: "Search" }).last().click();
-  await page.getByRole("option").last().click();
+  await page
+    .getByRole("button", {
+      name: /Taoyuan Airport T1 .*exact|Taoyuan Airport T1 桃園國際機場第一航廈 exact/i,
+    })
+    .first()
+    .click();
 }
 
 test.describe("tenant console booking map alignment", () => {
@@ -147,7 +161,9 @@ test.describe("tenant console booking map alignment", () => {
       page.getByText("Outside the service area", { exact: false }).first(),
     ).toBeVisible();
 
-    const submit = page.getByRole("button", { name: /Create booking|For approval|Submitting/ });
+    const submit = page.getByRole("button", {
+      name: /Create booking|For approval|Submitting|建立叫車/,
+    });
     await expect(submit).toBeDisabled();
   });
 });
