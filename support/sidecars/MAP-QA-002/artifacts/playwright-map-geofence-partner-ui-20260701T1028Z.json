@@ -1,0 +1,149 @@
+{
+  "config": {
+    "configFile": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/playwright.partner-booking-surfaces.config.ts",
+    "rootDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/tests/e2e",
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "/partner-(booking-surfaces|map-booking-ui)\\.spec\\.ts/"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "partner-map-booking-ui.spec.ts",
+      "file": "partner-map-booking-ui.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "partner map booking UI",
+          "file": "partner-map-booking-ui.spec.ts",
+          "line": 24,
+          "column": 6,
+          "specs": [
+            {
+              "title": "keeps dispatchable coordinates explicit before validation success",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6275,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-07-04T04:09:34.695Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "766754b32dcce5d890eb-3cff0b704bc51fddbe69",
+              "file": "partner-map-booking-ui.spec.ts",
+              "line": 25,
+              "column": 7
+            },
+            {
+              "title": "keeps manual-review routes explicit instead of looking dispatch-ready",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3072,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-07-04T04:09:41.070Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "766754b32dcce5d890eb-ea465d2ada9e7841f14c",
+              "file": "partner-map-booking-ui.spec.ts",
+              "line": 54,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-07-04T04:09:24.826Z",
+    "duration": 19467.862,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
