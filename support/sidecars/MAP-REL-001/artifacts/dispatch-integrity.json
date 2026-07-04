@@ -3,7 +3,7 @@
   "verifier": "verify-map-geofence-dispatch-integrity",
   "status": "PASS",
   "branch": "codex2/map-rel-001",
-  "head": "8d86173c5ed5c95de77867266998214b5e3e7c6f",
+  "head": "e6d5625195fd843693a31ca89e0b8a929b0f76dc",
   "checks": {
     "missingArtifacts": [],
     "placeholderFiles": [],
@@ -14,6 +14,6 @@
     "finalEvidenceBranchSha": "codex2/map-rel-001@8d86173c5ed5c95de77867266998214b5e3e7c6f",
     "manifestBranch": "codex2/map-rel-001",
     "manifestBranchSha": "8d86173c5ed5c95de77867266998214b5e3e7c6f",
-    "currentHeadParent": "e04f32b048b684ef4fc22862f9dfb71fec9e486f"
+    "currentHeadParent": "8d86173c5ed5c95de77867266998214b5e3e7c6f"
   }
 }

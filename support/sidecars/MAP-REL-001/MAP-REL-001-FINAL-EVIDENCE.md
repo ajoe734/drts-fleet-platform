@@ -15,7 +15,7 @@ hard-binds `GEO_PROVIDER` to the mock provider, deploy/preflight rails use the
 same `MAP_PROVIDER_MODE` plus `MAP_PROVIDER_SERVER_KEY` contract, and the
 release closeout no longer carries unassigned `MAP-GAP-*` rows. This evidence
 is limited to branch-scoped repository readiness on
-`codex2/map-rel-001@e04f32b048b684ef4fc22862f9dfb71fec9e486f`; it does not
+`codex2/map-rel-001@8d86173c5ed5c95de77867266998214b5e3e7c6f`; it does not
 claim a staging or production deployment occurred from this branch.
 
 ## Upstream Evidence Intake

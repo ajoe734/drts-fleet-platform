@@ -2,7 +2,7 @@
 
 - Task: `MAP-REL-001`
 - Branch: `codex2/map-rel-001`
-- Head: `8d86173c5ed5c95de77867266998214b5e3e7c6f`
+- Head: `e6d5625195fd843693a31ca89e0b8a929b0f76dc`
 - Verifier: `report-map-geofence-readiness-blockers`
 - Verdict: `PASS`
 
