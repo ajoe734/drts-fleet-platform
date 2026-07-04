@@ -50,13 +50,13 @@ describe("map booking helpers", () => {
       statusCode: 409,
       code: "DISPATCH_REQUIRES_MANUAL_REVIEW",
       rawBody:
-        "{\"error\":{\"code\":\"DISPATCH_REQUIRES_MANUAL_REVIEW\",\"message\":\"Order requires manual review before dispatch.\"}}",
+        '{"error":{"code":"DISPATCH_REQUIRES_MANUAL_REVIEW","message":"Order requires manual review before dispatch."}}',
     };
     const serviceAreaError = {
       statusCode: 400,
       code: "SERVICE_AREA_NOT_SERVICEABLE",
       rawBody:
-        "{\"error\":{\"code\":\"SERVICE_AREA_NOT_SERVICEABLE\",\"message\":\"Outside service area.\"}}",
+        '{"error":{"code":"SERVICE_AREA_NOT_SERVICEABLE","message":"Outside service area."}}',
     };
 
     expect(
@@ -74,8 +74,6 @@ describe("map booking helpers", () => {
         testTranslate,
         "booking.error.submit",
       ),
-    ).toBe(
-      "上車或下車地點不在支援的服務範圍內。請確認路線後再試一次。",
-    );
+    ).toBe("上車或下車地點不在支援的服務範圍內。請確認路線後再試一次。");
   });
 });

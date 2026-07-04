@@ -38,13 +38,19 @@ async function fulfillJson(route: Route, status: number, data: unknown) {
   });
 }
 
-async function installConciergeApiMocks(page: Page, captured: { body: unknown[] }) {
+async function installConciergeApiMocks(
+  page: Page,
+  captured: { body: unknown[] },
+) {
   await page.route("http://localhost:3001/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const body = request.postDataJSON();
 
-    if (request.method() === "POST" && url.pathname === "/api/callcenter/sessions") {
+    if (
+      request.method() === "POST" &&
+      url.pathname === "/api/callcenter/sessions"
+    ) {
       await fulfillJson(route, 200, {
         callId: "call-map-001",
         status: "active",
@@ -60,7 +66,10 @@ async function installConciergeApiMocks(page: Page, captured: { body: unknown[] 
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === "/api/call-center/orders") {
+    if (
+      request.method() === "POST" &&
+      url.pathname === "/api/call-center/orders"
+    ) {
       captured.body.push(body);
       await fulfillJson(route, 200, {
         orderId: "ord-map-001",
@@ -91,7 +100,10 @@ async function installConciergeApiMocks(page: Page, captured: { body: unknown[] 
       return;
     }
 
-    if (request.method() === "GET" && url.pathname === "/api/orders/ord-map-001") {
+    if (
+      request.method() === "GET" &&
+      url.pathname === "/api/orders/ord-map-001"
+    ) {
       await fulfillJson(route, 200, {
         orderId: "ord-map-001",
         orderNo: "ORD-20260703-001",
@@ -173,8 +185,12 @@ test.describe("concierge map booking UI", () => {
       "Taipei Main Station",
     );
 
-    await expect(page.getByRole("button", { name: "提交 assisted-entry 訂單" })).toBeEnabled();
-    await page.getByRole("button", { name: "提交 assisted-entry 訂單" }).click();
+    await expect(
+      page.getByRole("button", { name: "提交 assisted-entry 訂單" }),
+    ).toBeEnabled();
+    await page
+      .getByRole("button", { name: "提交 assisted-entry 訂單" })
+      .click();
 
     await expect(page.getByText("訂單 ID")).toBeVisible();
     expect(captured.body).toHaveLength(1);

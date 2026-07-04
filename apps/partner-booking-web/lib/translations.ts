@@ -343,8 +343,7 @@ const en = {
     "· certified professional drivers and a licensed fleet",
   "airport.quota.remaining": "Free transfers left this year",
   "airport.features.kicker": "Why book with us",
-  "airport.features.title":
-    "Concierge airport transfer, every detail handled",
+  "airport.features.title": "Concierge airport transfer, every detail handled",
   "airport.features.body":
     "From booking to arrival, professional drivers, live tracking, and consolidated billing keep business trips and homecomings effortless.",
   "airport.vehicles.title": "Choose the right vehicle",
@@ -530,13 +529,10 @@ const zh = {
   "book.section.review": "送單檢查",
   "book.map.label": "上下車地圖確認",
   "book.map.hint": "請先在地圖上確認上下車位置，讓訂單帶有可派送座標。",
-  "book.map.coordinatesRequired":
-    "此訂單在繼續前，必須先確認上下車座標。",
+  "book.map.coordinatesRequired": "此訂單在繼續前，必須先確認上下車座標。",
   "book.map.manualReviewTitle": "派遣前需人工確認",
-  "book.map.manualReview":
-    "目前可先記錄這趟行程，但正式派遣前仍需人工確認。",
-  "book.map.outsideServiceArea":
-    "所選路線超出服務範圍，無法從此入口送出。",
+  "book.map.manualReview": "目前可先記錄這趟行程，但正式派遣前仍需人工確認。",
+  "book.map.outsideServiceArea": "所選路線超出服務範圍，無法從此入口送出。",
   "book.ready": "方案閘門已通過；只要必填欄位合法，就可提交。",
   "book.notReady": "請先修正標示欄位，再進行提交。",
   "book.submit": "驗證下單表單",

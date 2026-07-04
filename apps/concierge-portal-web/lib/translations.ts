@@ -672,7 +672,8 @@ const zh: Record<keyof typeof en, string> = {
   "booking.field.notes": "櫃台備註",
   "booking.help.product":
     "入口會先驗證授權產品，再使用既有 callcenter order 接縫。",
-  "booking.help.route": "建立 assisted-entry 訂單前，請先在地圖上確認上下車位置。",
+  "booking.help.route":
+    "建立 assisted-entry 訂單前，請先在地圖上確認上下車位置。",
   "booking.help.manualReview":
     "此行程在派遣前仍需人工確認；只有在座標無誤時才可繼續。",
   "booking.submit": "提交 assisted-entry 訂單",
@@ -689,8 +690,7 @@ const zh: Record<keyof typeof en, string> = {
   "booking.error.loadSession": "載入目前櫃台工作階段失敗。",
   "booking.error.openSession": "開啟櫃台工作階段失敗。",
   "booking.error.closeSession": "關閉櫃台工作階段失敗。",
-  "booking.error.coordinatesRequired":
-    "建立此訂單前，請先確認上車與下車座標。",
+  "booking.error.coordinatesRequired": "建立此訂單前，請先確認上車與下車座標。",
   "booking.error.manualReviewRequired":
     "此訂單在派車前已改送人工審查。請到訂單查詢確認路線，並從審查佇列繼續處理。",
   "booking.error.outsideServiceArea":

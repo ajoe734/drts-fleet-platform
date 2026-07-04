@@ -72,11 +72,7 @@ describe("desk catalog", () => {
 
     expect(acmeDesk).toBeTruthy();
     expect(
-      evaluateDeskProductEligibility(
-        acmeDesk!,
-        "standard_taxi",
-        testTranslate,
-      ),
+      evaluateDeskProductEligibility(acmeDesk!, "standard_taxi", testTranslate),
     ).toMatchObject({
       state: "eligible",
     });

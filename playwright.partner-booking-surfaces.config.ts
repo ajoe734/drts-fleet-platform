@@ -24,8 +24,7 @@ export default defineConfig({
     ? {
         webServer: [
           {
-            command:
-              "node tests/e2e/mock-map-booking-authority-server.mjs",
+            command: "node tests/e2e/mock-map-booking-authority-server.mjs",
             url: "http://127.0.0.1:3001/api/partner/entries/ctbc",
             reuseExistingServer: !process.env.CI,
             timeout: 30_000,

@@ -148,11 +148,7 @@ export default function ConciergeBookingCreatePage() {
       } catch (nextError) {
         if (!cancelled) {
           setError(
-            formatConciergeApiError(
-              nextError,
-              t,
-              "booking.error.loadSession",
-            ),
+            formatConciergeApiError(nextError, t, "booking.error.loadSession"),
           );
         }
       }
@@ -494,11 +490,7 @@ export default function ConciergeBookingCreatePage() {
                 });
               } catch (nextError) {
                 setError(
-                  formatConciergeApiError(
-                    nextError,
-                    t,
-                    "booking.error.submit",
-                  ),
+                  formatConciergeApiError(nextError, t, "booking.error.submit"),
                 );
               } finally {
                 setBusyKey(null);

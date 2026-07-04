@@ -47,7 +47,9 @@ test.describe("partner map booking UI", () => {
 
     await expect(page.getByText("表單驗證通過")).toBeVisible();
     await expect(
-      page.getByText("此 partner flow 已可把型別安全的 payload 交給已驗證的 booking transport。"),
+      page.getByText(
+        "此 partner flow 已可把型別安全的 payload 交給已驗證的 booking transport。",
+      ),
     ).toBeVisible();
   });
 
@@ -60,7 +62,12 @@ test.describe("partner map booking UI", () => {
     expect(response?.status()).toBe(200);
 
     await fillCardProgramFields(page);
-    await selectPartnerMapCandidate(page, 0, "banqiao", "Banqiao District Office");
+    await selectPartnerMapCandidate(
+      page,
+      0,
+      "banqiao",
+      "Banqiao District Office",
+    );
     await selectPartnerMapCandidate(
       page,
       1,
