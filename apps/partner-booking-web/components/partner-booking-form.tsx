@@ -19,7 +19,6 @@ import {
   type AddressProviderMode,
 } from "@drts/ui-web";
 import {
-  createDefaultPartnerBookingDraft,
   getPartnerBookingFieldErrors,
   getPartnerProgramCoverage,
   getPartnerProgramGate,
