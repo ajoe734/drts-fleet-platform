@@ -1,10 +1,17 @@
 {
   "taskId": "MAP-REL-001",
   "verifier": "report-map-geofence-readiness-blockers",
-  "status": "PASS",
+  "status": "FAIL",
   "branch": "codex2/map-rel-001",
-  "head": "f718ceb3a34f9b26f36a98db8201d1d380767b8d",
-  "blockers": [],
+  "head": "5833b0aafd4d820322f3b37861ea6e61c2b4adbb",
+  "blockers": [
+    "Gate B is not marked PASS in final evidence.",
+    "Gate D is not marked PASS in final evidence.",
+    "FLEETS-MAP-002 is not closed with PASS in final evidence.",
+    "FLEETS-MAP-004 is not closed with PASS in final evidence.",
+    "Gate B lacks canonical /service-area-governance repo publication: expected apps/platform-admin-web/app/service-area-governance/page.tsx, apps/platform-admin-web/app/service-area-governance/service-areas/[serviceAreaId]/page.tsx, apps/platform-admin-web/app/service-area-governance/stop-policies/[stopPolicyId]/page.tsx.",
+    "Gate D still lacks release-grade simulator/device UAT evidence in support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md."
+  ],
   "checks": [
     {
       "id": "Gate A",
@@ -12,7 +19,7 @@
     },
     {
       "id": "Gate B",
-      "pass": true
+      "pass": false
     },
     {
       "id": "Gate C",
@@ -20,7 +27,7 @@
     },
     {
       "id": "Gate D",
-      "pass": true
+      "pass": false
     },
     {
       "id": "Gate E",
@@ -32,7 +39,7 @@
     },
     {
       "id": "FLEETS-MAP-002",
-      "pass": true
+      "pass": false
     },
     {
       "id": "FLEETS-MAP-003",
@@ -40,7 +47,7 @@
     },
     {
       "id": "FLEETS-MAP-004",
-      "pass": true
+      "pass": false
     },
     {
       "id": "FLEETS-MAP-005",
@@ -69,6 +76,14 @@
     {
       "id": "FLEETS-MAP-011",
       "pass": true
+    },
+    {
+      "id": "gate-b-canonical-route-publication",
+      "pass": false
+    },
+    {
+      "id": "gate-d-mobile-uat",
+      "pass": false
     },
     {
       "id": "provider-prereqs",
