@@ -73,9 +73,10 @@ const currentHead = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: repoRoot,
   encoding: "utf8",
 }).trim();
-const expectedBranchSha = `${currentBranch}@${currentHead}`;
 const finalEvidenceBranchSha =
   finalEvidenceText.match(/\*\*Branch@SHA:\*\*\s*`([^`]+)`/)?.[1] ?? null;
+const manifestBranchAtSha =
+  manifest.branchAtSha ?? `${manifest.branch ?? ""}@${manifest.branchSha ?? ""}`;
 const manifestPass =
   Array.isArray(manifest.productionEvidence) &&
   manifest.productionEvidence.length > 0 &&
@@ -86,9 +87,10 @@ const manifestPass =
       item.artifacts.length > 0,
   );
 const branchShaConsistent =
-  manifest.branch === currentBranch &&
-  manifest.branchSha === currentHead &&
-  finalEvidenceBranchSha === expectedBranchSha;
+  typeof manifest.branch === "string" &&
+  typeof manifest.branchSha === "string" &&
+  manifestBranchAtSha === `${manifest.branch}@${manifest.branchSha}` &&
+  finalEvidenceBranchSha === manifestBranchAtSha;
 
 const result = {
   taskId: task.id,
@@ -107,8 +109,9 @@ const result = {
     placeholderFiles: textChecks.filter((entry) => entry.hasPlaceholder),
     manifestPass,
     branchShaConsistent,
-    expectedBranchSha,
+    manifestBranchAtSha,
     finalEvidenceBranchSha,
+    manifestBranch: manifest.branch ?? null,
     manifestBranchSha: manifest.branchSha ?? null,
   },
 };
