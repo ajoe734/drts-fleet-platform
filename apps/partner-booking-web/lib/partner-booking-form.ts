@@ -91,8 +91,10 @@ function parseInteger(value: string) {
   return Number.parseInt(value.trim(), 10);
 }
 
-export function createDefaultPartnerBookingDraft(): PartnerBookingDraftValues {
-  const start = new Date();
+export function createDefaultPartnerBookingDraft(
+  baseTime: Date | string | number = new Date(),
+): PartnerBookingDraftValues {
+  const start = new Date(baseTime);
   start.setMinutes(start.getMinutes() + 90, 0, 0);
   const end = new Date(start.getTime());
   end.setMinutes(end.getMinutes() + 60);

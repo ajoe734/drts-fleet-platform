@@ -4,6 +4,7 @@ import {
   PartnerAuthorityError,
   getPartnerRouteContext,
 } from "@/lib/api-client";
+import { createDefaultPartnerBookingDraft } from "@/lib/partner-booking-form";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
@@ -34,6 +35,7 @@ export default async function PartnerBookPage({
         brand={brand}
         entry={entry}
         eligibilityVerificationId={eligibilityVerificationId}
+        initialDraft={createDefaultPartnerBookingDraft()}
       />
     );
   } catch (error) {

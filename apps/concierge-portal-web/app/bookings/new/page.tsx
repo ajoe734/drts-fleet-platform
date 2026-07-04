@@ -1,18 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
+  AddressPayload,
   CallSessionRecord,
   CallbackTaskRecord,
   DispatchTraceLogRecord,
   OwnedOrderRecord,
 } from "@drts/contracts";
+import {
+  AddressMapPairPicker,
+  buildAddressPickerLabels,
+  buildCanvasTheme,
+  createConfiguredMockAddressProvider,
+  evaluateAddressSubmitGate,
+  type AddressMapPairChange,
+  type AddressProviderMode,
+} from "@drts/ui-web";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
 import {
-  evaluateDeskEligibility,
+  evaluateDeskProductEligibility,
+  evaluateDeskTextServiceAreaEligibility,
   formatDeskHealth,
   formatQueuePolicy,
   formatRecordingAvailability,
@@ -30,6 +41,10 @@ import {
   formatTraceEventType,
 } from "@/lib/formatters";
 import { useTranslation } from "@/lib/i18n";
+import {
+  buildCallCenterMapFallbackReview,
+  formatConciergeApiError,
+} from "@/lib/map-booking";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 type SubmissionSummary = {
@@ -37,6 +52,25 @@ type SubmissionSummary = {
   trace: DispatchTraceLogRecord[];
   callbackTask: CallbackTaskRecord | null;
 };
+
+const mapTheme = buildCanvasTheme({
+  surface: "ops",
+  density: "compact",
+});
+
+function buildFallbackAddress(
+  address: string,
+  selected: AddressPayload | null,
+) {
+  if (!selected) {
+    return { address };
+  }
+
+  return {
+    ...selected,
+    address,
+  };
+}
 
 export default function ConciergeBookingCreatePage() {
   const router = useRouter();
@@ -73,6 +107,27 @@ export default function ConciergeBookingCreatePage() {
   const [currentSession, setCurrentSession] =
     useState<CallSessionRecord | null>(null);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
+  const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
+    pickup: null,
+    dropoff: null,
+    serviceability: null,
+    providerState: {
+      available: true,
+      degraded: false,
+      reasonCode: "available",
+    },
+    bothDispatchReady: false,
+  });
+
+  const mapProviderMode =
+    (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
+      | AddressProviderMode
+      | undefined) ?? "healthy";
+  const mapProvider = useMemo(
+    () => createConfiguredMockAddressProvider(mapProviderMode),
+    [mapProviderMode],
+  );
+  const mapLabels = useMemo(() => buildAddressPickerLabels(locale), [locale]);
 
   useEffect(() => {
     const activeCallId = session?.activeCallId;
@@ -93,9 +148,7 @@ export default function ConciergeBookingCreatePage() {
       } catch (nextError) {
         if (!cancelled) {
           setError(
-            nextError instanceof Error
-              ? nextError.message
-              : t("booking.error.loadSession"),
+            formatConciergeApiError(nextError, t, "booking.error.loadSession"),
           );
         }
       }
@@ -186,9 +239,11 @@ export default function ConciergeBookingCreatePage() {
                     setCurrentSession(opened);
                   } catch (nextError) {
                     setError(
-                      nextError instanceof Error
-                        ? nextError.message
-                        : t("booking.error.openSession"),
+                      formatConciergeApiError(
+                        nextError,
+                        t,
+                        "booking.error.openSession",
+                      ),
                     );
                   } finally {
                     setBusyKey(null);
@@ -223,9 +278,11 @@ export default function ConciergeBookingCreatePage() {
                       setCurrentSession(closed);
                     } catch (nextError) {
                       setError(
-                        nextError instanceof Error
-                          ? nextError.message
-                          : t("booking.error.closeSession"),
+                        formatConciergeApiError(
+                          nextError,
+                          t,
+                          "booking.error.closeSession",
+                        ),
                       );
                     } finally {
                       setBusyKey(null);
@@ -309,18 +366,52 @@ export default function ConciergeBookingCreatePage() {
                 return;
               }
 
-              const eligibility = evaluateDeskEligibility(
+              const productEligibility = evaluateDeskProductEligibility(
                 deskRecord,
                 requestedProduct,
-                pickupAddress,
-                dropoffAddress,
                 t,
               );
-              if (eligibility.state === "ineligible") {
+              if (productEligibility.state === "ineligible") {
                 router.push(
-                  `/ineligible?desk=${desk.deskId}&reason=${eligibility.reasonCode}`,
+                  `/ineligible?desk=${desk.deskId}&reason=${productEligibility.reasonCode}`,
                 );
                 return;
+              }
+
+              const mapGate = evaluateAddressSubmitGate({
+                pickup: mapSelection.pickup,
+                dropoff: mapSelection.dropoff,
+                serviceability: mapSelection.serviceability,
+                providerState: mapSelection.providerState,
+              });
+              const mapFallbackReview = buildCallCenterMapFallbackReview({
+                mapGate,
+                providerState: mapSelection.providerState,
+              });
+              if (mapGate.code === "outside_service_area") {
+                router.push(
+                  `/ineligible?desk=${desk.deskId}&reason=service_area`,
+                );
+                return;
+              }
+              if (mapGate.blocking) {
+                setError(t("booking.error.coordinatesRequired"));
+                return;
+              }
+              if (mapGate.code === "ready") {
+                const textServiceAreaEligibility =
+                  evaluateDeskTextServiceAreaEligibility(
+                    deskRecord,
+                    pickupAddress,
+                    dropoffAddress,
+                    t,
+                  );
+                if (textServiceAreaEligibility.state === "ineligible") {
+                  router.push(
+                    `/ineligible?desk=${desk.deskId}&reason=${textServiceAreaEligibility.reasonCode}`,
+                  );
+                  return;
+                }
               }
 
               setBusyKey("submit-order");
@@ -348,17 +439,20 @@ export default function ConciergeBookingCreatePage() {
                 const accepted = await client.createCallCenterOrder({
                   callId: workingSession.callId,
                   agentId: session.operatorId,
-                  pickup: {
-                    address: pickupAddress,
-                  },
-                  dropoff: {
-                    address: dropoffAddress,
-                  },
+                  pickup: buildFallbackAddress(
+                    pickupAddress,
+                    mapSelection.pickup,
+                  ),
+                  dropoff: buildFallbackAddress(
+                    dropoffAddress,
+                    mapSelection.dropoff,
+                  ),
                   passenger: {
                     name: passengerName,
                     phone: passengerPhone,
                   },
                   notes,
+                  mapFallbackReview,
                 });
 
                 recordOrder(accepted.orderId);
@@ -396,9 +490,7 @@ export default function ConciergeBookingCreatePage() {
                 });
               } catch (nextError) {
                 setError(
-                  nextError instanceof Error
-                    ? nextError.message
-                    : t("booking.error.submit"),
+                  formatConciergeApiError(nextError, t, "booking.error.submit"),
                 );
               } finally {
                 setBusyKey(null);
@@ -463,26 +555,48 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="pickup-address">
-                {t("booking.field.pickup")}
-              </label>
-              <textarea
-                id="pickup-address"
-                onChange={(event) => setPickupAddress(event.target.value)}
-                required
-                value={pickupAddress}
-              />
-            </div>
-            <div className="field-stack">
-              <label htmlFor="dropoff-address">
-                {t("booking.field.dropoff")}
-              </label>
-              <textarea
-                id="dropoff-address"
-                onChange={(event) => setDropoffAddress(event.target.value)}
-                required
-                value={dropoffAddress}
-              />
+              <label>{t("booking.field.route")}</label>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <AddressMapPairPicker
+                  actorId={session?.operatorId ?? null}
+                  bounds={{
+                    minLat: 24.9,
+                    maxLat: 25.2,
+                    minLng: 121.4,
+                    maxLng: 121.7,
+                  }}
+                  dropoffTitle={t("booking.field.dropoff")}
+                  onChange={(change) => {
+                    setMapSelection(change);
+                    setPickupAddress(change.pickup?.address ?? "");
+                    setDropoffAddress(change.dropoff?.address ?? "");
+                    if (error === t("booking.error.coordinatesRequired")) {
+                      setError(null);
+                    }
+                  }}
+                  pickupTitle={t("booking.field.pickup")}
+                  provider={mapProvider}
+                  serviceProductType={requestedProduct}
+                  surface="concierge_portal"
+                  theme={mapTheme}
+                  {...(mapLabels ? { labels: mapLabels } : {})}
+                />
+                <p className="form-help">{t("booking.help.route")}</p>
+                {!evaluateAddressSubmitGate({
+                  pickup: mapSelection.pickup,
+                  dropoff: mapSelection.dropoff,
+                  serviceability: mapSelection.serviceability,
+                  providerState: mapSelection.providerState,
+                }).blocking &&
+                evaluateAddressSubmitGate({
+                  pickup: mapSelection.pickup,
+                  dropoff: mapSelection.dropoff,
+                  serviceability: mapSelection.serviceability,
+                  providerState: mapSelection.providerState,
+                }).code === "dispatch_manual_review_required" ? (
+                  <p className="form-help">{t("booking.help.manualReview")}</p>
+                ) : null}
+              </div>
             </div>
             <div className="field-stack">
               <label htmlFor="callback-due-at">
@@ -517,7 +631,15 @@ export default function ConciergeBookingCreatePage() {
             <div className="inline-actions">
               <button
                 className="primary-button"
-                disabled={busyKey === "submit-order"}
+                disabled={
+                  busyKey === "submit-order" ||
+                  evaluateAddressSubmitGate({
+                    pickup: mapSelection.pickup,
+                    dropoff: mapSelection.dropoff,
+                    serviceability: mapSelection.serviceability,
+                    providerState: mapSelection.providerState,
+                  }).blocking
+                }
                 type="submit"
               >
                 {t("booking.submit")}

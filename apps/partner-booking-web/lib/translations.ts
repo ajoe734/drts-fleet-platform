@@ -61,6 +61,16 @@ const en = {
   "book.section.passenger": "Passenger",
   "book.section.program": "Program-specific intake",
   "book.section.review": "Submission readiness",
+  "book.map.label": "Pickup and drop-off map check",
+  "book.map.hint":
+    "Confirm both stops on the map so the booking carries dispatchable coordinates.",
+  "book.map.coordinatesRequired":
+    "Confirm pickup and drop-off coordinates before this booking can proceed.",
+  "book.map.manualReviewTitle": "Needs review before dispatch",
+  "book.map.manualReview":
+    "The selected stops can be recorded, but dispatch must review them before normal assignment.",
+  "book.map.outsideServiceArea":
+    "The selected route falls outside the service area and cannot be submitted from this surface.",
   "book.ready":
     "Program gate clear. Form can be submitted once all required fields are valid.",
   "book.notReady": "Resolve the highlighted fields before submission.",
@@ -333,8 +343,7 @@ const en = {
     "· certified professional drivers and a licensed fleet",
   "airport.quota.remaining": "Free transfers left this year",
   "airport.features.kicker": "Why book with us",
-  "airport.features.title":
-    "Concierge airport transfer, every detail handled",
+  "airport.features.title": "Concierge airport transfer, every detail handled",
   "airport.features.body":
     "From booking to arrival, professional drivers, live tracking, and consolidated billing keep business trips and homecomings effortless.",
   "airport.vehicles.title": "Choose the right vehicle",
@@ -518,6 +527,12 @@ const zh = {
   "book.section.passenger": "乘客資料",
   "book.section.program": "方案專屬欄位",
   "book.section.review": "送單檢查",
+  "book.map.label": "上下車地圖確認",
+  "book.map.hint": "請先在地圖上確認上下車位置，讓訂單帶有可派送座標。",
+  "book.map.coordinatesRequired": "此訂單在繼續前，必須先確認上下車座標。",
+  "book.map.manualReviewTitle": "派遣前需人工確認",
+  "book.map.manualReview": "目前可先記錄這趟行程，但正式派遣前仍需人工確認。",
+  "book.map.outsideServiceArea": "所選路線超出服務範圍，無法從此入口送出。",
   "book.ready": "方案閘門已通過；只要必填欄位合法，就可提交。",
   "book.notReady": "請先修正標示欄位，再進行提交。",
   "book.submit": "驗證下單表單",
