@@ -31,14 +31,14 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/platform-admin-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_DIST_DIR=.next-platform-admin-on NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true pnpm exec next dev --webpack --hostname 127.0.0.1 --port 33102",
+        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/platform-admin-web && DRTS_API_URL=https://drts-dev-api-ne55h7sy3a-uc.a.run.app NEXT_DIST_DIR=.next-platform-admin-on NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true pnpm exec next dev --webpack --hostname 127.0.0.1 --port 33102",
       url: "http://127.0.0.1:33102",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
     },
     {
       command:
-        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/platform-admin-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_DIST_DIR=.next-platform-admin-off NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=false pnpm exec next dev --webpack --hostname 127.0.0.1 --port 33103",
+        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/platform-admin-web && DRTS_API_URL=https://drts-dev-api-ne55h7sy3a-uc.a.run.app NEXT_DIST_DIR=.next-platform-admin-off NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=false pnpm exec next dev --webpack --hostname 127.0.0.1 --port 33103",
       url: "http://127.0.0.1:33103",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,

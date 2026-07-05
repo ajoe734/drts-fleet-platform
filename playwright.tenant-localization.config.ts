@@ -35,21 +35,21 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/tenant-console-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3304",
+        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/tenant-console-web && DRTS_API_URL=https://drts-dev-api-ne55h7sy3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3304",
       url: "http://127.0.0.1:3304",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
     },
     {
       command:
-        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --hostname 127.0.0.1 --port 3307",
+        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=https://drts-dev-api-ne55h7sy3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --hostname 127.0.0.1 --port 3307",
       url: "http://127.0.0.1:3307",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
     },
     {
       command:
-        "pnpm --filter @drts/ui-tokens build && cd apps/enterprise-dispatch-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3310",
+        "pnpm --filter @drts/ui-tokens build && cd apps/enterprise-dispatch-web && DRTS_API_URL=https://drts-dev-api-ne55h7sy3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3310",
       url: "http://127.0.0.1:3310",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
