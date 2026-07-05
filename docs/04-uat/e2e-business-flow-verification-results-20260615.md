@@ -352,7 +352,7 @@ pitfalls, undeclared vars). Genuine **product** fixes landed along the way:
 The hermetic API-backed suite (E2E-0NN.sh) is the CI deploy gate and is 100% green.
 This round broadened to the **previously-unverified UI-runtime surface**: the
 playwright `*.spec.ts` browser tests, run against the live dev front-ends
-(`https://drts-dev-*-waji3fer3a-uc.a.run.app`). These specs are **not wired into any
+(`https://drts-dev-*-ne55h7sy3a-uc.a.run.app`). These specs are **not wired into any
 CI workflow** (manual verification tools).
 
 ### Verified GREEN against live dev

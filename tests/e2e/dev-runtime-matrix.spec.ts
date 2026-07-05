@@ -187,7 +187,7 @@ const surfaces: RuntimeSurface[] = [
     family: "runtime-api-health",
     baseUrl:
       process.env.DRTS_DEV_API_BASE_URL ??
-      "https://drts-dev-api-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-api-ne55h7sy3a-uc.a.run.app",
     actors: apiActors,
     routes: [
       {
@@ -203,7 +203,7 @@ const surfaces: RuntimeSurface[] = [
     family: "issuer bank management console",
     baseUrl:
       process.env.DRTS_DEV_BANK_CONSOLE_BASE_URL ??
-      "https://drts-dev-bank-console-web-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-bank-console-web-ne55h7sy3a-uc.a.run.app",
     actors: bankActors,
     routes: [
       {
@@ -261,7 +261,7 @@ const surfaces: RuntimeSurface[] = [
     family: "partner white-label booking surface",
     baseUrl:
       process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL ??
-      "https://drts-dev-partner-booking-web-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app",
     actors: partnerBookingActors,
     routes: [
       {
@@ -319,7 +319,7 @@ const surfaces: RuntimeSurface[] = [
     family: "enterprise dispatch self-service",
     baseUrl:
       process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL ??
-      "https://drts-dev-enterprise-dispatch-web-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app",
     actors: enterpriseActors,
     routes: [
       {
@@ -407,7 +407,7 @@ const surfaces: RuntimeSurface[] = [
     family: "platform governance",
     baseUrl:
       process.env.DRTS_DEV_PLATFORM_ADMIN_BASE_URL ??
-      "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-platform-admin-web-ne55h7sy3a-uc.a.run.app",
     actors: platformActors,
     routes: [
       {
@@ -525,7 +525,7 @@ const surfaces: RuntimeSurface[] = [
     family: "operations control",
     baseUrl:
       process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
-      "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-ops-console-web-ne55h7sy3a-uc.a.run.app",
     actors: opsActors,
     routes: [
       {
@@ -661,7 +661,7 @@ const surfaces: RuntimeSurface[] = [
     family: "fleet partner operations",
     baseUrl:
       process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL ??
-      "https://drts-dev-fleet-partner-portal-web-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-fleet-partner-portal-web-ne55h7sy3a-uc.a.run.app",
     actors: fleetActors,
     routes: [
       {
@@ -737,7 +737,7 @@ const surfaces: RuntimeSurface[] = [
     family: "enterprise dispatch tenant operations",
     baseUrl:
       process.env.DRTS_DEV_TENANT_CONSOLE_BASE_URL ??
-      "https://drts-dev-tenant-console-web-waji3fer3a-uc.a.run.app",
+      "https://drts-dev-tenant-console-web-ne55h7sy3a-uc.a.run.app",
     actors: tenantActors,
     routes: [
       {

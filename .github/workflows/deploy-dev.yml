@@ -316,7 +316,7 @@ jobs:
             add_service_account_candidate "${WAJI_WIF_SERVICE_ACCOUNT:-}"
             add_service_account_candidate "${WIF_SERVICE_ACCOUNT:-}"
 
-            for project_id in drts-dev-bobo-20260503 drts-staging-bobo-20260502; do
+            for project_id in drts-dev-ray-tw-20260530; do
               for account_name in github-actions-deployer github-actions gha-deployer drts-deployer drts-dev-deployer deployer cicd-deployer drts-github-actions; do
                 add_service_account_candidate "${account_name}@${project_id}.iam.gserviceaccount.com"
               done
@@ -389,13 +389,13 @@ jobs:
           esac
 
           if [[ "$target_profile" == "waji" ]]; then
-            project_id="$(pick "${WAJI_GCP_PROJECT_ID:-}" "" "drts-dev-bobo-20260503")"
+            project_id="$(pick "${WAJI_GCP_PROJECT_ID:-}" "" "drts-dev-ray-tw-20260530")"
             region="$(pick "${WAJI_GCP_REGION:-}" "" "us-central1")"
-            cloudsql="$(pick "${WAJI_GCP_CLOUDSQL_INSTANCE:-}" "" "drts-dev-bobo-20260503:us-central1:drts-dev-db")"
-            runtime_sa="$(pick "${WAJI_GCP_RUNTIME_SERVICE_ACCOUNT:-}" "" "drts-dev-runtime@drts-dev-bobo-20260503.iam.gserviceaccount.com")"
+            cloudsql="$(pick "${WAJI_GCP_CLOUDSQL_INSTANCE:-}" "" "drts-dev-ray-tw-20260530:us-central1:drts-dev-db")"
+            runtime_sa="$(pick "${WAJI_GCP_RUNTIME_SERVICE_ACCOUNT:-}" "" "drts-dev-runtime@drts-dev-ray-tw-20260530.iam.gserviceaccount.com")"
             deployer_sa="$(pick "${WAJI_WIF_SERVICE_ACCOUNT:-}" "${WIF_SERVICE_ACCOUNT:-}" "")"
             wif_provider="$(pick "${WAJI_WIF_PROVIDER:-}" "${WIF_PROVIDER:-}" "")"
-            artifact_project_id="$(pick "${WAJI_ARTIFACT_PROJECT_ID:-}" "" "drts-staging-bobo-20260502")"
+            artifact_project_id="$(pick "${WAJI_ARTIFACT_PROJECT_ID:-}" "" "drts-dev-ray-tw-20260530")"
             artifact_region="$(pick "${WAJI_ARTIFACT_REGION:-}" "" "$region")"
             artifact_repository="$(pick "${WAJI_ARTIFACT_REPOSITORY:-}" "" "drts")"
             secret_prefix="$(pick "${WAJI_SECRET_PREFIX:-}" "" "drts-dev")"

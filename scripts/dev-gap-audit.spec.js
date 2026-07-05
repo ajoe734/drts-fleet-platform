@@ -3,8 +3,8 @@ const path = require("path");
 const { test, expect } = require("@playwright/test");
 
 const PLATFORM_ADMIN_BASE_URL =
-  "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app";
-const OPS_BASE_URL = "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app";
+  "https://drts-dev-platform-admin-web-ne55h7sy3a-uc.a.run.app";
+const OPS_BASE_URL = "https://drts-dev-ops-console-web-ne55h7sy3a-uc.a.run.app";
 const ARTIFACT_DIR = path.join(process.cwd(), ".artifacts", "func-audit");
 
 const platformAdminRoutes = [

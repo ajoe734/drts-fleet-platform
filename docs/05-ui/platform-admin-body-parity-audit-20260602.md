@@ -4,7 +4,7 @@
 - Auditor: Codex
 - Target app: `apps/platform-admin-web`
 - Runtime baseline: `origin/dev` at `3996828ad79cee93ce2b0dfff9c244c21a52bee1`
-- Dev URL audited: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
+- Dev URL audited: `https://drts-dev-platform-admin-web-ne55h7sy3a-uc.a.run.app`
 
 ## 1. Authority
 

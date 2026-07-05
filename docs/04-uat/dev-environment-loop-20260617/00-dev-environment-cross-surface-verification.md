@@ -6,7 +6,7 @@ The earlier cross-surface loop work (`docs/04-uat/cross-surface-ui-loop-20260615
 and the 10-round driver-app sweep (`docs/04-uat/driver-app-verification-20260615/`)
 were executed against a **full stack run locally on `drts-dev-vm`** (local API on
 `:3001` with in-memory read models, local `next dev` web apps, emulator pointed at
-`10.0.2.2:3001`). That proved the *code* was correct, but it was **not** the
+`10.0.2.2:3001`). That proved the _code_ was correct, but it was **not** the
 deployed **dev Cloud Run** environment. Two different process sets, two different
 datasets.
 
@@ -27,15 +27,15 @@ environment** after the persistence fix was merged and deployed.
 
 ## Environment under test (real dev Cloud Run, project `drts-dev-ray-20260527`)
 
-| Surface | URL |
-| --- | --- |
-| API | `https://drts-dev-api-waji3fer3a-uc.a.run.app` |
-| Ops Console | `https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app` |
-| Enterprise Dispatch | `https://drts-dev-enterprise-dispatch-web-waji3fer3a-uc.a.run.app` |
-| Tenant Console | `https://drts-dev-tenant-console-web-waji3fer3a-uc.a.run.app` |
+| Surface             | URL                                                                |
+| ------------------- | ------------------------------------------------------------------ |
+| API                 | `https://drts-dev-api-ne55h7sy3a-uc.a.run.app`                     |
+| Ops Console         | `https://drts-dev-ops-console-web-ne55h7sy3a-uc.a.run.app`         |
+| Enterprise Dispatch | `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app` |
+| Tenant Console      | `https://drts-dev-tenant-console-web-ne55h7sy3a-uc.a.run.app`      |
 
 Driver app: Expo dev-client on the KVM emulator (`emulator-5554`), Metro rebundled
-with `EXPO_PUBLIC_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app` and
+with `EXPO_PUBLIC_API_URL=https://drts-dev-api-ne55h7sy3a-uc.a.run.app` and
 `EXPO_PUBLIC_DRIVER_ID=drv-demo-001`. The driver app is app-auth-first (no IAP) and
 hits the public dev API directly.
 
@@ -43,7 +43,7 @@ hits the public dev API directly.
 
 ### 1. dev API — full enterprise dispatch chain (E2E-001) PASS
 
-`E2E_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app ./tests/e2e/run-e2e.sh --suite 001`
+`E2E_API_URL=https://drts-dev-api-ne55h7sy3a-uc.a.run.app ./tests/e2e/run-e2e.sh --suite 001`
 → **1/1 passed**. Chain on dev:
 
 ```

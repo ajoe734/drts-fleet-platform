@@ -20,7 +20,7 @@ Partners iframe one URL per referral entry:
 https://<referral-embed-host>/embed/<entrySlug>
 ```
 
-- **dev:** `https://drts-dev-referral-embed-web-waji3fer3a-uc.a.run.app/embed/<entrySlug>`
+- **dev:** `https://drts-dev-referral-embed-web-ne55h7sy3a-uc.a.run.app/embed/<entrySlug>`
 - `<entrySlug>` is the partner channel entry slug provisioned in platform-admin
   (`/partners`), e.g. `yuhe-residence`, `cambridge-community`.
 

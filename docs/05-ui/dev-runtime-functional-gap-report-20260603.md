@@ -3,8 +3,8 @@
 - **Last re-run:** 2026-06-06T08:42:11Z
 - **Auditor:** Claude2 (reassigned owner; prior re-runs by Codex2)
 - **Environment:** live dev Cloud Run
-  - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
-  - Ops Console: `https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app`
+  - Platform Admin: `https://drts-dev-platform-admin-web-ne55h7sy3a-uc.a.run.app`
+  - Ops Console: `https://drts-dev-ops-console-web-ne55h7sy3a-uc.a.run.app`
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
