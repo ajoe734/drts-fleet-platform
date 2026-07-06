@@ -22,13 +22,13 @@ on:
           - "false"
           - "true"
       target_profile:
-        description: "Dev Cloud Run target profile. waji is the public dev URL set used for live acceptance."
+        description: "Dev Cloud Run target profile. current = the live dev set on drts-dev-ray-tw-20260530 (hash ne55h7sy3a). waji = the RETIRED bobo set (drts-dev-bobo-20260503), decommissioned 2026-07-04 — do not use."
         required: false
-        default: "waji"
+        default: "current"
         type: choice
         options:
-          - "waji"
           - "current"
+          - "waji"
   push:
     branches:
       - "publish/v*"
@@ -369,7 +369,7 @@ jobs:
           enterprise_dispatch_origin="${DEV_ENTERPRISE_DISPATCH_ORIGIN:-}"
           channel_partner_portal_origin="${DEV_CHANNEL_PARTNER_PORTAL_ORIGIN:-}"
 
-          target_profile="${INPUT_TARGET_PROFILE:-waji}"
+          target_profile="${INPUT_TARGET_PROFILE:-current}"
           case "$target_profile" in
             waji|current) ;;
             *)
