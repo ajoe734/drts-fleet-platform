@@ -14,6 +14,22 @@ It is the practical bridge between:
 - the repo-executable next-wave backlog now opened from
   `docs/03-runbooks/execution-mode-candidate-backlog.md`
 
+## Current Status — 2026-07-07 (read this first)
+
+> **Sections 1–11 below are historical closeout context (2026-04 → 2026-05).**
+> They no longer describe the active board. The actual most-recent execution was
+> the **map / geofence / service-area wave (2026-06-30 → 2026-07-04)** — the
+> geofence/service-area foundation for the **Phase 2 Tesla/FSD monitoring
+> sandbox**. For the current, reconciled state see **§12** at the bottom.
+>
+> **TL;DR:** the map/geofence wave is landed and green on `dev` (all 18 `MAP-*`
+> tasks; supervisor 15/16 done, 1 permanent manual exception). One real
+> product-UI gap remains — the **Platform Admin `/service-area-governance`
+> publish screen** (backend + contracts + `GeometryEditor` done, admin route not
+> yet built; canvas-gated). The Phase 2 sandbox itself is at foundation stage by
+> design (governance/ODD APIs + Gate-B E2E landed; sandbox UI + external AV
+> contracts deliberately deferred). Full detail in §12.
+
 ## Decision Anchors
 
 - `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`
@@ -222,3 +238,69 @@ Dispatch rule:
 If a future wave is materialized from this packet, it should open as an
 explicit `ORX-*` family linked back to the accepted remediation plan rather
 than being merged silently into historical `OPX-*` prose.
+
+## 12. 2026-07-07 Map/Geofence Wave + Phase 2 Sandbox Reconciliation
+
+This section supersedes sections 1–11 for the *current* state of the board.
+Spec anchor: `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
+(+ the `-20260701` delta). Progress source: live `.orchestrator/state.json`,
+`git log origin/dev`, and deployed dev (`drts-dev-ray-tw-20260530` / `ne55h7sy3a`).
+
+### 12.1 Landed on dev (all 18 `MAP-*` tasks)
+
+- Backend authority: `MAP-BE-001` (geo/provenance contracts), `MAP-INFRA-001`
+  (provider health/quota, #1016), `MAP-BE-002` (geo gateway, #1031), `MAP-BE-003`
+  (typed api-client + OpenAPI delta), `MAP-BE-004` (service-area evaluation in
+  booking creation), `MAP-BE-005` (order spatial audit snapshots), `MAP-BE-006`
+  (service-area + stop-policy draft/review/publish/retire lifecycle + Phase 2
+  sandbox-governance/ODD APIs + GeoJSON export, #1019/#1020).
+- Shared UI: `MAP-UI-001` (`AddressMapPicker`, #1038), `MAP-UI-002`
+  (`GeometryEditor` primitive + hardening, #1032/#1033).
+- Surface integration: `MAP-FE-CALL-001` (callcenter), `MAP-FE-TEN-001` (tenant,
+  #1045), `MAP-FE-CON-001` (concierge/partner, #1055), `MAP-FE-OPS-001` (Ops real
+  map board, #1018), `MAP-MOB-DRV-001` (driver trip map/navigation, #1029).
+- Observability + QA: `MAP-OBS-001` (#1039), `MAP-QA-001` (offline harness),
+  `MAP-QA-002` (approved map/geofence E2E suite, #1057). Evidence under
+  `support/sidecars/MAP-QA-00{1,2}/` (playwright, 2026-07-01 & 07-04 artifacts).
+- Release: `MAP-REL-001` (#1060). Latest `deploy-dev` = success (2026-07-05).
+
+Supervisor board: 15/16 done; the one `blocked` item is `PH1GC-DRV-MP-002`
+(driver on-device evidence packet) — a standing **permanent manual exception**,
+not part of the map wave.
+
+### 12.2 Release-gate status (spec defines Gates A–E)
+
+- **Gate A — callcenter safe to dispatch:** ✅ (`MAP-FE-CALL-001` + QA-002).
+- **Gate B — governance safe to publish:** ⚠️ **backend/API + Gate-B E2E closed,
+  but the operator-facing Platform Admin publish UI is not built** — see 12.3.
+- **Gate C — Ops safe to operate:** ✅ (`MAP-FE-OPS-001`, `ops-map-board.ts`).
+- **Gate D — driver safe to navigate:** ✅ (`MAP-MOB-DRV-001`).
+- **Gate E — degraded safe:** ✅ (`MAP-BE-002` gateway + degradation fallbacks).
+
+### 12.3 The one real open product gap (`MAP-GAP-005` / `-011` UI)
+
+Backend service-area lifecycle APIs (`MAP-BE-006`), the `GeometryEditor`
+primitive (`MAP-UI-002`), and the screen requirements
+(`docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260703.md`)
+are all done. **But there is no `/service-area-governance` route in
+`apps/platform-admin-web`** — `MAP-FE-ADM-001` (#1047) closed as a *docs-only
+screen handoff*, blocked on the canonical Platform Admin canvas publishing the
+`/service-area-governance` screen family. The Phase 2 *sandbox* governance UI
+(`app/sandbox/*`, `components/sandbox/sandbox-geometry-map.tsx`) exists and is
+separate. Net: operators can publish no-pickup zones via API/backend, but not yet
+through a Platform Admin screen.
+
+Next step to close: publish the `/service-area-governance` route family into
+`docs/05-ui/drts-design-canvas/Platform Admin.html` + `platform-screens-*.jsx`,
+then implement the admin route against the existing contracts + `GeometryEditor`.
+
+### 12.4 Deliberately deferred / out of scope (by design — not gaps)
+
+- Batch impact preview across existing orders; Phase 2 sandbox operating-area
+  authoring UI; any new backend contract beyond `/service-area/*` (delta scope
+  cut).
+- First-party Passenger App / Web + passenger receipt UI (intentionally out of
+  scope).
+- Phase 2 Tesla/FSD sandbox **body UI** (needs design canvas) and **external AV
+  integration contracts** — foundation only (`P2-WP0` contracts + AV dispatch DD,
+  `MAP-BE-006` sandbox-governance/ODD APIs, `P2-E2E-001` Gate-B suite).
