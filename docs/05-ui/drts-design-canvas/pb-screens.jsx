@@ -197,20 +197,25 @@ function PB_BookInsurance() {
     <PBScreen p={p}>
       <PBHeader p={p} title="建立代步行程" sub="保險理賠代步 · 回診接送" back />
       <PBBody>
+        <PBMeter p={p} label="代步額度剩餘" en="replacement_days" used={16} total={30} unit="天" secondary="本案剩 14 天 · 含 4 趟" />
         <PBCard p={p} title="理賠資訊">
           <PBField label="保單號 · policy number" value="POL-558-22019" req />
           <PBField label="理賠號 · claim number" value="CLM-2026-88142" req />
           <PBField label="理賠申請人 · claimant" value="王〇華" req />
-          <PBField label="代步期間 · replacement period" value="2026-06-01 ~ 06-30 (剩 14 天)" />
-          <PBField label="承辦人 · case handler" value="富邦產險 · 李專員" />
+          <PBFieldLocked label="代步期間 · replacement period" value="2026-06-01 ~ 06-30" sub="由理賠案件帶入 · 剩 14 天" />
+          <PBFieldLocked label="承辦人 · case handler" value="富邦產險 · 李專員" />
         </PBCard>
         <PBCard p={p} title="行程地點">
           <PBField label="上車 · pickup" value="新北市板橋區文化路一段 88 號" req />
           <PBField label="目的地 · dropoff" value="台北榮民總醫院" req />
-          <PBField label="車型權益 · vehicle class" value="一般車型 (權益內)" />
+          <PBFieldLocked label="車型權益 · vehicle class" value="一般車型 (權益內)" sub="依理賠核定 · 不可變更" />
           <PBField label="出發時間" value="2026-06-06 08:30" req />
         </PBCard>
         <PBCard p={p} accentBar>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: '#56657F', fontWeight: 600 }}>費用方向</span>
+            <PBMoneyBadge kind="insurer" />
+          </div>
           <PBRow k="代步權益狀態 · entitlement" v="核定通過" />
           <PBRow k="本趟費用" v="NT$ 480 · 理賠給付" mono />
           <PBRow k="您將支付" v="免費" />
@@ -227,6 +232,7 @@ function PB_BookTravel() {
     <PBScreen p={p}>
       <PBHeader p={p} title="建立團體接送" sub="旅行社接送 · 機場 → 飯店" back />
       <PBBody>
+        <PBMeter p={p} label="團體接送段數" en="transfer_legs" used={1} total={4} unit="段" secondary="本團 12 席 · 第 1 段" />
         <PBCard p={p} title="團體資訊">
           <PBField label="團號 · group number" value="LION-TPE-0628" req />
           <PBField label="旅客人數 · traveler count" value="12 人" req />
@@ -241,7 +247,11 @@ function PB_BookTravel() {
           <PBField label="出發時間" value="2026-06-28 14:20" req />
         </PBCard>
         <PBCard p={p} accentBar>
-          <PBRow k="車輛配置" v="中型巴士 ×1" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: '#56657F', fontWeight: 600 }}>費用方向</span>
+            <PBMoneyBadge kind="tour" />
+          </div>
+          <PBFieldLocked label="車輛配置 · fleet" value="中型巴士 ×1" sub="依團體人數配置" />
           <PBRow k="接送段數" v="第 1 / 4 段" mono />
           <PBRow k="費用" v="已含團費" />
         </PBCard>
@@ -258,8 +268,8 @@ function PB_Review({ program = 'card' }) {
   const p = PROGRAMS[program];
   const rows = {
     card:      [['服務', '機場接送 · 出發'], ['航班', 'BR198 · T2'], ['上車', '台北信義 松仁路 100 號'], ['時間', '2026-06-08 05:30'], ['乘客', '王先生 · 0912-555-401'], ['費用', '免費 · World Elite 禮遇']],
-    insurance: [['服務', '保險代步 · 回診'], ['理賠號', 'CLM-2026-88142'], ['上車', '板橋 文化路一段 88 號'], ['目的地', '台北榮總'], ['時間', '2026-06-06 08:30'], ['費用', '免費 · 理賠給付']],
-    travel:    [['服務', '團體接送'], ['團號', 'LION-TPE-0628'], ['上車', '桃機 T1 入境大廳'], ['人數 / 行李', '12 人 / 18 件'], ['時間', '2026-06-28 14:20'], ['費用', '已含團費']],
+    insurance: [['服務', '保險代步 · 回診'], ['理賠號', pbMask('CLM-2026-88142')], ['上車', '板橋 文化路一段 88 號'], ['目的地', '台北榮總'], ['時間', '2026-06-06 08:30'], ['費用', '免費 · 理賠給付']],
+    travel:    [['服務', '團體接送'], ['團號', pbMask('LION-TPE-0628')], ['上車', '桃機 T1 入境大廳'], ['人數 / 行李', '12 人 / 18 件'], ['時間', '2026-06-28 14:20'], ['費用', '已含團費']],
   }[program];
   return (
     <PBScreen p={p}>
