@@ -18,6 +18,7 @@ import {
   Handshake,
   Languages,
   LayoutDashboard,
+  MapPinned,
   Package,
   Power,
   Radio,
@@ -96,6 +97,7 @@ const sections: NavSection[] = [
   { key: "people", labelKey: "adminShell.section.people" },
   { key: "fleet", labelKey: "adminShell.section.fleet" },
   { key: "sandbox", labelKey: "adminShell.section.sandbox" },
+  { key: "service-network", labelKey: "adminShell.section.serviceNetwork" },
   { key: "commerce", labelKey: "adminShell.section.commerce" },
   { key: "ops", labelKey: "adminShell.section.ops" },
 ];
@@ -160,6 +162,12 @@ const routes: NavRoute[] = [
     icon: FlaskConical,
     section: "sandbox",
     labelKey: "adminShell.route.sandboxExperiments",
+  },
+  {
+    key: "service-area-governance",
+    icon: MapPinned,
+    section: "service-network",
+    labelKey: "adminShell.route.serviceAreaGovernance",
   },
   {
     key: "sandbox-suspend",
@@ -528,7 +536,10 @@ function Sidebar({
           </div>
         </div>
       </div>
-      <nav aria-label={labelFor(locale, "adminShell.nav.aria")} style={navStyle}>
+      <nav
+        aria-label={labelFor(locale, "adminShell.nav.aria")}
+        style={navStyle}
+      >
         {sections.map((section) => (
           <div key={section.key} style={{ display: "grid", gap: 1 }}>
             <div style={sectionTitleStyle}>
@@ -566,7 +577,10 @@ function RefreshTierBadge({ pathname }: { pathname: string }) {
 
 function SearchBox({ locale }: { locale: Locale }) {
   return (
-    <div aria-label={labelFor(locale, "adminShell.search.aria")} style={searchBoxStyle}>
+    <div
+      aria-label={labelFor(locale, "adminShell.search.aria")}
+      style={searchBoxStyle}
+    >
       <Search size={13} />
       <span style={searchTextStyle}>
         {labelFor(locale, "adminShell.search.placeholder")}

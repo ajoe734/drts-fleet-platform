@@ -1048,6 +1048,7 @@ jobs:
           pnpm exec playwright test --retries=1 --config playwright.enterprise-dispatch.config.ts
           pnpm exec playwright test --retries=1 --config playwright.channel-partner-portal.config.ts
           pnpm exec playwright test --retries=1 --config playwright.referral-embed.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.platform-admin-service-area.config.ts
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
