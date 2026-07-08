@@ -77,10 +77,10 @@ receipt, manual-review blocking proof, and Ops-visible map model.
 
 ## FLEETS-CLOSEOUT-006 Observability Proof Packet
 
-Task: `FLEETS-CLOSEOUT-006`  
-Owner: `Claude`  
-Reviewer: `Codex`  
-Branch: `claude/fleets-closeout-006`
+- Task: `FLEETS-CLOSEOUT-006`
+- Owner: `Claude`
+- Reviewer: `Codex`
+- Branch: `claude/fleets-closeout-006`
 
 ### Scope
 
