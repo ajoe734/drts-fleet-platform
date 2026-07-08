@@ -3,7 +3,7 @@
     "beforePublishDecision": {
       "decision": "not_serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-08T07:26:46.778Z",
+      "evaluatedAt": "2026-07-08T07:29:42.255Z",
       "stops": [
         {
           "kind": "pickup",
@@ -34,7 +34,7 @@
     },
     "createdArea": {
       "record": {
-        "serviceAreaId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+        "serviceAreaId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
         "areaCode": "KHH_CORE",
         "displayName": "Kaohsiung core operating area",
         "status": "draft",
@@ -68,8 +68,8 @@
         "metadata": {
           "governanceDomain": "taxi_service_area"
         },
-        "createdAt": "2026-07-08T07:26:46.778Z",
-        "updatedAt": "2026-07-08T07:26:46.778Z"
+        "createdAt": "2026-07-08T07:29:42.256Z",
+        "updatedAt": "2026-07-08T07:29:42.256Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -78,7 +78,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.created",
         "resourceType": "service_area_boundary",
-        "resourceId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+        "resourceId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
         "newValuesSummary": {
           "areaCode": "KHH_CORE",
           "status": "draft",
@@ -91,7 +91,7 @@
     },
     "reviewArea": {
       "record": {
-        "serviceAreaId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+        "serviceAreaId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
         "areaCode": "KHH_CORE",
         "displayName": "Kaohsiung core operating area",
         "status": "review",
@@ -125,8 +125,8 @@
         "metadata": {
           "governanceDomain": "taxi_service_area"
         },
-        "createdAt": "2026-07-08T07:26:46.778Z",
-        "updatedAt": "2026-07-08T07:26:46.780Z"
+        "createdAt": "2026-07-08T07:29:42.256Z",
+        "updatedAt": "2026-07-08T07:29:42.257Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -135,7 +135,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.submitted_for_review",
         "resourceType": "service_area_boundary",
-        "resourceId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+        "resourceId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
         "newValuesSummary": {
           "areaCode": "KHH_CORE",
           "status": "review",
@@ -148,7 +148,7 @@
     },
     "publishedArea": {
       "record": {
-        "serviceAreaId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+        "serviceAreaId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
         "areaCode": "KHH_CORE",
         "displayName": "Kaohsiung core operating area",
         "status": "active",
@@ -182,12 +182,12 @@
         "metadata": {
           "governanceDomain": "taxi_service_area",
           "lifecycle": {
-            "publishedAt": "2026-07-08T07:26:46.780Z",
+            "publishedAt": "2026-07-08T07:29:42.257Z",
             "publishReason": "launch kaohsiung pilot"
           }
         },
-        "createdAt": "2026-07-08T07:26:46.778Z",
-        "updatedAt": "2026-07-08T07:26:46.780Z"
+        "createdAt": "2026-07-08T07:29:42.256Z",
+        "updatedAt": "2026-07-08T07:29:42.257Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -196,7 +196,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.published",
         "resourceType": "service_area_boundary",
-        "resourceId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+        "resourceId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
         "newValuesSummary": {
           "areaCode": "KHH_CORE",
           "status": "active",
@@ -212,7 +212,7 @@
     "afterPublishDecision": {
       "decision": "serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-08T07:26:46.780Z",
+      "evaluatedAt": "2026-07-08T07:29:42.257Z",
       "stops": [
         {
           "kind": "pickup",
@@ -248,7 +248,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.boundary.published",
       "resourceType": "service_area_boundary",
-      "resourceId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+      "resourceId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
       "newValuesSummary": {
         "areaCode": "KHH_CORE",
         "status": "active",
@@ -264,7 +264,7 @@
   "effectiveWindowProof": {
     "futurePublishedArea": {
       "record": {
-        "serviceAreaId": "3abc6084-8276-4aa5-a1a7-4b44474bad05",
+        "serviceAreaId": "d20b0efe-d34a-4883-8599-79d294eb9ddb",
         "areaCode": "CYI_CORE",
         "displayName": "Chiayi future operating area",
         "status": "active",
@@ -284,12 +284,12 @@
         "version": 1,
         "metadata": {
           "lifecycle": {
-            "publishedAt": "2026-07-08T07:26:46.781Z",
+            "publishedAt": "2026-07-08T07:29:42.258Z",
             "publishReason": "scheduled launch"
           }
         },
-        "createdAt": "2026-07-08T07:26:46.780Z",
-        "updatedAt": "2026-07-08T07:26:46.781Z"
+        "createdAt": "2026-07-08T07:29:42.258Z",
+        "updatedAt": "2026-07-08T07:29:42.258Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -298,7 +298,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.published",
         "resourceType": "service_area_boundary",
-        "resourceId": "3abc6084-8276-4aa5-a1a7-4b44474bad05",
+        "resourceId": "d20b0efe-d34a-4883-8599-79d294eb9ddb",
         "newValuesSummary": {
           "areaCode": "CYI_CORE",
           "status": "active",
@@ -314,7 +314,7 @@
     "beforeEffectiveDecision": {
       "decision": "not_serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-08T07:26:46.781Z",
+      "evaluatedAt": "2026-07-08T07:29:42.258Z",
       "stops": [
         {
           "kind": "pickup",
@@ -346,7 +346,7 @@
     "afterEffectiveDecision": {
       "decision": "serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-08T07:26:46.781Z",
+      "evaluatedAt": "2026-07-08T07:29:42.258Z",
       "stops": [
         {
           "kind": "pickup",
@@ -379,7 +379,7 @@
   "versionOverlapRejection": {
     "firstVersion": {
       "record": {
-        "serviceAreaId": "193a732c-c46e-4888-bb65-f20512ff5df0",
+        "serviceAreaId": "439456e7-3f63-4fcc-919d-ecd0e4d1eeb3",
         "areaCode": "VERSIONED_CORE",
         "displayName": "Versioned core first window",
         "status": "draft",
@@ -398,8 +398,8 @@
         "effectiveUntil": "2026-12-31T00:00:00.000Z",
         "version": 1,
         "metadata": {},
-        "createdAt": "2026-07-08T07:26:46.781Z",
-        "updatedAt": "2026-07-08T07:26:46.781Z"
+        "createdAt": "2026-07-08T07:29:42.258Z",
+        "updatedAt": "2026-07-08T07:29:42.258Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -408,7 +408,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.created",
         "resourceType": "service_area_boundary",
-        "resourceId": "193a732c-c46e-4888-bb65-f20512ff5df0",
+        "resourceId": "439456e7-3f63-4fcc-919d-ecd0e4d1eeb3",
         "newValuesSummary": {
           "areaCode": "VERSIONED_CORE",
           "status": "draft",
@@ -421,7 +421,7 @@
     },
     "overlappingVersion": {
       "record": {
-        "serviceAreaId": "4fc270fb-5a0e-4b32-8b1c-bd40464d6918",
+        "serviceAreaId": "c9401a53-1962-4e01-8e98-dca3bb8288bd",
         "areaCode": "VERSIONED_CORE",
         "displayName": "Versioned core overlapping window",
         "status": "draft",
@@ -440,8 +440,8 @@
         "effectiveUntil": "2026-07-01T00:00:00.000Z",
         "version": 2,
         "metadata": {},
-        "createdAt": "2026-07-08T07:26:46.781Z",
-        "updatedAt": "2026-07-08T07:26:46.781Z"
+        "createdAt": "2026-07-08T07:29:42.258Z",
+        "updatedAt": "2026-07-08T07:29:42.258Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -450,7 +450,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.created",
         "resourceType": "service_area_boundary",
-        "resourceId": "4fc270fb-5a0e-4b32-8b1c-bd40464d6918",
+        "resourceId": "c9401a53-1962-4e01-8e98-dca3bb8288bd",
         "newValuesSummary": {
           "areaCode": "VERSIONED_CORE",
           "status": "draft",
@@ -467,17 +467,17 @@
         "message": "Published service-area versions for the same area code cannot overlap.",
         "details": {
           "areaCode": "VERSIONED_CORE",
-          "overlappingServiceAreaId": "193a732c-c46e-4888-bb65-f20512ff5df0"
+          "overlappingServiceAreaId": "439456e7-3f63-4fcc-919d-ecd0e4d1eeb3"
         },
         "retryable": false,
-        "traceId": "fdc748f8-d76a-4fd7-a1c3-b71b82d8e4bb"
+        "traceId": "e576b4e6-98f5-4deb-a69d-55f0918325f4"
       }
     }
   },
   "stopPolicyLifecycle": {
     "stopPolicy": {
       "record": {
-        "stopPolicyId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "stopPolicyId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "draft",
@@ -505,8 +505,8 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy"
         },
-        "createdAt": "2026-07-08T07:26:46.783Z",
-        "updatedAt": "2026-07-08T07:26:46.783Z"
+        "createdAt": "2026-07-08T07:29:42.260Z",
+        "updatedAt": "2026-07-08T07:29:42.260Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -515,7 +515,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.created",
         "resourceType": "stop_policy",
-        "resourceId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "resourceId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "draft",
@@ -530,7 +530,7 @@
     },
     "reviewPolicy": {
       "record": {
-        "stopPolicyId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "stopPolicyId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "review",
@@ -558,8 +558,8 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy"
         },
-        "createdAt": "2026-07-08T07:26:46.783Z",
-        "updatedAt": "2026-07-08T07:26:46.783Z"
+        "createdAt": "2026-07-08T07:29:42.260Z",
+        "updatedAt": "2026-07-08T07:29:42.260Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -568,7 +568,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.submitted_for_review",
         "resourceType": "stop_policy",
-        "resourceId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "resourceId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "review",
@@ -584,7 +584,7 @@
       "features": [
         {
           "type": "Feature",
-          "id": "4fc270fb-5a0e-4b32-8b1c-bd40464d6918",
+          "id": "c9401a53-1962-4e01-8e98-dca3bb8288bd",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -790,7 +790,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "4fc270fb-5a0e-4b32-8b1c-bd40464d6918",
+            "serviceAreaId": "c9401a53-1962-4e01-8e98-dca3bb8288bd",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core overlapping window",
             "status": "draft",
@@ -814,7 +814,7 @@
         },
         {
           "type": "Feature",
-          "id": "193a732c-c46e-4888-bb65-f20512ff5df0",
+          "id": "439456e7-3f63-4fcc-919d-ecd0e4d1eeb3",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -1020,7 +1020,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "193a732c-c46e-4888-bb65-f20512ff5df0",
+            "serviceAreaId": "439456e7-3f63-4fcc-919d-ecd0e4d1eeb3",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core first window",
             "status": "active",
@@ -1041,7 +1041,7 @@
             "geometryVersionRef": "service_area:VERSIONED_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-08T07:26:46.781Z",
+                "publishedAt": "2026-07-08T07:29:42.258Z",
                 "publishReason": "initial version"
               }
             }
@@ -1049,7 +1049,7 @@
         },
         {
           "type": "Feature",
-          "id": "3abc6084-8276-4aa5-a1a7-4b44474bad05",
+          "id": "d20b0efe-d34a-4883-8599-79d294eb9ddb",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -1255,7 +1255,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "3abc6084-8276-4aa5-a1a7-4b44474bad05",
+            "serviceAreaId": "d20b0efe-d34a-4883-8599-79d294eb9ddb",
             "areaCode": "CYI_CORE",
             "displayName": "Chiayi future operating area",
             "status": "active",
@@ -1276,7 +1276,7 @@
             "geometryVersionRef": "service_area:CYI_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-08T07:26:46.781Z",
+                "publishedAt": "2026-07-08T07:29:42.258Z",
                 "publishReason": "scheduled launch"
               }
             }
@@ -1284,7 +1284,7 @@
         },
         {
           "type": "Feature",
-          "id": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+          "id": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -1314,7 +1314,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+            "serviceAreaId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
             "areaCode": "KHH_CORE",
             "displayName": "Kaohsiung core operating area",
             "status": "active",
@@ -1349,7 +1349,7 @@
             "metadata": {
               "governanceDomain": "taxi_service_area",
               "lifecycle": {
-                "publishedAt": "2026-07-08T07:26:46.780Z",
+                "publishedAt": "2026-07-08T07:29:42.257Z",
                 "publishReason": "launch kaohsiung pilot"
               }
             }
@@ -1660,7 +1660,7 @@
         },
         {
           "type": "Feature",
-          "id": "68cac120-9808-41e6-9f3f-35a9445deae2",
+          "id": "7e7e8d15-311b-44cd-af34-8922c1801704",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -1866,7 +1866,7 @@
           },
           "properties": {
             "recordKind": "stop_policy",
-            "stopPolicyId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+            "stopPolicyId": "7e7e8d15-311b-44cd-af34-8922c1801704",
             "policyCode": "CITY_HALL_PICKUP_BLOCK",
             "displayName": "City Hall pickup access block",
             "status": "review",
@@ -2379,11 +2379,11 @@
           }
         }
       ],
-      "generatedAt": "2026-07-08T07:26:46.784Z"
+      "generatedAt": "2026-07-08T07:29:42.261Z"
     },
     "publishedPolicy": {
       "record": {
-        "stopPolicyId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "stopPolicyId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "active",
@@ -2411,12 +2411,12 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy",
           "lifecycle": {
-            "publishedAt": "2026-07-08T07:26:46.785Z",
+            "publishedAt": "2026-07-08T07:29:42.261Z",
             "publishReason": "temporary city hall curb works"
           }
         },
-        "createdAt": "2026-07-08T07:26:46.783Z",
-        "updatedAt": "2026-07-08T07:26:46.785Z"
+        "createdAt": "2026-07-08T07:29:42.260Z",
+        "updatedAt": "2026-07-08T07:29:42.261Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -2425,7 +2425,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.published",
         "resourceType": "stop_policy",
-        "resourceId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "resourceId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "active",
@@ -2441,7 +2441,7 @@
     "publishedPolicyDecision": {
       "decision": "not_serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-08T07:26:46.785Z",
+      "evaluatedAt": "2026-07-08T07:29:42.261Z",
       "stops": [
         {
           "kind": "pickup",
@@ -2501,7 +2501,7 @@
     },
     "retiredPolicy": {
       "record": {
-        "stopPolicyId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "stopPolicyId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "retired",
@@ -2529,14 +2529,14 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy",
           "lifecycle": {
-            "publishedAt": "2026-07-08T07:26:46.785Z",
+            "publishedAt": "2026-07-08T07:29:42.261Z",
             "publishReason": "temporary city hall curb works",
-            "retiredAt": "2026-07-08T07:26:46.785Z",
+            "retiredAt": "2026-07-08T07:29:42.261Z",
             "retireReason": "curb works completed"
           }
         },
-        "createdAt": "2026-07-08T07:26:46.783Z",
-        "updatedAt": "2026-07-08T07:26:46.785Z"
+        "createdAt": "2026-07-08T07:29:42.260Z",
+        "updatedAt": "2026-07-08T07:29:42.261Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -2545,7 +2545,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.retired",
         "resourceType": "stop_policy",
-        "resourceId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+        "resourceId": "7e7e8d15-311b-44cd-af34-8922c1801704",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "retired",
@@ -2563,7 +2563,7 @@
       "features": [
         {
           "type": "Feature",
-          "id": "4fc270fb-5a0e-4b32-8b1c-bd40464d6918",
+          "id": "c9401a53-1962-4e01-8e98-dca3bb8288bd",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -2769,7 +2769,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "4fc270fb-5a0e-4b32-8b1c-bd40464d6918",
+            "serviceAreaId": "c9401a53-1962-4e01-8e98-dca3bb8288bd",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core overlapping window",
             "status": "draft",
@@ -2793,7 +2793,7 @@
         },
         {
           "type": "Feature",
-          "id": "193a732c-c46e-4888-bb65-f20512ff5df0",
+          "id": "439456e7-3f63-4fcc-919d-ecd0e4d1eeb3",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -2999,7 +2999,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "193a732c-c46e-4888-bb65-f20512ff5df0",
+            "serviceAreaId": "439456e7-3f63-4fcc-919d-ecd0e4d1eeb3",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core first window",
             "status": "active",
@@ -3020,7 +3020,7 @@
             "geometryVersionRef": "service_area:VERSIONED_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-08T07:26:46.781Z",
+                "publishedAt": "2026-07-08T07:29:42.258Z",
                 "publishReason": "initial version"
               }
             }
@@ -3028,7 +3028,7 @@
         },
         {
           "type": "Feature",
-          "id": "3abc6084-8276-4aa5-a1a7-4b44474bad05",
+          "id": "d20b0efe-d34a-4883-8599-79d294eb9ddb",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -3234,7 +3234,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "3abc6084-8276-4aa5-a1a7-4b44474bad05",
+            "serviceAreaId": "d20b0efe-d34a-4883-8599-79d294eb9ddb",
             "areaCode": "CYI_CORE",
             "displayName": "Chiayi future operating area",
             "status": "active",
@@ -3255,7 +3255,7 @@
             "geometryVersionRef": "service_area:CYI_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-08T07:26:46.781Z",
+                "publishedAt": "2026-07-08T07:29:42.258Z",
                 "publishReason": "scheduled launch"
               }
             }
@@ -3263,7 +3263,7 @@
         },
         {
           "type": "Feature",
-          "id": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+          "id": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -3293,7 +3293,7 @@
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "218e1999-d6c3-4fc6-b53d-71dc2b98c99a",
+            "serviceAreaId": "ed83cb8b-c7dd-45b4-a8bd-9ca9099fe579",
             "areaCode": "KHH_CORE",
             "displayName": "Kaohsiung core operating area",
             "status": "active",
@@ -3328,7 +3328,7 @@
             "metadata": {
               "governanceDomain": "taxi_service_area",
               "lifecycle": {
-                "publishedAt": "2026-07-08T07:26:46.780Z",
+                "publishedAt": "2026-07-08T07:29:42.257Z",
                 "publishReason": "launch kaohsiung pilot"
               }
             }
@@ -3639,7 +3639,7 @@
         },
         {
           "type": "Feature",
-          "id": "68cac120-9808-41e6-9f3f-35a9445deae2",
+          "id": "7e7e8d15-311b-44cd-af34-8922c1801704",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -3845,7 +3845,7 @@
           },
           "properties": {
             "recordKind": "stop_policy",
-            "stopPolicyId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+            "stopPolicyId": "7e7e8d15-311b-44cd-af34-8922c1801704",
             "policyCode": "CITY_HALL_PICKUP_BLOCK",
             "displayName": "City Hall pickup access block",
             "status": "retired",
@@ -3874,9 +3874,9 @@
             "metadata": {
               "governanceDomain": "taxi_stop_policy",
               "lifecycle": {
-                "publishedAt": "2026-07-08T07:26:46.785Z",
+                "publishedAt": "2026-07-08T07:29:42.261Z",
                 "publishReason": "temporary city hall curb works",
-                "retiredAt": "2026-07-08T07:26:46.785Z",
+                "retiredAt": "2026-07-08T07:29:42.261Z",
                 "retireReason": "curb works completed"
               }
             }
@@ -4364,12 +4364,12 @@
           }
         }
       ],
-      "generatedAt": "2026-07-08T07:26:46.786Z"
+      "generatedAt": "2026-07-08T07:29:42.262Z"
     },
     "postRetireDecision": {
       "decision": "serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-08T07:26:46.786Z",
+      "evaluatedAt": "2026-07-08T07:29:42.262Z",
       "stops": [
         {
           "kind": "pickup",
@@ -4422,7 +4422,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.stop_policy.submitted_for_review",
       "resourceType": "stop_policy",
-      "resourceId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+      "resourceId": "7e7e8d15-311b-44cd-af34-8922c1801704",
       "newValuesSummary": {
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "status": "review",
@@ -4439,7 +4439,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.stop_policy.published",
       "resourceType": "stop_policy",
-      "resourceId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+      "resourceId": "7e7e8d15-311b-44cd-af34-8922c1801704",
       "newValuesSummary": {
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "status": "active",
@@ -4458,7 +4458,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.stop_policy.retired",
       "resourceType": "stop_policy",
-      "resourceId": "68cac120-9808-41e6-9f3f-35a9445deae2",
+      "resourceId": "7e7e8d15-311b-44cd-af34-8922c1801704",
       "newValuesSummary": {
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "status": "retired",
@@ -4480,7 +4480,7 @@
           "field": "geometry.coordinates"
         },
         "retryable": false,
-        "traceId": "5850bda2-04bb-4ad5-95cf-4c7bb21f2a97"
+        "traceId": "dbc73c93-7365-41a2-b05e-628846c7cec0"
       }
     },
     "persistServiceAreaCallCount": 8
@@ -4551,6 +4551,6 @@
       "stopPolicyRetiredCount": 1,
       "manualOverrideCount": 0
     },
-    "lastEventAt": "2026-07-08T07:26:46.786Z"
+    "lastEventAt": "2026-07-08T07:29:42.262Z"
   }
 }

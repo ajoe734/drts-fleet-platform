@@ -229,10 +229,8 @@ it("writes row-level QA final evidence proof payloads", async () => {
     auditLogs: serviceAreaAuditLogs,
     observability: serviceAreaObservability,
   } = createObservedServiceAreaService();
-  const {
-    service: geoService,
-    observability: geoObservability,
-  } = createObservedGeoService();
+  const { service: geoService, observability: geoObservability } =
+    createObservedGeoService();
 
   const sharedRequestBody = {
     callId: "CALL-MAP-QA-SHARED-001",
@@ -391,8 +389,9 @@ it("writes row-level QA final evidence proof payloads", async () => {
     q: "台北",
     surface: "callcenter",
   });
-  let geoCoordinateLessError: ReturnType<ApiRequestError["getResponse"]> | null =
-    null;
+  let geoCoordinateLessError: ReturnType<
+    ApiRequestError["getResponse"]
+  > | null = null;
   try {
     await geoService.resolve({
       addressText: "No selected candidate or pin",
@@ -403,7 +402,12 @@ it("writes row-level QA final evidence proof payloads", async () => {
     geoCoordinateLessError = (error as ApiRequestError).getResponse();
   }
 
-  const artifactPath = resolve(process.cwd(), "..", "..", ARTIFACT_RELATIVE_PATH);
+  const artifactPath = resolve(
+    process.cwd(),
+    "..",
+    "..",
+    ARTIFACT_RELATIVE_PATH,
+  );
   mkdirSync(resolve(artifactPath, ".."), { recursive: true });
   writeFileSync(
     artifactPath,

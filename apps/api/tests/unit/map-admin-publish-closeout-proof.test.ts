@@ -20,10 +20,14 @@ function createMutationService() {
     }),
     persistServiceArea: vi
       .fn()
-      .mockImplementation(async (payload) => JSON.parse(JSON.stringify(payload))),
+      .mockImplementation(async (payload) =>
+        JSON.parse(JSON.stringify(payload)),
+      ),
     persistStopPolicy: vi
       .fn()
-      .mockImplementation(async (payload) => JSON.parse(JSON.stringify(payload))),
+      .mockImplementation(async (payload) =>
+        JSON.parse(JSON.stringify(payload)),
+      ),
     reportPersistenceFailure: vi.fn(),
   };
   const auditNotificationService = {
@@ -169,8 +173,9 @@ it("writes admin publish closeout proof payloads", async () => {
     },
     context,
   );
-  let overlappingPublishError: ReturnType<ApiRequestError["getResponse"]> | null =
-    null;
+  let overlappingPublishError: ReturnType<
+    ApiRequestError["getResponse"]
+  > | null = null;
   try {
     await service.publishServiceArea(
       overlappingVersion.record.serviceAreaId,
@@ -259,7 +264,12 @@ it("writes admin publish closeout proof payloads", async () => {
     invalidGeometryError = (error as ApiRequestError).getResponse();
   }
 
-  const artifactPath = resolve(process.cwd(), "..", "..", ARTIFACT_RELATIVE_PATH);
+  const artifactPath = resolve(
+    process.cwd(),
+    "..",
+    "..",
+    ARTIFACT_RELATIVE_PATH,
+  );
   mkdirSync(resolve(artifactPath, ".."), { recursive: true });
   writeFileSync(
     artifactPath,
@@ -316,8 +326,8 @@ it("writes admin publish closeout proof payloads", async () => {
         },
         invalidGeometryRejection: {
           errorResponse: invalidGeometryError,
-          persistServiceAreaCallCount: repository.persistServiceArea.mock.calls
-            .length,
+          persistServiceAreaCallCount:
+            repository.persistServiceArea.mock.calls.length,
         },
         observability: observability.getSnapshot(),
       },
