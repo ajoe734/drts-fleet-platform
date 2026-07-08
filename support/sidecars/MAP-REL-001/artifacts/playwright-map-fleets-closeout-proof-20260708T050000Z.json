@@ -1,0 +1,131 @@
+{
+  "config": {
+    "configFile": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-001/playwright.map-fleets-closeout.config.ts",
+    "rootDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-001/tests/e2e",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-001/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-001/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "/map-fleets-closeout-proof\\.spec\\.ts/"
+        ],
+        "timeout": 180000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 1,
+    "webServer": {
+      "command": "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/ops-console-web && NEXT_PUBLIC_OPS_ASSISTANT_ENABLED=true pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3003",
+      "url": "http://127.0.0.1:3003",
+      "reuseExistingServer": true,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "map-fleets-closeout-proof.spec.ts",
+      "file": "map-fleets-closeout-proof.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "map fleets closeout proof",
+          "file": "map-fleets-closeout-proof.spec.ts",
+          "line": 297,
+          "column": 6,
+          "specs": [
+            {
+              "title": "captures phone-order request provenance and order id",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7349,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-07-08T04:13:48.250Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "map-fleets-closeout-browser-proof",
+                          "contentType": "application/json",
+                          "path": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-001/test-results/map-fleets-closeout-proof--7a423-est-provenance-and-order-id/attachments/map-fleets-closeout-browser-proof-bae0d90518a14aa7ca218b74ad0454e723008f63.json"
+                        },
+                        {
+                          "name": "map-fleets-closeout-browser-proof-screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-001/test-results/map-fleets-closeout-proof--7a423-est-provenance-and-order-id/attachments/map-fleets-closeout-browser-proof-screenshot-4584b70cd6217adc14376d5c3d5bff3555133c59.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "25025d04d9a958de917d-ec17c3067184664812fe",
+              "file": "map-fleets-closeout-proof.spec.ts",
+              "line": 300,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-07-08T04:13:30.035Z",
+    "duration": 25903.036,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
