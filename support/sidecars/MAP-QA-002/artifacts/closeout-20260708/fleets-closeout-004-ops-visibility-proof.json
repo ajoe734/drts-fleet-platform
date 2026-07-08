@@ -1,0 +1,212 @@
+{
+  "generatedAt": "2026-07-08T06:48:07.492Z",
+  "branchSha": "codex/fleets-closeout-004@c75c7fc164f5",
+  "closeoutTask": "FLEETS-CLOSEOUT-004",
+  "scope": "repo-local Ops map model evidence; not final stage/browser/API/DB evidence and not MAP-QA-002-FINAL-EVIDENCE.md",
+  "command": "pnpm exec vitest run tests/unit/map-geofence-ops-visibility-proof.test.ts --reporter=verbose",
+  "sameOrderIdsAsCallcenterProof": [
+    "ORD-SMOKE-001",
+    "ORD-MAP-MANUAL-001"
+  ],
+  "opsBoard": {
+    "providerStatus": "degraded_projection",
+    "fallbackReason": "missing_coordinates",
+    "counts": {
+      "points": 6,
+      "candidateSupplyPoints": 2,
+      "staleCandidatePoints": 1,
+      "noLocationCandidateCount": 1,
+      "ordersMissingPickupCoordinates": 0
+    },
+    "overlays": {
+      "serviceAreaCodes": [
+        "TAIPEI_CORE"
+      ],
+      "policyCodes": [
+        "PICKUP_ZONE_A",
+        "DROPOFF_ZONE_B",
+        "XINYI_HOSPITAL_MANUAL_REVIEW"
+      ],
+      "geometryVersionRefs": [
+        "service_area:TAIPEI_CORE@1",
+        "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
+      ],
+      "reasonCodes": [
+        "STOP_REQUIRES_MANUAL_REVIEW"
+      ],
+      "decisions": [
+        "serviceable",
+        "manual_review"
+      ]
+    },
+    "points": [
+      {
+        "key": "ORD-SMOKE-001:pickup",
+        "kind": "pickup",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "JOB-OPS-CLOSEOUT-001",
+        "lat": 25.037519,
+        "lng": 121.56368,
+        "freshness": null
+      },
+      {
+        "key": "ORD-SMOKE-001:dropoff",
+        "kind": "dropoff",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "JOB-OPS-CLOSEOUT-001",
+        "lat": 25.033879,
+        "lng": 121.568743,
+        "freshness": null
+      },
+      {
+        "key": "JOB-OPS-CLOSEOUT-001:VH-MAP-CLOSEOUT-FRESH:DRV-MAP-CLOSEOUT-FRESH",
+        "kind": "candidate",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "JOB-OPS-CLOSEOUT-001",
+        "lat": 25.0378,
+        "lng": 121.5642,
+        "freshness": "fresh"
+      },
+      {
+        "key": "JOB-OPS-CLOSEOUT-001:VH-MAP-CLOSEOUT-LOW-ACC:DRV-MAP-CLOSEOUT-LOW-ACC",
+        "kind": "candidate",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "JOB-OPS-CLOSEOUT-001",
+        "lat": 25.0382,
+        "lng": 121.5652,
+        "freshness": "low_accuracy"
+      },
+      {
+        "key": "ORD-MAP-MANUAL-001:pickup",
+        "kind": "pickup",
+        "orderId": "ORD-MAP-MANUAL-001",
+        "lat": 25.0338,
+        "lng": 121.5645,
+        "freshness": null
+      },
+      {
+        "key": "ORD-MAP-MANUAL-001:dropoff",
+        "kind": "dropoff",
+        "orderId": "ORD-MAP-MANUAL-001",
+        "lat": 25.041,
+        "lng": 121.55,
+        "freshness": null
+      }
+    ],
+    "viewport": {
+      "centerLat": 25.037399999999998,
+      "centerLng": 121.5593715,
+      "zoom": 15,
+      "tileCount": 8,
+      "projectedPoints": [
+        {
+          "key": "ORD-SMOKE-001:pickup",
+          "kind": "pickup",
+          "orderId": "ORD-SMOKE-001",
+          "jobId": "JOB-OPS-CLOSEOUT-001",
+          "freshness": null,
+          "projection": {
+            "leftPct": 63.943795357934306,
+            "topPct": 49.14986349719887,
+            "visible": true
+          }
+        },
+        {
+          "key": "ORD-SMOKE-001:dropoff",
+          "kind": "dropoff",
+          "orderId": "ORD-SMOKE-001",
+          "jobId": "JOB-OPS-CLOSEOUT-001",
+          "freshness": null,
+          "projection": {
+            "leftPct": 80.32941353106354,
+            "topPct": 75.15366567906716,
+            "visible": true
+          }
+        },
+        {
+          "key": "JOB-OPS-CLOSEOUT-001:VH-MAP-CLOSEOUT-FRESH:DRV-MAP-CLOSEOUT-FRESH",
+          "kind": "candidate",
+          "orderId": "ORD-SMOKE-001",
+          "jobId": "JOB-OPS-CLOSEOUT-001",
+          "freshness": "fresh",
+          "projection": {
+            "leftPct": 65.62669511121284,
+            "topPct": 47.142395036450274,
+            "visible": true
+          }
+        },
+        {
+          "key": "JOB-OPS-CLOSEOUT-001:VH-MAP-CLOSEOUT-LOW-ACC:DRV-MAP-CLOSEOUT-LOW-ACC",
+          "kind": "candidate",
+          "orderId": "ORD-SMOKE-001",
+          "jobId": "JOB-OPS-CLOSEOUT-001",
+          "freshness": "low_accuracy",
+          "projection": {
+            "leftPct": 68.86304079011704,
+            "topPct": 44.28478075411274,
+            "visible": true
+          }
+        },
+        {
+          "key": "ORD-MAP-MANUAL-001:pickup",
+          "kind": "pickup",
+          "orderId": "ORD-MAP-MANUAL-001",
+          "freshness": null,
+          "projection": {
+            "leftPct": 66.59759881466421,
+            "topPct": 75.71802535857488,
+            "visible": true
+          }
+        },
+        {
+          "key": "ORD-MAP-MANUAL-001:dropoff",
+          "kind": "dropoff",
+          "orderId": "ORD-MAP-MANUAL-001",
+          "freshness": null,
+          "projection": {
+            "leftPct": 19.670586468936463,
+            "topPct": 24.281219834099627,
+            "visible": true
+          }
+        }
+      ]
+    },
+    "browserDomContract": [
+      ".spatial-point[data-ops-map-point-kind=\"pickup\"][data-ops-map-order-id=\"ORD-SMOKE-001\"]",
+      ".spatial-point[data-ops-map-point-kind=\"dropoff\"][data-ops-map-order-id=\"ORD-SMOKE-001\"]",
+      ".spatial-point[data-ops-map-point-kind=\"candidate\"][data-ops-map-freshness=\"fresh\"]",
+      ".spatial-point[data-ops-map-point-kind=\"candidate\"][data-ops-map-freshness=\"low_accuracy\"]",
+      "[data-ops-map-policy-codes*=\"XINYI_HOSPITAL_MANUAL_REVIEW\"]",
+      "[data-ops-map-fallback-reason=\"missing_coordinates\"]"
+    ]
+  },
+  "noVisibleFallback": {
+    "providerStatus": "no_spatial_data",
+    "fallbackReason": "no_visible_points",
+    "points": []
+  },
+  "finalEvidencePromotion": {
+    "canSupportRows": [
+      "E2E-MAP-006",
+      "Ops visibility",
+      "service overlays",
+      "stale supply",
+      "no-location supply",
+      "fallback state"
+    ],
+    "stillRequiredBeforeFinalPass": [
+      "reviewer-accepted browser trace or screenshot for the same order IDs",
+      "stage/API or DB snapshot artifact tying Ops rows to persisted backend orders",
+      "MAP-OBS-001 final evidence for supply freshness/degraded signals",
+      "MAP-QA-002 final row-level artifact links"
+    ]
+  },
+  "assertions": [
+    "ops_points_include_same_callcenter_order_id",
+    "ops_points_include_pickup_dropoff_and_candidate_supply",
+    "ops_overlays_include_service_area_stop_policy_and_geometry_versions",
+    "ops_counts_include_low_accuracy_and_no_location_supply",
+    "ops_fallback_distinguishes_missing_coordinates_from_no_visible_points",
+    "ops_viewport_projects_all_visible_points"
+  ]
+}

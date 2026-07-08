@@ -1,0 +1,58 @@
+{
+  "generatedAt": "2026-07-08T06:52:19.535Z",
+  "closeoutTask": "FLEETS-CLOSEOUT-004",
+  "scope": "repo-local browser DOM evidence from mock Ops UI; not final stage/API/DB evidence and not MAP-QA-002-FINAL-EVIDENCE.md",
+  "command": "pnpm exec playwright test -c playwright.map-geofence-ops-closeout.config.ts --reporter=list",
+  "screenshot": "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.png",
+  "pageUrl": "http://127.0.0.1:3006/dispatch?board=assigned",
+  "sameOrderIdsAsCallcenterProof": [
+    "ORD-SMOKE-001"
+  ],
+  "boardAttributes": {
+    "providerStatus": "degraded_projection",
+    "fallbackReason": "missing_coordinates",
+    "serviceAreas": "TAIPEI_CORE",
+    "policyCodes": "PICKUP_ZONE_A|DROPOFF_ZONE_B",
+    "routeCount": "1",
+    "overlayCount": "4"
+  },
+  "points": [
+    {
+      "kind": "pickup",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "governed"
+    },
+    {
+      "kind": "dropoff",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "governed"
+    },
+    {
+      "kind": "candidate",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "fresh"
+    },
+    {
+      "kind": "candidate",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "low_accuracy"
+    }
+  ],
+  "finalEvidencePromotion": {
+    "canSupportRows": [
+      "E2E-MAP-006",
+      "Ops visibility",
+      "service overlays",
+      "fallback state"
+    ],
+    "stillRequiredBeforeFinalPass": [
+      "reviewer-accepted stage/API or DB snapshot artifact for the same order ID",
+      "MAP-OBS-001 final evidence for supply freshness/degraded signals",
+      "MAP-QA-002 final row-level artifact links"
+    ]
+  }
+}
