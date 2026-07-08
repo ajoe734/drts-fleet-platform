@@ -1,6 +1,6 @@
 # FLEETS-CLOSEOUT-004 SIDECAR ACCEPTANCE
 
-Status: review (round 1 handoff to `Codex`)
+Status: review (round 2 handoff to `Codex` after dependency-snapshot refresh)
 Owner: Claude (reassigned from Codex2 per chairman availability-first reassignment; the Codex2 owner lane hit a 2/2 terminal loop on this support-only sidecar)
 Reviewer: Codex
 Parent: `FLEETS-CLOSEOUT-004` (owner `Codex`, reviewer `Codex2`)
@@ -45,7 +45,7 @@ This packet therefore treats those parent proof artifacts as **declared-but-pare
 
 ## Dependency Map
 
-All three product dependencies are resolved. Two are archived-`done`; the fourth parent dependency (`FLEETS-CLOSEOUT-001`) is a separate blocked task, not a prerequisite this sidecar can or should unblock.
+All three of this sidecar's declared prerequisites are resolved as archived-`done`. A fourth task declared on the **parent** (`FLEETS-CLOSEOUT-001`) is now `in_progress` (previously `blocked`); it is a separate release task, not a prerequisite this sidecar can or should progress.
 
 ### Hard prerequisites (declared in `FLEETS-CLOSEOUT-004.depends_on`)
 
@@ -59,7 +59,7 @@ All three product dependencies are resolved. Two are archived-`done`; the fourth
 
 | Dependency | Machine-truth status | Note |
 | --- | --- | --- |
-| `FLEETS-CLOSEOUT-001` | **blocked** (active; owner `Codex`, reviewer `Codex2`). | "Callcenter persisted spatial proof". It shares the same-order-ID linkage the parent's Ops visibility row depends on (acceptance bullet 2). It is a separate blocked release task on a merge/integration gate, not a prerequisite this support sidecar can unblock. Recorded here for completeness; no action taken. |
+| `FLEETS-CLOSEOUT-001` | **in_progress** (active; owner `Codex`, reviewer `Codex2`; refreshed against live `ai-status.json`, which reports `last_update` 2026-07-08T06:12:30Z). | "Callcenter persisted spatial proof". It shares the same-order-ID linkage the parent's Ops visibility row depends on (acceptance bullet 2 / A2). It is a separate active release task, not a prerequisite this support sidecar can or should progress. Recorded here for completeness; no action taken. |
 
 ### Out of scope for this sidecar
 
@@ -93,14 +93,14 @@ The parent's five acceptance bullets are restated read-only from `ai-status.json
 ## Sidecar reviewer checklist (`Codex`)
 
 - Confirm this packet matches live machine truth: parent `FLEETS-CLOSEOUT-004` is `in_progress` under `Codex` / `Codex2` with no commit/push/integration recorded; this sidecar is `review` under `Claude` / `Codex` after the round-1 handoff below.
-- Confirm the dependency map only references prerequisites that already exist in `ai-status.json` (`MAP-FE-OPS-001`, `MAP-BE-003`, `MAP-BE-005` archived-`done`; `FLEETS-CLOSEOUT-001` active-`blocked`) with no speculation.
+- Confirm the dependency map only references prerequisites that already exist in `ai-status.json` (`MAP-FE-OPS-001`, `MAP-BE-003`, `MAP-BE-005` archived-`done`; related parent task `FLEETS-CLOSEOUT-001` active-`in_progress`) with no speculation.
 - Confirm the packet does not restate parent-branch-local proof artifacts as verified from this branch, and does not redefine or progress parent closeout.
 - Confirm this sidecar only writes under `support/sidecars/FLEETS-CLOSEOUT-004/`.
 - Approve when satisfied:
 
 ```bash
 AI_NAME=Codex scripts/ai-status.sh approve FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE \
-  "Reviewed: FLEETS-CLOSEOUT-004 acceptance packet aligned to current parent snapshot (in_progress; no commit recorded), dependency map (MAP-FE-OPS-001/MAP-BE-003/MAP-BE-005 done, FLEETS-CLOSEOUT-001 blocked), and acceptance mapping without mutating canonical truth."
+  "Reviewed: FLEETS-CLOSEOUT-004 acceptance packet aligned to current parent snapshot (in_progress; no commit recorded), dependency map (MAP-FE-OPS-001/MAP-BE-003/MAP-BE-005 done, FLEETS-CLOSEOUT-001 in_progress), and acceptance mapping without mutating canonical truth."
 ```
 
 If changes are required:
@@ -114,7 +114,7 @@ AI_NAME=Codex scripts/ai-status.sh reopen FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE
 - Sidecar artifact: `support/sidecars/FLEETS-CLOSEOUT-004/FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE.md` (this file).
 - Parent machine truth: `ai-status.json` entry for `FLEETS-CLOSEOUT-004` — status `in_progress`, owner `Codex`, reviewer `Codex2`, no commit/push/integration recorded.
 - Sidecar machine truth: `ai-status.json` entry for `FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE` — owner `Claude`, reviewer `Codex`; `last_update` on that entry is the authoritative timestamp source.
-- Dependency closure: `MAP-FE-OPS-001`, `MAP-BE-003`, `MAP-BE-005` resolved as `done` via `ai-status.json.archived_task_ids`; `FLEETS-CLOSEOUT-001` active-`blocked`.
+- Dependency closure: `MAP-FE-OPS-001`, `MAP-BE-003`, `MAP-BE-005` resolved as `done` via `ai-status.json.archived_task_ids`; related parent task `FLEETS-CLOSEOUT-001` active-`in_progress` (owner `Codex`, reviewer `Codex2`).
 - Resolvable-on-branch anchors ✅: `apps/ops-console-web/app/dispatch/ops-map-board.ts`, `apps/ops-console-web/tests/unit/ops-map-board.test.ts`, `support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md`.
 - Parent-branch-local proof artifacts (declared in parent, not on this branch): `apps/api/tests/unit/owned-mobility-ops-map-closeout-proof.test.ts`, `apps/api/tests/unit/owned-mobility-ops-map-api-closeout-proof.test.ts`, `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md`, `support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-backend-linked-ops-proof.json`, `support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-api-envelope-ops-proof.json`.
 
@@ -123,6 +123,7 @@ AI_NAME=Codex scripts/ai-status.sh reopen FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE
 1. `AI_NAME=Claude scripts/ai-status.sh start FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE "Assembling acceptance checklist, dependency map, and support packet for FLEETS-CLOSEOUT-004 (support-only, no canonical edits)"` — sidecar moved to `in_progress` under new owner `Claude` (reassigned from `Codex2`).
 2. Round-1 draft of this support artifact created under `support/sidecars/FLEETS-CLOSEOUT-004/FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE.md`: parent live snapshot, dependency map (with machine-truth statuses + doc citations), acceptance mapping, gate context, and a branch-resolution honesty note distinguishing on-branch anchors from parent-branch-local proof artifacts. No canonical truth modified outside the sidecar path.
 3. Task-scoped commit + normal non-force push of the sidecar artifact, then handoff to `Codex` for review (see machine truth for exact transition timestamps).
+4. Round-1 review returned by `Codex`: the related dependency snapshot was stale — the packet listed `FLEETS-CLOSEOUT-001` as active-`blocked`, but live `ai-status.json` now shows it `in_progress` (`last_update` 2026-07-08T06:12:30Z, owner `Codex`, reviewer `Codex2`). Refreshed every reference to that task (dependency-map narrative, related-dependency table, sidecar reviewer checklist, approve-command summary, and evidence inventory) to `in_progress`, and corrected the dependency-map count ("all three declared prerequisites archived-done" — previously miscounted as "two"). Re-verified the three hard prerequisites are still archived-`done` in `ai-status.json.archived_task_ids` and the parent `FLEETS-CLOSEOUT-004` is still `in_progress` with no commit/push/integration recorded. No canonical truth modified outside the sidecar path. Re-committed + non-force pushed, then re-handed off to `Codex` for round-2 review.
 
 ---
 
