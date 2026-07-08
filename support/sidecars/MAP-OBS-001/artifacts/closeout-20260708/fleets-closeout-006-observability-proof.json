@@ -1,0 +1,220 @@
+{
+  "taskId": "FLEETS-CLOSEOUT-006",
+  "verdict": "PASS",
+  "closeoutDate": "2026-07-08",
+  "branchHead": "codex2/fleets-closeout-006@c75c7fc164f5c4cbf2a9b3e36eed14e44aed76ea",
+  "evidenceAnchors": {
+    "finalEvidence": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+    "automatedEvidence": "support/sidecars/MAP-OBS-001/MAP-OBS-001-AUTOMATED-EVIDENCE-20260701.md",
+    "alerts": "infra/alerts/map-geofence-alerts.yaml",
+    "mapRunbook": "docs/03-runbooks/map-geofence-observability-runbook.md",
+    "operationalRunbook": "docs/03-runbooks/operational-observability-alert-runbook.md",
+    "proofTest": "apps/api/tests/unit/map-geofence-observability-closeout-proof.test.ts"
+  },
+  "acceptance": {
+    "placeholderScan": {
+      "status": "PASS",
+      "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+    },
+    "metrics": [
+      {
+        "metric": "map_geocode_requests_total",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "metric": "map_geocode_latency_ms",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "metric": "map_provider_errors_total",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "metric": "map_provider_quota_usage_percent",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "metric": "coordinate_less_booking_attempts_total",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "metric": "service_area_evaluations_total",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "metric": "service_area_policy_blocks_total",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "metric": "service_area_geometry_mutations_total",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      }
+    ],
+    "auditEvents": [
+      {
+        "auditEvent": "geo.address.resolved",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "auditEvent": "geo.pin.confirmed",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "auditEvent": "service_area.evaluated",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "auditEvent": "service_area.policy.published",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "auditEvent": "service_area.policy.retired",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      {
+        "auditEvent": "geo.manual_override.created",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      }
+    ],
+    "alerts": [
+      {
+        "alertName": "MapProviderErrorRateHigh",
+        "status": "PASS",
+        "sourceMetric": "map_provider_errors_total",
+        "recentWindow": "[5m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "MapProviderLatencyHigh",
+        "status": "PASS",
+        "sourceMetric": "map_geocode_latency_ms_bucket",
+        "recentWindow": "[10m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "MapProviderQuotaUsageHigh",
+        "status": "PASS",
+        "sourceMetric": "map_provider_quota_usage_percent",
+        "recentWindow": "[15m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "MapProviderQuotaUsageCritical",
+        "status": "PASS",
+        "sourceMetric": "map_provider_quota_usage_percent",
+        "recentWindow": "[5m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "CoordinateLessDispatchAttemptHigh",
+        "status": "PASS",
+        "sourceMetric": "coordinate_less_booking_attempts_total",
+        "recentWindow": "[5m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "ServiceAreaPolicyBlockSpike",
+        "status": "PASS",
+        "sourceMetric": "service_area_policy_blocks_total",
+        "recentWindow": "[15m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "ServiceAreaEvaluationUnavailable",
+        "status": "PASS",
+        "sourceMetric": "service_area_evaluations_total{decision=~\"manual_review|not_serviceable\",reason_code=~\"EVALUATOR_UNAVAILABLE|POSTGIS_UNAVAILABLE\"}",
+        "recentWindow": "[10m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      }
+    ],
+    "runbookDistinctions": [
+      {
+        "topic": "Provider Outage",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
+      },
+      {
+        "topic": "Address Ambiguity",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
+      },
+      {
+        "topic": "Policy Denial",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
+      },
+      {
+        "topic": "PostGIS / Evaluator Unavailable",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
+      },
+      {
+        "topic": "Manual Override",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
+      },
+      {
+        "topic": "Geometry Rollback",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md",
+        "inference": "geometry rollback is evidenced by publish/retire audit coverage and the runbook's retire-path checks"
+      }
+    ],
+    "dashboardAndStageLinks": {
+      "status": "EXTERNAL_GATED",
+      "dashboard": {
+        "note": "repo-backed final evidence keeps dashboard/live parser validation external-gated",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      "stagedTraffic": {
+        "note": "repo-backed final evidence keeps staged/UAT traffic external-gated",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      },
+      "stagingRuntimeConfig": {
+        "note": "API README documents staging/production map-provider key requirements",
+        "artifact": "apps/api/README.md"
+      }
+    }
+  }
+}
