@@ -1,0 +1,165 @@
+{
+  "task": "FLEETS-CLOSEOUT-006",
+  "parentEvidence": "MAP-OBS-001",
+  "generatedBy": "apps/api/tests/unit/map-geofence-observability-closeout-proof.test.ts",
+  "sources": {
+    "alerts": "infra/alerts/map-geofence-alerts.yaml",
+    "finalEvidence": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+    "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
+  },
+  "runtimeDistinguishability": {
+    "verdict": "PASS",
+    "geo": {
+      "providerOutageCount": 2,
+      "addressAmbiguityCount": 1,
+      "coordinateLessAttemptCount": 1,
+      "manualOverrideCount": 1,
+      "resolvedAddressCount": 3,
+      "requests": {
+        "total": 3,
+        "successful": 1,
+        "providerErrorCount": 1,
+        "successRatePercent": 33.3,
+        "byOperation": {
+          "search": 2,
+          "resolve": 1,
+          "reverse": 0
+        },
+        "byResult": {
+          "resolved": 1,
+          "manualOverride": 0,
+          "addressAmbiguity": 1,
+          "coordinateLessAttempt": 0,
+          "providerOutage": 1
+        }
+      }
+    },
+    "serviceArea": {
+      "evaluations": 5,
+      "serviceableCount": 1,
+      "manualReviewCount": 1,
+      "policyDenialCount": 1,
+      "outOfAreaCount": 1,
+      "coordinateLessAttemptCount": 1
+    },
+    "governance": {
+      "geometryMutationCount": 2,
+      "serviceAreaPublishedCount": 1,
+      "serviceAreaRetiredCount": 0,
+      "stopPolicyPublishedCount": 0,
+      "stopPolicyRetiredCount": 1,
+      "manualOverrideCount": 1
+    }
+  },
+  "recentWindowAlerts": {
+    "verdict": "PASS",
+    "distinctSignalMetrics": {
+      "outage": "map_provider_errors_total",
+      "ambiguity": "map_geocode_requests_total{result=\"address_ambiguity\"}",
+      "policyDenial": "service_area_policy_blocks_total"
+    },
+    "rows": [
+      {
+        "alert": "MapProviderErrorRateHigh",
+        "signal": "provider outage",
+        "metric": "map_provider_errors_total",
+        "window": "[5m]",
+        "aggregator": "rate",
+        "expr": "expr: sum(rate(map_provider_errors_total{retryable=\"true\"}[5m])) by (provider, surface) > 0.05",
+        "recentWindow": true
+      },
+      {
+        "alert": "MapProviderLatencyHigh",
+        "signal": "provider outage",
+        "metric": "map_geocode_latency_ms_bucket",
+        "window": "[10m]",
+        "aggregator": "histogram_quantile",
+        "expr": "expr: histogram_quantile(0.95, sum by (le, provider, surface, operation) (rate(map_geocode_latency_ms_bucket[10m]))) > 750",
+        "recentWindow": true
+      },
+      {
+        "alert": "MapProviderQuotaUsageHigh",
+        "signal": "provider quota",
+        "metric": "map_provider_quota_usage_percent",
+        "window": "[15m]",
+        "aggregator": "max_over_time",
+        "expr": "expr: max_over_time(map_provider_quota_usage_percent[15m]) >= 80",
+        "recentWindow": true
+      },
+      {
+        "alert": "MapProviderQuotaUsageCritical",
+        "signal": "provider quota",
+        "metric": "map_provider_quota_usage_percent",
+        "window": "[5m]",
+        "aggregator": "max_over_time",
+        "expr": "expr: max_over_time(map_provider_quota_usage_percent[5m]) >= 95",
+        "recentWindow": true
+      },
+      {
+        "alert": "AddressAmbiguitySpike",
+        "signal": "address ambiguity",
+        "metric": "map_geocode_requests_total{result=\"address_ambiguity\"}",
+        "window": "[15m]",
+        "aggregator": "rate",
+        "expr": "expr: sum(rate(map_geocode_requests_total{result=\"address_ambiguity\"}[15m])) by (surface, provider) > 0.2",
+        "recentWindow": true
+      },
+      {
+        "alert": "CoordinateLessDispatchAttemptHigh",
+        "signal": "coordinate-less attempt",
+        "metric": "coordinate_less_booking_attempts_total",
+        "window": "[5m]",
+        "aggregator": "rate",
+        "expr": "expr: sum(rate(coordinate_less_booking_attempts_total[5m])) by (surface, actor_role, policy_result) > 0",
+        "recentWindow": true
+      },
+      {
+        "alert": "ServiceAreaPolicyBlockSpike",
+        "signal": "policy denial",
+        "metric": "service_area_policy_blocks_total",
+        "window": "[15m]",
+        "aggregator": "rate",
+        "expr": "expr: sum(rate(service_area_policy_blocks_total[15m])) by (area_code, reason_code, direction) > 0.3",
+        "recentWindow": true
+      },
+      {
+        "alert": "ServiceAreaEvaluationUnavailable",
+        "signal": "postgis/evaluator",
+        "metric": "service_area_evaluations_total",
+        "window": "[10m]",
+        "aggregator": "rate",
+        "expr": "expr: sum(rate(service_area_evaluations_total{decision=~\"manual_review|not_serviceable\",reason_code=~\"EVALUATOR_UNAVAILABLE|POSTGIS_UNAVAILABLE\"}[10m])) by (surface, product_code) > 0",
+        "recentWindow": true
+      },
+      {
+        "alert": "ManualMapOverrideSpike",
+        "signal": "manual override",
+        "metric": "geo_manual_overrides_total",
+        "window": "[30m]",
+        "aggregator": "rate",
+        "expr": "expr: sum(rate(geo_manual_overrides_total[30m])) by (surface, actor_role) > 0.1",
+        "recentWindow": true
+      }
+    ]
+  },
+  "finalEvidenceIntegrity": {
+    "verdict": "PASS",
+    "placeholderHits": [],
+    "passRowCount": 32,
+    "requiredSections": [
+      "## Verifier Topic Marker Matrix",
+      "## Metrics Evidence Matrix",
+      "## Audit Event Evidence Matrix",
+      "## Alert Evidence Matrix",
+      "## Runbook Distinction Matrix"
+    ],
+    "runbookDistinctions": [
+      "provider outage",
+      "address ambiguity",
+      "policy denial",
+      "postgis/evaluator unavailable",
+      "manual override"
+    ]
+  },
+  "verdict": "PASS"
+}
