@@ -53,11 +53,27 @@ git diff --check
 
 Result: passed.
 
+## Gate D Closeout Addendum
+
+`FLEETS-CLOSEOUT-005` consumes the accepted mixed-evidence packet in
+`support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md`.
+That packet explicitly separates the two evidence origins below instead of
+claiming the coordinate-handoff branch as the source of native map rendering:
+
+- 2026-06-15 Android emulator UAT on `dev@66ee70f5b` for active-trip trip-map
+  rendering,
+  pickup/dropoff markers, and active-trip heartbeat coexistence
+- 2026-07-03 committed unit/lint/typecheck evidence on
+  `origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2`
+  for coordinate-only navigation URLs, route-authority copy,
+  current-location freshness, and offline/degraded fallback copy
+
 ## Mobile And UAT Limitations
 
 - Android/iOS simulator UAT was not run in this repo-local pass.
 - No native map SDK dependency is present in `apps/driver-app/package.json`; this slice intentionally does not fake native map rendering.
-- Gate D production readiness still needs simulator/device screenshots or video proving actual app launch, navigation handoff, and platform-specific behavior.
+- Fresh 2026-07-08 simulator/device capture was not produced in this repo pass;
+  Gate D closeout instead cites the accepted mixed-evidence packet above.
 - This branch provides reviewable code and automated evidence for coordinate rendering, external navigation URL generation, route-authority safety copy, degraded fallback, and heartbeat coexistence.
 
 ## Suggested UAT Follow-Up
