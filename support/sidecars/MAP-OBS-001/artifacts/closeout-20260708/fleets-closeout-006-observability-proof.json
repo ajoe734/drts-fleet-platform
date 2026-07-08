@@ -146,6 +146,7 @@
     "verdict": "PASS",
     "placeholderHits": [],
     "passRowCount": 32,
+    "expectedPassRowTotal": 32,
     "requiredSections": [
       "## Verifier Topic Marker Matrix",
       "## Metrics Evidence Matrix",
@@ -153,6 +154,50 @@
       "## Alert Evidence Matrix",
       "## Runbook Distinction Matrix"
     ],
+    "lockedRowSets": {
+      "## Verifier Topic Marker Matrix": [
+        "OBS-MAP-PROVIDER-OUTAGE",
+        "OBS-MAP-ADDRESS-AMBIGUITY",
+        "OBS-MAP-POLICY-DENIAL",
+        "OBS-MAP-COORDINATELESS-ATTEMPT",
+        "OBS-MAP-MANUAL-OVERRIDE",
+        "OBS-MAP-GEOMETRY-MUTATION"
+      ],
+      "## Metrics Evidence Matrix": [
+        "map_geocode_requests_total",
+        "map_geocode_latency_ms",
+        "map_provider_errors_total",
+        "map_provider_quota_usage_percent",
+        "coordinate_less_booking_attempts_total",
+        "service_area_evaluations_total",
+        "service_area_policy_blocks_total",
+        "service_area_geometry_mutations_total"
+      ],
+      "## Audit Event Evidence Matrix": [
+        "geo.address.resolved",
+        "geo.pin.confirmed",
+        "service_area.evaluated",
+        "service_area.policy.published",
+        "service_area.policy.retired",
+        "geo.manual_override.created"
+      ],
+      "## Alert Evidence Matrix": [
+        "MapProviderErrorRateHigh",
+        "MapProviderLatencyHigh",
+        "MapProviderQuotaUsageHigh",
+        "MapProviderQuotaUsageCritical",
+        "CoordinateLessDispatchAttemptHigh",
+        "ServiceAreaPolicyBlockSpike",
+        "ServiceAreaEvaluationUnavailable"
+      ],
+      "## Runbook Distinction Matrix": [
+        "provider outage",
+        "address ambiguity",
+        "policy denial",
+        "postgis",
+        "manual override"
+      ]
+    },
     "runbookDistinctions": [
       "provider outage",
       "address ambiguity",

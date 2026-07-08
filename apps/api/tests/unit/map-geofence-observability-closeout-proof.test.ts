@@ -66,6 +66,33 @@ function exprLine(alertName: string) {
   return (line ?? "").trim();
 }
 
+// Slice the final-evidence body under a `## Heading` down to the next `## `
+// heading (or end of file), so a matrix can be locked in isolation.
+function finalEvidenceSection(heading: string) {
+  const index = finalEvidenceText.indexOf(heading);
+  expect(
+    index,
+    `expected final evidence section ${heading} to exist`,
+  ).toBeGreaterThanOrEqual(0);
+  const rest = finalEvidenceText.slice(index + heading.length);
+  const nextHeading = rest.search(/\n## /);
+  return nextHeading === -1 ? rest : rest.slice(0, nextHeading);
+}
+
+// Collect the first-column key of every PASS row inside a matrix section. A
+// PASS row is a markdown table row whose Final-mark cell carries `: PASS`; the
+// header and separator rows never do, so they are excluded automatically.
+function passRowKeys(sectionBody: string) {
+  return sectionBody
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && line.includes(": PASS"))
+    .map((line) => {
+      const cells = line.split("|").slice(1, -1);
+      return (cells[0] ?? "").trim().replace(/^`|`$/g, "");
+    });
+}
+
 // The proof object is assembled across the test cases and flushed to disk in
 // afterAll so a single JSON artifact captures every closeout claim.
 const proof: Record<string, unknown> = {
@@ -319,25 +346,100 @@ describe("FLEETS-CLOSEOUT-006 map/geofence observability closeout", () => {
       .filter((hit): hit is string => hit !== null);
     expect(placeholderHits).toEqual([]);
 
-    // Required matrices from the final evidence document.
-    const requiredSections = [
-      "## Verifier Topic Marker Matrix",
-      "## Metrics Evidence Matrix",
-      "## Audit Event Evidence Matrix",
-      "## Alert Evidence Matrix",
-      "## Runbook Distinction Matrix",
-    ];
-    for (const section of requiredSections) {
-      expect(finalEvidenceText, `final evidence section ${section}`).toContain(
-        section,
+    // The exact required matrix rows. This locks the closeout: a required row
+    // silently disappearing, being renamed, or flipping PASS -> FAIL fails the
+    // exact-set comparison below, instead of being masked by a loose `>= 30`
+    // count that leaves slack above the real total. Adding an unexpected PASS
+    // row to any matrix also fails, so the evidence surface cannot drift.
+    const requiredMatrixRows: Record<string, readonly string[]> = {
+      "## Verifier Topic Marker Matrix": [
+        "OBS-MAP-PROVIDER-OUTAGE",
+        "OBS-MAP-ADDRESS-AMBIGUITY",
+        "OBS-MAP-POLICY-DENIAL",
+        "OBS-MAP-COORDINATELESS-ATTEMPT",
+        "OBS-MAP-MANUAL-OVERRIDE",
+        "OBS-MAP-GEOMETRY-MUTATION",
+      ],
+      "## Metrics Evidence Matrix": [
+        "map_geocode_requests_total",
+        "map_geocode_latency_ms",
+        "map_provider_errors_total",
+        "map_provider_quota_usage_percent",
+        "coordinate_less_booking_attempts_total",
+        "service_area_evaluations_total",
+        "service_area_policy_blocks_total",
+        "service_area_geometry_mutations_total",
+      ],
+      "## Audit Event Evidence Matrix": [
+        "geo.address.resolved",
+        "geo.pin.confirmed",
+        "service_area.evaluated",
+        "service_area.policy.published",
+        "service_area.policy.retired",
+        "geo.manual_override.created",
+      ],
+      "## Alert Evidence Matrix": [
+        "MapProviderErrorRateHigh",
+        "MapProviderLatencyHigh",
+        "MapProviderQuotaUsageHigh",
+        "MapProviderQuotaUsageCritical",
+        "CoordinateLessDispatchAttemptHigh",
+        "ServiceAreaPolicyBlockSpike",
+        "ServiceAreaEvaluationUnavailable",
+      ],
+      "## Runbook Distinction Matrix": [
+        "provider outage",
+        "address ambiguity",
+        "policy denial",
+        "postgis",
+        "manual override",
+      ],
+    };
+
+    const requiredSections = Object.keys(requiredMatrixRows);
+
+    // Every PASS row across the matrices, kept for the total-count lock and the
+    // artifact-path check below.
+    const passRows: string[] = [];
+    const lockedRowSets: Record<string, string[]> = {};
+
+    for (const [section, expectedKeys] of Object.entries(requiredMatrixRows)) {
+      const body = finalEvidenceSection(section);
+      const keys = passRowKeys(body);
+
+      // Exact-set lock: same members, no missing required row, no extra row.
+      expect(new Set(keys), `PASS rows for ${section}`).toEqual(
+        new Set(expectedKeys),
       );
+      // Guard against a duplicated key masking a missing one (Set collapses
+      // duplicates, so also pin the raw PASS-row count per section).
+      expect(keys.length, `PASS row count for ${section}`).toBe(
+        expectedKeys.length,
+      );
+
+      lockedRowSets[section] = [...expectedKeys];
+      for (const line of body.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("|") && trimmed.includes(": PASS")) {
+          passRows.push(trimmed);
+        }
+      }
     }
 
-    // Every PASS row in the matrices must carry a repo-relative artifact path.
-    const passRows = finalEvidenceText
+    // The whole-document PASS-row total is exactly the sum of the locked
+    // per-section sets; no `: PASS` rows may live outside the required matrices.
+    const expectedTotal = Object.values(requiredMatrixRows).reduce(
+      (total, keys) => total + keys.length,
+      0,
+    );
+    const documentPassRows = finalEvidenceText
       .split("\n")
       .filter((line) => line.trim().startsWith("|") && line.includes(": PASS"));
-    expect(passRows.length).toBeGreaterThanOrEqual(30);
+    expect(documentPassRows.length, "total final-evidence PASS rows").toBe(
+      expectedTotal,
+    );
+
+    // Every PASS row in the matrices must carry a repo-relative artifact path.
     for (const row of passRows) {
       expect(
         /support\/sidecars\/|docs\/03-runbooks\/|infra\/alerts\/|apps\/api\//.test(
@@ -362,7 +464,9 @@ describe("FLEETS-CLOSEOUT-006 map/geofence observability closeout", () => {
       verdict: "PASS",
       placeholderHits,
       passRowCount: passRows.length,
+      expectedPassRowTotal: expectedTotal,
       requiredSections,
+      lockedRowSets,
       runbookDistinctions: [
         "provider outage",
         "address ambiguity",
