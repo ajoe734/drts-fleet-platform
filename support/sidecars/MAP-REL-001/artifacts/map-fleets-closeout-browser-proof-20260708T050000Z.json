@@ -1,0 +1,71 @@
+{
+  "orderId": "ORD-SMOKE-001",
+  "callId": "CALL-SMOKE-001",
+  "recordingId": "REC-SMOKE-001",
+  "submitResult": "pending_dispatch",
+  "bookingGateBeforeSubmit": "serviceable",
+  "bookingGateAfterSubmit": "pickup_coordinates_required",
+  "requestBody": {
+    "callId": "CALL-SMOKE-001",
+    "agentId": "AGENT-OPS-001",
+    "pickup": {
+      "addressName": "Taipei City Hall",
+      "address": "No. 1, City Hall Road, Xinyi District, Taipei",
+      "normalizedAddress": "No.1 City Hall Rd, Xinyi, Taipei",
+      "lat": 25.037519,
+      "lng": 121.56368,
+      "placeId": "place-city-hall",
+      "geocodeProvider": "mock-geo",
+      "geocodeConfidence": "exact",
+      "coordinateSource": "provider_candidate",
+      "coordinateAccuracyM": 8,
+      "providerCandidateId": "place-city-hall",
+      "selectedByActorId": "AGENT-OPS-001",
+      "selectedAt": null,
+      "surface": "callcenter",
+      "coordinateProvenance": {
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "exact",
+        "providerCandidateId": "place-city-hall",
+        "placeId": "place-city-hall",
+        "coordinateAccuracyM": 8,
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": null,
+        "surface": "callcenter"
+      }
+    },
+    "dropoff": {
+      "addressName": "Xinyi Office",
+      "address": "No. 100, Songren Road, Xinyi District, Taipei",
+      "normalizedAddress": "No.100 Songren Rd, Xinyi, Taipei",
+      "lat": 25.033879,
+      "lng": 121.568743,
+      "placeId": "place-xinyi-office",
+      "geocodeProvider": "mock-geo",
+      "geocodeConfidence": "interpolated",
+      "coordinateSource": "provider_candidate",
+      "coordinateAccuracyM": 25,
+      "providerCandidateId": "place-xinyi-office",
+      "selectedByActorId": "AGENT-OPS-001",
+      "selectedAt": null,
+      "surface": "callcenter",
+      "coordinateProvenance": {
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "interpolated",
+        "providerCandidateId": "place-xinyi-office",
+        "placeId": "place-xinyi-office",
+        "coordinateAccuracyM": 25,
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": null,
+        "surface": "callcenter"
+      }
+    },
+    "passenger": {
+      "name": "Smoke Caller",
+      "phone": "0912-000-301"
+    },
+    "recordingId": "REC-SMOKE-001"
+  }
+}
