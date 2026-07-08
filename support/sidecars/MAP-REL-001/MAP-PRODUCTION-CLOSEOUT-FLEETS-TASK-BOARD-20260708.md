@@ -1,6 +1,6 @@
 # Map Production Closeout Fleets Task Board
 
-**Board date:** `2026-07-08`  
+**Board date:** `2026-07-08`
 **Closeout family:** `map-geofence-production-closeout-20260708`
 
 ## Gate Summary
