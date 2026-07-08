@@ -2,7 +2,7 @@
 
 **Task:** `MAP-REL-001` release evidence closeout
 **Owner task:** `FLEETS-CLOSEOUT-008`
-**Release closeout branch:** `codex2/fleets-closeout-008@c75c7fc164f5c4cbf2a9b3e36eed14e44aed76ea`
+**Evidence assembly commit:** `origin/codex2/fleets-closeout-008@d15915975bdcf09e9ff9956ec4fd426e676b4141`
 **Date:** `2026-07-08`
 **Reviewer:** `Codex`
 
