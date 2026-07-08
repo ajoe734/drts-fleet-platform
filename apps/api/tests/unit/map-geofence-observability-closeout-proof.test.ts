@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -40,6 +39,15 @@ const alertsText = readFileSync(alertsPath, "utf8");
 const mapRunbookText = readFileSync(mapRunbookPath, "utf8");
 const operationalRunbookText = readFileSync(operationalRunbookPath, "utf8");
 const apiReadmeText = readFileSync(apiReadmePath, "utf8");
+const finalEvidenceBranchHeadMatch = finalEvidenceText.match(
+  /Implementation branch\/SHA:\s+`([^`]+)`/,
+);
+
+if (!finalEvidenceBranchHeadMatch) {
+  throw new Error("Final evidence must declare an implementation branch/SHA");
+}
+
+const finalEvidenceBranchHead = finalEvidenceBranchHeadMatch[1];
 
 const requiredMetrics = [
   "map_geocode_requests_total",
@@ -166,13 +174,6 @@ const runbookDistinctions = [
   },
 ] as const;
 
-function readGitValue(command: string) {
-  return execSync(command, {
-    cwd: workspaceRoot,
-    encoding: "utf8",
-  }).trim();
-}
-
 function expectPassRow(text: string, rowKey: string) {
   expect(text).toContain(`| \`${rowKey}\``);
   expect(text).toContain("PASS");
@@ -230,10 +231,6 @@ it("writes observability closeout proof for FLEETS-CLOSEOUT-006", () => {
 
   const artifactPath = path.resolve(workspaceRoot, proofRelativePath);
   mkdirSync(path.dirname(artifactPath), { recursive: true });
-
-  const currentBranch = readGitValue("git branch --show-current");
-  const currentHead = readGitValue("git rev-parse HEAD");
-
   writeFileSync(
     artifactPath,
     JSON.stringify(
@@ -241,7 +238,7 @@ it("writes observability closeout proof for FLEETS-CLOSEOUT-006", () => {
         taskId: "FLEETS-CLOSEOUT-006",
         verdict: "PASS",
         closeoutDate: "2026-07-08",
-        branchHead: `${currentBranch}@${currentHead}`,
+        branchHead: finalEvidenceBranchHead,
         evidenceAnchors: {
           finalEvidence: finalEvidenceRelativePath,
           automatedEvidence: automatedEvidenceRelativePath,
