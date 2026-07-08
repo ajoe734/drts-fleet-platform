@@ -1,6 +1,6 @@
 # FLEETS-CLOSEOUT-004 SIDECAR ACCEPTANCE
 
-Status: review (round 2 handoff to `Codex` after dependency-snapshot refresh)
+Status: review (round 3 handoff to `Codex` after removing pinned mutable `last_update` for the related active task)
 Owner: Claude (reassigned from Codex2 per chairman availability-first reassignment; the Codex2 owner lane hit a 2/2 terminal loop on this support-only sidecar)
 Reviewer: Codex
 Parent: `FLEETS-CLOSEOUT-004` (owner `Codex`, reviewer `Codex2`)
@@ -59,7 +59,7 @@ All three of this sidecar's declared prerequisites are resolved as archived-`don
 
 | Dependency | Machine-truth status | Note |
 | --- | --- | --- |
-| `FLEETS-CLOSEOUT-001` | **in_progress** (active; owner `Codex`, reviewer `Codex2`; refreshed against live `ai-status.json`, which reports `last_update` 2026-07-08T06:12:30Z). | "Callcenter persisted spatial proof". It shares the same-order-ID linkage the parent's Ops visibility row depends on (acceptance bullet 2 / A2). It is a separate active release task, not a prerequisite this support sidecar can or should progress. Recorded here for completeness; no action taken. |
+| `FLEETS-CLOSEOUT-001` | **active** (owner `Codex`, reviewer `Codex2`). Authoritative live `status`, `last_update`, and `next` for this task are in `ai-status.json.FLEETS-CLOSEOUT-001`; not duplicated inline because it is a separate active task whose mutable fields drift independently of this packet. | "Callcenter persisted spatial proof". It shares the same-order-ID linkage the parent's Ops visibility row depends on (acceptance bullet 2 / A2). It is a separate active release task, not a prerequisite this support sidecar can or should progress. Recorded here for completeness; no action taken. |
 
 ### Out of scope for this sidecar
 
@@ -123,7 +123,8 @@ AI_NAME=Codex scripts/ai-status.sh reopen FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE
 1. `AI_NAME=Claude scripts/ai-status.sh start FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE "Assembling acceptance checklist, dependency map, and support packet for FLEETS-CLOSEOUT-004 (support-only, no canonical edits)"` — sidecar moved to `in_progress` under new owner `Claude` (reassigned from `Codex2`).
 2. Round-1 draft of this support artifact created under `support/sidecars/FLEETS-CLOSEOUT-004/FLEETS-CLOSEOUT-004-SIDECAR-ACCEPTANCE.md`: parent live snapshot, dependency map (with machine-truth statuses + doc citations), acceptance mapping, gate context, and a branch-resolution honesty note distinguishing on-branch anchors from parent-branch-local proof artifacts. No canonical truth modified outside the sidecar path.
 3. Task-scoped commit + normal non-force push of the sidecar artifact, then handoff to `Codex` for review (see machine truth for exact transition timestamps).
-4. Round-1 review returned by `Codex`: the related dependency snapshot was stale — the packet listed `FLEETS-CLOSEOUT-001` as active-`blocked`, but live `ai-status.json` now shows it `in_progress` (`last_update` 2026-07-08T06:12:30Z, owner `Codex`, reviewer `Codex2`). Refreshed every reference to that task (dependency-map narrative, related-dependency table, sidecar reviewer checklist, approve-command summary, and evidence inventory) to `in_progress`, and corrected the dependency-map count ("all three declared prerequisites archived-done" — previously miscounted as "two"). Re-verified the three hard prerequisites are still archived-`done` in `ai-status.json.archived_task_ids` and the parent `FLEETS-CLOSEOUT-004` is still `in_progress` with no commit/push/integration recorded. No canonical truth modified outside the sidecar path. Re-committed + non-force pushed, then re-handed off to `Codex` for round-2 review.
+4. Round-1 review returned by `Codex`: the related dependency snapshot was stale — the packet listed `FLEETS-CLOSEOUT-001` as active-`blocked`, but live `ai-status.json` had moved it to `in_progress` (owner `Codex`, reviewer `Codex2`). Refreshed every reference to that task (dependency-map narrative, related-dependency table, sidecar reviewer checklist, approve-command summary, and evidence inventory), and corrected the dependency-map count ("all three declared prerequisites archived-done" — previously miscounted as "two"). Re-verified the three hard prerequisites are still archived-`done` in `ai-status.json.archived_task_ids` and the parent `FLEETS-CLOSEOUT-004` is still `in_progress` with no commit/push/integration recorded. No canonical truth modified outside the sidecar path. Re-committed + non-force pushed, then re-handed off to `Codex` for round-2 review.
+5. Round-2 review returned by `Codex`: the round-1 refresh had pinned `FLEETS-CLOSEOUT-001`'s mutable `last_update` timestamp inline (in the related-dependency row and this handoff narrative), which drifts independently of this packet and had already gone stale. Root-cause fix rather than another refresh: the related-dependency row now records only the durable owner/reviewer and defers the live `status`/`last_update`/`next` to `ai-status.json.FLEETS-CLOSEOUT-001` as authoritative (the same not-duplicated-inline discipline already used for this sidecar's own `Last Update` header), and this handoff log no longer cites a pinned `last_update` value. No canonical truth modified outside the sidecar path. Re-committed + non-force pushed, then re-handed off to `Codex` for round-3 review.
 
 ---
 
