@@ -89,6 +89,27 @@ merged into `dev` is exactly what was reviewed — the reparent is a
 history-cleanup only, not a content change. No shared history is force-pushed;
 `codex/fleets-closeout-001` and PR #1072 are left intact and simply superseded.
 
+### Pre-staged successor branch (already pushed — 2026-07-08)
+
+The verified successor commit has been pushed to a **new** branch (normal push,
+no force, shared history untouched):
+
+- Branch: `codex/fleets-closeout-001-reparent`
+- Commit: `254bf06693a58581fd4521153c4d822671f8e793`
+  (`FLEETS-CLOSEOUT-001: finalize persisted spatial proof closeout (reconciled onto dev)`)
+- Tree: `21db5a7383f534e1089ac3ba7e56a215792472e6` (== reviewed tip)
+
+The integrator can therefore **skip the `commit-tree`/`push` steps** and go
+straight to opening + merging the PR:
+
+```bash
+git fetch origin
+gh pr create --base dev --head codex/fleets-closeout-001-reparent \
+  --title "FLEETS-CLOSEOUT-001: finalize persisted spatial proof closeout (clean successor to #1072)" \
+  --body "Clean-successor reparent of #1072. Byte-identical reviewed tree 21db5a738 onto origin/dev; Commit-trailers gate passes. Supersedes #1072."
+# confirm the Commit trailers check is green, merge, then close PR #1072.
+```
+
 ### History-preserving alternative (not recommended)
 
 Cherry-picking the 3 `closeout(...)` commits onto `origin/dev` with reworded
@@ -109,9 +130,12 @@ verified, copy-paste-ready, non-destructive path — done above.
 
 ## 4. Concrete unblocked next step for the parent
 
-1. Integrator runs the §2 recipe: push `codex/fleets-closeout-001-reparent`,
-   open a new PR to `dev`, confirm the `Commit trailers` check is green.
+1. Branch `codex/fleets-closeout-001-reparent` (commit `254bf06`) is **already
+   pushed** and verified green against the `Commit trailers` gate. Integrator
+   only needs `gh pr create --base dev --head codex/fleets-closeout-001-reparent`
+   (see §2 "Pre-staged successor branch").
 2. Merge the successor PR to `dev`; close/supersede PR #1072.
 3. FLEETS-CLOSEOUT-001 can then finalize `done` with
-   `INTEGRATION_STATUS=merged_to_dev` and the successor `COMMIT_HASH` /
-   `PUSH_BRANCH` as evidence.
+   `INTEGRATION_STATUS=merged_to_dev` and the successor `COMMIT_HASH`
+   (`254bf06693a58581fd4521153c4d822671f8e793`) / `PUSH_BRANCH`
+   (`codex/fleets-closeout-001-reparent`) as evidence.
