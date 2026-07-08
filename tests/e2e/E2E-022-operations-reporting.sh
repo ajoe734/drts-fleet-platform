@@ -195,8 +195,8 @@ write_app_order_fixture() {
     --arg passengerName "E2E App Rider ${SUFFIX}" \
     --arg passengerPhone "+886900100${SUFFIX}" \
     '{
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: { address: $pickup, lat: 25.05, lng: 121.55, coordinateSource: "manual_pin" },
+      dropoff: { address: $dropoff, lat: 25.06, lng: 121.56, coordinateSource: "manual_pin" },
       passenger: {
         name: $passengerName,
         phone: $passengerPhone
@@ -220,8 +220,8 @@ write_call_center_order_fixture() {
       callId: $callId,
       agentId: $agentId,
       recordingId: $recordingId,
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: { address: $pickup, lat: 25.05, lng: 121.55, coordinateSource: "manual_pin" },
+      dropoff: { address: $dropoff, lat: 25.06, lng: 121.56, coordinateSource: "manual_pin" },
       passenger: {
         name: $passengerName,
         phone: $passengerPhone
