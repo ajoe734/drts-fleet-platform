@@ -83,6 +83,16 @@ const requiredAlerts = [
     window: "[5m]",
   },
   {
+    name: "MapProviderOutageFailClosed",
+    metric: 'map_provider_fail_closed{status="unhealthy"}',
+    window: null,
+  },
+  {
+    name: "AddressAmbiguitySpike",
+    metric: 'map_geocode_requests_total{result="address_ambiguity"}',
+    window: "[15m]",
+  },
+  {
     name: "CoordinateLessDispatchAttemptHigh",
     metric: "coordinate_less_booking_attempts_total",
     window: "[5m]",
@@ -96,6 +106,16 @@ const requiredAlerts = [
     name: "ServiceAreaEvaluationUnavailable",
     metric:
       'service_area_evaluations_total{decision=~"manual_review|not_serviceable",reason_code=~"EVALUATOR_UNAVAILABLE|POSTGIS_UNAVAILABLE"}',
+    window: "[10m]",
+  },
+  {
+    name: "ManualMapOverrideSpike",
+    metric: "geo_manual_overrides_total",
+    window: "[30m]",
+  },
+  {
+    name: "ServiceAreaGeometryMutationUnexpected",
+    metric: 'service_area_geometry_mutations_total{status!="approved"}',
     window: "[10m]",
   },
 ] as const;
@@ -132,9 +152,15 @@ const runbookDistinctions = [
     runbookNeedle: "## Manual Override",
   },
   {
+    key: "geometry_mutation",
+    title: "Geometry Mutation",
+    finalEvidenceNeedle: "geometry mutation / OBS-MAP-GEOMETRY-MUTATION: PASS",
+    runbookNeedle: "## Geometry Mutation",
+  },
+  {
     key: "geometry_rollback",
     title: "Geometry Rollback",
-    finalEvidenceNeedle: "service_area.policy.retired: PASS",
+    finalEvidenceNeedle: "geometry rollback / OBS-MAP-GEOMETRY-MUTATION: PASS",
     runbookNeedle:
       "verify `service_area.stop_policy.published` or `service_area.stop_policy.retired`",
   },
@@ -171,7 +197,9 @@ it("writes observability closeout proof for FLEETS-CLOSEOUT-006", () => {
     expectPassRow(finalEvidenceText, alert.name);
     expect(alertsText).toContain(`- alert: ${alert.name}`);
     expect(alertsText).toContain(alert.metric);
-    expect(alertsText).toContain(alert.window);
+    if (alert.window !== null) {
+      expect(alertsText).toContain(alert.window);
+    }
   }
 
   expect(alertsText).not.toContain("increase(map_provider_errors_total[1d])");

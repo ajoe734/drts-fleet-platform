@@ -2,7 +2,7 @@
   "taskId": "FLEETS-CLOSEOUT-006",
   "verdict": "PASS",
   "closeoutDate": "2026-07-08",
-  "branchHead": "codex2/fleets-closeout-006@c75c7fc164f5c4cbf2a9b3e36eed14e44aed76ea",
+  "branchHead": "codex2/fleets-closeout-006@82d124aace9b334b58281e51915e460116e67b0d",
   "evidenceAnchors": {
     "finalEvidence": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
     "automatedEvidence": "support/sidecars/MAP-OBS-001/MAP-OBS-001-AUTOMATED-EVIDENCE-20260701.md",
@@ -132,6 +132,26 @@
         ]
       },
       {
+        "alertName": "MapProviderOutageFailClosed",
+        "status": "PASS",
+        "sourceMetric": "map_provider_fail_closed{status=\"unhealthy\"}",
+        "recentWindow": null,
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "AddressAmbiguitySpike",
+        "status": "PASS",
+        "sourceMetric": "map_geocode_requests_total{result=\"address_ambiguity\"}",
+        "recentWindow": "[15m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
         "alertName": "CoordinateLessDispatchAttemptHigh",
         "status": "PASS",
         "sourceMetric": "coordinate_less_booking_attempts_total",
@@ -155,6 +175,26 @@
         "alertName": "ServiceAreaEvaluationUnavailable",
         "status": "PASS",
         "sourceMetric": "service_area_evaluations_total{decision=~\"manual_review|not_serviceable\",reason_code=~\"EVALUATOR_UNAVAILABLE|POSTGIS_UNAVAILABLE\"}",
+        "recentWindow": "[10m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "ManualMapOverrideSpike",
+        "status": "PASS",
+        "sourceMetric": "geo_manual_overrides_total",
+        "recentWindow": "[30m]",
+        "artifacts": [
+          "infra/alerts/map-geofence-alerts.yaml",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+        ]
+      },
+      {
+        "alertName": "ServiceAreaGeometryMutationUnexpected",
+        "status": "PASS",
+        "sourceMetric": "service_area_geometry_mutations_total{status!=\"approved\"}",
         "recentWindow": "[10m]",
         "artifacts": [
           "infra/alerts/map-geofence-alerts.yaml",
@@ -189,6 +229,12 @@
       },
       {
         "topic": "Manual Override",
+        "status": "PASS",
+        "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
+      },
+      {
+        "topic": "Geometry Mutation",
         "status": "PASS",
         "artifact": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
         "runbook": "docs/03-runbooks/map-geofence-observability-runbook.md"
