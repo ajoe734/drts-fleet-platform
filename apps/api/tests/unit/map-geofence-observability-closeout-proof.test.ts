@@ -174,9 +174,29 @@ const runbookDistinctions = [
   },
 ] as const;
 
-function expectPassRow(text: string, rowKey: string) {
-  expect(text).toContain(`| \`${rowKey}\``);
-  expect(text).toContain("PASS");
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getSection(markdown: string, heading: string) {
+  const sectionMatch = markdown.match(
+    new RegExp(`## ${escapeRegExp(heading)}\\n([\\s\\S]*?)(?:\\n## |$)`),
+  );
+
+  if (!sectionMatch) {
+    throw new Error(`Missing section: ${heading}`);
+  }
+
+  return sectionMatch[1];
+}
+
+function expectPassRow(sectionText: string, rowKey: string) {
+  const rowMatch = sectionText.match(
+    new RegExp("^\\|\\s+`" + escapeRegExp(rowKey) + "`\\s+\\|.*$", "m"),
+  );
+
+  expect(rowMatch, `Missing row for ${rowKey}`).not.toBeNull();
+  expect(rowMatch?.[0]).toContain("PASS");
 }
 
 it("writes observability closeout proof for FLEETS-CLOSEOUT-006", () => {
@@ -186,16 +206,30 @@ it("writes observability closeout proof for FLEETS-CLOSEOUT-006", () => {
   expect(finalEvidenceText).toContain("## Alert Evidence Matrix");
   expect(finalEvidenceText).toContain("## Runbook Distinction Matrix");
 
+  const metricsSection = getSection(
+    finalEvidenceText,
+    "Metrics Evidence Matrix",
+  );
+  const auditSection = getSection(
+    finalEvidenceText,
+    "Audit Event Evidence Matrix",
+  );
+  const alertsSection = getSection(finalEvidenceText, "Alert Evidence Matrix");
+  const runbookSection = getSection(
+    finalEvidenceText,
+    "Runbook Distinction Matrix",
+  );
+
   for (const metric of requiredMetrics) {
-    expectPassRow(finalEvidenceText, metric);
+    expectPassRow(metricsSection, metric);
   }
 
   for (const auditEvent of requiredAuditEvents) {
-    expectPassRow(finalEvidenceText, auditEvent);
+    expectPassRow(auditSection, auditEvent);
   }
 
   for (const alert of requiredAlerts) {
-    expectPassRow(finalEvidenceText, alert.name);
+    expectPassRow(alertsSection, alert.name);
     expect(alertsText).toContain(`- alert: ${alert.name}`);
     expect(alertsText).toContain(alert.metric);
     if (alert.window !== null) {
@@ -209,7 +243,7 @@ it("writes observability closeout proof for FLEETS-CLOSEOUT-006", () => {
   );
 
   for (const distinction of runbookDistinctions) {
-    expect(finalEvidenceText).toContain(distinction.finalEvidenceNeedle);
+    expect(runbookSection).toContain(distinction.finalEvidenceNeedle);
     expect(mapRunbookText).toContain(distinction.runbookNeedle);
   }
 

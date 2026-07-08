@@ -2,7 +2,7 @@
   "taskId": "FLEETS-CLOSEOUT-006",
   "verdict": "PASS",
   "closeoutDate": "2026-07-08",
-  "branchHead": "codex2/fleets-closeout-006@0eee0fa59430",
+  "branchHead": "codex2/fleets-closeout-006@77b5c802e31f",
   "evidenceAnchors": {
     "finalEvidence": "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
     "automatedEvidence": "support/sidecars/MAP-OBS-001/MAP-OBS-001-AUTOMATED-EVIDENCE-20260701.md",

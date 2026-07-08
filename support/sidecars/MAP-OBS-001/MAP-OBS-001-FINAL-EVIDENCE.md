@@ -1,7 +1,7 @@
 # MAP-OBS-001 Final Observability Evidence
 
 Task: `MAP-OBS-001`
-Implementation branch/SHA: `codex2/fleets-closeout-006@0eee0fa59430`
+Implementation branch/SHA: `codex2/fleets-closeout-006@77b5c802e31f`
 Merge-base against `origin/dev`: `c75c7fc164f5c4cbf2a9b3e36eed14e44aed76ea`
 Automated evidence log: `support/sidecars/MAP-OBS-001/MAP-OBS-001-AUTOMATED-EVIDENCE-20260701.md`
 
@@ -13,7 +13,7 @@ MAP-OBS-001 is `PASS` for repo-backed observability scope. Required metrics, aud
 
 | Item                     | Value                                                                                                           |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| OBS branch/SHA           | `codex2/fleets-closeout-006@0eee0fa59430`                                                                       |
+| OBS branch/SHA           | `codex2/fleets-closeout-006@77b5c802e31f`                                                                       |
 | Base branch / merge-base | `origin/dev@c75c7fc164f5c4cbf2a9b3e36eed14e44aed76ea`                                                           |
 | Test environment         | `local isolated task worktree`                                                                                  |
 | Metrics backend          | `repo-backed in-process mapGeofence snapshot; Prometheus/OpenTelemetry exporter mapping remains external-gated` |
