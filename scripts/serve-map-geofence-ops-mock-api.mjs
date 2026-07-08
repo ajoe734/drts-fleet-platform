@@ -529,7 +529,8 @@ function sendEmpty(response, status = 204) {
   response.writeHead(status, {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization,x-actor-id,x-actor-type,x-realm",
+    "access-control-allow-headers":
+      "content-type,authorization,x-actor-id,x-actor-type,x-realm",
   });
   response.end();
 }

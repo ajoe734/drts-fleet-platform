@@ -33,7 +33,16 @@ await waitForApiHealth(`${API_BASE_URL}/api/health`);
 
 const nextProcess = spawn(
   "pnpm",
-  ["exec", "next", "dev", "--webpack", "--hostname", OPS_HOST, "--port", OPS_PORT],
+  [
+    "exec",
+    "next",
+    "dev",
+    "--webpack",
+    "--hostname",
+    OPS_HOST,
+    "--port",
+    OPS_PORT,
+  ],
   {
     cwd: OPS_APP_DIR,
     env: {

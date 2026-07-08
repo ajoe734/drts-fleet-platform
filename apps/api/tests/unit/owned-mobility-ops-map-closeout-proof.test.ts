@@ -49,10 +49,9 @@ describe("FLEETS-CLOSEOUT-004 backend-linked Ops map proof", () => {
       const stack = new Error().stack ?? "";
       if (stack.includes("buildSpatialAuditSnapshot")) {
         snapshotSequence += 1;
-        return `snapshot-fleets-closeout-004-${String(snapshotSequence).padStart(
-          3,
-          "0",
-        )}`;
+        return `snapshot-fleets-closeout-004-${String(
+          snapshotSequence,
+        ).padStart(3, "0")}`;
       }
       if (stack.includes("appendTrace")) {
         traceSequence += 1;
@@ -428,7 +427,8 @@ function summarizeCandidate(candidate: DispatchCandidate) {
 
 function currentBranchSha() {
   try {
-    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    const { execFileSync } =
+      require("node:child_process") as typeof import("node:child_process");
     const branch = execFileSync("git", ["branch", "--show-current"], {
       encoding: "utf8",
     }).trim();
