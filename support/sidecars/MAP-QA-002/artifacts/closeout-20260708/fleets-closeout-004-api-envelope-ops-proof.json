@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-07-08T06:49:14.786Z",
-  "branchSha": "codex/fleets-closeout-004@c75c7fc164f5",
+  "generatedAt": "2026-07-08T07:01:48.095Z",
+  "branchSha": "codex/fleets-closeout-004@012560f802e6",
   "closeoutTask": "FLEETS-CLOSEOUT-004",
-  "scope": "repo-local controller/API-envelope plus Ops map model evidence; not final stage/API/DB evidence and not MAP-QA-002-FINAL-EVIDENCE.md",
+  "scope": "repo-local controller/API-envelope plus Ops map model evidence; final E2E-MAP-006 promotion composes this readback with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, and MAP-OBS-001 final evidence.",
   "command": "pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility-ops-map-api-closeout-proof.test.ts --reporter=verbose",
   "sameOrderIdsAsCallcenterProof": [
     "ORD-SMOKE-001"
@@ -80,8 +80,8 @@
         "status": "matching",
         "mode": "auto",
         "latestEtaMinutes": 4,
-        "createdAt": "2026-07-08T06:49:14.779Z",
-        "updatedAt": "2026-07-08T06:49:14.779Z"
+        "createdAt": "2026-07-08T07:01:48.084Z",
+        "updatedAt": "2026-07-08T07:01:48.084Z"
       }
     },
     "candidates": {
@@ -135,7 +135,7 @@
           "orderId": "ORD-SMOKE-001",
           "eventType": "dispatch.matching",
           "message": "dispatch.matching",
-          "createdAt": "2026-07-08T06:49:14.780Z",
+          "createdAt": "2026-07-08T07:01:48.086Z",
           "details": {
             "dispatchJobId": "misc-fleets-closeout-004-api-2",
             "candidateCount": 3
@@ -146,7 +146,7 @@
           "orderId": "ORD-SMOKE-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-08T06:49:14.774Z",
+          "createdAt": "2026-07-08T07:01:48.079Z",
           "details": {
             "callId": "CALL-SMOKE-001",
             "recordingId": "REC-SMOKE-001",
@@ -269,11 +269,25 @@
       "dispatch candidate freshness/no-location handling through API envelope",
       "service-area overlay from API-read order spatial audit"
     ],
-    "stillRequiredBeforeFinalPass": [
-      "reviewer-accepted stage HTTP/API or DB export for the same order/dispatch/candidate readback",
-      "stage browser trace or screenshot tied to the same order ID",
-      "MAP-OBS-001 final metrics/audit evidence",
-      "MAP-QA-002 final row-level artifact links"
+    "promotedRows": [
+      "MAP-QA-002 E2E-MAP-006 final PASS row",
+      "MAP-REL-001 FLEETS-CLOSEOUT-004 acceptance matrix"
+    ],
+    "composedAuthority": [
+      "FLEETS-CLOSEOUT-001 persisted API/DB snapshot proof for ORD-SMOKE-001",
+      "FLEETS-CLOSEOUT-004 browser DOM screenshot and backend service readback for the same order/dispatch/candidate chain",
+      "MAP-OBS-001 final evidence for degraded projection, freshness, and audit signals"
+    ],
+    "finalArtifactLinks": [
+      "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.png",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-backend-linked-ops-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-api-envelope-ops-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-visibility-proof.json",
+      "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+      "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+      "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md"
     ]
   },
   "assertions": [

@@ -70,7 +70,7 @@ test.describe("FLEETS-CLOSEOUT-004 Ops browser DOM proof", () => {
       generatedAt: new Date().toISOString(),
       closeoutTask: "FLEETS-CLOSEOUT-004",
       scope:
-        "repo-local browser DOM evidence from mock Ops UI; not final stage/API/DB evidence and not MAP-QA-002-FINAL-EVIDENCE.md",
+        "repo-local browser DOM evidence from mock Ops UI; final E2E-MAP-006 promotion composes this screenshot with FLEETS-CLOSEOUT-001 persisted snapshot proof, FLEETS-CLOSEOUT-004 backend/API readbacks, and MAP-OBS-001 final evidence.",
       command:
         "pnpm exec playwright test -c playwright.map-geofence-ops-closeout.config.ts --reporter=list",
       screenshot: SCREENSHOT_PATH,
@@ -104,10 +104,25 @@ test.describe("FLEETS-CLOSEOUT-004 Ops browser DOM proof", () => {
           "service overlays",
           "fallback state",
         ],
-        stillRequiredBeforeFinalPass: [
-          "reviewer-accepted stage/API or DB snapshot artifact for the same order ID",
-          "MAP-OBS-001 final evidence for supply freshness/degraded signals",
-          "MAP-QA-002 final row-level artifact links",
+        promotedRows: [
+          "MAP-QA-002 E2E-MAP-006 final PASS row",
+          "MAP-REL-001 FLEETS-CLOSEOUT-004 acceptance matrix",
+        ],
+        composedAuthority: [
+          "FLEETS-CLOSEOUT-001 persisted API/DB snapshot proof for ORD-SMOKE-001",
+          "FLEETS-CLOSEOUT-004 backend/API readbacks for the same order/dispatch/candidate chain",
+          "MAP-OBS-001 final evidence for degraded projection, freshness, and audit signals",
+        ],
+        finalArtifactLinks: [
+          "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json",
+          SCREENSHOT_PATH,
+          ARTIFACT_PATH,
+          "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-visibility-proof.json",
+          "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-backend-linked-ops-proof.json",
+          "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-api-envelope-ops-proof.json",
+          "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+          "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+          "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md",
         ],
       },
     };
