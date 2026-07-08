@@ -205,8 +205,8 @@ write_booking_fixture() {
       partnerEntrySlug: $entrySlug,
       eligibilityVerificationId: $eligibilityId,
       benefitReference: $benefitReference,
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: { address: $pickup, lat: 25.05, lng: 121.55, coordinateSource: "manual_pin" },
+      dropoff: { address: $dropoff, lat: 25.06, lng: 121.56, coordinateSource: "manual_pin" },
       reservationWindowStart: $windowStart,
       reservationWindowEnd: $windowEnd,
       passenger: {
