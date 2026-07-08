@@ -1,21 +1,25 @@
 # MAP-MOB-DRV-001 Gate D UAT Packet
 
-**Task:** `FLEETS-CLOSEOUT-005` - Driver native map/navigation UAT  
-**Driver build:** `origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2`  
-**Source closeout:** `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`  
-**Packet date:** `2026-07-08`  
+**Task:** `FLEETS-CLOSEOUT-005` - Driver native map/navigation UAT
+**Packet provenance:** `mixed-evidence`
+**UAT build:** `dev@66ee70f5b` (`2026-06-15` Android emulator sweep)
+**Committed driver evidence build:** `origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2` (`2026-07-03` coordinate handoff branch)
+**Source closeout:** `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`
+**Packet date:** `2026-07-08`
 **Evidence mode:** `ACCEPTED-EXTERNAL-GATED`
 
 ## Verdict
 
 Gate D closeout evidence is accepted as a mixed packet:
 
-- Android emulator UAT captured on `2026-06-15` proves the trip screen renders
-  in an active trip with a live route map, pickup/dropoff pins, and active-trip
-  heartbeat permission coexistence.
-- The committed `2026-07-03` driver build proves coordinate-only navigation
-  URLs, route-authority copy, current-location freshness copy, and
-  offline/degraded fallback copy through focused driver-app tests.
+- Android emulator UAT captured on `2026-06-15` against `dev@66ee70f5b`
+  proves the trip screen renders in an active trip with a live route map,
+  pickup/dropoff pins, and active-trip heartbeat permission coexistence.
+- The committed `2026-07-03` coordinate handoff build
+  `origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2`
+  proves coordinate-only navigation URLs, route-authority copy,
+  current-location freshness copy, and offline/degraded fallback copy through
+  focused driver-app tests.
 
 This packet does not claim a fresh `2026-07-08` simulator rerun or physical
 device video. It is the accepted external-gated Gate D packet for release
@@ -37,10 +41,10 @@ closeout on this branch.
 
 | Evidence family             | Artifact                                                                                                                                                                     | Notes                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Emulator trip UAT           | `docs/04-uat/driver-app-verification-20260615/round-03-trip-lifecycle.md`                                                                                                    | Active task advanced to `on_trip`; trip screen opened via deep link.                                       |
+| Emulator trip UAT           | `docs/04-uat/driver-app-verification-20260615/round-03-trip-lifecycle.md`                                                                                                    | Active task advanced to `on_trip`; trip screen opened via deep link on `dev@66ee70f5b`.                    |
 | Emulator trip screenshot    | `docs/04-uat/driver-app-verification-20260615/screens/r3-trip-on-trip.png`                                                                                                   | Visual capture referenced by Round 3.                                                                      |
-| Emulator heartbeat UAT      | `docs/04-uat/driver-app-verification-20260615/round-10-incident-heartbeat.md`                                                                                                | Records active-trip location permission and heartbeat coverage.                                            |
-| Driver build closeout       | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`                                                                                                         | Frozen build branch@sha plus command results.                                                              |
+| Emulator heartbeat UAT      | `docs/04-uat/driver-app-verification-20260615/round-10-incident-heartbeat.md`                                                                                                | Records active-trip location permission and heartbeat coverage on `dev@66ee70f5b`.                         |
+| Driver build closeout       | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`                                                                                                         | Frozen coordinate-handoff build branch@sha plus command results; not cited as native map rendering proof.  |
 | Driver map/navigation tests | `apps/driver-app/tests/unit/driver-navigation.test.ts`, `apps/driver-app/tests/unit/driver-location-heartbeat.test.ts`, `apps/driver-app/tests/unit/driver-trip-map.test.ts` | Repo-backed assertions for coordinate URLs, heartbeat after navigation handoff, and trip-map surface copy. |
 
 ## Explicit Limits
