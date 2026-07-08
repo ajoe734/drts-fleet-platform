@@ -57,13 +57,14 @@ Full command log and automation mapping are recorded in `support/sidecars/MAP-QA
 
 **Task:** `FLEETS-CLOSEOUT-002` - Cross-surface persisted anti-bypass proof
 **Owner / Reviewer:** `Claude` / `Codex2`
-**Promotion branch/SHA:** `claude/fleets-closeout-002@252b09f26`
+**Promotion branch/SHA:** `claude/fleets-closeout-002@e41b45edf`
 **Date:** `2026-07-08`
 **Scope:** Promotes the `E2E-MAP-004` / `E2E-MAP-005` browser-only PASS rows above into rows that also carry persisted backend API + audit proof, and adds an explicit backend anti-bypass row proving that provider-outage, no-geocode, ambiguity, and coordinate-less inputs cannot produce a normal dispatchable order. Every row below cites a fresh repo-local artifact generated on the promotion SHA.
 
 All backend proofs were rerun on the promotion SHA:
 
-- `pnpm --dir apps/api exec vitest run tests/unit/owned-mobility.service.test.ts` — `71/71 PASS` → `support/sidecars/MAP-QA-002/artifacts/final-evidence-20260708/vitest-owned-mobility-anti-bypass-20260708T0406Z.json`- `pnpm --dir apps/api exec vitest run tests/unit/geo.service.test.ts tests/unit/service-area.service.test.ts tests/unit/operational-observability.service.test.ts` — `39/39 PASS` → `support/sidecars/MAP-QA-002/artifacts/final-evidence-20260708/vitest-backend-antibypass-audit-20260708T0406Z.json`
+- `pnpm --dir apps/api exec vitest run tests/unit/owned-mobility.service.test.ts` — `71/71 PASS` → `support/sidecars/MAP-QA-002/artifacts/final-evidence-20260708/vitest-owned-mobility-anti-bypass-20260708T0406Z.json`
+- `pnpm --dir apps/api exec vitest run tests/unit/geo.service.test.ts tests/unit/service-area.service.test.ts tests/unit/operational-observability.service.test.ts` — `39/39 PASS` → `support/sidecars/MAP-QA-002/artifacts/final-evidence-20260708/vitest-backend-antibypass-audit-20260708T0406Z.json`
 
 ### Promoted Scenario Rows
 
