@@ -80,7 +80,7 @@ run_psql() {
   docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
     -e PGPASSWORD="$(database_password)" \
     postgres \
-    psql -U "$(database_user)" -d "$(database_name)" "$@"
+    psql "$DATABASE_URL" "$@"
 }
 
 run_psql_file() {
@@ -101,5 +101,5 @@ run_psql_file() {
   docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
     -e PGPASSWORD="$(database_password)" \
     postgres \
-    psql -U "$(database_user)" -d "$(database_name)" -v ON_ERROR_STOP=1 "$@" < "$file"
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@" < "$file"
 }
