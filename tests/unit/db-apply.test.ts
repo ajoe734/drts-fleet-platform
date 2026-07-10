@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -89,6 +89,17 @@ describe("db-apply legacy migration canonicalization", () => {
       ].join("\n"),
     );
     rmSync(toolDir, { force: true, recursive: true });
+  });
+
+  it("uses unique migration versions in the repo ledger", () => {
+    const versions = readdirSync(path.join(repoRoot, "infra/migrations"))
+      .filter((file) => /^V[0-9A-Z]+__.+\.sql$/.test(file))
+      .map((file) => file.split("__", 1)[0]);
+    const duplicates = versions.filter(
+      (version, index) => versions.indexOf(version) !== index,
+    );
+
+    expect(duplicates).toEqual([]);
   });
 
   it("replays renamed and re-numbered service-area migrations for legacy ledgers", () => {
