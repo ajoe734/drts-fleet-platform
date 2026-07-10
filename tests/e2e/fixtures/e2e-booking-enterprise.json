@@ -2,8 +2,8 @@
   "businessDispatchSubtype": "enterprise_dispatch",
   "pickup": {
     "address": "1 E2E Test Plaza, Staging City",
-    "lat": 25.0478,
-    "lng": 121.5319
+    "lat": 25.0375,
+    "lng": 121.5637
   },
   "dropoff": {
     "address": "99 E2E Destination Ave, Staging City",

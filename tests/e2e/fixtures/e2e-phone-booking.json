@@ -1,10 +1,14 @@
 {
   "businessDispatchSubtype": "enterprise_dispatch",
   "pickup": {
-    "address": "5 Call Center Lane, Integration City"
+    "address": "5 Call Center Lane, Integration City",
+    "lat": 25.0375,
+    "lng": 121.5637
   },
   "dropoff": {
-    "address": "88 Destination Road, Integration City"
+    "address": "88 Destination Road, Integration City",
+    "lat": 25.06,
+    "lng": 121.58
   },
   "reservationWindowStart": "__WINDOW_START__",
   "reservationWindowEnd": "__WINDOW_END__",

@@ -51,6 +51,10 @@ PORTAL_WINDOW_END=$(
   date -u -d "+30 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
     || date -u -v+30M +"%Y-%m-%dT%H:%M:%SZ"
 )
+TAIPEI_CORE_PICKUP_LAT="25.0375"
+TAIPEI_CORE_PICKUP_LNG="121.5637"
+TAIPEI_CORE_DROPOFF_LAT="25.06"
+TAIPEI_CORE_DROPOFF_LNG="121.58"
 
 APP_ORDER_ID=""
 APP_DISPATCH_JOB_ID=""
@@ -192,11 +196,15 @@ write_app_order_fixture() {
   jq -n \
     --arg pickup "10 E2E App Pickup ${SUFFIX}" \
     --arg dropoff "20 E2E App Dropoff ${SUFFIX}" \
+    --argjson pickupLat "$TAIPEI_CORE_PICKUP_LAT" \
+    --argjson pickupLng "$TAIPEI_CORE_PICKUP_LNG" \
+    --argjson dropoffLat "$TAIPEI_CORE_DROPOFF_LAT" \
+    --argjson dropoffLng "$TAIPEI_CORE_DROPOFF_LNG" \
     --arg passengerName "E2E App Rider ${SUFFIX}" \
     --arg passengerPhone "+886900100${SUFFIX}" \
     '{
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: { address: $pickup, lat: $pickupLat, lng: $pickupLng },
+      dropoff: { address: $dropoff, lat: $dropoffLat, lng: $dropoffLng },
       passenger: {
         name: $passengerName,
         phone: $passengerPhone
@@ -214,14 +222,18 @@ write_call_center_order_fixture() {
     --arg recordingId "e2e-022-rec-${SUFFIX}" \
     --arg pickup "30 E2E Phone Pickup ${SUFFIX}" \
     --arg dropoff "40 E2E Phone Dropoff ${SUFFIX}" \
+    --argjson pickupLat "$TAIPEI_CORE_PICKUP_LAT" \
+    --argjson pickupLng "$TAIPEI_CORE_PICKUP_LNG" \
+    --argjson dropoffLat "$TAIPEI_CORE_DROPOFF_LAT" \
+    --argjson dropoffLng "$TAIPEI_CORE_DROPOFF_LNG" \
     --arg passengerName "E2E Phone Rider ${SUFFIX}" \
     --arg passengerPhone "+886900200${SUFFIX}" \
     '{
       callId: $callId,
       agentId: $agentId,
       recordingId: $recordingId,
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: { address: $pickup, lat: $pickupLat, lng: $pickupLng },
+      dropoff: { address: $dropoff, lat: $dropoffLat, lng: $dropoffLng },
       passenger: {
         name: $passengerName,
         phone: $passengerPhone
