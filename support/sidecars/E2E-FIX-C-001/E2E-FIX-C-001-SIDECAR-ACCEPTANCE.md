@@ -5,7 +5,7 @@
 **Parent Owner:** `Codex`  
 **Parent Reviewer:** `Copilot`  
 **Sidecar Owner:** `Codex2`  
-**Sidecar Reviewer:** `Claude`  
+**Sidecar Reviewer:** `Gemini`
 **Generated:** `2026-07-10` (UTC)  
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or parent implementation.
 
@@ -37,7 +37,7 @@ Out of scope:
 ### Sidecar - `ai-status.json -> E2E-FIX-C-001-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex2`
-- reviewer=`Claude`
+- reviewer=`Gemini`
 - status is live in `ai-status.json`
 - task_class=`sidecar`
 - helper_parent=`E2E-FIX-C-001`
@@ -167,7 +167,7 @@ Legend: `[PARENT]` = parent task acceptance support. `[SIDECAR]` = helper accept
 
 - [x] Only support artifact output is added under `support/sidecars/E2E-FIX-C-001/`.
 - [x] No canonical truth or runtime code is edited by this sidecar task.
-- [x] Packet is ready to hand off to sidecar reviewer `Claude`.
+- [x] Packet is ready to hand off to sidecar reviewer `Gemini`.
 
 ---
 
@@ -187,7 +187,7 @@ Legend: `[PARENT]` = parent task acceptance support. `[SIDECAR]` = helper accept
 
 ## 8. Reviewer Focus
 
-Primary review questions for `Claude`:
+Primary review questions for `Gemini`:
 
 1. Does the packet accurately capture the two-layer root cause instead of attributing the failure
    only to shell scripts?
