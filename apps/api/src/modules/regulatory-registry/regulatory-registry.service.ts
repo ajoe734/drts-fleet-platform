@@ -43,6 +43,7 @@ import type {
   VehicleContractRecord,
   VehicleFleetAffiliationRecord,
   VehicleFleetAffiliationType,
+  VehicleLicenseType,
   VehicleRegistryRecord,
   VehicleSupplyDraft,
   VehicleSupplyLifecycleRecord,
@@ -188,6 +189,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-001",
     plateNo: "ABC-1001",
+    licenseType: "multi_purpose_taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi", "business_dispatch"],
     dispatchableFlag: true,
@@ -199,6 +201,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-002",
     plateNo: "ABC-1002",
+    licenseType: "taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi"],
     dispatchableFlag: false,
@@ -210,6 +213,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-003",
     plateNo: "ABC-1003",
+    licenseType: "taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi"],
     dispatchableFlag: true,
@@ -221,6 +225,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-004",
     plateNo: "ABC-1004",
+    licenseType: "business_vehicle",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["business_dispatch"],
     dispatchableFlag: true,
@@ -232,6 +237,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-av-demo-001",
     plateNo: "ABC-AV01",
+    licenseType: "business_vehicle",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["business_dispatch"],
     dispatchableFlag: true,
@@ -617,6 +623,13 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return this.vehicles.map((vehicle) => this.cloneVehicle(vehicle));
   }
 
+  getVehicleLicenseType(vehicleId: string): VehicleLicenseType | null {
+    const vehicle = this.vehicles.find(
+      (candidateVehicle) => candidateVehicle.vehicleId === vehicleId,
+    );
+    return this.normalizeVehicleLicenseType(vehicle?.licenseType);
+  }
+
   listDrivers() {
     return this.drivers.map((driver) =>
       this.cloneDriver(this.decorateDriver(driver)),
@@ -915,16 +928,20 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
     this.requireDriver(driverId);
 
+    const locationRepository = this.getLocationRepository();
+    const updatedAt = new Date().toISOString();
     const currentLocationUpdated =
-      await this.requireLocationRepository().upsertDriverLocation({
-        driverId,
-        lat: command.lat,
-        lng: command.lng,
-        recordedAt,
-        ...(command.accuracyM === undefined
-          ? {}
-          : { accuracyM: command.accuracyM }),
-      });
+      locationRepository === null
+        ? true
+        : await locationRepository.upsertDriverLocation({
+            driverId,
+            lat: command.lat,
+            lng: command.lng,
+            recordedAt,
+            ...(command.accuracyM === undefined
+              ? {}
+              : { accuracyM: command.accuracyM }),
+          });
 
     if (
       currentLocationUpdated &&
@@ -934,7 +951,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
         lng: command.lng,
         accuracyM: command.accuracyM ?? null,
         recordedAt,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       })
     ) {
       const latestLocation = this.cloneDriverLocation(
@@ -989,10 +1006,15 @@ export class RegulatoryRegistryService implements OnModuleInit {
   ): Promise<DriverLocationHeartbeatAck> {
     const heartbeat = this.normalizeHeartbeatEnvelope(item);
 
+    const locationRepository = this.getLocationRepository();
     const persistedResult =
-      await this.requireLocationRepository().recordDriverLocationEvent(
-        heartbeat,
-      );
+      locationRepository === null
+        ? {
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: new Date().toISOString(),
+          }
+        : await locationRepository.recordDriverLocationEvent(heartbeat);
 
     const currentLocationUpdated =
       persistedResult.currentLocationUpdated &&
@@ -1152,10 +1174,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     this.assertCoordinate(destLng, "destLng", -180, 180);
     this.requireDriver(driverId);
 
-    const driverLocation =
-      await this.requireLocationRepository().findLatestDriverLocation(
-        driverId.trim(),
-      );
+    const driverLocation = await this.resolveLatestDriverLocation(
+      driverId.trim(),
+    );
 
     if (!driverLocation) {
       throw new ApiRequestError(
@@ -1948,6 +1969,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     const created: VehicleRegistryRecord = {
       vehicleId: `veh_${randomUUID()}`,
       plateNo: draft.plateNo.trim(),
+      licenseType: this.normalizeVehicleLicenseType(draft.licenseType),
       operatingArea: draft.businessArea.trim(),
       supportedServiceBuckets: this.mapServiceBuckets(
         draft.supportedServiceProductCodes,
@@ -2531,6 +2553,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       : createEmptySupplyLifecycle(updatedAt);
     return {
       ...vehicle,
+      licenseType: this.normalizeVehicleLicenseType(vehicle.licenseType),
       supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
       updatedAt,
       supplyLifecycle: {
@@ -2608,6 +2631,21 @@ export class RegulatoryRegistryService implements OnModuleInit {
         ? profile.deviceBindings.map((binding) => ({ ...binding }))
         : [],
     };
+  }
+
+  private normalizeVehicleLicenseType(
+    licenseType?: string | null,
+  ): VehicleLicenseType | null {
+    switch (licenseType) {
+      case "taxi":
+      case "multi_purpose_taxi":
+      case "rental_car":
+      case "business_vehicle":
+      case "airport_transfer_vehicle":
+        return licenseType;
+      default:
+        return null;
+    }
   }
 
   private computeDriverEligibilityBlockedReasons(
@@ -3057,13 +3095,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return driver;
   }
 
-  private requireLocationRepository(): RegulatoryRegistryRepository {
+  private getLocationRepository(): RegulatoryRegistryRepository | null {
     if (!this.regulatoryRegistryRepository?.isEnabled()) {
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "DRIVER_LOCATION_STORAGE_UNAVAILABLE",
-        "Driver location storage is not available.",
-      );
+      return null;
     }
 
     return this.regulatoryRegistryRepository;

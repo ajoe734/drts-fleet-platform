@@ -19,6 +19,13 @@ import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-pa
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
+const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
+  "veh-demo-001": "multi_purpose_taxi",
+  "veh-demo-002": "taxi",
+  "veh-demo-003": "taxi",
+  "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
+};
 
 function createOwnedMobilityService(options?: {
   candidates?: Array<{
@@ -43,6 +50,7 @@ function createOwnedMobilityService(options?: {
     vehicleId: string,
     serviceBucket: string,
   ) => boolean;
+  vehicleLicenseTypes?: Record<string, string>;
   driverAvailable?: boolean;
   getDriverAvailability?: (driverId: string, serviceBucket: string) => boolean;
   enableVehicleEligibility?: boolean;
@@ -81,6 +89,12 @@ function createOwnedMobilityService(options?: {
         options?.getDriverAvailability?.(driverId, serviceBucket) ??
         options?.driverAvailable ??
         true,
+    ),
+    getVehicleLicenseType: vi.fn(
+      (vehicleId: string) =>
+        options?.vehicleLicenseTypes?.[vehicleId] ??
+        DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ??
+        null,
     ),
   };
   const auditNotificationService = {
