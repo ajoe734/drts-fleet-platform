@@ -123,13 +123,62 @@ run_admin_psql() {
   return 1
 }
 
+wait_for_db() {
+  local attempt
+  for attempt in $(seq 1 20); do
+    if run_psql -tAc "SELECT 1;" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "[hermetic] database ${DB_NAME} did not become connectable after reset"
+  return 1
+}
+
+run_with_retry() { # label cmd...
+  local label="$1"
+  shift
+  local attempt log_file
+  for attempt in 1 2; do
+    log_file="$(mktemp)"
+    if "$@" >"$log_file" 2>&1; then
+      rm -f "$log_file"
+      return 0
+    fi
+    echo "[hermetic] ${label} failed (attempt ${attempt})"
+    cat "$log_file"
+    rm -f "$log_file"
+    if [[ "$attempt" -eq 2 ]]; then
+      return 1
+    fi
+    sleep 2
+    wait_for_db || return 1
+  done
+}
+
+run_logged() { # label cmd...
+  local label="$1"
+  shift
+  local log_file
+  log_file="$(mktemp)"
+  if "$@" >"$log_file" 2>&1; then
+    rm -f "$log_file"
+    return 0
+  fi
+  echo "[hermetic] ${label} failed"
+  cat "$log_file"
+  rm -f "$log_file"
+  return 1
+}
+
 reset_db() {
   run_admin_psql -v ON_ERROR_STOP=1 -c \
     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME_SQL_LITERAL}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
   run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
   run_admin_psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
-  pnpm db:migrate >/dev/null 2>&1 || return 1
-  pnpm db:seed >/dev/null 2>&1 || return 1
+  wait_for_db || return 1
+  run_logged "db:migrate" pnpm db:migrate || return 1
+  run_logged "db:seed" pnpm db:seed || return 1
 }
 
 ensure_api_build() {
@@ -142,7 +191,7 @@ ensure_api_build() {
   fi
 
   echo "[hermetic] building @drts/api because apps/api/dist/main.js is missing"
-  bash -lc "$API_BUILD_CMD" >/dev/null 2>&1 || return 1
+  run_with_retry "api build" bash -lc "$API_BUILD_CMD" || return 1
 }
 
 start_api() {
