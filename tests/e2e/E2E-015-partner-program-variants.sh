@@ -205,8 +205,16 @@ write_booking_fixture() {
       partnerEntrySlug: $entrySlug,
       eligibilityVerificationId: $eligibilityId,
       benefitReference: $benefitReference,
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: {
+        address: $pickup,
+        lat: 25.0478,
+        lng: 121.5319
+      },
+      dropoff: {
+        address: $dropoff,
+        lat: 25.0580,
+        lng: 121.5430
+      },
       reservationWindowStart: $windowStart,
       reservationWindowEnd: $windowEnd,
       passenger: {
@@ -258,6 +266,7 @@ run_downstream_chain() {
   log_surface "${kind} partner program - dispatch, driver, invoice"
 
   switch_actor "ops_user" "e2e-ops-015"
+  prime_enterprise_dispatch_supply_locations
   printf '%s\n' '{"mode":"auto"}' > "$dispatch_fixture"
 
   log_step "${kind}.9 - POST /orders/:orderId/dispatch"
