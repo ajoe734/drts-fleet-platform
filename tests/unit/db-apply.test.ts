@@ -9,6 +9,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(__dirname, "../..");
 const adminUrl = "postgresql://postgres:postgres@localhost:5432/postgres";
 const toolDir = mkdtempSync(path.join(os.tmpdir(), "db-apply-test-"));
+const localPsqlPath = execFileSync("bash", ["-lc", "command -v psql || true"], {
+  cwd: repoRoot,
+  encoding: "utf8",
+  stdio: "pipe",
+}).trim();
 
 function bash(command: string, env: NodeJS.ProcessEnv = {}) {
   return execFileSync("bash", ["-lc", command], {
@@ -68,6 +73,12 @@ describe("db-apply legacy migration canonicalization", () => {
         "      ;;",
         "  esac",
         "done",
+        `if [[ -n "${localPsqlPath}" ]]; then`,
+        '  if [[ -n "$file" ]]; then',
+        `    exec "${localPsqlPath}" "\${args[@]}" -f "$file"`,
+        "  fi",
+        `  exec "${localPsqlPath}" "\${args[@]}"`,
+        "fi",
         'if [[ -n "$file" ]]; then',
         `  exec docker compose -f "${repoRoot}/docker-compose.dev.yml" exec -T -e PGPASSWORD="\${PGPASSWORD:-postgres}" postgres psql "\${args[@]}" < "$file"`,
         "fi",
