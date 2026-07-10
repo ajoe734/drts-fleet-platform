@@ -285,6 +285,7 @@ log_ok "Airport-transfer booking created: bookingId=${BOOKING_ID}, orderId=${ORD
 log_surface "Ops Console — dispatch eligibility enforcement"
 
 switch_actor "ops_user" "e2e-ops-001"
+prime_enterprise_dispatch_supply_locations
 
 DISPATCH_FIXTURE=$(mktemp /tmp/drts-e2e-013-dispatch-XXXXXX.json)
 printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"

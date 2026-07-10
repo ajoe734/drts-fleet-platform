@@ -221,6 +221,7 @@ log_ok "Booking read-back preserved partner metadata and benefitReference"
 log_surface "Ops Console — dispatch assignment"
 
 switch_actor "ops_user" "e2e-ops-001"
+prime_enterprise_dispatch_supply_locations
 
 DISPATCH_FIXTURE=$(mktemp /tmp/drts-e2e-007-dispatch-XXXXXX.json)
 trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE"' EXIT

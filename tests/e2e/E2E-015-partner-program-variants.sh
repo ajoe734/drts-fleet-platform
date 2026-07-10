@@ -258,6 +258,8 @@ run_downstream_chain() {
   log_surface "${kind} partner program - dispatch, driver, invoice"
 
   switch_actor "ops_user" "e2e-ops-015"
+  prime_enterprise_dispatch_supply_locations
+
   printf '%s\n' '{"mode":"auto"}' > "$dispatch_fixture"
 
   log_step "${kind}.9 - POST /orders/:orderId/dispatch"

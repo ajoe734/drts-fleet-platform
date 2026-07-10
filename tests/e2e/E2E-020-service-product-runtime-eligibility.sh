@@ -329,6 +329,7 @@ log_ok "Airport-transfer booking preserves exact product: bookingId=${BOOKING_ID
 log_surface "Ops Console — dispatch eligibility enforcement"
 
 switch_actor "ops_user" "e2e-ops-001"
+prime_enterprise_dispatch_supply_locations
 
 DISPATCH_FIXTURE=$(mktemp /tmp/drts-e2e-020-dispatch-XXXXXX.json)
 printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"

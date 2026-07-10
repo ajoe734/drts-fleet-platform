@@ -548,6 +548,7 @@ assert_daily_record_fields() {
 log_surface "Order sources — app / phone / tenant portal"
 
 switch_actor "ops_user" "e2e-ops-022"
+prime_enterprise_dispatch_supply_locations
 APP_FIXTURE="${TMP_DIR}/app-order.json"
 write_app_order_fixture "$APP_FIXTURE"
 

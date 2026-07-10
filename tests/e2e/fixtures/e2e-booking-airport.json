@@ -4,14 +4,14 @@
   "terminal": "T2",
   "pickup": {
     "address": "88 Corporate HQ, Staging City",
-    "lat": 25.05,
-    "lng": 121.55,
+    "lat": 25.0797,
+    "lng": 121.2342,
     "coordinateSource": "manual_pin"
   },
   "dropoff": {
     "address": "Staging International Airport, Terminal 2",
-    "lat": 25.06,
-    "lng": 121.56,
+    "lat": 25.0797,
+    "lng": 121.2342,
     "coordinateSource": "manual_pin"
   },
   "reservationWindowStart": "__RESERVATION_START__",
