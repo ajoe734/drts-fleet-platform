@@ -106,6 +106,21 @@ existing integration PR:
 5. Finalize the parent with merged-to-dev evidence from the actual merge
    result, not from the pre-merge branch head.
 
+## Owner Closeout Addendum
+
+- Reviewer approval for this helper task landed at `2026-07-10T17:22:30Z` on
+  PR `#1080` / commit `5817ef76d` after re-checking remote refs, range-diff,
+  PR state, failing jobs, and `git diff --check`.
+- The parent unblock result must stay in machine truth as a concrete next step:
+  reuse PR `#1079` at
+  `origin/codex2/e2e-fix-d-001-integrate @ 7c8bc560b`, resolve the failing
+  checks (`unit`, `Smoke acceptance`, `e2e`, `ci-integ`), merge to `dev`, then
+  finalize `E2E-FIX-D-001` with `INTEGRATION_STATUS=merged_to_dev` plus
+  `MERGED_REF=origin/dev` or `MERGE_COMMIT=<merged sha>`.
+- This helper task only closes out the branch-level unblock note and evidence
+  on `origin/codex/e2e-fix-d-001-unblock-history-repair`; it does not claim
+  that PR `#1079` or PR `#1080` has merged, and it does not claim dev deploy.
+
 ## Non-Claim
 
 This note does not claim that `E2E-FIX-D-001` is already merged to `dev`, does
