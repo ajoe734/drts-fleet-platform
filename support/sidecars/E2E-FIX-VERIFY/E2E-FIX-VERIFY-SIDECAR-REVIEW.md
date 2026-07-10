@@ -49,16 +49,17 @@ Machine-truth row: `E2E-FIX-VERIFY`
 - title=`Full hermetic business-flow E2E green`
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress`
+- status=`done`
 - acceptance=`run-e2e-hermetic.sh 全 22 PASS 或 PR ci-integ/e2e 全綠;產出 before/after evidence`
-- next=`Owner closeout commit 338b6203a0c83be06fde479dba21dd0e9da20ce2 is pushed on origin/codex/e2e-fix-verify. PR #1083 to dev is open with auto-merge enabled; CI remains pending on build/e2e/Smoke acceptance, so review-approved task cannot finalize to done until the delivered commit reaches origin/dev.`
-- last_update=`2026-07-10T20:51:38Z`
+- next=`INTEGRATION_STATUS=merged_to_dev; origin/dev includes merge commit 88c925fb71a8b59fa457393b7d5bcd9223625de0 from PR #1083 (merged 2026-07-10T20:53:52Z). CI run https://github.com/ajoe734/drts-fleet-platform/actions/runs/29122680812 completed success at 2026-07-10T20:58:05Z, including hermetic e2e job 86461187344 success at 2026-07-10T20:57:59Z and ci-integ aggregate 86462797421 success at 2026-07-10T20:58:04Z.`
+- last_update=`2026-07-10T20:59:11Z`
 
 ### 2.3 Current visible branch state
 
 At packet generation time, the parent implementation branch `origin/codex/e2e-fix-verify` is at:
 
 - `338b6203a0c83be06fde479dba21dd0e9da20ce2`
+- Merged to `origin/dev` as `88c925fb71a8b59fa457393b7d5bcd9223625de0`
 
 ---
 
@@ -96,7 +97,8 @@ At packet generation time, the parent implementation branch `origin/codex/e2e-fi
 
 The parent task is fully reviewable and functional:
 
-- The parent task `E2E-FIX-VERIFY` is currently marked as `in_progress` in machine truth (with review approval awaiting dev branch integration), and its changes are visible at commit `338b6203a0c83be06fde479dba21dd0e9da20ce2` on `origin/codex/e2e-fix-verify`.
+- The parent task `E2E-FIX-VERIFY` is marked as `done` in machine truth, and its changes are visible at merge commit `88c925fb71a8b59fa457393b7d5bcd9223625de0` on `origin/dev` (derived from branch commit `338b6203a0c83be06fde479dba21dd0e9da20ce2`).
+- The continuous integration run `https://github.com/ajoe734/drts-fleet-platform/actions/runs/29122680812` was fully successful, including the hermetic E2E test job and aggregate validation.
 - The modifications resolve the database migration conflict and automate the environment setup, enabling all 22 E2E suites to run cleanly in a hermetic test run.
 - Reviewer recommendation is to approve this sidecar review packet since it accurately matches the machine truth and git evidence, without making changes to canonical codebase behavior.
 
@@ -117,7 +119,7 @@ Reviewer `Codex` should check these points first:
 
 Suggested `approve` wording for this sidecar packet:
 
-> `審查通過：E2E-FIX-VERIFY sidecar review packet 已正確對齊 machine truth 與 git evidence。parent task (E2E-FIX-VERIFY) 已通過審查且為 review_approved 狀態，其修復包含了重命名重複的 V0036 遷移至 V0050、強化 docker psql 降級、整合 @drts/api 自動編譯與補齊 E2E 的 Taipei Core 司機位置與坐標，確保 hermetic 測試全 22 綠。support artifact only，未改 canonical truth。`
+> `審查通過：E2E-FIX-VERIFY sidecar review packet 已正確對齊 machine truth 與 git evidence。parent task (E2E-FIX-VERIFY) 已完成且為 done 狀態，其修復包含重命名重複的 V0036 遷移至 V0050、強化 docker psql 降級、整合 @drts/api 自動編譯與補齊 E2E 的 Taipei Core 司機位置與坐標，確保 hermetic 測試全 22 綠，且 CI run (actions/runs/29122680812) 及 ci-integ aggregate 均已順利通過。support artifact only，未改 canonical truth。`
 
 Suggested `reopen` wording for this sidecar packet:
 
@@ -130,7 +132,7 @@ Suggested `reopen` wording for this sidecar packet:
 Owner handoff to sidecar reviewer:
 
 ```bash
-AI_NAME=Gemini scripts/ai-status.sh handoff E2E-FIX-VERIFY-SIDECAR-REVIEW Codex "Review packet ready at support/sidecars/E2E-FIX-VERIFY/E2E-FIX-VERIFY-SIDECAR-REVIEW.md. It summarizes the parent branch evidence at 338b6203a0c83be06fde479dba21dd0e9da20ce2, detailing the V0036 migration rename, CLI psql fallback, auto-compile additions, and E2E driver location priming."
+AI_NAME=Gemini scripts/ai-status.sh handoff E2E-FIX-VERIFY-SIDECAR-REVIEW Codex "Review packet ready at support/sidecars/E2E-FIX-VERIFY/E2E-FIX-VERIFY-SIDECAR-REVIEW.md. It summarizes the parent branch evidence merged as 88c925fb71a8b59fa457393b7d5bcd9223625de0, detailing the V0036 migration rename, CLI psql fallback, auto-compile additions, and E2E driver location priming, with completed CI runs."
 ```
 
 Reviewer approval:
@@ -151,3 +153,4 @@ AI_NAME=Codex scripts/ai-status.sh reopen E2E-FIX-VERIFY-SIDECAR-REVIEW "packet 
 
 - `2026-07-10` - Initial review packet created for `E2E-FIX-VERIFY-SIDECAR-REVIEW`.
 - `2026-07-10` - Documented the database migration version conflict resolution, CLI command fallback, E2E driver locations, and handoff instructions.
+- `2026-07-10` - Refreshed review packet to align with parent task E2E-FIX-VERIFY status transitioning to done, including merge commit 88c925fb71a8b59fa457393b7d5bcd9223625de0 and successful CI run details.
