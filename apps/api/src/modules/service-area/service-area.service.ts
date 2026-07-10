@@ -1468,7 +1468,7 @@ export class ServiceAreaService implements OnModuleInit {
     );
     let decision: ServiceAreaEvaluationDecision = "serviceable";
 
-    if (matchedAreas.length === 0) {
+    if (activeAreas.length > 0 && matchedAreas.length === 0) {
       decision = "not_serviceable";
       reasonCodes.push(`${stop.kind.toUpperCase()}_AREA_NOT_SERVICEABLE`);
       reasonMessages.push(`${stop.kind} is outside the service area.`);
