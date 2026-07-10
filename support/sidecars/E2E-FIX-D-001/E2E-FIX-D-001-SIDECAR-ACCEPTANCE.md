@@ -5,9 +5,9 @@
 **Parent Owner:** `Gemini`  
 **Parent Reviewer:** `Claude`  
 **Sidecar Owner:** `Codex2`  
-**Sidecar Reviewer:** `Claude`  
+**Sidecar Reviewer:** `Gemini`  
 **Last Revised:** `2026-07-10 (UTC)`  
-**Status:** `REVIEW-STAGE SUPPORT ARTIFACT` - support-only packet for reviewer handoff; does not modify canonical truth, runtime behavior, or parent task ownership.
+**Status:** `REVIEW-APPROVED SUPPORT ARTIFACT` - support-only packet for owner closeout after reviewer approval; does not modify canonical truth, runtime behavior, or parent task ownership.
 
 ---
 
@@ -36,8 +36,8 @@ Out of scope:
 ### Sidecar - `E2E-FIX-D-001-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex2`
-- reviewer=`Claude`
-- status=`in_progress` when this packet was prepared, intended for `review` handoff
+- reviewer=`Gemini`
+- status=`review_approved`
 - depends_on=`[]`
 - helper_parent=`E2E-FIX-D-001`
 - helper_kind=`acceptance_packet`
@@ -243,9 +243,9 @@ No runtime or canonical files were changed as part of this sidecar.
 
 ## 10. Reviewer Handoff Note
 
-This packet is ready for `Claude` as the assigned reviewer for both the sidecar and the parent task. The key value of this artifact is not a fix claim; it is a dependency-and-drift map that narrows review to the real unresolved question:
+This packet was approved on the sidecar lane and is ready for owner closeout. The parent task remains under separate review on its own lane. The key value of this artifact is not a fix claim; it is a dependency-and-drift map that narrows review to the real unresolved question:
 
 - either a specific create-driver 500 still exists in the required stack and needs fresh fix evidence
 - or machine truth has lagged behind the implemented route/test surface and needs to be reconciled explicitly
 
-This sidecar should move to `review` once committed and pushed. The parent owner can then use the packet as the review baseline without treating the old brief as the sole source of reality.
+This sidecar closeout should record the artifact as branch-scoped support evidence only. The parent owner can use the packet as the review baseline without treating the old brief as the sole source of reality.
