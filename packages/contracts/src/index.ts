@@ -3515,6 +3515,7 @@ export interface VehicleSupplyLifecycleRecord {
 export interface VehicleRegistryRecord {
   vehicleId: string;
   plateNo: string;
+  licenseType?: VehicleLicenseType | null;
   operatingArea: string;
   supportedServiceBuckets: Phase1ServiceBucket[];
   dispatchableFlag: boolean;
