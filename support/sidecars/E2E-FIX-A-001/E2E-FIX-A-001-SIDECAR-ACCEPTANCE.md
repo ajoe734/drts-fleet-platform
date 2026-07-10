@@ -3,11 +3,11 @@
 **Sidecar Kind:** `acceptance_packet`  
 **Parent Task:** `E2E-FIX-A-001` - Dispatch E2E fixtures: correct per-product serviceable coordinates  
 **Parent Owner:** `Gemini`  
-**Parent Reviewer:** `Copilot`  
+**Parent Reviewer:** `Codex`<br>
 **Sidecar Owner:** `Codex`  
 **Sidecar Reviewer:** `Gemini`  
-**Last Revised:** `2026-07-10 (UTC)`  
-**Status:** `REVIEW-STAGE SUPPORT ARTIFACT` - support-only packet for reviewer handoff; does not modify canonical truth, runtime behavior, or parent task ownership.
+**Last Revised:** `2026-07-10 (UTC closeout refresh)`<br>
+**Status:** `OWNER-CLOSEOUT SUPPORT ARTIFACT` - reviewer-approved support-only packet finalized for branch closeout; does not modify canonical truth, runtime behavior, or parent task ownership.
 
 ---
 
@@ -27,17 +27,20 @@ Out of scope:
 - editing `tests/e2e/**`, `apps/api/**`, canonical product truth, or machine-truth files
 - deciding which exact coordinates the parent owner should ship
 - claiming the parent acceptance has already passed
-- replacing the parent review that still belongs to `Copilot`
+- replacing the parent review that now belongs to `Codex`
 
 ---
 
 ## 2. Machine-Truth Snapshot
 
+Snapshot refreshed during owner closeout on `2026-07-10 (UTC)` after the sidecar review returned to `Codex` for finalization.
+
 ### Sidecar - `E2E-FIX-A-001-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex`
 - reviewer=`Gemini`
-- status=`in_progress` at packet authoring time
+- status=`in_progress` during owner closeout
+- review_notes_zh=`審查通過`, `回到 owner 收尾`
 - helper_parent=`E2E-FIX-A-001`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
@@ -46,7 +49,7 @@ Out of scope:
 ### Parent - `E2E-FIX-A-001`
 
 - owner=`Gemini`
-- reviewer=`Copilot`
+- reviewer=`Codex`
 - status=`in_progress`
 - depends_on=`E2E-FIX-BE-001`
 - artifacts=`tests/e2e/fixtures/`, `tests/e2e/`
@@ -55,13 +58,13 @@ Out of scope:
 ### Declared backend dependency - `E2E-FIX-BE-001`
 
 - owner=`Gemini`
-- reviewer=`Copilot`
-- status=`review`
+- reviewer=`Codex`
+- status=`in_progress`
 - acceptance=`無服務區 product 不再被 gate 擋;有服務區者行為不變;apps/api typecheck+vitest 綠`
 
 ### Machine-truth implication
 
-- The parent task is not an isolated fixture tweak; it is explicitly blocked on a backend rule change that is still only in `review`.
+- The parent task is not an isolated fixture tweak; it is explicitly blocked on a backend rule change that is still in active implementation (`in_progress`), so parent acceptance cannot be treated as cleared.
 - The parent owner and dependency owner are the same lane (`Gemini`), so reviewer notes should treat the fixture patch and the backend exemption as a coupled acceptance surface.
 
 ---
@@ -95,7 +98,7 @@ Reviewer reading:
 
 | Dependency | Machine-truth status | Why it matters |
 | --- | --- | --- |
-| `E2E-FIX-BE-001` | `review` | Parent acceptance covers scenarios that were failing at the service-area gate. The backend fix is responsible only for products with no active seeded service area. |
+| `E2E-FIX-BE-001` | `in_progress` | Parent acceptance covers scenarios that were failing at the service-area gate. The backend fix remains the only declared path for products with no active seeded service area. |
 
 ### Effective fixture-level dependency graph
 
@@ -208,13 +211,21 @@ Repo inspection:
 - runtime service-product inventory in `apps/api/src/modules/service-product/service-product.service.ts`
 - service-area compliance gate behavior in `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
 
+Closeout checks:
+
+- `git status --short --branch`
+- `git show -s --format=fuller HEAD`
+- `git rev-parse HEAD`
+- `git rev-parse --abbrev-ref --symbolic-full-name @{u}`
+
 No runtime tests were executed because this sidecar only adds support documentation and does not change executable code.
 
 ---
 
-## 9. Handoff
+## 9. Handoff / Closeout
 
-- Owner `Codex` -> Reviewer `Gemini`
+- Reviewer handoff completed: `Codex` -> `Gemini`
+- Reviewer outcome: approved and returned to owner for finalization
 - Sidecar integration status: `not_applicable`
 - Intended use: reviewer may absorb Sections 3-7 into parent review notes for `E2E-FIX-A-001`, especially where the fixture patch and `E2E-FIX-BE-001` backend exemption interact
 - This packet documents acceptance framing only; the parent owner decides whether and how to absorb it into the main task branch
