@@ -53,6 +53,7 @@ function createRegistryStub() {
     {
       vehicleId: "veh-demo-001",
       plateNo: "ABC-1001",
+      licenseType: "multi_purpose_taxi",
       operatingArea: "taipei",
       supportedServiceBuckets: ["business_dispatch"],
       dispatchableFlag: true,
@@ -110,6 +111,7 @@ function createRegistryStub() {
     {
       vehicleId: "veh-demo-002",
       plateNo: "ABC-1002",
+      licenseType: "taxi",
       operatingArea: "taipei",
       supportedServiceBuckets: ["business_dispatch"],
       dispatchableFlag: true,
@@ -201,6 +203,11 @@ function createRegistryStub() {
     ]),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
+    getVehicleLicenseType: vi.fn(
+      (vehicleId: string) =>
+        vehicles.find((vehicle) => vehicle.vehicleId === vehicleId)
+          ?.licenseType ?? null,
+    ),
     listDrivers: vi.fn(() => drivers),
     listVehicles: vi.fn(() => vehicles),
     listLatestDriverLocations: vi.fn(() => [

@@ -86,6 +86,23 @@ describe("ServiceAreaService", () => {
     expect(result.stops).toHaveLength(2);
   });
 
+  it("exempts products with no active service area defined from service-area check", () => {
+    const service = createService();
+
+    // insurance_replacement_vehicle has no active service areas seeded
+    const result = service.evaluate({
+      serviceProductType: "insurance_replacement_vehicle",
+      pickup: { lat: 25.041, lng: 121.55 },
+      dropoff: { lat: 25.06, lng: 121.58 },
+      requestedAt: "2026-06-30T00:00:00.000Z",
+    });
+
+    expect(result.decision).toBe("serviceable");
+    expect(result.serviceAreaCodes).toEqual([]);
+    expect(result.geometryVersionRefs).toEqual([]);
+    expect(result.reasonCodes).toEqual([]);
+  });
+
   it("rejects pickup points outside the service area", () => {
     const service = createService();
 
