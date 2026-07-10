@@ -289,10 +289,10 @@
       },
       "approval": {
         "workspace_permission_mode": "acceptEdits",
-        "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
+        "allow_dangerous_skip": true,
+        "copilot_allow_dangerous_skip": true,
         "rule_default_mode": "acceptEdits",
-        "disable_bypass_permissions": true
+        "disable_bypass_permissions": false
       }
     },
     "claude2": {
@@ -322,10 +322,10 @@
       },
       "approval": {
         "workspace_permission_mode": "acceptEdits",
-        "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
+        "allow_dangerous_skip": true,
+        "copilot_allow_dangerous_skip": true,
         "rule_default_mode": "acceptEdits",
-        "disable_bypass_permissions": true
+        "disable_bypass_permissions": false
       }
     },
     "gemini": {
@@ -351,7 +351,7 @@
       },
       "approval": {
         "default_approval_mode": "auto_edit",
-        "workspace_agent_yolo_mode": false,
+        "workspace_agent_yolo_mode": true,
         "enable_permanent_tool_approval": true,
         "auto_add_to_policy_by_default": true,
         "disable_yolo_mode": false,
@@ -394,7 +394,7 @@
       },
       "approval": {
         "default_approval_mode": "yolo",
-        "workspace_agent_yolo_mode": false,
+        "workspace_agent_yolo_mode": true,
         "enable_permanent_tool_approval": true,
         "auto_add_to_policy_by_default": true,
         "disable_yolo_mode": false,
