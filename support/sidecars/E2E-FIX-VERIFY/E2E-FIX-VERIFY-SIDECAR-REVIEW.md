@@ -40,7 +40,7 @@ Machine-truth row: `E2E-FIX-VERIFY-SIDECAR-REVIEW`
   - `Create support artifacts only`
   - `Do not edit canonical truth`
   - `Hand off the packet to the assigned reviewer`
-- last_update=`2026-07-10T20:55:00Z`
+- last_update=`2026-07-10T21:01:54Z`
 
 ### 2.2 Parent task snapshot
 
@@ -154,3 +154,4 @@ AI_NAME=Codex scripts/ai-status.sh reopen E2E-FIX-VERIFY-SIDECAR-REVIEW "packet 
 - `2026-07-10` - Initial review packet created for `E2E-FIX-VERIFY-SIDECAR-REVIEW`.
 - `2026-07-10` - Documented the database migration version conflict resolution, CLI command fallback, E2E driver locations, and handoff instructions.
 - `2026-07-10` - Refreshed review packet to align with parent task E2E-FIX-VERIFY status transitioning to done, including merge commit 88c925fb71a8b59fa457393b7d5bcd9223625de0 and successful CI run details.
+- `2026-07-10` - Refreshed sidecar task snapshot last_update to 2026-07-10T21:01:54Z to resolve stale snapshot error and prepare for re-handoff to Codex.
