@@ -163,16 +163,31 @@ assert_status "200"
 CANDIDATE_COUNT=$(json_get ".data.items | length")
 log_info "Candidate count: ${CANDIDATE_COUNT:-0}"
 
-ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[0] | (.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
-ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[0] | (.driverId // .driver_id // empty)' 2>/dev/null || true)
+SELECTED_CANDIDATE=$(echo "$RESP_BODY" | jq -c \
+  '(.data.items // [])
+   | map(select((.eligibilityDecision // .eligibility_decision // "eligible") != "ineligible"))
+   | .[0] // empty' 2>/dev/null || true)
 
-if [[ -z "$ASSIGN_VEHICLE_ID" ]]; then
-  ASSIGN_VEHICLE_ID="$E2E_SEED_VEHICLE_ID"
+if [[ -z "$SELECTED_CANDIDATE" ]]; then
+  log_fail "No assignable dispatch candidate returned for enterprise dispatch."
+  log_fail "Candidate payload: ${RESP_BODY}"
+  exit 1
 fi
-if [[ -z "$ASSIGN_DRIVER_ID" ]]; then
-  ASSIGN_DRIVER_ID="$E2E_SEED_DRIVER_ID"
+
+ASSIGN_VEHICLE_ID=$(echo "$SELECTED_CANDIDATE" | jq -r \
+  '(.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
+ASSIGN_DRIVER_ID=$(echo "$SELECTED_CANDIDATE" | jq -r \
+  '(.driverId // .driver_id // empty)' 2>/dev/null || true)
+ASSIGN_ELIGIBILITY_DECISION=$(echo "$SELECTED_CANDIDATE" | jq -r \
+  '(.eligibilityDecision // .eligibility_decision // "eligible")' 2>/dev/null || true)
+
+if [[ -z "$ASSIGN_VEHICLE_ID" || -z "$ASSIGN_DRIVER_ID" ]]; then
+  log_fail "Assignable candidate missing vehicleId or driverId: ${SELECTED_CANDIDATE}"
+  exit 1
+fi
+if [[ "$ASSIGN_ELIGIBILITY_DECISION" == "ineligible" ]]; then
+  log_fail "Refusing to assign an ineligible candidate: ${SELECTED_CANDIDATE}"
+  exit 1
 fi
 
 chain_set "ops" "vehicleId" "$ASSIGN_VEHICLE_ID"

@@ -5,6 +5,7 @@ import { ServiceProductService } from "../../src/modules/service-product/service
 
 function createService(options?: {
   serviceProductOverrides?: Record<string, unknown>;
+  vehicleLicenseTypes?: Record<string, string>;
   candidates?: Array<{
     vehicleId: string;
     driverId: string;
@@ -61,6 +62,9 @@ function createService(options?: {
     ),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
+    getVehicleLicenseType: vi.fn(
+      (vehicleId: string) => options?.vehicleLicenseTypes?.[vehicleId] ?? null,
+    ),
   };
   const auditNotificationService = {
     recordAuditLog: vi.fn(),
@@ -133,6 +137,39 @@ describe("VehicleEligibilityService", () => {
     ).toMatchObject({
       vehicleId: "veh-av-demo-001",
       licenseType: "business_vehicle",
+      businessDispatchEligible: true,
+    });
+  });
+
+  it("resolves runtime capability for registry-backed UUID vehicles", () => {
+    const registryVehicleId = "10000000-0000-0000-0000-000000000353";
+    const { service } = createService({
+      candidates: [
+        {
+          vehicleId: registryVehicleId,
+          driverId: "10000000-0000-0000-0000-000000000383",
+          operatingArea: "taichung-port",
+          serviceBuckets: ["business_dispatch"],
+          etaMinutes: 4,
+          currentLocation: null,
+        },
+      ],
+      vehicleLicenseTypes: {
+        [registryVehicleId]: "rental_car",
+      },
+    });
+
+    expect(service.listEligibleSupply("enterprise_dispatch")).toEqual([
+      expect.objectContaining({
+        vehicleId: registryVehicleId,
+        serviceProduct: "enterprise_dispatch",
+      }),
+    ]);
+    expect(
+      service.resolveRuntimeVehicleCapability(registryVehicleId),
+    ).toMatchObject({
+      vehicleId: registryVehicleId,
+      licenseType: "rental_car",
       businessDispatchEligible: true,
     });
   });

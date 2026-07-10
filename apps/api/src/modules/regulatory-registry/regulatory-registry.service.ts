@@ -43,6 +43,7 @@ import type {
   VehicleContractRecord,
   VehicleFleetAffiliationRecord,
   VehicleFleetAffiliationType,
+  VehicleLicenseType,
   VehicleRegistryRecord,
   VehicleSupplyDraft,
   VehicleSupplyLifecycleRecord,
@@ -188,6 +189,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-001",
     plateNo: "ABC-1001",
+    licenseType: "multi_purpose_taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi", "business_dispatch"],
     dispatchableFlag: true,
@@ -199,6 +201,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-002",
     plateNo: "ABC-1002",
+    licenseType: "taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi"],
     dispatchableFlag: false,
@@ -210,6 +213,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-003",
     plateNo: "ABC-1003",
+    licenseType: "taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi"],
     dispatchableFlag: true,
@@ -221,6 +225,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-004",
     plateNo: "ABC-1004",
+    licenseType: "business_vehicle",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["business_dispatch"],
     dispatchableFlag: true,
@@ -232,6 +237,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-av-demo-001",
     plateNo: "ABC-AV01",
+    licenseType: "business_vehicle",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["business_dispatch"],
     dispatchableFlag: true,
@@ -615,6 +621,13 @@ export class RegulatoryRegistryService implements OnModuleInit {
       persistContext: null,
     });
     return this.vehicles.map((vehicle) => this.cloneVehicle(vehicle));
+  }
+
+  getVehicleLicenseType(vehicleId: string): VehicleLicenseType | null {
+    const vehicle = this.vehicles.find(
+      (candidateVehicle) => candidateVehicle.vehicleId === vehicleId,
+    );
+    return this.normalizeVehicleLicenseType(vehicle?.licenseType);
   }
 
   listDrivers() {
@@ -1948,6 +1961,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     const created: VehicleRegistryRecord = {
       vehicleId: `veh_${randomUUID()}`,
       plateNo: draft.plateNo.trim(),
+      licenseType: this.normalizeVehicleLicenseType(draft.licenseType),
       operatingArea: draft.businessArea.trim(),
       supportedServiceBuckets: this.mapServiceBuckets(
         draft.supportedServiceProductCodes,
@@ -2531,6 +2545,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       : createEmptySupplyLifecycle(updatedAt);
     return {
       ...vehicle,
+      licenseType: this.normalizeVehicleLicenseType(vehicle.licenseType),
       supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
       updatedAt,
       supplyLifecycle: {
@@ -2608,6 +2623,21 @@ export class RegulatoryRegistryService implements OnModuleInit {
         ? profile.deviceBindings.map((binding) => ({ ...binding }))
         : [],
     };
+  }
+
+  private normalizeVehicleLicenseType(
+    licenseType?: string | null,
+  ): VehicleLicenseType | null {
+    switch (licenseType) {
+      case "taxi":
+      case "multi_purpose_taxi":
+      case "rental_car":
+      case "business_vehicle":
+      case "airport_transfer_vehicle":
+        return licenseType;
+      default:
+        return null;
+    }
   }
 
   private computeDriverEligibilityBlockedReasons(
