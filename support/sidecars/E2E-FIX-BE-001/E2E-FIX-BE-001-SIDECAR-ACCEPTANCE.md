@@ -1,14 +1,16 @@
 # E2E-FIX-BE-001 Sidecar Acceptance Packet
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `E2E-FIX-BE-001` - Service-area gate: exempt products with no seeded service area  
-**Parent Owner:** `Gemini`  
-**Parent Reviewer:** `Claude`  
-**Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Claude`  
-**Generated:** `2026-07-10` (UTC, packet rev1)  
-**Snapshot anchor (parent `last_update`):** `2026-07-09T14:31:13Z`  
-**Snapshot anchor (sidecar `last_update`):** `2026-07-10T09:53:25Z`  
+**Sidecar Kind:** `acceptance_packet`<br>
+**Parent Task:** `E2E-FIX-BE-001` - Service-area gate: exempt products with no seeded service area<br>
+**Parent Owner:** `Gemini`<br>
+**Parent Reviewer:** `Codex`<br>
+**Sidecar Owner:** `Codex`<br>
+**Sidecar Reviewer:** `Gemini`<br>
+**Generated:** `2026-07-10` (UTC, packet rev1)<br>
+**Closeout Refresh:** `2026-07-10T15:21:06Z` (metadata/evidence sync after reviewer approval)<br>
+**Snapshot anchor (parent `last_update`):** `2026-07-10T15:18:51Z`<br>
+**Snapshot anchor (sidecar `last_update`):** `2026-07-10T15:21:06Z`<br>
+**Review Result:** `Gemini` approved at `2026-07-10T15:21:06Z` - `Acceptance packet matches the scope and requirements of E2E-FIX-BE-001.`<br>
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, contract surface, or the parent task's implementation files.
 
 This packet is the reviewer-facing companion to `E2E-FIX-BE-001`, the backend
@@ -56,6 +58,10 @@ Like all sidecar packets, this file is a snapshot for reviewer convenience.
 Live lifecycle state remains authoritative in `ai-status.json` and
 `ai-activity-log.jsonl`.
 
+This closeout refresh only aligns packet metadata with current machine truth
+and records the approval event. The acceptance checklist, dependency map, and
+review watchpoints below are unchanged in substance from the reviewed packet.
+
 ---
 
 ## 1. Scope Boundary
@@ -94,13 +100,17 @@ Out of scope:
 Machine-truth row: `ai-status.json` -> `E2E-FIX-BE-001-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex`
-- reviewer=`Claude`
-- status=`in_progress` at packet generation time
+- reviewer=`Gemini`
+- status=`review_approved`
 - depends_on=`[]`
 - helper_parent=`E2E-FIX-BE-001`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
 - artifact=`support/sidecars/E2E-FIX-BE-001/E2E-FIX-BE-001-SIDECAR-ACCEPTANCE.md`
+- review_notes_zh:
+  - `審查通過`
+- approval event:
+  - `2026-07-10T15:21:06Z` reviewer `Gemini`: `Acceptance packet matches the scope and requirements of E2E-FIX-BE-001.`
 - acceptance:
   - `Create support artifacts only`
   - `Do not edit canonical truth`
@@ -112,14 +122,16 @@ Machine-truth row: `ai-status.json` -> `E2E-FIX-BE-001`
 
 - title=`Service-area gate: exempt products with no seeded service area`
 - owner=`Gemini`
-- reviewer=`Claude`
-- status=`todo` at packet snapshot
+- reviewer=`Codex`
+- status=`review`
 - depends_on=`[]`
 - artifacts:
   - `apps/api/src/modules/owned-mobility/`
   - `apps/api/src/modules/service-area/`
 - acceptance:
   - `無服務區 product 不再被 gate 擋;有服務區者行為不變;apps/api typecheck+vitest 綠`
+- current handoff summary:
+  - `E2E-FIX-BE-001: Exemption logic for products with no service area defined has been implemented and tested successfully. 112 test files passed, typecheck passed, lint passed. Branch gemini/e2e-fix-be-001 pushed with commit 12613ee63.`
 - summary anchor:
   - map gate currently returns `not_serviceable` for products with no seeded
     service area
