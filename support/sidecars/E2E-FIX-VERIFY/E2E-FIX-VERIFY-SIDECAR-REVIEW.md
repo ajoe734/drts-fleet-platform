@@ -7,7 +7,7 @@
 **Assigned Reviewer:** `Codex`  
 **Parent Owner / Reviewer:** `Codex` / `Codex2`  
 **Last Revised:** `2026-07-10 (UTC)`  
-**Status at Packet Creation:** `in_progress`
+**Status at Packet Creation:** `review_approved`
 
 ---
 
@@ -150,7 +150,7 @@ AI_NAME=Codex2 scripts/ai-status.sh done E2E-FIX-VERIFY-SIDECAR-REVIEW "Done: re
 Verification performed for this sidecar:
 
 1. Confirmed the worker is on branch `codex2/e2e-fix-verify-sidecar-review`.
-2. Confirmed the support artifact path did not already exist.
+2. Confirmed the packet is committed on the sidecar branch and pushed to `origin/codex2/e2e-fix-verify-sidecar-review` before owner closeout.
 3. Queried machine truth with `scripts/ai-status.sh show` for:
    - sidecar task
    - parent task
@@ -168,3 +168,4 @@ Verification not performed by this sidecar:
 ## 8. Change Log
 
 - `2026-07-10`: initial packet created after ownership was reassigned from Gemini to `Codex2` so the stalled helper slice could be closed without modifying canonical truth.
+- `2026-07-10`: closeout refresh recorded after reviewer approval so the owner handoff packet matches the final `review_approved` lifecycle state before `done`.
