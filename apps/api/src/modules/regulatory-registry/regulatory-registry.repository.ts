@@ -7,6 +7,7 @@ import type {
   DriverLocationSnapshot,
   DriverRegistryRecord,
   InsurancePolicyRecord,
+  VehicleLicenseType,
   VehicleContractRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
@@ -55,6 +56,11 @@ type DriverLocationRow = {
   accuracy_m: number | string | null;
   recorded_at: Date | string;
   updated_at: Date | string;
+};
+
+type VehicleLicenseClassRow = {
+  vehicle_id: string;
+  license_class: string;
 };
 
 type DriverLocationEventRow = {
@@ -128,6 +134,7 @@ export class RegulatoryRegistryRepository {
       contractsResult,
       policiesResult,
       exclusivitiesResult,
+      vehicleLicenseClassResult,
     ] = await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `
@@ -171,15 +178,41 @@ export class RegulatoryRegistryRepository {
           ORDER BY updated_at DESC
         `,
       ),
+      this.databaseService!.query<VehicleLicenseClassRow>(
+        `
+          SELECT vehicle_id, license_class
+          FROM reg.vehicles
+        `,
+      ),
     ]);
 
+    const vehicleLicenseTypes = new Map(
+      vehicleLicenseClassResult.rows
+        .map(
+          (row) =>
+            [
+              row.vehicle_id,
+              this.mapVehicleLicenseClass(row.license_class),
+            ] as const,
+        )
+        .filter(
+          (entry): entry is readonly [string, VehicleLicenseType] =>
+            entry[1] !== null,
+        ),
+    );
+
     return {
-      vehicles: vehiclesResult.rows.map((row) =>
-        this.parseRecord<VehicleRegistryRecord>(
+      vehicles: vehiclesResult.rows.map((row) => {
+        const record = this.parseRecord<VehicleRegistryRecord>(
           row.record,
           "reg.phase1_registry_vehicles",
-        ),
-      ),
+        );
+        const licenseType =
+          record.licenseType ??
+          vehicleLicenseTypes.get(record.vehicleId) ??
+          null;
+        return licenseType ? { ...record, licenseType } : record;
+      }),
       drivers: driversResult.rows.map((row) =>
         this.parseRecord<DriverRegistryRecord>(
           row.record,
@@ -762,6 +795,25 @@ export class RegulatoryRegistryRepository {
     }
 
     return record as T;
+  }
+
+  private mapVehicleLicenseClass(
+    licenseClass: string | null | undefined,
+  ): VehicleLicenseType | null {
+    switch (licenseClass) {
+      case "taxi":
+        return "taxi";
+      case "multi_taxi":
+        return "multi_purpose_taxi";
+      case "rental":
+        return "rental_car";
+      case "other":
+        // The regulatory registry enum is coarser than the runtime eligibility
+        // matrix; the "other" bucket maps to business-dispatch-capable vehicles.
+        return "business_vehicle";
+      default:
+        return null;
+    }
   }
 
   private assertDatabaseEnabled(context: string): void {

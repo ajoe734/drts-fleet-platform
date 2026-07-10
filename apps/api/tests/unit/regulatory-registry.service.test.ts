@@ -489,6 +489,37 @@ describe("RegulatoryRegistryService", () => {
     });
   });
 
+  it("accepts legacy driver location updates in in-memory mode when storage is unavailable", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService();
+
+    await expect(
+      service.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(
+      regulatoryRegistryRepository.upsertDriverLocation,
+    ).not.toHaveBeenCalled();
+    expect(service.listLatestDriverLocations()).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+      }),
+    ]);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+  });
+
   it("does not publish a legacy driver location update when the heartbeat is older than the stored snapshot", async () => {
     const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
       createService({
@@ -590,6 +621,59 @@ describe("RegulatoryRegistryService", () => {
         recordedAt: "2026-06-20T06:00:00.000Z",
       }),
     ]);
+  });
+
+  it("accepts batch heartbeats in in-memory mode when storage is unavailable", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService();
+
+    await expect(
+      service.recordDriverLocationBatch({
+        items: [
+          {
+            eventId: "evt-001",
+            deviceId: "device-001",
+            driverId: "drv-demo-001",
+            vehicleId: "veh-demo-001",
+            taskId: null,
+            sequenceNo: 1001,
+            recordedAt: "2026-06-20T05:59:59.000Z",
+            lat: 24.1477,
+            lng: 120.6736,
+            accuracyM: 6,
+            workState: "available",
+            appState: "foreground",
+            transportMode: "foreground",
+            networkType: "cellular",
+          },
+        ],
+      }),
+    ).resolves.toEqual({
+      items: [
+        expect.objectContaining({
+          eventId: "evt-001",
+          accepted: true,
+          duplicate: false,
+          currentLocationUpdated: true,
+        }),
+      ],
+    });
+
+    expect(
+      regulatoryRegistryRepository.recordDriverLocationEvent,
+    ).not.toHaveBeenCalled();
+    expect(service.listLatestDriverLocations()).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T05:59:59.000Z",
+      }),
+    ]);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("acknowledges duplicate heartbeats and only publishes newer current locations", async () => {

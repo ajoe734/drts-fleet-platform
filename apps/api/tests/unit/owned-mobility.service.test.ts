@@ -19,6 +19,13 @@ import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-pa
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
+const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
+  "veh-demo-001": "multi_purpose_taxi",
+  "veh-demo-002": "taxi",
+  "veh-demo-003": "taxi",
+  "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
+};
 
 function createOwnedMobilityService(options?: {
   candidates?: Array<{
@@ -43,6 +50,7 @@ function createOwnedMobilityService(options?: {
     vehicleId: string,
     serviceBucket: string,
   ) => boolean;
+  vehicleLicenseTypes?: Record<string, string>;
   driverAvailable?: boolean;
   getDriverAvailability?: (driverId: string, serviceBucket: string) => boolean;
   enableVehicleEligibility?: boolean;
@@ -81,6 +89,12 @@ function createOwnedMobilityService(options?: {
         options?.getDriverAvailability?.(driverId, serviceBucket) ??
         options?.driverAvailable ??
         true,
+    ),
+    getVehicleLicenseType: vi.fn(
+      (vehicleId: string) =>
+        options?.vehicleLicenseTypes?.[vehicleId] ??
+        DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ??
+        null,
     ),
   };
   const auditNotificationService = {
@@ -528,6 +542,52 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(() =>
       service.dispatchOrder(order.orderId, { mode: "auto" }),
     ).toThrowError(ApiRequestError);
+  });
+
+  it("exempts products with no active service area defined (e.g. insurance_replacement_vehicle) from service-area check", async () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      serviceProductOverrides: {
+        serviceProductType: "insurance_replacement_vehicle",
+        displayName: "Insurance Replacement",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+      candidates: [
+        {
+          driverId: "driver-map-exempt-001",
+          vehicleId: "vehicle-map-exempt-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "insurance_replacement_vehicle",
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        pickup: {
+          address: "Some place outside any service area",
+          lat: 24.15,
+          lng: 120.67,
+        },
+        dropoff: {
+          address: "Another place outside any service area",
+          lat: 24.25,
+          lng: 120.77,
+        },
+        passenger: { name: "Exempt Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const detail = service.getOrder(booking.orderId);
+    expect(detail.complianceFlags).toContain("service_area_serviceable");
   });
 
   it("uses immutable spatial snapshots instead of re-evaluating created orders", () => {
