@@ -28,6 +28,12 @@ cd "$ROOT_DIR"
 
 export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/drts_fleet_platform}"
 export E2E_API_URL="${E2E_API_URL:-http://localhost:3001}"
+export JWT_SECRET="${JWT_SECRET:-ci-e2e-secret}"
+export JWT_ISSUER="${JWT_ISSUER:-drts-local}"
+export JWT_AUDIENCE="${JWT_AUDIENCE:-drts-api}"
+export CONTROLLED_DOWNLOAD_SIGNING_SECRET="${CONTROLLED_DOWNLOAD_SIGNING_SECRET:-ci-e2e-controlled-download-secret}"
+export PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT:-ci-e2e-alpha-ingress-key}"
+export PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT:-ci-e2e-beta-ingress-key}"
 API_START_CMD="${API_START_CMD:-pnpm --filter @drts/api start}"
 API_PORT="${API_PORT:-3001}"
 API_LOG="${API_LOG:-/tmp/drts-e2e-api.log}"
@@ -83,16 +89,19 @@ stop_api() {
   sleep 2
 }
 
-reset_db() {
-  if ! command -v psql >/dev/null 2>&1; then
-    echo "[hermetic] psql command not found; cannot reset ${DB_NAME}." >&2
-    return 1
+run_psql() {
+  if command -v psql >/dev/null 2>&1; then
+    PGPASSWORD="$DB_PASS" psql "$@"
+  else
+    docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD="$DB_PASS" postgres psql "$@"
   fi
+}
 
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c \
+reset_db() {
+  run_psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c \
     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${DB_NAME};" >/dev/null || return 1
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${DB_NAME};" >/dev/null || return 1
+  run_psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${DB_NAME};" >/dev/null || return 1
+  run_psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${DB_NAME};" >/dev/null || return 1
   pnpm db:migrate >/dev/null 2>&1 || return 1
   pnpm db:seed >/dev/null 2>&1 || return 1
 }
