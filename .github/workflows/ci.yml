@@ -115,6 +115,22 @@ jobs:
   smoke-acceptance:
     name: Smoke acceptance
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -126,6 +142,8 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Lint
