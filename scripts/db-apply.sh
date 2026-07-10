@@ -36,7 +36,29 @@ on_error() {
 trap on_error ERR
 
 table_exists() {
-  run_psql -tAc "SELECT to_regclass('admin.schema_migrations') IS NOT NULL;" | tr -d '[:space:]'
+  local attempt output
+  for attempt in $(seq 1 5); do
+    if output="$(run_psql -tAc "SELECT to_regclass('admin.schema_migrations') IS NOT NULL;" 2>/dev/null)"; then
+      printf '%s' "$output" | tr -d '[:space:]'
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+schema_migration_applied() {
+  local version="$1"
+  local attempt output
+  for attempt in $(seq 1 5); do
+    if output="$(run_psql -tAc "SELECT 1 FROM admin.schema_migrations WHERE version = '${version}' LIMIT 1;" 2>/dev/null)"; then
+      printf '%s' "$output" | tr -d '[:space:]'
+      return 0
+    fi
+    sleep 1
+  done
+  LAST_ERROR="admin.schema_migrations was not queryable after applying ${CURRENT_VERSION:-unknown}"
+  return 1
 }
 
 ordinal=10
@@ -45,8 +67,8 @@ for file in $(find "$MIGRATIONS_DIR" -maxdepth 1 -type f -name 'V*.sql' | sort);
   ordinal=$((ordinal + 1))
   filename="$(basename "$file")"
   version="${filename%%__*}"
-  if [[ "$(table_exists)" == "t" ]]; then
-    applied="$(run_psql -tAc "SELECT 1 FROM admin.schema_migrations WHERE version = '${version}' LIMIT 1;" | tr -d '[:space:]')"
+  if [[ "$(table_exists || true)" == "t" ]]; then
+    applied="$(schema_migration_applied "$version")" || false
     if [[ "$applied" == "1" ]]; then
       echo "[skip] $version already applied"
       continue
