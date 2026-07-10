@@ -333,7 +333,11 @@ jq \
     | .passenger.name = "Tenant Biz Rider"
     | .passenger.phone = "+886912000012"
     | .pickup.address = "台北車站"
+    | .pickup.lat = 25.0478
+    | .pickup.lng = 121.5319
     | .dropoff.address = "松山機場"
+    | .dropoff.lat = 25.06
+    | .dropoff.lng = 121.58
   ' "${SCRIPT_DIR}/fixtures/e2e-booking-enterprise.json" > "$BOOKING_FIXTURE"
 
 http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
@@ -370,6 +374,7 @@ log_ok "booking read-back preserved cost center + service product binding"
 
 log_surface "Ops console — dispatch assign"
 switch_actor "ops_user" "e2e-ops-012"
+prime_enterprise_dispatch_supply_locations
 DISPATCH_FIXTURE="${TMP_DIR}/dispatch.json"
 printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
 

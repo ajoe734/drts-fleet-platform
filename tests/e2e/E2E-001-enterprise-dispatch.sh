@@ -99,6 +99,7 @@ log_surface "Ops Console — dispatch assignment"
 
 # Live staging bootstrap auth grants dispatch scopes through the ops_user preset.
 switch_actor "ops_user" "e2e-ops-001"
+prime_enterprise_dispatch_supply_locations
 
 log_step "2.1 — POST /orders/:orderId/dispatch"
 if [[ -z "${ORDER_ID:-}" ]]; then

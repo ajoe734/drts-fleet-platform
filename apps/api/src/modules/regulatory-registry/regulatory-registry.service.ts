@@ -928,16 +928,20 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
     this.requireDriver(driverId);
 
+    const locationRepository = this.getLocationRepository();
+    const updatedAt = new Date().toISOString();
     const currentLocationUpdated =
-      await this.requireLocationRepository().upsertDriverLocation({
-        driverId,
-        lat: command.lat,
-        lng: command.lng,
-        recordedAt,
-        ...(command.accuracyM === undefined
-          ? {}
-          : { accuracyM: command.accuracyM }),
-      });
+      locationRepository === null
+        ? true
+        : await locationRepository.upsertDriverLocation({
+            driverId,
+            lat: command.lat,
+            lng: command.lng,
+            recordedAt,
+            ...(command.accuracyM === undefined
+              ? {}
+              : { accuracyM: command.accuracyM }),
+          });
 
     if (
       currentLocationUpdated &&
@@ -947,7 +951,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
         lng: command.lng,
         accuracyM: command.accuracyM ?? null,
         recordedAt,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       })
     ) {
       const latestLocation = this.cloneDriverLocation(
@@ -1002,10 +1006,15 @@ export class RegulatoryRegistryService implements OnModuleInit {
   ): Promise<DriverLocationHeartbeatAck> {
     const heartbeat = this.normalizeHeartbeatEnvelope(item);
 
+    const locationRepository = this.getLocationRepository();
     const persistedResult =
-      await this.requireLocationRepository().recordDriverLocationEvent(
-        heartbeat,
-      );
+      locationRepository === null
+        ? {
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: new Date().toISOString(),
+          }
+        : await locationRepository.recordDriverLocationEvent(heartbeat);
 
     const currentLocationUpdated =
       persistedResult.currentLocationUpdated &&
@@ -1165,10 +1174,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     this.assertCoordinate(destLng, "destLng", -180, 180);
     this.requireDriver(driverId);
 
-    const driverLocation =
-      await this.requireLocationRepository().findLatestDriverLocation(
-        driverId.trim(),
-      );
+    const driverLocation = await this.resolveLatestDriverLocation(
+      driverId.trim(),
+    );
 
     if (!driverLocation) {
       throw new ApiRequestError(
@@ -3087,13 +3095,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return driver;
   }
 
-  private requireLocationRepository(): RegulatoryRegistryRepository {
+  private getLocationRepository(): RegulatoryRegistryRepository | null {
     if (!this.regulatoryRegistryRepository?.isEnabled()) {
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "DRIVER_LOCATION_STORAGE_UNAVAILABLE",
-        "Driver location storage is not available.",
-      );
+      return null;
     }
 
     return this.regulatoryRegistryRepository;

@@ -3,6 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 
+const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
+  "veh-demo-001": "multi_purpose_taxi",
+  "veh-demo-002": "taxi",
+  "veh-demo-003": "taxi",
+  "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
+};
+
 function createService(options?: {
   serviceProductOverrides?: Record<string, unknown>;
   vehicleLicenseTypes?: Record<string, string>;
@@ -63,7 +71,10 @@ function createService(options?: {
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
     getVehicleLicenseType: vi.fn(
-      (vehicleId: string) => options?.vehicleLicenseTypes?.[vehicleId] ?? null,
+      (vehicleId: string) =>
+        options?.vehicleLicenseTypes?.[vehicleId] ??
+        DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ??
+        null,
     ),
   };
   const auditNotificationService = {

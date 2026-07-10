@@ -13,6 +13,14 @@ import {
 import { SandboxAdapter } from "../../src/modules/forwarder/sandbox.adapter";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
+const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
+  "veh-demo-001": "multi_purpose_taxi",
+  "veh-demo-002": "taxi",
+  "veh-demo-003": "taxi",
+  "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
+};
+
 function createAdapter(
   overrides: Partial<ForwarderAdapterInterface> = {},
 ): ForwarderAdapterInterface {
@@ -122,6 +130,9 @@ function createService(options?: {
           serviceBuckets: [serviceBucket],
           currentLocation: null,
         })),
+    ),
+    getVehicleLicenseType: vi.fn(
+      (vehicleId: string) => DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ?? null,
     ),
   };
   const auditNotificationService = {

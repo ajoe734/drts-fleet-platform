@@ -310,14 +310,6 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
   },
 ];
 
-const VEHICLE_LICENSE_BY_ID: Record<string, VehicleLicenseType> = {
-  "veh-demo-001": "multi_purpose_taxi",
-  "veh-demo-002": "taxi",
-  "veh-demo-003": "taxi",
-  "veh-demo-004": "business_vehicle",
-  "veh-av-demo-001": "business_vehicle",
-};
-
 @Injectable()
 export class VehicleEligibilityService implements OnModuleInit {
   private matrix: VehicleEligibilityMatrixRecord[] = [];
@@ -709,13 +701,8 @@ export class VehicleEligibilityService implements OnModuleInit {
   private requireVehicleCapability(
     vehicleId: string,
   ): RuntimeVehicleCapability {
-    const registryLicenseType =
-      typeof (
-        this.regulatoryRegistryService as Partial<RegulatoryRegistryService>
-      ).getVehicleLicenseType === "function"
-        ? this.regulatoryRegistryService.getVehicleLicenseType(vehicleId)
-        : null;
-    const licenseType = registryLicenseType ?? VEHICLE_LICENSE_BY_ID[vehicleId];
+    const licenseType =
+      this.regulatoryRegistryService.getVehicleLicenseType(vehicleId);
     if (!licenseType) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
