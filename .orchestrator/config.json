@@ -289,10 +289,10 @@
       },
       "approval": {
         "workspace_permission_mode": "acceptEdits",
-        "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
+        "allow_dangerous_skip": true,
+        "copilot_allow_dangerous_skip": true,
         "rule_default_mode": "acceptEdits",
-        "disable_bypass_permissions": true
+        "disable_bypass_permissions": false
       }
     },
     "claude2": {
@@ -322,10 +322,10 @@
       },
       "approval": {
         "workspace_permission_mode": "acceptEdits",
-        "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
+        "allow_dangerous_skip": true,
+        "copilot_allow_dangerous_skip": true,
         "rule_default_mode": "acceptEdits",
-        "disable_bypass_permissions": true
+        "disable_bypass_permissions": false
       }
     },
     "gemini": {
