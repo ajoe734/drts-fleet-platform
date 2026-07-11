@@ -1,0 +1,31 @@
+FLEETS-CLOSEOUT-009 token audit
+Generated at: 2026-07-11T03:52:00Z
+
+Theme entry points
+packages/ui-web/src/address-map-picker.tsx:14:import { buildCanvasTheme, type CanvasTheme } from "./canvas-tokens";
+packages/ui-web/src/address-map-picker.tsx:48:const DEFAULT_THEME = buildCanvasTheme({
+apps/ops-console-web/app/callcenter/page.tsx:27:  buildCanvasTheme,
+apps/ops-console-web/app/callcenter/page.tsx:70:const theme = buildCanvasTheme({
+
+Theme-driven status helpers
+70:function toneColor(theme: CanvasTheme, tone: AddressPickerTone): string {
+246:          const color = toneColor(theme, pin.tone ?? "neutral");
+407:function StatusBanner({
+422:  const color = toneColor(theme, tone);
+467:function TonePill({
+476:  const color = toneColor(theme, tone);
+933:        <StatusBanner
+952:        <StatusBanner
+1078:                    <TonePill
+1083:                    </TonePill>
+1094:        <StatusBanner
+1183:            <TonePill
+1189:            </TonePill>
+1190:            <TonePill theme={theme} tone="neutral">
+1193:            </TonePill>
+1216:          <StatusBanner
+1223:          <StatusBanner
+1616:          <StatusBanner
+1630:          <StatusBanner
+
+Hardcoded color scan across owned surface (expect no matches)
