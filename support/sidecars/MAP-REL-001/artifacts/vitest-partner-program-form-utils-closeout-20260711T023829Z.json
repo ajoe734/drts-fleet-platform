@@ -1,0 +1,140 @@
+{
+  "numTotalTestSuites": 2,
+  "numPassedTestSuites": 2,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 10,
+  "numPassedTests": 10,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1783737657258,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities blocks airport transfer until an eligibility verification id is present",
+          "status": "passed",
+          "title": "blocks airport transfer until an eligibility verification id is present",
+          "duration": 2.403051000000005,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities localizes program labels, coverage, gates, and validation errors",
+          "status": "passed",
+          "title": "localizes program labels, coverage, gates, and validation errors",
+          "duration": 1.0107830000000604,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities requires claim, policy, claimant, and replacement-vehicle coverage fields for insurance replacement",
+          "status": "passed",
+          "title": "requires claim, policy, claimant, and replacement-vehicle coverage fields for insurance replacement",
+          "duration": 0.5832850000000462,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities requires roster-oriented travel fields for travel agency transfers",
+          "status": "passed",
+          "title": "requires roster-oriented travel fields for travel agency transfers",
+          "duration": 0.36890100000005077,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities marks a completed travel-agency draft ready when eligibility mode is none",
+          "status": "passed",
+          "title": "marks a completed travel-agency draft ready when eligibility mode is none",
+          "duration": 0.4449650000000247,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities rejects invalid itinerary links for travel agency transfers",
+          "status": "passed",
+          "title": "rejects invalid itinerary links for travel agency transfers",
+          "duration": 0.301586000000043,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities requires coordinates before a booking can proceed",
+          "status": "passed",
+          "title": "requires coordinates before a booking can proceed",
+          "duration": 0.863835999999992,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities keeps manual-review routes explicit without blocking the record step",
+          "status": "passed",
+          "title": "keeps manual-review routes explicit without blocking the record step",
+          "duration": 0.35742100000004484,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities keeps provider outages in explicit manual review instead of normal ready",
+          "status": "passed",
+          "title": "keeps provider outages in explicit manual review instead of normal ready",
+          "duration": 0.5122759999999289,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["partner booking program form utilities"],
+          "fullName": "partner booking program form utilities allows text-only address fallback when the provider is unavailable",
+          "status": "passed",
+          "title": "allows text-only address fallback when the provider is unavailable",
+          "duration": 0.3921580000001086,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1783737657996,
+      "endTime": 1783737658003.392,
+      "status": "passed",
+      "message": "",
+      "name": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-002/apps/partner-booking-web/tests/integration/program-form-utils.test.ts"
+    }
+  ]
+}
