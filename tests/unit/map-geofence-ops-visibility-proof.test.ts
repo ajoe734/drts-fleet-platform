@@ -7,8 +7,8 @@ import type {
   DispatchCandidate,
   DispatchJobRecord,
   OwnedOrderRecord,
-  OwnedOrderSpatialAuditDecision,
   OwnedOrderSpatialAuditSnapshot,
+  ServiceAreaEvaluationDecision,
 } from "@drts/contracts";
 
 import {
@@ -294,7 +294,7 @@ function spatialAudit({
   stopPolicyCodes,
 }: {
   snapshotId: string;
-  decision: OwnedOrderSpatialAuditDecision;
+  decision: ServiceAreaEvaluationDecision;
   serviceAreaCodes: string[];
   geometryVersionRefs: string[];
   reasonCodes?: string[];
