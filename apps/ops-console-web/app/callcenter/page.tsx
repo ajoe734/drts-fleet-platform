@@ -48,6 +48,7 @@ import type {
   OwnedOrderRecord,
   RefreshTier,
   ResourceActionDescriptor,
+  ServiceAreaGeoJsonResponse,
   ServiceAreaEvaluationResult,
   TransferCallToComplaintCommand,
   UiHealthEnvelope,
@@ -66,6 +67,8 @@ import {
   type CallcenterMapBookingGate,
   type CallcenterServiceabilityPreviewStatus,
 } from "./map-booking";
+import { CallcenterInteractiveMap } from "./callcenter-interactive-map";
+import { resolveOpsMapTileUrlTemplate } from "../dispatch/ops-map-board";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -150,6 +153,11 @@ const INITIAL_COMPLAINT_TRANSFER_FORM: TransferCallToComplaintCommand = {
 
 const CALLCENTER_REFRESH_TIER: RefreshTier = "dispatch";
 const CALLCENTER_REFRESH_INTERVAL_MS = 5000;
+const CALLCENTER_MAP_TILE_URL_TEMPLATE = resolveOpsMapTileUrlTemplate({
+  NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE:
+    process.env.NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE,
+  NODE_ENV: process.env.NODE_ENV,
+});
 
 const FALLBACK_REFRESH_METADATA: UiRefreshMetadata = {
   generatedAt: new Date(0).toISOString(),
@@ -290,6 +298,21 @@ function getCallcenterMapBookingSectionCopy(
     description: t("callcenter.mapBooking.section.description"),
     pickupTitle: t("callcenter.mapBooking.section.pickupTitle"),
     dropoffTitle: t("callcenter.mapBooking.section.dropoffTitle"),
+  };
+}
+
+function getCallcenterInteractiveMapLabels(
+  t: (key: string, params?: Record<string, string | number>) => string,
+) {
+  return {
+    instruction: t("callcenter.mapBooking.map.instruction"),
+    serviceArea: t("callcenter.mapBooking.map.serviceArea"),
+    deny: t("callcenter.mapBooking.map.deny"),
+    manual: t("callcenter.mapBooking.map.manual"),
+    overlayError: t("callcenter.mapBooking.map.overlayError"),
+    overlayLoading: t("callcenter.mapBooking.map.overlayLoading"),
+    zoomOut: t("callcenter.mapBooking.map.zoomOut"),
+    zoomIn: t("callcenter.mapBooking.map.zoomIn"),
   };
 }
 
@@ -1010,6 +1033,7 @@ export default function CallcenterPage() {
   const currentLocale = locale as Locale;
   const mapBookingSectionCopy = getCallcenterMapBookingSectionCopy(t);
   const callcenterMapPickerLabels = getCallcenterMapPickerLabels(t);
+  const callcenterInteractiveMapLabels = getCallcenterInteractiveMapLabels(t);
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
 
@@ -1064,6 +1088,11 @@ export default function CallcenterPage() {
     useState<ServiceAreaEvaluationResult | null>(null);
   const [serviceabilityPreviewStatus, setServiceabilityPreviewStatus] =
     useState<CallcenterServiceabilityPreviewStatus>("idle");
+  const [serviceAreaMap, setServiceAreaMap] =
+    useState<ServiceAreaGeoJsonResponse | null>(null);
+  const [serviceAreaMapStatus, setServiceAreaMapStatus] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
   const [existingOrderId, setExistingOrderId] = useState("");
   const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
   const [recordingForm, setRecordingForm] = useState<RecordingFormState>(
@@ -1083,6 +1112,9 @@ export default function CallcenterPage() {
       },
       async getHealth() {
         return getOpsClient().getGeoProviderHealth();
+      },
+      async reverse(command) {
+        return getOpsClient().reverseGeo(command);
       },
     }),
     [],
@@ -1298,6 +1330,30 @@ export default function CallcenterPage() {
 
   useEffect(() => {
     void loadData();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setServiceAreaMapStatus("loading");
+
+    void getOpsClient()
+      .getOperationalServiceAreaGeoJson()
+      .then((geoJson) => {
+        if (!cancelled) {
+          setServiceAreaMap(geoJson);
+          setServiceAreaMapStatus("ready");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServiceAreaMap(null);
+          setServiceAreaMapStatus("error");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -2573,6 +2629,21 @@ export default function CallcenterPage() {
                           }}
                           actorId={callcenterActorId}
                           title={mapBookingSectionCopy.pickupTitle}
+                          renderMap={({ id, point, onPointSelect }) => (
+                            <CallcenterInteractiveMap
+                              id={id}
+                              stopKind="pickup"
+                              value={point}
+                              serviceProductType={
+                                CALLCENTER_MAP_SERVICE_PRODUCT_TYPE
+                              }
+                              geoJson={serviceAreaMap}
+                              overlayStatus={serviceAreaMapStatus}
+                              tileUrlTemplate={CALLCENTER_MAP_TILE_URL_TEMPLATE}
+                              labels={callcenterInteractiveMapLabels}
+                              onPinSelect={onPointSelect}
+                            />
+                          )}
                         />
                       </div>
                       <div
@@ -2593,6 +2664,21 @@ export default function CallcenterPage() {
                           }}
                           actorId={callcenterActorId}
                           title={mapBookingSectionCopy.dropoffTitle}
+                          renderMap={({ id, point, onPointSelect }) => (
+                            <CallcenterInteractiveMap
+                              id={id}
+                              stopKind="dropoff"
+                              value={point}
+                              serviceProductType={
+                                CALLCENTER_MAP_SERVICE_PRODUCT_TYPE
+                              }
+                              geoJson={serviceAreaMap}
+                              overlayStatus={serviceAreaMapStatus}
+                              tileUrlTemplate={CALLCENTER_MAP_TILE_URL_TEMPLATE}
+                              labels={callcenterInteractiveMapLabels}
+                              onPinSelect={onPointSelect}
+                            />
+                          )}
                         />
                       </div>
                     </div>

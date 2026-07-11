@@ -109,6 +109,7 @@ export {
 } from "./address-map-picker";
 export type {
   AddressMapPickerProps,
+  AddressMapRendererProps,
   AddressMapPairPickerProps,
   AddressMapPairChange,
   AddressMapPreviewSurfaceProps,

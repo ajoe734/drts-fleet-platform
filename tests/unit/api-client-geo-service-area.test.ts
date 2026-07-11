@@ -69,6 +69,7 @@ describe("api client geo and service-area coverage", () => {
     });
     await client.getServiceAreaDefinitions();
     await client.getServiceAreaGeoJson();
+    await client.getOperationalServiceAreaGeoJson();
     await client.evaluateServiceArea({
       serviceProductType: "taxi_realtime",
       pickup: { lat: 25.033, lng: 121.5654 },
@@ -138,6 +139,7 @@ describe("api client geo and service-area coverage", () => {
       "http://localhost:3001/api/geo/reverse",
       "http://localhost:3001/api/service-area/definitions",
       "http://localhost:3001/api/service-area/admin/geojson",
+      "http://localhost:3001/api/service-area/geojson",
       "http://localhost:3001/api/service-area/evaluate",
       "http://localhost:3001/api/service-area/admin/service-areas",
       "http://localhost:3001/api/service-area/admin/service-areas/svc%2F001/update",
@@ -232,9 +234,11 @@ describe("api client geo and service-area coverage", () => {
 
     const client = new ApiClient({ baseUrl: "http://localhost:3001" });
 
-    const error = await client.searchGeo({
-      q: "__provider_unavailable__",
-    }).catch((caughtError: unknown) => caughtError);
+    const error = await client
+      .searchGeo({
+        q: "__provider_unavailable__",
+      })
+      .catch((caughtError: unknown) => caughtError);
 
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error).toMatchObject({

@@ -481,6 +481,19 @@ export function projectOpsMapPointToViewport(
   };
 }
 
+export function unprojectOpsMapViewportPoint(
+  point: { leftPx: number; topPx: number },
+  viewport: OpsMapTileViewport,
+): OpsMapCoordinate {
+  const worldX = viewport.topLeftX + point.leftPx;
+  const worldY = viewport.topLeftY + point.topPx;
+  const unprojected = worldPixelToLngLat(worldX, worldY, viewport);
+  return {
+    lat: clampLatitude(unprojected.lat),
+    lng: normalizeLongitude(unprojected.lng),
+  };
+}
+
 export function shiftOpsMapCenter(
   viewport: OpsMapTileViewport,
   direction: "north" | "south" | "west" | "east",
