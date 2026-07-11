@@ -80,8 +80,8 @@ receipt, manual-review blocking proof, and Ops-visible map model.
 Task: `FLEETS-CLOSEOUT-002`
 Owner: `Codex`
 Reviewer: `Codex2`
-Branch: `codex/fleets-closeout-002`
-Verified code ref: `codex/fleets-closeout-002@2c6a34cb0`
+Branch: `codex/fleets-closeout-002-ci`
+Verified code ref: `codex/fleets-closeout-002-ci@f11c14237`
 
 ### Scope
 
