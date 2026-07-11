@@ -37,6 +37,15 @@
 
 ## Commands And Evidence
 
+### FLEETS-CLOSEOUT-003 E2E-MAP-002 Addendum
+
+The `E2E-MAP-002` PASS row is additionally closed by
+`support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md`.
+That packet ties the reviewed service-area and stop-policy lifecycle, active
+version/effective-window exports, evaluator refresh, invalid geometry rejection,
+and the existing downstream Callcenter blocked-order artifact into one
+row-level proof set.
+
 | Command                                                                                                                                                                                                                                                                                                                  | Result | Evidence                                                                                          |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------- |
 | `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts --reporter=json > support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`                                                                                                                                     | PASS   | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`       |
