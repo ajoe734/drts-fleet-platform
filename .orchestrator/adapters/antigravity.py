@@ -7,6 +7,7 @@ from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, Deli
 from adapters.file_inbox import FileInboxAdapter
 from common import (
     agent_config_for,
+    antigravity_rotation_config,
     apply_orchestrator_runtime_env,
     command_exists,
     config_path,
@@ -14,6 +15,7 @@ from common import (
     new_runtime_id,
     runtime_env_overrides,
     runtime_log_path,
+    select_rotation_model,
     spawn_background_process,
 )
 
@@ -199,9 +201,34 @@ class AntigravityAdapter(BaseAdapter):
             command.append("--dangerously-skip-permissions")
         if _truthy(settings.get("sandbox"), default=False):
             command.append("--sandbox")
-        model = str(request.metadata.get("model_preference") or settings.get("model") or "").strip()
+        # Model rotation: when enabled, the shared cooldown file (written by the
+        # supervisor on quota/capacity walls) decides which model this dispatch
+        # uses. Primary ("") means the agy default (Gemini); the fallback is an
+        # explicit model. Rotation owns model selection and overrides any
+        # model_preference/model hint. See common.select_rotation_model.
+        rotation = antigravity_rotation_config(settings)
+        rotation_slot: str | None = None
+        rotation_model: str | None = None
+        if rotation["enabled"]:
+            rotation_slot, rotation_model, both_cooling = select_rotation_model(
+                self.config, provider_key, rotation
+            )
+            if both_cooling:
+                note = (
+                    "Antigravity model rotation: both the Gemini and fallback pools are "
+                    "cooling down; deferring to inbox until one frees."
+                )
+                return _fallback_to_inbox(self, request, note, hard_error=False)
+            model = str(rotation_model or "").strip()
+        else:
+            model = str(request.metadata.get("model_preference") or settings.get("model") or "").strip()
         if model:
             command.extend(["--model", model])
+        # agy --print defaults to a 5m timeout which kills long agentic tasks;
+        # allow a per-provider override (default 1h).
+        print_timeout = str(settings.get("print_timeout") or "1h").strip()
+        if print_timeout:
+            command.extend(["--print-timeout", print_timeout])
         workspace_root = delivery_workspace_root(self.config, request.metadata)
         for directory in _include_directories(self.config, settings, Path(str(workspace_root))):
             command.extend(["--add-dir", directory])
@@ -226,4 +253,9 @@ class AntigravityAdapter(BaseAdapter):
             log_path=str(log_path),
             pid=process.pid,
             run_id=run_id,
+            metadata=(
+                {"rotation_slot": rotation_slot, "rotation_model": rotation_model}
+                if rotation_slot
+                else {}
+            ),
         )
