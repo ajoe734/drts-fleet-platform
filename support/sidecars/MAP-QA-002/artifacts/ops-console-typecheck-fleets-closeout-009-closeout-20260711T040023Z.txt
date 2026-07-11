@@ -1,0 +1,6 @@
+
+> @drts/ops-console-web@0.1.0 typecheck /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-009/apps/ops-console-web
+> next typegen && tsc --noEmit
+
+Generating route types...
+✓ Types generated successfully
