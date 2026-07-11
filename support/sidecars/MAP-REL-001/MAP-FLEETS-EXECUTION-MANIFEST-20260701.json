@@ -2,10 +2,19 @@
   "releaseId": "MAP-REL-001",
   "taskId": "FLEETS-CLOSEOUT-008",
   "phase": "map-geofence-production-closeout-20260708",
-  "updatedAt": "2026-07-11T06:06:45Z",
+  "updatedAt": "2026-07-11T06:29:29Z",
   "owner": "Codex",
   "reviewer": "Codex2",
   "releaseCloseoutBranch": "codex/fleets-closeout-008",
+  "integratedDevBaseline": "origin/dev@2102b8c1322b2f622bb36dc76485460b364f9131",
+  "actualProductionIntegration": {
+    "prNumber": 1095,
+    "prUrl": "https://github.com/ajoe734/drts-fleet-platform/pull/1095",
+    "headRef": "origin/codex/fleets-closeout-008-ci@3813843f071e56dabd80d38dc1df33c3476ea520",
+    "state": "OPEN",
+    "mergeStateStatus": "DIRTY",
+    "checksSummary": "GitHub checks are green through e2e and ci-integ as of 2026-07-11T06:29:19Z, but the head is not yet reachable from origin/dev@2102b8c1322b2f622bb36dc76485460b364f9131."
+  },
   "evidenceRoot": "support/sidecars/MAP-REL-001",
   "closeoutBoard": "support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md",
   "blockerReport": "support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md",
@@ -237,7 +246,7 @@
       "expectedStatus": "PASS",
       "artifactPaths": [
         "scripts/verify-map-geofence-dispatch-integrity.mjs",
-        "support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-dispatch-integrity-20260711T060645Z.txt"
+        "support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-dispatch-integrity-20260711T062929Z.txt"
       ],
       "sourceTasks": ["FLEETS-CLOSEOUT-008"]
     },
@@ -248,7 +257,7 @@
       "expectedStatus": "PASS",
       "artifactPaths": [
         "scripts/verify-map-geofence-production-readiness.mjs",
-        "support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-production-readiness-20260711T060645Z.txt"
+        "support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-production-readiness-20260711T062929Z.txt"
       ],
       "sourceTasks": ["FLEETS-CLOSEOUT-008"]
     }

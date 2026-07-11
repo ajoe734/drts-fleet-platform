@@ -3,18 +3,29 @@
 **Task:** `MAP-REL-001` release evidence closeout
 **Owner task:** `FLEETS-CLOSEOUT-008`
 **Evidence assembly branch:** `codex/fleets-closeout-008`
-**Integrated dev baseline:** `origin/dev@4c17d267406c4853ec398cd5dce8c55bdd50d743`
+**Actual production integration:** `PR #1095 / origin/codex/fleets-closeout-008-ci@3813843f071e56dabd80d38dc1df33c3476ea520`
+**Integrated dev baseline:** `origin/dev@2102b8c1322b2f622bb36dc76485460b364f9131`
 **Scaffold lineage:** `codex/fleets-closeout-008-ci@db4a2fc21b2a25077d0ed402b16663b0dfb1be4e`
 **Date:** `2026-07-11`
 **Reviewer:** `Codex2`
 
 ## Verdict
 
-`MAP-REL-001` release evidence is `PASS` for repo-backed release closeout on
-this branch. Gate A through Gate E each have concrete artifact links, every
-manifest `productionEvidence` item is closed as `PASS`, the latest readiness
-blocker report and closeout board are linked, and both release verifiers pass
-against canonical machine truth plus the current branch tree.
+`MAP-REL-001` release evidence is `PASS` for repo-backed release-evidence
+closeout on this branch. Gate A through Gate E each have concrete artifact
+links, every manifest `productionEvidence` item is closed as `PASS`, the latest
+readiness blocker report and closeout board are linked, and both release
+verifiers pass against canonical machine truth plus the current branch tree.
+
+Actual production integration remains `PENDING`. As of `2026-07-11T06:29:29Z`,
+GitHub reports PR `#1095` at
+`origin/codex/fleets-closeout-008-ci@3813843f071e56dabd80d38dc1df33c3476ea520`
+as `OPEN` with `mergeStateStatus=DIRTY`. The recorded GitHub checks are green
+through `e2e` and `ci-integ`, but that head is not an ancestor of
+`origin/dev@2102b8c1322b2f622bb36dc76485460b364f9131` after
+`FLEETS-CLOSEOUT-004` merged separately via PR `#1096`. Post-merge verifier
+reruns on `origin/dev` remain required before this task can be closed as
+integrated.
 
 This packet does **not** claim `dev_deployed`, live production publication, or
 human-operated release approval. Gate D remains an accepted
@@ -29,13 +40,13 @@ still requires separate deploy governance outside this task.
 | OBS final evidence | `codex2/fleets-closeout-006@fdcb09d0b86da33a34143bfd0bf3082a70ec5907` | `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
 | Driver Gate D evidence | `mixed: dev@66ee70f5b + origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2` | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md` |
 | `FLEETS-CLOSEOUT-001` | `done`, `origin/dev`, commit `c75c7fc164f5c4cbf2a9b3e36eed14e44aed76ea` | `support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md` |
-| `FLEETS-CLOSEOUT-002` | `done`, `not_applicable`, commit `b1682c234fcd5de6cac970c75caf175fb33f9a2a` | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
+| `FLEETS-CLOSEOUT-002` | `canonical done/not_applicable`; actual production code carried by PR `#1095` source `41670bd95f2d79159237f53e617ab4465b2b57ff` (`OPEN`, `DIRTY`) | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
 | `FLEETS-CLOSEOUT-003` | `done`, `origin/dev`, commit `0644366a3cd7df026d674a6888740666f9a5ec89` | `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md` |
-| `FLEETS-CLOSEOUT-004` | `done`, `not_applicable`, commit `399707364566cfb615e89ab21847f259c8d694d2` | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json` |
+| `FLEETS-CLOSEOUT-004` | `canonical done/not_applicable`; actual production integration merged by PR `#1096` as `origin/dev@2102b8c1322b2f622bb36dc76485460b364f9131` from `origin/codex/fleets-closeout-004-ci@efc373a6c0a256617c2950cbfd4bbcdc2b761c5c` | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json` |
 | `FLEETS-CLOSEOUT-005` | `done`, `origin/dev`, commit `a167bf6bc61d1897bf118cd140e1b319eb1477a2` | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md` |
 | `FLEETS-CLOSEOUT-006` | `done`, `origin/dev`, commit `1ac630692123efff46855f8e4ce7f019aa2de1b2` | `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md` |
-| `FLEETS-CLOSEOUT-007` | `done`, `not_applicable`, commit `cc0f19eb5b6ae72c04cb74876ff044dc3b20bc32` | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md` |
-| `FLEETS-CLOSEOUT-009` | `done`, `merged_to_dev`, merge `4c17d267406c4853ec398cd5dce8c55bdd50d743` | `support/sidecars/MAP-REL-001/FLEETS-CLOSEOUT-009-CALLCENTER-MAP-EVIDENCE.md` |
+| `FLEETS-CLOSEOUT-007` | `canonical done/not_applicable`; actual production code carried by PR `#1095` source `ef1e66d5138cc5f8159cfc6a6c23ed99c5707f9a` (`OPEN`, `DIRTY`) | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md` |
+| `FLEETS-CLOSEOUT-009` | `done`, `merged_to_dev`, merge `4c17d267406c4853ec398cd5dce8c55bdd50d743` (included in current `origin/dev@2102b8c1322b2f622bb36dc76485460b364f9131`) | `support/sidecars/MAP-REL-001/FLEETS-CLOSEOUT-009-CALLCENTER-MAP-EVIDENCE.md` |
 
 ## Gate Summary
 
@@ -67,8 +78,8 @@ still requires separate deploy governance outside this task.
 | `latest_blocker_report` | PASS | `support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md` |
 | `latest_closeout_board` | PASS | `support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md` |
 | `blocker_handoff_note` | PASS | `support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md` (`duplicate-skipped` handoff note) |
-| `dispatch_integrity_verifier` | PASS | `scripts/verify-map-geofence-dispatch-integrity.mjs`, `support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-dispatch-integrity-20260711T060645Z.txt` |
-| `production_readiness_verifier` | PASS | `scripts/verify-map-geofence-production-readiness.mjs`, `support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-production-readiness-20260711T060645Z.txt` |
+| `dispatch_integrity_verifier` | PASS | `scripts/verify-map-geofence-dispatch-integrity.mjs`, `support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-dispatch-integrity-20260711T062929Z.txt` |
+| `production_readiness_verifier` | PASS | `scripts/verify-map-geofence-production-readiness.mjs`, `support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-production-readiness-20260711T062929Z.txt` |
 
 ## Linked Parent Artifacts
 
@@ -87,6 +98,8 @@ still requires separate deploy governance outside this task.
 - No claim that a dev or prod deploy occurred from this task branch.
 - No claim that Gate D is fresh same-day device evidence; it remains the
   accepted mixed packet documented above.
+- No claim that PR `#1095` is merged or currently lineage-complete on
+  `origin/dev`; it is still `OPEN` / `DIRTY` as documented above.
 - No production-readiness claim here overrides the absence of live deploy proof;
   this packet only proves repo-backed release evidence and canonical task
   closure.

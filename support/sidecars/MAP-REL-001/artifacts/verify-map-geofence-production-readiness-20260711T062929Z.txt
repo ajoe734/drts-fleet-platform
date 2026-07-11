@@ -1,0 +1,73 @@
+MAP production readiness verification
+code_root=/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-008
+status_root=/home/edna/workspace/drts-fleet-platform
+PASS final evidence heading exists
+PASS overall release evidence verdict is PASS
+PASS final evidence has no template markers
+PASS gate row passes: Gate A - Callcenter safe to dispatch
+PASS gate row cites artifact evidence: Gate A - Callcenter safe to dispatch
+PASS gate row passes: Gate B - Governance safe to publish
+PASS gate row cites artifact evidence: Gate B - Governance safe to publish
+PASS gate row passes: Gate C - Ops safe to operate
+PASS gate row cites artifact evidence: Gate C - Ops safe to operate
+PASS gate row passes: Gate D - Driver safe to navigate
+PASS gate row cites artifact evidence: Gate D - Driver safe to navigate
+PASS gate row passes: Gate E - Degraded safe
+PASS gate row cites artifact evidence: Gate E - Degraded safe
+PASS production evidence row present for qa_packet_complete
+PASS production evidence row for qa_packet_complete cites manifest artifact evidence
+PASS production evidence row present for obs_packet_complete
+PASS production evidence row for obs_packet_complete cites manifest artifact evidence
+PASS production evidence row present for fleets_closeout_001_spatial_proof
+PASS production evidence row for fleets_closeout_001_spatial_proof cites manifest artifact evidence
+PASS production evidence row present for fleets_closeout_002_anti_bypass
+PASS production evidence row for fleets_closeout_002_anti_bypass cites manifest artifact evidence
+PASS production evidence row present for fleets_closeout_003_admin_publish
+PASS production evidence row for fleets_closeout_003_admin_publish cites manifest artifact evidence
+PASS production evidence row present for fleets_closeout_004_ops_visibility
+PASS production evidence row for fleets_closeout_004_ops_visibility cites manifest artifact evidence
+PASS production evidence row present for fleets_closeout_005_gate_d_packet
+PASS production evidence row for fleets_closeout_005_gate_d_packet cites manifest artifact evidence
+PASS production evidence row present for fleets_closeout_009_callcenter_map
+PASS production evidence row for fleets_closeout_009_callcenter_map cites manifest artifact evidence
+PASS production evidence row present for gate_a_dispatch
+PASS production evidence row for gate_a_dispatch cites manifest artifact evidence
+PASS production evidence row present for gate_b_publish
+PASS production evidence row for gate_b_publish cites manifest artifact evidence
+PASS production evidence row present for gate_c_ops
+PASS production evidence row for gate_c_ops cites manifest artifact evidence
+PASS production evidence row present for gate_d_driver
+PASS production evidence row for gate_d_driver cites manifest artifact evidence
+PASS production evidence row present for gate_e_degraded
+PASS production evidence row for gate_e_degraded cites manifest artifact evidence
+PASS production evidence row present for latest_blocker_report
+PASS production evidence row for latest_blocker_report cites manifest artifact evidence
+PASS production evidence row present for latest_closeout_board
+PASS production evidence row for latest_closeout_board cites manifest artifact evidence
+PASS production evidence row present for blocker_handoff_note
+PASS production evidence row for blocker_handoff_note cites manifest artifact evidence
+PASS production evidence row present for dispatch_integrity_verifier
+PASS production evidence row for dispatch_integrity_verifier cites manifest artifact evidence
+PASS production evidence row present for production_readiness_verifier
+PASS production evidence row for production_readiness_verifier cites manifest artifact evidence
+PASS final evidence links blocker report and closeout board
+PASS closeout artifacts explicitly avoid unsupported production-ready claims
+PASS closeout board preserves non-claim wording
+PASS FLEETS-CLOSEOUT-001 is done
+PASS FLEETS-CLOSEOUT-001 delivered commit is integrated into verifier HEAD
+PASS FLEETS-CLOSEOUT-002 is done
+PASS FLEETS-CLOSEOUT-002 is recorded as a completed sidecar-only closeout
+PASS FLEETS-CLOSEOUT-003 is done
+PASS FLEETS-CLOSEOUT-003 delivered commit is integrated into verifier HEAD
+PASS FLEETS-CLOSEOUT-004 is done
+PASS FLEETS-CLOSEOUT-004 is recorded as a completed sidecar-only closeout
+PASS FLEETS-CLOSEOUT-005 is done
+PASS FLEETS-CLOSEOUT-005 delivered commit is integrated into verifier HEAD
+PASS FLEETS-CLOSEOUT-006 is done
+PASS FLEETS-CLOSEOUT-006 delivered commit is integrated into verifier HEAD
+PASS FLEETS-CLOSEOUT-007 is done
+PASS FLEETS-CLOSEOUT-007 is recorded as a completed sidecar-only closeout
+PASS FLEETS-CLOSEOUT-009 is done
+PASS FLEETS-CLOSEOUT-009 delivered commit is integrated into verifier HEAD
+PASS FLEETS-CLOSEOUT-008 status is compatible with readiness verification
+production_readiness=PASS
