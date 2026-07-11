@@ -3,8 +3,8 @@
 **Task:** `FLEETS-CLOSEOUT-007` - QA final evidence packet
 **Packet scope:** Promote `MAP-QA-002` into closeout-ready evidence for `E2E-MAP-001` through `E2E-MAP-007`
 **Packet date:** `2026-07-08`
-**Owner:** `Codex2`
-**Reviewer:** `Codex`
+**Owner:** `Codex`
+**Reviewer:** `Codex2`
 
 ## Verdict
 
