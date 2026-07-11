@@ -301,6 +301,21 @@ function getCallcenterMapBookingSectionCopy(
   };
 }
 
+function getCallcenterInteractiveMapLabels(
+  t: (key: string, params?: Record<string, string | number>) => string,
+) {
+  return {
+    instruction: t("callcenter.mapBooking.map.instruction"),
+    serviceArea: t("callcenter.mapBooking.map.serviceArea"),
+    deny: t("callcenter.mapBooking.map.deny"),
+    manual: t("callcenter.mapBooking.map.manual"),
+    overlayError: t("callcenter.mapBooking.map.overlayError"),
+    overlayLoading: t("callcenter.mapBooking.map.overlayLoading"),
+    zoomOut: t("callcenter.mapBooking.map.zoomOut"),
+    zoomIn: t("callcenter.mapBooking.map.zoomIn"),
+  };
+}
+
 function getCallcenterMapPickerLabels(
   t: (key: string, params?: Record<string, string | number>) => string,
 ): Partial<AddressMapPickerLabels> {
@@ -1018,6 +1033,7 @@ export default function CallcenterPage() {
   const currentLocale = locale as Locale;
   const mapBookingSectionCopy = getCallcenterMapBookingSectionCopy(t);
   const callcenterMapPickerLabels = getCallcenterMapPickerLabels(t);
+  const callcenterInteractiveMapLabels = getCallcenterInteractiveMapLabels(t);
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
 
@@ -2624,7 +2640,7 @@ export default function CallcenterPage() {
                               geoJson={serviceAreaMap}
                               overlayStatus={serviceAreaMapStatus}
                               tileUrlTemplate={CALLCENTER_MAP_TILE_URL_TEMPLATE}
-                              locale={currentLocale}
+                              labels={callcenterInteractiveMapLabels}
                               onPinSelect={onPointSelect}
                             />
                           )}
@@ -2659,7 +2675,7 @@ export default function CallcenterPage() {
                               geoJson={serviceAreaMap}
                               overlayStatus={serviceAreaMapStatus}
                               tileUrlTemplate={CALLCENTER_MAP_TILE_URL_TEMPLATE}
-                              locale={currentLocale}
+                              labels={callcenterInteractiveMapLabels}
                               onPinSelect={onPointSelect}
                             />
                           )}

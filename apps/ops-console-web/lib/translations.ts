@@ -3415,6 +3415,17 @@ const en = {
     "Outside the governed service area",
   "callcenter.mapBooking.picker.serviceabilityPending":
     "Checking service area…",
+  "callcenter.mapBooking.map.instruction":
+    "Click the map to pin the exact stop",
+  "callcenter.mapBooking.map.serviceArea": "Service area",
+  "callcenter.mapBooking.map.deny": "No-stop",
+  "callcenter.mapBooking.map.manual": "Manual review",
+  "callcenter.mapBooking.map.overlayError":
+    "Fence overlays failed to load; live policy evaluation remains authoritative",
+  "callcenter.mapBooking.map.overlayLoading":
+    "Loading service areas and stop policies",
+  "callcenter.mapBooking.map.zoomOut": "Zoom out",
+  "callcenter.mapBooking.map.zoomIn": "Zoom in",
   "callcenter.mapBooking.banner.pickupCoordinatesTitle":
     "Pickup coordinates are required",
   "callcenter.mapBooking.banner.pickupCoordinatesBody":
@@ -7646,6 +7657,15 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.mapBooking.picker.manualReviewTitle": "需人工審查後才能釋出",
   "callcenter.mapBooking.picker.notServiceableTitle": "超出受管制的服務範圍",
   "callcenter.mapBooking.picker.serviceabilityPending": "正在檢查服務範圍…",
+  "callcenter.mapBooking.map.instruction": "點擊底圖可直接標記精確位置",
+  "callcenter.mapBooking.map.serviceArea": "服務範圍",
+  "callcenter.mapBooking.map.deny": "禁停",
+  "callcenter.mapBooking.map.manual": "人工覆核",
+  "callcenter.mapBooking.map.overlayError":
+    "圍籬圖層載入失敗；送單仍以即時政策判定為準",
+  "callcenter.mapBooking.map.overlayLoading": "正在載入服務範圍與停靠政策",
+  "callcenter.mapBooking.map.zoomOut": "縮小地圖",
+  "callcenter.mapBooking.map.zoomIn": "放大地圖",
   "callcenter.mapBooking.banner.pickupCoordinatesTitle": "必須先確認上車座標",
   "callcenter.mapBooking.banner.pickupCoordinatesBody":
     "建立電話訂車前，先搜尋或手動標記上車點。",

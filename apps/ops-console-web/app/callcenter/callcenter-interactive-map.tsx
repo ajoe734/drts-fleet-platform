@@ -30,8 +30,19 @@ export interface CallcenterInteractiveMapProps {
   geoJson: ServiceAreaGeoJsonResponse | null;
   overlayStatus: OverlayStatus;
   tileUrlTemplate: string;
-  locale: "en" | "zh";
+  labels: CallcenterInteractiveMapLabels;
   onPinSelect: (point: GeoPoint) => void;
+}
+
+export interface CallcenterInteractiveMapLabels {
+  instruction: string;
+  serviceArea: string;
+  deny: string;
+  manual: string;
+  overlayError: string;
+  overlayLoading: string;
+  zoomOut: string;
+  zoomIn: string;
 }
 
 const MAP_WIDTH = 640;
@@ -111,7 +122,7 @@ export function CallcenterInteractiveMap({
   geoJson,
   overlayStatus,
   tileUrlTemplate,
-  locale,
+  labels,
   onPinSelect,
 }: CallcenterInteractiveMapProps) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
@@ -178,25 +189,6 @@ export function CallcenterInteractiveMap({
     }
   }
 
-  const copy =
-    locale === "zh"
-      ? {
-          instruction: "點擊底圖可直接標記精確位置",
-          serviceArea: "服務範圍",
-          deny: "禁停",
-          manual: "人工覆核",
-          overlayError: "圍籬圖層載入失敗；送單仍以即時政策判定為準",
-          overlayLoading: "正在載入服務範圍與停靠政策",
-        }
-      : {
-          instruction: "Click the map to pin the exact stop",
-          serviceArea: "Service area",
-          deny: "No-stop",
-          manual: "Manual review",
-          overlayError:
-            "Fence overlays failed to load; live policy evaluation remains authoritative",
-          overlayLoading: "Loading service areas and stop policies",
-        };
   const overlayPolygons = features.flatMap((feature) =>
     feature.geometry.coordinates.map((ring, ringIndex) => {
       const visual = featureVisual(feature);
@@ -261,7 +253,7 @@ export function CallcenterInteractiveMap({
       style={{ display: "grid", gap: 8 }}
     >
       <div
-        aria-label={`${stopKind} ${copy.instruction}`}
+        aria-label={`${stopKind} ${labels.instruction}`}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         role="application"
@@ -293,7 +285,7 @@ export function CallcenterInteractiveMap({
         )}
 
         <svg
-          aria-label={`${copy.serviceArea} overlays`}
+          aria-label={`${labels.serviceArea} overlays`}
           data-callcenter-map-overlays
           height="100%"
           style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
@@ -339,10 +331,10 @@ export function CallcenterInteractiveMap({
           }}
         >
           {overlayStatus === "loading"
-            ? copy.overlayLoading
+            ? labels.overlayLoading
             : overlayStatus === "error"
-              ? copy.overlayError
-              : copy.instruction}
+              ? labels.overlayError
+              : labels.instruction}
         </span>
       </div>
 
@@ -358,13 +350,13 @@ export function CallcenterInteractiveMap({
         }}
       >
         <span>
-          <b style={{ color: "#38bdf8" }}>□</b> {copy.serviceArea} ·{" "}
-          <b style={{ color: "#f87171" }}>■</b> {copy.deny} ·{" "}
-          <b style={{ color: "#fbbf24" }}>■</b> {copy.manual}
+          <b style={{ color: "#38bdf8" }}>□</b> {labels.serviceArea} ·{" "}
+          <b style={{ color: "#f87171" }}>■</b> {labels.deny} ·{" "}
+          <b style={{ color: "#fbbf24" }}>■</b> {labels.manual}
         </span>
         <span style={{ display: "inline-flex", gap: 6 }}>
           <button
-            aria-label="Zoom out"
+            aria-label={labels.zoomOut}
             disabled={zoom <= 3}
             onClick={() => setZoom((current) => Math.max(3, current - 1))}
             style={{ minWidth: 28 }}
@@ -373,7 +365,7 @@ export function CallcenterInteractiveMap({
             -
           </button>
           <button
-            aria-label="Zoom in"
+            aria-label={labels.zoomIn}
             disabled={zoom >= 18}
             onClick={() => setZoom((current) => Math.min(18, current + 1))}
             style={{ minWidth: 28 }}
