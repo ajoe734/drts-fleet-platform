@@ -3,6 +3,7 @@
 Task bridge: `FLEETS-CLOSEOUT-001`, `FLEETS-CLOSEOUT-002`
 Source QA packet: `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`
 Promoted closeout branches: `codex/fleets-closeout-001`, `codex/fleets-closeout-002`
+`FLEETS-CLOSEOUT-002` verified code ref: `codex/fleets-closeout-002@2c6a34cb0`
 
 ## Purpose
 
