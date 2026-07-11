@@ -1,0 +1,230 @@
+{
+  "numTotalTestSuites": 2,
+  "numPassedTestSuites": 2,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 19,
+  "numPassedTests": 19,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1783741921315,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService returns serviceable when pickup and dropoff are inside an active area",
+          "status": "passed",
+          "title": "returns serviceable when pickup and dropoff are inside an active area",
+          "duration": 6.6354069999999865,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService exempts products with no active service area defined from service-area check",
+          "status": "passed",
+          "title": "exempts products with no active service area defined from service-area check",
+          "duration": 0.9953469999998106,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService rejects pickup points outside the service area",
+          "status": "passed",
+          "title": "rejects pickup points outside the service area",
+          "duration": 1.9450479999998151,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService hard-blocks a pickup point inside a deny stop policy",
+          "status": "passed",
+          "title": "hard-blocks a pickup point inside a deny stop policy",
+          "duration": 0.8428800000001502,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService audits evaluations and separates policy denial from coordinate-less attempts",
+          "status": "passed",
+          "title": "audits evaluations and separates policy denial from coordinate-less attempts",
+          "duration": 4.900564000000031,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService returns manual review when a stop hits a review-only policy",
+          "status": "passed",
+          "title": "returns manual review when a stop hits a review-only policy",
+          "duration": 0.6162379999998393,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService uses service product scoping when matching areas",
+          "status": "passed",
+          "title": "uses service product scoping when matching areas",
+          "duration": 0.5457420000000184,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService rejects invalid coordinates with a 400 contract error",
+          "status": "passed",
+          "title": "rejects invalid coordinates with a 400 contract error",
+          "duration": 0.6013629999999921,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService returns definitions with generated freshness metadata",
+          "status": "passed",
+          "title": "returns definitions with generated freshness metadata",
+          "duration": 1.0214509999998427,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService exports governed admin GeoJSON layers with lifecycle metadata",
+          "status": "passed",
+          "title": "exports governed admin GeoJSON layers with lifecycle metadata",
+          "duration": 1.1438750000002074,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService merges persisted governance state with baseline service-area seeds on startup",
+          "status": "passed",
+          "title": "merges persisted governance state with baseline service-area seeds on startup",
+          "duration": 1.030775000000176,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService rejects service-area creates when persistence fails without mutating memory or audit",
+          "status": "passed",
+          "title": "rejects service-area creates when persistence fails without mutating memory or audit",
+          "duration": 2.404218000000128,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService rolls back service-area updates when persistence fails",
+          "status": "passed",
+          "title": "rolls back service-area updates when persistence fails",
+          "duration": 1.4664339999999356,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService publishes service-area drafts and feeds the evaluator immediately",
+          "status": "passed",
+          "title": "publishes service-area drafts and feeds the evaluator immediately",
+          "duration": 2.959810999999945,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService keeps future-effective published service areas out of evaluator until active",
+          "status": "passed",
+          "title": "keeps future-effective published service areas out of evaluator until active",
+          "duration": 0.8265550000000985,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService rejects overlapping active versions for the same service-area code",
+          "status": "passed",
+          "title": "rejects overlapping active versions for the same service-area code",
+          "duration": 0.891988000000083,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService publishes and retires stop policies without losing service-area coverage",
+          "status": "passed",
+          "title": "publishes and retires stop policies without losing service-area coverage",
+          "duration": 3.9049669999999423,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService rejects self-intersecting service-area geometry before persistence",
+          "status": "passed",
+          "title": "rejects self-intersecting service-area geometry before persistence",
+          "duration": 0.8113840000000891,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["ServiceAreaService"],
+          "fullName": "ServiceAreaService exposes admin mutation envelopes through the controller",
+          "status": "passed",
+          "title": "exposes admin mutation envelopes through the controller",
+          "duration": 1.3284589999998389,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1783741922576,
+      "endTime": 1783741922611.3284,
+      "status": "passed",
+      "message": "",
+      "name": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-009/apps/api/tests/unit/service-area.service.test.ts"
+    }
+  ]
+}
