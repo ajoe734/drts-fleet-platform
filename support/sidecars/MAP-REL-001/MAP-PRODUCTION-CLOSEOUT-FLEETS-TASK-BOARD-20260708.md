@@ -11,15 +11,15 @@
 
 ## Task Closeout Rows
 
-| Task                  | Scope                                     | Status                  | Acceptance closeout                                                                                                                                                                                                                                                         |
-| --------------------- | ----------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FLEETS-CLOSEOUT-001` | Callcenter persisted spatial proof        | PASS                    | `E2E-MAP-001` and `E2E-MAP-003` link the same browser submit, persisted API/DB snapshot, service-area decision, audit event, manual-review no-dispatch proof, and Ops visibility chain.                                                                                     |
-| `FLEETS-CLOSEOUT-002` | Cross-surface persisted anti-bypass proof | PASS                    | `E2E-MAP-004` links tenant/concierge/partner persisted API and audit proof; `E2E-MAP-005` proves provider-outage and coordinate-less paths fail closed across every booking surface.                                                                                        |
-| `FLEETS-CLOSEOUT-003` | Admin publish and policy versions         | PASS                    | Draft/review/publish/retire, effective-window, invalid-geometry, audit and downstream Callcenter-block proof is consolidated in `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md`.                                                           |
-| `FLEETS-CLOSEOUT-004` | Ops map backend-linked visibility proof   | PASS                    | `E2E-MAP-006` links browser DOM/screenshot, Ops model, backend service, controller/API-envelope, persisted snapshot and observability evidence for the same order IDs.                                                                                                      |
-| `FLEETS-CLOSEOUT-005` | Driver native map/navigation UAT          | PASS                    | `E2E-MAP-007` proves trip map, pins, location freshness, coordinate-only navigation, route-authority and degraded/offline copy, plus heartbeat coexistence.                                                                                                                 |
-| `FLEETS-CLOSEOUT-006` | Observability final evidence              | PASS                    | Required metrics, audit events, alerts and runbooks distinguish outage, ambiguity, policy denial and coordinate-less attempts, with geometry rollback and manual-override coverage.                                                                                         |
-| `FLEETS-CLOSEOUT-009` | Callcenter production map integration     | PASS (`INTEGRATION-PR`) | Tile maps, active/effective service-area and stop-policy overlays, click-to-pin reverse geocoding, fail-closed reevaluation, deployment tile preflight and browser E2E are integrated into the final release branch; `dev` merge remains the only outstanding lineage step. |
+| Task                  | Scope                                     | Status | Acceptance closeout                                                                                                                                                                                                            |
+| --------------------- | ----------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FLEETS-CLOSEOUT-001` | Callcenter persisted spatial proof        | PASS   | `E2E-MAP-001` and `E2E-MAP-003` link the same browser submit, persisted API/DB snapshot, service-area decision, audit event, manual-review no-dispatch proof, and Ops visibility chain.                                        |
+| `FLEETS-CLOSEOUT-002` | Cross-surface persisted anti-bypass proof | PASS   | `E2E-MAP-004` links tenant/concierge/partner persisted API and audit proof; `E2E-MAP-005` proves provider-outage and coordinate-less paths fail closed across every booking surface.                                           |
+| `FLEETS-CLOSEOUT-003` | Admin publish and policy versions         | PASS   | Draft/review/publish/retire, effective-window, invalid-geometry, audit and downstream Callcenter-block proof is consolidated in `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md`.              |
+| `FLEETS-CLOSEOUT-004` | Ops map backend-linked visibility proof   | PASS   | `E2E-MAP-006` links browser DOM/screenshot, Ops model, backend service, controller/API-envelope, persisted snapshot and observability evidence for the same order IDs.                                                         |
+| `FLEETS-CLOSEOUT-005` | Driver native map/navigation UAT          | PASS   | `E2E-MAP-007` proves trip map, pins, location freshness, coordinate-only navigation, route-authority and degraded/offline copy, plus heartbeat coexistence.                                                                    |
+| `FLEETS-CLOSEOUT-006` | Observability final evidence              | PASS   | Required metrics, audit events, alerts and runbooks distinguish outage, ambiguity, policy denial and coordinate-less attempts, with geometry rollback and manual-override coverage.                                            |
+| `FLEETS-CLOSEOUT-009` | Callcenter production map integration     | PASS   | Tile maps, active/effective service-area and stop-policy overlays, click-to-pin reverse geocoding, fail-closed reevaluation, deployment tile preflight and browser E2E are squash-integrated by PR `#1095` at `dev@cbff3f7d9`. |
 
 ## FLEETS-CLOSEOUT-003 Governance Proof
 
@@ -234,10 +234,10 @@ authority and `MAP-OBS-001` final evidence. It still does not claim broader
 
 - This board now includes `FLEETS-CLOSEOUT-004` repo-local Ops evidence in
   addition to the closed `FLEETS-CLOSEOUT-001` and `FLEETS-CLOSEOUT-005`
-  slices. It still does not claim full `MAP-REL-001` production readiness or
-  `dev` deployment.
+  slices. It does not claim live production readiness or `dev` deployment;
+  repo-backed release readiness is closed separately by the parent evidence.
 - Separate parent blockers around provider runtime wiring and deploy-rail
   alignment on `MAP_PROVIDER_MODE` remain outside this task board's acceptance
   slice.
 - Integration status for the broader release family remains controlled by the
-  parent release task and its verifier/deploy evidence.
+  parent release task and its verifier evidence.

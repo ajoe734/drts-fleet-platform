@@ -2,10 +2,10 @@
   "releaseId": "MAP-REL-001",
   "taskId": "FLEETS-CLOSEOUT-008",
   "phase": "map-geofence-production-closeout-20260708",
-  "updatedAt": "2026-07-11T03:20:00Z",
+  "updatedAt": "2026-07-11T06:43:00Z",
   "owner": "Codex",
   "reviewer": "Codex2",
-  "releaseCloseoutBranch": "codex/fleets-closeout-008-ci",
+  "releaseCloseoutBranch": "origin/dev",
   "evidenceRoot": "support/sidecars/MAP-REL-001",
   "closeoutBoard": "support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md",
   "blockerReport": "support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md",
@@ -22,6 +22,23 @@
     "FLEETS-CLOSEOUT-007",
     "FLEETS-CLOSEOUT-009"
   ],
+  "productionIntegration": {
+    "status": "merged_to_dev",
+    "strategy": "squash",
+    "pullRequest": 1095,
+    "sourceHead": "e3d8dccd3cff981e29c0e9baf5bb0c8649746c71",
+    "devCommit": "cbff3f7d906eefe0728a3e486d4035fbd1179096",
+    "requiredTaskIds": [
+      "FLEETS-CLOSEOUT-001",
+      "FLEETS-CLOSEOUT-002",
+      "FLEETS-CLOSEOUT-003",
+      "FLEETS-CLOSEOUT-004",
+      "FLEETS-CLOSEOUT-005",
+      "FLEETS-CLOSEOUT-006",
+      "FLEETS-CLOSEOUT-007",
+      "FLEETS-CLOSEOUT-009"
+    ]
+  },
   "productionEvidence": [
     {
       "id": "qa_packet_complete",
@@ -117,6 +134,17 @@
         "apps/api/tests/unit/map-fleets-closeout-proof.test.ts"
       ],
       "sourceTasks": ["FLEETS-CLOSEOUT-009"]
+    },
+    {
+      "id": "production_integration_receipt",
+      "gate": "release-closeout",
+      "title": "Reviewed source tasks are integrated into the recorded dev commit",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-REL-001/MAP-FLEETS-EXECUTION-MANIFEST-20260701.json",
+        "support/sidecars/MAP-REL-001/MAP-REL-001-FINAL-EVIDENCE.md"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-008"]
     },
     {
       "id": "gate_a_dispatch",
