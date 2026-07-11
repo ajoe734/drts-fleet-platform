@@ -45,3 +45,13 @@ release closeout can cite exact evidence instead of only broad PASS summaries.
     artifacts per surface plus one backend proof packet
   - `MAP-OBS-001` rows are cross-linked so outage, ambiguity, policy denial,
     and coordinate-less attempts stay distinct in release evidence
+
+## FLEETS-CLOSEOUT-003 Admin Publish Promotion
+
+| Acceptance target                                | Result | Row-level artifact                                                                                                                     |
+| ------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `E2E-MAP-002` admin publish and downstream block | PASS   | `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md`, plus the Callcenter Playwright artifact linked above |
+| Evaluator refresh and effective window           | PASS   | Admin proof sections `Acceptance Proof` and `Version And Audit Values`                                                                 |
+| Active policy/version IDs                        | PASS   | `KHH_CORE@1`, `CYI_CORE@1`, and `CITY_HALL_PICKUP_BLOCK@1` in the admin proof                                                          |
+| Publish/retire audit                             | PASS   | Review, publish and retire assertions in `apps/api/tests/unit/service-area.service.test.ts`                                            |
+| Invalid geometry rejection                       | PASS   | `rejects self-intersecting service-area geometry before persistence`                                                                   |

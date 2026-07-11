@@ -17,6 +17,19 @@
 | `FLEETS-CLOSEOUT-002` | Cross-surface persisted anti-bypass proof | PASS   | `E2E-MAP-004` now links tenant / concierge / partner browser proof to persisted API + audit artifacts, while `E2E-MAP-005` links provider-outage and coordinate-less flows across tenant / concierge / partner / callcenter to explicit manual-review or fail-closed backend proof; OBS rows also cross-link outage vs ambiguity vs policy denial so no degraded path can be mistaken for a normal dispatchable order.                                                                                                                                                                                                                                               |
 | `FLEETS-CLOSEOUT-006` | Observability final evidence              | PASS   | `MAP-OBS-001-FINAL-EVIDENCE.md` on `codex2/fleets-closeout-006@fdcb09d0b86d` remains placeholder-free and keeps every required metric, audit event, recent-window alert, and runbook distinction row at `PASS` with row-level evidence. `support/sidecars/MAP-OBS-001/artifacts/closeout-20260708/fleets-closeout-006-observability-proof.json` and `apps/api/tests/unit/map-geofence-observability-closeout-proof.test.ts` add the closeout-specific proof for outage/ambiguity/policy-denial separation, PostGIS/evaluator and manual-override coverage, geometry rollback via publish/retire audit evidence, and repo-scoped dashboard/stage external-gate links. |
 | `FLEETS-CLOSEOUT-005` | Driver native map/navigation UAT          | PASS   | `E2E-MAP-007` now points to the accepted Gate D packet above; packet proves trip-map rendering, pickup/dropoff pins, current-location freshness copy, coordinate-only navigation URLs, route-authority copy, offline/degraded copy, and heartbeat coexistence while map/navigation is active.                                                                                                                                                                                                                                                                                                                                                                        |
+| `FLEETS-CLOSEOUT-003` | Admin publish and policy versions         | PASS   | Reviewed draft/publish/retire, effective-window, invalid-geometry, audit and downstream Callcenter-block proof is consolidated in `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+## FLEETS-CLOSEOUT-003 Governance Proof
+
+- Reviewed proof branch: `codex2/fleets-closeout-003@59a56c86a`.
+- Active boundary/version proof: `KHH_CORE@1` and `CYI_CORE@1`.
+- Active policy/version proof: `CITY_HALL_PICKUP_BLOCK@1`.
+- Review/publish/retire exports include status, version, geometry reference and
+  effective window.
+- Audit assertions include actor, actor type, request ID and mutation summary.
+- Invalid self-intersecting geometry is rejected before persistence.
+- Published deny policy refreshes the evaluator and matches the Callcenter
+  blocked-order browser artifact.
 
 ## FLEETS-CLOSEOUT-001 Spatial Proof Packet
 
