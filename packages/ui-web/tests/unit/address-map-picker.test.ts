@@ -44,7 +44,9 @@ describe("candidateToAddressPayload", () => {
     expect(payload?.coordinateSource).toBe("provider_candidate");
     expect(payload?.geocodeConfidence).toBe("exact");
     expect(payload?.providerCandidateId).toBe("place-1");
-    expect(payload?.coordinateProvenance?.coordinateSource).toBe("provider_candidate");
+    expect(payload?.coordinateProvenance?.coordinateSource).toBe(
+      "provider_candidate",
+    );
     expect(payload?.coordinateProvenance?.geocodeProvider).toBe("mock-geo");
     expect(payload?.coordinateProvenance?.surface).toBe("callcenter");
     expect(payload?.coordinateProvenance?.selectedByActorId).toBe("agent-9");
@@ -169,7 +171,10 @@ describe("buildServiceAreaPreviewCommand", () => {
 
 describe("deriveProviderState", () => {
   it("treats a disabled provider as unavailable", () => {
-    const state = deriveProviderState({ mode: "disabled", status: "unhealthy" });
+    const state = deriveProviderState({
+      mode: "disabled",
+      status: "unhealthy",
+    });
     expect(state.available).toBe(false);
     expect(state.reasonCode).toBe("provider_disabled");
   });
@@ -192,7 +197,11 @@ describe("deriveProviderState", () => {
 
   it("reports a healthy provider as available", () => {
     const state = deriveProviderState({ mode: "mock", status: "healthy" });
-    expect(state).toEqual({ available: true, degraded: false, reasonCode: "available" });
+    expect(state).toEqual({
+      available: true,
+      degraded: false,
+      reasonCode: "available",
+    });
   });
 
   it("assumes availability when no health snapshot exists", () => {
@@ -217,11 +226,15 @@ describe("derivePickerStatus", () => {
   });
 
   it("stays in manual entry when manual mode is on without a selection", () => {
-    expect(derivePickerStatus({ ...base, manualMode: true })).toBe("manual_entry");
+    expect(derivePickerStatus({ ...base, manualMode: true })).toBe(
+      "manual_entry",
+    );
   });
 
   it("reports selected once an address is pinned", () => {
-    expect(derivePickerStatus({ ...base, hasSelection: true })).toBe("selected");
+    expect(derivePickerStatus({ ...base, hasSelection: true })).toBe(
+      "selected",
+    );
   });
 
   it("reports no_match when a search returned nothing", () => {
@@ -245,7 +258,9 @@ describe("serviceability helpers", () => {
   });
 
   it("takes the strictest decision across stops", () => {
-    expect(worstServiceDecision("serviceable", "manual_review")).toBe("manual_review");
+    expect(worstServiceDecision("serviceable", "manual_review")).toBe(
+      "manual_review",
+    );
     expect(worstServiceDecision("manual_review", "not_serviceable")).toBe(
       "not_serviceable",
     );
@@ -314,7 +329,11 @@ describe("AddressMapPicker static render", () => {
       createElement(AddressMapPicker, {
         provider: createMockAddressProvider(),
         surface: "callcenter",
-        providerHealth: { mode: "disabled", status: "unhealthy", failClosed: true },
+        providerHealth: {
+          mode: "disabled",
+          status: "unhealthy",
+          failClosed: true,
+        },
       }),
     );
     expect(html).toContain("Address lookup is unavailable");
@@ -335,5 +354,29 @@ describe("AddressMapPicker static render", () => {
     expect(html).toContain("Match confidence");
     expect(html).toContain("Location source");
     expect(html).toContain("provider_candidate");
+  });
+
+  it("lets a product surface replace the CI grid with an interactive map", () => {
+    const value = candidateToAddressPayload(CANDIDATE, {
+      surface: "callcenter",
+    });
+    const html = renderToStaticMarkup(
+      createElement(AddressMapPicker, {
+        id: "pickup-map",
+        provider: createMockAddressProvider(),
+        surface: "callcenter",
+        value,
+        renderMap: ({ id, point }) =>
+          createElement("div", {
+            "data-custom-map": id,
+            "data-lat": point?.lat,
+            "data-lng": point?.lng,
+          }),
+      }),
+    );
+
+    expect(html).toContain('data-custom-map="pickup-map-interactive-map"');
+    expect(html).toContain('data-lat="25.033964"');
+    expect(html).not.toContain("Select an address or drop a pin");
   });
 });

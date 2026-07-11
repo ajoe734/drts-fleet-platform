@@ -21,12 +21,19 @@ parse_bool() {
 }
 
 detect_tier() {
+  case "$(lower "${MAP_PROVIDER_DEPLOYMENT_TIER:-}")" in
+    production|prod ) printf 'production'; return ;;
+    staging|stage ) printf 'staging'; return ;;
+    ci ) printf 'ci'; return ;;
+    local|development|dev ) printf 'local'; return ;;
+  esac
+
   if [[ "$(parse_bool "${CI:-false}")" == "true" ]]; then
     printf 'ci'
     return
   fi
 
-  case "$(lower "${MAP_PROVIDER_DEPLOYMENT_TIER:-${APP_ENV:-${NODE_ENV:-local}}}")" in
+  case "$(lower "${APP_ENV:-${NODE_ENV:-local}}")" in
     production|prod ) printf 'production' ;;
     staging|stage ) printf 'staging' ;;
     ci ) printf 'ci' ;;
@@ -63,6 +70,24 @@ esac
 case "$TIER" in
   staging|production ) STRICT_RUNTIME='true' ;;
 esac
+
+TILE_URL_TEMPLATE="${NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE:-${MAP_PROVIDER_TILE_URL_TEMPLATE:-}}"
+if [[ "$STRICT_RUNTIME" == "true" ]]; then
+  if [[ -z "$TILE_URL_TEMPLATE" ]]; then
+    echo "MAP provider config check: tier=${TIER} requires NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE for web map rendering." >&2
+    exit 1
+  fi
+  if [[ "$TILE_URL_TEMPLATE" != https://* ]]; then
+    echo "MAP provider config check: production-like tile templates must use HTTPS." >&2
+    exit 1
+  fi
+  for token in '{z}' '{x}' '{y}'; do
+    if [[ "$TILE_URL_TEMPLATE" != *"$token"* ]]; then
+      echo "MAP provider config check: tile template is missing ${token}." >&2
+      exit 1
+    fi
+  done
+fi
 
 if [[ "$BACKEND" == "mock" ]]; then
   echo "MAP provider config check: backend=mock tier=${TIER}; deterministic mock mode is active."

@@ -1,0 +1,251 @@
+{
+  "releaseId": "MAP-REL-001",
+  "taskId": "FLEETS-CLOSEOUT-008",
+  "phase": "map-geofence-production-closeout-20260708",
+  "updatedAt": "2026-07-11T03:20:00Z",
+  "owner": "Codex",
+  "reviewer": "Codex2",
+  "releaseCloseoutBranch": "codex/fleets-closeout-008-ci",
+  "evidenceRoot": "support/sidecars/MAP-REL-001",
+  "closeoutBoard": "support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md",
+  "blockerReport": "support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md",
+  "finalEvidence": "support/sidecars/MAP-REL-001/MAP-REL-001-FINAL-EVIDENCE.md",
+  "dispatchIntegrityVerifier": "scripts/verify-map-geofence-dispatch-integrity.mjs",
+  "productionReadinessVerifier": "scripts/verify-map-geofence-production-readiness.mjs",
+  "requiredTaskIds": [
+    "FLEETS-CLOSEOUT-001",
+    "FLEETS-CLOSEOUT-002",
+    "FLEETS-CLOSEOUT-003",
+    "FLEETS-CLOSEOUT-004",
+    "FLEETS-CLOSEOUT-005",
+    "FLEETS-CLOSEOUT-006",
+    "FLEETS-CLOSEOUT-007",
+    "FLEETS-CLOSEOUT-009"
+  ],
+  "productionEvidence": [
+    {
+      "id": "qa_packet_complete",
+      "gate": "release-input",
+      "title": "QA final evidence packet is linked and accepted",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-007"]
+    },
+    {
+      "id": "obs_packet_complete",
+      "gate": "release-input",
+      "title": "Observability final evidence packet is linked and accepted",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-OBS-001/artifacts/vitest-map-geofence-alerts-20260703T153844Z.json",
+        "support/sidecars/MAP-OBS-001/artifacts/vitest-map-geofence-observability-runtime-20260703T153844Z.json"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-006"]
+    },
+    {
+      "id": "fleets_closeout_001_spatial_proof",
+      "gate": "Gate A",
+      "title": "Callcenter persisted spatial proof closes same-order dispatch chain",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md",
+        "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-browser-proof-20260708T050000Z.json",
+        "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-001"]
+    },
+    {
+      "id": "fleets_closeout_002_anti_bypass",
+      "gate": "Gate A",
+      "title": "Cross-surface anti-bypass proof prevents dispatchable coordinate-less or outage orders",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-002"]
+    },
+    {
+      "id": "fleets_closeout_003_admin_publish",
+      "gate": "Gate B",
+      "title": "Platform Admin publish and policy version proof is closed",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "apps/api/tests/unit/service-area.service.test.ts"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-003"]
+    },
+    {
+      "id": "fleets_closeout_004_ops_visibility",
+      "gate": "Gate C",
+      "title": "Ops map visibility proof is backend-linked to the same governed orders",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json",
+        "apps/api/tests/unit/owned-mobility.service.test.ts"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-004"]
+    },
+    {
+      "id": "fleets_closeout_005_gate_d_packet",
+      "gate": "Gate D",
+      "title": "Driver Gate D packet is accepted as external-gated mixed evidence",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md",
+        "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md",
+        "docs/04-uat/driver-app-verification-20260615/screens/r3-trip-on-trip.png"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-005"]
+    },
+    {
+      "id": "fleets_closeout_009_callcenter_map",
+      "gate": "Gate A",
+      "title": "Callcenter uses a production tile map with governed service-area and stop-policy overlays",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-REL-001/FLEETS-CLOSEOUT-009-CALLCENTER-MAP-EVIDENCE.md",
+        "support/sidecars/MAP-REL-001/artifacts/fleets-closeout-009-callcenter-map-blocked.png",
+        "tests/e2e/map-fleets-closeout-proof.spec.ts",
+        "apps/api/tests/unit/map-fleets-closeout-proof.test.ts"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-009"]
+    },
+    {
+      "id": "gate_a_dispatch",
+      "gate": "Gate A",
+      "title": "Callcenter and booking surfaces are safe to dispatch under governed serviceability",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md",
+        "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json"
+      ],
+      "sourceTasks": [
+        "FLEETS-CLOSEOUT-001",
+        "FLEETS-CLOSEOUT-002",
+        "FLEETS-CLOSEOUT-007",
+        "FLEETS-CLOSEOUT-009"
+      ]
+    },
+    {
+      "id": "gate_b_publish",
+      "gate": "Gate B",
+      "title": "Governance publish flows are safe to publish with audit and policy evidence",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "apps/api/tests/unit/service-area.service.test.ts"
+      ],
+      "sourceTasks": [
+        "FLEETS-CLOSEOUT-003",
+        "FLEETS-CLOSEOUT-006",
+        "FLEETS-CLOSEOUT-007"
+      ]
+    },
+    {
+      "id": "gate_c_ops",
+      "gate": "Gate C",
+      "title": "Ops board exposes governed spatial readiness hooks and backend-linked visibility",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json"
+      ],
+      "sourceTasks": [
+        "FLEETS-CLOSEOUT-004",
+        "FLEETS-CLOSEOUT-006",
+        "FLEETS-CLOSEOUT-007"
+      ]
+    },
+    {
+      "id": "gate_d_driver",
+      "gate": "Gate D",
+      "title": "Driver navigation handoff is accepted for release closeout",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md",
+        "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md",
+        "docs/04-uat/driver-app-verification-20260615/round-10-incident-heartbeat.md"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-005"]
+    },
+    {
+      "id": "gate_e_degraded",
+      "gate": "Gate E",
+      "title": "Provider outage, ambiguity, and coordinate-less degraded paths fail closed",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+        "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
+      ],
+      "sourceTasks": [
+        "FLEETS-CLOSEOUT-002",
+        "FLEETS-CLOSEOUT-006",
+        "FLEETS-CLOSEOUT-007",
+        "FLEETS-CLOSEOUT-009"
+      ]
+    },
+    {
+      "id": "latest_blocker_report",
+      "gate": "release-closeout",
+      "title": "Latest readiness blocker report is linked",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-008"]
+    },
+    {
+      "id": "latest_closeout_board",
+      "gate": "release-closeout",
+      "title": "Latest closeout board is linked",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-008"]
+    },
+    {
+      "id": "blocker_handoff_note",
+      "gate": "release-closeout",
+      "title": "Blocker notifier handoff note is posted or duplicate-skipped",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-008"]
+    },
+    {
+      "id": "dispatch_integrity_verifier",
+      "gate": "release-closeout",
+      "title": "Dispatch integrity verifier passes on branch-local closeout evidence",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "scripts/verify-map-geofence-dispatch-integrity.mjs",
+        "support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-dispatch-integrity-20260708T081047Z.txt"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-008"]
+    },
+    {
+      "id": "production_readiness_verifier",
+      "gate": "release-closeout",
+      "title": "Production readiness verifier passes without over-claiming live production",
+      "expectedStatus": "PASS",
+      "artifactPaths": [
+        "scripts/verify-map-geofence-production-readiness.mjs",
+        "support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-production-readiness-20260708T081047Z.txt"
+      ],
+      "sourceTasks": ["FLEETS-CLOSEOUT-008"]
+    }
+  ]
+}

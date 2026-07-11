@@ -14,6 +14,7 @@ import {
   normalizeOpsMapBounds,
   projectOpsMapPointToViewport,
   resolveOpsMapTileUrlTemplate,
+  unprojectOpsMapViewportPoint,
 } from "../../app/dispatch/ops-map-board";
 
 function order(overrides: Partial<OwnedOrderRecord> = {}): OwnedOrderRecord {
@@ -278,6 +279,16 @@ describe("ops map board model", () => {
     expect(pickupProjection.leftPct).toBeLessThanOrEqual(100);
     expect(pickupProjection.topPct).toBeGreaterThanOrEqual(0);
     expect(pickupProjection.topPct).toBeLessThanOrEqual(100);
+
+    const unprojected = unprojectOpsMapViewportPoint(
+      {
+        leftPx: (pickupProjection.leftPct / 100) * viewport.width,
+        topPx: (pickupProjection.topPct / 100) * viewport.height,
+      },
+      viewport,
+    );
+    expect(unprojected.lat).toBeCloseTo(model.points[0]!.lat, 6);
+    expect(unprojected.lng).toBeCloseTo(model.points[0]!.lng, 6);
   });
 
   it("uses deterministic mock tiles only for local/test/mock runtimes", () => {

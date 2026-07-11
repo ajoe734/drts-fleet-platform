@@ -252,6 +252,26 @@ export class ServiceAreaService implements OnModuleInit {
     };
   }
 
+  exportOperationalGeoJson(
+    requestedAt = new Date(),
+  ): ServiceAreaGeoJsonResponse {
+    const exported = this.exportGeoJson();
+    return {
+      ...exported,
+      features: exported.features.filter((feature) => {
+        const properties = feature.properties;
+        return (
+          properties.status === "active" &&
+          this.recordIsEffective(
+            properties.effectiveFrom,
+            properties.effectiveUntil,
+            requestedAt,
+          )
+        );
+      }),
+    };
+  }
+
   async createServiceArea(
     command: CreateServiceAreaBoundaryCommand,
     context: ServiceAreaMutationContext,

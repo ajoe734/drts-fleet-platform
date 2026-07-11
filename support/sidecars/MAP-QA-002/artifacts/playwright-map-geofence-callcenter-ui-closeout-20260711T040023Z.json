@@ -26,18 +26,12 @@
         "name": "",
         "testDir": "/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-fleets-closeout-009/tests/e2e",
         "testIgnore": [],
-        "testMatch": [
-          "/ops-console-parity\\.spec\\.ts/"
-        ],
+        "testMatch": ["/ops-console-parity\\.spec\\.ts/"],
         "timeout": 180000
       }
     ],
     "quiet": false,
-    "reporter": [
-      [
-        "json"
-      ]
-    ],
+    "reporter": [["json"]],
     "reportSlowTests": {
       "max": 5,
       "threshold": 300000

@@ -44,6 +44,14 @@ export class ServiceAreaController {
     );
   }
 
+  @Get("geojson")
+  exportOperationalGeoJson(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.serviceAreaService.exportOperationalGeoJson(),
+      requestId,
+    );
+  }
+
   @Post("evaluate")
   evaluateServiceArea(
     @Body() command: EvaluateServiceAreaCommand,

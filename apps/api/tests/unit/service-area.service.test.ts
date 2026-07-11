@@ -328,6 +328,76 @@ describe("ServiceAreaService", () => {
     });
   });
 
+  it("exports only active and effective layers to operational map consumers", async () => {
+    const { service, context } = createMutationService();
+    const draft = await service.createServiceArea(
+      {
+        areaCode: "DRAFT_MAP_AREA",
+        displayName: "Draft map area",
+        geometry: {
+          type: "circle",
+          center: { lat: 24.99, lng: 121.3 },
+          radiusMeters: 900,
+        },
+        serviceProductTypes: ["taxi_realtime"],
+      },
+      context,
+    );
+    const future = await service.createServiceArea(
+      {
+        areaCode: "FUTURE_MAP_AREA",
+        displayName: "Future map area",
+        geometry: {
+          type: "circle",
+          center: { lat: 23.48, lng: 120.45 },
+          radiusMeters: 900,
+        },
+        serviceProductTypes: ["taxi_realtime"],
+        effectiveFrom: "2026-08-01T00:00:00.000Z",
+      },
+      context,
+    );
+    await service.submitServiceAreaForReview(
+      future.record.serviceAreaId,
+      context,
+    );
+    await service.publishServiceArea(
+      future.record.serviceAreaId,
+      { reason: "future rollout" },
+      context,
+    );
+
+    const controller = new ServiceAreaController(service);
+    const operational = service.exportOperationalGeoJson(
+      new Date("2026-07-11T00:00:00.000Z"),
+    );
+    const admin = controller.exportAdminGeoJson().data;
+    const operationalCodes = operational.features.map((feature) =>
+      feature.properties.recordKind === "service_area"
+        ? feature.properties.areaCode
+        : feature.properties.policyCode,
+    );
+    const adminCodes = admin.features.map((feature) =>
+      feature.properties.recordKind === "service_area"
+        ? feature.properties.areaCode
+        : feature.properties.policyCode,
+    );
+
+    expect(adminCodes).toEqual(
+      expect.arrayContaining([draft.record.areaCode, future.record.areaCode]),
+    );
+    expect(operationalCodes).not.toContain(draft.record.areaCode);
+    expect(operationalCodes).not.toContain(future.record.areaCode);
+    expect(
+      operational.features.every(
+        (feature) => feature.properties.status === "active",
+      ),
+    ).toBe(true);
+    expect(
+      controller.exportOperationalGeoJson("req-operational-map").meta.requestId,
+    ).toBe("req-operational-map");
+  });
+
   it("merges persisted governance state with baseline service-area seeds on startup", async () => {
     const repository = {
       loadState: vi.fn().mockResolvedValue({
