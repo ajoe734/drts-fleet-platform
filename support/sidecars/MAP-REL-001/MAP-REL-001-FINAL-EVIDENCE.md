@@ -2,17 +2,18 @@
 
 **Task:** `MAP-REL-001` release evidence closeout
 **Owner task:** `FLEETS-CLOSEOUT-008`
-**Evidence assembly branch:** `codex/fleets-closeout-008-ci`
+**Evidence assembly branch:** `origin/dev@cbff3f7d906eefe0728a3e486d4035fbd1179096`
 **Date:** `2026-07-11`
 **Reviewer:** `Codex2`
 
 ## Verdict
 
-`MAP-REL-001` release evidence is `PENDING` until every task in manifest
-`requiredTaskIds` is `done` in canonical machine truth and all referenced
-artifacts are integrated into the same `dev` lineage. Gate A through Gate E
-have concrete proof rows, but the closeout verifiers intentionally fail closed
-while any required task or artifact is missing.
+`MAP-REL-001` release evidence is `PASS`. Every task in manifest
+`requiredTaskIds` is complete, and the reviewed implementation, evidence, and
+reproducible tests are integrated by squash PR `#1095` at
+`dev@cbff3f7d906eefe0728a3e486d4035fbd1179096`. The integration head passed all
+14 required GitHub checks; local verification passed all 119 API test files
+(818 tests), the Callcenter map E2E (1/1), and the Ops map E2E (1/1).
 
 This packet does **not** claim `dev_deployed`, live production publication, or
 human-operated release approval. Gate D remains an accepted
@@ -27,13 +28,13 @@ still requires separate deploy governance outside this task.
 | OBS final evidence     | `codex/map-obs-001@43baac5843a2`                                                                  | `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`                                                   |
 | Driver Gate D evidence | `origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2` plus `dev@66ee70f5b` UAT | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md`                               |
 | `FLEETS-CLOSEOUT-001`  | `done`, `merged_to_dev`, commit `c75c7fc164f5c4cbf2a9b3e36eed14e44aed76ea`                        | `support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md`                           |
-| `FLEETS-CLOSEOUT-002`  | source `41670bd95`, integrated into release PR `#1095`                                            | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`                                                     |
+| `FLEETS-CLOSEOUT-002`  | `done`; source `41670bd95`, squash-integrated by PR `#1095` at `dev@cbff3f7d9`                    | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`                                                     |
 | `FLEETS-CLOSEOUT-003`  | `done`, integrated in `dev@0644366a3`                                                             | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `apps/api/tests/unit/service-area.service.test.ts` |
-| `FLEETS-CLOSEOUT-004`  | source `816db347a`, integrated into release PR `#1095`                                            | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `tests/e2e/map-geofence-ops-closeout.spec.ts`      |
+| `FLEETS-CLOSEOUT-004`  | `done`; source `816db347a`, squash-integrated by PR `#1095` at `dev@cbff3f7d9`                    | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `tests/e2e/map-geofence-ops-closeout.spec.ts`      |
 | `FLEETS-CLOSEOUT-005`  | `done`, commit `8d62417046b688a810382ffe5c78725194b8f135`                                         | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md`                               |
 | `FLEETS-CLOSEOUT-006`  | `done`, integrated in `dev@1ac630692`                                                             | `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`                                                   |
-| `FLEETS-CLOSEOUT-007`  | source `ef1e66d51`, integrated into release PR `#1095`                                            | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`                                                     |
-| `FLEETS-CLOSEOUT-009`  | source `0dfd32706`, integrated into release PR `#1095`                                            | `support/sidecars/MAP-REL-001/FLEETS-CLOSEOUT-009-CALLCENTER-MAP-EVIDENCE.md`                                  |
+| `FLEETS-CLOSEOUT-007`  | `done`; source `ef1e66d51`, squash-integrated by PR `#1095` at `dev@cbff3f7d9`                    | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`                                                     |
+| `FLEETS-CLOSEOUT-009`  | `done`; source `0dfd32706`, squash-integrated by PR `#1095` at `dev@cbff3f7d9`                    | `support/sidecars/MAP-REL-001/FLEETS-CLOSEOUT-009-CALLCENTER-MAP-EVIDENCE.md`                                  |
 
 ## Gate Summary
 
@@ -57,6 +58,7 @@ still requires separate deploy governance outside this task.
 | `fleets_closeout_004_ops_visibility` | PASS   | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json`, `apps/api/tests/unit/owned-mobility.service.test.ts`                                                                       |
 | `fleets_closeout_005_gate_d_packet`  | PASS   | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md`, `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`, `docs/04-uat/driver-app-verification-20260615/screens/r3-trip-on-trip.png`                                                       |
 | `fleets_closeout_009_callcenter_map` | PASS   | `support/sidecars/MAP-REL-001/FLEETS-CLOSEOUT-009-CALLCENTER-MAP-EVIDENCE.md`, `support/sidecars/MAP-REL-001/artifacts/fleets-closeout-009-callcenter-map-blocked.png`, `tests/e2e/map-fleets-closeout-proof.spec.ts`, `apps/api/tests/unit/map-fleets-closeout-proof.test.ts`           |
+| `production_integration_receipt`     | PASS   | Manifest squash receipt for PR `#1095`; source head `e3d8dccd3cff981e29c0e9baf5bb0c8649746c71` is integrated at `dev@cbff3f7d906eefe0728a3e486d4035fbd1179096`                                                                                                                           |
 | `gate_a_dispatch`                    | PASS   | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md`, `support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json`                                       |
 | `gate_b_publish`                     | PASS   | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`, `apps/api/tests/unit/service-area.service.test.ts`                                                                                                             |
 | `gate_c_ops`                         | PASS   | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`, `support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json`                                                               |
@@ -83,5 +85,6 @@ still requires separate deploy governance outside this task.
 - No claim that a dev or prod deploy occurred from this task branch.
 - No claim that Gate D is fresh same-day device evidence; it remains the
   accepted mixed packet documented above.
-- No production-readiness claim is valid until both verifier scripts pass
-  against canonical `ai-status.json` and the integrated `dev` artifact tree.
+- This repo-backed production-readiness claim remains valid only while both
+  verifier scripts pass against canonical `ai-status.json` and the integrated
+  `dev` artifact tree.

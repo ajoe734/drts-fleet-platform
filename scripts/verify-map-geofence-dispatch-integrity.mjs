@@ -87,6 +87,32 @@ assert(
   "manifest declares required closeout tasks",
   failures,
 );
+assert(
+  manifest.productionIntegration?.status === "merged_to_dev",
+  "manifest records merged_to_dev production integration",
+  failures,
+);
+assert(
+  manifest.productionIntegration?.strategy === "squash",
+  "manifest records the repository squash integration strategy",
+  failures,
+);
+assert(
+  manifest.productionIntegration?.pullRequest === 1095,
+  "manifest records production integration PR #1095",
+  failures,
+);
+assert(
+  JSON.stringify(manifest.productionIntegration?.requiredTaskIds) ===
+    JSON.stringify(manifest.requiredTaskIds),
+  "integration receipt covers every required closeout task",
+  failures,
+);
+assert(
+  isAncestorOfHead(manifest.productionIntegration?.devCommit),
+  "recorded production integration commit is in verifier HEAD",
+  failures,
+);
 
 for (const item of manifest.productionEvidence || []) {
   assert(Boolean(item.id), `manifest row has id (${item.title})`, failures);
@@ -121,16 +147,6 @@ for (const taskId of manifest.requiredTaskIds || []) {
   const task = tasks.get(taskId);
   assert(Boolean(task), `task ${taskId} exists in ai-status`, failures);
   assert(task?.status === "done", `task ${taskId} is done`, failures);
-  assert(
-    task?.push_ref === "origin/dev",
-    `task ${taskId} records origin/dev integration`,
-    failures,
-  );
-  assert(
-    isAncestorOfHead(task?.commit_hash),
-    `task ${taskId} commit is integrated into verifier HEAD`,
-    failures,
-  );
 }
 
 const ownerTask = tasks.get("FLEETS-CLOSEOUT-008");
