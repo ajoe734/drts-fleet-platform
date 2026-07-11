@@ -19,6 +19,7 @@
 
 ## FLEETS-CLOSEOUT-003 Governance Proof
 
+- Verified implementation: `codex/fleets-closeout-003-ci@dc9a5609e`.
 - Active boundary/version proof: `KHH_CORE@1` and `CYI_CORE@1`.
 - Active policy/version proof: `CITY_HALL_PICKUP_BLOCK@1`.
 - Review/publish/retire exports include status, version, geometry reference and

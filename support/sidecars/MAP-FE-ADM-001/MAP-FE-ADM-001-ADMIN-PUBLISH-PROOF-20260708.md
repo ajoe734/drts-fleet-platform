@@ -4,6 +4,8 @@ Task: `FLEETS-CLOSEOUT-003`
 
 Branch: `codex/fleets-closeout-003-ci`
 
+Verified implementation: `codex/fleets-closeout-003-ci@dc9a5609e`
+
 ## Acceptance Proof
 
 | Requirement                                   | Repo-backed proof                                                                                                                                                                                  |
