@@ -301,6 +301,8 @@ function spatialAudit({
   reasonMessages?: string[];
   stopPolicyCodes: string[];
 }): OwnedOrderSpatialAuditSnapshot {
+  const serviceAreaDecision = requireEvaluatedDecision(decision);
+
   return {
     snapshotId,
     snapshotVersion: 1,
@@ -313,7 +315,7 @@ function spatialAudit({
     decision,
     stops: [],
     serviceAreaEvaluation: {
-      decision,
+      decision: serviceAreaDecision,
       serviceProductType: "taxi_realtime",
       evaluatedAt: GENERATED_AT,
       stops: stopPolicyCodes.map((policyCode, index) => ({
@@ -325,7 +327,7 @@ function spatialAudit({
         serviceAreaCodes,
         policyCodes: [policyCode],
         geometryVersionRefs,
-        decision,
+        decision: serviceAreaDecision,
         reasonCodes,
         reasonMessages,
       })),
@@ -349,6 +351,17 @@ function spatialAudit({
       },
     ],
   };
+}
+
+function requireEvaluatedDecision(
+  decision: OwnedOrderSpatialAuditDecision,
+): Exclude<OwnedOrderSpatialAuditDecision, "not_evaluated"> {
+  if (decision === "not_evaluated") {
+    throw new Error(
+      "Ops visibility proof requires an evaluated spatial decision",
+    );
+  }
+  return decision;
 }
 
 function dispatchJob(orderId: string): DispatchJobRecord {
