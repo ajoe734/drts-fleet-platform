@@ -110,6 +110,7 @@ async function handleHarnessRoute(
         );
         return true;
       case "/service-area/admin/geojson":
+      case "/service-area/geojson":
         await fulfillJson(
           route,
           200,
@@ -165,8 +166,14 @@ async function handleResolveRoute(
     body.providerCandidateId,
     fixture?.candidate?.providerCandidateId,
   );
-  const placeId = coalesceNullableString(body.placeId, fixture?.candidate?.placeId);
-  const selectedByActorId = coalesceNullableString(body.selectedByActorId, null);
+  const placeId = coalesceNullableString(
+    body.placeId,
+    fixture?.candidate?.placeId,
+  );
+  const selectedByActorId = coalesceNullableString(
+    body.selectedByActorId,
+    null,
+  );
   const manualOverrideReason = coalesceNullableString(
     body.manualOverrideReason,
     null,
@@ -201,11 +208,9 @@ async function handleReverseRoute(
     null,
   );
   const command: ReverseGeocodeCommand = {
-    location:
-      (body.location as GeoPoint | undefined) ??
+    location: (body.location as GeoPoint | undefined) ??
       fixture?.reverseProbeLocation ??
-      fixture?.candidate?.location ??
-      { lat: 25.0375, lng: 121.5637 },
+      fixture?.candidate?.location ?? { lat: 25.0375, lng: 121.5637 },
     surface: (body.surface as GeoResolutionSurface | undefined) ?? "unknown",
     ...(requestedByActorId !== undefined ? { requestedByActorId } : {}),
   };
@@ -225,18 +230,19 @@ async function handleServiceAreaEvaluateRoute(
   const fixture = resolveFixtureFromRoute(route, options, body);
   const expectation = fixture?.evaluationExpectations[0];
   const requestedAt = coalesceRequiredString(body.requestedAt, undefined);
-  const dropoff = (body.dropoff as GeoPoint | null | undefined) ??
+  const dropoff =
+    (body.dropoff as GeoPoint | null | undefined) ??
     expectation?.dropoff ??
     undefined;
   const command: EvaluateServiceAreaCommand = {
     serviceProductType:
-      (body.serviceProductType as EvaluateServiceAreaCommand["serviceProductType"] | undefined) ??
+      (body.serviceProductType as
+        | EvaluateServiceAreaCommand["serviceProductType"]
+        | undefined) ??
       expectation?.serviceProductType ??
       "taxi_realtime",
-    pickup:
-      (body.pickup as GeoPoint | undefined) ??
-      fixture?.candidate?.location ??
-      { lat: 25.0375, lng: 121.5637 },
+    pickup: (body.pickup as GeoPoint | undefined) ??
+      fixture?.candidate?.location ?? { lat: 25.0375, lng: 121.5637 },
     ...(dropoff !== undefined ? { dropoff } : {}),
     ...(requestedAt !== undefined ? { requestedAt } : {}),
   };

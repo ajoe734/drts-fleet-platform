@@ -540,7 +540,17 @@ export interface AddressMapPickerProps<
   providerHealth?: AddressProviderHealth | null;
   /** Require a manual-override reason before a manual pin is accepted (default true). */
   requireManualReason?: boolean;
+  /** Replace the CI-safe grid with a surface-owned tile/overlay map. */
+  renderMap?: (props: AddressMapRendererProps) => ReactNode;
   id?: string;
+}
+
+export interface AddressMapRendererProps {
+  id: string;
+  point: GeoPoint | null;
+  tone: AddressPickerTone;
+  label: string;
+  onPointSelect: (point: GeoPoint) => void;
 }
 
 interface SelectionState {
@@ -567,6 +577,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     enableServiceabilityPreview = true,
     providerHealth,
     requireManualReason = true,
+    renderMap,
   } = props;
 
   const theme = themeProp ?? DEFAULT_THEME;
@@ -842,6 +853,69 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     ],
   );
 
+  const handleMapPointSelect = useCallback(
+    async (point: GeoPoint) => {
+      const reason = "agent_map_click";
+      const applyPoint = (baseAddress: AddressPayload | null) => {
+        const lineageBase = baseAddress
+          ? ({
+              ...(selectedAddress ?? {}),
+              ...baseAddress,
+            } as AddressPayload)
+          : selectedAddress;
+        const geocodeConfidence =
+          lineageBase?.geocodeConfidence ?? selectedAddress?.geocodeConfidence;
+        const address = manualCoordinateToAddressPayload({
+          lat: point.lat,
+          lng: point.lng,
+          addressText:
+            lineageBase?.address ??
+            selectedAddress?.address ??
+            labels.manualTitle,
+          baseAddress: lineageBase,
+          addressName:
+            lineageBase?.addressName ?? selectedAddress?.addressName ?? null,
+          surface,
+          manualOverrideReason: reason,
+          pinnedByActorId: actorId,
+          ...(geocodeConfidence ? { geocodeConfidence } : {}),
+        });
+        if (!address) {
+          return;
+        }
+        applySelection(address, reason);
+        runServiceability(address);
+      };
+
+      // Keep the exact map click immediately; reverse geocoding only enriches it.
+      applyPoint(null);
+      if (!provider.reverse) {
+        return;
+      }
+      try {
+        const reverse = await provider.reverse({
+          location: point,
+          surface,
+          ...(locale ? { locale } : {}),
+          requestedByActorId: actorId,
+        });
+        applyPoint(reverse.address);
+      } catch {
+        // A provider outage must not erase a valid, policy-evaluated map pin.
+      }
+    },
+    [
+      actorId,
+      applySelection,
+      labels.manualTitle,
+      locale,
+      provider,
+      runServiceability,
+      selectedAddress,
+      surface,
+    ],
+  );
+
   const handleClear = useCallback(() => {
     applySelection(null, "");
     setServiceability(null);
@@ -1110,31 +1184,41 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       ) : null}
 
       {/* Map preview */}
-      <AddressMapPreviewSurface
-        theme={theme}
-        {...(bounds ? { bounds } : {})}
-        emptyLabel={labels.mapEmpty}
-        nudgeHint={labels.mapHint}
-        caption={
-          pinPoint
-            ? `${roundCoord(pinPoint.lat)}, ${roundCoord(pinPoint.lng)}`
-            : undefined
-        }
-        onPinMove={handlePinMove}
-        pins={
-          pinPoint
-            ? [
-                {
-                  id: "primary",
-                  point: pinPoint,
-                  tone: pinTone,
-                  label: selectedAddress?.address ?? "Selected location",
-                  draggable: true,
-                },
-              ]
-            : []
-        }
-      />
+      {renderMap ? (
+        renderMap({
+          id: `${domId}-interactive-map`,
+          point: pinPoint,
+          tone: pinTone,
+          label: selectedAddress?.address ?? labels.mapEmpty,
+          onPointSelect: (point) => void handleMapPointSelect(point),
+        })
+      ) : (
+        <AddressMapPreviewSurface
+          theme={theme}
+          {...(bounds ? { bounds } : {})}
+          emptyLabel={labels.mapEmpty}
+          nudgeHint={labels.mapHint}
+          caption={
+            pinPoint
+              ? `${roundCoord(pinPoint.lat)}, ${roundCoord(pinPoint.lng)}`
+              : undefined
+          }
+          onPinMove={handlePinMove}
+          pins={
+            pinPoint
+              ? [
+                  {
+                    id: "primary",
+                    point: pinPoint,
+                    tone: pinTone,
+                    label: selectedAddress?.address ?? "Selected location",
+                    draggable: true,
+                  },
+                ]
+              : []
+          }
+        />
+      )}
 
       {/* Selection detail */}
       {selectedAddress ? (

@@ -738,6 +738,10 @@ export class ApiClient {
     );
   }
 
+  async getOperationalServiceAreaGeoJson(): Promise<ServiceAreaGeoJsonResponse> {
+    return this.get<ServiceAreaGeoJsonResponse>("/api/service-area/geojson");
+  }
+
   async evaluateServiceArea(
     command: EvaluateServiceAreaCommand,
   ): Promise<ServiceAreaEvaluationResult> {

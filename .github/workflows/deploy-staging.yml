@@ -45,6 +45,7 @@ env:
   WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER }}
   SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
   MAP_PROVIDER_BACKEND: ${{ vars.STAGING_MAP_PROVIDER_BACKEND || 'mock' }}
+  NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE: ${{ vars.STAGING_MAP_TILE_URL_TEMPLATE }}
   MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.STAGING_MAP_PROVIDER_ALLOWED_ORIGINS || vars.MAP_PROVIDER_ALLOWED_ORIGINS || '' }}
   MAP_PROVIDER_MONTHLY_BUDGET_USD: ${{ vars.STAGING_MAP_PROVIDER_MONTHLY_BUDGET_USD || vars.MAP_PROVIDER_MONTHLY_BUDGET_USD || '' }}
   MAP_PROVIDER_BUDGET_ALERT_PCT: ${{ vars.STAGING_MAP_PROVIDER_BUDGET_ALERT_PCT || vars.MAP_PROVIDER_BUDGET_ALERT_PCT || '50;80;95' }}
@@ -173,6 +174,8 @@ jobs:
           context: .
           file: apps/ops-console-web/Dockerfile
           push: true
+          build-args: |
+            NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=${{ env.NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE }}
           tags: |
             ${{ env.REGISTRY }}/ops-console-web:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/ops-console-web:latest

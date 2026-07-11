@@ -3,6 +3,9 @@ import { resolve } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { buildMapGeofenceServiceAreaGeoJsonEnvelope } from "../../packages/shared-test-fixtures/src/map-geofence-fixtures";
+import { installMockMapTileRoutes } from "./map-geofence-harness";
+
 const baseUrl =
   process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
   process.env.OPS_CONSOLE_BASE_URL ??
@@ -15,6 +18,8 @@ const BROWSER_ARTIFACT_RELATIVE_PATH =
   "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-browser-proof-20260708T050000Z.json";
 const SCREENSHOT_RELATIVE_PATH =
   "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-browser-proof-20260708T050000Z.png";
+const BLOCKED_SCREENSHOT_RELATIVE_PATH =
+  "support/sidecars/MAP-REL-001/artifacts/fleets-closeout-009-callcenter-map-blocked.png";
 
 async function assertShell(page: Page) {
   const shellAside = page
@@ -61,6 +66,7 @@ async function ensureCallcenterMapBookingForm(page: Page) {
 
 async function installMockCallcenterMapRoutes(page: Page) {
   const now = "2026-07-08T05:00:00.000Z";
+  await installMockMapTileRoutes(page);
   const activeSession = {
     callId: CALL_ID,
     callType: "booking",
@@ -111,6 +117,21 @@ async function installMockCallcenterMapRoutes(page: Page) {
     location: { lat: 25.033879, lng: 121.568743 },
     confidence: "interpolated",
     accuracyM: 25,
+  };
+  const blockedPickupCandidate = {
+    candidateId: "mock-taipei-station",
+    provider: "mock-geo",
+    providerCandidateId: "place-taipei-station",
+    placeId: "place-taipei-station",
+    displayName: "Taipei Main Station",
+    address: "No. 3, Beiping West Road, Zhongzheng District, Taipei",
+    normalizedAddress: "No.3 Beiping W. Rd, Zhongzheng, Taipei",
+    district: "Zhongzheng",
+    locality: "Taipei",
+    countryCode: "TW",
+    location: { lat: 25.0478, lng: 121.517 },
+    confidence: "exact",
+    accuracyM: 8,
   };
 
   await page.route("**/control-plane-proxy/health*", async (route) => {
@@ -203,8 +224,9 @@ async function installMockCallcenterMapRoutes(page: Page) {
   await page.route("**/control-plane-proxy/geo/search*", async (route) => {
     const requestUrl = new URL(route.request().url());
     const query = requestUrl.searchParams.get("q")?.toLowerCase() ?? "";
-    const candidates =
-      query.includes("city") || query.includes("hall")
+    const candidates = query.includes("station")
+      ? [blockedPickupCandidate]
+      : query.includes("city") || query.includes("hall")
         ? [pickupCandidate]
         : query.includes("office")
           ? [dropoffCandidate]
@@ -224,6 +246,44 @@ async function installMockCallcenterMapRoutes(page: Page) {
     });
   });
 
+  await page.route("**/control-plane-proxy/geo/reverse*", async (route) => {
+    const command = route.request().postDataJSON() as {
+      location: { lat: number; lng: number };
+      surface: string;
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          address: {
+            address: `Map pin ${command.location.lat.toFixed(6)}, ${command.location.lng.toFixed(6)}`,
+            lat: command.location.lat,
+            lng: command.location.lng,
+            coordinateSource: "reverse_geocode",
+            geocodeProvider: "mock-geo",
+            geocodeConfidence: "approximate",
+            surface: command.surface,
+          },
+          provider: "mock-geo",
+          resolvedAt: now,
+        },
+      }),
+    });
+  });
+
+  await page.route(
+    "**/control-plane-proxy/service-area/geojson*",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(buildMapGeofenceServiceAreaGeoJsonEnvelope()),
+      });
+    },
+  );
+
   await page.route(
     "**/control-plane-proxy/service-area/evaluate*",
     async (route) => {
@@ -231,6 +291,17 @@ async function installMockCallcenterMapRoutes(page: Page) {
         pickup: { lat: number; lng: number };
         dropoff: { lat: number; lng: number } | null;
       };
+      const pickupBlocked =
+        Math.abs(command.pickup.lat - blockedPickupCandidate.location.lat) <
+          0.002 &&
+        Math.abs(command.pickup.lng - blockedPickupCandidate.location.lng) <
+          0.002;
+      const decision = pickupBlocked ? "not_serviceable" : "serviceable";
+      const policyCodes = pickupBlocked ? ["TPE_STATION_PICKUP_BLOCK"] : [];
+      const reasonCodes = pickupBlocked ? ["PICKUP_NOT_ALLOWED"] : [];
+      const reasonMessages = pickupBlocked
+        ? ["Pickup is not allowed at this curb zone."]
+        : [];
 
       await route.fulfill({
         status: 200,
@@ -238,7 +309,7 @@ async function installMockCallcenterMapRoutes(page: Page) {
         body: JSON.stringify({
           success: true,
           data: {
-            decision: "serviceable",
+            decision,
             serviceProductType: "taxi_realtime",
             evaluatedAt: now,
             stops: [
@@ -246,11 +317,16 @@ async function installMockCallcenterMapRoutes(page: Page) {
                 kind: "pickup",
                 location: command.pickup,
                 serviceAreaCodes: ["TAIPEI_CORE"],
-                policyCodes: [],
-                geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
-                decision: "serviceable",
-                reasonCodes: [],
-                reasonMessages: [],
+                policyCodes,
+                geometryVersionRefs: [
+                  "service_area:TAIPEI_CORE@1",
+                  ...(pickupBlocked
+                    ? ["stop_policy:TPE_STATION_PICKUP_BLOCK@1"]
+                    : []),
+                ],
+                decision,
+                reasonCodes,
+                reasonMessages,
               },
               {
                 kind: "dropoff",
@@ -264,9 +340,14 @@ async function installMockCallcenterMapRoutes(page: Page) {
               },
             ],
             serviceAreaCodes: ["TAIPEI_CORE"],
-            geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
-            reasonCodes: [],
-            reasonMessages: [],
+            geometryVersionRefs: [
+              "service_area:TAIPEI_CORE@1",
+              ...(pickupBlocked
+                ? ["stop_policy:TPE_STATION_PICKUP_BLOCK@1"]
+                : []),
+            ],
+            reasonCodes,
+            reasonMessages,
           },
         }),
       });
@@ -297,7 +378,7 @@ async function installMockCallcenterMapRoutes(page: Page) {
 test.describe("map fleets closeout proof", () => {
   test.use({ viewport: { width: 1440, height: 950 } });
 
-  test("captures phone-order request provenance and order id", async ({
+  test("blocks a visible no-pickup fence, then submits the corrected map pin", async ({
     page,
   }, testInfo) => {
     await installMockCallcenterMapRoutes(page);
@@ -329,11 +410,11 @@ test.describe("map fleets closeout proof", () => {
     await pickupPicker
       .locator('input[type="text"]')
       .first()
-      .fill("Taipei City Hall");
+      .fill("Taipei Station");
     await pickupPicker.getByRole("button", { name: /Search|搜尋/i }).click();
     await pickupPicker
       .locator("button")
-      .filter({ hasText: /Taipei City Hall/i })
+      .filter({ hasText: /Taipei Main Station/i })
       .first()
       .click();
 
@@ -350,6 +431,51 @@ test.describe("map fleets closeout proof", () => {
       .filter({ hasText: /Xinyi Office/i })
       .first()
       .click();
+
+    const pickupMap = page.locator(
+      '[data-callcenter-interactive-map="callcenter-pickup-map-interactive-map"]',
+    );
+    await expect(pickupMap).toHaveAttribute("data-map-overlay-status", "ready");
+    await expect(pickupMap).toHaveAttribute("data-map-render-mode", "tile");
+    await expect(pickupMap).toHaveAttribute(
+      "data-map-policy-codes",
+      /TPE_STATION_PICKUP_BLOCK/,
+    );
+    await expect(
+      pickupMap.locator('[data-map-feature-code="TPE_STATION_PICKUP_BLOCK"]'),
+    ).toBeVisible();
+    await expect(bookingGate).toHaveAttribute(
+      "data-callcenter-map-booking-gate",
+      "serviceability_blocked",
+    );
+    await expect(submitButton).toBeDisabled();
+    const blockedGateBeforeCorrection = await bookingGate.getAttribute(
+      "data-callcenter-map-booking-gate",
+    );
+    const blockedMapEvidence = {
+      renderMode: await pickupMap.getAttribute("data-map-render-mode"),
+      overlayStatus: await pickupMap.getAttribute("data-map-overlay-status"),
+      policyCodes: await pickupMap.getAttribute("data-map-policy-codes"),
+      selectedLat: await pickupMap.getAttribute("data-selected-lat"),
+      selectedLng: await pickupMap.getAttribute("data-selected-lng"),
+    };
+    mkdirSync(
+      resolve(process.cwd(), "support/sidecars/MAP-REL-001/artifacts"),
+      { recursive: true },
+    );
+    await pickupMap.screenshot({
+      path: resolve(process.cwd(), BLOCKED_SCREENSHOT_RELATIVE_PATH),
+    });
+
+    const mapCanvas = pickupMap.locator('[role="application"]');
+    const mapBox = await mapCanvas.boundingBox();
+    expect(mapBox).not.toBeNull();
+    await mapCanvas.click({
+      position: {
+        x: mapBox!.width * 0.2,
+        y: mapBox!.height * 0.5,
+      },
+    });
 
     await expect(bookingGate).toHaveAttribute(
       "data-callcenter-map-booking-gate",
@@ -391,12 +517,10 @@ test.describe("map fleets closeout proof", () => {
         name: "Smoke Caller",
       },
       pickup: {
-        address: "No. 1, City Hall Road, Xinyi District, Taipei",
-        lat: 25.037519,
-        lng: 121.56368,
-        coordinateSource: "provider_candidate",
+        coordinateSource: "manual_pin",
         geocodeProvider: "mock-geo",
-        providerCandidateId: "place-city-hall",
+        providerCandidateId: "place-taipei-station",
+        manualOverrideReason: "agent_map_click",
         surface: "callcenter",
       },
       dropoff: {
@@ -409,6 +533,13 @@ test.describe("map fleets closeout proof", () => {
         surface: "callcenter",
       },
     });
+    const pickup = payload.pickup as {
+      lat: number;
+      lng: number;
+      address: string;
+    };
+    expect(pickup.address).toMatch(/^Map pin /);
+    expect(Math.abs(pickup.lng - 121.517)).toBeGreaterThan(0.002);
 
     const artifactPath = resolve(process.cwd(), BROWSER_ARTIFACT_RELATIVE_PATH);
     const screenshotPath = resolve(process.cwd(), SCREENSHOT_RELATIVE_PATH);
@@ -426,6 +557,8 @@ test.describe("map fleets closeout proof", () => {
           callId: responseBody.data.callId,
           recordingId: responseBody.data.recordingId,
           submitResult: responseBody.data.status,
+          blockedGateBeforeCorrection,
+          blockedMapEvidence,
           bookingGateBeforeSubmit: gateBeforeSubmit,
           bookingGateAfterSubmit: await bookingGate.getAttribute(
             "data-callcenter-map-booking-gate",
@@ -444,6 +577,10 @@ test.describe("map fleets closeout proof", () => {
     });
     await testInfo.attach("map-fleets-closeout-browser-proof-screenshot", {
       path: screenshotPath,
+      contentType: "image/png",
+    });
+    await testInfo.attach("callcenter-map-blocked-screenshot", {
+      path: resolve(process.cwd(), BLOCKED_SCREENSHOT_RELATIVE_PATH),
       contentType: "image/png",
     });
   });
