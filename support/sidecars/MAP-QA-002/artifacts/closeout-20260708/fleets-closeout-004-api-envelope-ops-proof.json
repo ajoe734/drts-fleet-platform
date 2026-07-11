@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-07-11T02:29:36.534Z",
-  "branchSha": "codex/fleets-closeout-004@ee615f4370d4",
+  "generatedAt": "2026-07-11T02:33:39.699Z",
+  "branchSha": "codex/fleets-closeout-004@f9c033bb1194",
   "closeoutTask": "FLEETS-CLOSEOUT-004",
   "scope": "repo-local controller/API-envelope plus Ops map model evidence; final E2E-MAP-006 promotion composes this readback with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, and MAP-OBS-001 final evidence.",
   "command": "pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility-ops-map-api-closeout-proof.test.ts --reporter=verbose",
@@ -80,8 +80,8 @@
         "status": "matching",
         "mode": "auto",
         "latestEtaMinutes": 4,
-        "createdAt": "2026-07-11T02:29:36.527Z",
-        "updatedAt": "2026-07-11T02:29:36.527Z"
+        "createdAt": "2026-07-11T02:33:39.688Z",
+        "updatedAt": "2026-07-11T02:33:39.688Z"
       }
     },
     "candidates": {
@@ -135,7 +135,7 @@
           "orderId": "ORD-SMOKE-001",
           "eventType": "dispatch.matching",
           "message": "dispatch.matching",
-          "createdAt": "2026-07-11T02:29:36.528Z",
+          "createdAt": "2026-07-11T02:33:39.690Z",
           "details": {
             "dispatchJobId": "misc-fleets-closeout-004-api-2",
             "candidateCount": 3
@@ -146,7 +146,7 @@
           "orderId": "ORD-SMOKE-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-11T02:29:36.523Z",
+          "createdAt": "2026-07-11T02:33:39.682Z",
           "details": {
             "callId": "CALL-SMOKE-001",
             "recordingId": "REC-SMOKE-001",
