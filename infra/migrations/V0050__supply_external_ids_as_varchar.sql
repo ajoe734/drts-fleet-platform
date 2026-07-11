@@ -1,6 +1,10 @@
 -- SUP-BE-003 restore follow-up.
 -- The restored supply write-flow persists against Phase 1 runtime snapshot ids,
 -- which are varchar-backed slug/text ids rather than normalized UUID FKs.
+--
+-- This patch must use a unique migration version. A previous copy was
+-- mistakenly introduced as V0036 and was shadowed by the existing service-area
+-- V0036, so hermetic databases never applied the type conversion.
 
 ALTER TABLE IF EXISTS fleet.supply_submissions
   ALTER COLUMN fleet_partner_id TYPE varchar(100) USING fleet_partner_id::text,

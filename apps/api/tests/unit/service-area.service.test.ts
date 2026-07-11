@@ -86,6 +86,23 @@ describe("ServiceAreaService", () => {
     expect(result.stops).toHaveLength(2);
   });
 
+  it("exempts products with no active service area defined from service-area check", () => {
+    const service = createService();
+
+    // insurance_replacement_vehicle has no active service areas seeded
+    const result = service.evaluate({
+      serviceProductType: "insurance_replacement_vehicle",
+      pickup: { lat: 25.041, lng: 121.55 },
+      dropoff: { lat: 25.06, lng: 121.58 },
+      requestedAt: "2026-06-30T00:00:00.000Z",
+    });
+
+    expect(result.decision).toBe("serviceable");
+    expect(result.serviceAreaCodes).toEqual([]);
+    expect(result.geometryVersionRefs).toEqual([]);
+    expect(result.reasonCodes).toEqual([]);
+  });
+
   it("rejects pickup points outside the service area", () => {
     const service = createService();
 
@@ -637,10 +654,36 @@ describe("ServiceAreaService", () => {
       },
       context,
     );
-    await service.submitStopPolicyForReview(
+    const review = await service.submitStopPolicyForReview(
       policy.record.stopPolicyId,
       context,
     );
+    expect(review.record).toMatchObject({
+      policyCode: "CITY_HALL_PICKUP_BLOCK",
+      status: "review",
+      version: 1,
+      effectiveFrom: "2026-06-01T00:00:00.000Z",
+      effectiveUntil: null,
+    });
+    expect(
+      service
+        .exportGeoJson()
+        .features.find(
+          (feature) =>
+            feature.properties.recordKind === "stop_policy" &&
+            feature.properties.policyCode === "CITY_HALL_PICKUP_BLOCK",
+        ),
+    ).toMatchObject({
+      properties: {
+        recordKind: "stop_policy",
+        policyCode: "CITY_HALL_PICKUP_BLOCK",
+        status: "review",
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
+        effectiveUntil: null,
+        version: 1,
+        geometryVersionRef: "stop_policy:CITY_HALL_PICKUP_BLOCK@1",
+      },
+    });
     const published = await service.publishStopPolicy(
       policy.record.stopPolicyId,
       { reason: "temporary city hall curb works" },
@@ -674,6 +717,25 @@ describe("ServiceAreaService", () => {
 
     expect(retired.record.status).toBe("retired");
     expect(
+      service
+        .exportGeoJson()
+        .features.find(
+          (feature) =>
+            feature.properties.recordKind === "stop_policy" &&
+            feature.properties.policyCode === "CITY_HALL_PICKUP_BLOCK",
+        ),
+    ).toMatchObject({
+      properties: {
+        recordKind: "stop_policy",
+        policyCode: "CITY_HALL_PICKUP_BLOCK",
+        status: "retired",
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
+        effectiveUntil: "2026-07-15T00:00:00.000Z",
+        version: 1,
+        geometryVersionRef: "stop_policy:CITY_HALL_PICKUP_BLOCK@1",
+      },
+    });
+    expect(
       service.evaluate({
         serviceProductType: "taxi_realtime",
         pickup: { lat: 25.0375, lng: 121.5637 },
@@ -684,14 +746,43 @@ describe("ServiceAreaService", () => {
     expect(repository.persistStopPolicy).toHaveBeenCalledTimes(4);
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
+        actionName: "service_area.stop_policy.submitted_for_review",
+        actorId: "platform-admin-geo-001",
+        actorType: "platform_admin",
+        requestId: "req-service-area-admin-001",
+        newValuesSummary: expect.objectContaining({
+          policyCode: "CITY_HALL_PICKUP_BLOCK",
+          status: "review",
+          version: 1,
+        }),
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
         actionName: "service_area.stop_policy.published",
         actorId: "platform-admin-geo-001",
+        actorType: "platform_admin",
+        requestId: "req-service-area-admin-001",
+        newValuesSummary: expect.objectContaining({
+          policyCode: "CITY_HALL_PICKUP_BLOCK",
+          status: "active",
+          version: 1,
+          geometryVersionRef: "stop_policy:CITY_HALL_PICKUP_BLOCK@1",
+        }),
       }),
     );
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         actionName: "service_area.stop_policy.retired",
         actorId: "platform-admin-geo-001",
+        actorType: "platform_admin",
+        requestId: "req-service-area-admin-001",
+        newValuesSummary: expect.objectContaining({
+          policyCode: "CITY_HALL_PICKUP_BLOCK",
+          status: "retired",
+          version: 1,
+          effectiveUntil: "2026-07-15T00:00:00.000Z",
+        }),
       }),
     );
     expect(observability.getSnapshot()).toMatchObject({

@@ -302,6 +302,11 @@ write_require_approval_rule_fixture() {
     > "$path"
 }
 
+TAIPEI_CORE_PICKUP_LAT="25.0375"
+TAIPEI_CORE_PICKUP_LNG="121.5637"
+TAIPEI_CORE_DROPOFF_LAT="25.06"
+TAIPEI_CORE_DROPOFF_LNG="121.58"
+
 write_governed_booking_fixture() {
   local path="$1" cost_center="$2" notes="${3:-E2E-010 governance probe}"
   local window_start window_end
@@ -318,12 +323,16 @@ write_governed_booking_fixture() {
     --arg windowEnd "$window_end" \
     --arg costCenter "$cost_center" \
     --arg notes "$notes" \
+    --argjson pickupLat "$TAIPEI_CORE_PICKUP_LAT" \
+    --argjson pickupLng "$TAIPEI_CORE_PICKUP_LNG" \
+    --argjson dropoffLat "$TAIPEI_CORE_DROPOFF_LAT" \
+    --argjson dropoffLng "$TAIPEI_CORE_DROPOFF_LNG" \
     '{
       businessDispatchSubtype: "enterprise_dispatch",
       reservationWindowStart: $windowStart,
       reservationWindowEnd: $windowEnd,
-      pickup: { address: "Governance Pickup" },
-      dropoff: { address: "Governance Dropoff" },
+      pickup: { address: "Governance Pickup", lat: $pickupLat, lng: $pickupLng },
+      dropoff: { address: "Governance Dropoff", lat: $dropoffLat, lng: $dropoffLng },
       passenger: { name: "Governance Rider", phone: "0912000099" },
       costCenter: $costCenter,
       notes: $notes

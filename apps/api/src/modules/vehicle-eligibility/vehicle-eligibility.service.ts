@@ -259,15 +259,56 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
     createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
   },
+  {
+    capabilityId: "seed-rental-car",
+    licenseType: "rental_car",
+    supportedProducts: [
+      "enterprise_dispatch",
+      "credit_card_airport_transfer",
+      "insurance_replacement_vehicle",
+    ],
+    seatCount: 4,
+    luggageCapacity: 4,
+    airportPermit: true,
+    businessDispatchEligible: true,
+    taxiMeterRequired: false,
+    fixedFareAllowed: true,
+    conditionallyAllowed: false,
+    requiredDocuments: [],
+    trainingRequired: false,
+    permitRequired: false,
+    platformForwardingAllowed: false,
+    active: true,
+    effectiveFrom: SEED_TIMESTAMP,
+    effectiveUntil: null,
+    createdAt: SEED_TIMESTAMP,
+    updatedAt: SEED_TIMESTAMP,
+  },
+  {
+    capabilityId: "seed-airport-transfer-vehicle",
+    licenseType: "airport_transfer_vehicle",
+    supportedProducts: [
+      "credit_card_airport_transfer",
+      "travel_agency_transfer",
+    ],
+    seatCount: 5,
+    luggageCapacity: 5,
+    airportPermit: true,
+    businessDispatchEligible: true,
+    taxiMeterRequired: false,
+    fixedFareAllowed: true,
+    conditionallyAllowed: false,
+    requiredDocuments: [],
+    trainingRequired: false,
+    permitRequired: false,
+    platformForwardingAllowed: false,
+    active: true,
+    effectiveFrom: SEED_TIMESTAMP,
+    effectiveUntil: null,
+    createdAt: SEED_TIMESTAMP,
+    updatedAt: SEED_TIMESTAMP,
+  },
 ];
-
-const VEHICLE_LICENSE_BY_ID: Record<string, VehicleLicenseType> = {
-  "veh-demo-001": "multi_purpose_taxi",
-  "veh-demo-002": "taxi",
-  "veh-demo-003": "taxi",
-  "veh-demo-004": "business_vehicle",
-  "veh-av-demo-001": "business_vehicle",
-};
 
 @Injectable()
 export class VehicleEligibilityService implements OnModuleInit {
@@ -660,7 +701,8 @@ export class VehicleEligibilityService implements OnModuleInit {
   private requireVehicleCapability(
     vehicleId: string,
   ): RuntimeVehicleCapability {
-    const licenseType = VEHICLE_LICENSE_BY_ID[vehicleId];
+    const licenseType =
+      this.regulatoryRegistryService.getVehicleLicenseType(vehicleId);
     if (!licenseType) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,

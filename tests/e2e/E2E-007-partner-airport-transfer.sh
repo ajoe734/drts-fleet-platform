@@ -221,6 +221,7 @@ log_ok "Booking read-back preserved partner metadata and benefitReference"
 log_surface "Ops Console — dispatch assignment"
 
 switch_actor "ops_user" "e2e-ops-001"
+prime_enterprise_dispatch_supply_locations
 
 DISPATCH_FIXTURE=$(mktemp /tmp/drts-e2e-007-dispatch-XXXXXX.json)
 trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE"' EXIT
@@ -273,8 +274,12 @@ ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r \
   '.data.items[0] | (.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
 ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r \
   '.data.items[0] | (.driverId // .driver_id // empty)' 2>/dev/null || true)
-[[ -n "$ASSIGN_VEHICLE_ID" ]] || ASSIGN_VEHICLE_ID="$E2E_SEED_VEHICLE_ID"
-[[ -n "$ASSIGN_DRIVER_ID" ]] || ASSIGN_DRIVER_ID="$E2E_SEED_DRIVER_ID"
+
+if [[ -z "$ASSIGN_VEHICLE_ID" || -z "$ASSIGN_DRIVER_ID" ]]; then
+  log_fail "Dispatch candidates did not surface an airport-transfer-capable supply row."
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+fi
 
 ASSIGN_FIXTURE=$(mktemp /tmp/drts-e2e-007-assign-XXXXXX.json)
 trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE"' EXIT
