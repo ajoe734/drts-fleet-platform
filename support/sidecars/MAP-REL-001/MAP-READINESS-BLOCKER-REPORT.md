@@ -30,26 +30,24 @@ handoff required by `FLEETS-CLOSEOUT-008`.
 
 ## Open Production Blockers
 
-| Blocker                           | Current state                                                       | Exit condition                                                          |
-| --------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `FLEETS-CLOSEOUT-002` integration | PR `#1089` in review                                                | Required CI green, independent review, merge to `dev`, canonical `done` |
-| `FLEETS-CLOSEOUT-003` integration | PR `#1090` in review                                                | Required CI green, independent review, merge to `dev`, canonical `done` |
-| `FLEETS-CLOSEOUT-006` lifecycle   | Code/evidence merged at `dev@1ac630692`; canonical state not closed | Owner records approved lifecycle completion                             |
-| `FLEETS-CLOSEOUT-007` integration | Replacement PR `#1091` in review                                    | Required CI green, independent review, merge to `dev`, canonical `done` |
-| `FLEETS-CLOSEOUT-009` integration | PR `#1085` in review                                                | Required CI green, independent review, merge to `dev`, canonical `done` |
+| Blocker                           | Current state                                                                           | Exit condition                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Production integration PR `#1095` | `002/004/007/009` are combined; local API `818/818` and both map browser E2Es pass      | Required GitHub CI/E2E green, independent review, merge to `dev`               |
+| Canonical dev-lineage refresh     | `002/004/007/009` still record feature-branch refs; verifier correctly fails these rows | After merge, record the actual `origin/dev` SHA for each integrated task       |
+| Final release-evidence verdict    | `PENDING`; no live production or deployment claim                                       | Run both verifiers on merged `dev`, then promote verdict only if both are PASS |
 
 ## Upstream Evidence Read
 
 | Upstream task         | Status read              | Notes                                                                                                                         |
 | --------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
 | `FLEETS-CLOSEOUT-001` | `done` (`merged_to_dev`) | Same-order callcenter persisted proof packet is filed in `support/sidecars/MAP-REL-001/` and reflected in the closeout board. |
-| `FLEETS-CLOSEOUT-002` | `review`                 | Cross-surface anti-bypass proof is in PR `#1089`; integration is pending.                                                     |
-| `FLEETS-CLOSEOUT-003` | `review`                 | Platform Admin publish/version proof is in PR `#1090`; integration is pending.                                                |
-| `FLEETS-CLOSEOUT-004` | `done`                   | Ops visibility proof is closed and linked back to the same governed order chain.                                              |
+| `FLEETS-CLOSEOUT-002` | `done`                   | Reviewed source `41670bd95` is included in release PR `#1095`; dev lineage is pending.                                        |
+| `FLEETS-CLOSEOUT-003` | `done`                   | Platform Admin publish/version proof is integrated in `dev@0644366a3`.                                                        |
+| `FLEETS-CLOSEOUT-004` | `review`                 | Reproducible Ops model/backend/API/browser proof `816db347a` is included in release PR `#1095`.                               |
 | `FLEETS-CLOSEOUT-005` | `done`                   | Gate D accepted external-gated driver packet is filed.                                                                        |
-| `FLEETS-CLOSEOUT-006` | `todo`                   | Evidence is merged to `dev`; canonical owner closeout is pending.                                                             |
-| `FLEETS-CLOSEOUT-007` | `review`                 | Clean replacement PR `#1091` is pending integration.                                                                          |
-| `FLEETS-CLOSEOUT-009` | `review`                 | Callcenter tile map, operational overlays, click correction and E2E proof are in PR `#1085`.                                  |
+| `FLEETS-CLOSEOUT-006` | `done`                   | Observability evidence is integrated in `dev@1ac630692`.                                                                      |
+| `FLEETS-CLOSEOUT-007` | `done`                   | Reviewed source `ef1e66d51` is included in release PR `#1095`; dev lineage is pending.                                        |
+| `FLEETS-CLOSEOUT-009` | `done`                   | Reviewed production-map source `0dfd32706` is included in release PR `#1095`; dev lineage is pending.                         |
 
 ## Blocker Handoff Notes
 
