@@ -174,3 +174,14 @@ policy reason` passed.
 | Invalid geometry rejection                                  | `apps/api/tests/unit/service-area.service.test.ts`                                                |
 | Callcenter blocked downstream                               | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json` |
 | Consolidated QA row reference                               | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md`              |
+
+## Verification
+
+```bash
+pnpm --dir apps/api exec vitest run tests/unit/service-area.service.test.ts
+pnpm exec prettier --check apps/api/tests/unit/service-area.service.test.ts support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md
+git diff --check
+```
+
+This is repo-backed governance proof. It does not claim a live production
+publish or deployed policy version.

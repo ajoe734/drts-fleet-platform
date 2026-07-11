@@ -56,6 +56,15 @@ Release readiness for the broader `MAP-REL-001` family remains outside this pack
 
 ## Commands And Evidence
 
+### FLEETS-CLOSEOUT-003 E2E-MAP-002 Addendum
+
+The `E2E-MAP-002` PASS row is additionally closed by
+`support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-ADMIN-PUBLISH-PROOF-20260708.md`.
+That packet ties the reviewed service-area and stop-policy lifecycle, active
+version/effective-window exports, evaluator refresh, invalid geometry rejection,
+and the existing downstream Callcenter blocked-order artifact into one
+row-level proof set.
+
 | Command                                                                                                                                                                                                                                                | Result      | Branch@SHA                                                            | Evidence / justification                                                                                                                                                                                                  |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm test:e2e`                                                                                                                                                                                                                                        | SUBSTITUTED | `n/a`                                                                 | No single repo command covers harness, all web surfaces, backend proof reruns, ops closeout browser proof, and accepted Gate D UAT. Final authority is the decomposed command set below plus the accepted Gate D packet.  |
