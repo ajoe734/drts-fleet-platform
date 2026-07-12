@@ -22,6 +22,7 @@ export async function generateMetadata({
   try {
     const { brand } = await getPartnerRouteContext(tenantSlug, {
       allowInactive: true,
+      allowAuthorityOutage: true,
     });
     return {
       title: `${brand.displayName} · 合作預約`,
@@ -43,6 +44,7 @@ export default async function TenantLayout({ children, params }: LayoutProps) {
   try {
     const { brand, provenance } = await getPartnerRouteContext(tenantSlug, {
       allowInactive: true,
+      allowAuthorityOutage: true,
     });
     const locale = await getServerLocale();
     return (

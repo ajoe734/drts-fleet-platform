@@ -33,6 +33,7 @@ const en = {
   "nav.dispatch": "Dispatch",
   "nav.complaints": "Complaints",
   "nav.callcenter": "Call Center",
+  "nav.avFallback": "AV Fallback",
   "nav.reports": "Reports",
   "nav.revenue": "Revenue",
   "nav.attendance": "Attendance",
@@ -90,6 +91,114 @@ const en = {
   "common.dash": "-",
   "common.notAvailable": "N/A",
 
+  // ── AV Fallback ──
+  "avFallback.title": "AV → Human Fallback",
+  "avFallback.subtitle":
+    "Autonomy fallback tracking, passenger recovery, and sandbox exceptions in the ops realm.",
+  "avFallback.banner.title":
+    "Fallback remains ops-observed, not vehicle-controlled",
+  "avFallback.banner.body":
+    "The backend and ROC trigger human fallback when sandbox conditions fail. Ops preserves booking context, follows emitted actions, and never exposes internal FSD reasons in passenger-facing updates.",
+  "avFallback.activeCount": "{count} active fallback item(s)",
+  "avFallback.empty.title": "No active AV fallback items",
+  "avFallback.empty.body":
+    "No open human-fallback or fallback-candidate alerts are currently present in ROC.",
+  "avFallback.card.booking": "Booking",
+  "avFallback.card.passenger": "Passenger",
+  "avFallback.card.vehicle": "Vehicle",
+  "avFallback.card.eta": "Revised ETA",
+  "avFallback.card.triggeredAt": "Triggered at",
+  "avFallback.card.alert": "Alert",
+  "avFallback.card.summary": "Ops summary",
+  "avFallback.card.progress": "Fallback progress",
+  "avFallback.card.recoveryLink": "Passenger recovery",
+  "avFallback.card.exceptionLink": "Sandbox exceptions",
+  "avFallback.stage.triggered": "Triggered",
+  "avFallback.stage.reassigning": "Reassigning",
+  "avFallback.stage.humanEnroute": "Human driver en route",
+  "avFallback.stage.completed": "Completed",
+  "avFallback.stageHelp.triggered":
+    "ROC has emitted a fallback candidate but the human reassignment is not complete yet.",
+  "avFallback.stageHelp.reassigning":
+    "The sandbox trip is moving to the human fallback path while booking context stays unchanged.",
+  "avFallback.stageHelp.humanEnroute":
+    "A human driver is now servicing the same booking and the revised ETA is passenger-visible.",
+  "avFallback.stageHelp.completed":
+    "The fallback trip finished; booking context and audit trail remain available.",
+  "avFallback.recovery.title": "Passenger Recovery",
+  "avFallback.recovery.subtitle":
+    "Same-booking recovery context with revised ETA and passenger-facing messageCode only.",
+  "avFallback.recovery.contextTitle": "Same booking context",
+  "avFallback.recovery.contextSub":
+    "Redispatch and ETA corrections remain attached to the original booking.",
+  "avFallback.recovery.messageTitle": "Passenger-facing messageCode",
+  "avFallback.recovery.messageSub":
+    "Render the backend messageCode only. Do not leak internal autonomy reasons.",
+  "avFallback.recovery.internalGuardrail":
+    "Internal autonomy / takeover reasons stay hidden from passenger-facing copy.",
+  "avFallback.recovery.messageCodeLabel": "messageCode",
+  "avFallback.recovery.ackLabel": "Acknowledgement",
+  "avFallback.recovery.ackRequired": "Required",
+  "avFallback.recovery.ackNotRequired": "Not required",
+  "avFallback.recovery.acknowledgedAt": "Acknowledged at",
+  "avFallback.recovery.statusTitle": "Recovery status",
+  "avFallback.recovery.statusSub":
+    "Current fallback stage, ROC alert posture, and writable actions.",
+  "avFallback.recovery.currentStage": "Fallback stage",
+  "avFallback.recovery.currentOrderStatus": "Order status",
+  "avFallback.recovery.currentAlertStatus": "Alert status",
+  "avFallback.recovery.currentAlert": "Alert",
+  "avFallback.recovery.currentEta": "Revised ETA",
+  "avFallback.recovery.calculatedAt": "ETA calculated at",
+  "avFallback.recovery.noSurcharge": "No fallback surcharge UI is shown here.",
+  "avFallback.recovery.back": "Back to AV fallback",
+  "avFallback.recovery.exceptionsLink": "Open sandbox exceptions",
+  "avFallback.recovery.notFound":
+    "The selected fallback booking could not be loaded.",
+  "avFallback.recovery.missingMessageCode":
+    "sandbox_passenger_disclosure.unavailable",
+  "avFallback.exceptions.title": "Sandbox Exceptions",
+  "avFallback.exceptions.subtitle":
+    "Boundary, provider, takeover, and safety-governance exceptions emitted from sandbox ROC.",
+  "avFallback.exceptions.banner.title": "Exceptions remain backend-authored",
+  "avFallback.exceptions.banner.body":
+    "Severity, status, and write CTAs come from ROC alert read models and availableActions. The table below does not invent fallback authority.",
+  "avFallback.exceptions.empty.title": "No sandbox exceptions",
+  "avFallback.exceptions.empty.body":
+    "ROC did not return any sandbox exception alerts for the current identity.",
+  "avFallback.exceptions.col.id": "ID",
+  "avFallback.exceptions.col.type": "Type",
+  "avFallback.exceptions.col.vehicle": "Vehicle",
+  "avFallback.exceptions.col.order": "Order",
+  "avFallback.exceptions.col.summary": "Summary",
+  "avFallback.exceptions.col.severity": "Severity",
+  "avFallback.exceptions.col.openedAt": "Opened",
+  "avFallback.exceptions.col.status": "Status",
+  "avFallback.exceptions.col.action": "Action",
+  "avFallback.exceptions.filter": "Type",
+  "avFallback.actions.tracking": "Audit",
+  "avFallback.actions.pending": "Working...",
+  "avFallback.actions.failed": "Action failed",
+  "avFallback.actions.disabled": "Disabled",
+  "avFallback.actions.reasonRequired": "Reason required",
+  "avFallback.actions.reason.avMonitor": "AV fallback action: {alertId}",
+  "avFallback.actions.reason.passengerRecovery":
+    "Passenger recovery action: {alertId}",
+  "avFallback.actions.reason.sandboxException":
+    "Sandbox exception action: {alertId}",
+  "avFallback.actions.readOnly":
+    "No writable actions emitted for this resource.",
+
+  // ── Ops action labels ──
+  "opsAction.ack": "Acknowledge",
+  "opsAction.fallbackToHuman": "Fallback to Human",
+  "opsAction.notify": "Notify",
+  "opsAction.openIncident": "Open Incident",
+  "opsAction.operationalHold": "Operational Hold",
+  "opsAction.requestSafetyAction": "Request Safety Action",
+  "opsAction.startEvidenceFreeze": "Freeze Evidence",
+  "opsAction.stopNewDispatch": "Stop New Dispatch",
+
   // ── Approval Requests ──
   "approvalRequests.title": "Approval Requests · cross-tenant",
   "approvalRequests.subtitle":
@@ -97,7 +206,8 @@ const en = {
   "approvalRequests.tab.pending": "Pending",
   "approvalRequests.tab.approved": "Approved",
   "approvalRequests.tab.rejected": "Rejected",
-  "approvalRequests.banner.loadFailed.title": "Could not load approval requests",
+  "approvalRequests.banner.loadFailed.title":
+    "Could not load approval requests",
   "approvalRequests.banner.loadFailed.body":
     "You may lack scope, or the service is unavailable.",
   "approvalRequests.empty.loadFailed": "No data to display.",
@@ -745,7 +855,8 @@ const en = {
   "drivers.signals.location": "Live locations",
   "drivers.signals.locationDetail": "{stale} stale or delayed samples",
   "drivers.signals.suppression": "Matching suppressed",
-  "drivers.signals.suppressionDetail": "{degraded} platform status checks degraded",
+  "drivers.signals.suppressionDetail":
+    "{degraded} platform status checks degraded",
   "drivers.col.driverId": "Driver ID",
   "drivers.col.name": "Name",
   "drivers.col.driver": "Driver",
@@ -773,7 +884,8 @@ const en = {
   "drivers.emptyState.notProvisionedTitle": "Driver registry not provisioned",
   "drivers.emptyState.fetchFailedTitle": "Could not load drivers",
   "drivers.emptyState.permissionDeniedTitle": "Permission required",
-  "drivers.emptyState.externalUnavailableTitle": "External dependency unavailable",
+  "drivers.emptyState.externalUnavailableTitle":
+    "External dependency unavailable",
   "drivers.emptyState.filteredEmptyTitle": "No drivers match these filters",
   "drivers.emptyState.noDataBody":
     "The driver registry is healthy, but this environment has no driver records yet.",
@@ -790,7 +902,8 @@ const en = {
   "drivers.emptyState.action.clear_filters": "Clear filters",
   "drivers.emptyState.action.refresh_list": "Refresh list",
   "drivers.emptyState.action.open_adapter_registry": "Open adapter registry",
-  "drivers.emptyState.action.inspect_adapter_registry": "Inspect adapter registry",
+  "drivers.emptyState.action.inspect_adapter_registry":
+    "Inspect adapter registry",
   "drivers.emptyState.action.open_platform_admin_adapter_registry":
     "Open Platform Admin adapter registry",
   "drivers.list.eligibilityClear": "No active blockers",
@@ -1045,8 +1158,7 @@ const en = {
   "drivers.detailPage.card.activeTasksTitle": "Active tasks · {count}",
   "drivers.detailPage.card.noActiveTasks":
     "No owned or forwarded tasks are currently in flight.",
-  "drivers.detailPage.card.earningsTitle":
-    "Earnings · {count} statement(s)",
+  "drivers.detailPage.card.earningsTitle": "Earnings · {count} statement(s)",
   "drivers.detailPage.card.latestStatement":
     "Latest {periodMonth} · {amount} net",
   "drivers.detailPage.card.noStatements":
@@ -1062,8 +1174,7 @@ const en = {
   "drivers.detailPage.card.shiftsTitle": "Shifts & attendance · {count}",
   "drivers.detailPage.card.noShifts":
     "No recent shift or attendance entries for this driver.",
-  "drivers.detailPage.card.incidentsTitle":
-    "Recent incidents · {count}",
+  "drivers.detailPage.card.incidentsTitle": "Recent incidents · {count}",
   "drivers.detailPage.card.noIncidents":
     "No incidents are linked to this driver.",
   "drivers.detailPage.card.locationStatusTitle": "Location & status",
@@ -1686,10 +1797,31 @@ const en = {
   "dispatch.workflow.map.staleSupply": "stale supply points",
   "dispatch.workflow.map.noLocationSupply": "candidate(s) without location",
   "dispatch.workflow.map.projectionNote":
-    "This board is a projection over backend order and location truth. It does not create a second dispatch authority.",
+    "This map renders provider tiles for geographic context while backend order and policy records remain dispatch authority.",
+  "dispatch.workflow.map.tileFallback":
+    "Basemap tiles are not configured in this environment. Pins still use governed coordinates.",
+  "dispatch.workflow.map.viewport": "Zoom {zoom} · center {lat}, {lng}",
+  "dispatch.workflow.map.zoomIn": "Zoom in",
+  "dispatch.workflow.map.zoomOut": "Zoom out",
+  "dispatch.workflow.map.resetView": "Reset map",
+  "dispatch.workflow.map.panNorth": "N",
+  "dispatch.workflow.map.panSouth": "S",
+  "dispatch.workflow.map.panWest": "W",
+  "dispatch.workflow.map.panEast": "E",
+  "dispatch.workflow.map.status.ready":
+    "Map-ready: visible jobs and loaded supply have governed coordinates.",
+  "dispatch.workflow.map.status.degraded_projection":
+    "Degraded projection: some jobs or supply are missing governed coordinates.",
+  "dispatch.workflow.map.status.no_spatial_data":
+    "No governed spatial data is available yet.",
+  "dispatch.workflow.map.overlay.serviceAreas": "Service areas",
+  "dispatch.workflow.map.overlay.stopPolicies": "Stop policies",
+  "dispatch.workflow.map.overlay.reasonCodes": "Reason codes",
+  "dispatch.workflow.map.overlay.geometryRefs": "Geometry versions",
   "dispatch.workflow.map.northWest": "NW · {lat}, {lng}",
   "dispatch.workflow.map.southEast": "SE · {lat}, {lng}",
   "dispatch.workflow.map.legend": "Legend",
+  "dispatch.workflow.map.legend.route": "Route",
   "dispatch.workflow.map.legend.pickup": "Pickup",
   "dispatch.workflow.map.legend.dropoff": "Dropoff",
   "dispatch.workflow.map.legend.candidate": "Candidate supply",
@@ -1890,12 +2022,34 @@ const en = {
   "dispatch.detail.refresh.availableActionsHint":
     "CTAs come from availableActions",
   "dispatch.detail.refresh.tier": "T2 · 5s",
-  "dispatch.workflow.candidateLocation.live": "Live location",
+  "dispatch.workflow.candidateLocation.fresh": "Fresh location",
   "dispatch.workflow.candidateLocation.stale": "Stale location",
-  "dispatch.workflow.candidateLocation.no_location": "No location",
+  "dispatch.workflow.candidateLocation.low_accuracy": "Low accuracy location",
+  "dispatch.workflow.candidateLocation.missing": "No location",
   "dispatch.workflow.candidateLocationSummary":
     "{count} candidate(s) are currently {state}.",
   "dispatch.workflow.loadCandidatesFailed": "Failed to fetch candidates",
+  "dispatch.workflow.eligibility.includeIneligible": "Show excluded candidates",
+  "dispatch.workflow.eligibility.includeIneligibleHint":
+    "Reveals ineligible candidates with their exclusion reasons.",
+  "dispatch.workflow.eligibility.col.eligibility": "Eligibility",
+  "dispatch.workflow.eligibility.decision.eligible": "Eligible",
+  "dispatch.workflow.eligibility.decision.conditionally_eligible":
+    "Conditionally eligible",
+  "dispatch.workflow.eligibility.decision.ineligible": "Ineligible",
+  "dispatch.workflow.eligibility.decision.unknown": "Not evaluated",
+  "dispatch.workflow.eligibility.policyVersion": "Policy {version}",
+  "dispatch.workflow.eligibility.hardReasons": "Hard blocks",
+  "dispatch.workflow.eligibility.softReasons": "Soft warnings",
+  "dispatch.workflow.eligibility.missingRequirements": "Missing requirements",
+  "dispatch.workflow.eligibility.ineligibleSelectBlocked":
+    "Ineligible due to hard blocks and cannot be assigned.",
+  "dispatch.workflow.eligibility.noEligibleSupply":
+    "No eligible supply yet. Turn on “Show excluded candidates” to see who was excluded and why.",
+  "dispatch.workflow.eligibility.conflictTitle":
+    "Eligibility changed before assignment",
+  "dispatch.workflow.eligibility.conflictHint":
+    "The candidate is no longer assignable. Review the refreshed reasons and reselect.",
   "dispatch.workflow.refreshFailed": "Failed to refresh dispatch board",
   "dispatch.workflow.actionFailed": "Dispatch action failed",
   "dispatch.workflow.traceLoadFailed": "Dispatch trace could not be loaded.",
@@ -3213,6 +3367,103 @@ const en = {
   "callcenter.clearSearch": "Clear search",
   "callcenter.deadline.dueIn": "Due in {value} min",
   "callcenter.deadline.overdueBy": "Overdue by {value} min",
+  "callcenter.mapBooking.section.title": "Pickup and dropoff map verification",
+  "callcenter.mapBooking.section.description":
+    "Search or manually pin both stops before creating the phone booking.",
+  "callcenter.mapBooking.section.pickupTitle": "Pickup location",
+  "callcenter.mapBooking.section.dropoffTitle": "Dropoff location",
+  "callcenter.mapBooking.picker.searchLabel": "Search address",
+  "callcenter.mapBooking.picker.searchPlaceholder":
+    "Search a street, terminal, gate, or landmark",
+  "callcenter.mapBooking.picker.searchButton": "Search",
+  "callcenter.mapBooking.picker.searching": "Searching…",
+  "callcenter.mapBooking.picker.candidatesTitle": "Matching locations",
+  "callcenter.mapBooking.picker.noMatchTitle": "No matching address",
+  "callcenter.mapBooking.picker.noMatchBody":
+    "No reliable match yet. Refine the search or pin the coordinates manually.",
+  "callcenter.mapBooking.picker.manualToggle": "Enter coordinates manually",
+  "callcenter.mapBooking.picker.manualTitle": "Manual location",
+  "callcenter.mapBooking.picker.manualLatLabel": "Latitude",
+  "callcenter.mapBooking.picker.manualLngLabel": "Longitude",
+  "callcenter.mapBooking.picker.manualReasonLabel":
+    "Reason for manual location",
+  "callcenter.mapBooking.picker.manualReasonPlaceholder":
+    "e.g. caller confirmed the exact gate or curb position",
+  "callcenter.mapBooking.picker.manualApply": "Use this location",
+  "callcenter.mapBooking.picker.manualInvalid":
+    "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).",
+  "callcenter.mapBooking.picker.providerOutageTitle":
+    "Address lookup is unavailable",
+  "callcenter.mapBooking.picker.providerOutageBody":
+    "Address lookup is unavailable right now. Enter coordinates manually before creating the booking.",
+  "callcenter.mapBooking.picker.degradedNote":
+    "Address results may be limited right now.",
+  "callcenter.mapBooking.picker.confidenceLabel": "Match confidence",
+  "callcenter.mapBooking.picker.provenanceLabel": "Location source",
+  "callcenter.mapBooking.picker.coordinatesLabel": "Coordinates",
+  "callcenter.mapBooking.picker.mapEmpty":
+    "Search and pin the caller's location before creating the booking.",
+  "callcenter.mapBooking.picker.mapHint":
+    "Drag the pin or use arrow keys to fine-tune the location.",
+  "callcenter.mapBooking.picker.pinAdjustHint": "Pin adjusted manually.",
+  "callcenter.mapBooking.picker.clearSelection": "Clear",
+  "callcenter.mapBooking.picker.serviceableTitle":
+    "Serviceable for standard taxi dispatch",
+  "callcenter.mapBooking.picker.manualReviewTitle":
+    "Manual review required before release",
+  "callcenter.mapBooking.picker.notServiceableTitle":
+    "Outside the governed service area",
+  "callcenter.mapBooking.picker.serviceabilityPending":
+    "Checking service area…",
+  "callcenter.mapBooking.map.instruction":
+    "Click the map to pin the exact stop",
+  "callcenter.mapBooking.map.serviceArea": "Service area",
+  "callcenter.mapBooking.map.deny": "No-stop",
+  "callcenter.mapBooking.map.manual": "Manual review",
+  "callcenter.mapBooking.map.overlayError":
+    "Fence overlays failed to load; live policy evaluation remains authoritative",
+  "callcenter.mapBooking.map.overlayLoading":
+    "Loading service areas and stop policies",
+  "callcenter.mapBooking.map.zoomOut": "Zoom out",
+  "callcenter.mapBooking.map.zoomIn": "Zoom in",
+  "callcenter.mapBooking.banner.pickupCoordinatesTitle":
+    "Pickup coordinates are required",
+  "callcenter.mapBooking.banner.pickupCoordinatesBody":
+    "Search or pin the pickup before creating the phone booking.",
+  "callcenter.mapBooking.banner.dropoffCoordinatesTitle":
+    "Dropoff coordinates are required",
+  "callcenter.mapBooking.banner.dropoffCoordinatesBody":
+    "Search or pin the dropoff before creating the phone booking.",
+  "callcenter.mapBooking.banner.pickupProvenanceTitle":
+    "Pickup provenance is required",
+  "callcenter.mapBooking.banner.pickupProvenanceBody":
+    "Re-select or manually pin the pickup so coordinate provenance is recorded.",
+  "callcenter.mapBooking.banner.dropoffProvenanceTitle":
+    "Dropoff provenance is required",
+  "callcenter.mapBooking.banner.dropoffProvenanceBody":
+    "Re-select or manually pin the dropoff so coordinate provenance is recorded.",
+  "callcenter.mapBooking.banner.previewPendingTitle":
+    "Checking service area before submit",
+  "callcenter.mapBooking.banner.previewPendingBody":
+    "Wait for the serviceability result before creating the booking.",
+  "callcenter.mapBooking.banner.previewUnavailableTitle":
+    "Service-area preview is unavailable",
+  "callcenter.mapBooking.banner.previewUnavailableBody":
+    "Do not create a normal dispatchable booking until the preview recovers.",
+  "callcenter.mapBooking.banner.blockedTitle":
+    "This trip is outside the service area",
+  "callcenter.mapBooking.banner.blockedBody":
+    "The booking cannot enter normal dispatch with the current pickup/dropoff.",
+  "callcenter.mapBooking.banner.serviceableTitle":
+    "Ready to create a dispatchable phone booking",
+  "callcenter.mapBooking.banner.serviceableBody":
+    "Pickup and dropoff coordinates are pinned and serviceable.",
+  "callcenter.mapBooking.banner.manualReviewTitle":
+    "This booking will enter manual review",
+  "callcenter.mapBooking.banner.manualReviewBody":
+    "Create the booking only if ops should review it before normal dispatch.",
+  "callcenter.mapBooking.banner.manualReviewHelper":
+    "Creates an order flagged for manual review instead of normal dispatch.",
 
   // ── Reports ──
   "reports.title": "Reports Center",
@@ -3788,15 +4039,36 @@ const en = {
   "opsLabel.incidentsAllClear": "No critical incidents. All clear for now.",
   "opsLabel.incidentsLoading": "Loading incidents...",
   "opsLabel.incidentsNoLinkedEntities": "No linked entities",
-  "opsLabel.incidentsSelectHint": "Choose an incident row to inspect timeline and audit flow.",
+  "opsLabel.incidentsSelectHint":
+    "Choose an incident row to inspect timeline and audit flow.",
   "opsLabel.reportsPeriodExample": "2026-04 or 2026-H1",
   "opsLabel.reportsClosedMonthExample": "2026-03",
   "opsLabel.reportsRequestedByExample": "ops-console",
-  "opsLabel.driverRegistryUnavailableSubtitle": "Unable to load driver registry data for {driverId}.",
+  "opsLabel.driverRegistryUnavailableSubtitle":
+    "Unable to load driver registry data for {driverId}.",
   "opsLabel.openDriverDetail": "Open detail for driver {driverId}",
   // ── Ops code labels (migrated from lib/localized-labels.ts) ──
   "opsCode.available": "Available",
   "opsCode.eligible": "Eligible",
+  "opsCode.vehicle_not_eligible_for_service_product":
+    "Vehicle not eligible for service product",
+  "opsCode.business_dispatch_eligibility_required":
+    "Business dispatch eligibility required",
+  "opsCode.missing_airport_eligibility": "Missing airport eligibility",
+  "opsCode.taxi_meter_required": "Taxi meter required",
+  "opsCode.fixed_fare_not_allowed": "Fixed fare not allowed",
+  "opsCode.platform_forwarding_not_allowed": "Platform forwarding not allowed",
+  "opsCode.platform_binding_required": "Platform binding required",
+  "opsCode.driver_not_ready": "Driver not ready",
+  "opsCode.vehicle_not_ready": "Vehicle not ready",
+  "opsCode.service_product_inactive": "Service product inactive",
+  "opsCode.vehicle_not_dispatchable": "Vehicle not dispatchable",
+  "opsCode.stale_location": "Stale location",
+  "opsCode.low_accuracy_location": "Low-accuracy location",
+  "opsCode.missing_location": "Missing location",
+  "opsCode.conditional_capability": "Conditional capability",
+  "opsCode.training": "Training",
+  "opsCode.permit": "Permit",
   "opsCode.ineligible": "Ineligible",
   "opsCode.online": "Online",
   "opsCode.lifecycle_draft": "Lifecycle: Draft",
@@ -3855,8 +4127,10 @@ const en = {
   "opsCode.enroute": "En Route",
   "opsCode.enroute_pickup": "En Route to Pickup",
   "opsCode.exception_hold": "Exception Hold",
-  "opsCode.exception_hold_confirmation_window_expired": "Confirmation Window Expired",
-  "opsCode.exception_hold_driver_rejected_in_window": "Driver Rejected In Window",
+  "opsCode.exception_hold_confirmation_window_expired":
+    "Confirmation Window Expired",
+  "opsCode.exception_hold_driver_rejected_in_window":
+    "Driver Rejected In Window",
   "opsCode.exception_hold_manual_escalation": "Manual Escalation",
   "opsCode.exception_hold_no_eligible_supply": "No Eligible Supply",
   "opsCode.expired": "Expired",
@@ -3904,6 +4178,22 @@ const en = {
   "opsCode.missing": "Missing",
   "opsCode.manual_hold": "Manual Hold",
   "opsCode.manual_fallback": "Manual Fallback",
+  "opsCode.open": "Open",
+  "opsCode.info": "Info",
+  "opsCode.acknowledged": "Acknowledged",
+  "opsCode.warning": "Warning",
+  "opsCode.human_fallback": "Human Fallback",
+  "opsCode.dispatch_gate": "Dispatch Gate",
+  "opsCode.provider_health": "Provider Health",
+  "opsCode.takeover_discrepancy": "Takeover Discrepancy",
+  "opsCode.operational_hold": "Operational Hold",
+  "opsCode.roc_role_required": "ROC role required",
+  "opsCode.already_active": "Already active",
+  "opsCode.already_acknowledged": "Already acknowledged",
+  "opsCode.already_resolved": "Already resolved",
+  "opsCode.vehicle_context_required": "Vehicle context required",
+  "opsCode.incident_already_open": "Incident already open",
+  "opsCode.source_still_active": "Source still active",
   "opsCode.manual_review_queue": "Manual Review Queue",
   "opsCode.mismatch": "Mismatch",
   "opsCode.mutable": "Mutable",
@@ -3917,7 +4207,6 @@ const en = {
   "opsCode.ok": "OK",
   "opsCode.oil_change": "Oil Change",
   "opsCode.on_trip": "On Trip",
-  "opsCode.open": "Open",
   "opsCode.override_pending": "Override Pending",
   "opsCode.escalated_to_incident": "Escalated to Incident",
   "opsCode.incident_linked": "Incident Linked",
@@ -4052,6 +4341,110 @@ const en = {
   "opsCode.offboarding_pending_debranding": "Debranding Required",
   "opsCode.debranding_required": "Debranding Required",
   "opsCode.not_required": "Not Required",
+
+  // ── Operational reports (Phase 1 delta SD §2.10 / §3.5) ──
+  "reports.type.daily_dispatch_record": "Daily dispatch record",
+  "reports.type.daily_dispatch_record.desc":
+    "Per-order daily dispatch trace with timing, final assignment, and complaint counts.",
+  "reports.type.six_month_operations_summary": "Six-month operations summary",
+  "reports.type.six_month_operations_summary.desc":
+    "Six-month demand, dispatch, completion, and snapshot-coverage rollup.",
+  "reports.tabs.operational": "Operational",
+  "reports.ops.banner.title": "Operational report preview",
+  "reports.ops.banner.body":
+    "Preview the daily dispatch record and six-month operations summary. Coverage, freshness, and counts are fixed by the reporting service and are never recomputed in the browser (SA §7.4).",
+  "reports.ops.reportType": "Report type",
+  "reports.ops.filters": "Filters",
+  "reports.ops.filtersSubtitle":
+    "Scope the preview by period, area, product, source, party, and status.",
+  "reports.ops.filter.dateFrom": "Service date from",
+  "reports.ops.filter.dateTo": "Service date to",
+  "reports.ops.filter.businessArea": "Business area",
+  "reports.ops.filter.serviceProduct": "Service product",
+  "reports.ops.filter.orderSource": "Order source",
+  "reports.ops.filter.tenantId": "Tenant ID",
+  "reports.ops.filter.partnerId": "Partner ID",
+  "reports.ops.filter.status": "Status",
+  "reports.ops.filter.periodFrom": "Period from",
+  "reports.ops.filter.periodTo": "Period to",
+  "reports.ops.filter.anyOption": "Any",
+  "reports.ops.filter.monthHint": "Example: 2026-01",
+  "reports.ops.filter.dateHint": "YYYY-MM-DD",
+  "reports.ops.filter.businessAreaPlaceholder": "taipei-core",
+  "reports.ops.filter.serviceProductPlaceholder": "wheelchair_van",
+  "reports.ops.filter.tenantPlaceholder": "tenant_001",
+  "reports.ops.filter.partnerPlaceholder": "partner_001",
+  "reports.ops.action.load": "Load preview",
+  "reports.ops.action.loading": "Loading preview...",
+  "reports.ops.action.regenerate": "Regenerate",
+  "reports.ops.action.regenerating": "Regenerating...",
+  "reports.ops.action.export": "Export job",
+  "reports.ops.action.exporting": "Submitting export...",
+  "reports.ops.format": "Export format",
+  "reports.ops.export.accepted":
+    "Export job {jobId} queued. Track it in the Jobs tab for the signed download.",
+  "reports.ops.export.jsonDone": "Exported {count} summary row(s) as JSON.",
+  "reports.ops.regenerate.done": "Regenerated {count} record(s) at {time}.",
+  "reports.ops.empty.daily":
+    "No daily dispatch records for the selected filters.",
+  "reports.ops.empty.summary":
+    "No operations summary rows for the selected window.",
+  "reports.ops.empty.prompt": "Choose filters and load the preview.",
+  "reports.ops.meta.generatedAt": "Generated",
+  "reports.ops.meta.coverage": "Data coverage",
+  "reports.ops.meta.freshness": "Source freshness",
+  "reports.ops.meta.status": "Status",
+  "reports.ops.meta.records": "{count} record(s)",
+  "reports.ops.status.preview": "Preview",
+  "reports.ops.coverage.complete": "Complete",
+  "reports.ops.coverage.incomplete": "Incomplete",
+  "reports.ops.coverageWarning.title": "Data incomplete",
+  "reports.ops.coverageWarning.body":
+    "Snapshot coverage is below 95% for at least one period. Treat the operations summary as provisional until coverage recovers (SA §7.4).",
+  "reports.ops.coverageWarning.bodyDaily":
+    "Arrival-event coverage is below 95% for the selected range. Some started trips are missing an arrived event (ARRIVAL_EVENT_MISSING); treat timing fields as provisional (SA §7.3).",
+  "reports.ops.freshness.arrivalMissing":
+    "{count} record(s) missing arrival event",
+  "reports.ops.freshness.complete": "Arrival events complete",
+  "reports.ops.freshness.snapshotIncomplete":
+    "{count} supply snapshot(s) missing",
+  "reports.ops.freshness.snapshotComplete": "Snapshot source complete",
+  "reports.ops.summary.window": "{from} → {to}",
+  "reports.ops.summary.allAreas": "All business areas",
+  "reports.ops.summary.allProducts": "All service products",
+  "reports.ops.metric.demand": "Demand requests",
+  "reports.ops.metric.dispatch": "Actual dispatches",
+  "reports.ops.metric.completed": "Completed trips",
+  "reports.ops.metric.cancelled": "Cancelled orders",
+  "reports.ops.metric.avgVehicles": "Avg dispatchable vehicles",
+  "reports.ops.metric.snapshots": "Valid / expected snapshots",
+  "reports.ops.metric.coverageRate": "Snapshot coverage",
+  "reports.ops.metric.complaints": "Complaints",
+  "reports.ops.metric.complaintsByCategory": "Complaints by category",
+  "reports.ops.metric.noComplaints": "No complaints recorded.",
+  "reports.ops.orderSource.phone": "Phone",
+  "reports.ops.orderSource.ops_console": "Ops console",
+  "reports.ops.orderSource.tenant_portal": "Tenant portal",
+  "reports.ops.orderSource.partner_booking": "Partner booking",
+  "reports.ops.orderSource.api": "API",
+  "reports.ops.orderSource.third_party_platform": "Third-party platform",
+  "reports.ops.col.service": "Service date",
+  "reports.ops.col.order": "Order",
+  "reports.ops.col.source": "Source",
+  "reports.ops.col.product": "Product",
+  "reports.ops.col.party": "Tenant / partner",
+  "reports.ops.col.requested": "Requested",
+  "reports.ops.col.pickupDropoff": "Pickup / dropoff",
+  "reports.ops.col.dispatch": "First dispatch",
+  "reports.ops.col.assignment": "Assignment",
+  "reports.ops.col.driverVehicle": "Driver / vehicle",
+  "reports.ops.col.eta": "ETA (s)",
+  "reports.ops.col.arrived": "Arrived",
+  "reports.ops.col.trip": "Trip",
+  "reports.ops.col.finalStatus": "Final status",
+  "reports.ops.col.redispatch": "Redispatch",
+  "reports.ops.col.cancellation": "Cancellation",
+  "reports.ops.col.complaints": "Complaints",
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -4087,6 +4480,7 @@ const zh: Record<keyof typeof en, string> = {
   "nav.dispatch": "派車調度",
   "nav.complaints": "客訴中心",
   "nav.callcenter": "客服中心",
+  "nav.avFallback": "AV 備援",
   "nav.reports": "報表",
   "nav.revenue": "收益",
   "nav.attendance": "出勤",
@@ -4143,6 +4537,109 @@ const zh: Record<keyof typeof en, string> = {
   "common.completedAt": "完成：{value}",
   "common.dash": "—",
   "common.notAvailable": "N/A",
+
+  // ── AV Fallback ──
+  "avFallback.title": "AV → 人駕備援",
+  "avFallback.subtitle": "營運端查看自駕 fallback、乘客恢復與沙盒例外。",
+  "avFallback.banner.title": "Fallback 由營運監看，不是遠端控車",
+  "avFallback.banner.body":
+    "當沙盒條件失效時，後端與 ROC 會觸發轉人駕。Ops 保留同一 booking 上下文、依 emitted action 執行，且不在乘客文案中暴露 FSD 內部原因。",
+  "avFallback.activeCount": "{count} 件進行中的 fallback",
+  "avFallback.empty.title": "目前沒有進行中的 AV fallback",
+  "avFallback.empty.body":
+    "ROC 目前沒有回傳 open 的 human fallback 或 fallback 候選 alert。",
+  "avFallback.card.booking": "Booking",
+  "avFallback.card.passenger": "乘客",
+  "avFallback.card.vehicle": "車輛",
+  "avFallback.card.eta": "修正後 ETA",
+  "avFallback.card.triggeredAt": "觸發時間",
+  "avFallback.card.alert": "Alert",
+  "avFallback.card.summary": "營運摘要",
+  "avFallback.card.progress": "Fallback 進度",
+  "avFallback.card.recoveryLink": "乘客恢復",
+  "avFallback.card.exceptionLink": "沙盒例外",
+  "avFallback.stage.triggered": "已觸發",
+  "avFallback.stage.reassigning": "轉派中",
+  "avFallback.stage.humanEnroute": "人駕前往中",
+  "avFallback.stage.completed": "已完成",
+  "avFallback.stageHelp.triggered":
+    "ROC 已發出 fallback 候選，但人駕改派尚未完成。",
+  "avFallback.stageHelp.reassigning":
+    "沙盒行程正切往人駕 fallback 路徑，同一 booking 上下文維持不變。",
+  "avFallback.stageHelp.humanEnroute":
+    "人駕已接手同一 booking，修正後 ETA 對乘客可見。",
+  "avFallback.stageHelp.completed":
+    "Fallback 行程已完成；booking 上下文與 audit trail 仍可追蹤。",
+  "avFallback.recovery.title": "乘客恢復",
+  "avFallback.recovery.subtitle":
+    "同一 booking 的恢復上下文，顯示修正後 ETA 與乘客 messageCode。",
+  "avFallback.recovery.contextTitle": "同一 booking 上下文",
+  "avFallback.recovery.contextSub":
+    "改派與 ETA 修正都維持掛在原始 booking 上。",
+  "avFallback.recovery.messageTitle": "乘客端 messageCode",
+  "avFallback.recovery.messageSub":
+    "只渲染 backend messageCode，不外洩自駕內部原因。",
+  "avFallback.recovery.internalGuardrail":
+    "自駕 / 接管內部原因不會出現在乘客端文案。",
+  "avFallback.recovery.messageCodeLabel": "messageCode",
+  "avFallback.recovery.ackLabel": "確認需求",
+  "avFallback.recovery.ackRequired": "需要",
+  "avFallback.recovery.ackNotRequired": "不需要",
+  "avFallback.recovery.acknowledgedAt": "確認時間",
+  "avFallback.recovery.statusTitle": "恢復狀態",
+  "avFallback.recovery.statusSub":
+    "目前 fallback 階段、ROC alert 狀態與可寫 action。",
+  "avFallback.recovery.currentStage": "Fallback 階段",
+  "avFallback.recovery.currentOrderStatus": "訂單狀態",
+  "avFallback.recovery.currentAlertStatus": "Alert 狀態",
+  "avFallback.recovery.currentAlert": "Alert",
+  "avFallback.recovery.currentEta": "修正後 ETA",
+  "avFallback.recovery.calculatedAt": "ETA 計算時間",
+  "avFallback.recovery.noSurcharge": "此畫面不顯示 fallback surcharge UI。",
+  "avFallback.recovery.back": "回到 AV fallback",
+  "avFallback.recovery.exceptionsLink": "開啟沙盒例外",
+  "avFallback.recovery.notFound": "無法載入指定的 fallback booking。",
+  "avFallback.recovery.missingMessageCode":
+    "sandbox_passenger_disclosure.unavailable",
+  "avFallback.exceptions.title": "沙盒例外",
+  "avFallback.exceptions.subtitle":
+    "來自 sandbox ROC 的邊界、供應商、接管與安全治理例外。",
+  "avFallback.exceptions.banner.title": "例外資料由後端決定",
+  "avFallback.exceptions.banner.body":
+    "嚴重度、狀態與可寫 CTA 都來自 ROC alert read model 與 availableActions；這個表格不自行發明 fallback 權限。",
+  "avFallback.exceptions.empty.title": "目前沒有沙盒例外",
+  "avFallback.exceptions.empty.body":
+    "ROC 沒有針對目前身分回傳任何 sandbox exception alert。",
+  "avFallback.exceptions.col.id": "ID",
+  "avFallback.exceptions.col.type": "類型",
+  "avFallback.exceptions.col.vehicle": "車輛",
+  "avFallback.exceptions.col.order": "訂單",
+  "avFallback.exceptions.col.summary": "摘要",
+  "avFallback.exceptions.col.severity": "嚴重度",
+  "avFallback.exceptions.col.openedAt": "開啟時間",
+  "avFallback.exceptions.col.status": "狀態",
+  "avFallback.exceptions.col.action": "動作",
+  "avFallback.exceptions.filter": "類型",
+  "avFallback.actions.tracking": "稽核",
+  "avFallback.actions.pending": "處理中...",
+  "avFallback.actions.failed": "動作失敗",
+  "avFallback.actions.disabled": "不可執行",
+  "avFallback.actions.reasonRequired": "需要原因",
+  "avFallback.actions.reason.avMonitor": "AV fallback 動作：{alertId}",
+  "avFallback.actions.reason.passengerRecovery":
+    "Passenger recovery 動作：{alertId}",
+  "avFallback.actions.reason.sandboxException": "Sandbox 例外動作：{alertId}",
+  "avFallback.actions.readOnly": "此資源目前沒有後端發出的可寫 action。",
+
+  // ── Ops action labels ──
+  "opsAction.ack": "確認接手",
+  "opsAction.fallbackToHuman": "轉人駕",
+  "opsAction.notify": "通知",
+  "opsAction.openIncident": "建立事故",
+  "opsAction.operationalHold": "啟動保留",
+  "opsAction.requestSafetyAction": "要求安全員動作",
+  "opsAction.startEvidenceFreeze": "證據凍結",
+  "opsAction.stopNewDispatch": "停止新派遣",
 
   // ── Ops Assistant ──
   "opsAssistant.launcher.open": "開啟營運助理",
@@ -4449,8 +4946,7 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.section.attention.title": "今日待處理",
   "dashboard.section.attention.subtitle": "排序：SOS → no_supply → sync_failed",
   "dashboard.section.healthSignals.title": "健康訊號",
-  "dashboard.section.healthSignals.subtitle":
-    "UiHealthEnvelope · 跨應用相依",
+  "dashboard.section.healthSignals.subtitle": "UiHealthEnvelope · 跨應用相依",
   "dashboard.section.queue.title": "當前 dispatch 隊列 · top 5",
   "dashboard.section.queue.openDispatch": "前往派遣",
   "dashboard.section.adapterRegistry": "查看 adapter registry",
@@ -4752,8 +5248,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.refreshBanner.degradedBody":
     "部分上游司機資料延遲。請保持列表開啟，等下一次健康刷新後再做大量派遣異動。",
   "drivers.refreshBanner.unknownTitle": "司機刷新狀態未知",
-  "drivers.refreshBanner.unknownBody":
-    "後端未提供此快照的新鮮度 metadata。",
+  "drivers.refreshBanner.unknownBody": "後端未提供此快照的新鮮度 metadata。",
   "drivers.refreshBanner.staleTitle": "司機快照已過期",
   "drivers.refreshBanner.staleBody":
     "{source} 快照已超過新鮮度窗口。做派遣關鍵判斷前請重新整理。",
@@ -4767,8 +5262,7 @@ const zh: Record<keyof typeof en, string> = {
     "司機名冊服務健康，但此環境尚未建立任何司機紀錄。",
   "drivers.emptyState.notProvisionedBody":
     "此環境尚未佈建上游司機名冊或平台綁定資料流。",
-  "drivers.emptyState.fetchFailedBody":
-    "服務在產生司機快照前回傳錯誤。",
+  "drivers.emptyState.fetchFailedBody": "服務在產生司機快照前回傳錯誤。",
   "drivers.emptyState.permissionDeniedBody":
     "你的角色可以開啟此工作區，但此司機資料集需要更高範圍的讀取權限。",
   "drivers.emptyState.externalUnavailableBody":
@@ -4933,8 +5427,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.refresh.generatedAt": "生成時間 {value}",
   "drivers.detailPage.refresh.metadataUnavailable":
     "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
-  "drivers.detailPage.refresh.summary":
-    "T3 節奏 · {source} 快照 · {freshness}",
+  "drivers.detailPage.refresh.summary": "T3 節奏 · {source} 快照 · {freshness}",
   "drivers.detailPage.registryBack": "回到司機名冊",
   "drivers.detailPage.title": "司機詳情",
   "drivers.detailPage.registryFetchFailed": "名冊載入失敗",
@@ -4955,8 +5448,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.action.openIncident": "前往事故",
   "drivers.detailPage.action.relatedIncident": "相關事故",
   "drivers.detailPage.action.generateStatement": "產生對帳單",
-  "drivers.detailPage.action.markUnavailableForwarded":
-    "標記 forwarded 不可用",
+  "drivers.detailPage.action.markUnavailableForwarded": "標記 forwarded 不可用",
   "drivers.detailPage.workStateLabel": "工作狀態",
   "drivers.detailPage.deviceBindings": "裝置綁定",
   "drivers.detailPage.tab.overview": "總覽",
@@ -5006,8 +5498,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.banner.sosActive":
     "此司機目前處於 SOS in_response — dispatch action 已停用",
   "drivers.detailPage.banner.openIncidentById": "前往 {incidentId}",
-  "drivers.detailPage.banner.suppressionActive":
-    "此司機目前處於派遣抑制狀態",
+  "drivers.detailPage.banner.suppressionActive": "此司機目前處於派遣抑制狀態",
   "drivers.detailPage.banner.platformPresenceDegraded": "平台在線狀態降級",
   "drivers.detailPage.card.platformBindingTitle": "平台綁定 · {count} 個平台",
   "drivers.detailPage.card.platformBindingSubtitle":
@@ -5015,24 +5506,20 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.card.noPlatformBindings":
     "這位司機目前沒有任何平台綁定。",
   "drivers.detailPage.card.activeTasksTitle": "進行中任務 · {count}",
-  "drivers.detailPage.card.noActiveTasks":
-    "目前沒有進行中的自有或轉派任務。",
+  "drivers.detailPage.card.noActiveTasks": "目前沒有進行中的自有或轉派任務。",
   "drivers.detailPage.card.earningsTitle": "收入 · {count} 張對帳單",
   "drivers.detailPage.card.latestStatement":
     "最新 {periodMonth} · 淨額 {amount}",
-  "drivers.detailPage.card.noStatements":
-    "這位司機尚未產生任何對帳單。",
+  "drivers.detailPage.card.noStatements": "這位司機尚未產生任何對帳單。",
   "drivers.detailPage.card.manualOverrideTitle": "人工介入與抑制紀錄",
   "drivers.detailPage.card.noManualOverride":
     "這位司機目前沒有人工介入或派遣抑制紀錄。",
   "drivers.detailPage.card.failedRelayTitle": "轉派失敗 · {count}（近期）",
   "drivers.detailPage.card.noRelayFailures": "目前時段內沒有轉派失敗。",
   "drivers.detailPage.card.shiftsTitle": "班次與出勤 · {count}",
-  "drivers.detailPage.card.noShifts":
-    "這位司機沒有近期班次或出勤紀錄。",
+  "drivers.detailPage.card.noShifts": "這位司機沒有近期班次或出勤紀錄。",
   "drivers.detailPage.card.incidentsTitle": "近期事故 · {count}",
-  "drivers.detailPage.card.noIncidents":
-    "目前沒有與這位司機相關的事故。",
+  "drivers.detailPage.card.noIncidents": "目前沒有與這位司機相關的事故。",
   "drivers.detailPage.card.locationStatusTitle": "位置與狀態",
   "drivers.detailPage.location.unknown": "位置未知",
   "drivers.detailPage.location.noSample": "無位置樣本",
@@ -5658,11 +6145,31 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.map.supplyPoints": "候選供給點",
   "dispatch.workflow.map.staleSupply": "過舊供給點",
   "dispatch.workflow.map.projectionNote":
-    "此看板只投影後端訂單與位置真相，不形成第二套派車權威。",
+    "此地圖以 provider tiles 呈現地理脈絡；派車權威仍以後端訂單與政策紀錄為準。",
+  "dispatch.workflow.map.tileFallback":
+    "此環境尚未設定底圖 tiles；點位仍使用治理座標顯示。",
+  "dispatch.workflow.map.viewport": "縮放 {zoom} · 中心 {lat}, {lng}",
+  "dispatch.workflow.map.zoomIn": "放大",
+  "dispatch.workflow.map.zoomOut": "縮小",
+  "dispatch.workflow.map.resetView": "重設地圖",
+  "dispatch.workflow.map.panNorth": "北",
+  "dispatch.workflow.map.panSouth": "南",
+  "dispatch.workflow.map.panWest": "西",
+  "dispatch.workflow.map.panEast": "東",
+  "dispatch.workflow.map.status.ready":
+    "地圖就緒：可見任務與已載入供給都有治理座標。",
+  "dispatch.workflow.map.status.degraded_projection":
+    "退化投影：部分任務或供給缺少治理座標。",
+  "dispatch.workflow.map.status.no_spatial_data": "目前尚無可治理的空間資料。",
+  "dispatch.workflow.map.overlay.serviceAreas": "服務範圍",
+  "dispatch.workflow.map.overlay.stopPolicies": "上下車政策",
+  "dispatch.workflow.map.overlay.reasonCodes": "原因代碼",
+  "dispatch.workflow.map.overlay.geometryRefs": "圖資版本",
   "dispatch.workflow.map.noLocationSupply": "無位置的候選供給",
   "dispatch.workflow.map.northWest": "西北 · {lat}, {lng}",
   "dispatch.workflow.map.southEast": "東南 · {lat}, {lng}",
   "dispatch.workflow.map.legend": "圖例",
+  "dispatch.workflow.map.legend.route": "路線",
   "dispatch.workflow.map.legend.pickup": "上車點",
   "dispatch.workflow.map.legend.dropoff": "下車點",
   "dispatch.workflow.map.legend.candidate": "候選供給",
@@ -5787,8 +6294,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.forwarded.terminal.title": "鏡像已進入終態 · 唯讀",
   "dispatch.detail.forwarded.terminal.body":
     "僅提供強制刷新；對帳與金流於來源平台結算。",
-  "dispatch.detail.forwarded.authorityChain":
-    "合規關卡 · 授權鏈",
+  "dispatch.detail.forwarded.authorityChain": "合規關卡 · 授權鏈",
   "dispatch.detail.forwarded.domain": "domain",
   "dispatch.detail.forwarded.sourcePlatform": "source platform",
   "dispatch.detail.forwarded.routeLocked": "route locked",
@@ -5858,10 +6364,30 @@ const zh: Record<keyof typeof en, string> = {
     "畫面 CTA 以 availableActions 為準",
   "dispatch.detail.refresh.tier": "T2 · 5s",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
+  "dispatch.workflow.eligibility.includeIneligible": "顯示被排除候選",
+  "dispatch.workflow.eligibility.includeIneligibleHint":
+    "顯示不符合資格的候選及其被排除原因。",
+  "dispatch.workflow.eligibility.col.eligibility": "資格",
+  "dispatch.workflow.eligibility.decision.eligible": "符合資格",
+  "dispatch.workflow.eligibility.decision.conditionally_eligible": "有條件符合",
+  "dispatch.workflow.eligibility.decision.ineligible": "不符合資格",
+  "dispatch.workflow.eligibility.decision.unknown": "尚未評估",
+  "dispatch.workflow.eligibility.policyVersion": "政策版本 {version}",
+  "dispatch.workflow.eligibility.hardReasons": "硬性阻擋",
+  "dispatch.workflow.eligibility.softReasons": "軟性警示",
+  "dispatch.workflow.eligibility.missingRequirements": "缺少條件",
+  "dispatch.workflow.eligibility.ineligibleSelectBlocked":
+    "因硬性阻擋不符合資格，無法指派。",
+  "dispatch.workflow.eligibility.noEligibleSupply":
+    "目前沒有符合資格的供給。開啟「顯示被排除候選」可查看誰被排除及原因。",
+  "dispatch.workflow.eligibility.conflictTitle": "指派前資格已變動",
+  "dispatch.workflow.eligibility.conflictHint":
+    "此候選已無法指派，請檢視重新整理後的原因並重新選擇。",
   "dispatch.workflow.refreshFailed": "重新整理派車看板失敗",
-  "dispatch.workflow.candidateLocation.live": "即時位置",
-  "dispatch.workflow.candidateLocation.stale": "過舊位置",
-  "dispatch.workflow.candidateLocation.no_location": "無位置",
+  "dispatch.workflow.candidateLocation.fresh": "位置最新",
+  "dispatch.workflow.candidateLocation.stale": "位置過舊",
+  "dispatch.workflow.candidateLocation.low_accuracy": "定位精度偏低",
+  "dispatch.workflow.candidateLocation.missing": "無位置",
   "dispatch.workflow.candidateLocationSummary":
     "目前有 {count} 位候選人屬於 {state}。",
   "dispatch.workflow.actionFailed": "派車操作失敗",
@@ -6543,8 +7069,7 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.detail.refresh.freshness.degraded": "降級",
   "incidents.detail.refresh.freshness.unknown": "未知",
   "incidents.detail.refresh.snapshot": "快照 {time} UTC · {source}",
-  "incidents.detail.refresh.snapshotUnavailable":
-    "快照 -- · 中繼資料不可用",
+  "incidents.detail.refresh.snapshotUnavailable": "快照 -- · 中繼資料不可用",
   "incidents.hubTitle": "事故中心",
   "incidents.hubSubtitle":
     "安全 · 碰撞 · 財損 · 服務恢復 — driver SOS / dispatch exception 一律由 ops 接手",
@@ -7093,6 +7618,85 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.clearSearch": "清除搜尋",
   "callcenter.deadline.dueIn": "{value} 分鐘後到期",
   "callcenter.deadline.overdueBy": "已逾期 {value} 分鐘",
+  "callcenter.mapBooking.section.title": "上下車定位確認",
+  "callcenter.mapBooking.section.description":
+    "建立電話訂車前，先搜尋或手動確認上下車座標與服務範圍。",
+  "callcenter.mapBooking.section.pickupTitle": "上車點",
+  "callcenter.mapBooking.section.dropoffTitle": "下車點",
+  "callcenter.mapBooking.picker.searchLabel": "搜尋地址",
+  "callcenter.mapBooking.picker.searchPlaceholder":
+    "搜尋街道、航廈、門口或地標",
+  "callcenter.mapBooking.picker.searchButton": "搜尋",
+  "callcenter.mapBooking.picker.searching": "搜尋中…",
+  "callcenter.mapBooking.picker.candidatesTitle": "候選地址",
+  "callcenter.mapBooking.picker.noMatchTitle": "找不到相符地址",
+  "callcenter.mapBooking.picker.noMatchBody":
+    "目前沒有可靠結果。請調整搜尋，或改為手動輸入座標。",
+  "callcenter.mapBooking.picker.manualToggle": "手動輸入座標",
+  "callcenter.mapBooking.picker.manualTitle": "手動定位",
+  "callcenter.mapBooking.picker.manualLatLabel": "緯度",
+  "callcenter.mapBooking.picker.manualLngLabel": "經度",
+  "callcenter.mapBooking.picker.manualReasonLabel": "手動定位原因",
+  "callcenter.mapBooking.picker.manualReasonPlaceholder":
+    "例如：來電者已確認精確上下車點",
+  "callcenter.mapBooking.picker.manualApply": "使用這個位置",
+  "callcenter.mapBooking.picker.manualInvalid":
+    "請輸入有效的緯度（-90 到 90）與經度（-180 到 180）。",
+  "callcenter.mapBooking.picker.providerOutageTitle": "地址查詢目前不可用",
+  "callcenter.mapBooking.picker.providerOutageBody":
+    "建立電話訂車前，請先手動輸入座標。",
+  "callcenter.mapBooking.picker.degradedNote": "地址結果目前可能不完整。",
+  "callcenter.mapBooking.picker.confidenceLabel": "比對信心",
+  "callcenter.mapBooking.picker.provenanceLabel": "定位來源",
+  "callcenter.mapBooking.picker.coordinatesLabel": "座標",
+  "callcenter.mapBooking.picker.mapEmpty": "先搜尋並確認位置，再建立電話訂車。",
+  "callcenter.mapBooking.picker.mapHint": "可拖曳圖釘，或用方向鍵微調位置。",
+  "callcenter.mapBooking.picker.pinAdjustHint": "已手動調整圖釘。",
+  "callcenter.mapBooking.picker.clearSelection": "清除",
+  "callcenter.mapBooking.picker.serviceableTitle": "符合標準計程車派遣範圍",
+  "callcenter.mapBooking.picker.manualReviewTitle": "需人工審查後才能釋出",
+  "callcenter.mapBooking.picker.notServiceableTitle": "超出受管制的服務範圍",
+  "callcenter.mapBooking.picker.serviceabilityPending": "正在檢查服務範圍…",
+  "callcenter.mapBooking.map.instruction": "點擊底圖可直接標記精確位置",
+  "callcenter.mapBooking.map.serviceArea": "服務範圍",
+  "callcenter.mapBooking.map.deny": "禁停",
+  "callcenter.mapBooking.map.manual": "人工覆核",
+  "callcenter.mapBooking.map.overlayError":
+    "圍籬圖層載入失敗；送單仍以即時政策判定為準",
+  "callcenter.mapBooking.map.overlayLoading": "正在載入服務範圍與停靠政策",
+  "callcenter.mapBooking.map.zoomOut": "縮小地圖",
+  "callcenter.mapBooking.map.zoomIn": "放大地圖",
+  "callcenter.mapBooking.banner.pickupCoordinatesTitle": "必須先確認上車座標",
+  "callcenter.mapBooking.banner.pickupCoordinatesBody":
+    "建立電話訂車前，先搜尋或手動標記上車點。",
+  "callcenter.mapBooking.banner.dropoffCoordinatesTitle": "必須先確認下車座標",
+  "callcenter.mapBooking.banner.dropoffCoordinatesBody":
+    "建立電話訂車前，先搜尋或手動標記下車點。",
+  "callcenter.mapBooking.banner.pickupProvenanceTitle": "上車點缺少定位來源",
+  "callcenter.mapBooking.banner.pickupProvenanceBody":
+    "請重新選取或手動釘選上車點，保留定位 provenance。",
+  "callcenter.mapBooking.banner.dropoffProvenanceTitle": "下車點缺少定位來源",
+  "callcenter.mapBooking.banner.dropoffProvenanceBody":
+    "請重新選取或手動釘選下車點，保留定位 provenance。",
+  "callcenter.mapBooking.banner.previewPendingTitle":
+    "送出前必須完成服務範圍檢查",
+  "callcenter.mapBooking.banner.previewPendingBody":
+    "請等待 serviceability 結果後再建立電話訂車。",
+  "callcenter.mapBooking.banner.previewUnavailableTitle":
+    "服務範圍預覽目前不可用",
+  "callcenter.mapBooking.banner.previewUnavailableBody":
+    "在預覽恢復前，不要建立可正常派遣的電話訂單。",
+  "callcenter.mapBooking.banner.blockedTitle": "此趟行程不在服務範圍內",
+  "callcenter.mapBooking.banner.blockedBody":
+    "目前的上下車點不可進入正常派遣。",
+  "callcenter.mapBooking.banner.serviceableTitle": "可建立可派遣的電話訂單",
+  "callcenter.mapBooking.banner.serviceableBody":
+    "上下車座標已確認，且通過服務範圍檢查。",
+  "callcenter.mapBooking.banner.manualReviewTitle": "此訂單會先進人工審查",
+  "callcenter.mapBooking.banner.manualReviewBody":
+    "建立後不會直接進 normal dispatch，需先由營運審查。",
+  "callcenter.mapBooking.banner.manualReviewHelper":
+    "建立後會以人工審查狀態進入後續流程。",
 
   // ── Reports ──
   "reports.title": "報表",
@@ -7625,11 +8229,29 @@ const zh: Record<keyof typeof en, string> = {
   "opsLabel.reportsPeriodExample": "2026-04 或 2026-H1",
   "opsLabel.reportsClosedMonthExample": "2026-03",
   "opsLabel.reportsRequestedByExample": "ops-console",
-  "opsLabel.driverRegistryUnavailableSubtitle": "無法載入司機名冊資料：{driverId}。",
+  "opsLabel.driverRegistryUnavailableSubtitle":
+    "無法載入司機名冊資料：{driverId}。",
   "opsLabel.openDriverDetail": "開啟司機 {driverId} 的明細",
   // ── Ops code labels (migrated from lib/localized-labels.ts) ──
   "opsCode.available": "可派遣",
   "opsCode.eligible": "符合資格",
+  "opsCode.vehicle_not_eligible_for_service_product": "車輛不符合此服務產品",
+  "opsCode.business_dispatch_eligibility_required": "需具備商務派遣資格",
+  "opsCode.missing_airport_eligibility": "缺少機場營運資格",
+  "opsCode.taxi_meter_required": "需具備計程車計費表",
+  "opsCode.fixed_fare_not_allowed": "不允許固定費率",
+  "opsCode.platform_forwarding_not_allowed": "不允許平台轉派",
+  "opsCode.platform_binding_required": "需完成平台綁定",
+  "opsCode.driver_not_ready": "司機尚未就緒",
+  "opsCode.vehicle_not_ready": "車輛尚未就緒",
+  "opsCode.service_product_inactive": "服務產品未啟用",
+  "opsCode.vehicle_not_dispatchable": "車輛無法派遣",
+  "opsCode.stale_location": "位置過舊",
+  "opsCode.low_accuracy_location": "定位精度偏低",
+  "opsCode.missing_location": "無位置資訊",
+  "opsCode.conditional_capability": "有條件能力",
+  "opsCode.training": "教育訓練",
+  "opsCode.permit": "許可證",
   "opsCode.ineligible": "不符合資格",
   "opsCode.online": "上線",
   "opsCode.lifecycle_draft": "Lifecycle：草稿",
@@ -7737,6 +8359,22 @@ const zh: Record<keyof typeof en, string> = {
   "opsCode.missing": "缺漏",
   "opsCode.manual_hold": "人工停派",
   "opsCode.manual_fallback": "人工備援",
+  "opsCode.open": "開啟",
+  "opsCode.info": "資訊",
+  "opsCode.acknowledged": "已確認",
+  "opsCode.warning": "警示",
+  "opsCode.human_fallback": "轉人駕",
+  "opsCode.dispatch_gate": "派遣閘控",
+  "opsCode.provider_health": "供應商健康",
+  "opsCode.takeover_discrepancy": "接管差異",
+  "opsCode.operational_hold": "營運保留",
+  "opsCode.roc_role_required": "需要 ROC 權限",
+  "opsCode.already_active": "已啟用",
+  "opsCode.already_acknowledged": "已確認",
+  "opsCode.already_resolved": "已解除",
+  "opsCode.vehicle_context_required": "需要車輛上下文",
+  "opsCode.incident_already_open": "事故已建立",
+  "opsCode.source_still_active": "來源仍為活躍",
   "opsCode.manual_review_queue": "人工審查佇列",
   "opsCode.mismatch": "不一致",
   "opsCode.mutable": "可變",
@@ -7750,7 +8388,6 @@ const zh: Record<keyof typeof en, string> = {
   "opsCode.ok": "正常",
   "opsCode.oil_change": "換油",
   "opsCode.on_trip": "行程中",
-  "opsCode.open": "開啟",
   "opsCode.override_pending": "等待覆核",
   "opsCode.escalated_to_incident": "已升級為事故",
   "opsCode.incident_linked": "已連結事故",
@@ -7885,6 +8522,106 @@ const zh: Record<keyof typeof en, string> = {
   "opsCode.offboarding_pending_debranding": "待完成除標識",
   "opsCode.debranding_required": "待完成除標識",
   "opsCode.not_required": "不需要",
+
+  // ── 營運報表（Phase 1 delta SD §2.10 / §3.5） ──
+  "reports.type.daily_dispatch_record": "每日派遣紀錄",
+  "reports.type.daily_dispatch_record.desc":
+    "逐筆訂單的每日派遣軌跡，含時間點、最終指派與客訴數。",
+  "reports.type.six_month_operations_summary": "半年營運摘要",
+  "reports.type.six_month_operations_summary.desc":
+    "半年期需求、派遣、完成與快照涵蓋率彙整。",
+  "reports.tabs.operational": "營運報表",
+  "reports.ops.banner.title": "營運報表預覽",
+  "reports.ops.banner.body":
+    "預覽每日派遣紀錄與半年營運摘要。涵蓋率、資料新鮮度與各項數字由報表服務固定產出，前端不重新計算（SA §7.4）。",
+  "reports.ops.reportType": "報表類型",
+  "reports.ops.filters": "篩選",
+  "reports.ops.filtersSubtitle":
+    "依期間、營運區、服務產品、來源、租戶／合作夥伴與狀態縮小預覽範圍。",
+  "reports.ops.filter.dateFrom": "服務日期起",
+  "reports.ops.filter.dateTo": "服務日期迄",
+  "reports.ops.filter.businessArea": "營運區",
+  "reports.ops.filter.serviceProduct": "服務產品",
+  "reports.ops.filter.orderSource": "訂單來源",
+  "reports.ops.filter.tenantId": "租戶 ID",
+  "reports.ops.filter.partnerId": "合作夥伴 ID",
+  "reports.ops.filter.status": "狀態",
+  "reports.ops.filter.periodFrom": "期間起",
+  "reports.ops.filter.periodTo": "期間迄",
+  "reports.ops.filter.anyOption": "全部",
+  "reports.ops.filter.monthHint": "範例：2026-01",
+  "reports.ops.filter.dateHint": "YYYY-MM-DD",
+  "reports.ops.filter.businessAreaPlaceholder": "taipei-core",
+  "reports.ops.filter.serviceProductPlaceholder": "wheelchair_van",
+  "reports.ops.filter.tenantPlaceholder": "tenant_001",
+  "reports.ops.filter.partnerPlaceholder": "partner_001",
+  "reports.ops.action.load": "載入預覽",
+  "reports.ops.action.loading": "載入預覽中…",
+  "reports.ops.action.regenerate": "重算",
+  "reports.ops.action.regenerating": "重算中…",
+  "reports.ops.action.export": "匯出工作",
+  "reports.ops.action.exporting": "送出匯出中…",
+  "reports.ops.format": "匯出格式",
+  "reports.ops.export.accepted":
+    "匯出工作 {jobId} 已排入佇列，請至 Jobs 分頁取得簽章下載。",
+  "reports.ops.export.jsonDone": "已將 {count} 筆營運摘要匯出為 JSON。",
+  "reports.ops.regenerate.done": "已於 {time} 重算 {count} 筆紀錄。",
+  "reports.ops.empty.daily": "符合篩選條件的每日派遣紀錄為空。",
+  "reports.ops.empty.summary": "所選區間沒有營運摘要資料。",
+  "reports.ops.empty.prompt": "選擇篩選條件後載入預覽。",
+  "reports.ops.meta.generatedAt": "產生時間",
+  "reports.ops.meta.coverage": "資料涵蓋率",
+  "reports.ops.meta.freshness": "資料新鮮度",
+  "reports.ops.meta.status": "狀態",
+  "reports.ops.meta.records": "{count} 筆紀錄",
+  "reports.ops.status.preview": "預覽",
+  "reports.ops.coverage.complete": "完整",
+  "reports.ops.coverage.incomplete": "不完整",
+  "reports.ops.coverageWarning.title": "資料不完整",
+  "reports.ops.coverageWarning.body":
+    "至少一個期間的快照涵蓋率低於 95%。在涵蓋率回復前，營運摘要僅供暫時參考（SA §7.4）。",
+  "reports.ops.coverageWarning.bodyDaily":
+    "所選區間的抵達事件涵蓋率低於 95%。部分已開始的趟次缺少抵達事件（ARRIVAL_EVENT_MISSING），時間欄位僅供暫時參考（SA §7.3）。",
+  "reports.ops.freshness.arrivalMissing": "{count} 筆紀錄缺少抵達事件",
+  "reports.ops.freshness.complete": "抵達事件完整",
+  "reports.ops.freshness.snapshotIncomplete": "缺少 {count} 筆供給快照",
+  "reports.ops.freshness.snapshotComplete": "快照來源完整",
+  "reports.ops.summary.window": "{from} → {to}",
+  "reports.ops.summary.allAreas": "全部營運區",
+  "reports.ops.summary.allProducts": "全部服務產品",
+  "reports.ops.metric.demand": "需求請求數",
+  "reports.ops.metric.dispatch": "實際派遣數",
+  "reports.ops.metric.completed": "完成趟次",
+  "reports.ops.metric.cancelled": "取消訂單數",
+  "reports.ops.metric.avgVehicles": "平均可派遣車輛數",
+  "reports.ops.metric.snapshots": "有效／預期快照數",
+  "reports.ops.metric.coverageRate": "快照涵蓋率",
+  "reports.ops.metric.complaints": "客訴數",
+  "reports.ops.metric.complaintsByCategory": "客訴分類",
+  "reports.ops.metric.noComplaints": "無客訴紀錄。",
+  "reports.ops.orderSource.phone": "電話",
+  "reports.ops.orderSource.ops_console": "營運控制台",
+  "reports.ops.orderSource.tenant_portal": "租戶入口",
+  "reports.ops.orderSource.partner_booking": "合作夥伴預約",
+  "reports.ops.orderSource.api": "API",
+  "reports.ops.orderSource.third_party_platform": "第三方平台",
+  "reports.ops.col.service": "服務日期",
+  "reports.ops.col.order": "訂單",
+  "reports.ops.col.source": "來源",
+  "reports.ops.col.product": "產品",
+  "reports.ops.col.party": "租戶／合作夥伴",
+  "reports.ops.col.requested": "請求時間",
+  "reports.ops.col.pickupDropoff": "上車／下車",
+  "reports.ops.col.dispatch": "首次派遣",
+  "reports.ops.col.assignment": "指派",
+  "reports.ops.col.driverVehicle": "司機／車輛",
+  "reports.ops.col.eta": "ETA（秒）",
+  "reports.ops.col.arrived": "抵達",
+  "reports.ops.col.trip": "行程",
+  "reports.ops.col.finalStatus": "最終狀態",
+  "reports.ops.col.redispatch": "重派",
+  "reports.ops.col.cancellation": "取消原因",
+  "reports.ops.col.complaints": "客訴",
 };
 
 export const translations: Record<Locale, Record<string, string>> = { en, zh };

@@ -2,6 +2,13 @@ import type {
   BusinessDispatchSubtype,
   PartnerChannelEntryRecord,
 } from "@drts/contracts";
+import {
+  evaluateAddressSubmitGate,
+  type AddressPayload,
+  type AddressProviderState,
+  type AddressSubmitGateState,
+  type ServiceAreaEvaluationResult,
+} from "@drts/ui-web";
 import { type Locale, t } from "./translations";
 
 const DEFAULT_LOCALE: Locale = "zh";
@@ -64,6 +71,12 @@ function hasText(value: string) {
   return value.trim().length > 0;
 }
 
+function hasTextAddressFallback(
+  draft: Pick<PartnerBookingDraftValues, "pickupAddress" | "dropoffAddress">,
+) {
+  return hasText(draft.pickupAddress) && hasText(draft.dropoffAddress);
+}
+
 function isValidDateTime(value: string) {
   return Number.isFinite(new Date(value).getTime());
 }
@@ -91,8 +104,10 @@ function parseInteger(value: string) {
   return Number.parseInt(value.trim(), 10);
 }
 
-export function createDefaultPartnerBookingDraft(): PartnerBookingDraftValues {
-  const start = new Date();
+export function createDefaultPartnerBookingDraft(
+  baseTime: Date | string | number = new Date(),
+): PartnerBookingDraftValues {
+  const start = new Date(baseTime);
   start.setMinutes(start.getMinutes() + 90, 0, 0);
   const end = new Date(start.getTime());
   end.setMinutes(end.getMinutes() + 60);
@@ -434,4 +449,35 @@ export function isPartnerBookingDraftReady(params: {
       locale,
     }).state === "ready"
   );
+}
+
+export function getPartnerMapSubmitGate(params: {
+  draft: Pick<PartnerBookingDraftValues, "pickupAddress" | "dropoffAddress">;
+  pickup: AddressPayload | null;
+  dropoff: AddressPayload | null;
+  serviceability: ServiceAreaEvaluationResult | null;
+  providerState?: AddressProviderState | null;
+}): AddressSubmitGateState {
+  const baseGate = evaluateAddressSubmitGate({
+    pickup: params.pickup,
+    dropoff: params.dropoff,
+    serviceability: params.serviceability,
+    ...(params.providerState === undefined
+      ? {}
+      : { providerState: params.providerState }),
+  });
+
+  if (
+    baseGate.code === "coordinates_required" &&
+    params.providerState &&
+    !params.providerState.available &&
+    hasTextAddressFallback(params.draft)
+  ) {
+    return {
+      blocking: false,
+      code: "dispatch_manual_review_required",
+    };
+  }
+
+  return baseGate;
 }

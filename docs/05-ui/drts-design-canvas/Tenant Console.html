@@ -41,6 +41,7 @@
 <script type="text/babel" src="tenant-screens-1.jsx"></script>
 <script type="text/babel" src="tenant-screens-2.jsx"></script>
 <script type="text/babel" src="tenant-screens-3.jsx"></script>
+<script type="text/babel" src="tenant-av-fallback.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -107,6 +108,11 @@ function App() {
         <DCSection id="system" title="08 · 系統">
           <DCArtboard id="flags" label="功能旗標 · read-only (Q-X16)" width={W} height={H}><Bare><TN_Flags theme={th} /></Bare></DCArtboard>
           <DCArtboard id="settings" label="設定" width={W} height={H}><Bare><TN_Settings theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="av-fallback" title="09 · AV→人駕 Fallback · Phase 2 V1" subtitle="計畫 vs 實際履約 · 轉派階段 · ETA/計費/SLA · 文案走 tenantMessageCode · 不加收不重下單">
+          <DCArtboard id="av-fb-list" label="訂單 · AV 履約追蹤（計畫 vs 實際）" width={W} height={H}><Hero url="/bookings?fulfillment=av"><TN_AvFallbackList theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="av-fb-detail" label="訂單詳情 · 轉人駕 + 計費/SLA + 揭露限制" width={W} height={H}><Bare><TN_AvFallbackDetail theme={th} /></Bare></DCArtboard>
         </DCSection>
       </DesignCanvas>
 

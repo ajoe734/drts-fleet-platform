@@ -1,0 +1,1145 @@
+{
+  "serviceableOrder": {
+    "orderId": "ORD-SMOKE-001",
+    "requestId": "req-map-closeout-serviceable-001",
+    "requestBody": {
+      "callId": "CALL-SMOKE-001",
+      "agentId": "AGENT-OPS-001",
+      "recordingId": "REC-SMOKE-001",
+      "pickup": {
+        "address": "No. 1, City Hall Road, Xinyi District, Taipei",
+        "lat": 25.037519,
+        "lng": 121.56368,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "exact",
+        "providerCandidateId": "place-city-hall",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:00:00.000Z",
+        "surface": "callcenter",
+        "coordinateProvenance": {
+          "coordinateSource": "provider_candidate",
+          "geocodeProvider": "mock-geo",
+          "geocodeConfidence": "exact",
+          "providerCandidateId": "place-city-hall",
+          "selectedByActorId": "AGENT-OPS-001",
+          "selectedAt": "2026-07-08T05:00:00.000Z",
+          "surface": "callcenter"
+        }
+      },
+      "dropoff": {
+        "address": "No. 100, Songren Road, Xinyi District, Taipei",
+        "lat": 25.033879,
+        "lng": 121.568743,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "interpolated",
+        "providerCandidateId": "place-xinyi-office",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:01:00.000Z",
+        "surface": "callcenter",
+        "coordinateProvenance": {
+          "coordinateSource": "provider_candidate",
+          "geocodeProvider": "mock-geo",
+          "geocodeConfidence": "interpolated",
+          "providerCandidateId": "place-xinyi-office",
+          "selectedByActorId": "AGENT-OPS-001",
+          "selectedAt": "2026-07-08T05:01:00.000Z",
+          "surface": "callcenter"
+        }
+      },
+      "passenger": {
+        "name": "Smoke Caller",
+        "phone": "0912-000-301"
+      }
+    },
+    "apiOrder": {
+      "orderId": "ORD-SMOKE-001",
+      "status": "ready_for_dispatch",
+      "complianceFlags": ["recording_bound", "service_area_serviceable"],
+      "pickup": {
+        "address": "No. 1, City Hall Road, Xinyi District, Taipei",
+        "lat": 25.037519,
+        "lng": 121.56368,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "exact",
+        "providerCandidateId": "place-city-hall",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:00:00.000Z",
+        "surface": "callcenter",
+        "coordinateProvenance": {
+          "coordinateSource": "provider_candidate",
+          "geocodeProvider": "mock-geo",
+          "geocodeConfidence": "exact",
+          "providerCandidateId": "place-city-hall",
+          "selectedByActorId": "AGENT-OPS-001",
+          "selectedAt": "2026-07-08T05:00:00.000Z",
+          "surface": "callcenter"
+        }
+      },
+      "dropoff": {
+        "address": "No. 100, Songren Road, Xinyi District, Taipei",
+        "lat": 25.033879,
+        "lng": 121.568743,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "interpolated",
+        "providerCandidateId": "place-xinyi-office",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:01:00.000Z",
+        "surface": "callcenter",
+        "coordinateProvenance": {
+          "coordinateSource": "provider_candidate",
+          "geocodeProvider": "mock-geo",
+          "geocodeConfidence": "interpolated",
+          "providerCandidateId": "place-xinyi-office",
+          "selectedByActorId": "AGENT-OPS-001",
+          "selectedAt": "2026-07-08T05:01:00.000Z",
+          "surface": "callcenter"
+        }
+      },
+      "spatialAudit": {
+        "snapshotId": "snapshot-serviceable-001",
+        "snapshotVersion": 1,
+        "capturedAt": "2026-07-10T15:17:09.029Z",
+        "capturedReason": "booking_creation",
+        "actorId": "AGENT-OPS-001",
+        "actorType": "ops_user",
+        "surface": "callcenter",
+        "serviceProductType": "taxi_realtime",
+        "decision": "serviceable",
+        "stops": [
+          {
+            "kind": "pickup",
+            "addressText": "No. 1, City Hall Road, Xinyi District, Taipei",
+            "location": {
+              "lat": 25.037519,
+              "lng": 121.56368
+            },
+            "coordinateProvenance": {
+              "coordinateSource": "provider_candidate",
+              "geocodeProvider": "mock-geo",
+              "geocodeConfidence": "exact",
+              "providerCandidateId": "place-city-hall",
+              "selectedByActorId": "AGENT-OPS-001",
+              "selectedAt": "2026-07-08T05:00:00.000Z",
+              "surface": "callcenter"
+            },
+            "provenanceComplete": true,
+            "missingItems": []
+          },
+          {
+            "kind": "dropoff",
+            "addressText": "No. 100, Songren Road, Xinyi District, Taipei",
+            "location": {
+              "lat": 25.033879,
+              "lng": 121.568743
+            },
+            "coordinateProvenance": {
+              "coordinateSource": "provider_candidate",
+              "geocodeProvider": "mock-geo",
+              "geocodeConfidence": "interpolated",
+              "providerCandidateId": "place-xinyi-office",
+              "selectedByActorId": "AGENT-OPS-001",
+              "selectedAt": "2026-07-08T05:01:00.000Z",
+              "surface": "callcenter"
+            },
+            "provenanceComplete": true,
+            "missingItems": []
+          }
+        ],
+        "serviceAreaEvaluation": {
+          "decision": "serviceable",
+          "serviceProductType": "taxi_realtime",
+          "evaluatedAt": "2026-07-10T15:17:09.027Z",
+          "stops": [
+            {
+              "kind": "pickup",
+              "location": {
+                "lat": 25.037519,
+                "lng": 121.56368
+              },
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "policyCodes": [],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "decision": "serviceable",
+              "reasonCodes": [],
+              "reasonMessages": []
+            },
+            {
+              "kind": "dropoff",
+              "location": {
+                "lat": 25.033879,
+                "lng": 121.568743
+              },
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "policyCodes": [],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "decision": "serviceable",
+              "reasonCodes": [],
+              "reasonMessages": []
+            }
+          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
+          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "reasonCodes": [],
+          "reasonMessages": []
+        },
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "reasonCodes": [],
+        "reasonMessages": [],
+        "missingItems": [],
+        "auditEvents": [
+          {
+            "auditId": "audit-001",
+            "actionName": "order.spatial_audit.snapshot_created",
+            "actorId": "AGENT-OPS-001",
+            "actorType": "ops_user",
+            "createdAt": "2026-07-08T05:05:00.000Z"
+          }
+        ]
+      },
+      "serviceAreaGate": {
+        "gateType": "service_area",
+        "title": "Service-area and stop-policy authority",
+        "state": "clear",
+        "required": true,
+        "blocking": false,
+        "evidenceState": "verified",
+        "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+        "missingItems": [],
+        "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
+        "reviewerLabel": null,
+        "overrideAllowed": false,
+        "overrideActors": [],
+        "impacts": [
+          {
+            "stage": "dispatch",
+            "effect": "clear",
+            "reason": "Service-area evaluation is clear for taxi_realtime."
+          },
+          {
+            "stage": "completion",
+            "effect": "clear",
+            "reason": "Service-area checks are enforced before dispatch and do not block driver completion once released."
+          },
+          {
+            "stage": "settlement",
+            "effect": "clear",
+            "reason": "Service-area evaluation evidence is available for audit."
+          }
+        ]
+      }
+    },
+    "persistedWrite": {
+      "orders": [
+        {
+          "orderId": "ORD-SMOKE-001",
+          "orderNo": "O-20260410-000001",
+          "orderSource": "phone",
+          "orderDomain": "owned",
+          "tenantId": null,
+          "partnerId": null,
+          "partnerProgramId": null,
+          "partnerEntrySlug": null,
+          "eligibilityVerificationId": null,
+          "issuerAuthorizationRef": null,
+          "passengerDisclosure": null,
+          "serviceBucket": "standard_taxi",
+          "dispatchSemantics": "realtime",
+          "businessDispatchSubtype": null,
+          "status": "ready_for_dispatch",
+          "pickup": {
+            "address": "No. 1, City Hall Road, Xinyi District, Taipei",
+            "lat": 25.037519,
+            "lng": 121.56368,
+            "coordinateSource": "provider_candidate",
+            "geocodeProvider": "mock-geo",
+            "geocodeConfidence": "exact",
+            "providerCandidateId": "place-city-hall",
+            "selectedByActorId": "AGENT-OPS-001",
+            "selectedAt": "2026-07-08T05:00:00.000Z",
+            "surface": "callcenter",
+            "coordinateProvenance": {
+              "coordinateSource": "provider_candidate",
+              "geocodeProvider": "mock-geo",
+              "geocodeConfidence": "exact",
+              "providerCandidateId": "place-city-hall",
+              "selectedByActorId": "AGENT-OPS-001",
+              "selectedAt": "2026-07-08T05:00:00.000Z",
+              "surface": "callcenter"
+            }
+          },
+          "dropoff": {
+            "address": "No. 100, Songren Road, Xinyi District, Taipei",
+            "lat": 25.033879,
+            "lng": 121.568743,
+            "coordinateSource": "provider_candidate",
+            "geocodeProvider": "mock-geo",
+            "geocodeConfidence": "interpolated",
+            "providerCandidateId": "place-xinyi-office",
+            "selectedByActorId": "AGENT-OPS-001",
+            "selectedAt": "2026-07-08T05:01:00.000Z",
+            "surface": "callcenter",
+            "coordinateProvenance": {
+              "coordinateSource": "provider_candidate",
+              "geocodeProvider": "mock-geo",
+              "geocodeConfidence": "interpolated",
+              "providerCandidateId": "place-xinyi-office",
+              "selectedByActorId": "AGENT-OPS-001",
+              "selectedAt": "2026-07-08T05:01:00.000Z",
+              "surface": "callcenter"
+            }
+          },
+          "passenger": {
+            "name": "Smoke Caller",
+            "phone": "0912-000-301"
+          },
+          "bookingId": null,
+          "bookingType": null,
+          "etaSnapshot": {
+            "etaMinutes": 10,
+            "calculatedAt": "2026-07-10T15:17:09.000Z"
+          },
+          "callId": "CALL-SMOKE-001",
+          "recordingId": "REC-SMOKE-001",
+          "reservationWindowStart": null,
+          "reservationWindowEnd": null,
+          "recurrenceRule": null,
+          "modifiableUntil": null,
+          "cancelableUntil": null,
+          "bookedBy": null,
+          "onsiteContact": null,
+          "costCenter": null,
+          "vehiclePreference": null,
+          "benefitReference": null,
+          "direction": null,
+          "flightNo": null,
+          "terminal": null,
+          "luggageCount": null,
+          "notes": null,
+          "fixedPrice": false,
+          "quotedFare": null,
+          "quotedFareSource": null,
+          "quotedFareRuleVersion": null,
+          "manualFareOverride": null,
+          "exceptionHold": null,
+          "proofRequirements": {
+            "minPhotoCount": 0,
+            "signoffRequired": false,
+            "expenseProofRequired": false
+          },
+          "approvalState": "not_required",
+          "approvalRequestIds": [],
+          "complianceFlags": ["recording_bound", "service_area_serviceable"],
+          "cancelledAt": null,
+          "cancelReason": null,
+          "mapFallbackReview": null,
+          "reservationHoldStatus": "none",
+          "reservationHoldId": null,
+          "reservationHoldExpiresAt": null,
+          "dispatchAttemptCount": 0,
+          "lastDispatchFailureReason": null,
+          "noSupplyEscalation": null,
+          "dispatchTimeout": null,
+          "createdAt": "2026-07-10T15:17:09.000Z",
+          "updatedAt": "2026-07-10T15:17:09.000Z",
+          "spatialAudit": {
+            "snapshotId": "snapshot-serviceable-001",
+            "snapshotVersion": 1,
+            "capturedAt": "2026-07-10T15:17:09.029Z",
+            "capturedReason": "booking_creation",
+            "actorId": "AGENT-OPS-001",
+            "actorType": "ops_user",
+            "surface": "callcenter",
+            "serviceProductType": "taxi_realtime",
+            "decision": "serviceable",
+            "stops": [
+              {
+                "kind": "pickup",
+                "addressText": "No. 1, City Hall Road, Xinyi District, Taipei",
+                "location": {
+                  "lat": 25.037519,
+                  "lng": 121.56368
+                },
+                "coordinateProvenance": {
+                  "coordinateSource": "provider_candidate",
+                  "geocodeProvider": "mock-geo",
+                  "geocodeConfidence": "exact",
+                  "providerCandidateId": "place-city-hall",
+                  "selectedByActorId": "AGENT-OPS-001",
+                  "selectedAt": "2026-07-08T05:00:00.000Z",
+                  "surface": "callcenter"
+                },
+                "provenanceComplete": true,
+                "missingItems": []
+              },
+              {
+                "kind": "dropoff",
+                "addressText": "No. 100, Songren Road, Xinyi District, Taipei",
+                "location": {
+                  "lat": 25.033879,
+                  "lng": 121.568743
+                },
+                "coordinateProvenance": {
+                  "coordinateSource": "provider_candidate",
+                  "geocodeProvider": "mock-geo",
+                  "geocodeConfidence": "interpolated",
+                  "providerCandidateId": "place-xinyi-office",
+                  "selectedByActorId": "AGENT-OPS-001",
+                  "selectedAt": "2026-07-08T05:01:00.000Z",
+                  "surface": "callcenter"
+                },
+                "provenanceComplete": true,
+                "missingItems": []
+              }
+            ],
+            "serviceAreaEvaluation": {
+              "decision": "serviceable",
+              "serviceProductType": "taxi_realtime",
+              "evaluatedAt": "2026-07-10T15:17:09.027Z",
+              "stops": [
+                {
+                  "kind": "pickup",
+                  "location": {
+                    "lat": 25.037519,
+                    "lng": 121.56368
+                  },
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
+                  "policyCodes": [],
+                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "decision": "serviceable",
+                  "reasonCodes": [],
+                  "reasonMessages": []
+                },
+                {
+                  "kind": "dropoff",
+                  "location": {
+                    "lat": 25.033879,
+                    "lng": 121.568743
+                  },
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
+                  "policyCodes": [],
+                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "decision": "serviceable",
+                  "reasonCodes": [],
+                  "reasonMessages": []
+                }
+              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "reasonCodes": [],
+              "reasonMessages": []
+            },
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+            "reasonCodes": [],
+            "reasonMessages": [],
+            "missingItems": [],
+            "auditEvents": [
+              {
+                "auditId": "audit-001",
+                "actionName": "order.spatial_audit.snapshot_created",
+                "actorId": "AGENT-OPS-001",
+                "actorType": "ops_user",
+                "createdAt": "2026-07-08T05:05:00.000Z"
+              }
+            ]
+          },
+          "complianceGates": [
+            {
+              "gateType": "service_area",
+              "title": "Service-area and stop-policy authority",
+              "state": "clear",
+              "required": true,
+              "blocking": false,
+              "evidenceState": "verified",
+              "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+              "missingItems": [],
+              "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
+              "reviewerLabel": null,
+              "overrideAllowed": false,
+              "overrideActors": [],
+              "impacts": [
+                {
+                  "stage": "dispatch",
+                  "effect": "clear",
+                  "reason": "Service-area evaluation is clear for taxi_realtime."
+                },
+                {
+                  "stage": "completion",
+                  "effect": "clear",
+                  "reason": "Service-area checks are enforced before dispatch and do not block driver completion once released."
+                },
+                {
+                  "stage": "settlement",
+                  "effect": "clear",
+                  "reason": "Service-area evaluation evidence is available for audit."
+                }
+              ]
+            },
+            {
+              "gateType": "recording",
+              "title": "Call recording linkage",
+              "state": "clear",
+              "required": true,
+              "blocking": false,
+              "evidenceState": "verified",
+              "evidenceRefs": ["REC-SMOKE-001"],
+              "missingItems": [],
+              "nextAction": "Recording has been bound to the phone order.",
+              "reviewerLabel": "callcenter / ops compliance",
+              "overrideAllowed": false,
+              "overrideActors": [],
+              "impacts": [
+                {
+                  "stage": "dispatch",
+                  "effect": "clear",
+                  "reason": "Dispatch may proceed because recording linkage is present."
+                },
+                {
+                  "stage": "completion",
+                  "effect": "clear",
+                  "reason": "Recording linkage does not block driver completion once dispatch starts."
+                },
+                {
+                  "stage": "settlement",
+                  "effect": "clear",
+                  "reason": "Recording evidence is available for audit and revenue review."
+                }
+              ]
+            }
+          ],
+          "queueFamily": "realtime_ready_queue",
+          "queueEntryReason": "realtime_ready_for_dispatch"
+        }
+      ],
+      "dispatchTraceLogs": [
+        {
+          "traceId": "trace-serviceable-001",
+          "orderId": "ORD-SMOKE-001",
+          "eventType": "callcenter.order_created",
+          "message": "callcenter.order_created",
+          "createdAt": "2026-07-10T15:17:09.030Z",
+          "details": {
+            "callId": "CALL-SMOKE-001",
+            "recordingId": "REC-SMOKE-001",
+            "recordingPending": false
+          }
+        }
+      ]
+    },
+    "auditEvent": {
+      "auditId": "audit-001",
+      "createdAt": "2026-07-08T05:05:00.000Z",
+      "requestId": "req-map-closeout-serviceable-001",
+      "actorId": "AGENT-OPS-001",
+      "actorType": "ops_user",
+      "tenantId": null,
+      "moduleName": "order",
+      "actionName": "order.spatial_audit.snapshot_created",
+      "resourceType": "order",
+      "resourceId": "ORD-SMOKE-001",
+      "oldValuesSummary": null,
+      "newValuesSummary": {
+        "snapshotId": "snapshot-serviceable-001",
+        "decision": "serviceable",
+        "surface": "callcenter",
+        "serviceProductType": "taxi_realtime",
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "reasonCodes": [],
+        "missingItems": [],
+        "provenanceComplete": true
+      },
+      "metadata": null
+    },
+    "immutableSnapshotCheck": {
+      "mutatedReasonCodes": ["MUTATED_REASON"],
+      "freshReasonCodes": [],
+      "freshPickupLocation": {
+        "lat": 25.037519,
+        "lng": 121.56368
+      }
+    },
+    "opsVisibility": {
+      "providerStatus": "ready",
+      "fallbackReason": "none",
+      "routeSegments": [
+        {
+          "key": "ORD-SMOKE-001:route",
+          "orderId": "ORD-SMOKE-001",
+          "label": "O-20260410-000001",
+          "pickup": {
+            "lat": 25.037519,
+            "lng": 121.56368
+          },
+          "dropoff": {
+            "lat": 25.033879,
+            "lng": 121.568743
+          }
+        }
+      ],
+      "points": [
+        {
+          "key": "ORD-SMOKE-001:pickup",
+          "kind": "pickup",
+          "label": "O-20260410-000001",
+          "lat": 25.037519,
+          "lng": 121.56368,
+          "orderId": "ORD-SMOKE-001",
+          "subtitle": "No. 1, City Hall Road, Xinyi District, Taipei"
+        },
+        {
+          "key": "ORD-SMOKE-001:dropoff",
+          "kind": "dropoff",
+          "label": "O-20260410-000001",
+          "lat": 25.033879,
+          "lng": 121.568743,
+          "orderId": "ORD-SMOKE-001",
+          "subtitle": "No. 100, Songren Road, Xinyi District, Taipei"
+        }
+      ],
+      "overlays": {
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "policyCodes": [],
+        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "reasonCodes": [],
+        "decisions": ["serviceable"]
+      }
+    }
+  },
+  "manualReviewOrder": {
+    "orderId": "ORD-MAP-MANUAL-001",
+    "requestId": "req-map-closeout-manual-review-001",
+    "requestBody": {
+      "callId": "CALL-MANUAL-001",
+      "agentId": "AGENT-OPS-001",
+      "recordingId": "REC-MANUAL-001",
+      "pickup": {
+        "address": "信義醫院管制入口",
+        "lat": 25.0338,
+        "lng": 121.5645,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "exact",
+        "providerCandidateId": "place-xinyi-hospital-review",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:10:00.000Z",
+        "surface": "callcenter"
+      },
+      "dropoff": {
+        "address": "市府轉運站",
+        "lat": 25.041,
+        "lng": 121.55,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "exact",
+        "providerCandidateId": "place-city-hall-bus-terminal",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:11:00.000Z",
+        "surface": "callcenter"
+      },
+      "passenger": {
+        "name": "Manual Review Rider",
+        "phone": "0912-000-302"
+      }
+    },
+    "apiOrder": {
+      "orderId": "ORD-MAP-MANUAL-001",
+      "status": "ready_for_dispatch",
+      "queueFamily": "manual_review_queue",
+      "queueEntryReason": "dispatch_manual_review_required",
+      "spatialAudit": {
+        "snapshotId": "snapshot-manual-review-001",
+        "snapshotVersion": 1,
+        "capturedAt": "2026-07-10T15:17:09.059Z",
+        "capturedReason": "booking_creation",
+        "actorId": "AGENT-OPS-001",
+        "actorType": "ops_user",
+        "surface": "callcenter",
+        "serviceProductType": "taxi_realtime",
+        "decision": "manual_review",
+        "stops": [
+          {
+            "kind": "pickup",
+            "addressText": "信義醫院管制入口",
+            "location": {
+              "lat": 25.0338,
+              "lng": 121.5645
+            },
+            "coordinateProvenance": {
+              "coordinateSource": "provider_candidate",
+              "geocodeProvider": "mock-geo",
+              "geocodeConfidence": "exact",
+              "providerCandidateId": "place-xinyi-hospital-review",
+              "placeId": null,
+              "coordinateAccuracyM": null,
+              "selectedByActorId": "AGENT-OPS-001",
+              "selectedAt": "2026-07-08T05:10:00.000Z",
+              "pinnedByActorId": null,
+              "pinnedAt": null,
+              "manualOverrideReason": null,
+              "surface": "callcenter"
+            },
+            "provenanceComplete": true,
+            "missingItems": []
+          },
+          {
+            "kind": "dropoff",
+            "addressText": "市府轉運站",
+            "location": {
+              "lat": 25.041,
+              "lng": 121.55
+            },
+            "coordinateProvenance": {
+              "coordinateSource": "provider_candidate",
+              "geocodeProvider": "mock-geo",
+              "geocodeConfidence": "exact",
+              "providerCandidateId": "place-city-hall-bus-terminal",
+              "placeId": null,
+              "coordinateAccuracyM": null,
+              "selectedByActorId": "AGENT-OPS-001",
+              "selectedAt": "2026-07-08T05:11:00.000Z",
+              "pinnedByActorId": null,
+              "pinnedAt": null,
+              "manualOverrideReason": null,
+              "surface": "callcenter"
+            },
+            "provenanceComplete": true,
+            "missingItems": []
+          }
+        ],
+        "serviceAreaEvaluation": {
+          "decision": "manual_review",
+          "serviceProductType": "taxi_realtime",
+          "evaluatedAt": "2026-07-10T15:17:09.059Z",
+          "stops": [
+            {
+              "kind": "pickup",
+              "location": {
+                "lat": 25.0338,
+                "lng": 121.5645
+              },
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "policyCodes": ["XINYI_HOSPITAL_MANUAL_REVIEW"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1",
+                "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
+              ],
+              "decision": "manual_review",
+              "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+              "reasonMessages": [
+                "This stop requires ops review before dispatch."
+              ]
+            },
+            {
+              "kind": "dropoff",
+              "location": {
+                "lat": 25.041,
+                "lng": 121.55
+              },
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "policyCodes": [],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "decision": "serviceable",
+              "reasonCodes": [],
+              "reasonMessages": []
+            }
+          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1",
+            "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
+          ],
+          "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+          "reasonMessages": ["This stop requires ops review before dispatch."]
+        },
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "geometryVersionRefs": [
+          "service_area:TAIPEI_CORE@1",
+          "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
+        ],
+        "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+        "reasonMessages": ["This stop requires ops review before dispatch."],
+        "missingItems": [],
+        "auditEvents": [
+          {
+            "auditId": "audit-003",
+            "actionName": "order.spatial_audit.snapshot_created",
+            "actorId": "AGENT-OPS-001",
+            "actorType": "ops_user",
+            "createdAt": "2026-07-08T05:05:02.000Z"
+          }
+        ]
+      },
+      "serviceAreaGate": {
+        "gateType": "service_area",
+        "title": "Service-area and stop-policy authority",
+        "state": "review_required",
+        "required": true,
+        "blocking": false,
+        "evidenceState": "submitted",
+        "evidenceRefs": [
+          "service_area:TAIPEI_CORE@1",
+          "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1",
+          "STOP_REQUIRES_MANUAL_REVIEW"
+        ],
+        "missingItems": [],
+        "nextAction": "This stop requires ops review before dispatch.",
+        "reviewerLabel": "ops dispatch / service area",
+        "overrideAllowed": true,
+        "overrideActors": ["ops_user", "platform_admin"],
+        "impacts": [
+          {
+            "stage": "dispatch",
+            "effect": "review_required",
+            "reason": "Dispatch requires manual review before release."
+          },
+          {
+            "stage": "completion",
+            "effect": "clear",
+            "reason": "Service-area checks are enforced before dispatch and do not block driver completion once released."
+          },
+          {
+            "stage": "settlement",
+            "effect": "review_required",
+            "reason": "Spatial review outcome must be retained for compliance follow-up."
+          }
+        ]
+      }
+    },
+    "persistedWrite": {
+      "orders": [
+        {
+          "orderId": "ORD-MAP-MANUAL-001",
+          "orderNo": "O-20260410-000002",
+          "orderSource": "phone",
+          "orderDomain": "owned",
+          "tenantId": null,
+          "partnerId": null,
+          "partnerProgramId": null,
+          "partnerEntrySlug": null,
+          "eligibilityVerificationId": null,
+          "issuerAuthorizationRef": null,
+          "passengerDisclosure": null,
+          "serviceBucket": "standard_taxi",
+          "dispatchSemantics": "realtime",
+          "businessDispatchSubtype": null,
+          "status": "ready_for_dispatch",
+          "pickup": {
+            "address": "信義醫院管制入口",
+            "lat": 25.0338,
+            "lng": 121.5645,
+            "coordinateSource": "provider_candidate",
+            "geocodeProvider": "mock-geo",
+            "geocodeConfidence": "exact",
+            "providerCandidateId": "place-xinyi-hospital-review",
+            "selectedByActorId": "AGENT-OPS-001",
+            "selectedAt": "2026-07-08T05:10:00.000Z",
+            "surface": "callcenter"
+          },
+          "dropoff": {
+            "address": "市府轉運站",
+            "lat": 25.041,
+            "lng": 121.55,
+            "coordinateSource": "provider_candidate",
+            "geocodeProvider": "mock-geo",
+            "geocodeConfidence": "exact",
+            "providerCandidateId": "place-city-hall-bus-terminal",
+            "selectedByActorId": "AGENT-OPS-001",
+            "selectedAt": "2026-07-08T05:11:00.000Z",
+            "surface": "callcenter"
+          },
+          "passenger": {
+            "name": "Manual Review Rider",
+            "phone": "0912-000-302"
+          },
+          "bookingId": null,
+          "bookingType": null,
+          "etaSnapshot": {
+            "etaMinutes": 10,
+            "calculatedAt": "2026-07-10T15:17:09.058Z"
+          },
+          "callId": "CALL-MANUAL-001",
+          "recordingId": "REC-MANUAL-001",
+          "reservationWindowStart": null,
+          "reservationWindowEnd": null,
+          "recurrenceRule": null,
+          "modifiableUntil": null,
+          "cancelableUntil": null,
+          "bookedBy": null,
+          "onsiteContact": null,
+          "costCenter": null,
+          "vehiclePreference": null,
+          "benefitReference": null,
+          "direction": null,
+          "flightNo": null,
+          "terminal": null,
+          "luggageCount": null,
+          "notes": null,
+          "fixedPrice": false,
+          "quotedFare": null,
+          "quotedFareSource": null,
+          "quotedFareRuleVersion": null,
+          "manualFareOverride": null,
+          "exceptionHold": null,
+          "proofRequirements": {
+            "minPhotoCount": 0,
+            "signoffRequired": false,
+            "expenseProofRequired": false
+          },
+          "approvalState": "not_required",
+          "approvalRequestIds": [],
+          "complianceFlags": ["recording_bound", "service_area_manual_review"],
+          "cancelledAt": null,
+          "cancelReason": null,
+          "mapFallbackReview": null,
+          "reservationHoldStatus": "none",
+          "reservationHoldId": null,
+          "reservationHoldExpiresAt": null,
+          "dispatchAttemptCount": 0,
+          "lastDispatchFailureReason": null,
+          "noSupplyEscalation": null,
+          "dispatchTimeout": null,
+          "createdAt": "2026-07-10T15:17:09.058Z",
+          "updatedAt": "2026-07-10T15:17:09.058Z",
+          "spatialAudit": {
+            "snapshotId": "snapshot-manual-review-001",
+            "snapshotVersion": 1,
+            "capturedAt": "2026-07-10T15:17:09.059Z",
+            "capturedReason": "booking_creation",
+            "actorId": "AGENT-OPS-001",
+            "actorType": "ops_user",
+            "surface": "callcenter",
+            "serviceProductType": "taxi_realtime",
+            "decision": "manual_review",
+            "stops": [
+              {
+                "kind": "pickup",
+                "addressText": "信義醫院管制入口",
+                "location": {
+                  "lat": 25.0338,
+                  "lng": 121.5645
+                },
+                "coordinateProvenance": {
+                  "coordinateSource": "provider_candidate",
+                  "geocodeProvider": "mock-geo",
+                  "geocodeConfidence": "exact",
+                  "providerCandidateId": "place-xinyi-hospital-review",
+                  "placeId": null,
+                  "coordinateAccuracyM": null,
+                  "selectedByActorId": "AGENT-OPS-001",
+                  "selectedAt": "2026-07-08T05:10:00.000Z",
+                  "pinnedByActorId": null,
+                  "pinnedAt": null,
+                  "manualOverrideReason": null,
+                  "surface": "callcenter"
+                },
+                "provenanceComplete": true,
+                "missingItems": []
+              },
+              {
+                "kind": "dropoff",
+                "addressText": "市府轉運站",
+                "location": {
+                  "lat": 25.041,
+                  "lng": 121.55
+                },
+                "coordinateProvenance": {
+                  "coordinateSource": "provider_candidate",
+                  "geocodeProvider": "mock-geo",
+                  "geocodeConfidence": "exact",
+                  "providerCandidateId": "place-city-hall-bus-terminal",
+                  "placeId": null,
+                  "coordinateAccuracyM": null,
+                  "selectedByActorId": "AGENT-OPS-001",
+                  "selectedAt": "2026-07-08T05:11:00.000Z",
+                  "pinnedByActorId": null,
+                  "pinnedAt": null,
+                  "manualOverrideReason": null,
+                  "surface": "callcenter"
+                },
+                "provenanceComplete": true,
+                "missingItems": []
+              }
+            ],
+            "serviceAreaEvaluation": {
+              "decision": "manual_review",
+              "serviceProductType": "taxi_realtime",
+              "evaluatedAt": "2026-07-10T15:17:09.059Z",
+              "stops": [
+                {
+                  "kind": "pickup",
+                  "location": {
+                    "lat": 25.0338,
+                    "lng": 121.5645
+                  },
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
+                  "policyCodes": ["XINYI_HOSPITAL_MANUAL_REVIEW"],
+                  "geometryVersionRefs": [
+                    "service_area:TAIPEI_CORE@1",
+                    "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
+                  ],
+                  "decision": "manual_review",
+                  "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+                  "reasonMessages": [
+                    "This stop requires ops review before dispatch."
+                  ]
+                },
+                {
+                  "kind": "dropoff",
+                  "location": {
+                    "lat": 25.041,
+                    "lng": 121.55
+                  },
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
+                  "policyCodes": [],
+                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "decision": "serviceable",
+                  "reasonCodes": [],
+                  "reasonMessages": []
+                }
+              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1",
+                "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
+              ],
+              "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+              "reasonMessages": [
+                "This stop requires ops review before dispatch."
+              ]
+            },
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "geometryVersionRefs": [
+              "service_area:TAIPEI_CORE@1",
+              "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
+            ],
+            "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+            "reasonMessages": [
+              "This stop requires ops review before dispatch."
+            ],
+            "missingItems": [],
+            "auditEvents": [
+              {
+                "auditId": "audit-003",
+                "actionName": "order.spatial_audit.snapshot_created",
+                "actorId": "AGENT-OPS-001",
+                "actorType": "ops_user",
+                "createdAt": "2026-07-08T05:05:02.000Z"
+              }
+            ]
+          },
+          "complianceGates": [
+            {
+              "gateType": "service_area",
+              "title": "Service-area and stop-policy authority",
+              "state": "review_required",
+              "required": true,
+              "blocking": false,
+              "evidenceState": "submitted",
+              "evidenceRefs": [
+                "service_area:TAIPEI_CORE@1",
+                "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1",
+                "STOP_REQUIRES_MANUAL_REVIEW"
+              ],
+              "missingItems": [],
+              "nextAction": "This stop requires ops review before dispatch.",
+              "reviewerLabel": "ops dispatch / service area",
+              "overrideAllowed": true,
+              "overrideActors": ["ops_user", "platform_admin"],
+              "impacts": [
+                {
+                  "stage": "dispatch",
+                  "effect": "review_required",
+                  "reason": "Dispatch requires manual review before release."
+                },
+                {
+                  "stage": "completion",
+                  "effect": "clear",
+                  "reason": "Service-area checks are enforced before dispatch and do not block driver completion once released."
+                },
+                {
+                  "stage": "settlement",
+                  "effect": "review_required",
+                  "reason": "Spatial review outcome must be retained for compliance follow-up."
+                }
+              ]
+            },
+            {
+              "gateType": "recording",
+              "title": "Call recording linkage",
+              "state": "clear",
+              "required": true,
+              "blocking": false,
+              "evidenceState": "verified",
+              "evidenceRefs": ["REC-MANUAL-001"],
+              "missingItems": [],
+              "nextAction": "Recording has been bound to the phone order.",
+              "reviewerLabel": "callcenter / ops compliance",
+              "overrideAllowed": false,
+              "overrideActors": [],
+              "impacts": [
+                {
+                  "stage": "dispatch",
+                  "effect": "clear",
+                  "reason": "Dispatch may proceed because recording linkage is present."
+                },
+                {
+                  "stage": "completion",
+                  "effect": "clear",
+                  "reason": "Recording linkage does not block driver completion once dispatch starts."
+                },
+                {
+                  "stage": "settlement",
+                  "effect": "clear",
+                  "reason": "Recording evidence is available for audit and revenue review."
+                }
+              ]
+            }
+          ],
+          "queueFamily": "manual_review_queue",
+          "queueEntryReason": "dispatch_manual_review_required"
+        }
+      ],
+      "dispatchTraceLogs": [
+        {
+          "traceId": "trace-manual-review-001",
+          "orderId": "ORD-MAP-MANUAL-001",
+          "eventType": "callcenter.order_created",
+          "message": "callcenter.order_created",
+          "createdAt": "2026-07-10T15:17:09.060Z",
+          "details": {
+            "callId": "CALL-MANUAL-001",
+            "recordingId": "REC-MANUAL-001",
+            "recordingPending": false
+          }
+        }
+      ]
+    },
+    "dispatchAttempt": {
+      "errorResponse": {
+        "error": {
+          "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
+          "message": "Order requires manual review before dispatch.",
+          "details": {
+            "orderId": "ORD-MAP-MANUAL-001",
+            "gateTypes": ["service_area"],
+            "reasonCodes": [
+              "service_area:TAIPEI_CORE@1",
+              "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1",
+              "STOP_REQUIRES_MANUAL_REVIEW"
+            ],
+            "missingItems": []
+          },
+          "retryable": false,
+          "traceId": "misc-closeout-1"
+        }
+      },
+      "dispatchJobsForOrder": []
+    }
+  }
+}

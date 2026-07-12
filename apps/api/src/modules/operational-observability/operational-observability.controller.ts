@@ -15,9 +15,9 @@ export class OperationalObservabilityController {
   @Get()
   @RequireRealms("platform", "ops")
   @RequireScopes("audit:read")
-  getSnapshot(@Headers("x-request-id") requestId?: string) {
+  async getSnapshot(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope<OperationalObservabilitySnapshot>(
-      this.operationalObservabilityService.getSnapshot(),
+      await this.operationalObservabilityService.getSnapshot(),
       requestId,
     );
   }

@@ -1,0 +1,120 @@
+MAP dispatch integrity verification
+code_root=/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-fleets-closeout-008
+status_root=/home/edna/workspace/drts-fleet-platform
+PASS support/sidecars/MAP-REL-001/MAP-FLEETS-EXECUTION-MANIFEST-20260701.json exists
+PASS support/sidecars/MAP-REL-001/MAP-REL-001-FINAL-EVIDENCE.md exists
+PASS support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md exists
+PASS support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md exists
+PASS manifest finalEvidence path matches expected release evidence file
+PASS manifest blockerReport path matches expected blocker report
+PASS manifest closeoutBoard path matches expected closeout board
+PASS manifest row has id (QA final evidence packet is linked and accepted)
+PASS manifest row qa_packet_complete has artifact paths
+PASS artifact exists for qa_packet_complete: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for qa_packet_complete: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md
+PASS final evidence closes manifest row qa_packet_complete as PASS
+PASS manifest row has id (Observability final evidence packet is linked and accepted)
+PASS manifest row obs_packet_complete has artifact paths
+PASS artifact exists for obs_packet_complete: support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md
+PASS artifact exists for obs_packet_complete: support/sidecars/MAP-OBS-001/artifacts/vitest-map-geofence-alerts-20260703T153844Z.json
+PASS artifact exists for obs_packet_complete: support/sidecars/MAP-OBS-001/artifacts/vitest-map-geofence-observability-runtime-20260703T153844Z.json
+PASS final evidence closes manifest row obs_packet_complete as PASS
+PASS manifest row has id (Callcenter persisted spatial proof closes same-order dispatch chain)
+PASS manifest row fleets_closeout_001_spatial_proof has artifact paths
+PASS artifact exists for fleets_closeout_001_spatial_proof: support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md
+PASS artifact exists for fleets_closeout_001_spatial_proof: support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-browser-proof-20260708T050000Z.json
+PASS artifact exists for fleets_closeout_001_spatial_proof: support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json
+PASS final evidence closes manifest row fleets_closeout_001_spatial_proof as PASS
+PASS manifest row has id (Cross-surface anti-bypass proof prevents dispatchable coordinate-less or outage orders)
+PASS manifest row fleets_closeout_002_anti_bypass has artifact paths
+PASS artifact exists for fleets_closeout_002_anti_bypass: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for fleets_closeout_002_anti_bypass: support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md
+PASS final evidence closes manifest row fleets_closeout_002_anti_bypass as PASS
+PASS manifest row has id (Platform Admin publish and policy version proof is closed)
+PASS manifest row fleets_closeout_003_admin_publish has artifact paths
+PASS artifact exists for fleets_closeout_003_admin_publish: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for fleets_closeout_003_admin_publish: support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md
+PASS artifact exists for fleets_closeout_003_admin_publish: apps/api/tests/unit/service-area.service.test.ts
+PASS final evidence closes manifest row fleets_closeout_003_admin_publish as PASS
+PASS manifest row has id (Ops map visibility proof is backend-linked to the same governed orders)
+PASS manifest row fleets_closeout_004_ops_visibility has artifact paths
+PASS artifact exists for fleets_closeout_004_ops_visibility: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for fleets_closeout_004_ops_visibility: support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json
+PASS artifact exists for fleets_closeout_004_ops_visibility: apps/api/tests/unit/owned-mobility.service.test.ts
+PASS final evidence closes manifest row fleets_closeout_004_ops_visibility as PASS
+PASS manifest row has id (Driver Gate D packet is accepted as external-gated mixed evidence)
+PASS manifest row fleets_closeout_005_gate_d_packet has artifact paths
+PASS artifact exists for fleets_closeout_005_gate_d_packet: support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md
+PASS artifact exists for fleets_closeout_005_gate_d_packet: support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md
+PASS artifact exists for fleets_closeout_005_gate_d_packet: docs/04-uat/driver-app-verification-20260615/screens/r3-trip-on-trip.png
+PASS final evidence closes manifest row fleets_closeout_005_gate_d_packet as PASS
+PASS manifest row has id (Callcenter and booking surfaces are safe to dispatch under governed serviceability)
+PASS manifest row gate_a_dispatch has artifact paths
+PASS artifact exists for gate_a_dispatch: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for gate_a_dispatch: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md
+PASS artifact exists for gate_a_dispatch: support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json
+PASS final evidence closes manifest row gate_a_dispatch as PASS
+PASS manifest row has id (Governance publish flows are safe to publish with audit and policy evidence)
+PASS manifest row gate_b_publish has artifact paths
+PASS artifact exists for gate_b_publish: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for gate_b_publish: support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md
+PASS artifact exists for gate_b_publish: apps/api/tests/unit/service-area.service.test.ts
+PASS final evidence closes manifest row gate_b_publish as PASS
+PASS manifest row has id (Ops board exposes governed spatial readiness hooks and backend-linked visibility)
+PASS manifest row gate_c_ops has artifact paths
+PASS artifact exists for gate_c_ops: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for gate_c_ops: support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md
+PASS artifact exists for gate_c_ops: support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json
+PASS final evidence closes manifest row gate_c_ops as PASS
+PASS manifest row has id (Driver navigation handoff is accepted for release closeout)
+PASS manifest row gate_d_driver has artifact paths
+PASS artifact exists for gate_d_driver: support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT-PACKET-20260708.md
+PASS artifact exists for gate_d_driver: support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md
+PASS artifact exists for gate_d_driver: docs/04-uat/driver-app-verification-20260615/round-10-incident-heartbeat.md
+PASS final evidence closes manifest row gate_d_driver as PASS
+PASS manifest row has id (Provider outage, ambiguity, and coordinate-less degraded paths fail closed)
+PASS manifest row gate_e_degraded has artifact paths
+PASS artifact exists for gate_e_degraded: support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
+PASS artifact exists for gate_e_degraded: support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md
+PASS final evidence closes manifest row gate_e_degraded as PASS
+PASS manifest row has id (Latest readiness blocker report is linked)
+PASS manifest row latest_blocker_report has artifact paths
+PASS artifact exists for latest_blocker_report: support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md
+PASS final evidence closes manifest row latest_blocker_report as PASS
+PASS manifest row has id (Latest closeout board is linked)
+PASS manifest row latest_closeout_board has artifact paths
+PASS artifact exists for latest_closeout_board: support/sidecars/MAP-REL-001/MAP-PRODUCTION-CLOSEOUT-FLEETS-TASK-BOARD-20260708.md
+PASS final evidence closes manifest row latest_closeout_board as PASS
+PASS manifest row has id (Blocker notifier handoff note is posted or duplicate-skipped)
+PASS manifest row blocker_handoff_note has artifact paths
+PASS artifact exists for blocker_handoff_note: support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md
+PASS final evidence closes manifest row blocker_handoff_note as PASS
+PASS manifest row has id (Dispatch integrity verifier passes on branch-local closeout evidence)
+PASS manifest row dispatch_integrity_verifier has artifact paths
+PASS artifact exists for dispatch_integrity_verifier: scripts/verify-map-geofence-dispatch-integrity.mjs
+PASS artifact exists for dispatch_integrity_verifier: support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-dispatch-integrity-20260708T081047Z.txt
+PASS final evidence closes manifest row dispatch_integrity_verifier as PASS
+PASS manifest row has id (Production readiness verifier passes without over-claiming live production)
+PASS manifest row production_readiness_verifier has artifact paths
+PASS artifact exists for production_readiness_verifier: scripts/verify-map-geofence-production-readiness.mjs
+PASS artifact exists for production_readiness_verifier: support/sidecars/MAP-REL-001/artifacts/verify-map-geofence-production-readiness-20260708T081047Z.txt
+PASS final evidence closes manifest row production_readiness_verifier as PASS
+PASS task FLEETS-CLOSEOUT-001 exists in ai-status
+PASS task FLEETS-CLOSEOUT-001 is done
+PASS task FLEETS-CLOSEOUT-002 exists in ai-status
+PASS task FLEETS-CLOSEOUT-002 is done
+PASS task FLEETS-CLOSEOUT-003 exists in ai-status
+PASS task FLEETS-CLOSEOUT-003 is done
+PASS task FLEETS-CLOSEOUT-004 exists in ai-status
+PASS task FLEETS-CLOSEOUT-004 is done
+PASS task FLEETS-CLOSEOUT-005 exists in ai-status
+PASS task FLEETS-CLOSEOUT-005 is done
+PASS task FLEETS-CLOSEOUT-006 exists in ai-status
+PASS task FLEETS-CLOSEOUT-006 is done
+PASS task FLEETS-CLOSEOUT-007 exists in ai-status
+PASS task FLEETS-CLOSEOUT-007 is done
+PASS task FLEETS-CLOSEOUT-008 exists in ai-status
+PASS task FLEETS-CLOSEOUT-008 is active or complete
+PASS blocker report records posted or duplicate-skipped handoff note
+PASS final evidence links latest closeout board and blocker report
+dispatch_integrity=PASS

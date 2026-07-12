@@ -9,6 +9,7 @@ import {
 } from "react";
 import type {
   CreateReportJobCommand,
+  DispatchDailyRecord,
   DispatchRecordingIndexRowRecord,
   FilingPackageDetailRecord,
   FilingPackageManifestEntryRecord,
@@ -21,13 +22,19 @@ import type {
   ReportJobType,
   ReportOutputFormat,
   ResourceActionDescriptor,
+  SixMonthOperationsSummary,
 } from "@drts/contracts";
 import {
   FILING_PACKAGE_TYPES,
+  OWNED_ORDER_STATUSES,
   REGULATORY_REPORT_JOB_TYPES,
   REPORT_JOB_TYPES,
   REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
+import type {
+  DailyDispatchRecordQuery,
+  OperationsSummaryPreviewQuery,
+} from "@drts/api-client";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -47,7 +54,40 @@ import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import { t as translate, type Locale } from "@/lib/translations";
 
-type ReportsTab = "jobs" | "packages" | "schedules";
+type ReportsTab = "jobs" | "operational" | "packages" | "schedules";
+
+type OperationalReportType =
+  | "daily_dispatch_record"
+  | "six_month_operations_summary";
+
+// The six-month summary additionally offers a direct JSON export of the
+// previewed aggregate (SA §7.6). `json` is not a canonical `ReportOutputFormat`
+// (the background report-job pipeline only emits csv/xlsx/pdf/zip), so it is a
+// UI-only format handled client-side rather than through `createReportJob`.
+type OperationalExportFormat = ReportOutputFormat | "json";
+
+type DailyRecordRow = DispatchDailyRecord & Record<string, unknown>;
+
+const OPERATIONAL_ORDER_SOURCES = [
+  "phone",
+  "ops_console",
+  "tenant_portal",
+  "partner_booking",
+  "api",
+  "third_party_platform",
+] as const;
+
+// Export formats per operational report type (SA §7.6): daily record =
+// CSV / XLSX / PDF; six-month summary = PDF / CSV / JSON.
+const OPERATIONAL_EXPORT_FORMATS: Record<
+  OperationalReportType,
+  OperationalExportFormat[]
+> = {
+  daily_dispatch_record: ["csv", "xlsx", "pdf"],
+  six_month_operations_summary: ["pdf", "csv", "json"],
+};
+
+const COVERAGE_WARNING_THRESHOLD = 0.95;
 
 type JobRow = ReportJobRecord &
   Record<string, unknown> & {
@@ -661,6 +701,856 @@ function ReportJobComposerModal({
   );
 }
 
+function formatPercent(rate: number) {
+  return `${(rate * 100).toFixed(1)}%`;
+}
+
+// Trigger a client-side download of an in-memory payload as a pretty-printed
+// JSON file. Used for the six-month summary JSON export (SA §7.6), whose data
+// is already returned as JSON by the preview endpoint.
+function downloadJsonFile(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function OperationalReportsPanel() {
+  const { t, locale } = useTranslation();
+  const [reportType, setReportType] = useState<OperationalReportType>(
+    "daily_dispatch_record",
+  );
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [businessArea, setBusinessArea] = useState("");
+  const [serviceProduct, setServiceProduct] = useState("");
+  const [orderSource, setOrderSource] = useState("");
+  const [tenantId, setTenantId] = useState("");
+  const [partnerId, setPartnerId] = useState("");
+  const [status, setStatus] = useState("");
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
+  const [format, setFormat] = useState<OperationalExportFormat>("csv");
+
+  const [dailyRows, setDailyRows] = useState<DispatchDailyRecord[] | null>(null);
+  const [summaryRows, setSummaryRows] = useState<
+    SixMonthOperationsSummary[] | null
+  >(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const isDaily = reportType === "daily_dispatch_record";
+
+  useEffect(() => {
+    setFormat(OPERATIONAL_EXPORT_FORMATS[reportType][0]!);
+  }, [reportType]);
+
+  function buildDailyQuery(): DailyDispatchRecordQuery {
+    return {
+      ...(dateFrom.trim() ? { serviceDateFrom: dateFrom.trim() } : {}),
+      ...(dateTo.trim() ? { serviceDateTo: dateTo.trim() } : {}),
+      ...(orderSource.trim() ? { orderSource: orderSource.trim() } : {}),
+      ...(tenantId.trim() ? { tenantId: tenantId.trim() } : {}),
+      ...(partnerId.trim() ? { partnerId: partnerId.trim() } : {}),
+      ...(serviceProduct.trim()
+        ? { serviceProductCode: serviceProduct.trim() }
+        : {}),
+      ...(status.trim() ? { finalStatus: status.trim() } : {}),
+    };
+  }
+
+  function buildSummaryQuery(): OperationsSummaryPreviewQuery {
+    return {
+      ...(periodFrom.trim() ? { from: periodFrom.trim() } : {}),
+      ...(periodTo.trim() ? { to: periodTo.trim() } : {}),
+      ...(businessArea.trim() ? { businessArea: businessArea.trim() } : {}),
+      ...(serviceProduct.trim()
+        ? { serviceProductCode: serviceProduct.trim() }
+        : {}),
+    };
+  }
+
+  function buildExportFilters(): CreateReportJobCommand["filters"] {
+    return isDaily
+      ? (buildDailyQuery() as CreateReportJobCommand["filters"])
+      : (buildSummaryQuery() as CreateReportJobCommand["filters"]);
+  }
+
+  async function loadPreview() {
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const client = getOpsClient();
+      if (isDaily) {
+        const rows = await client.listDailyDispatchRecords(buildDailyQuery());
+        setDailyRows(rows);
+        setSummaryRows(null);
+      } else {
+        const rows = await client.previewSixMonthOperationsSummary(
+          buildSummaryQuery(),
+        );
+        setSummaryRows(rows);
+        setDailyRows(null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("common.unknown"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function regenerate() {
+    startTransition(() => {
+      void (async () => {
+        setError(null);
+        setNotice(null);
+        try {
+          const client = getOpsClient();
+          if (isDaily) {
+            const result = await client.rebuildDailyDispatchRecords(
+              buildDailyQuery(),
+            );
+            setNotice(
+              t("reports.ops.regenerate.done", {
+                count: result.rebuiltCount,
+                time: formatDateTime(locale, result.generatedAt, "long"),
+              }),
+            );
+          } else {
+            const result = await client.rebuildMonthlyOperationsSummaries(
+              buildSummaryQuery(),
+            );
+            setNotice(
+              t("reports.ops.regenerate.done", {
+                count: result.rebuiltCount,
+                time: formatDateTime(locale, result.generatedAt, "long"),
+              }),
+            );
+          }
+          await loadPreview();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : t("common.unknown"));
+        }
+      })();
+    });
+  }
+
+  function exportJob() {
+    startTransition(() => {
+      void (async () => {
+        setError(null);
+        setNotice(null);
+        try {
+          // JSON export (summary only) is served directly from the preview
+          // payload rather than a background report job, since `json` is not a
+          // canonical report-job output format (SA §7.6).
+          if (!isDaily && format === "json") {
+            const query = buildSummaryQuery();
+            const rows =
+              await getOpsClient().previewSixMonthOperationsSummary(query);
+            downloadJsonFile(
+              `six-month-operations-summary-${new Date()
+                .toISOString()
+                .slice(0, 10)}.json`,
+              {
+                reportType,
+                query,
+                exportedAt: new Date().toISOString(),
+                rows,
+              },
+            );
+            setSummaryRows(rows);
+            setDailyRows(null);
+            setNotice(
+              t("reports.ops.export.jsonDone", { count: rows.length }),
+            );
+            return;
+          }
+
+          const filters = buildExportFilters();
+          const accepted = await getOpsClient().createReportJob({
+            jobType: reportType,
+            format: format as ReportOutputFormat,
+            ...(filters && Object.keys(filters).length > 0 ? { filters } : {}),
+          });
+          setNotice(
+            t("reports.ops.export.accepted", { jobId: accepted.jobId }),
+          );
+        } catch (e) {
+          setError(e instanceof Error ? e.message : t("common.unknown"));
+        }
+      })();
+    });
+  }
+
+  const dailyGeneratedAt = dailyRows?.[0]?.generatedAt ?? null;
+  const arrivalMissingCount =
+    dailyRows?.filter((row) => row.tripStartedAt && !row.arrivedPickupAt)
+      .length ?? 0;
+
+  // Daily data coverage = arrival-event coverage among trips that actually
+  // started. A null arrivedPickupAt on a started trip is the ARRIVAL_EVENT_MISSING
+  // gap (SA §7.3); the rate is null when no trips started (nothing to cover).
+  const dailyStartedTripCount =
+    dailyRows?.filter((row) => row.tripStartedAt).length ?? 0;
+  const dailyCoverageRate =
+    dailyStartedTripCount > 0
+      ? (dailyStartedTripCount - arrivalMissingCount) / dailyStartedTripCount
+      : null;
+
+  // Summary data coverage = worst snapshot coverage across previewed windows;
+  // source freshness is expressed as the count of missing supply snapshots
+  // (validSnapshotCount vs expectedSnapshotCount, SA §7.4).
+  const summaryCoverageRate =
+    summaryRows && summaryRows.length > 0
+      ? Math.min(...summaryRows.map((row) => row.snapshotCoverageRate))
+      : null;
+  const summarySnapshotsMissing =
+    summaryRows?.reduce(
+      (sum, row) =>
+        sum + Math.max(0, row.expectedSnapshotCount - row.validSnapshotCount),
+      0,
+    ) ?? 0;
+  const summaryGeneratedAt =
+    summaryRows && summaryRows.length > 0
+      ? summaryRows.reduce(
+          (latest, row) =>
+            row.generatedAt > latest ? row.generatedAt : latest,
+          summaryRows[0]!.generatedAt,
+        )
+      : null;
+
+  // Unified operational metadata contract (SA §7.4 / screen-requirements §5):
+  // both report types surface generatedAt · data coverage · source freshness ·
+  // report status.
+  const activeGeneratedAt = isDaily ? dailyGeneratedAt : summaryGeneratedAt;
+  const activeCoverageRate = isDaily ? dailyCoverageRate : summaryCoverageRate;
+  const activeRecordCount = isDaily
+    ? (dailyRows?.length ?? 0)
+    : (summaryRows?.length ?? 0);
+  const activeDataLoaded = isDaily ? dailyRows !== null : summaryRows !== null;
+  const coverageIncomplete =
+    activeCoverageRate !== null &&
+    activeCoverageRate < COVERAGE_WARNING_THRESHOLD;
+
+  const dailyColumns: CanvasTableColumn<DailyRecordRow>[] = [
+    {
+      h: t("reports.ops.col.service"),
+      w: 110,
+      mono: true,
+      k: "serviceDate",
+    },
+    {
+      h: t("reports.ops.col.order"),
+      w: 170,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>{row.orderNo}</span>
+          <span style={rowMetaStyle}>{row.orderId}</span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.source"),
+      w: 130,
+      r: (row) => formatOpsCodeLabel(locale, row.orderSource),
+    },
+    {
+      h: t("reports.ops.col.product"),
+      w: 150,
+      mono: true,
+      k: "serviceProductCode",
+    },
+    {
+      h: t("reports.ops.col.party"),
+      w: 150,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>{row.tenantId ?? t("common.dash")}</span>
+          <span style={rowMetaStyle}>{row.partnerId ?? t("common.dash")}</span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.requested"),
+      w: 140,
+      mono: true,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>
+            {formatDateTime(locale, row.requestedAt)}
+          </span>
+          <span style={rowMetaStyle}>
+            {formatDateTime(locale, row.reservationTime)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.pickupDropoff"),
+      w: 240,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>{row.pickupAddressSnapshot}</span>
+          <span style={rowMetaStyle}>
+            {row.dropoffAddressSnapshot ?? t("common.dash")}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.dispatch"),
+      w: 140,
+      mono: true,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>
+            {formatDateTime(locale, row.firstDispatchAt)}
+          </span>
+          <span style={rowMetaStyle}>
+            {formatDateTime(locale, row.firstAssignedAt)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.driverVehicle"),
+      w: 160,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>
+            {row.finalDriverId ?? t("common.dash")}
+          </span>
+          <span style={rowMetaStyle}>
+            {row.finalVehicleId ?? t("common.dash")}
+            {row.finalPlateNo ? ` · ${row.finalPlateNo}` : ""}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.eta"),
+      w: 80,
+      mono: true,
+      align: "right",
+      r: (row) =>
+        row.etaSecondsAtAssignment === null
+          ? t("common.dash")
+          : String(row.etaSecondsAtAssignment),
+    },
+    {
+      h: t("reports.ops.col.arrived"),
+      w: 120,
+      mono: true,
+      r: (row) =>
+        row.arrivedPickupAt ? (
+          formatDateTime(locale, row.arrivedPickupAt)
+        ) : (
+          <CanvasPill theme={th} tone="warn" dot>
+            {t("common.dash")}
+          </CanvasPill>
+        ),
+    },
+    {
+      h: t("reports.ops.col.trip"),
+      w: 140,
+      mono: true,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>
+            {formatDateTime(locale, row.tripStartedAt)}
+          </span>
+          <span style={rowMetaStyle}>
+            {formatDateTime(locale, row.tripCompletedAt)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.finalStatus"),
+      w: 140,
+      r: (row) => (
+        <CanvasPill theme={th} tone="neutral" dot>
+          {formatOpsCodeLabel(locale, row.finalStatus)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: t("reports.ops.col.redispatch"),
+      w: 90,
+      mono: true,
+      align: "right",
+      r: (row) => String(row.redispatchCount),
+    },
+    {
+      h: t("reports.ops.col.cancellation"),
+      w: 150,
+      r: (row) =>
+        row.cancellationReason
+          ? formatOpsCodeLabel(locale, row.cancellationReason)
+          : t("common.dash"),
+    },
+    {
+      h: t("reports.ops.col.complaints"),
+      w: 90,
+      mono: true,
+      align: "right",
+      r: (row) => String(row.complaintCount),
+    },
+  ];
+
+  return (
+    <>
+      <CanvasBanner
+        theme={th}
+        tone="info"
+        icon="reports"
+        title={t("reports.ops.banner.title")}
+        body={t("reports.ops.banner.body")}
+      />
+
+      {error ? (
+        <CanvasBanner
+          theme={th}
+          tone="danger"
+          icon="warn"
+          title={getOpsLabel(locale, "error")}
+          body={error}
+        />
+      ) : null}
+
+      {notice ? (
+        <CanvasBanner
+          theme={th}
+          tone="success"
+          icon="reports"
+          title={t("reports.ops.action.export")}
+          body={notice}
+        />
+      ) : null}
+
+      <CanvasCard
+        theme={th}
+        title={t("reports.ops.filters")}
+        subtitle={t("reports.ops.filtersSubtitle")}
+      >
+        <div style={formGridStyle}>
+          <CanvasField theme={th} label={t("reports.ops.reportType")}>
+            <select
+              value={reportType}
+              onChange={(event) =>
+                setReportType(event.target.value as OperationalReportType)
+              }
+              style={nativeSelectStyle}
+            >
+              <option value="daily_dispatch_record">
+                {t("reports.type.daily_dispatch_record")}
+              </option>
+              <option value="six_month_operations_summary">
+                {t("reports.type.six_month_operations_summary")}
+              </option>
+            </select>
+          </CanvasField>
+
+          {isDaily ? (
+            <>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.dateFrom")}
+                hint={t("reports.ops.filter.dateHint")}
+              >
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  style={nativeMonoInputStyle}
+                />
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.dateTo")}
+                hint={t("reports.ops.filter.dateHint")}
+              >
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  style={nativeMonoInputStyle}
+                />
+              </CanvasField>
+              <CanvasField theme={th} label={t("reports.ops.filter.orderSource")}>
+                <select
+                  value={orderSource}
+                  onChange={(event) => setOrderSource(event.target.value)}
+                  style={nativeSelectStyle}
+                >
+                  <option value="">{t("reports.ops.filter.anyOption")}</option>
+                  {OPERATIONAL_ORDER_SOURCES.map((source) => (
+                    <option key={source} value={source}>
+                      {t(`reports.ops.orderSource.${source}`)}
+                    </option>
+                  ))}
+                </select>
+              </CanvasField>
+              <CanvasField theme={th} label={t("reports.ops.filter.status")}>
+                <select
+                  value={status}
+                  onChange={(event) => setStatus(event.target.value)}
+                  style={nativeSelectStyle}
+                >
+                  <option value="">{t("reports.ops.filter.anyOption")}</option>
+                  {OWNED_ORDER_STATUSES.map((value) => (
+                    <option key={value} value={value}>
+                      {formatOpsCodeLabel(locale, value)}
+                    </option>
+                  ))}
+                </select>
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.tenantId")}
+                hint={t("reports.ops.filter.tenantPlaceholder")}
+              >
+                <input
+                  value={tenantId}
+                  onChange={(event) => setTenantId(event.target.value)}
+                  placeholder={t("reports.ops.filter.tenantPlaceholder")}
+                  style={nativeMonoInputStyle}
+                />
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.partnerId")}
+                hint={t("reports.ops.filter.partnerPlaceholder")}
+              >
+                <input
+                  value={partnerId}
+                  onChange={(event) => setPartnerId(event.target.value)}
+                  placeholder={t("reports.ops.filter.partnerPlaceholder")}
+                  style={nativeMonoInputStyle}
+                />
+              </CanvasField>
+            </>
+          ) : (
+            <>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.periodFrom")}
+                hint={t("reports.ops.filter.monthHint")}
+              >
+                <input
+                  type="month"
+                  value={periodFrom}
+                  onChange={(event) => setPeriodFrom(event.target.value)}
+                  style={nativeMonoInputStyle}
+                />
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.periodTo")}
+                hint={t("reports.ops.filter.monthHint")}
+              >
+                <input
+                  type="month"
+                  value={periodTo}
+                  onChange={(event) => setPeriodTo(event.target.value)}
+                  style={nativeMonoInputStyle}
+                />
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.businessArea")}
+                hint={t("reports.ops.filter.businessAreaPlaceholder")}
+              >
+                <input
+                  value={businessArea}
+                  onChange={(event) => setBusinessArea(event.target.value)}
+                  placeholder={t("reports.ops.filter.businessAreaPlaceholder")}
+                  style={nativeMonoInputStyle}
+                />
+              </CanvasField>
+            </>
+          )}
+
+          <CanvasField
+            theme={th}
+            label={t("reports.ops.filter.serviceProduct")}
+            hint={t("reports.ops.filter.serviceProductPlaceholder")}
+          >
+            <input
+              value={serviceProduct}
+              onChange={(event) => setServiceProduct(event.target.value)}
+              placeholder={t("reports.ops.filter.serviceProductPlaceholder")}
+              style={nativeMonoInputStyle}
+            />
+          </CanvasField>
+
+          <CanvasField theme={th} label={t("reports.ops.format")}>
+            <select
+              value={format}
+              onChange={(event) =>
+                setFormat(event.target.value as OperationalExportFormat)
+              }
+              style={nativeSelectStyle}
+            >
+              {OPERATIONAL_EXPORT_FORMATS[reportType].map((value) => (
+                <option key={value} value={value}>
+                  {value.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </CanvasField>
+        </div>
+
+        <div style={formFooterStyle}>
+          <div style={formNoteStyle}>{t("reports.ops.empty.prompt")}</div>
+          <div style={actionRowStyle}>
+            <CanvasBtn
+              theme={th}
+              variant="primary"
+              size="sm"
+              icon="arrow"
+              onClick={() => void loadPreview()}
+              disabled={loading || pending}
+            >
+              {loading
+                ? t("reports.ops.action.loading")
+                : t("reports.ops.action.load")}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              size="sm"
+              icon="arrow"
+              onClick={regenerate}
+              disabled={loading || pending}
+            >
+              {pending
+                ? t("reports.ops.action.regenerating")
+                : t("reports.ops.action.regenerate")}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              size="sm"
+              icon="ext"
+              onClick={exportJob}
+              disabled={loading || pending}
+            >
+              {pending
+                ? t("reports.ops.action.exporting")
+                : t("reports.ops.action.export")}
+            </CanvasBtn>
+          </div>
+        </div>
+      </CanvasCard>
+
+      {coverageIncomplete ? (
+        <CanvasBanner
+          theme={th}
+          tone="warn"
+          icon="warn"
+          title={t("reports.ops.coverageWarning.title")}
+          body={
+            isDaily
+              ? t("reports.ops.coverageWarning.bodyDaily")
+              : t("reports.ops.coverageWarning.body")
+          }
+        />
+      ) : null}
+
+      {activeDataLoaded ? (
+        <div style={kpiGridStyle}>
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.generatedAt")}
+            value={formatDateTime(locale, activeGeneratedAt)}
+            sub={t("reports.ops.meta.records", { count: activeRecordCount })}
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.coverage")}
+            value={
+              activeCoverageRate === null
+                ? t("common.dash")
+                : formatPercent(activeCoverageRate)
+            }
+            sub={
+              coverageIncomplete
+                ? t("reports.ops.coverage.incomplete")
+                : t("reports.ops.coverage.complete")
+            }
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.freshness")}
+            value={
+              isDaily
+                ? arrivalMissingCount > 0
+                  ? t("reports.ops.freshness.arrivalMissing", {
+                      count: arrivalMissingCount,
+                    })
+                  : t("reports.ops.freshness.complete")
+                : summarySnapshotsMissing > 0
+                  ? t("reports.ops.freshness.snapshotIncomplete", {
+                      count: summarySnapshotsMissing,
+                    })
+                  : t("reports.ops.freshness.snapshotComplete")
+            }
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.status")}
+            value={t("reports.ops.status.preview")}
+          />
+        </div>
+      ) : null}
+
+      {isDaily && dailyRows ? (
+        <CanvasCard theme={th} padding={0}>
+          {dailyRows.length > 0 ? (
+            <CanvasTable<DailyRecordRow>
+              theme={th}
+              columns={dailyColumns}
+              rows={dailyRows.map((row) => ({ ...row }))}
+            />
+          ) : (
+            <div style={emptyStateStyle}>{t("reports.ops.empty.daily")}</div>
+          )}
+        </CanvasCard>
+      ) : null}
+
+      {!isDaily && summaryRows ? (
+        summaryRows.length > 0 ? (
+          <div style={twoColumnGridStyle}>
+            {summaryRows.map((row, index) => {
+              const incomplete =
+                row.snapshotCoverageRate < COVERAGE_WARNING_THRESHOLD;
+              const complaintEntries = Object.entries(row.complaintsByCategory);
+              return (
+                <CanvasCard
+                  key={`${row.from}:${row.to}:${row.businessArea ?? ""}:${
+                    row.serviceProductCode ?? ""
+                  }:${index}`}
+                  theme={th}
+                  title={t("reports.ops.summary.window", {
+                    from: row.from,
+                    to: row.to,
+                  })}
+                  subtitle={`${
+                    row.businessArea ?? t("reports.ops.summary.allAreas")
+                  } · ${
+                    row.serviceProductCode ??
+                    t("reports.ops.summary.allProducts")
+                  }`}
+                  actions={
+                    <CanvasPill
+                      theme={th}
+                      tone={incomplete ? "warn" : "success"}
+                      dot
+                    >
+                      {incomplete
+                        ? t("reports.ops.coverage.incomplete")
+                        : t("reports.ops.coverage.complete")}
+                    </CanvasPill>
+                  }
+                >
+                  <CanvasDL
+                    theme={th}
+                    cols={2}
+                    items={[
+                      {
+                        label: t("reports.ops.metric.demand"),
+                        value: String(row.demandRequestCount),
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.metric.dispatch"),
+                        value: String(row.actualDispatchCount),
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.metric.completed"),
+                        value: String(row.completedTripCount),
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.metric.cancelled"),
+                        value: String(row.cancelledOrderCount),
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.metric.avgVehicles"),
+                        value: row.averageDispatchableVehicleCount.toFixed(1),
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.metric.snapshots"),
+                        value: `${row.validSnapshotCount} / ${row.expectedSnapshotCount}`,
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.metric.coverageRate"),
+                        value: formatPercent(row.snapshotCoverageRate),
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.metric.complaints"),
+                        value: String(row.complaintCount),
+                        mono: true,
+                      },
+                      {
+                        label: t("reports.ops.meta.generatedAt"),
+                        value: formatDateTime(locale, row.generatedAt, "long"),
+                        mono: true,
+                      },
+                    ]}
+                  />
+                  <div style={{ height: 12 }} />
+                  <div style={sectionCopyStyle}>
+                    {t("reports.ops.metric.complaintsByCategory")}
+                  </div>
+                  {complaintEntries.length > 0 ? (
+                    <div style={{ ...actionRowStyle, marginTop: 8 }}>
+                      {complaintEntries.map(([category, count]) => (
+                        <CanvasPill key={category} theme={th} tone="neutral">
+                          {`${formatOpsCodeLabel(locale, category)} · ${count}`}
+                        </CanvasPill>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ ...formNoteStyle, marginTop: 8 }}>
+                      {t("reports.ops.metric.noComplaints")}
+                    </div>
+                  )}
+                </CanvasCard>
+              );
+            })}
+          </div>
+        ) : (
+          <CanvasCard theme={th}>
+            <div style={emptyStateStyle}>{t("reports.ops.empty.summary")}</div>
+          </CanvasCard>
+        )
+      ) : null}
+
+      {!dailyRows && !summaryRows ? (
+        <CanvasCard theme={th}>
+          <div style={emptyStateStyle}>{t("reports.ops.empty.prompt")}</div>
+        </CanvasCard>
+      ) : null}
+    </>
+  );
+}
+
 export default function ReportsPage() {
   const { t, locale } = useTranslation();
   const [activeTab, setActiveTab] = useState<ReportsTab>("jobs");
@@ -1082,6 +1972,7 @@ export default function ReportsPage() {
 
   const tabItems: Array<{ id: ReportsTab; label: string }> = [
     { id: "jobs", label: t("reports.tabs.jobs") },
+    { id: "operational", label: t("reports.tabs.operational") },
     { id: "packages", label: t("reports.tabs.packages") },
     { id: "schedules", label: t("reports.tabs.schedules") },
   ];
@@ -1593,6 +2484,8 @@ export default function ReportsPage() {
             ) : null}
           </>
         ) : null}
+
+        {activeTab === "operational" ? <OperationalReportsPanel /> : null}
 
         {activeTab === "packages" ? (
           <>

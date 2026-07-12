@@ -3,12 +3,33 @@ import { describe, expect, it, vi } from "vitest";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 
+const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
+  "veh-demo-001": "multi_purpose_taxi",
+  "veh-demo-002": "taxi",
+  "veh-demo-003": "taxi",
+  "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
+};
+
 function createService(options?: {
   serviceProductOverrides?: Record<string, unknown>;
+  vehicleLicenseTypes?: Record<string, string>;
+  candidates?: Array<{
+    vehicleId: string;
+    driverId: string;
+    operatingArea: string;
+    serviceBuckets: string[];
+    etaMinutes: number;
+    currentLocation: null;
+  }>;
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
       (serviceBucket: string, destination?: unknown) => {
+        if (options?.candidates) {
+          return options.candidates;
+        }
+
         if (serviceBucket === "business_dispatch") {
           return [
             {
@@ -49,6 +70,12 @@ function createService(options?: {
     ),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
+    getVehicleLicenseType: vi.fn(
+      (vehicleId: string) =>
+        options?.vehicleLicenseTypes?.[vehicleId] ??
+        DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ??
+        null,
+    ),
   };
   const auditNotificationService = {
     recordAuditLog: vi.fn(),
@@ -92,6 +119,69 @@ describe("VehicleEligibilityService", () => {
       requiredDocuments: [],
       trainingRequired: false,
       permitRequired: false,
+    });
+  });
+
+  it("treats the seeded AV demo vehicle as a business-vehicle capability", () => {
+    const { service } = createService({
+      candidates: [
+        {
+          vehicleId: "veh-av-demo-001",
+          driverId: "safety-op-001",
+          operatingArea: "taichung-port",
+          serviceBuckets: ["business_dispatch"],
+          etaMinutes: 6,
+          currentLocation: null,
+        },
+      ],
+    });
+
+    expect(service.listEligibleSupply("enterprise_dispatch")).toEqual([
+      expect.objectContaining({
+        vehicleId: "veh-av-demo-001",
+        driverId: "safety-op-001",
+        serviceProduct: "enterprise_dispatch",
+      }),
+    ]);
+    expect(
+      service.resolveRuntimeVehicleCapability("veh-av-demo-001"),
+    ).toMatchObject({
+      vehicleId: "veh-av-demo-001",
+      licenseType: "business_vehicle",
+      businessDispatchEligible: true,
+    });
+  });
+
+  it("resolves runtime capability for registry-backed UUID vehicles", () => {
+    const registryVehicleId = "10000000-0000-0000-0000-000000000353";
+    const { service } = createService({
+      candidates: [
+        {
+          vehicleId: registryVehicleId,
+          driverId: "10000000-0000-0000-0000-000000000383",
+          operatingArea: "taichung-port",
+          serviceBuckets: ["business_dispatch"],
+          etaMinutes: 4,
+          currentLocation: null,
+        },
+      ],
+      vehicleLicenseTypes: {
+        [registryVehicleId]: "rental_car",
+      },
+    });
+
+    expect(service.listEligibleSupply("enterprise_dispatch")).toEqual([
+      expect.objectContaining({
+        vehicleId: registryVehicleId,
+        serviceProduct: "enterprise_dispatch",
+      }),
+    ]);
+    expect(
+      service.resolveRuntimeVehicleCapability(registryVehicleId),
+    ).toMatchObject({
+      vehicleId: registryVehicleId,
+      licenseType: "rental_car",
+      businessDispatchEligible: true,
     });
   });
 

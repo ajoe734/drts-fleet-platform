@@ -39,8 +39,9 @@ import {
 } from "@/lib/api-client";
 import { formatMoney } from "@/lib/money";
 import {
+  formatDriverServiceProductLabel,
   formatDriverTaskStatusLabel,
-  formatDriverTaskTypeLabel,
+  readDriverServiceProductCode,
 } from "@/lib/operational-labels";
 import {
   driverForwardedTaskStatusLabels,
@@ -617,7 +618,8 @@ function getDenseStatusColor(task: UnifiedDriverTaskView) {
 }
 
 function buildTypeLabel(order: OwnedOrderRecord | null) {
-  return formatDriverTaskTypeLabel({
+  return formatDriverServiceProductLabel({
+    serviceProductCode: readDriverServiceProductCode(order),
     serviceBucket: order?.serviceBucket ?? null,
     businessDispatchSubtype: order?.businessDispatchSubtype ?? null,
     dispatchSemantics: order?.dispatchSemantics ?? null,

@@ -250,6 +250,28 @@ export function evaluateDeskEligibility(
   dropoffAddress: string,
   t: Translator,
 ): DeskEligibilityResult {
+  const productEligibility = evaluateDeskProductEligibility(
+    desk,
+    requestedProduct,
+    t,
+  );
+  if (productEligibility.state === "ineligible") {
+    return productEligibility;
+  }
+
+  return evaluateDeskTextServiceAreaEligibility(
+    desk,
+    pickupAddress,
+    dropoffAddress,
+    t,
+  );
+}
+
+export function evaluateDeskProductEligibility(
+  desk: DeskCatalogRecord,
+  requestedProduct: RequestedServiceProduct,
+  t: Translator,
+): DeskEligibilityResult {
   if (!desk.authorizedProducts.includes(requestedProduct)) {
     return {
       state: "ineligible",
@@ -261,6 +283,20 @@ export function evaluateDeskEligibility(
     };
   }
 
+  return {
+    state: "eligible",
+    message: t("desk.eligibility.allowed", {
+      deskName: t(desk.deskNameKey),
+    }),
+  };
+}
+
+export function evaluateDeskTextServiceAreaEligibility(
+  desk: DeskCatalogRecord,
+  pickupAddress: string,
+  dropoffAddress: string,
+  t: Translator,
+): DeskEligibilityResult {
   const normalizedScope = `${pickupAddress} ${dropoffAddress}`.toLowerCase();
   const matchesZone = desk.authorizedAddressKeywords.some((keyword) =>
     normalizedScope.includes(keyword.toLowerCase()),

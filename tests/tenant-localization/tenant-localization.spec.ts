@@ -118,6 +118,33 @@ async function expectShellControls(page: Page) {
   await expect(page.locator("body")).toContainText(/English|繁體中文/);
 }
 
+async function expectDocumentViewportFit(page: Page, shellSelector: string) {
+  const metrics = await page.evaluate((selector) => {
+    const shell = document.querySelector(selector);
+    const shellRect = shell?.getBoundingClientRect();
+
+    return {
+      viewportHeight: window.innerHeight,
+      documentScrollHeight: document.documentElement.scrollHeight,
+      shellBottom: shellRect?.bottom ?? 0,
+      shellHeight: shellRect?.height ?? 0,
+    };
+  }, shellSelector);
+
+  expect(
+    metrics.shellHeight,
+    "shell should fill the viewport",
+  ).toBeGreaterThanOrEqual(metrics.viewportHeight - 2);
+  expect(
+    metrics.shellBottom,
+    "shell bottom should align with the viewport",
+  ).toBeGreaterThanOrEqual(metrics.viewportHeight - 2);
+  expect(
+    metrics.documentScrollHeight - metrics.viewportHeight,
+    "short pages should not create document-level bottom whitespace",
+  ).toBeLessThanOrEqual(2);
+}
+
 async function gotoEnterpriseAndSettle(page: Page, route: string) {
   const response = await page.goto(route, { waitUntil: "domcontentloaded" });
   expect(response?.ok() ?? response?.status() === 304, route).toBeTruthy();
@@ -165,6 +192,27 @@ test.describe("tenant console localization smoke", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.locator("body")).toContainText("Tenant settings");
     await expect(page.locator("body")).toContainText("繁體中文");
+  });
+
+  test("language toggle switches the tenant shell and html lang", async ({
+    page,
+  }) => {
+    await gotoAndSettle(page, "/settings");
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+    await page.getByRole("button", { name: "切換語系" }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText("Tenant settings");
+    await expect(page.locator("body")).toContainText("繁體中文");
+  });
+
+  test("short tenant pages fill the viewport without bottom whitespace", async ({
+    page,
+  }) => {
+    await gotoAndSettle(page, "/audit");
+    await expectDocumentViewportFit(
+      page,
+      '[data-testid="tenant-console-shell"]',
+    );
   });
 
   test("en booking list empty state is localized", async ({

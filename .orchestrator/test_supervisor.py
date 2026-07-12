@@ -497,7 +497,10 @@ class ExecutionWorkspaceTests(unittest.TestCase):
     def _repo_config(self, root: Path) -> dict:
         (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
         return {
-            "paths": {"status_file": str(root / "ai-status.json")},
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+            },
             "agents": {
                 "codex2": {
                     "id": "codex2",
@@ -539,16 +542,59 @@ class ExecutionWorkspaceTests(unittest.TestCase):
                 task_id="PBK-UI-003",
                 metadata={"mode": "execution"},
             )
-            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
-                self._repo_config(root),
-                request,
-                supervisor.route_task("PBK-UI-003"),
-            )
+            with mock.patch.object(
+                supervisor,
+                "_provision_worktree_node_modules",
+                return_value=None,
+            ) as provision:
+                workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                    self._repo_config(root),
+                    request,
+                    supervisor.route_task("PBK-UI-003"),
+                )
 
             self.assertEqual(workspace, existing.resolve())
             self.assertEqual(branch, "codex2/pbk-ui-003")
             self.assertEqual(base_branch, "dev")
             self.assertEqual(source, "existing_worktree")
+            provision.assert_called_once_with(root.resolve(), existing.resolve())
+
+    def test_bootstraps_existing_path_when_reusing_task_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            destination = root / ".artifacts/worktrees/auto/codex2-pbk-ui-003"
+            destination.mkdir(parents=True)
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            with (
+                mock.patch.object(supervisor, "_worktree_for_branch", return_value=None),
+                mock.patch.object(supervisor, "_current_branch", return_value="codex2/pbk-ui-003"),
+                mock.patch.object(
+                    supervisor,
+                    "_provision_worktree_node_modules",
+                    return_value=None,
+                ) as provision,
+            ):
+                workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                    self._repo_config(root),
+                    request,
+                    supervisor.route_task("PBK-UI-003"),
+                )
+
+            self.assertEqual(workspace, destination.resolve())
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_path")
+            provision.assert_called_once_with(root.resolve(), destination)
 
     def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -737,6 +783,8 @@ class DiskGuardTests(unittest.TestCase):
                     "worktree_retention_days": 3,
                     "max_worktrees_removed_per_tick": 20,
                     "remove_dirty_worktrees": False,
+                    "archive_dirty_worktrees": False,
+                    "force_remove_dirty_worktrees_after_archive": False,
                 },
             )
 
@@ -744,6 +792,74 @@ class DiskGuardTests(unittest.TestCase):
             self.assertFalse(clean.exists())
             self.assertTrue(dirty.exists())
             self.assertTrue(active.exists())
+
+    def test_prunes_stale_dirty_worktree_after_archiving_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            archive_root = Path(tmpdir) / "archive"
+            root.mkdir()
+            self._init_repo(root)
+            base = root / ".artifacts/worktrees/auto"
+            dirty = base / "codex-old-dirty"
+            _git(root, "worktree", "add", "-b", "codex/old-dirty", str(dirty), "dev")
+            dirty_path = str(dirty.resolve())
+            (dirty / "scratch.txt").write_text("untracked work\n", encoding="utf-8")
+            old = time.time() - 4 * 86400
+            os.utime(dirty, (old, old))
+
+            result = supervisor.prune_stale_worker_worktrees(
+                self._repo_config(root),
+                {"workers": {}},
+                {
+                    "worktree_retention_days": 3,
+                    "max_worktrees_removed_per_tick": 20,
+                    "archive_root": str(archive_root),
+                },
+            )
+
+            self.assertEqual(result["removed"], 1)
+            self.assertEqual(result["archived"], 1)
+            self.assertFalse(dirty.exists())
+            bundles = sorted(archive_root.iterdir())
+            self.assertEqual(len(bundles), 1)
+            manifest = json.loads((bundles[0] / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["worktree_path"], dirty_path)
+            self.assertEqual((bundles[0] / "files" / "scratch.txt").read_text(encoding="utf-8"), "untracked work\n")
+
+    def test_releases_inactive_auto_worktrees_without_waiting_for_retention(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            archive_root = Path(tmpdir) / "archive"
+            root.mkdir()
+            self._init_repo(root)
+            base = root / ".artifacts/worktrees/auto"
+            completed = base / "codex-completed"
+            running = base / "codex-running"
+            _git(root, "worktree", "add", "-b", "codex/completed", str(completed), "dev")
+            _git(root, "worktree", "add", "-b", "codex/running", str(running), "dev")
+            (completed / "scratch.txt").write_text("left behind\n", encoding="utf-8")
+
+            result = supervisor.release_inactive_worker_worktrees(
+                self._repo_config(root),
+                {
+                    "workers": {
+                        "completed-run": {
+                            "status": "completed",
+                            "workspace_root": str(completed),
+                        },
+                        "running-run": {
+                            "status": "running",
+                            "workspace_root": str(running),
+                        },
+                    }
+                },
+                {"archive_root": str(archive_root)},
+            )
+
+            self.assertEqual(result["removed"], 1)
+            self.assertEqual(result["archived"], 1)
+            self.assertFalse(completed.exists())
+            self.assertTrue(running.exists())
 
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
@@ -8193,9 +8309,8 @@ if __name__ == "__main__":
 
 
 class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
-    """RCA fix: fresh task worktrees must get node_modules (symlinked from the
-    canonical checkout) so workers can typecheck/build at closeout instead of
-    stranding `blocked` on a missing/slow per-worktree install."""
+    """Fresh task worktrees must self-repair local node_modules state instead
+    of inheriting symlinks that escape the worktree root."""
 
     def _mk(self):
         import shutil
@@ -8204,24 +8319,58 @@ class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
         (root / "apps" / "foo").mkdir(parents=True); (root / "apps" / "foo" / "node_modules").mkdir()
         (root / "packages" / "bar").mkdir(parents=True); (root / "packages" / "bar" / "node_modules").mkdir()
         dest = Path(tempfile.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(dest, ignore_errors=True))
+        (dest / "scripts").mkdir(parents=True)
+        (dest / "scripts" / "ensure-local-node-modules.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         (dest / "apps" / "foo").mkdir(parents=True); (dest / "packages" / "bar").mkdir(parents=True)
         return root, dest
 
-    def test_symlinks_root_and_workspace_node_modules(self):
+    def test_repairs_local_node_modules_in_fresh_worktree(self):
         root, dest = self._mk()
-        supervisor._provision_worktree_node_modules(root, dest)
-        self.assertTrue((dest / "node_modules").is_symlink())
-        self.assertEqual((dest / "node_modules").resolve(), (root / "node_modules").resolve())
-        self.assertTrue((dest / "apps" / "foo" / "node_modules").is_symlink())
-        self.assertTrue((dest / "packages" / "bar" / "node_modules").is_symlink())
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+            error = supervisor._provision_worktree_node_modules(root, dest)
+
+        self.assertIsNone(error)
+        run.assert_called_once_with(
+            [
+                supervisor.sys.executable,
+                str(dest / "scripts" / "ensure-local-node-modules.py"),
+                "repair",
+                "--root",
+                str(dest),
+            ],
+            cwd=str(dest),
+            text=True,
+            capture_output=True,
+            timeout=600.0,
+        )
 
     def test_noop_on_canonical_root(self):
         root, _ = self._mk()
-        supervisor._provision_worktree_node_modules(root, root)
-        self.assertFalse((root / "node_modules").is_symlink())
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            error = supervisor._provision_worktree_node_modules(root, root)
 
-    def test_does_not_clobber_existing_node_modules(self):
+        self.assertIsNone(error)
+        run.assert_not_called()
+
+    def test_reports_missing_repair_script(self):
         root, dest = self._mk()
-        (dest / "node_modules").mkdir()
-        supervisor._provision_worktree_node_modules(root, dest)
-        self.assertFalse((dest / "node_modules").is_symlink())
+        (dest / "scripts" / "ensure-local-node-modules.py").unlink()
+
+        error = supervisor._provision_worktree_node_modules(root, dest)
+
+        self.assertIn("missing node_modules repair script", error)
+
+    def test_reports_repair_failure_details(self):
+        root, dest = self._mk()
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="pnpm install failed",
+            )
+            error = supervisor._provision_worktree_node_modules(root, dest)
+
+        self.assertIn("exit code 1", error)
+        self.assertIn("pnpm install failed", error)

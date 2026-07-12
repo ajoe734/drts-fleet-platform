@@ -32,6 +32,21 @@ export const AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE: Record<
   referral_passenger: ["partner"],
 };
 
+const SANDBOX_COMPLIANCE_SCOPES = [
+  "sandbox.compliance.read",
+  "sandbox.compliance.manage",
+  "sandbox.investigation.read",
+  "sandbox.investigation.manage",
+  "sandbox.evidence.preview",
+  "sandbox.evidence.export.request",
+  "sandbox.evidence.export.approve",
+  "sandbox.legal_hold.place",
+  "sandbox.legal_hold.release.request",
+  "sandbox.legal_hold.release.approve",
+  "sandbox.regulatory_report.review",
+  "sandbox.regulatory_report.submit",
+] as const;
+
 export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   system: [
     "identity:read",
@@ -70,6 +85,7 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "reports:write",
     "forwarder:read",
     "forwarder:write",
+    ...SANDBOX_COMPLIANCE_SCOPES,
   ],
   platform_admin: [
     "identity:read",
@@ -97,6 +113,7 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "reports:read",
     "reports:write",
     "forwarder:read",
+    ...SANDBOX_COMPLIANCE_SCOPES,
   ],
   tenant_admin: [
     "identity:read",
@@ -140,6 +157,9 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "reports:write",
     "forwarder:read",
     "forwarder:write",
+    "sandbox.compliance.read",
+    "sandbox.investigation.read",
+    "sandbox.evidence.preview",
   ],
   driver_user: [
     "owned:read",

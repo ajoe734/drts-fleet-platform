@@ -333,7 +333,11 @@ jq \
     | .passenger.name = "Tenant Biz Rider"
     | .passenger.phone = "+886912000012"
     | .pickup.address = "台北車站"
+    | .pickup.lat = 25.0478
+    | .pickup.lng = 121.5319
     | .dropoff.address = "松山機場"
+    | .dropoff.lat = 25.06
+    | .dropoff.lng = 121.58
   ' "${SCRIPT_DIR}/fixtures/e2e-booking-enterprise.json" > "$BOOKING_FIXTURE"
 
 http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
@@ -370,6 +374,7 @@ log_ok "booking read-back preserved cost center + service product binding"
 
 log_surface "Ops console — dispatch assign"
 switch_actor "ops_user" "e2e-ops-012"
+prime_enterprise_dispatch_supply_locations
 DISPATCH_FIXTURE="${TMP_DIR}/dispatch.json"
 printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
 
@@ -394,15 +399,30 @@ log_ok "dispatch job found: ${DISPATCH_JOB_ID}"
 
 http_call GET "/dispatch/tasks/${DISPATCH_JOB_ID}/candidates"
 assert_status "200"
-ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[0] | (.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
-ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[0] | (.driverId // .driver_id // empty)' 2>/dev/null || true)
-if [[ -z "$ASSIGN_VEHICLE_ID" ]]; then
-  ASSIGN_VEHICLE_ID="$E2E_SEED_VEHICLE_ID"
+SELECTED_CANDIDATE=$(echo "$RESP_BODY" | jq -c \
+  '(.data.items // [])
+   | map(select((.eligibilityDecision // .eligibility_decision // "eligible") != "ineligible"))
+   | .[0] // empty' 2>/dev/null || true)
+if [[ -z "$SELECTED_CANDIDATE" ]]; then
+  log_fail "No assignable dispatch candidate returned for enterprise dispatch."
+  log_fail "Candidate payload: ${RESP_BODY}"
+  exit 1
 fi
-if [[ -z "$ASSIGN_DRIVER_ID" ]]; then
-  ASSIGN_DRIVER_ID="$E2E_SEED_DRIVER_ID"
+
+ASSIGN_VEHICLE_ID=$(echo "$SELECTED_CANDIDATE" | jq -r \
+  '(.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
+ASSIGN_DRIVER_ID=$(echo "$SELECTED_CANDIDATE" | jq -r \
+  '(.driverId // .driver_id // empty)' 2>/dev/null || true)
+ASSIGN_ELIGIBILITY_DECISION=$(echo "$SELECTED_CANDIDATE" | jq -r \
+  '(.eligibilityDecision // .eligibility_decision // "eligible")' 2>/dev/null || true)
+
+if [[ -z "$ASSIGN_VEHICLE_ID" || -z "$ASSIGN_DRIVER_ID" ]]; then
+  log_fail "Assignable candidate missing vehicleId or driverId: ${SELECTED_CANDIDATE}"
+  exit 1
+fi
+if [[ "$ASSIGN_ELIGIBILITY_DECISION" == "ineligible" ]]; then
+  log_fail "Refusing to assign an ineligible candidate: ${SELECTED_CANDIDATE}"
+  exit 1
 fi
 
 ASSIGN_FIXTURE="${TMP_DIR}/assign.json"

@@ -298,6 +298,51 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath === "admin/vehicle-eligibility-matrix" ||
+    routePath === "admin/service-products" ||
+    routePath.startsWith("admin/service-products/") ||
+    routePath.startsWith("admin/sandbox-governance")
+  ) {
+    // Admin eligibility / service-product configuration (read + write). These
+    // were missing from the route-auth table and were served ANONYMOUSLY,
+    // allowing unauthenticated GET (config disclosure) and PUT/POST (e.g. making
+    // an airport-ineligible vehicle eligible). Restrict to platform/ops/system.
+    return {
+      routeKey: `admin:eligibility-config:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description:
+        "Admin vehicle-eligibility matrix + sandbox governance + service product configuration",
+    };
+  }
+
+  if (
+    routePath === "driver/location-heartbeats/batch" ||
+    routePath === "driver/tracking-status" ||
+    (routePath.startsWith("ops/drivers/") &&
+      routePath.endsWith("/tracking-status"))
+  ) {
+    const isOpsView =
+      routePath.startsWith("ops/drivers/") &&
+      routePath.endsWith("/tracking-status");
+    return {
+      routeKey: isOpsView
+        ? `ops:driver-tracking:${upperMethod}`
+        : `driver:location-tracking:${upperMethod}`,
+      // Auth-required + realm-restricted (no specific scope) so the driver app
+      // (driver realm), ops console (ops realm), and platform/system callers can
+      // post/read location telemetry while anonymous access is rejected.
+      requiredScopes: [],
+      allowedRealms: isOpsView
+        ? baseAllowedRealms("platform", "ops")
+        : baseAllowedRealms("platform", "ops", "driver"),
+      description: isOpsView
+        ? "Ops driver location tracking status access"
+        : "Driver location heartbeat ingest + self tracking status",
+    };
+  }
+
+  if (
     routePath === "driver/profile" ||
     routePath.startsWith("driver/profile/")
   ) {
@@ -367,6 +412,28 @@ export function resolveRouteAuthPolicy(
       ),
       allowedRealms: baseAllowedRealms("platform", "ops"),
       description: "Maintenance management",
+    };
+  }
+
+  if (routePath.startsWith("roc")) {
+    return {
+      routeKey: `roc:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "ROC operational read models and human-only actions",
+    };
+  }
+
+  if (routePath.startsWith("regulatory/") || routePath === "regulatory") {
+    return {
+      routeKey: `regulatory-reporting:${upperMethod}`,
+      requiredScopes: methodScope(
+        "regulatory:read",
+        "regulatory:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Regulatory notification reporting",
     };
   }
 

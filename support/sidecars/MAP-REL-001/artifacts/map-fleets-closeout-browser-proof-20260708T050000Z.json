@@ -1,0 +1,85 @@
+{
+  "orderId": "ORD-SMOKE-001",
+  "callId": "CALL-SMOKE-001",
+  "recordingId": "REC-SMOKE-001",
+  "submitResult": "pending_dispatch",
+  "blockedGateBeforeCorrection": "serviceability_blocked",
+  "blockedMapEvidence": {
+    "renderMode": "tile",
+    "overlayStatus": "ready",
+    "policyCodes": "TPE_STATION_PICKUP_BLOCK|XINYI_HOSPITAL_MANUAL_REVIEW",
+    "selectedLat": "25.047800",
+    "selectedLng": "121.517000"
+  },
+  "bookingGateBeforeSubmit": "serviceable",
+  "bookingGateAfterSubmit": "pickup_coordinates_required",
+  "requestBody": {
+    "callId": "CALL-SMOKE-001",
+    "agentId": "AGENT-OPS-001",
+    "pickup": {
+      "addressName": "Taipei Main Station",
+      "address": "Map pin 25.047742, 121.500555",
+      "normalizedAddress": "No.3 Beiping W. Rd, Zhongzheng, Taipei",
+      "lat": 25.047742,
+      "lng": 121.500555,
+      "placeId": "place-taipei-station",
+      "geocodeProvider": "mock-geo",
+      "geocodeConfidence": "approximate",
+      "coordinateSource": "manual_pin",
+      "coordinateAccuracyM": null,
+      "providerCandidateId": "place-taipei-station",
+      "selectedByActorId": "AGENT-OPS-001",
+      "selectedAt": null,
+      "surface": "callcenter",
+      "coordinateProvenance": {
+        "coordinateSource": "manual_pin",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "approximate",
+        "providerCandidateId": "place-taipei-station",
+        "placeId": "place-taipei-station",
+        "coordinateAccuracyM": 8,
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": null,
+        "pinnedByActorId": "AGENT-OPS-001",
+        "pinnedAt": null,
+        "manualOverrideReason": "agent_map_click",
+        "surface": "callcenter"
+      },
+      "pinnedByActorId": "AGENT-OPS-001",
+      "pinnedAt": null,
+      "manualOverrideReason": "agent_map_click"
+    },
+    "dropoff": {
+      "addressName": "Xinyi Office",
+      "address": "No. 100, Songren Road, Xinyi District, Taipei",
+      "normalizedAddress": "No.100 Songren Rd, Xinyi, Taipei",
+      "lat": 25.033879,
+      "lng": 121.568743,
+      "placeId": "place-xinyi-office",
+      "geocodeProvider": "mock-geo",
+      "geocodeConfidence": "interpolated",
+      "coordinateSource": "provider_candidate",
+      "coordinateAccuracyM": 25,
+      "providerCandidateId": "place-xinyi-office",
+      "selectedByActorId": "AGENT-OPS-001",
+      "selectedAt": null,
+      "surface": "callcenter",
+      "coordinateProvenance": {
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "interpolated",
+        "providerCandidateId": "place-xinyi-office",
+        "placeId": "place-xinyi-office",
+        "coordinateAccuracyM": 25,
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": null,
+        "surface": "callcenter"
+      }
+    },
+    "passenger": {
+      "name": "Smoke Caller",
+      "phone": "0912-000-301"
+    },
+    "recordingId": "REC-SMOKE-001"
+  }
+}

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 
 import type {
   AdapterHealthRecord,
@@ -18,6 +18,7 @@ import type {
   ReportJobRecord,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
+  SandboxExperimentProgramRecord,
 } from "@drts/contracts";
 
 import { CallcenterService } from "../callcenter/callcenter.service";
@@ -25,7 +26,10 @@ import { ForwarderService } from "../forwarder/forwarder.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
+import { RegulatoryReportJobsService } from "../regulatory-reporting/regulatory-report-jobs.service";
+import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { MapGeofenceObservabilityService } from "./map-geofence-observability.service";
 
 const SYSTEM_IDENTITY: IdentityContext = {
   actorType: "system",
@@ -102,6 +106,20 @@ const ADAPTER_DEGRADATION_THRESHOLDS: OperationalAlertThresholds = {
   unit: "count",
 };
 
+const MAP_PROVIDER_OUTAGE_THRESHOLDS: OperationalAlertThresholds = {
+  warning: 1,
+  critical: 3,
+  unit: "count",
+};
+
+const MAP_GEOFENCE_DENIAL_THRESHOLDS: OperationalAlertThresholds = {
+  warning: 3,
+  critical: 10,
+  unit: "count",
+};
+
+const PHASE2_SANDBOX_PROGRAM_CODE = "phase2-tesla-fsd-sandbox-202606";
+
 @Injectable()
 export class OperationalObservabilityService {
   constructor(
@@ -111,9 +129,17 @@ export class OperationalObservabilityService {
     private readonly forwarderService: ForwarderService,
     private readonly reportingFilingService: ReportingFilingService,
     private readonly tenantPartnerService: TenantPartnerService,
+    @Optional()
+    private readonly regulatoryReportJobsService?: RegulatoryReportJobsService,
+    @Optional()
+    private readonly sandboxGovernanceService?: SandboxGovernanceService,
+    @Optional()
+    private readonly mapGeofenceObservabilityService?: MapGeofenceObservabilityService,
   ) {}
 
-  getSnapshot(referenceDate = new Date()): OperationalObservabilitySnapshot {
+  async getSnapshot(
+    referenceDate = new Date(),
+  ): Promise<OperationalObservabilitySnapshot> {
     const generatedAt = referenceDate.toISOString();
     const orders = this.ownedMobilityService.listOrders();
     const dispatchJobs = this.ownedMobilityService.listDispatchJobs();
@@ -166,10 +192,83 @@ export class OperationalObservabilityService {
       reconciliationIssues,
       referenceDate,
     );
+    const phase2SandboxKpiDashboard =
+      await this.loadPhase2SandboxKpiDashboard(referenceDate);
     const adapterDetails = this.buildAdapterDetails(adapterHealth);
+    const mapGeofence = this.mapGeofenceObservabilityService?.getSnapshot() ?? {
+      providerHealth: {
+        status: "unknown" as const,
+        provider: null,
+        mode: null,
+        failClosed: false,
+        lastCheckedAt: null,
+        quota: {
+          dailyLimit: null,
+          minuteLimit: null,
+          dailyUsed: null,
+          minuteUsed: null,
+          usagePercent: null,
+          status: "unknown" as const,
+          warningThresholdPercent: null,
+          criticalThresholdPercent: null,
+          policy: null,
+        },
+      },
+      geo: {
+        providerOutageCount: 0,
+        addressAmbiguityCount: 0,
+        coordinateLessAttemptCount: 0,
+        manualOverrideCount: 0,
+        resolvedAddressCount: 0,
+        requests: {
+          total: 0,
+          successful: 0,
+          providerErrorCount: 0,
+          successRatePercent: null,
+          byOperation: {
+            search: 0,
+            resolve: 0,
+            reverse: 0,
+          },
+          byResult: {
+            resolved: 0,
+            manualOverride: 0,
+            addressAmbiguity: 0,
+            coordinateLessAttempt: 0,
+            providerOutage: 0,
+          },
+        },
+        latencyMs: {
+          count: 0,
+          average: null,
+          max: null,
+          p95: null,
+        },
+      },
+      serviceArea: {
+        evaluations: 0,
+        serviceableCount: 0,
+        manualReviewCount: 0,
+        policyDenialCount: 0,
+        outOfAreaCount: 0,
+        coordinateLessAttemptCount: 0,
+      },
+      governance: {
+        geometryMutationCount: 0,
+        serviceAreaPublishedCount: 0,
+        serviceAreaRetiredCount: 0,
+        stopPolicyPublishedCount: 0,
+        stopPolicyRetiredCount: 0,
+        manualOverrideCount: 0,
+      },
+      lastEventAt: null,
+    };
     const degradedAdapterCount = adapterHealth.filter(
       (adapter) => adapter.status !== "healthy",
     ).length;
+    const mapProviderOutageSignal =
+      mapGeofence.geo.providerOutageCount +
+      (mapGeofence.providerHealth.failClosed ? 1 : 0);
 
     return {
       generatedAt,
@@ -216,6 +315,20 @@ export class OperationalObservabilityService {
           ["ops", "platform"],
           generatedAt,
         ),
+        this.buildAlert(
+          "map_provider_outage",
+          mapProviderOutageSignal,
+          MAP_PROVIDER_OUTAGE_THRESHOLDS,
+          ["ops", "platform"],
+          generatedAt,
+        ),
+        this.buildAlert(
+          "map_geofence_denial_burst",
+          mapGeofence.serviceArea.policyDenialCount,
+          MAP_GEOFENCE_DENIAL_THRESHOLDS,
+          ["ops", "platform"],
+          generatedAt,
+        ),
       ],
       dispatch,
       recording,
@@ -225,7 +338,9 @@ export class OperationalObservabilityService {
       reporting,
       adapters,
       forwarderOps,
+      mapGeofence,
       adapterDetails,
+      phase2SandboxKpiDashboard,
       roleViews: [
         {
           route: "ops",
@@ -235,6 +350,8 @@ export class OperationalObservabilityService {
             "driver_state_lag",
             "eligibility_review_backlog",
             "adapter_degradation",
+            "map_provider_outage",
+            "map_geofence_denial_burst",
           ],
           focusAreas: [
             "dispatch",
@@ -243,6 +360,7 @@ export class OperationalObservabilityService {
             "reporting",
             "adapters",
             "forwarder_ops",
+            "map_geofence",
           ],
         },
         {
@@ -252,6 +370,8 @@ export class OperationalObservabilityService {
             "webhook_failure_burst",
             "eligibility_review_backlog",
             "adapter_degradation",
+            "map_provider_outage",
+            "map_geofence_denial_burst",
           ],
           focusAreas: [
             "dispatch",
@@ -260,10 +380,44 @@ export class OperationalObservabilityService {
             "reporting",
             "adapters",
             "forwarder_ops",
+            "map_geofence",
           ],
         },
       ],
     };
+  }
+
+  private async loadPhase2SandboxKpiDashboard(referenceDate: Date) {
+    const experiment = this.resolvePhase2SandboxExperiment(referenceDate);
+    if (!experiment || !this.regulatoryReportJobsService) {
+      return null;
+    }
+    return this.regulatoryReportJobsService.generateKpiDashboard(
+      experiment.experimentId,
+      referenceDate.toISOString(),
+    );
+  }
+
+  private resolvePhase2SandboxExperiment(referenceDate: Date) {
+    return (
+      this.sandboxGovernanceService
+        ?.listExperiments(referenceDate.toISOString())
+        .find((candidate) => this.isPhase2SandboxExperiment(candidate)) ?? null
+    );
+  }
+
+  private isPhase2SandboxExperiment(
+    experiment: SandboxExperimentProgramRecord,
+  ) {
+    return (
+      experiment.programCode === PHASE2_SANDBOX_PROGRAM_CODE &&
+      experiment.archivedAt === null &&
+      experiment.versions.some(
+        (version) =>
+          version.versionId === experiment.currentVersionId &&
+          version.lifecycleStatus === "published",
+      )
+    );
   }
 
   private buildDispatchMetrics(

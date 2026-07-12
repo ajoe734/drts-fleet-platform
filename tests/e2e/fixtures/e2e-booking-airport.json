@@ -3,10 +3,14 @@
   "airportDirection": "dropoff",
   "terminal": "T2",
   "pickup": {
-    "address": "88 Corporate HQ, Staging City"
+    "address": "88 Corporate HQ, Staging City",
+    "lat": 25.0797,
+    "lng": 121.2342
   },
   "dropoff": {
-    "address": "Staging International Airport, Terminal 2"
+    "address": "Staging International Airport, Terminal 2",
+    "lat": 25.0777,
+    "lng": 121.2328
   },
   "reservationWindowStart": "__RESERVATION_START__",
   "reservationWindowEnd": "__RESERVATION_END__",

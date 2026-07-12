@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Optional,
+  forwardRef,
+} from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
   AddressPayload,
@@ -38,10 +46,14 @@ import type {
   ApproveExceptionOverrideCommand,
   ExceptionHoldRecord,
   ExceptionHoldReasonCode,
+  FulfillmentSegmentRecord,
   MoneyAmount,
   OverrideRequestRecord,
+  PassengerDisclosureChannel,
+  PassengerDisclosureRequirementSnapshot,
   RejectExceptionOverrideCommand,
   RejectTenantBookingApprovalRequestCommand,
+  RecordPassengerAcknowledgementCommand,
   RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
@@ -53,16 +65,26 @@ import type {
   RedispatchOrderCommand,
   ReservationHoldStatus,
   ResolveExceptionHoldCommand,
+  SandboxBillingTreatmentRecord,
   TenantApprovalEvaluationInputSnapshot,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
   UpdateTenantBookingCommand,
+  GeoPoint,
+  GeoCoordinateProvenance,
+  GeoResolutionSurface,
+  OwnedOrderSpatialAuditSnapshot,
+  OwnedOrderSpatialAuditStopSnapshot,
+  ServiceAreaEvaluationResult,
+  ServiceProductType,
 } from "@drts/contracts";
 
 import {
   QUEUE_ENTRY_POLICY_MAP,
   RESERVATION_HOLD_VALID_TRANSITIONS,
+  hasAddressCoordinateProvenance,
+  hasAddressCoordinates,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -75,8 +97,16 @@ import {
   type OwnedMobilityQueryExecutor,
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
+import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/sandbox-fallback-cost-policy-resolver.service";
+import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
+import { ServiceAreaService } from "../service-area/service-area.service";
+import {
+  OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+  type OwnedMobilityTripCompletedEvent,
+} from "./owned-mobility-events";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { ServiceProductService } from "../service-product/service-product.service";
 import type { MessageEvent } from "@nestjs/common";
@@ -114,6 +144,14 @@ type CallRecordingAttachmentEvent = {
   requestId?: string;
 };
 
+export type OwnedMobilityReportingSnapshot = {
+  orders: OwnedOrderRecord[];
+  dispatchJobs: DispatchJobRecord[];
+  dispatchAssignments: DispatchAssignmentRecord[];
+  driverTasks: DriverTaskRecord[];
+  dispatchTraceLogs: DispatchTraceLogRecord[];
+};
+
 type CallRecordingStateChangeEvent = {
   callId: string;
   linkedOrderId: string;
@@ -128,6 +166,39 @@ type CallRecordingStateChangeEvent = {
 };
 
 type MaybePromise<T> = T | Promise<T>;
+
+type DispatchAssignmentBundle = {
+  order: OwnedOrderRecord;
+  dispatchJob: DispatchJobRecord;
+  assignment: DispatchAssignmentRecord;
+  task: DriverTaskRecord;
+  dispatchAttempt: DispatchAttemptRecord;
+  traceLogs: DispatchTraceLogRecord[];
+};
+
+type DispatchAssignmentResult = {
+  assignmentId: string;
+  status: DispatchAssignmentRecord["status"];
+  taskId: string;
+};
+
+type CreateDispatchAssignmentOptions = {
+  dispatchAttemptSequence?: number;
+};
+
+type ServiceAreaGateResolution = {
+  serviceProductType: ServiceProductType | null;
+  pickup: GeoPoint | null;
+  dropoff: GeoPoint | null;
+  missingItems: string[];
+  evaluation: ServiceAreaEvaluationResult | null;
+};
+
+type SpatialAuditContext = {
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  surface: GeoResolutionSurface;
+};
 
 const BOOKING_RULES: Record<
   NonNullable<OwnedOrderRecord["businessDispatchSubtype"]>,
@@ -169,6 +240,17 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
   amountMinor: 150000,
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
+const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
+
+// Hard eligibility reasons that must NEVER be re-admitted by the scarcity
+// fallback below. Dispatching a vehicle that failed the airport-permit gate to an
+// airport-transfer order is a compliance violation, not a graceful degradation:
+// a broad business_dispatch candidate must not satisfy an airport-transfer order
+// just because no airport-eligible supply is currently available. Other hard
+// reasons keep the existing anti-stranding fallback behaviour.
+const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
+  "MISSING_AIRPORT_ELIGIBILITY",
+]);
 
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
@@ -212,7 +294,32 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly vehicleEligibilityService?: VehicleEligibilityService,
     @Optional()
     private readonly serviceProductService?: ServiceProductService,
-  ) {
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
+    @Optional()
+    private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
+    @Optional()
+    private readonly sandboxFallbackCostPolicyResolver: SandboxFallbackCostPolicyResolverService = new SandboxFallbackCostPolicyResolverService(),
+    @Optional()
+    @Inject(forwardRef(() => SandboxDispatchGateService))
+    private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
+    private readonly serviceAreaService?: ServiceAreaService,
+  ) {}
+
+  private callRecordingListenersRegistered = false;
+
+  // Register call-recording listeners here (not in the constructor): with the
+  // forwardRef circular dependency on SandboxDispatchGateService, registering
+  // cross-service callbacks during construction can bind them to a partially
+  // resolved CallcenterService reference whose events never reach the
+  // fully-resolved singleton. onModuleInit runs once on the resolved instance.
+  // Idempotent so unit tests (which construct directly and may invoke it more
+  // than once) do not double-register.
+  registerCallRecordingListeners() {
+    if (this.callRecordingListenersRegistered) {
+      return;
+    }
+    this.callRecordingListenersRegistered = true;
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
     );
@@ -222,6 +329,8 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    this.registerCallRecordingListeners();
+
     if (!this.ownedMobilityRepository) {
       return;
     }
@@ -268,8 +377,8 @@ export class OwnedMobilityService implements OnModuleInit {
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
   ) {
-    this.assertAddress(command.pickup.address, "pickup.address");
-    this.assertAddress(command.dropoff.address, "dropoff.address");
+    this.assertAddress(command.pickup?.address, "pickup.address");
+    this.assertAddress(command.dropoff?.address, "dropoff.address");
 
     const now = new Date().toISOString();
     const etaSnapshot: EtaSnapshot = {
@@ -293,6 +402,7 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
+      passengerDisclosure: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -353,7 +463,16 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.orders = [order, ...this.orders];
+    this.applyServiceAreaCreationPolicy(
+      order,
+      {
+        actorId: null,
+        actorType: "referral_passenger",
+        surface: "passenger_entry",
+      },
+      requestId,
+    );
+    this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const traceLog = this.appendTrace(
       order.orderId,
       "order.ready_for_dispatch",
@@ -397,9 +516,9 @@ export class OwnedMobilityService implements OnModuleInit {
     command: CreateCallCenterOrderCommand,
     requestId?: string,
   ) {
-    this.assertAddress(command.pickup.address, "pickup.address");
-    this.assertAddress(command.dropoff.address, "dropoff.address");
-    if (!command.callId.trim()) {
+    this.assertAddress(command.pickup?.address, "pickup.address");
+    this.assertAddress(command.dropoff?.address, "dropoff.address");
+    if (!command.callId?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "CALL_ID_REQUIRED",
@@ -420,6 +539,7 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug: null,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
+      passengerDisclosure: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -474,6 +594,15 @@ export class OwnedMobilityService implements OnModuleInit {
         : ["recording_pending"],
       cancelledAt: null,
       cancelReason: null,
+      mapFallbackReview: command.mapFallbackReview?.reasonCode
+        ? {
+            reasonCode: command.mapFallbackReview.reasonCode,
+            providerAvailable: command.mapFallbackReview.providerAvailable,
+            providerDegraded: command.mapFallbackReview.providerDegraded,
+            providerReasonCode:
+              command.mapFallbackReview.providerReasonCode ?? null,
+          }
+        : null,
       reservationHoldStatus: "none",
       reservationHoldId: null,
       reservationHoldExpiresAt: null,
@@ -485,11 +614,20 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.orders = [order, ...this.orders];
+    this.applyServiceAreaCreationPolicy(
+      order,
+      {
+        actorId: command.agentId,
+        actorType: "ops_user",
+        surface: "callcenter",
+      },
+      requestId,
+    );
+    this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const session = this.callcenterService.linkOrderToCallSession({
       callId: command.callId,
       callType: "booking",
-      callerPhone: command.passenger.phone,
+      callerPhone: command.passenger?.phone,
       agentId: command.agentId,
       linkedOrderId: order.orderId,
       recordingId,
@@ -498,10 +636,14 @@ export class OwnedMobilityService implements OnModuleInit {
     if (session.recordingId) {
       order.recordingId = session.recordingId;
       order.status = "ready_for_dispatch";
-      order.complianceFlags = ["recording_bound"];
+      order.complianceFlags = order.complianceFlags.filter(
+        (flag) => flag !== "recording_pending",
+      );
+      this.addComplianceFlag(order, "recording_bound");
       order.updatedAt = now;
     } else {
       order.status = "recording_pending";
+      this.addComplianceFlag(order, "recording_pending");
       order.updatedAt = now;
     }
 
@@ -599,6 +741,7 @@ export class OwnedMobilityService implements OnModuleInit {
       eligibilityVerificationId:
         partnerContext?.eligibilityVerificationId ?? null,
       issuerAuthorizationRef: partnerContext?.issuerAuthorizationRef ?? null,
+      passengerDisclosure: null,
       serviceBucket: "business_dispatch",
       dispatchSemantics: "reservation",
       businessDispatchSubtype: command.businessDispatchSubtype,
@@ -667,6 +810,11 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
+    this.applyServiceAreaCreationPolicy(
+      order,
+      this.resolveBookingSpatialAuditContext(order, identity),
+      requestId,
+    );
     const bookingTraceLog = this.appendTrace(
       order.orderId,
       "tenant.booking_created",
@@ -694,7 +842,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
-      this.orders = [order, ...this.orders];
+      this.orders = [this.stampServiceProductCode(order), ...this.orders];
       if (persistOrderWrite) {
         this.persistChanges(
           {
@@ -752,6 +900,10 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const previousApprovalState = order.approvalState;
     const governanceSnapshot = this.captureTenantGovernanceSnapshot();
+    const applyPassengerDisclosure = () =>
+      this.refreshPassengerDisclosureSnapshot(order, false, {
+        channel: this.resolvePassengerDisclosureChannel(order, identity),
+      });
     const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
@@ -778,11 +930,26 @@ export class OwnedMobilityService implements OnModuleInit {
     ) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
+          await applyPassengerDisclosure();
           const approvalRequest = await applyGovernance(tx);
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(order)],
             dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
           });
+          if (command.passengerDisclosureAcknowledgement) {
+            await this.acknowledgePassengerDisclosure(
+              tenantId,
+              bookingId,
+              command.passengerDisclosureAcknowledgement,
+              identity,
+              requestId,
+              {
+                order,
+                tx,
+                refreshDisclosure: false,
+              },
+            );
+          }
           return finalizeCreation(
             previousApprovalState,
             approvalRequest,
@@ -802,8 +969,26 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return this.withRollback(
       () =>
-        this.afterMaybePromise(applyGovernance(null), (approvalRequest) =>
-          finalizeCreation(previousApprovalState, approvalRequest),
+        this.afterMaybePromise(applyPassengerDisclosure(), () =>
+          this.afterMaybePromise(applyGovernance(null), (approvalRequest) => {
+            return command.passengerDisclosureAcknowledgement
+              ? this.afterMaybePromise(
+                  this.acknowledgePassengerDisclosure(
+                    tenantId,
+                    bookingId,
+                    command.passengerDisclosureAcknowledgement,
+                    identity,
+                    requestId,
+                    {
+                      order,
+                      refreshDisclosure: false,
+                    },
+                  ),
+                  () =>
+                    finalizeCreation(previousApprovalState, approvalRequest),
+                )
+              : finalizeCreation(previousApprovalState, approvalRequest);
+          }),
         ),
       () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),
     );
@@ -1029,6 +1214,115 @@ export class OwnedMobilityService implements OnModuleInit {
     });
     this.applyApprovalRequestResolutionToOrder(request, requestId);
     return request;
+  }
+
+  async acknowledgePassengerDisclosure(
+    tenantId: string,
+    bookingId: string,
+    command: RecordPassengerAcknowledgementCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    options?: {
+      order?: OwnedOrderRecord;
+      tx?: OwnedMobilityQueryExecutor | null;
+      refreshDisclosure?: boolean;
+    },
+  ) {
+    this.assertNonBlank(tenantId, "tenantId");
+    const order =
+      options?.order ?? this.requireBookingOrder(bookingId, tenantId);
+    const shouldRefreshDisclosure = options?.refreshDisclosure !== false;
+    if (shouldRefreshDisclosure) {
+      await this.refreshPassengerDisclosureSnapshot(order, true, {
+        channel: this.resolvePassengerDisclosureChannel(order, identity),
+      });
+    }
+
+    if (!order.passengerDisclosure) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_DISCLOSURE_POLICY_NOT_CONFIGURED",
+        "Passenger disclosure is not configured for this booking.",
+        { bookingId, orderId: order.orderId },
+      );
+    }
+
+    const record =
+      await this.sandboxDispatchGateService?.recordPassengerAcknowledgement({
+        bookingId,
+        orderId: order.orderId,
+        disclosure: order.passengerDisclosure,
+        command,
+        actor: this.resolvePassengerDisclosureAcknowledgementActor(identity),
+        ...(options?.tx ? { executor: options.tx } : {}),
+      });
+    if (!record) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "PASSENGER_DISCLOSURE_SERVICE_UNAVAILABLE",
+        "Passenger disclosure acknowledgement service is unavailable.",
+        { bookingId, orderId: order.orderId },
+      );
+    }
+
+    order.passengerDisclosure = {
+      ...order.passengerDisclosure,
+      acknowledgedAt: record.acknowledgedAt,
+      acknowledgementRecordId: record.acknowledgementId,
+    };
+    order.updatedAt = new Date().toISOString();
+    const traceLog = this.appendTrace(
+      order.orderId,
+      "booking.passenger_disclosure_acknowledged",
+      {
+        bookingId,
+        policyId: order.passengerDisclosure.policyId,
+        messageCode: order.passengerDisclosure.messageCode,
+        acknowledgementRecordId: record.acknowledgementId,
+        actorType:
+          record.actorType === "passenger"
+            ? "referral_passenger"
+            : record.actorType,
+        actorRef: record.actorRef,
+      },
+    );
+    if (options?.tx && this.ownedMobilityRepository?.isEnabled()) {
+      await this.ownedMobilityRepository.persistOrderWorkflow(options.tx, {
+        orders: [this.cloneOrder(order)],
+        dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
+      });
+    } else {
+      this.persistChanges(
+        {
+          orders: [order],
+          dispatchTraceLogs: [traceLog],
+        },
+        "acknowledge_passenger_disclosure",
+      );
+    }
+    const auditActorType: AuditLogRecord["actorType"] =
+      record.actorType === "passenger"
+        ? "referral_passenger"
+        : record.actorType;
+    this.recordAudit(
+      {
+        actorId: record.actorRef,
+        actorType: auditActorType,
+        tenantId: order.tenantId,
+        moduleName: "order",
+        actionName: "acknowledge_passenger_disclosure",
+        resourceType: "booking",
+        resourceId: bookingId,
+        newValuesSummary: {
+          orderId: order.orderId,
+          policyId: order.passengerDisclosure.policyId,
+          messageCode: order.passengerDisclosure.messageCode,
+          acknowledgementRecordId: record.acknowledgementId,
+        },
+      },
+      requestId,
+    );
+    return this.mapOrderToBooking(order);
   }
 
   updateTenantBooking(
@@ -1469,6 +1763,7 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+    this.assertDispatchComplianceGatesClear(order);
     const candidates = this.listEligibleDispatchCandidates(order);
     const now = new Date().toISOString();
     const isReservation = order.dispatchSemantics === "reservation";
@@ -1698,7 +1993,7 @@ export class OwnedMobilityService implements OnModuleInit {
     command: RedispatchOrderCommand,
     requestId?: string,
   ) {
-    if (!command.reasonCode.trim()) {
+    if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "REDISPATCH_REASON_REQUIRED",
@@ -2349,10 +2644,17 @@ export class OwnedMobilityService implements OnModuleInit {
       .map((traceLog) => this.cloneTraceLog(traceLog));
   }
 
-  listDispatchCandidates(dispatchJobId: string): DispatchCandidate[] {
+  async listDispatchCandidates(
+    dispatchJobId: string,
+    includeIneligible = false,
+  ): Promise<DispatchCandidate[]> {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-    const candidates = this.listEligibleDispatchCandidates(order);
+    const candidates = await this.listDispatchCandidatesWithEligibility(
+      dispatchJob,
+      order,
+      includeIneligible,
+    );
     return candidates.map((candidate) => ({ ...candidate }));
   }
 
@@ -2373,7 +2675,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(command: AssignDispatchCommand, requestId?: string) {
+  assignDispatch(command: AssignDispatchCommand, requestId?: string): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2382,12 +2684,13 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       command.vehicleId,
       command.driverId,
+      command.sandboxDispatchSnapshot ?? null,
       requestId,
     );
   }
 
-  reassignDispatch(command: ReassignDispatchCommand, requestId?: string) {
-    if (!command.reasonCode.trim()) {
+  reassignDispatch(command: ReassignDispatchCommand, requestId?: string): any {
+    if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "REASSIGN_REASON_REQUIRED",
@@ -2397,38 +2700,6 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-
-    if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
-        command.vehicleId,
-        order.serviceBucket,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VEHICLE_NOT_DISPATCHABLE",
-        "Vehicle is not eligible for dispatch.",
-        {
-          vehicleId: command.vehicleId,
-        },
-      );
-    }
-
-    if (
-      !this.regulatoryRegistryService.getDriverAvailability(
-        command.driverId,
-        order.serviceBucket,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "DRIVER_NOT_AVAILABLE",
-        "Driver is not eligible for dispatch.",
-        {
-          driverId: command.driverId,
-        },
-      );
-    }
 
     const activeAssignment = this.dispatchAssignments.find(
       (assignment) =>
@@ -2453,25 +2724,19 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    activeAssignment.status = "cancelled";
-    activeAssignment.updatedAt = now;
-    if (activeTask) {
-      activeTask.status = "cancelled";
-      activeTask.completedAt = now;
-    }
-
+    const reassignAttemptSequence = this.nextAttemptSequence(
+      dispatchJob.dispatchJobId,
+    );
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
       orderId: order.orderId,
-      sequence: this.nextAttemptSequence(dispatchJob.dispatchJobId),
+      sequence: reassignAttemptSequence,
       outcome: "reassigned",
       reasonCode: command.reasonCode,
       createdAt: now,
     };
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
-
-    const traceLog = this.appendTrace(order.orderId, "dispatch.reassigned", {
+    const traceLog = this.buildTraceLog(order.orderId, "dispatch.reassigned", {
       dispatchJobId: dispatchJob.dispatchJobId,
       previousAssignmentId: activeAssignment.assignmentId,
       previousTaskId: activeTask?.taskId ?? null,
@@ -2483,53 +2748,72 @@ export class OwnedMobilityService implements OnModuleInit {
       reasonNote: command.reasonNote ?? null,
     });
 
-    this.persistChanges(
-      {
-        dispatchAssignments: [activeAssignment],
-        ...(activeTask ? { driverTasks: [activeTask] } : {}),
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: [traceLog],
-      },
-      "reassign_dispatch",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: order.tenantId,
-        moduleName: "dispatch",
-        actionName: "reassign_dispatch",
-        resourceType: "dispatch_assignment",
-        resourceId: activeAssignment.assignmentId,
-        oldValuesSummary: {
-          vehicleId: activeAssignment.vehicleId,
-          driverId: activeAssignment.driverId,
-        },
-        newValuesSummary: {
-          dispatchJobId: dispatchJob.dispatchJobId,
-          vehicleId: command.vehicleId,
-          driverId: command.driverId,
-          reasonCode: command.reasonCode,
-          reasonNote: command.reasonNote ?? null,
-        },
-      },
-      requestId,
-    );
-
-    if (activeTask) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
-        activeTask,
+    return this.afterMaybePromise(
+      this.createDispatchAssignment(
+        dispatchJob,
         order,
+        command.vehicleId,
+        command.driverId,
+        null,
         requestId,
-      );
-    }
+        {
+          dispatchAttemptSequence: reassignAttemptSequence + 1,
+        },
+      ),
+      (result) => {
+        activeAssignment.status = "cancelled";
+        activeAssignment.updatedAt = now;
+        if (activeTask) {
+          activeTask.status = "cancelled";
+          activeTask.completedAt = now;
+        }
 
-    return this.createDispatchAssignment(
-      dispatchJob,
-      order,
-      command.vehicleId,
-      command.driverId,
-      requestId,
+        this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+        this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+
+        this.persistChanges(
+          {
+            dispatchAssignments: [activeAssignment],
+            ...(activeTask ? { driverTasks: [activeTask] } : {}),
+            dispatchAttempts: [dispatchAttempt],
+            dispatchTraceLogs: [traceLog],
+          },
+          "reassign_dispatch",
+        );
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: order.tenantId,
+            moduleName: "dispatch",
+            actionName: "reassign_dispatch",
+            resourceType: "dispatch_assignment",
+            resourceId: activeAssignment.assignmentId,
+            oldValuesSummary: {
+              vehicleId: activeAssignment.vehicleId,
+              driverId: activeAssignment.driverId,
+            },
+            newValuesSummary: {
+              dispatchJobId: dispatchJob.dispatchJobId,
+              vehicleId: command.vehicleId,
+              driverId: command.driverId,
+              reasonCode: command.reasonCode,
+              reasonNote: command.reasonNote ?? null,
+            },
+          },
+          requestId,
+        );
+
+        if (activeTask) {
+          this.ownedMobilityTaskEventsService.publishTaskCancelled(
+            activeTask,
+            order,
+            requestId,
+          );
+        }
+
+        return result;
+      },
     );
   }
 
@@ -2538,176 +2822,79 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     vehicleId: string,
     driverId: string,
+    sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     requestId?: string,
-  ) {
-    if (this.vehicleEligibilityService) {
-      this.vehicleEligibilityService.assertDispatchAssignmentEligible(
-        order,
-        vehicleId,
-        driverId,
-      );
-    } else {
-      if (
-        !this.regulatoryRegistryService.getVehicleDispatchability(
-          vehicleId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VEHICLE_NOT_DISPATCHABLE",
-          "Vehicle is not eligible for dispatch.",
-          {
+    options?: CreateDispatchAssignmentOptions,
+  ): MaybePromise<DispatchAssignmentResult> {
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      return this.ownedMobilityRepository
+        .withTransaction(async (tx) => {
+          const bundle = this.buildDispatchAssignmentBundle(
+            dispatchJob,
+            order,
             vehicleId,
-          },
-        );
-      }
-
-      if (
-        !this.regulatoryRegistryService.getDriverAvailability(
-          driverId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "DRIVER_NOT_AVAILABLE",
-          "Driver is not eligible for dispatch.",
-          {
             driverId,
-          },
+            sandboxDispatchSnapshot,
+            options,
+          );
+          this.assertAssignmentEligibilityRecheck(
+            bundle.order,
+            dispatchJob.dispatchJobId,
+            vehicleId,
+            driverId,
+          );
+          await this.assertSandboxDispatchGate(
+            bundle.order,
+            dispatchJob.dispatchJobId,
+            vehicleId,
+            driverId,
+            sandboxDispatchSnapshot,
+            requestId,
+          );
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [this.cloneOrder(bundle.order)],
+            dispatchJobs: [{ ...bundle.dispatchJob }],
+            dispatchAssignments: [{ ...bundle.assignment }],
+            driverTasks: [this.cloneTask(bundle.task)],
+            dispatchAttempts: [{ ...bundle.dispatchAttempt }],
+            dispatchTraceLogs: bundle.traceLogs.map((traceLog) =>
+              this.cloneTraceLog(traceLog),
+            ),
+          });
+          return bundle;
+        })
+        .then((bundle) =>
+          this.applyDispatchAssignmentBundle(bundle, requestId, false),
         );
-      }
     }
 
-    const now = new Date().toISOString();
-    const taskId = randomUUID();
-    const assignment: DispatchAssignmentRecord = {
-      assignmentId: randomUUID(),
-      dispatchJobId: dispatchJob.dispatchJobId,
-      orderId: order.orderId,
-      taskId,
+    this.assertAssignmentEligibilityRecheck(
+      order,
+      dispatchJob.dispatchJobId,
       vehicleId,
       driverId,
-      assignmentType: order.fixedPrice ? "fixed_price" : "metered",
-      status: "assigned",
-      acceptedAt: null,
-      rejectedAt: null,
-      rejectReasonCode: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const task: DriverTaskRecord = {
-      taskId,
-      orderId: order.orderId,
-      dispatchJobId: dispatchJob.dispatchJobId,
-      assignmentId: assignment.assignmentId,
-      driverId,
-      vehicleId,
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
-      routeProvided: false,
-      waypoints: [],
-      status: "pending_acceptance",
-      acceptedAt: null,
-      departedAt: null,
-      arrivedPickupAt: null,
-      startedAt: null,
-      completedAt: null,
-      actualDistanceKm: null,
-      actualDurationSec: null,
-      fare: null,
-      proof: null,
-    };
-    const dispatchAttempt: DispatchAttemptRecord = {
-      attemptId: randomUUID(),
-      dispatchJobId: dispatchJob.dispatchJobId,
-      orderId: order.orderId,
-      sequence: this.nextAttemptSequence(dispatchJob.dispatchJobId),
-      outcome: "assigned",
-      reasonCode: null,
-      createdAt: now,
-    };
-
-    this.dispatchAssignments = [assignment, ...this.dispatchAssignments];
-    this.driverTasks = [task, ...this.driverTasks];
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
-    dispatchJob.status = "assigned";
-    dispatchJob.updatedAt = now;
-    order.status = "assigned";
-    order.updatedAt = now;
-    const traceLogs: DispatchTraceLogRecord[] = [];
-    if (order.dispatchSemantics === "reservation") {
-      this.transitionReservationHold(order, "released");
-      order.reservationHoldExpiresAt = now;
-      traceLogs.push(
-        this.appendTrace(order.orderId, "reservation.hold.released", {
-          dispatchJobId: dispatchJob.dispatchJobId,
-          reservationHoldId: order.reservationHoldId,
-          reason: "assignment_confirmed",
-        }),
-      );
-    }
-
-    traceLogs.push(
-      this.appendTrace(order.orderId, "dispatch.assigned", {
-        dispatchJobId: dispatchJob.dispatchJobId,
-        assignmentId: assignment.assignmentId,
-        taskId,
-        vehicleId,
-        driverId,
-      }),
     );
-    this.auditNotificationService.recordNotification({
-      tenantId: order.tenantId,
-      channel: "driver_task",
-      title: "Driver task assigned",
-      message: `Driver ${driverId} received task ${taskId} for order ${order.orderNo}.`,
-      status: "unread",
-    });
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "dispatch",
-        actionName: "assign_dispatch",
-        resourceType: "dispatch_assignment",
-        resourceId: assignment.assignmentId,
-        newValuesSummary: {
-          dispatchJobId: dispatchJob.dispatchJobId,
+    const sandboxGateResult = this.assertSandboxDispatchGate(
+      order,
+      dispatchJob.dispatchJobId,
+      vehicleId,
+      driverId,
+      sandboxDispatchSnapshot,
+      requestId,
+    );
+    return this.afterMaybePromise(sandboxGateResult, () =>
+      this.applyDispatchAssignmentBundle(
+        this.buildDispatchAssignmentBundle(
+          dispatchJob,
+          order,
           vehicleId,
           driverId,
-        },
-      },
-      requestId,
+          sandboxDispatchSnapshot,
+          options,
+        ),
+        requestId,
+      ),
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchJobs: [dispatchJob],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: traceLogs,
-      },
-      "assign_dispatch",
-    );
-    this.ownedMobilityTaskEventsService.publishTaskAssigned(
-      task,
-      order,
-      requestId,
-    );
-    this.opsDispatchEventsService?.publishDispatchJobUpdated(
-      order.orderId,
-      dispatchJob,
-      requestId,
-    );
-
-    return {
-      assignmentId: assignment.assignmentId,
-      status: assignment.status,
-      taskId,
-    };
   }
 
   cancelOwnedOrder(
@@ -3052,6 +3239,20 @@ export class OwnedMobilityService implements OnModuleInit {
     });
   }
 
+  getReportingSnapshot(): OwnedMobilityReportingSnapshot {
+    return {
+      orders: this.listOrders(),
+      dispatchJobs: this.dispatchJobs.map((job) => ({ ...job })),
+      dispatchAssignments: this.dispatchAssignments.map((assignment) => ({
+        ...assignment,
+      })),
+      driverTasks: this.listDriverTasks(),
+      dispatchTraceLogs: this.dispatchTraceLogs.map((traceLog) =>
+        this.cloneTraceLog(traceLog),
+      ),
+    };
+  }
+
   streamDriverTaskEvents(driverId: string): Observable<MessageEvent> {
     this.assertNonBlank(driverId, "driverId");
     return this.ownedMobilityTaskEventsService.streamDriverTaskEvents(driverId);
@@ -3149,7 +3350,7 @@ export class OwnedMobilityService implements OnModuleInit {
     command: DriverRejectTaskCommand,
     requestId?: string,
   ) {
-    if (!command.reasonCode.trim()) {
+    if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "REJECT_REASON_REQUIRED",
@@ -3527,6 +3728,7 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       assignmentId: assignment.assignmentId,
     });
+    this.publishCompletedTripSettlementEvent(order, task);
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
@@ -3535,6 +3737,234 @@ export class OwnedMobilityService implements OnModuleInit {
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneTask(task);
+  }
+
+  private publishCompletedTripSettlementEvent(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+  ) {
+    if (
+      !this.eventEmitter ||
+      !order.tenantId ||
+      order.serviceBucket !== "business_dispatch" ||
+      !order.businessDispatchSubtype ||
+      !task.completedAt
+    ) {
+      return;
+    }
+
+    const grossEarning = task.fare ??
+      order.quotedFare ?? {
+        currency: "NTD",
+        amountMinor: 0,
+      };
+    const sandboxFulfillmentSegments = this.buildSandboxFulfillmentSegments(
+      order,
+      task,
+      grossEarning,
+    );
+    const sandboxBillingTreatment = this.buildSandboxBillingTreatment(
+      order,
+      task,
+      grossEarning,
+      sandboxFulfillmentSegments,
+    );
+    const payload: OwnedMobilityTripCompletedEvent = {
+      tenantId: order.tenantId,
+      driverId: task.driverId,
+      orderId: order.orderId,
+      bookingId: order.bookingId,
+      completedAt: task.completedAt,
+      grossEarning: { ...grossEarning },
+      orderSource: order.orderSource,
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: order.businessDispatchSubtype,
+      costCenterCode: order.costCenter,
+      riderId: order.passenger.passengerId ?? null,
+      partnerId: order.partnerId,
+      partnerProgramId: order.partnerProgramId,
+      partnerEntrySlug: order.partnerEntrySlug,
+      eligibilityVerificationId: order.eligibilityVerificationId,
+      issuerAuthorizationRef: order.issuerAuthorizationRef,
+      benefitReference: order.benefitReference,
+      serviceProduct: order.businessDispatchSubtype,
+      tenantServiceProgramId: this.resolveTenantServiceProgramId(order),
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      ...(sandboxFulfillmentSegments.length > 0
+        ? { sandboxFulfillmentSegments }
+        : {}),
+      ...(sandboxBillingTreatment ? { sandboxBillingTreatment } : {}),
+    };
+
+    this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
+  }
+
+  private buildSandboxFulfillmentSegments(
+    order: OwnedOrderRecord,
+    completedTask: DriverTaskRecord,
+    grossEarning: MoneyAmount,
+  ): FulfillmentSegmentRecord[] {
+    const orderAssignments = this.dispatchAssignments
+      .filter((assignment) => assignment.orderId === order.orderId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const bookingId = order.bookingId ?? order.orderId;
+    const sandboxTripId = order.orderId;
+
+    return orderAssignments.flatMap((assignment, index) => {
+      const task = this.driverTasks.find(
+        (candidate) => candidate.assignmentId === assignment.assignmentId,
+      );
+      const isAvVehicle = this.isSandboxAvVehicle(assignment.vehicleId);
+      const taskIsCompleted = task?.taskId === completedTask.taskId;
+
+      if (
+        !isAvVehicle &&
+        !taskIsCompleted &&
+        assignment.status === "cancelled" &&
+        task?.status !== "completed"
+      ) {
+        return [];
+      }
+
+      const segmentType = isAvVehicle ? "tesla_av" : "human_taxi";
+      const segmentReason = isAvVehicle
+        ? taskIsCompleted
+          ? "sandbox_av_completed"
+          : "sandbox_av_attempt"
+        : order.complianceFlags.includes("sandbox_human_fallback")
+          ? "roc_human_fallback"
+          : "phase1_human_dispatch";
+      const segmentCost =
+        !isAvVehicle || taskIsCompleted ? { ...grossEarning } : null;
+
+      return [
+        {
+          fulfillmentSegmentId: `segment-${order.orderId}-${index + 1}`,
+          bookingId,
+          orderId: order.orderId,
+          sandboxTripId,
+          segmentType,
+          segmentReason,
+          startedAt:
+            task?.startedAt ??
+            task?.acceptedAt ??
+            assignment.acceptedAt ??
+            assignment.createdAt,
+          endedAt:
+            task?.completedAt ??
+            (assignment.status === "cancelled" ? assignment.updatedAt : null),
+          vehicleId: assignment.vehicleId,
+          vin: null,
+          driverId: assignment.driverId,
+          safetyOperatorId: isAvVehicle ? assignment.driverId : null,
+          sourcePlatform:
+            this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+          distanceKm: task?.actualDistanceKm ?? null,
+          durationSeconds: task?.actualDurationSec ?? null,
+          cost: segmentCost,
+          evidenceReference: null,
+          createdAt: assignment.createdAt,
+        },
+      ];
+    });
+  }
+
+  private buildSandboxBillingTreatment(
+    order: OwnedOrderRecord,
+    completedTask: DriverTaskRecord,
+    grossEarning: MoneyAmount,
+    fulfillmentSegments: FulfillmentSegmentRecord[],
+  ): SandboxBillingTreatmentRecord | null {
+    const bookingId = order.bookingId ?? order.orderId;
+    const currentTaskIsAv = this.isSandboxAvVehicle(completedTask.vehicleId);
+    const previousAvSegment = fulfillmentSegments.find(
+      (segment) =>
+        segment.segmentType === "tesla_av" &&
+        segment.vehicleId !== completedTask.vehicleId,
+    );
+    const humanFallbackApplied =
+      order.complianceFlags.includes("sandbox_human_fallback") ||
+      (!currentTaskIsAv && Boolean(previousAvSegment));
+
+    if (!currentTaskIsAv && !humanFallbackApplied) {
+      return null;
+    }
+
+    const fallbackPolicyResolution = humanFallbackApplied
+      ? this.sandboxFallbackCostPolicyResolver.resolveHumanFallbackPolicy(
+          order,
+          completedTask.completedAt ?? null,
+        )
+      : null;
+    const fallbackCostAbsorber =
+      fallbackPolicyResolution?.fallbackCostAbsorber ?? null;
+    const fallbackPolicyId = fallbackPolicyResolution?.fallbackPolicyId ?? null;
+    const policyResolution =
+      fallbackPolicyResolution?.policyResolution ?? "normal_av_no_fallback";
+    const treatmentType = humanFallbackApplied
+      ? fallbackCostAbsorber === "partner"
+        ? "partner_program_adjusted"
+        : fallbackCostAbsorber === "tenant_contract"
+          ? "tenant_contract_adjusted"
+          : "fallback_human"
+      : "normal_av";
+    const partnerCharge =
+      humanFallbackApplied && fallbackCostAbsorber === "partner"
+        ? { ...grossEarning }
+        : null;
+    const tenantCharge =
+      humanFallbackApplied && fallbackCostAbsorber === "tenant_contract"
+        ? { ...grossEarning }
+        : null;
+    const platformAbsorbed =
+      humanFallbackApplied && fallbackCostAbsorber === "platform"
+        ? { ...grossEarning }
+        : null;
+
+    return {
+      sandboxBillingTreatmentId: `sandbox-billing-${order.orderId}`,
+      bookingId,
+      orderId: order.orderId,
+      sandboxTripId: order.orderId,
+      treatmentType,
+      fallbackCostAbsorber,
+      fallbackPolicyId,
+      policyResolution,
+      passengerExtraChargeAllowed: false,
+      passengerExtraCharge: { currency: "NTD", amountMinor: 0 },
+      internalAvCost: currentTaskIsAv ? { ...grossEarning } : null,
+      internalHumanFallbackCost: humanFallbackApplied
+        ? { ...grossEarning }
+        : null,
+      partnerCharge,
+      tenantCharge,
+      platformAbsorbed,
+      fallbackSurchargeApplied: false,
+      treatmentSnapshot: {
+        bookingId,
+        orderId: order.orderId,
+        fallbackCostAbsorber,
+        fallbackPolicyId,
+        policyResolution,
+        fulfillmentMode: humanFallbackApplied
+          ? previousAvSegment
+            ? "mixed"
+            : "human_fallback"
+          : "tesla_av",
+        customerFareMinor: grossEarning.amountMinor,
+        customerFareCurrency: grossEarning.currency,
+      },
+      createdAt: completedTask.completedAt ?? new Date().toISOString(),
+    };
+  }
+
+  private isSandboxAvVehicle(vehicleId: string | null | undefined) {
+    return vehicleId?.startsWith("veh-av") ?? false;
+  }
+
+  private resolveTenantServiceProgramId(order: OwnedOrderRecord) {
+    return order.partnerProgramId ?? DEFAULT_TENANT_SERVICE_PROGRAM_ID;
   }
 
   private publishTenantOrderWebhook(
@@ -3601,7 +4031,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAddress(address: string, field: string) {
-    if (!address.trim()) {
+    if (!(address ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "ADDRESS_UNRESOLVABLE",
@@ -3614,7 +4044,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertNonBlank(value: string, field: string) {
-    if (!value.trim()) {
+    if (!(value ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
@@ -3627,7 +4057,9 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private requireNonBlankText(value: string, field: string) {
-    const normalized = value.trim();
+    // Guard against a missing field: value.trim() on undefined threw a
+    // TypeError -> 500. Normalize so the blank check returns a clean 400.
+    const normalized = (value ?? "").trim();
     if (!normalized) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -4344,6 +4776,407 @@ export class OwnedMobilityService implements OnModuleInit {
     return traceLog;
   }
 
+  private buildTraceLog(
+    orderId: string,
+    eventType: string,
+    details?: Record<string, unknown>,
+  ): DispatchTraceLogRecord {
+    const traceLog: DispatchTraceLogRecord = {
+      traceId: randomUUID(),
+      orderId,
+      eventType,
+      message: eventType,
+      createdAt: new Date().toISOString(),
+    };
+    if (details) {
+      traceLog.details = details;
+    }
+    return traceLog;
+  }
+
+  private assertAssignmentEligibilityRecheck(
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "serviceBucket" | "businessDispatchSubtype"
+    >,
+    dispatchJobId: string,
+    vehicleId: string,
+    driverId: string,
+  ) {
+    try {
+      if (this.vehicleEligibilityService) {
+        this.vehicleEligibilityService.assertDispatchAssignmentEligible(
+          order,
+          vehicleId,
+          driverId,
+        );
+        return;
+      }
+
+      if (
+        !this.regulatoryRegistryService.getVehicleDispatchability(
+          vehicleId,
+          order.serviceBucket,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VEHICLE_NOT_DISPATCHABLE",
+          "Vehicle is not eligible for dispatch.",
+          { vehicleId },
+        );
+      }
+
+      if (
+        !this.regulatoryRegistryService.getDriverAvailability(
+          driverId,
+          order.serviceBucket,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "DRIVER_NOT_AVAILABLE",
+          "Driver is not eligible for dispatch.",
+          { driverId },
+        );
+      }
+    } catch (error) {
+      if (!(error instanceof ApiRequestError)) {
+        throw error;
+      }
+
+      const response = error.getResponse() as {
+        error?: {
+          code?: string;
+          details?: Record<string, unknown>;
+        };
+      };
+      const reasonCode = this.normalizeAssignmentEligibilityReasonCode(
+        response.error?.code,
+      );
+      if (!reasonCode) {
+        throw error;
+      }
+
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+        "Eligibility changed before assignment. Refresh candidates and retry.",
+        {
+          dispatchJobId,
+          orderId: order.orderId,
+          vehicleId,
+          driverId,
+          serviceProductCode: this.resolveServiceProductCodeForOrder(order),
+          reasonCodes: [reasonCode],
+          latestEligibility: response.error?.details ?? null,
+        },
+      );
+    }
+  }
+
+  private normalizeAssignmentEligibilityReasonCode(code?: string) {
+    switch (code) {
+      case "SERVICE_PRODUCT_INACTIVE":
+        return "SERVICE_PRODUCT_INACTIVE";
+      case "VEHICLE_NOT_DISPATCHABLE":
+      case "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT":
+      case "TAXI_METER_REQUIRED":
+      case "AIRPORT_PERMIT_REQUIRED":
+      case "FIXED_FARE_NOT_ALLOWED":
+        return "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT";
+      case "DRIVER_NOT_AVAILABLE":
+      case "DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT":
+        return "DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT";
+      default:
+        return null;
+    }
+  }
+
+  private resolveServiceProductCodeForOrder(
+    order: Pick<
+      OwnedOrderRecord,
+      "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
+    >,
+  ): ServiceProductType | null {
+    // Booking-origin value wins; derivation is only a legacy fallback.
+    if (order.serviceProductCode) {
+      return order.serviceProductCode;
+    }
+
+    if (this.vehicleEligibilityService) {
+      return this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
+        order,
+      );
+    }
+
+    return order.serviceBucket === "standard_taxi"
+      ? "taxi_realtime"
+      : (order.businessDispatchSubtype ?? null);
+  }
+
+  private assertSandboxDispatchGate(
+    order: OwnedOrderRecord,
+    dispatchJobId: string,
+    vehicleId: string,
+    driverId: string,
+    sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
+    requestId?: string,
+  ) {
+    if (
+      !this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
+        vehicleId,
+      )
+    ) {
+      return;
+    }
+
+    return this.afterMaybePromise(
+      this.refreshPassengerDisclosureSnapshot(order),
+      (hydratedOrder) =>
+        this.afterMaybePromise(
+          this.sandboxDispatchGateService!.buildAssignmentGateInput({
+            orderId: hydratedOrder.orderId,
+            dispatchJobId,
+            vehicleId,
+            driverId,
+            bookingWindow: {
+              start: hydratedOrder.reservationWindowStart,
+              end: hydratedOrder.reservationWindowEnd,
+            },
+            pickup: hydratedOrder.pickup,
+            dropoff: hydratedOrder.dropoff,
+            entitlement: sandboxDispatchSnapshot?.entitlement ?? null,
+            candidateRoute: sandboxDispatchSnapshot?.candidateRoute ?? null,
+            providerCapabilities:
+              sandboxDispatchSnapshot?.providerCapabilities ?? null,
+            telemetry: sandboxDispatchSnapshot?.telemetry ?? null,
+            regulatory: sandboxDispatchSnapshot?.regulatory ?? null,
+            recorder: sandboxDispatchSnapshot?.recorder ?? null,
+            holdState: sandboxDispatchSnapshot?.holdState ?? null,
+            limits: sandboxDispatchSnapshot?.limits ?? null,
+            passengerDisclosure: hydratedOrder.passengerDisclosure
+              ? {
+                  channel: hydratedOrder.passengerDisclosure.channel,
+                  policyId: hydratedOrder.passengerDisclosure.policyId,
+                  policyVersion:
+                    hydratedOrder.passengerDisclosure.policyVersion,
+                  messageCode: hydratedOrder.passengerDisclosure.messageCode,
+                  requiresAcknowledgement:
+                    hydratedOrder.passengerDisclosure.requiresAcknowledgement,
+                  acknowledgementMode:
+                    hydratedOrder.passengerDisclosure.acknowledgementMode,
+                  acknowledgedAt:
+                    hydratedOrder.passengerDisclosure.acknowledgedAt,
+                  acknowledgementRecordId:
+                    hydratedOrder.passengerDisclosure.acknowledgementRecordId,
+                }
+              : null,
+          }),
+          (gateInput) =>
+            this.sandboxDispatchGateService!.assertAssignmentEligible(
+              gateInput,
+              requestId,
+            ),
+        ),
+    );
+  }
+
+  // Stamp the precise service-product code onto a freshly-built order so it
+  // originates at booking intake and flows unchanged downstream. Idempotent: an
+  // order that already carries the code is returned untouched.
+  private stampServiceProductCode<T extends OwnedOrderRecord>(order: T): T {
+    if (order.serviceProductCode) {
+      return order;
+    }
+    return {
+      ...order,
+      serviceProductCode: this.resolveServiceProductCodeForOrder(order),
+    };
+  }
+
+  private buildDispatchAssignmentBundle(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
+    vehicleId: string,
+    driverId: string,
+    _sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
+    options?: CreateDispatchAssignmentOptions,
+  ): DispatchAssignmentBundle {
+    const now = new Date().toISOString();
+    const nextOrder = this.cloneOrder(order);
+    const nextDispatchJob = { ...dispatchJob };
+    const taskId = randomUUID();
+    const serviceProductCode = this.resolveServiceProductCodeForOrder(order);
+    const assignment: DispatchAssignmentRecord = {
+      assignmentId: randomUUID(),
+      dispatchJobId: dispatchJob.dispatchJobId,
+      orderId: order.orderId,
+      taskId,
+      serviceProductCode,
+      vehicleId,
+      driverId,
+      assignmentType: order.fixedPrice ? "fixed_price" : "metered",
+      status: "assigned",
+      acceptedAt: null,
+      rejectedAt: null,
+      rejectReasonCode: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const task: DriverTaskRecord = {
+      taskId,
+      orderId: order.orderId,
+      dispatchJobId: dispatchJob.dispatchJobId,
+      assignmentId: assignment.assignmentId,
+      serviceProductCode,
+      driverId,
+      vehicleId,
+      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
+      routeProvided: false,
+      waypoints: [],
+      status: "pending_acceptance",
+      acceptedAt: null,
+      departedAt: null,
+      arrivedPickupAt: null,
+      startedAt: null,
+      completedAt: null,
+      actualDistanceKm: null,
+      actualDurationSec: null,
+      fare: null,
+      proof: null,
+    };
+    const dispatchAttempt: DispatchAttemptRecord = {
+      attemptId: randomUUID(),
+      dispatchJobId: dispatchJob.dispatchJobId,
+      orderId: order.orderId,
+      sequence:
+        options?.dispatchAttemptSequence ??
+        this.nextAttemptSequence(dispatchJob.dispatchJobId),
+      outcome: "assigned",
+      reasonCode: null,
+      createdAt: now,
+    };
+
+    nextDispatchJob.status = "assigned";
+    nextDispatchJob.updatedAt = now;
+    nextOrder.status = "assigned";
+    nextOrder.updatedAt = now;
+
+    const traceLogs: DispatchTraceLogRecord[] = [];
+    if (
+      nextOrder.dispatchSemantics === "reservation" &&
+      nextOrder.reservationHoldStatus !== "released"
+    ) {
+      this.transitionReservationHold(nextOrder, "released");
+      nextOrder.reservationHoldExpiresAt = now;
+      traceLogs.push(
+        this.buildTraceLog(nextOrder.orderId, "reservation.hold.released", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          reservationHoldId: nextOrder.reservationHoldId,
+          reason: "assignment_confirmed",
+        }),
+      );
+    }
+
+    traceLogs.push(
+      this.buildTraceLog(nextOrder.orderId, "dispatch.assigned", {
+        dispatchJobId: dispatchJob.dispatchJobId,
+        assignmentId: assignment.assignmentId,
+        taskId,
+        vehicleId,
+        driverId,
+      }),
+    );
+
+    return {
+      order: nextOrder,
+      dispatchJob: nextDispatchJob,
+      assignment,
+      task,
+      dispatchAttempt,
+      traceLogs,
+    };
+  }
+
+  private applyDispatchAssignmentBundle(
+    bundle: DispatchAssignmentBundle,
+    requestId?: string,
+    persistChanges = true,
+  ): DispatchAssignmentResult {
+    this.orders = [
+      bundle.order,
+      ...this.orders.filter((order) => order.orderId !== bundle.order.orderId),
+    ];
+    this.dispatchJobs = [
+      bundle.dispatchJob,
+      ...this.dispatchJobs.filter(
+        (dispatchJob) =>
+          dispatchJob.dispatchJobId !== bundle.dispatchJob.dispatchJobId,
+      ),
+    ];
+    this.dispatchAssignments = [bundle.assignment, ...this.dispatchAssignments];
+    this.driverTasks = [bundle.task, ...this.driverTasks];
+    this.dispatchAttempts = [bundle.dispatchAttempt, ...this.dispatchAttempts];
+    for (const traceLog of bundle.traceLogs) {
+      this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+    }
+
+    this.auditNotificationService.recordNotification({
+      tenantId: bundle.order.tenantId,
+      channel: "driver_task",
+      title: "Driver task assigned",
+      message: `Driver ${bundle.task.driverId} received task ${bundle.task.taskId} for order ${bundle.order.orderNo}.`,
+      status: "unread",
+    });
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "dispatch",
+        actionName: "assign_dispatch",
+        resourceType: "dispatch_assignment",
+        resourceId: bundle.assignment.assignmentId,
+        newValuesSummary: {
+          dispatchJobId: bundle.dispatchJob.dispatchJobId,
+          vehicleId: bundle.assignment.vehicleId,
+          driverId: bundle.assignment.driverId,
+        },
+      },
+      requestId,
+    );
+    if (persistChanges) {
+      this.persistChanges(
+        {
+          orders: [bundle.order],
+          dispatchJobs: [bundle.dispatchJob],
+          dispatchAssignments: [bundle.assignment],
+          driverTasks: [bundle.task],
+          dispatchAttempts: [bundle.dispatchAttempt],
+          dispatchTraceLogs: bundle.traceLogs,
+        },
+        "assign_dispatch",
+      );
+    }
+    this.ownedMobilityTaskEventsService.publishTaskAssigned(
+      bundle.task,
+      bundle.order,
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishDispatchJobUpdated(
+      bundle.order.orderId,
+      bundle.dispatchJob,
+      requestId,
+    );
+
+    return {
+      assignmentId: bundle.assignment.assignmentId,
+      status: bundle.assignment.status,
+      taskId: bundle.task.taskId,
+    };
+  }
+
   private replayDriverCompletion(
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
@@ -4472,7 +5305,7 @@ export class OwnedMobilityService implements OnModuleInit {
   private recordAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
-  ) {
+  ): AuditLogRecord | undefined {
     const auditInput: Omit<
       AuditLogRecord,
       "auditId" | "createdAt" | "requestId"
@@ -4484,7 +5317,7 @@ export class OwnedMobilityService implements OnModuleInit {
     if (requestId) {
       auditInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditInput);
+    return this.auditNotificationService.recordAuditLog(auditInput);
   }
 
   private recordReservationEscalationNotifications(
@@ -4724,6 +5557,163 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
+  private refreshPassengerDisclosureSnapshot(
+    order: OwnedOrderRecord,
+    persistChanges = true,
+    options?: {
+      channel?: PassengerDisclosureChannel;
+    },
+  ): MaybePromise<OwnedOrderRecord> {
+    if (
+      !this.sandboxDispatchGateService ||
+      !order.bookingId ||
+      !order.businessDispatchSubtype
+    ) {
+      return order;
+    }
+
+    return this.afterMaybePromise(
+      this.sandboxDispatchGateService.resolvePassengerDisclosureForBooking({
+        tenantId: order.tenantId,
+        businessDispatchSubtype: order.businessDispatchSubtype,
+        partnerEntrySlug: order.partnerEntrySlug,
+        channel: this.resolvePassengerDisclosureChannel(
+          order,
+          undefined,
+          options?.channel,
+        ),
+      }),
+      (resolvedDisclosure) => {
+        const previous = order.passengerDisclosure;
+        const canReuseAcknowledgement =
+          resolvedDisclosure !== null &&
+          this.canReusePassengerDisclosureAcknowledgement(
+            previous,
+            resolvedDisclosure,
+          );
+        const nextDisclosure =
+          resolvedDisclosure === null
+            ? null
+            : {
+                ...resolvedDisclosure,
+                acknowledgedAt:
+                  canReuseAcknowledgement && previous
+                    ? previous.acknowledgedAt
+                    : null,
+                acknowledgementRecordId: canReuseAcknowledgement
+                  ? (previous?.acknowledgementRecordId ?? null)
+                  : null,
+              };
+
+        if (this.samePassengerDisclosure(previous, nextDisclosure)) {
+          return order;
+        }
+
+        order.passengerDisclosure = nextDisclosure;
+        order.updatedAt = new Date().toISOString();
+        if (persistChanges) {
+          this.persistChanges(
+            {
+              orders: [order],
+            },
+            "refresh_passenger_disclosure",
+          );
+        }
+        return order;
+      },
+    );
+  }
+
+  private samePassengerDisclosure(
+    left: PassengerDisclosureRequirementSnapshot | null,
+    right: PassengerDisclosureRequirementSnapshot | null,
+  ) {
+    if (left === right) {
+      return true;
+    }
+    if (!left || !right) {
+      return false;
+    }
+    return (
+      left.channel === right.channel &&
+      left.policyId === right.policyId &&
+      left.policyVersion === right.policyVersion &&
+      left.messageCode === right.messageCode &&
+      left.requiresAcknowledgement === right.requiresAcknowledgement &&
+      left.acknowledgementMode === right.acknowledgementMode &&
+      left.acknowledgedAt === right.acknowledgedAt &&
+      left.acknowledgementRecordId === right.acknowledgementRecordId
+    );
+  }
+
+  private canReusePassengerDisclosureAcknowledgement(
+    previous: PassengerDisclosureRequirementSnapshot | null | undefined,
+    next: PassengerDisclosureRequirementSnapshot,
+  ) {
+    if (!previous) {
+      return false;
+    }
+    return (
+      previous.channel === next.channel &&
+      previous.policyId === next.policyId &&
+      previous.policyVersion === next.policyVersion &&
+      previous.messageCode === next.messageCode &&
+      previous.requiresAcknowledgement === next.requiresAcknowledgement &&
+      previous.acknowledgementMode === next.acknowledgementMode
+    );
+  }
+
+  private resolvePassengerDisclosureChannel(
+    order: Pick<
+      OwnedOrderRecord,
+      "partnerEntrySlug" | "orderSource" | "passengerDisclosure"
+    >,
+    identity?: BootstrapRequestIdentity | null,
+    explicitChannel?: PassengerDisclosureChannel,
+  ): PassengerDisclosureChannel {
+    if (explicitChannel) {
+      return explicitChannel;
+    }
+    if (
+      identity?.actorType === "ops_user" ||
+      identity?.actorType === "platform_admin"
+    ) {
+      return "ops_console";
+    }
+    if (order.orderSource === "phone") {
+      return "call_center";
+    }
+    if (order.partnerEntrySlug) {
+      return "partner_portal";
+    }
+    if (order.passengerDisclosure?.channel === "ops_console") {
+      return "ops_console";
+    }
+    return "tenant_portal";
+  }
+
+  private resolvePassengerDisclosureAcknowledgementActor(
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (identity?.actorType === "tenant_admin" && identity.actorId) {
+      return {
+        actorType: "tenant_admin" as const,
+        actorRef: identity.actorId,
+      };
+    }
+    if (identity?.actorType === "ops_user" && identity.actorId) {
+      return {
+        actorType: "ops_user" as const,
+        actorRef: identity.actorId,
+      };
+    }
+
+    return {
+      actorType: "passenger" as const,
+      actorRef: null,
+    };
+  }
+
   private captureTenantGovernanceSnapshot() {
     return (
       this.tenantPartnerService?.createGovernanceMutationSnapshot?.() ?? null
@@ -4807,6 +5797,7 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug: order.partnerEntrySlug,
       eligibilityVerificationId: order.eligibilityVerificationId,
       issuerAuthorizationRef: order.issuerAuthorizationRef,
+      passengerDisclosure: order.passengerDisclosure,
       status:
         order.status === "cancelled"
           ? "cancelled"
@@ -4975,6 +5966,76 @@ export class OwnedMobilityService implements OnModuleInit {
         );
   }
 
+  private async listDispatchCandidatesWithEligibility(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
+    includeIneligible: boolean,
+  ): Promise<DispatchCandidate[]> {
+    if (!this.vehicleEligibilityService || !this.runtimeEligibilityEvaluator) {
+      return this.listEligibleDispatchCandidates(order);
+    }
+
+    const destination = this.resolvePickupEtaDestination(order);
+    const serviceProduct =
+      this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(order);
+    const candidates = this.regulatoryRegistryService.getEligibleCandidates(
+      order.serviceBucket,
+      destination,
+    );
+    const sourcePlatform = this.forwarderSourceMap.get(order.orderId) ?? null;
+
+    const evaluatedCandidates = await Promise.all(
+      candidates.map(async (candidate) => {
+        const decision = await this.runtimeEligibilityEvaluator!.evaluate({
+          orderId: order.orderId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          driverId: candidate.driverId,
+          vehicleId: candidate.vehicleId,
+          serviceProductCode: serviceProduct,
+          sourcePlatform,
+          currentLocation: candidate.currentLocation ?? null,
+        });
+
+        return {
+          ...candidate,
+          serviceProductContext: {
+            serviceProductId: decision.serviceProductId,
+            serviceProductCode: decision.serviceProductCode,
+            policyVersion: decision.policyVersion,
+            evaluatedAt: decision.evaluatedAt,
+          },
+          eligibilityDecision: decision.decision,
+          hardReasonCodes: [...decision.hardReasonCodes],
+          softReasonCodes: [...decision.softReasonCodes],
+          missingRequirements: [...decision.missingRequirements],
+          locationState: decision.locationState,
+        } satisfies DispatchCandidate;
+      }),
+    );
+
+    if (includeIneligible) {
+      return evaluatedCandidates;
+    }
+
+    const visibleCandidates = evaluatedCandidates.filter(
+      (candidate) => candidate.eligibilityDecision !== "ineligible",
+    );
+    if (visibleCandidates.length > 0) {
+      return visibleCandidates;
+    }
+
+    // Scarcity fallback: surface decorated ineligible rows so dispatch is not a
+    // bare empty list -- EXCEPT candidates that hard-failed a non-bypassable gate
+    // (e.g. the airport-permit requirement), which must never be offered for the
+    // exact service product even when no eligible supply exists.
+    return evaluatedCandidates.filter(
+      (candidate) =>
+        !candidate.hardReasonCodes.some((code) =>
+          NON_BYPASSABLE_HARD_REASON_CODES.has(code),
+        ),
+    );
+  }
+
   private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {
     if (
       Number.isFinite(order.pickup.lat) &&
@@ -4997,11 +6058,565 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
+  private applyServiceAreaCreationPolicy(
+    order: OwnedOrderRecord,
+    context: SpatialAuditContext,
+    requestId?: string,
+  ): void {
+    const resolution = this.resolveServiceAreaGate(order);
+    if (!resolution) {
+      return;
+    }
+
+    order.spatialAudit = this.buildSpatialAuditSnapshot(
+      order,
+      resolution,
+      context,
+    );
+    this.recordSpatialAuditSnapshot(order, context, requestId);
+
+    const { evaluation, missingItems } = resolution;
+    if (missingItems.length > 0) {
+      this.addComplianceFlag(order, "service_area_legacy_text_manual_review");
+    }
+    if (!evaluation) {
+      return;
+    }
+    if (evaluation.decision === "not_serviceable") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        this.resolveServiceAreaBlockCode(evaluation),
+        this.resolveServiceAreaMessage(
+          evaluation,
+          "This booking is outside the service area or violates a stop policy.",
+        ),
+        this.serviceAreaErrorDetails(order, evaluation, missingItems),
+      );
+    }
+    if (evaluation.decision === "manual_review") {
+      this.addComplianceFlag(order, "service_area_manual_review");
+      return;
+    }
+    if (missingItems.length === 0) {
+      this.addComplianceFlag(order, "service_area_serviceable");
+    }
+  }
+
+  private assertDispatchComplianceGatesClear(order: OwnedOrderRecord): void {
+    const gates = this.listComplianceGatesForOrder(order);
+    const dispatchBlocking = gates.filter((gate) =>
+      gate.impacts.some(
+        (impact) => impact.stage === "dispatch" && impact.effect === "blocked",
+      ),
+    );
+    if (dispatchBlocking.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DISPATCH_COMPLIANCE_BLOCKED",
+        "Order cannot dispatch until blocking compliance gates are cleared.",
+        {
+          orderId: order.orderId,
+          gateTypes: dispatchBlocking.map((gate) => gate.gateType),
+          reasonCodes: dispatchBlocking.flatMap((gate) => gate.evidenceRefs),
+          missingItems: dispatchBlocking.flatMap((gate) => gate.missingItems),
+        },
+      );
+    }
+
+    const dispatchReviewRequired = gates.filter((gate) =>
+      gate.impacts.some(
+        (impact) =>
+          impact.stage === "dispatch" && impact.effect === "review_required",
+      ),
+    );
+    if (dispatchReviewRequired.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DISPATCH_REQUIRES_MANUAL_REVIEW",
+        "Order requires manual review before dispatch.",
+        {
+          orderId: order.orderId,
+          gateTypes: dispatchReviewRequired.map((gate) => gate.gateType),
+          reasonCodes: dispatchReviewRequired.flatMap(
+            (gate) => gate.evidenceRefs,
+          ),
+          missingItems: dispatchReviewRequired.flatMap(
+            (gate) => gate.missingItems,
+          ),
+        },
+      );
+    }
+  }
+
+  private resolveServiceAreaGate(
+    order: OwnedOrderRecord,
+  ): ServiceAreaGateResolution | null {
+    if (order.spatialAudit) {
+      return this.resolveServiceAreaGateFromSnapshot(order.spatialAudit);
+    }
+
+    if (!this.serviceAreaService) {
+      return null;
+    }
+
+    const serviceProductType = this.resolveServiceProductCodeForOrder(order);
+    const pickup = this.toServiceAreaPoint(order.pickup);
+    const dropoff = this.toServiceAreaPoint(order.dropoff);
+    const missingItems = [
+      ...(pickup ? [] : ["pickup_coordinates"]),
+      ...(dropoff ? [] : ["dropoff_coordinates"]),
+    ];
+
+    if (!serviceProductType) {
+      return {
+        serviceProductType,
+        pickup,
+        dropoff,
+        missingItems: ["service_product_type", ...missingItems],
+        evaluation: null,
+      };
+    }
+
+    if (!pickup) {
+      return {
+        serviceProductType,
+        pickup,
+        dropoff,
+        missingItems,
+        evaluation: null,
+      };
+    }
+
+    const evaluation = this.serviceAreaService.evaluate({
+      serviceProductType,
+      pickup,
+      ...(dropoff ? { dropoff } : {}),
+      requestedAt: order.createdAt,
+    });
+
+    return {
+      serviceProductType,
+      pickup,
+      dropoff,
+      missingItems,
+      evaluation,
+    };
+  }
+
+  private resolveServiceAreaGateFromSnapshot(
+    snapshot: OwnedOrderSpatialAuditSnapshot,
+  ): ServiceAreaGateResolution {
+    const pickup =
+      snapshot.stops.find((stop) => stop.kind === "pickup")?.location ?? null;
+    const dropoff =
+      snapshot.stops.find((stop) => stop.kind === "dropoff")?.location ?? null;
+
+    return {
+      serviceProductType: snapshot.serviceProductType,
+      pickup,
+      dropoff,
+      missingItems: [...snapshot.missingItems],
+      evaluation: snapshot.serviceAreaEvaluation
+        ? this.cloneServiceAreaEvaluation(snapshot.serviceAreaEvaluation)
+        : null,
+    };
+  }
+
+  private buildSpatialAuditSnapshot(
+    order: OwnedOrderRecord,
+    resolution: ServiceAreaGateResolution,
+    context: SpatialAuditContext,
+  ): OwnedOrderSpatialAuditSnapshot {
+    const evaluation = resolution.evaluation
+      ? this.cloneServiceAreaEvaluation(resolution.evaluation)
+      : null;
+    const decision = evaluation?.decision ?? "manual_review";
+
+    return {
+      snapshotId: randomUUID(),
+      snapshotVersion: 1,
+      capturedAt: new Date().toISOString(),
+      capturedReason: "booking_creation",
+      actorId: context.actorId,
+      actorType: context.actorType,
+      surface: context.surface,
+      serviceProductType: resolution.serviceProductType,
+      decision,
+      stops: [
+        this.buildSpatialAuditStopSnapshot("pickup", order.pickup, context),
+        this.buildSpatialAuditStopSnapshot("dropoff", order.dropoff, context),
+      ],
+      serviceAreaEvaluation: evaluation,
+      serviceAreaCodes: [...(evaluation?.serviceAreaCodes ?? [])],
+      geometryVersionRefs: [...(evaluation?.geometryVersionRefs ?? [])],
+      reasonCodes: [...(evaluation?.reasonCodes ?? [])],
+      reasonMessages: [...(evaluation?.reasonMessages ?? [])],
+      missingItems: [...resolution.missingItems],
+      auditEvents: [],
+    };
+  }
+
+  private buildSpatialAuditStopSnapshot(
+    kind: "pickup" | "dropoff",
+    address: AddressPayload,
+    context: SpatialAuditContext,
+  ): OwnedOrderSpatialAuditStopSnapshot {
+    const location = this.toServiceAreaPoint(address);
+    const missingItems = location ? [] : [`${kind}_coordinates`];
+
+    return {
+      kind,
+      addressText: address.address,
+      location,
+      coordinateProvenance: this.buildCoordinateProvenance(address, context),
+      provenanceComplete: hasAddressCoordinateProvenance(address),
+      missingItems,
+    };
+  }
+
+  private buildCoordinateProvenance(
+    address: AddressPayload,
+    context: SpatialAuditContext,
+  ): GeoCoordinateProvenance | null {
+    if (address.coordinateProvenance) {
+      return this.cloneCoordinateProvenance(address.coordinateProvenance);
+    }
+
+    const hasTopLevelProvenance = Boolean(
+      address.coordinateSource ||
+      address.geocodeProvider ||
+      address.geocodeConfidence ||
+      address.providerCandidateId ||
+      address.placeId ||
+      address.selectedByActorId ||
+      address.selectedAt ||
+      address.pinnedByActorId ||
+      address.pinnedAt ||
+      address.manualOverrideReason,
+    );
+    if (!hasTopLevelProvenance && hasAddressCoordinates(address)) {
+      return null;
+    }
+
+    return {
+      coordinateSource:
+        address.coordinateSource ??
+        (hasAddressCoordinates(address) ? "manual_pin" : "legacy_text"),
+      geocodeProvider: address.geocodeProvider ?? null,
+      geocodeConfidence: address.geocodeConfidence ?? null,
+      providerCandidateId: address.providerCandidateId ?? null,
+      placeId: address.placeId ?? null,
+      coordinateAccuracyM: address.coordinateAccuracyM ?? null,
+      selectedByActorId:
+        address.selectedByActorId ?? address.pinnedByActorId ?? context.actorId,
+      selectedAt: address.selectedAt ?? address.pinnedAt ?? null,
+      pinnedByActorId: address.pinnedByActorId ?? null,
+      pinnedAt: address.pinnedAt ?? null,
+      manualOverrideReason: address.manualOverrideReason ?? null,
+      surface: address.surface ?? context.surface,
+    };
+  }
+
+  private cloneCoordinateProvenance(
+    provenance: GeoCoordinateProvenance,
+  ): GeoCoordinateProvenance {
+    return {
+      ...provenance,
+    };
+  }
+
+  private recordSpatialAuditSnapshot(
+    order: OwnedOrderRecord,
+    context: SpatialAuditContext,
+    requestId?: string,
+  ): void {
+    if (!order.spatialAudit) {
+      return;
+    }
+
+    const auditLog = this.recordAudit(
+      {
+        actorId: context.actorId,
+        actorType: context.actorType,
+        tenantId: order.tenantId,
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: order.orderId,
+        newValuesSummary: {
+          snapshotId: order.spatialAudit.snapshotId,
+          decision: order.spatialAudit.decision,
+          surface: order.spatialAudit.surface,
+          serviceProductType: order.spatialAudit.serviceProductType,
+          serviceAreaCodes: order.spatialAudit.serviceAreaCodes,
+          geometryVersionRefs: order.spatialAudit.geometryVersionRefs,
+          reasonCodes: order.spatialAudit.reasonCodes,
+          missingItems: order.spatialAudit.missingItems,
+          provenanceComplete: order.spatialAudit.stops.every(
+            (stop) => stop.provenanceComplete,
+          ),
+        },
+      },
+      requestId,
+    );
+    if (!auditLog) {
+      return;
+    }
+
+    order.spatialAudit.auditEvents = [
+      ...order.spatialAudit.auditEvents,
+      {
+        auditId: auditLog.auditId,
+        actionName: auditLog.actionName,
+        actorId: auditLog.actorId,
+        actorType: auditLog.actorType,
+        createdAt: auditLog.createdAt,
+      },
+    ];
+  }
+
+  private buildServiceAreaGate(
+    order: OwnedOrderRecord,
+  ): ComplianceGateRecord | null {
+    const resolution = this.resolveServiceAreaGate(order);
+    if (!resolution) {
+      return null;
+    }
+
+    const { evaluation, missingItems, serviceProductType } = resolution;
+    const missingCoordinates = missingItems.length > 0;
+    const decision = evaluation?.decision ?? "manual_review";
+    const blocked = decision === "not_serviceable";
+    const reviewRequired =
+      !blocked && (missingCoordinates || decision === "manual_review");
+    const state: ComplianceGateState = blocked
+      ? "blocked"
+      : reviewRequired
+        ? "review_required"
+        : "clear";
+    const reasonCodes =
+      evaluation?.reasonCodes.length === 0
+        ? []
+        : (evaluation?.reasonCodes ?? []);
+    const evidenceRefs = [
+      ...(evaluation?.geometryVersionRefs ?? []),
+      ...reasonCodes,
+    ];
+
+    return {
+      gateType: "service_area",
+      title: "Service-area and stop-policy authority",
+      state,
+      required: true,
+      blocking: blocked,
+      evidenceState:
+        state === "clear"
+          ? "verified"
+          : missingCoordinates
+            ? "missing"
+            : "submitted",
+      evidenceRefs,
+      missingItems,
+      nextAction:
+        state === "clear"
+          ? "Pickup and dropoff coordinates are serviceable for the selected service product."
+          : blocked
+            ? this.resolveServiceAreaMessage(
+                evaluation,
+                "Booking violates service-area or stop-policy rules and cannot dispatch.",
+              )
+            : missingCoordinates
+              ? "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review."
+              : this.resolveServiceAreaMessage(
+                  evaluation,
+                  "Ops must review this stop policy before dispatch.",
+                ),
+      reviewerLabel: state === "clear" ? null : "ops dispatch / service area",
+      overrideAllowed: state !== "clear",
+      overrideActors: state === "clear" ? [] : ["ops_user", "platform_admin"],
+      impacts: [
+        {
+          stage: "dispatch",
+          effect: blocked
+            ? "blocked"
+            : reviewRequired
+              ? "review_required"
+              : "clear",
+          reason:
+            state === "clear"
+              ? `Service-area evaluation is clear for ${serviceProductType ?? "unknown service product"}.`
+              : blocked
+                ? "Dispatch is blocked by service-area or stop-policy authority."
+                : "Dispatch requires manual review before release.",
+        },
+        {
+          stage: "completion",
+          effect: "clear",
+          reason:
+            "Service-area checks are enforced before dispatch and do not block driver completion once released.",
+        },
+        {
+          stage: "settlement",
+          effect: state === "clear" ? "clear" : "review_required",
+          reason:
+            state === "clear"
+              ? "Service-area evaluation evidence is available for audit."
+              : "Spatial review outcome must be retained for compliance follow-up.",
+        },
+      ],
+    };
+  }
+
+  private toServiceAreaPoint(address: AddressPayload): GeoPoint | null {
+    if (!hasAddressCoordinates(address)) {
+      return null;
+    }
+    return {
+      lat: address.lat as number,
+      lng: address.lng as number,
+    };
+  }
+
+  private addComplianceFlag(order: OwnedOrderRecord, flag: string): void {
+    if (!order.complianceFlags.includes(flag)) {
+      order.complianceFlags = [...order.complianceFlags, flag];
+    }
+  }
+
+  private resolveServiceAreaBlockCode(
+    evaluation: ServiceAreaEvaluationResult,
+  ): string {
+    if (evaluation.reasonCodes.includes("PICKUP_NOT_ALLOWED")) {
+      return "PICKUP_NOT_ALLOWED";
+    }
+    if (
+      evaluation.reasonCodes.some((reasonCode) =>
+        reasonCode.endsWith("_AREA_NOT_SERVICEABLE"),
+      )
+    ) {
+      return "SERVICE_AREA_NOT_SERVICEABLE";
+    }
+    return evaluation.reasonCodes[0] ?? "SERVICE_AREA_NOT_SERVICEABLE";
+  }
+
+  private resolveServiceAreaMessage(
+    evaluation: ServiceAreaEvaluationResult | null,
+    fallback: string,
+  ): string {
+    return evaluation?.reasonMessages[0] ?? fallback;
+  }
+
+  private serviceAreaErrorDetails(
+    order: OwnedOrderRecord,
+    evaluation: ServiceAreaEvaluationResult,
+    missingItems: string[],
+  ) {
+    return {
+      orderSource: order.orderSource,
+      tenantId: order.tenantId,
+      serviceProductType: evaluation.serviceProductType,
+      decision: evaluation.decision,
+      serviceAreaCodes: evaluation.serviceAreaCodes,
+      geometryVersionRefs: evaluation.geometryVersionRefs,
+      reasonCodes: evaluation.reasonCodes,
+      reasonMessages: evaluation.reasonMessages,
+      missingItems,
+      spatialAuditSnapshotId: order.spatialAudit?.snapshotId ?? null,
+    };
+  }
+
+  private cloneServiceAreaEvaluation(
+    evaluation: ServiceAreaEvaluationResult,
+  ): ServiceAreaEvaluationResult {
+    return {
+      ...evaluation,
+      stops: evaluation.stops.map((stop) => ({
+        ...stop,
+        location: { ...stop.location },
+        serviceAreaCodes: [...stop.serviceAreaCodes],
+        policyCodes: [...stop.policyCodes],
+        geometryVersionRefs: [...stop.geometryVersionRefs],
+        reasonCodes: [...stop.reasonCodes],
+        reasonMessages: [...stop.reasonMessages],
+      })),
+      serviceAreaCodes: [...evaluation.serviceAreaCodes],
+      geometryVersionRefs: [...evaluation.geometryVersionRefs],
+      reasonCodes: [...evaluation.reasonCodes],
+      reasonMessages: [...evaluation.reasonMessages],
+    };
+  }
+
+  private cloneSpatialAuditSnapshot(
+    snapshot: OwnedOrderSpatialAuditSnapshot,
+  ): OwnedOrderSpatialAuditSnapshot {
+    return {
+      ...snapshot,
+      stops: snapshot.stops.map((stop) => ({
+        ...stop,
+        location: stop.location ? { ...stop.location } : null,
+        coordinateProvenance: stop.coordinateProvenance
+          ? this.cloneCoordinateProvenance(stop.coordinateProvenance)
+          : null,
+        missingItems: [...stop.missingItems],
+      })),
+      serviceAreaEvaluation: snapshot.serviceAreaEvaluation
+        ? this.cloneServiceAreaEvaluation(snapshot.serviceAreaEvaluation)
+        : null,
+      serviceAreaCodes: [...snapshot.serviceAreaCodes],
+      geometryVersionRefs: [...snapshot.geometryVersionRefs],
+      reasonCodes: [...snapshot.reasonCodes],
+      reasonMessages: [...snapshot.reasonMessages],
+      missingItems: [...snapshot.missingItems],
+      auditEvents: snapshot.auditEvents.map((event) => ({ ...event })),
+    };
+  }
+
+  private resolveBookingSpatialAuditContext(
+    order: OwnedOrderRecord,
+    identity?: BootstrapRequestIdentity | null,
+  ): SpatialAuditContext {
+    const isPartnerBooking = Boolean(order.partnerId || order.partnerEntrySlug);
+    return {
+      actorId: identity?.actorId ?? null,
+      actorType: identity
+        ? this.coerceAuditActorType(identity.actorType)
+        : isPartnerBooking
+          ? "partner_api_key"
+          : "tenant_admin",
+      surface: isPartnerBooking ? "partner_booking" : "tenant_console",
+    };
+  }
+
+  private coerceAuditActorType(
+    actorType: BootstrapRequestIdentity["actorType"] | null | undefined,
+  ): AuditLogRecord["actorType"] {
+    switch (actorType) {
+      case "platform_admin":
+      case "tenant_admin":
+      case "ops_user":
+      case "partner_api_key":
+      case "referral_passenger":
+        return actorType;
+      default:
+        return "system";
+    }
+  }
+
   private listComplianceGatesForOrder(
     order: OwnedOrderRecord,
     task = this.findLatestTaskForOrder(order.orderId),
   ): ComplianceGateRecord[] {
     const gates: ComplianceGateRecord[] = [];
+    const serviceAreaGate = this.buildServiceAreaGate(order);
+    if (serviceAreaGate) {
+      gates.push(serviceAreaGate);
+    }
+
+    const addressCaptureGate = this.buildAddressCaptureGate(order);
+    if (addressCaptureGate) {
+      gates.push(addressCaptureGate);
+    }
+
     const recordingGate = this.buildRecordingGate(order);
     if (recordingGate) {
       gates.push(recordingGate);
@@ -5018,6 +6633,56 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     return gates;
+  }
+
+  private buildAddressCaptureGate(
+    order: OwnedOrderRecord,
+  ): ComplianceGateRecord | null {
+    const fallbackReview = order.mapFallbackReview;
+    if (!fallbackReview?.reasonCode?.trim()) {
+      return null;
+    }
+
+    return {
+      gateType: "address_capture",
+      title: "Address capture fallback review",
+      state: "review_required",
+      required: true,
+      blocking: false,
+      evidenceState: "submitted",
+      evidenceRefs: [
+        fallbackReview.reasonCode,
+        ...(fallbackReview.providerReasonCode
+          ? [fallbackReview.providerReasonCode]
+          : []),
+      ],
+      missingItems: [],
+      nextAction:
+        "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
+      reviewerLabel: "callcenter / dispatch mapping",
+      overrideAllowed: true,
+      overrideActors: ["ops_user", "platform_admin"],
+      impacts: [
+        {
+          stage: "dispatch",
+          effect: "review_required",
+          reason:
+            "Dispatch stays in manual review until an operator confirms the fallback map capture.",
+        },
+        {
+          stage: "completion",
+          effect: "clear",
+          reason:
+            "Address capture fallback does not block completion after dispatch is explicitly released.",
+        },
+        {
+          stage: "settlement",
+          effect: "review_required",
+          reason:
+            "Audit should retain why dispatch proceeded from a degraded map-capture path.",
+        },
+      ],
+    };
   }
 
   private buildRecordingGate(
@@ -5630,6 +7295,16 @@ export class OwnedMobilityService implements OnModuleInit {
       approvalRequestIds: [...order.approvalRequestIds],
       complianceGates,
       complianceFlags: [...order.complianceFlags],
+      ...(order.spatialAudit !== undefined
+        ? {
+            spatialAudit: order.spatialAudit
+              ? this.cloneSpatialAuditSnapshot(order.spatialAudit)
+              : null,
+          }
+        : {}),
+      mapFallbackReview: order.mapFallbackReview
+        ? { ...order.mapFallbackReview }
+        : null,
       queueFamily: queueState.queueFamily,
       queueEntryReason: queueState.queueEntryReason,
       noSupplyEscalation: order.noSupplyEscalation

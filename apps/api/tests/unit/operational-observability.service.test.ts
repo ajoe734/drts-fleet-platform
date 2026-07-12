@@ -13,6 +13,7 @@ import type {
   ReportJobRecord,
 } from "@drts/contracts";
 
+import { MapGeofenceObservabilityService } from "../../src/modules/operational-observability/map-geofence-observability.service";
 import { OperationalObservabilityService } from "../../src/modules/operational-observability/operational-observability.service";
 
 function createDriver(
@@ -38,7 +39,9 @@ function createDriver(
   };
 }
 
-function createServiceFixture() {
+function createServiceFixture(
+  mapGeofenceObservabilityService?: MapGeofenceObservabilityService,
+) {
   const orders: OwnedOrderRecord[] = [
     {
       orderId: "ord-ready-001",
@@ -752,6 +755,9 @@ function createServiceFixture() {
     forwarderService as never,
     reportingFilingService as never,
     tenantPartnerService as never,
+    undefined,
+    undefined,
+    mapGeofenceObservabilityService,
   );
 
   return {
@@ -763,11 +769,47 @@ function createServiceFixture() {
 }
 
 describe("OperationalObservabilityService", () => {
-  it("aggregates workflow metrics and raises role-routed alerts", () => {
+  it("aggregates workflow metrics and raises role-routed alerts", async () => {
+    const mapGeofenceObservabilityService =
+      new MapGeofenceObservabilityService();
+    mapGeofenceObservabilityService.recordProviderHealth({
+      status: "unhealthy",
+      provider: "external-map",
+      mode: "external",
+      failClosed: true,
+      quota: {
+        dailyLimit: 1000,
+        minuteLimit: 120,
+        dailyUsed: 830,
+        minuteUsed: 81,
+        usagePercent: 83,
+        status: "warning",
+        warningThresholdPercent: 80,
+        criticalThresholdPercent: 95,
+        policy: "provider_enforced",
+      },
+    });
+    mapGeofenceObservabilityService.recordGeocodeRequest({
+      operation: "search",
+      result: "resolved",
+      durationMs: 120,
+    });
+    mapGeofenceObservabilityService.recordGeocodeRequest({
+      operation: "resolve",
+      result: "provider_outage",
+      durationMs: 420,
+    });
+    mapGeofenceObservabilityService.recordGeoOutcome("provider_outage");
+    mapGeofenceObservabilityService.recordServiceAreaEvaluation({
+      decision: "not_serviceable",
+      policyDenied: true,
+    });
     const { service, callcenterService, reportingFilingService } =
-      createServiceFixture();
+      createServiceFixture(mapGeofenceObservabilityService);
 
-    const snapshot = service.getSnapshot(new Date("2026-04-30T10:30:00.000Z"));
+    const snapshot = await service.getSnapshot(
+      new Date("2026-04-30T10:30:00.000Z"),
+    );
 
     expect(callcenterService.listCallSessions).toHaveBeenCalled();
     expect(reportingFilingService.listReportJobs).toHaveBeenCalled();
@@ -833,6 +875,45 @@ describe("OperationalObservabilityService", () => {
       oldestManualFallbackLagMinutes: 16,
       oldestReconciliationLagMinutes: 24,
     });
+    expect(snapshot.mapGeofence).toMatchObject({
+      providerHealth: {
+        status: "unhealthy",
+        provider: "external-map",
+        mode: "external",
+        failClosed: true,
+        quota: {
+          usagePercent: 83,
+          status: "warning",
+        },
+      },
+      geo: {
+        providerOutageCount: 1,
+        requests: {
+          total: 2,
+          successful: 1,
+          providerErrorCount: 1,
+          successRatePercent: 50,
+          byOperation: {
+            search: 1,
+            resolve: 1,
+            reverse: 0,
+          },
+          byResult: {
+            resolved: 1,
+            providerOutage: 1,
+          },
+        },
+        latencyMs: {
+          count: 2,
+          average: 270,
+          max: 420,
+          p95: 420,
+        },
+      },
+      serviceArea: {
+        policyDenialCount: 1,
+      },
+    });
     expect(snapshot.adapterDetails).toEqual([
       expect.objectContaining({
         platformCode: "line-taxi",
@@ -850,6 +931,7 @@ describe("OperationalObservabilityService", () => {
         credentialStatus: "stub",
       }),
     ]);
+    expect(snapshot.phase2SandboxKpiDashboard).toBeNull();
 
     expect(snapshot.alerts).toEqual(
       expect.arrayContaining([
@@ -889,6 +971,12 @@ describe("OperationalObservabilityService", () => {
           measuredValue: 2,
           routes: ["ops", "platform"],
         }),
+        expect.objectContaining({
+          key: "map_provider_outage",
+          state: "warning",
+          measuredValue: 2,
+          routes: ["ops", "platform"],
+        }),
       ]),
     );
 
@@ -901,8 +989,13 @@ describe("OperationalObservabilityService", () => {
             "recording_backlog",
             "driver_state_lag",
             "adapter_degradation",
+            "map_provider_outage",
           ]),
-          focusAreas: expect.arrayContaining(["adapters", "forwarder_ops"]),
+          focusAreas: expect.arrayContaining([
+            "adapters",
+            "forwarder_ops",
+            "map_geofence",
+          ]),
         }),
         expect.objectContaining({
           route: "platform",
@@ -911,8 +1004,13 @@ describe("OperationalObservabilityService", () => {
             "webhook_failure_burst",
             "eligibility_review_backlog",
             "adapter_degradation",
+            "map_provider_outage",
           ]),
-          focusAreas: expect.arrayContaining(["adapters", "forwarder_ops"]),
+          focusAreas: expect.arrayContaining([
+            "adapters",
+            "forwarder_ops",
+            "map_geofence",
+          ]),
         }),
       ]),
     );

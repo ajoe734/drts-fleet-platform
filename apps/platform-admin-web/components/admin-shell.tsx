@@ -14,10 +14,13 @@ import {
   CreditCard,
   DollarSign,
   Flag,
+  FlaskConical,
   Handshake,
   Languages,
   LayoutDashboard,
+  MapPinned,
   Package,
+  Power,
   Radio,
   Search,
   Shield,
@@ -93,6 +96,8 @@ const sections: NavSection[] = [
   { key: "partner", labelKey: "adminShell.section.partner" },
   { key: "people", labelKey: "adminShell.section.people" },
   { key: "fleet", labelKey: "adminShell.section.fleet" },
+  { key: "sandbox", labelKey: "adminShell.section.sandbox" },
+  { key: "service-network", labelKey: "adminShell.section.serviceNetwork" },
   { key: "commerce", labelKey: "adminShell.section.commerce" },
   { key: "ops", labelKey: "adminShell.section.ops" },
 ];
@@ -151,6 +156,54 @@ const routes: NavRoute[] = [
     icon: Handshake,
     section: "fleet",
     labelKey: "adminShell.route.fleetPartners",
+  },
+  {
+    key: "sandbox",
+    icon: FlaskConical,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxExperiments",
+  },
+  {
+    key: "service-area-governance",
+    icon: MapPinned,
+    section: "service-network",
+    labelKey: "adminShell.route.serviceAreaGovernance",
+  },
+  {
+    key: "sandbox-suspend",
+    icon: Power,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxSuspend",
+  },
+  {
+    key: "sandbox-compliance",
+    icon: ShieldCheck,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxCompliance",
+  },
+  {
+    key: "sandbox-investigations",
+    icon: Search,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxInvestigations",
+  },
+  {
+    key: "sandbox-evidence-exports",
+    icon: Package,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxEvidenceExports",
+  },
+  {
+    key: "sandbox-legal-holds",
+    icon: Shield,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxLegalHolds",
+  },
+  {
+    key: "sandbox-regulatory-reports",
+    icon: ClipboardList,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxRegulatoryReports",
   },
   {
     key: "switchboard",
@@ -483,7 +536,10 @@ function Sidebar({
           </div>
         </div>
       </div>
-      <nav aria-label={labelFor(locale, "adminShell.nav.aria")} style={navStyle}>
+      <nav
+        aria-label={labelFor(locale, "adminShell.nav.aria")}
+        style={navStyle}
+      >
         {sections.map((section) => (
           <div key={section.key} style={{ display: "grid", gap: 1 }}>
             <div style={sectionTitleStyle}>
@@ -521,7 +577,10 @@ function RefreshTierBadge({ pathname }: { pathname: string }) {
 
 function SearchBox({ locale }: { locale: Locale }) {
   return (
-    <div aria-label={labelFor(locale, "adminShell.search.aria")} style={searchBoxStyle}>
+    <div
+      aria-label={labelFor(locale, "adminShell.search.aria")}
+      style={searchBoxStyle}
+    >
       <Search size={13} />
       <span style={searchTextStyle}>
         {labelFor(locale, "adminShell.search.placeholder")}

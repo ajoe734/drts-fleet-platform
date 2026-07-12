@@ -26,6 +26,11 @@
     "max_worker_history": 200,
     "auto_refresh_provider_capabilities": false,
     "git_reconcile_interval_seconds": 600,
+    "worker_workspace_cleanup": {
+      "enabled": true,
+      "archive_dirty_worktrees": true,
+      "force_remove_dirty_worktrees_after_archive": true
+    },
     "disk_guard": {
       "enabled": true,
       "path": ".",

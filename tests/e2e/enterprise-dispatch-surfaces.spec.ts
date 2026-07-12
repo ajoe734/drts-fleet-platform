@@ -1,5 +1,39 @@
 import { expect, test } from "@playwright/test";
 
+const enterpriseTenantId =
+  process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID ??
+  "10000000-0000-0000-0000-000000000201";
+const enterpriseCostCenterCode = "CC-PRD-07";
+const tenantConsoleBaseURL =
+  process.env.DRTS_DEV_TENANT_CONSOLE_BASE_URL ??
+  process.env.TENANT_CONSOLE_BASE_URL;
+
+function tenantHeaders(requestId: string) {
+  return {
+    "Content-Type": "application/json",
+    "x-actor-id": "enterprise-dispatch-e2e",
+    "x-actor-type": "tenant_admin",
+    "x-realm": "tenant",
+    "x-request-id": requestId,
+    "x-tenant-id": enterpriseTenantId,
+    "X-DRTS-E2E-Actor": "enterprise-dispatch-e2e",
+    "X-DRTS-E2E-Operation": "enterprise booking production chain",
+    "X-DRTS-E2E-Surface": "enterprise-dispatch-web",
+  };
+}
+
+function unwrapData(body: unknown): Record<string, unknown> {
+  if (body && typeof body === "object" && "data" in body) {
+    return (body as { data: Record<string, unknown> }).data;
+  }
+
+  return body as Record<string, unknown>;
+}
+
+function field(data: Record<string, unknown>, camel: string, snake: string) {
+  return data[camel] ?? data[snake];
+}
+
 const websiteRoutes = [
   { path: "/", marker: /嗨，林宜君，|企業派車|成本中心/ },
   { path: "/bookings", marker: /我的預約|費用歸屬|成本中心/ },
@@ -96,6 +130,134 @@ test.describe("enterprise dispatch surfaces", () => {
         /EB-7K2E1D|林宜君 · EB-|金額 NT\$/,
       );
     }
+  });
+
+  test("submits booking through the backend chain and proves read-back side effect", async ({
+    page,
+    request,
+  }) => {
+    const apiBaseURL = process.env.DRTS_DEV_API_BASE_URL;
+    test.skip(
+      !apiBaseURL ||
+        !process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL ||
+        !tenantConsoleBaseURL,
+      "requires deployed enterprise web, tenant console, and API URLs",
+    );
+
+    const setupResponse = await request.post(
+      `${apiBaseURL}/api/tenant/cost-centers`,
+      {
+        data: {
+          code: enterpriseCostCenterCode,
+          name: "Enterprise Dispatch E2E Guest Reception",
+          description:
+            "Ensures the UI booking submit chain has a real cost-center producer dependency.",
+          ownerName: "Enterprise Dispatch E2E",
+          activeFlag: true,
+        },
+        headers: tenantHeaders("enterprise-dispatch-e2e-cost-center"),
+      },
+    );
+    const setupBody = await setupResponse.text();
+    expect(
+      setupResponse.ok(),
+      `cost center setup should not be an unexplained empty dependency: ${setupResponse.status()} ${setupBody}`,
+    ).toBeTruthy();
+    const setupData = unwrapData(JSON.parse(setupBody) as unknown);
+    expect(field(setupData, "code", "code")).toBe(enterpriseCostCenterCode);
+
+    await page.goto("/bookings/review", { waitUntil: "domcontentloaded" });
+    const submitButton = page.getByTestId("enterprise-booking-submit");
+    await expect(submitButton).toHaveAttribute("data-ready", "true");
+    await expect(submitButton).toBeEnabled();
+
+    const bookingResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/control-plane-proxy/api/tenant/bookings") &&
+        response.request().method() === "POST",
+      { timeout: 30000 },
+    );
+    await submitButton.click();
+
+    const bookingResponse = await bookingResponsePromise;
+    const bookingResponseBody = await bookingResponse.text();
+    expect(
+      bookingResponse.ok(),
+      "booking submit POST must hit the proxy and return proof: " +
+        bookingResponse.status() +
+        " " +
+        bookingResponseBody,
+    ).toBeTruthy();
+    await expect(page).toHaveURL(
+      /\/bookings\/submitted\?.*bookingId=booking-/,
+      {
+        timeout: 30000,
+      },
+    );
+
+    const submittedUrl = new URL(page.url());
+    const bookingId = submittedUrl.searchParams.get("bookingId");
+    const orderId = submittedUrl.searchParams.get("orderId");
+    expect(bookingId).toBeTruthy();
+    expect(orderId).toBeTruthy();
+    await expect(
+      page.getByTestId("enterprise-booking-submission-proof"),
+    ).toContainText(bookingId!);
+    await expect(
+      page.getByTestId("enterprise-booking-submission-proof"),
+    ).toContainText(orderId!);
+    await expect(
+      page.getByTestId("enterprise-booking-submission-proof"),
+    ).toContainText("enterprise-dispatch-web");
+
+    const readBackResponse = await request.get(
+      `${apiBaseURL}/api/tenant/bookings/${encodeURIComponent(bookingId!)}`,
+      {
+        headers: tenantHeaders("enterprise-dispatch-e2e-read-back"),
+      },
+    );
+    const readBackBody = await readBackResponse.text();
+    expect(
+      readBackResponse.ok(),
+      `booking read-back should prove the POST side effect: ${readBackResponse.status()} ${readBackBody}`,
+    ).toBeTruthy();
+    const readBackData = unwrapData(JSON.parse(readBackBody) as unknown);
+
+    expect(field(readBackData, "bookingId", "booking_id")).toBe(bookingId);
+    expect(field(readBackData, "orderId", "order_id")).toBe(orderId);
+    expect(
+      field(
+        readBackData,
+        "businessDispatchSubtype",
+        "business_dispatch_subtype",
+      ),
+    ).toBe("enterprise_dispatch");
+    expect(field(readBackData, "costCenter", "cost_center")).toBe(
+      enterpriseCostCenterCode,
+    );
+
+    const tenantConsoleDetailUrl = new URL(
+      "/bookings/" + encodeURIComponent(bookingId!),
+      tenantConsoleBaseURL!,
+    );
+    const tenantConsoleResponse = await page.goto(
+      tenantConsoleDetailUrl.toString(),
+      { waitUntil: "domcontentloaded" },
+    );
+    expect(
+      Boolean(tenantConsoleResponse?.ok()) ||
+        tenantConsoleResponse?.status() === 304,
+      "tenant-console detail should open the enterprise-produced booking",
+    ).toBeTruthy();
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+    await expect(page.locator("body")).toContainText(bookingId!);
+    await expect(page.locator("body")).toContainText(orderId!);
+    await expect(page.locator("body")).toContainText("enterprise_dispatch");
+    await expect(page.locator("body")).toContainText(enterpriseCostCenterCode);
+    await expect(page.locator("body")).toContainText(/行程摘要|Trip summary/);
+    await expect(page.locator("body")).not.toContainText(
+      /No booking data exists yet|No booking data|fetch_failed|not_found/i,
+    );
   });
 
   test("keeps embed identity states compact and separate from website chrome", async ({

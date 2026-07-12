@@ -141,11 +141,15 @@ export default async function BookingDetailPage({
           <ECard
             t={t}
             title={tr("detail.card.progress")}
-            sub="timeline · cross-actor"
+            sub={tr("card.sub.timelineCrossActor")}
           >
             <ETimeline t={t} events={timeline} />
           </ECard>
-          <ECard t={t} title={tr("detail.card.trip")} sub="trip">
+          <ECard
+            t={t}
+            title={tr("detail.card.trip")}
+            sub={tr("card.sub.trip")}
+          >
             <EntRoute
               t={t}
               from={booking.from}
@@ -178,7 +182,11 @@ export default async function BookingDetailPage({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ECard t={t} title={tr("detail.card.driver")} sub="assigned">
+          <ECard
+            t={t}
+            title={tr("detail.card.driver")}
+            sub={tr("card.sub.assigned")}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
               <EAvatar t={t} name="張" size={48} />
               <div style={{ flex: 1 }}>
@@ -216,7 +224,11 @@ export default async function BookingDetailPage({
               </EBtn>
             </div>
           </ECard>
-          <ECard t={t} title={tr("detail.card.cost")} sub="cost · approval">
+          <ECard
+            t={t}
+            title={tr("detail.card.cost")}
+            sub={tr("card.sub.costApproval")}
+          >
             <ERow t={t} k={tr("new.field.costCenter")} v={booking.costCenter} />
             <ERow
               t={t}
@@ -235,7 +247,11 @@ export default async function BookingDetailPage({
               last
             />
           </ECard>
-          <ECard t={t} title={tr("detail.card.actions")} sub="availableActions">
+          <ECard
+            t={t}
+            title={tr("detail.card.actions")}
+            sub={tr("card.sub.availableActions")}
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <EBtn
                 t={t}

@@ -17,7 +17,10 @@ import type { ActionIntent, ResourceActionDescriptor } from "@drts/contracts";
 import { buildCanvasTheme, CanvasIcon } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import {
+  formatOpsActionLabel,
+  formatOpsCodeLabel,
+} from "@/lib/localized-labels";
 import {
   useOpsAssistantActionBridge,
   useOpsAssistantContext,
@@ -594,12 +597,17 @@ export function OpsAssistantWidget() {
   };
 
   const describeIntent = (intent: ActionIntent) =>
-    `${intent.resourceKind}:${intent.resourceId} · ${intent.action}`;
+    `${intent.resourceKind}:${intent.resourceId} · ${formatOpsActionLabel(
+      context?.locale ?? "en",
+      intent.action,
+    )}`;
 
   const buildAlternatives = (descriptors: ResourceActionDescriptor[]) => {
     const alternatives = descriptors
       .filter((descriptor) => descriptor.enabled)
-      .map((descriptor) => descriptor.action)
+      .map((descriptor) =>
+        formatOpsActionLabel(context?.locale ?? "en", descriptor.action),
+      )
       .slice(0, 3);
     return alternatives.length > 0
       ? t("opsAssistant.meta.available", {
@@ -678,7 +686,7 @@ export function OpsAssistantWidget() {
         author: "assistant",
         tone: "accent",
         message: t("opsAssistant.message.proposed", {
-          action: intent.action,
+          action: formatOpsActionLabel(context?.locale ?? "en", intent.action),
           resourceKind: intent.resourceKind,
           resourceId: intent.resourceId,
         }),
@@ -711,7 +719,10 @@ export function OpsAssistantWidget() {
         author: "assistant",
         tone: "danger",
         message: t("opsAssistant.message.unavailableAction", {
-          action: pendingIntent.action,
+          action: formatOpsActionLabel(
+            context?.locale ?? "en",
+            pendingIntent.action,
+          ),
         }),
         meta: buildAlternatives(actionBridge.availableActions),
       });
@@ -1053,7 +1064,10 @@ export function OpsAssistantWidget() {
                             }}
                           >
                             <span style={{ fontSize: 12.5, fontWeight: 700 }}>
-                              {action.action}
+                              {formatOpsActionLabel(
+                                context?.locale ?? "en",
+                                action.action,
+                              )}
                             </span>
                             <span
                               style={{
@@ -1101,7 +1115,10 @@ export function OpsAssistantWidget() {
                       >
                         <span style={{ fontSize: 12.5, color: theme.text }}>
                           {t("opsAssistant.bridge.pendingIntent", {
-                            action: pendingIntent.action,
+                            action: formatOpsActionLabel(
+                              context?.locale ?? "en",
+                              pendingIntent.action,
+                            ),
                           })}
                         </span>
                         <span

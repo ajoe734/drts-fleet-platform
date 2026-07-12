@@ -24,10 +24,10 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("W8-001A feature flags service (in-memory fallback)", () => {
-  it("seeds all 14 default Phase 1 flags", async () => {
+  it("seeds all 20 default Phase 1 and map rollout flags", async () => {
     const service = new FeatureFlagsService();
     const flags = await service.getAll();
-    expect(flags).toHaveLength(14);
+    expect(flags).toHaveLength(20);
   });
 
   it("returns correct flag keys for tenant-portal surface", async () => {

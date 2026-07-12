@@ -4,7 +4,8 @@ export type CanvasSurface =
   | "tenant"
   | "partner"
   | "enterprise"
-  | "bank";
+  | "bank"
+  | "roc";
 export type CanvasMode = "light" | "dark";
 export type CanvasDensity = "compact" | "comfy";
 
@@ -178,6 +179,24 @@ export const CANVAS_SURFACE_ACCENTS: Record<CanvasSurface, CanvasAccentScale> =
       darkBorder: "#21376A",
       name: "Bank Console",
       tagline: "發卡行方案監管台",
+    },
+    // ROC Console — 監理運營中心 (regulatory operations centre). Shares the Ops
+    // neutral-dark control-plane canvas (`buildCanvasTheme({ dark: true })`) but
+    // carries an independent blue/cyan accent so duty staff can tell the two
+    // control-plane apps apart. Decision packet §C2 / §4.3; the blue anchors on
+    // the `info` status tone (roc.accent.primary -> semantic.info.strong), the
+    // cyan `*Hi` is the secondary identity tone.
+    roc: {
+      light: "#1F5DB8",
+      lightHi: "#0E7490",
+      lightBg: "#E4EDFB",
+      lightBorder: "#B6CBEC",
+      dark: "#60A5FA",
+      darkHi: "#22D3EE",
+      darkBg: "#0F1F36",
+      darkBorder: "#1E3A5F",
+      name: "ROC Console",
+      tagline: "監理運營中心",
     },
   };
 

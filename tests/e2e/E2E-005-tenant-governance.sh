@@ -43,6 +43,10 @@ CC_NOAPP="CC-NOAPP-${SUFFIX}"
 CC_OPS="CC-OPS-${SUFFIX}"
 CC_FIN="CC-FIN-${SUFFIX}"
 CC_XTEN="CC-XTEN-${SUFFIX}"
+TAIPEI_CORE_PICKUP_LAT="25.0375"
+TAIPEI_CORE_PICKUP_LNG="121.5637"
+TAIPEI_CORE_DROPOFF_LAT="25.06"
+TAIPEI_CORE_DROPOFF_LNG="121.58"
 
 TENANT_ADMIN_USER_ID=""
 TENANT_FINANCE_USER_ID=""
@@ -91,12 +95,16 @@ write_booking_fixture() {
     --arg windowEnd "$window_end" \
     --arg costCenter "$cost_center" \
     --arg notes "$notes" \
+    --argjson pickupLat "$TAIPEI_CORE_PICKUP_LAT" \
+    --argjson pickupLng "$TAIPEI_CORE_PICKUP_LNG" \
+    --argjson dropoffLat "$TAIPEI_CORE_DROPOFF_LAT" \
+    --argjson dropoffLng "$TAIPEI_CORE_DROPOFF_LNG" \
     '{
       businessDispatchSubtype: "enterprise_dispatch",
       reservationWindowStart: $windowStart,
       reservationWindowEnd: $windowEnd,
-      pickup: { address: "Governance Pickup" },
-      dropoff: { address: "Governance Dropoff" },
+      pickup: { address: "Governance Pickup", lat: $pickupLat, lng: $pickupLng },
+      dropoff: { address: "Governance Dropoff", lat: $dropoffLat, lng: $dropoffLng },
       passenger: { name: "Governance Rider", phone: "0912000099" }
     }
     + (if $costCenter != "" then { costCenter: $costCenter } else {} end)

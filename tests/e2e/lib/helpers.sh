@@ -16,6 +16,9 @@ E2E_API_URL="${E2E_API_URL:-${SMOKE_API_URL:-http://localhost:3001}}"
 E2E_API_PATH_PREFIX="${E2E_API_PATH_PREFIX:-/api}"
 # Optional Cloud Run / ingress bearer token for private staging access.
 E2E_AUTH_BEARER_TOKEN="${E2E_AUTH_BEARER_TOKEN:-}"
+# Optional application bearer token. This uses x-drts-authorization so it does
+# not collide with Cloud Run / ingress Authorization headers.
+E2E_REQUEST_BEARER_TOKEN="${E2E_REQUEST_BEARER_TOKEN:-}"
 E2E_INTERNAL_KEY="${E2E_INTERNAL_KEY:-${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}}"
 
 # ── Bootstrap auth (overridden per surface leg via switch_actor) ───────────────
@@ -39,6 +42,7 @@ E2E_EXTRA_SCOPES="${E2E_EXTRA_SCOPES:-}"
 E2E_SEED_TENANT_ID="${E2E_SEED_TENANT_ID:-10000000-0000-0000-0000-000000000201}"
 E2E_SEED_DRIVER_ID="${E2E_SEED_DRIVER_ID:-10000000-0000-0000-0000-000000000381}"
 E2E_SEED_VEHICLE_ID="${E2E_SEED_VEHICLE_ID:-10000000-0000-0000-0000-000000000351}"
+E2E_BUSINESS_DRIVER_ID="${E2E_BUSINESS_DRIVER_ID:-10000000-0000-0000-0000-000000000383}"
 
 # ── Timing ────────────────────────────────────────────────────────────────────
 E2E_TIMEOUT="${E2E_TIMEOUT:-30}"
@@ -132,6 +136,10 @@ http_call() {
 
   if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
     curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
+
+  if [[ -n "$E2E_REQUEST_BEARER_TOKEN" ]]; then
+    curl_args+=(-H "x-drts-authorization: Bearer ${E2E_REQUEST_BEARER_TOKEN}")
   fi
 
   if [[ -n "$E2E_INTERNAL_KEY" ]]; then
@@ -263,6 +271,64 @@ save_evidence() {
   local scenario="$1" surface="$2" key="$3" value="$4"
   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") | ${scenario} | ${surface} | ${key}=${value}" \
     >> "$EVIDENCE_FILE"
+}
+
+prime_driver_location() {
+  local driver_id="$1"
+  local lat="${2:-25.0478}"
+  local lng="${3:-121.5319}"
+  local recorded_at="${4:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+  local fixture
+  fixture=$(mktemp /tmp/drts-e2e-driver-location-XXXXXX.json)
+  jq -n \
+    --arg driverId "$driver_id" \
+    --arg recordedAt "$recorded_at" \
+    --argjson lat "$lat" \
+    --argjson lng "$lng" \
+    '{
+      driverId: $driverId,
+      lat: $lat,
+      lng: $lng,
+      accuracyM: 15,
+      recordedAt: $recordedAt
+    }' > "$fixture"
+
+  http_call POST "/regulatory-registry/driver-location" "$fixture"
+  rm -f "$fixture"
+
+  case "$RESP_STATUS" in
+    200|201)
+      log_info "Primed driver location for ${driver_id}"
+      ;;
+    404)
+      log_info "Driver location prime skipped for ${driver_id}: driver not found"
+      ;;
+    *)
+      log_fail "Driver location prime failed for ${driver_id}: HTTP ${RESP_STATUS}"
+      log_fail "Body: ${RESP_BODY}"
+      return 1
+      ;;
+  esac
+}
+
+prime_enterprise_dispatch_supply_locations() {
+  local recorded_at="${1:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+  local driver_id
+  local seeded=()
+
+  for driver_id in \
+    "drv-demo-001" \
+    "drv-demo-004" \
+    "$E2E_SEED_DRIVER_ID" \
+    "$E2E_BUSINESS_DRIVER_ID"
+  do
+    [[ -n "$driver_id" ]] || continue
+    if [[ " ${seeded[*]} " == *" ${driver_id} "* ]]; then
+      continue
+    fi
+    prime_driver_location "$driver_id" 25.0478 121.5319 "$recorded_at"
+    seeded+=("$driver_id")
+  done
 }
 
 # ── Poll helper ───────────────────────────────────────────────────────────────
