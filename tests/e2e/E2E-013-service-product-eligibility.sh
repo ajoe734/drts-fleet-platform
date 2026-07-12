@@ -8,7 +8,7 @@
 #   1. Service product registry contains an active credit_card_airport_transfer product.
 #   2. Vehicle eligibility matrix is configured so taxi is ineligible and multi_purpose_taxi is eligible.
 #   3. Airport-transfer booking is created and read back with the expected subtype.
-#   4. Dispatch rejects the ineligible taxi with a service-product eligibility error.
+#   4. Assignment-time recheck rejects the ineligible taxi with 409 plus the latest eligibility reason.
 #   5. Dispatch candidates and positive assignment use the eligible airport-capable supply.
 set -euo pipefail
 
@@ -285,6 +285,7 @@ log_ok "Airport-transfer booking created: bookingId=${BOOKING_ID}, orderId=${ORD
 log_surface "Ops Console — dispatch eligibility enforcement"
 
 switch_actor "ops_user" "e2e-ops-001"
+prime_enterprise_dispatch_supply_locations
 
 DISPATCH_FIXTURE=$(mktemp /tmp/drts-e2e-013-dispatch-XXXXXX.json)
 printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
@@ -343,35 +344,41 @@ jq -n \
     driverId: $driverId
   }' > "$NEGATIVE_ASSIGN_FIXTURE"
 
-log_step "4.3 — POST /dispatch/assign (expect ineligible taxi rejection)"
+log_step "4.3 — POST /dispatch/assign (expect assignment-time eligibility recheck rejection)"
 http_call POST "/dispatch/assign" "$NEGATIVE_ASSIGN_FIXTURE"
-if [[ "${RESP_STATUS}" != "400" ]]; then
-  log_fail "Expected HTTP 400 for ineligible taxi assignment, got ${RESP_STATUS}"
+if [[ "${RESP_STATUS}" != "409" ]]; then
+  log_fail "Expected HTTP 409 for assignment-time eligibility change, got ${RESP_STATUS}"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi
 
 NEGATIVE_CODE=$(echo "$RESP_BODY" | jq -r '.error.code // empty' 2>/dev/null || true)
-# The default ineligible taxi (veh-demo-002) is a standard taxi (license type
-# `taxi`, so NOT eligible for the credit_card_airport_transfer service product)
-# AND is marked non-dispatchable in the demo supply. The /dispatch/assign guard
-# enforces supply dispatchability before service-product capability, so the
-# rejection surfaces as VEHICLE_NOT_DISPATCHABLE here; both codes prove an
-# ineligible taxi cannot be assigned to the airport-transfer order. (Exercising
-# the VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT path specifically needs a
-# dispatchable-yet-product-ineligible vehicle in the demo seed -- tracked as a
-# follow-up; see docs/04-uat/e2e-business-flow-verification-results-20260615.md.)
-case "$NEGATIVE_CODE" in
+if [[ "$NEGATIVE_CODE" != "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT" ]]; then
+  log_fail "Expected ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT, got '${NEGATIVE_CODE:-<empty>}'"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+fi
+
+NEGATIVE_REASON_CODE=$(echo "$RESP_BODY" | jq -r '.error.details.reason_codes[0] // empty' 2>/dev/null || true)
+case "$NEGATIVE_REASON_CODE" in
   VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT | VEHICLE_NOT_DISPATCHABLE) ;;
   *)
-    log_fail "Expected ineligible taxi rejection (VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT or VEHICLE_NOT_DISPATCHABLE), got '${NEGATIVE_CODE:-<empty>}'"
+    log_fail "Expected latest eligibility reason to show ineligible taxi rejection, got '${NEGATIVE_REASON_CODE:-<empty>}'"
     log_fail "Body: ${RESP_BODY}"
     exit 1
     ;;
 esac
 
+NEGATIVE_SERVICE_PRODUCT=$(echo "$RESP_BODY" | jq -r '.error.details.service_product_code // empty' 2>/dev/null || true)
+if [[ "$NEGATIVE_SERVICE_PRODUCT" != "$PRODUCT_TYPE" ]]; then
+  log_fail "Expected rejection to preserve service_product_code ${PRODUCT_TYPE}, got '${NEGATIVE_SERVICE_PRODUCT:-<empty>}'"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+fi
+
 save_evidence "$SCENARIO" "ops" "ineligibleTaxiCode" "$NEGATIVE_CODE"
-log_ok "Ineligible taxi rejected with ${NEGATIVE_CODE}"
+save_evidence "$SCENARIO" "ops" "ineligibleTaxiReasonCode" "$NEGATIVE_REASON_CODE"
+log_ok "Ineligible taxi rejected with ${NEGATIVE_CODE} (${NEGATIVE_REASON_CODE})"
 
 POSITIVE_ASSIGN_FIXTURE=$(mktemp /tmp/drts-e2e-013-assign-pos-XXXXXX.json)
 jq -n \

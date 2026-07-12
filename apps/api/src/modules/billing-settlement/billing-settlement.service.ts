@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
 
 import type {
   AddReconciliationIssueCommentCommand,
@@ -10,6 +11,7 @@ import type {
   CrossAppResourceLink,
   CreateReconciliationIssueCommand,
   DriverFeePlanRecord,
+  FulfillmentSegmentRecord,
   DriverStatementLineRecord,
   DriverStatementRecord,
   EmptyStateEnvelope,
@@ -24,6 +26,7 @@ import type {
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
   ResourceActionDescriptor,
+  SandboxBillingTreatmentRecord,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
   SettlementMatrixRecord,
@@ -74,6 +77,10 @@ import {
   type ReferralStatementStatus,
 } from "./referral-statement.types";
 import { ForwarderService } from "../forwarder/forwarder.service";
+import {
+  OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+  type OwnedMobilityTripCompletedEvent,
+} from "../owned-mobility/owned-mobility-events";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
@@ -402,12 +409,78 @@ export class BillingSettlementService implements OnModuleInit {
     platformFundedDiscount: { ...trip.platformFundedDiscount },
   }));
 
+  private readonly liveSettlementTrips = new Map<
+    string,
+    LiveSettlementTripRecord
+  >();
+
+  private fulfillmentSegments: FulfillmentSegmentRecord[] = [];
+
+  private sandboxBillingTreatments: SandboxBillingTreatmentRecord[] = [];
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     private readonly billingSettlementRepository?: BillingSettlementRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
   ) {}
+
+  @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
+  handleOwnedMobilityTripCompleted(event: OwnedMobilityTripCompletedEvent) {
+    if (
+      !event.tenantId ||
+      !event.driverId ||
+      !event.orderId ||
+      event.serviceBucket !== "business_dispatch" ||
+      !event.businessDispatchSubtype ||
+      Number.isNaN(new Date(event.completedAt).getTime())
+    ) {
+      return;
+    }
+
+    this.liveSettlementTrips.set(event.orderId, {
+      ...event,
+      grossEarning: { ...event.grossEarning },
+    });
+    if (event.sandboxFulfillmentSegments?.length) {
+      this.fulfillmentSegments = this.mergeFulfillmentSegments(
+        this.fulfillmentSegments,
+        event.sandboxFulfillmentSegments,
+      );
+    }
+    if (event.sandboxBillingTreatment) {
+      this.sandboxBillingTreatments = this.mergeSandboxBillingTreatments(
+        this.sandboxBillingTreatments,
+        [event.sandboxBillingTreatment],
+      );
+    }
+    if (
+      event.sandboxFulfillmentSegments?.length ||
+      event.sandboxBillingTreatment
+    ) {
+      this.persistChanges(
+        {
+          ...(event.sandboxFulfillmentSegments?.length
+            ? {
+                fulfillmentSegments: event.sandboxFulfillmentSegments.map(
+                  (segment) => this.cloneFulfillmentSegment(segment),
+                ),
+              }
+            : {}),
+          ...(event.sandboxBillingTreatment
+            ? {
+                sandboxBillingTreatments: [
+                  this.cloneSandboxBillingTreatment(
+                    event.sandboxBillingTreatment,
+                  ),
+                ],
+              }
+            : {}),
+        },
+        "owned_mobility_trip_completed_sandbox_ledger",
+      );
+    }
+  }
 
   async onModuleInit() {
     if (!this.billingSettlementRepository) {
@@ -422,7 +495,9 @@ export class BillingSettlementService implements OnModuleInit {
         persistedState.driverFeePlans.length > 0 ||
         persistedState.driverStatements.length > 0 ||
         persistedState.reimbursementBatches.length > 0 ||
-        persistedState.reconciliationIssues.length > 0;
+        persistedState.reconciliationIssues.length > 0 ||
+        persistedState.fulfillmentSegments.length > 0 ||
+        persistedState.sandboxBillingTreatments.length > 0;
 
       if (!hasPersistedState) {
         this.persistChanges(
@@ -455,6 +530,13 @@ export class BillingSettlementService implements OnModuleInit {
       this.reimbursementBatches = persistedState.reimbursementBatches.map(
         (batch) => this.cloneReimbursementBatch(batch),
       );
+      this.fulfillmentSegments = persistedState.fulfillmentSegments.map(
+        (segment) => this.cloneFulfillmentSegment(segment),
+      );
+      this.sandboxBillingTreatments =
+        persistedState.sandboxBillingTreatments.map((treatment) =>
+          this.cloneSandboxBillingTreatment(treatment),
+        );
       this.reconciliationIssues =
         persistedState.reconciliationIssues.length > 0
           ? persistedState.reconciliationIssues.map((issue) =>
@@ -1318,6 +1400,20 @@ export class BillingSettlementService implements OnModuleInit {
       .map((batch) => this.cloneReimbursementBatch(batch));
   }
 
+  listFulfillmentSegments(orderId?: string) {
+    return this.fulfillmentSegments
+      .filter((segment) => !orderId || segment.orderId === orderId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((segment) => this.cloneFulfillmentSegment(segment));
+  }
+
+  listSandboxBillingTreatments(orderId?: string) {
+    return this.sandboxBillingTreatments
+      .filter((treatment) => !orderId || treatment.orderId === orderId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map((treatment) => this.cloneSandboxBillingTreatment(treatment));
+  }
+
   listReconciliationIssues(filters: ReconciliationIssueFilters = {}) {
     this.syncDerivedForwarderIssues();
     return this.reconciliationIssues
@@ -1855,6 +1951,17 @@ export class BillingSettlementService implements OnModuleInit {
         months.add(this.toPeriodMonth(trip.completedAt));
       }
     }
+    for (const trip of this.liveSettlementTrips.values()) {
+      if (
+        trip.tenantId === tenantId &&
+        settlementChannelKeyForTrip(trip) ===
+          SETTLEMENT_STATEMENT_CHANNEL_KEY &&
+        Boolean(trip.benefitReference) &&
+        Boolean(trip.issuerAuthorizationRef)
+      ) {
+        months.add(this.toPeriodMonth(trip.completedAt));
+      }
+    }
     // Live repository periods can exist without any matching seed trip; union
     // them in so GET /settlement-statements is not limited to seed memory.
     for (const periodMonth of await this.listLiveCardBenefitSettlementPeriods(
@@ -2269,8 +2376,19 @@ export class BillingSettlementService implements OnModuleInit {
     periodStart: string,
     periodEnd: string,
   ) {
+    const liveTripMap = new Map<string, LiveSettlementTripRecord>();
+    for (const trip of this.listInMemoryLiveSettlementTripsInPeriod(
+      periodStart,
+      periodEnd,
+      { tenantId },
+    )) {
+      liveTripMap.set(trip.orderId, trip);
+    }
+
     if (!this.billingSettlementRepository?.isEnabled()) {
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
 
     try {
@@ -2280,13 +2398,20 @@ export class BillingSettlementService implements OnModuleInit {
           periodStart,
           periodEnd,
         );
-      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
+      for (const trip of trips) {
+        liveTripMap.set(trip.orderId, trip);
+      }
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     } catch (error) {
       this.billingSettlementRepository.reportPersistenceFailure(
         error,
         "list_live_completed_tenant_trips",
       );
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
   }
 
@@ -2295,8 +2420,19 @@ export class BillingSettlementService implements OnModuleInit {
     periodEnd: string,
     driverId?: string,
   ) {
+    const liveTripMap = new Map<string, LiveSettlementTripRecord>();
+    for (const trip of this.listInMemoryLiveSettlementTripsInPeriod(
+      periodStart,
+      periodEnd,
+      driverId ? { driverId } : {},
+    )) {
+      liveTripMap.set(trip.orderId, trip);
+    }
+
     if (!this.billingSettlementRepository?.isEnabled()) {
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
 
     try {
@@ -2310,7 +2446,12 @@ export class BillingSettlementService implements OnModuleInit {
             periodStart,
             periodEnd,
           );
-      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
+      for (const trip of trips) {
+        liveTripMap.set(trip.orderId, trip);
+      }
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     } catch (error) {
       this.billingSettlementRepository.reportPersistenceFailure(
         error,
@@ -2318,8 +2459,30 @@ export class BillingSettlementService implements OnModuleInit {
           ? "list_live_driver_trips_in_period_for_driver"
           : "list_live_driver_trips_in_period",
       );
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
+  }
+
+  private listInMemoryLiveSettlementTripsInPeriod(
+    periodStart: string,
+    periodEnd: string,
+    filter: { tenantId?: string; driverId?: string } = {},
+  ) {
+    const start = new Date(periodStart).getTime();
+    const end = new Date(periodEnd).getTime();
+
+    return [...this.liveSettlementTrips.values()].filter((trip) => {
+      const completedAt = new Date(trip.completedAt).getTime();
+      return (
+        !Number.isNaN(completedAt) &&
+        completedAt >= start &&
+        completedAt <= end &&
+        (!filter.tenantId || trip.tenantId === filter.tenantId) &&
+        (!filter.driverId || trip.driverId === filter.driverId)
+      );
+    });
   }
 
   private async resolveTenantSettlementPeriodMonth(
@@ -2337,8 +2500,13 @@ export class BillingSettlementService implements OnModuleInit {
     const invoiceMonths = this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
       .map((invoice) => this.toPeriodMonth(invoice.periodStart));
+    const liveMonths = [...this.liveSettlementTrips.values()]
+      .filter((trip) => trip.tenantId === tenantId)
+      .map((trip) => this.toPeriodMonth(trip.completedAt));
 
-    const latestPeriodMonth = [...seededMonths, ...invoiceMonths].sort().at(-1);
+    const latestPeriodMonth = [...seededMonths, ...invoiceMonths, ...liveMonths]
+      .sort()
+      .at(-1);
     return latestPeriodMonth ?? this.toPeriodMonth(new Date().toISOString());
   }
 
@@ -2429,6 +2597,11 @@ export class BillingSettlementService implements OnModuleInit {
     const platformFundedDiscount = isCardBenefitTrip
       ? { ...trip.grossEarning }
       : this.money(0);
+    const latestSandboxTreatment = this.findSandboxBillingTreatmentForOrder(
+      trip.orderId,
+    );
+    const eligibleForDriverStatement =
+      latestSandboxTreatment?.treatmentType === "normal_av" ? false : true;
 
     return {
       settlementId: `settlement-live-${trip.orderId}`,
@@ -2442,7 +2615,7 @@ export class BillingSettlementService implements OnModuleInit {
       platformFundedDiscount,
       pricingVersionSnapshot: LIVE_SETTLEMENT_PRICING_VERSION,
       eligibleForTenantInvoice: true,
-      eligibleForDriverStatement: true,
+      eligibleForDriverStatement,
       serviceBucket: "business_dispatch",
       businessDispatchSubtype:
         trip.businessDispatchSubtype ?? "enterprise_dispatch",
@@ -2693,6 +2866,38 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
+  private cloneFulfillmentSegment(
+    segment: FulfillmentSegmentRecord,
+  ): FulfillmentSegmentRecord {
+    return {
+      ...segment,
+      cost: segment.cost ? { ...segment.cost } : null,
+    };
+  }
+
+  private cloneSandboxBillingTreatment(
+    treatment: SandboxBillingTreatmentRecord,
+  ): SandboxBillingTreatmentRecord {
+    return {
+      ...treatment,
+      passengerExtraCharge: { ...treatment.passengerExtraCharge },
+      internalAvCost: treatment.internalAvCost
+        ? { ...treatment.internalAvCost }
+        : null,
+      internalHumanFallbackCost: treatment.internalHumanFallbackCost
+        ? { ...treatment.internalHumanFallbackCost }
+        : null,
+      partnerCharge: treatment.partnerCharge
+        ? { ...treatment.partnerCharge }
+        : null,
+      tenantCharge: treatment.tenantCharge ? { ...treatment.tenantCharge } : null,
+      platformAbsorbed: treatment.platformAbsorbed
+        ? { ...treatment.platformAbsorbed }
+        : null,
+      treatmentSnapshot: { ...treatment.treatmentSnapshot },
+    };
+  }
+
   private cloneStatement(statement: DriverStatementRecord) {
     return {
       ...statement,
@@ -2735,6 +2940,50 @@ export class BillingSettlementService implements OnModuleInit {
         artifactIds: [...comment.artifactIds],
       })),
     };
+  }
+
+  private mergeFulfillmentSegments(
+    current: readonly FulfillmentSegmentRecord[],
+    incoming: readonly FulfillmentSegmentRecord[],
+  ) {
+    const merged = new Map(
+      current.map((segment) => [
+        segment.fulfillmentSegmentId,
+        this.cloneFulfillmentSegment(segment),
+      ]),
+    );
+    for (const segment of incoming) {
+      merged.set(
+        segment.fulfillmentSegmentId,
+        this.cloneFulfillmentSegment(segment),
+      );
+    }
+    return [...merged.values()];
+  }
+
+  private mergeSandboxBillingTreatments(
+    current: readonly SandboxBillingTreatmentRecord[],
+    incoming: readonly SandboxBillingTreatmentRecord[],
+  ) {
+    const merged = new Map(
+      current.map((treatment) => [
+        treatment.sandboxBillingTreatmentId,
+        this.cloneSandboxBillingTreatment(treatment),
+      ]),
+    );
+    for (const treatment of incoming) {
+      merged.set(
+        treatment.sandboxBillingTreatmentId,
+        this.cloneSandboxBillingTreatment(treatment),
+      );
+    }
+    return [...merged.values()];
+  }
+
+  private findSandboxBillingTreatmentForOrder(orderId: string) {
+    return this.sandboxBillingTreatments
+      .filter((treatment) => treatment.orderId === orderId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   }
 
   private createIssueComment(

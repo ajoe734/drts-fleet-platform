@@ -1,5 +1,10 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
+import type {
+  SandboxAuthorizationStatus,
+  SandboxComplianceSnapshotRecord,
+} from "./phase2-tesla-fsd-sandbox";
 import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
@@ -9,8 +14,22 @@ import type {
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "./ui-runtime";
+import type {
+  PassengerDisclosureRequirementSnapshot,
+  RecordPassengerAcknowledgementCommand,
+  SandboxDispatchAssignmentSnapshot,
+} from "./phase2-tesla-fsd-sandbox";
 
 export * from "./referral-channel";
+export type {
+  RequestSandboxRegulatorCaseExportCommand,
+  SandboxFulfillmentProjectionView,
+  SandboxRegulatorCaseAccessLogRecord,
+  SandboxRegulatorCaseBundleState,
+  SandboxRegulatorCaseNotificationState,
+  SandboxRegulatorCaseSummary,
+  SandboxRegulatorCaseView,
+} from "./phase2-tesla-fsd-sandbox";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -68,6 +87,534 @@ export const SERVICE_PRODUCT_TYPES = [
   "third_party_forwarded_order",
 ] as const;
 export type ServiceProductType = (typeof SERVICE_PRODUCT_TYPES)[number];
+
+export type GeoPoint = {
+  lat: number;
+  lng: number;
+};
+
+export const GEO_COORDINATE_SOURCES = [
+  "provider_candidate",
+  "manual_pin",
+  "saved_address",
+  "reverse_geocode",
+  "external_platform",
+  "legacy_text",
+] as const;
+export type GeoCoordinateSource = (typeof GEO_COORDINATE_SOURCES)[number];
+
+export const GEO_GEOCODE_CONFIDENCE_LEVELS = [
+  "exact",
+  "interpolated",
+  "approximate",
+  "manual",
+  "unknown",
+] as const;
+export type GeoGeocodeConfidence =
+  (typeof GEO_GEOCODE_CONFIDENCE_LEVELS)[number];
+
+export const GEO_RESOLUTION_SURFACES = [
+  "api",
+  "callcenter",
+  "ops_console",
+  "platform_admin",
+  "tenant_console",
+  "tenant_portal",
+  "concierge_portal",
+  "partner_booking",
+  "passenger_entry",
+  "driver_app",
+  "unknown",
+] as const;
+export type GeoResolutionSurface = (typeof GEO_RESOLUTION_SURFACES)[number];
+
+export interface GeoCoordinateProvenance {
+  coordinateSource: GeoCoordinateSource;
+  geocodeProvider?: string | null;
+  geocodeConfidence?: GeoGeocodeConfidence | null;
+  providerCandidateId?: string | null;
+  placeId?: string | null;
+  coordinateAccuracyM?: number | null;
+  selectedByActorId?: string | null;
+  selectedAt?: string | null;
+  pinnedByActorId?: string | null;
+  pinnedAt?: string | null;
+  manualOverrideReason?: string | null;
+  surface?: GeoResolutionSurface | null;
+}
+
+export interface GeocodeCandidate {
+  candidateId: string;
+  provider: string;
+  providerCandidateId?: string | null;
+  placeId?: string | null;
+  displayName: string;
+  address: string;
+  normalizedAddress?: string | null;
+  district?: string | null;
+  locality?: string | null;
+  countryCode?: string | null;
+  location?: GeoPoint | null;
+  confidence: GeoGeocodeConfidence;
+  accuracyM?: number | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SearchGeoQuery {
+  q: string;
+  near?: GeoPoint | null;
+  locale?: string;
+  limit?: number;
+  surface?: GeoResolutionSurface;
+  requestedByActorId?: string | null;
+}
+
+export interface ResolveAddressCommand {
+  candidateId?: string | null;
+  providerCandidateId?: string | null;
+  placeId?: string | null;
+  addressText: string;
+  selectedPoint?: GeoPoint | null;
+  selectedByActorId?: string | null;
+  surface: GeoResolutionSurface;
+  manualOverrideReason?: string | null;
+}
+
+export interface ReverseGeocodeCommand {
+  location: GeoPoint;
+  locale?: string;
+  surface: GeoResolutionSurface;
+  requestedByActorId?: string | null;
+}
+
+export interface GeoSearchResponse {
+  candidates: GeocodeCandidate[];
+  provider: string;
+  generatedAt: string;
+  degraded?: boolean;
+  reasonCode?: string | null;
+}
+
+export interface GeoResolveResponse {
+  address: ResolvedAddressPayload;
+  candidate?: GeocodeCandidate | null;
+  provider: string;
+  resolvedAt: string;
+}
+
+export interface GeoReverseResponse {
+  address: ResolvedAddressPayload;
+  provider: string;
+  resolvedAt: string;
+}
+
+export const GEO_PROVIDER_MODES = ["mock", "external", "disabled"] as const;
+export type GeoProviderMode = (typeof GEO_PROVIDER_MODES)[number];
+
+export const GEO_PROVIDER_OPERATIONAL_STATUSES = [
+  "healthy",
+  "degraded",
+  "unhealthy",
+] as const;
+export type GeoProviderOperationalStatus =
+  (typeof GEO_PROVIDER_OPERATIONAL_STATUSES)[number];
+
+export const GEO_PROVIDER_HEALTH_CHECK_STATUSES = [
+  "pass",
+  "warn",
+  "fail",
+] as const;
+export type GeoProviderHealthCheckStatus =
+  (typeof GEO_PROVIDER_HEALTH_CHECK_STATUSES)[number];
+
+export const GEO_PROVIDER_QUOTA_STATUSES = [
+  "unknown",
+  "healthy",
+  "warning",
+  "critical",
+] as const;
+export type GeoProviderQuotaStatus =
+  (typeof GEO_PROVIDER_QUOTA_STATUSES)[number];
+
+export interface GeoProviderHealthCheck {
+  name: string;
+  status: GeoProviderHealthCheckStatus;
+  message: string;
+}
+
+export interface GeoProviderHealthResponse {
+  provider: string;
+  mode: GeoProviderMode;
+  status: GeoProviderOperationalStatus;
+  environment: string;
+  generatedAt: string;
+  failClosed: boolean;
+  mockAllowed: boolean;
+  requiredSecretNames: string[];
+  missingSecretNames: string[];
+  quota: {
+    dailyLimit: number | null;
+    minuteLimit: number | null;
+    dailyUsed: number | null;
+    minuteUsed: number | null;
+    usagePercent: number | null;
+    status: GeoProviderQuotaStatus;
+    warningThresholdPercent: number;
+    criticalThresholdPercent: number;
+    policy: "mock_unlimited" | "provider_enforced";
+  };
+  keyRestrictions: {
+    browserAllowedOrigins: string[];
+    mobileBundleIds: string[];
+    mobilePackageNames: string[];
+    serverKeyConfigured: boolean;
+    browserKeyConfigured: boolean;
+  };
+  checks: GeoProviderHealthCheck[];
+}
+
+export function isValidLatitude(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= -90 &&
+    value <= 90
+  );
+}
+
+export function isValidLongitude(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= -180 &&
+    value <= 180
+  );
+}
+
+export function isValidGeoPoint(value: unknown): value is GeoPoint {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<GeoPoint>;
+  return isValidLatitude(candidate.lat) && isValidLongitude(candidate.lng);
+}
+
+export function hasAddressCoordinates(
+  value: Pick<AddressPayload, "lat" | "lng"> | null | undefined,
+): boolean {
+  return isValidLatitude(value?.lat) && isValidLongitude(value?.lng);
+}
+
+export function hasAddressCoordinateProvenance(
+  value: AddressPayload | null | undefined,
+): boolean {
+  if (!hasAddressCoordinates(value)) {
+    return false;
+  }
+  return Boolean(
+    value?.coordinateSource ||
+    value?.geocodeProvider ||
+    value?.placeId ||
+    value?.pinnedByActorId ||
+    value?.pinnedAt,
+  );
+}
+
+export type GeoPolygon = {
+  type: "polygon";
+  coordinates: GeoPoint[];
+};
+
+export type GeoCircle = {
+  type: "circle";
+  center: GeoPoint;
+  radiusMeters: number;
+};
+
+export type ServiceAreaGeometry = GeoPolygon | GeoCircle;
+
+export const SERVICE_AREA_RECORD_STATUSES = [
+  "draft",
+  "review",
+  "active",
+  "retired",
+] as const;
+export type ServiceAreaRecordStatus =
+  (typeof SERVICE_AREA_RECORD_STATUSES)[number];
+
+export interface ServiceAreaBoundaryRecord {
+  serviceAreaId: string;
+  areaCode: string;
+  displayName: string;
+  status: ServiceAreaRecordStatus;
+  geometry: ServiceAreaGeometry;
+  serviceProductTypes: ServiceProductType[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  version: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const STOP_POLICY_DIRECTIONS = ["pickup", "dropoff", "both"] as const;
+export type StopPolicyDirection = (typeof STOP_POLICY_DIRECTIONS)[number];
+
+export const STOP_POLICY_EFFECTS = ["allow", "deny", "manual_review"] as const;
+export type StopPolicyEffect = (typeof STOP_POLICY_EFFECTS)[number];
+
+export interface StopPolicyRecord {
+  stopPolicyId: string;
+  policyCode: string;
+  displayName: string;
+  status: ServiceAreaRecordStatus;
+  direction: StopPolicyDirection;
+  effect: StopPolicyEffect;
+  geometry: ServiceAreaGeometry;
+  serviceAreaCodes: string[];
+  serviceProductTypes: ServiceProductType[];
+  reasonCode: string;
+  reasonMessage: string;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  version: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ServiceAreaEvaluationStopKind = "pickup" | "dropoff";
+
+export interface ServiceAreaEvaluationStop {
+  kind: ServiceAreaEvaluationStopKind;
+  location: GeoPoint;
+}
+
+export interface EvaluateServiceAreaCommand {
+  serviceProductType: ServiceProductType;
+  pickup: GeoPoint;
+  dropoff?: GeoPoint | null;
+  requestedAt?: string;
+}
+
+export const SERVICE_AREA_EVALUATION_DECISIONS = [
+  "serviceable",
+  "manual_review",
+  "not_serviceable",
+] as const;
+export type ServiceAreaEvaluationDecision =
+  (typeof SERVICE_AREA_EVALUATION_DECISIONS)[number];
+
+export interface ServiceAreaStopEvaluation {
+  kind: ServiceAreaEvaluationStopKind;
+  location: GeoPoint;
+  serviceAreaCodes: string[];
+  policyCodes: string[];
+  geometryVersionRefs: string[];
+  decision: ServiceAreaEvaluationDecision;
+  reasonCodes: string[];
+  reasonMessages: string[];
+}
+
+export interface ServiceAreaEvaluationResult {
+  decision: ServiceAreaEvaluationDecision;
+  serviceProductType: ServiceProductType;
+  evaluatedAt: string;
+  stops: ServiceAreaStopEvaluation[];
+  serviceAreaCodes: string[];
+  geometryVersionRefs: string[];
+  reasonCodes: string[];
+  reasonMessages: string[];
+}
+
+export interface ServiceAreaDefinitionsResponse {
+  serviceAreas: ServiceAreaBoundaryRecord[];
+  stopPolicies: StopPolicyRecord[];
+  generatedAt: string;
+}
+
+export type ServiceAreaGeoJsonGeometry = {
+  type: "Polygon";
+  coordinates: number[][][];
+};
+
+export type ServiceAreaGeoJsonFeatureProperties =
+  | {
+      recordKind: "service_area";
+      serviceAreaId: string;
+      areaCode: string;
+      displayName: string;
+      status: ServiceAreaRecordStatus;
+      sourceGeometry: ServiceAreaGeometry;
+      serviceProductTypes: ServiceProductType[];
+      effectiveFrom: string;
+      effectiveUntil: string | null;
+      version: number;
+      geometryVersionRef: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      recordKind: "stop_policy";
+      stopPolicyId: string;
+      policyCode: string;
+      displayName: string;
+      status: ServiceAreaRecordStatus;
+      direction: StopPolicyDirection;
+      effect: StopPolicyEffect;
+      sourceGeometry: ServiceAreaGeometry;
+      serviceAreaCodes: string[];
+      serviceProductTypes: ServiceProductType[];
+      reasonCode: string;
+      reasonMessage: string;
+      effectiveFrom: string;
+      effectiveUntil: string | null;
+      version: number;
+      geometryVersionRef: string;
+      metadata?: Record<string, unknown>;
+    };
+
+export interface ServiceAreaGeoJsonFeature {
+  type: "Feature";
+  id: string;
+  geometry: ServiceAreaGeoJsonGeometry;
+  properties: ServiceAreaGeoJsonFeatureProperties;
+}
+
+export interface ServiceAreaGeoJsonResponse {
+  type: "FeatureCollection";
+  features: ServiceAreaGeoJsonFeature[];
+  generatedAt: string;
+}
+
+export interface CreateServiceAreaBoundaryCommand {
+  areaCode: string;
+  displayName: string;
+  geometry: ServiceAreaGeometry;
+  serviceProductTypes: ServiceProductType[];
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateServiceAreaBoundaryCommand {
+  displayName?: string;
+  geometry?: ServiceAreaGeometry;
+  serviceProductTypes?: ServiceProductType[];
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PublishServiceAreaBoundaryCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface RetireServiceAreaBoundaryCommand {
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface CreateStopPolicyCommand {
+  policyCode: string;
+  displayName: string;
+  direction: StopPolicyDirection;
+  effect: StopPolicyEffect;
+  geometry: ServiceAreaGeometry;
+  serviceAreaCodes: string[];
+  serviceProductTypes: ServiceProductType[];
+  reasonCode: string;
+  reasonMessage: string;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateStopPolicyCommand {
+  displayName?: string;
+  direction?: StopPolicyDirection;
+  effect?: StopPolicyEffect;
+  geometry?: ServiceAreaGeometry;
+  serviceAreaCodes?: string[];
+  serviceProductTypes?: ServiceProductType[];
+  reasonCode?: string;
+  reasonMessage?: string;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PublishStopPolicyCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface RetireStopPolicyCommand {
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface ServiceAreaAdminMutationResponse {
+  serviceArea?: ServiceAreaBoundaryRecord;
+  stopPolicy?: StopPolicyRecord;
+  auditId: string | null;
+  generatedAt: string;
+}
+
+export const OWNED_ORDER_SPATIAL_AUDIT_REASONS = [
+  "booking_creation",
+  "legacy_backfill",
+] as const;
+export type OwnedOrderSpatialAuditReason =
+  (typeof OWNED_ORDER_SPATIAL_AUDIT_REASONS)[number];
+
+export const OWNED_ORDER_SPATIAL_AUDIT_DECISIONS = [
+  "serviceable",
+  "manual_review",
+  "not_serviceable",
+  "not_evaluated",
+] as const;
+export type OwnedOrderSpatialAuditDecision =
+  (typeof OWNED_ORDER_SPATIAL_AUDIT_DECISIONS)[number];
+
+export interface OwnedOrderSpatialAuditStopSnapshot {
+  kind: ServiceAreaEvaluationStopKind;
+  addressText: string;
+  location: GeoPoint | null;
+  coordinateProvenance: GeoCoordinateProvenance | null;
+  provenanceComplete: boolean;
+  missingItems: string[];
+}
+
+export interface OwnedOrderSpatialAuditEventRef {
+  auditId: string;
+  actionName: string;
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  createdAt: string;
+}
+
+export interface OwnedOrderSpatialAuditSnapshot {
+  snapshotId: string;
+  snapshotVersion: 1;
+  capturedAt: string;
+  capturedReason: OwnedOrderSpatialAuditReason;
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  surface: GeoResolutionSurface;
+  serviceProductType: ServiceProductType | null;
+  decision: OwnedOrderSpatialAuditDecision;
+  stops: OwnedOrderSpatialAuditStopSnapshot[];
+  serviceAreaEvaluation: ServiceAreaEvaluationResult | null;
+  serviceAreaCodes: string[];
+  geometryVersionRefs: string[];
+  reasonCodes: string[];
+  reasonMessages: string[];
+  missingItems: string[];
+  auditEvents: OwnedOrderSpatialAuditEventRef[];
+}
 
 export const VEHICLE_LICENSE_TYPES = [
   "taxi",
@@ -2014,6 +2561,27 @@ export interface AddressPayload {
   sensitive?: boolean;
   lat?: number | null;
   lng?: number | null;
+  placeId?: string | null;
+  geocodeProvider?: string | null;
+  geocodeConfidence?: GeoGeocodeConfidence | null;
+  coordinateSource?: GeoCoordinateSource | null;
+  coordinateAccuracyM?: number | null;
+  providerCandidateId?: string | null;
+  selectedByActorId?: string | null;
+  selectedAt?: string | null;
+  pinnedByActorId?: string | null;
+  pinnedAt?: string | null;
+  manualOverrideReason?: string | null;
+  surface?: GeoResolutionSurface | null;
+  coordinateProvenance?: GeoCoordinateProvenance | null;
+}
+
+export interface ResolvedAddressPayload extends AddressPayload {
+  lat: number;
+  lng: number;
+  coordinateSource: GeoCoordinateSource;
+  geocodeConfidence: GeoGeocodeConfidence;
+  resolvedAt: string;
 }
 
 export interface PassengerProfile {
@@ -2083,6 +2651,8 @@ export const COMPLIANCE_GATE_TYPES = [
   "recording",
   "proof",
   "eligibility",
+  "service_area",
+  "address_capture",
 ] as const;
 export type ComplianceGateType = (typeof COMPLIANCE_GATE_TYPES)[number];
 
@@ -2141,6 +2711,13 @@ export interface CreateOwnedOrderCommand {
   paymentMethod?: "cash" | "card";
 }
 
+export interface CallCenterMapFallbackReview {
+  reasonCode: string;
+  providerAvailable: boolean;
+  providerDegraded: boolean;
+  providerReasonCode?: string | null;
+}
+
 export interface CreateCallCenterOrderCommand {
   callId: string;
   agentId: string;
@@ -2149,6 +2726,7 @@ export interface CreateCallCenterOrderCommand {
   dropoff: AddressPayload;
   passenger: PassengerProfile;
   notes?: string;
+  mapFallbackReview?: CallCenterMapFallbackReview | null;
 }
 
 export interface CreateTenantBookingCommand {
@@ -2185,6 +2763,7 @@ export interface CreateTenantBookingCommand {
   quotedFareRuleVersion?: string;
   minPhotoCount?: number;
   expenseProofRequired?: boolean;
+  passengerDisclosureAcknowledgement?: RecordPassengerAcknowledgementCommand;
 }
 
 export interface UpdateTenantBookingCommand {
@@ -2270,6 +2849,7 @@ export interface AssignDispatchCommand {
   dispatchJobId: string;
   vehicleId: string;
   driverId: string;
+  sandboxDispatchSnapshot?: SandboxDispatchAssignmentSnapshot | null;
 }
 
 export interface ReassignDispatchCommand {
@@ -2345,9 +2925,15 @@ export interface OwnedOrderRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
+  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   serviceBucket: Phase1ServiceBucket;
   dispatchSemantics: DispatchSemantics;
   businessDispatchSubtype: BusinessDispatchSubtype | null;
+  // Precise service-product code resolved once at booking intake and carried
+  // (not re-derived) through dispatch → candidate → assignment → task →
+  // settlement. Optional for legacy/in-flight orders persisted before this
+  // field existed; consumers fall back to deriving it from the bucket/subtype.
+  serviceProductCode?: ServiceProductType | null;
   status: OwnedOrderStatus;
   pickup: AddressPayload;
   dropoff: AddressPayload;
@@ -2393,6 +2979,8 @@ export interface OwnedOrderRecord {
   approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   complianceFlags: string[];
+  spatialAudit?: OwnedOrderSpatialAuditSnapshot | null;
+  mapFallbackReview?: CallCenterMapFallbackReview | null;
   cancelledAt: string | null;
   cancelReason: string | null;
   reservationHoldStatus: ReservationHoldStatus;
@@ -2417,6 +3005,7 @@ export interface BookingRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
+  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   status: BookingStatus;
   serviceBucket: "business_dispatch";
   businessDispatchSubtype: BusinessDispatchSubtype;
@@ -2523,17 +3112,30 @@ export interface DispatchCandidate {
   operatingArea: string;
   serviceBuckets: Phase1ServiceBucket[];
   etaMinutes: number;
-  locationState?: DispatchCandidateLocationState;
   currentLocation?: DriverLocationSnapshot | null;
+  serviceProductContext?: DispatchCandidateServiceProductContext;
+  eligibilityDecision?: EligibilityDecision;
+  hardReasonCodes?: string[];
+  softReasonCodes?: string[];
+  missingRequirements?: string[];
+  locationState?: DispatchCandidateLocationState;
 }
 
 export const DISPATCH_CANDIDATE_LOCATION_STATES = [
-  "live",
+  "fresh",
   "stale",
-  "no_location",
+  "low_accuracy",
+  "missing",
 ] as const;
 export type DispatchCandidateLocationState =
   (typeof DISPATCH_CANDIDATE_LOCATION_STATES)[number];
+
+export interface DispatchCandidateServiceProductContext {
+  serviceProductId: string;
+  serviceProductCode: ServiceProductType;
+  policyVersion: string;
+  evaluatedAt: string;
+}
 
 export interface DispatchJobRecord {
   dispatchJobId: string;
@@ -2622,6 +3224,7 @@ export interface DispatchAssignmentRecord {
   dispatchJobId: string;
   orderId: string;
   taskId: string;
+  serviceProductCode?: ServiceProductType | null;
   vehicleId: string;
   driverId: string;
   assignmentType: "metered" | "fixed_price";
@@ -2648,6 +3251,7 @@ export interface DriverTaskRecord {
   orderId: string;
   dispatchJobId: string;
   assignmentId: string;
+  serviceProductCode?: ServiceProductType | null;
   driverId: string;
   vehicleId: string;
   sourcePlatform: string | null;
@@ -2911,6 +3515,7 @@ export interface VehicleSupplyLifecycleRecord {
 export interface VehicleRegistryRecord {
   vehicleId: string;
   plateNo: string;
+  licenseType?: VehicleLicenseType | null;
   operatingArea: string;
   supportedServiceBuckets: Phase1ServiceBucket[];
   dispatchableFlag: boolean;
@@ -4195,6 +4800,9 @@ export const OPERATIONAL_REPORT_JOB_TYPES = [
   "revenue_summary",
   "incident_register",
   "maintenance_overview",
+  // Phase 1 delta (SD §1.6): daily dispatch record + six-month operations summary.
+  "daily_dispatch_record",
+  "six_month_operations_summary",
 ] as const;
 
 export const REPORT_JOB_TYPES = [
@@ -4314,6 +4922,217 @@ export interface ReportJobDetailRecord extends ReportJobRecord {
   rows?: DispatchRecordingIndexRowRecord[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
+}
+
+export const PHASE2_REGULATORY_REPORT_JOB_TYPES = [
+  "daily_ops_report",
+  "trip_report",
+  "takeover_report",
+  "fsd_session_report",
+  "telemetry_completeness_report",
+  "incident_report",
+] as const;
+export type Phase2RegulatoryReportJobType =
+  (typeof PHASE2_REGULATORY_REPORT_JOB_TYPES)[number];
+
+export interface CreateRegulatoryReportJobCommand {
+  reportType: Phase2RegulatoryReportJobType;
+  format: ReportOutputFormat;
+  filters?: Record<string, unknown>;
+}
+
+export interface RegulatoryReportEvidenceTraceRecord {
+  evidenceId: string;
+  sourceModule: string;
+  sourceType: string;
+  sourceId: string;
+  occurredAt: string | null;
+  manifestHash: string;
+  summary: string;
+  record: Record<string, unknown>;
+}
+
+export interface RegulatoryReportSectionRecord {
+  sectionId: string;
+  title: string;
+  summary: string;
+  rowCount: number;
+  evidenceCount: number;
+  payload: Record<string, unknown>;
+}
+
+export interface RegulatoryReportPeriodRecord {
+  from: string | null;
+  to: string | null;
+  asOf: string | null;
+}
+
+export interface RegulatoryReportJobRecord {
+  jobId: string;
+  reportType: Phase2RegulatoryReportJobType;
+  format: ReportOutputFormat;
+  status: ReportJobStatus;
+  filters: Record<string, unknown>;
+  artifact: ReportArtifactRecord | null;
+  rowCount: number;
+  evidenceCount: number;
+  reportPeriod: RegulatoryReportPeriodRecord;
+  generatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RegulatoryReportJobDetailRecord extends RegulatoryReportJobRecord {
+  artifact:
+    | (ReportArtifactRecord & {
+        downloadMetadata: ControlledDownloadRecord;
+      })
+    | null;
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
+  rows: Record<string, unknown>[];
+  evidenceTrace: RegulatoryReportEvidenceTraceRecord[];
+  sections: RegulatoryReportSectionRecord[];
+}
+
+export interface RegulatoryComplianceSummaryCoverageRecord {
+  reportType: Phase2RegulatoryReportJobType;
+  latestJobId: string | null;
+  status: ReportJobStatus | null;
+  generatedAt: string | null;
+  rowCount: number;
+  evidenceCount: number;
+  artifactId: string | null;
+}
+
+export interface RegulatoryComplianceSummaryRecord {
+  experimentId: string;
+  experimentVersionId: string | null;
+  programCode: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  authorizationStatus: SandboxAuthorizationStatus | null;
+  snapshotHashSha256: string;
+  jurisdictionCodes: string[];
+  approvalDocumentCount: number;
+  requiredCapabilityCount: number;
+  operatingAreaCount: number;
+  routeCount: number;
+  vehicleEnrollmentCount: number;
+  telemetryConfiguredVehicleCount: number;
+  telemetryGapVehicleCount: number;
+  activeTakeoverCount: number;
+  takeoverDiscrepancyCount: number;
+  openIncidentCount: number;
+  openNotificationCount: number;
+  reportCoverage: RegulatoryComplianceSummaryCoverageRecord[];
+  notes: string[];
+}
+
+export interface SandboxKpiBaselineWindowRecord {
+  targetStatus: "baseline_collecting";
+  configuredDays: number;
+  configuredTrips: number;
+  collectionStartAt: string | null;
+  evaluatedAt: string;
+  elapsedDays: number;
+  tripsCollected: number;
+  ready: boolean;
+  readinessReason: "days" | "trips" | "collecting";
+}
+
+export interface SandboxKpiTargetRecord {
+  key:
+    | "readiness"
+    | "eligibility"
+    | "provider_completeness"
+    | "takeover_correlation"
+    | "freeze_success"
+    | "fallback_success"
+    | "notification_timeliness"
+    | "telemetry_freshness"
+    | "export_success"
+    | "legal_hold_release_cycle";
+  label: string;
+  targetStatus: "baseline_collecting";
+  measurementKind:
+    | "count"
+    | "percentage"
+    | "duration_hours"
+    | "duration_minutes"
+    | "status";
+  value: number | string | null;
+  unit: string | null;
+  numerator: number | null;
+  denominator: number | null;
+  observedAt: string | null;
+  note: string | null;
+}
+
+export interface SandboxSafetyGateRecord {
+  key: string;
+  label: string;
+  hardAlert: true;
+  failClosed: true;
+  state: "pass" | "alert" | "unknown";
+  reason: string | null;
+  observedAt: string | null;
+}
+
+export interface SandboxKpiDashboardRecord {
+  experimentId: string;
+  experimentVersionId: string | null;
+  programCode: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  baselineWindow: SandboxKpiBaselineWindowRecord;
+  targets: SandboxKpiTargetRecord[];
+  safetyGates: SandboxSafetyGateRecord[];
+}
+
+export interface GenerateResumeAuthorizationDossierCommand {
+  asOf?: string | null;
+  actorId?: string | null;
+  note?: string | null;
+}
+
+export interface ResumeAuthorizationDossierSourceRecord {
+  sourceType: string;
+  sourceId: string;
+  manifestHash: string | null;
+  description: string;
+}
+
+export interface ResumeAuthorizationDossierSectionRecord {
+  sectionId: string;
+  title: string;
+  summary: string;
+  evidenceCount: number;
+  payload: Record<string, unknown>;
+}
+
+export interface ResumeAuthorizationDossierRecord {
+  dossierId: string;
+  experimentId: string;
+  experimentVersionId: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  authorizationStatus: SandboxAuthorizationStatus | null;
+  manifestHash: string;
+  immutable: true;
+  artifact:
+    | (ReportArtifactRecord & {
+        downloadMetadata: ControlledDownloadRecord;
+      })
+    | null;
+  complianceSummary: RegulatoryComplianceSummaryRecord;
+  complianceSnapshot: SandboxComplianceSnapshotRecord;
+  reportJobs: RegulatoryReportJobRecord[];
+  sections: ResumeAuthorizationDossierSectionRecord[];
+  sourceRefs: ResumeAuthorizationDossierSourceRecord[];
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
 }
 
 export const FILING_PACKAGE_TYPES = [
@@ -5294,6 +6113,8 @@ export const OPERATIONAL_ALERT_KEYS = [
   "webhook_failure_burst",
   "eligibility_review_backlog",
   "adapter_degradation",
+  "map_provider_outage",
+  "map_geofence_denial_burst",
 ] as const;
 export type OperationalAlertKey = (typeof OPERATIONAL_ALERT_KEYS)[number];
 
@@ -5397,6 +6218,75 @@ export interface OperationalForwarderOpsMetrics {
   oldestReconciliationLagMinutes: number | null;
 }
 
+export interface OperationalMapGeofenceMetrics {
+  providerHealth: {
+    status: GeoProviderOperationalStatus | "unknown";
+    provider: string | null;
+    mode: string | null;
+    failClosed: boolean;
+    lastCheckedAt: string | null;
+    quota: {
+      dailyLimit: number | null;
+      minuteLimit: number | null;
+      dailyUsed: number | null;
+      minuteUsed: number | null;
+      usagePercent: number | null;
+      status: GeoProviderQuotaStatus;
+      warningThresholdPercent: number | null;
+      criticalThresholdPercent: number | null;
+      policy: "mock_unlimited" | "provider_enforced" | null;
+    };
+  };
+  geo: {
+    providerOutageCount: number;
+    addressAmbiguityCount: number;
+    coordinateLessAttemptCount: number;
+    manualOverrideCount: number;
+    resolvedAddressCount: number;
+    requests: {
+      total: number;
+      successful: number;
+      providerErrorCount: number;
+      successRatePercent: number | null;
+      byOperation: {
+        search: number;
+        resolve: number;
+        reverse: number;
+      };
+      byResult: {
+        resolved: number;
+        manualOverride: number;
+        addressAmbiguity: number;
+        coordinateLessAttempt: number;
+        providerOutage: number;
+      };
+    };
+    latencyMs: {
+      count: number;
+      average: number | null;
+      max: number | null;
+      p95: number | null;
+    };
+  };
+  serviceArea: {
+    evaluations: number;
+    serviceableCount: number;
+    manualReviewCount: number;
+    policyDenialCount: number;
+    outOfAreaCount: number;
+    coordinateLessAttemptCount: number;
+  };
+  governance: {
+    geometryMutationCount: number;
+    serviceAreaPublishedCount: number;
+    serviceAreaRetiredCount: number;
+    stopPolicyPublishedCount: number;
+    stopPolicyRetiredCount: number;
+    manualOverrideCount: number;
+  };
+  lastEventAt: string | null;
+}
+
 export interface OperationalAdapterDetailRecord {
   platformCode: PlatformCode;
   status: AdapterHealthStatus;
@@ -5425,6 +6315,7 @@ export interface OperationalRoleView {
     | "reporting"
     | "adapters"
     | "forwarder_ops"
+    | "map_geofence"
   >;
 }
 
@@ -5439,7 +6330,9 @@ export interface OperationalObservabilitySnapshot {
   reporting: OperationalReportingMetrics;
   adapters: OperationalAdapterMetrics;
   forwarderOps: OperationalForwarderOpsMetrics;
+  mapGeofence: OperationalMapGeofenceMetrics;
   adapterDetails: OperationalAdapterDetailRecord[];
+  phase2SandboxKpiDashboard: SandboxKpiDashboardRecord | null;
   roleViews: OperationalRoleView[];
 }
 
@@ -5502,3 +6395,5 @@ export interface ActionIntent {
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
 export * from "./ui-runtime";
+export * from "./phase1-delta-supply-eligibility";
+export * from "./phase2-tesla-fsd-sandbox";

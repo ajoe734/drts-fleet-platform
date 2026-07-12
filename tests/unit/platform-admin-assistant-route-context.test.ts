@@ -27,11 +27,11 @@ import type {
 import type { PlatformAdminAssistantPageBridge } from "../../apps/platform-admin-web/components/assistant/route-context";
 
 describe("Platform Admin route registry", () => {
-  it("registers exactly the 22 canvas routes", () => {
-    // 18 original canvas routes + 4 added by the Phase 1 SVC/Fleet wave:
-    // service-products, vehicle-eligibility, fleet-partners, fleet-partner-detail.
-    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(22);
-    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(22);
+  it("registers exactly the 31 current platform-admin routes", () => {
+    // 22 existing platform-admin routes plus 9 sandbox compliance /
+    // investigation surfaces added in the sandbox governance wave.
+    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(31);
+    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(31);
   });
 
   it("has a unique, valid descriptor per route key", () => {
@@ -81,7 +81,7 @@ describe("matchRoute specificity", () => {
 });
 
 describe("buildRouteContext — every route resolves", () => {
-  it("produces a context with a valid refresh tier for all 18 routes", () => {
+  it("produces a context with a valid refresh tier for all registered routes", () => {
     const validTiers = new Set([
       "fast",
       "medium",

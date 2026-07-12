@@ -115,6 +115,11 @@ log_surface "Channel Partner — referral usage / revenue / settlement"
 # (actorType=partner_api_key, realm=partner, partnerEntrySlug) — not the handoff
 # passenger bearer. Present it via bootstrap headers, mirroring E2E-008.
 switch_actor "partner_api_key" "referral-channel-partner-016" "$TENANT_ID"
+# Referral settlement statements read through the billing-settlement service,
+# which requires billing:read on the partner bootstrap identity. switch_actor
+# resets E2E_EXTRA_SCOPES, so this must be set AFTER it (restores line dropped
+# by a stale-base squash in #974; see E2E-014 for the same pattern).
+E2E_EXTRA_SCOPES="billing:read"
 export E2E_REALM="partner"
 export E2E_PARTNER_ID="$PARTNER_ID"
 export E2E_PARTNER_PROGRAM_ID="$PARTNER_PROGRAM_ID"

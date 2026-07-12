@@ -68,4 +68,89 @@ describe("OwnedMobilityController tenant booking routes", () => {
       "req-e2e-update",
     );
   });
+
+  it("passes includeIneligible through candidate queries before wrapping the API envelope", async () => {
+    const service = {
+      listDispatchCandidates: vi.fn().mockResolvedValue([
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+          eligibilityDecision: "ineligible",
+        },
+      ]),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = await controller.listDispatchCandidates(
+      "job-e2e-001",
+      "true",
+      "req-e2e-candidates",
+    );
+
+    expect(response.data.items).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        eligibilityDecision: "ineligible",
+      }),
+    ]);
+    expect(service.listDispatchCandidates).toHaveBeenCalledWith(
+      "job-e2e-001",
+      true,
+    );
+  });
+
+  it("awaits dispatch assignment before wrapping the API envelope", async () => {
+    const service = {
+      assignDispatch: vi.fn().mockResolvedValue({
+        assignmentId: "assignment-e2e-001",
+        status: "assigned",
+        taskId: "task-e2e-001",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = await controller.assignDispatch(
+      {} as never,
+      "req-e2e-assign",
+    );
+
+    expect(response.data).toMatchObject({
+      assignmentId: "assignment-e2e-001",
+      status: "assigned",
+      taskId: "task-e2e-001",
+    });
+    expect(service.assignDispatch).toHaveBeenCalledWith(
+      {},
+      "req-e2e-assign",
+    );
+  });
+
+  it("awaits dispatch reassignment before wrapping the API envelope", async () => {
+    const service = {
+      reassignDispatch: vi.fn().mockResolvedValue({
+        assignmentId: "assignment-e2e-002",
+        status: "assigned",
+        taskId: "task-e2e-002",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = await controller.reassignDispatch(
+      {} as never,
+      "req-e2e-reassign",
+    );
+
+    expect(response.data).toMatchObject({
+      assignmentId: "assignment-e2e-002",
+      status: "assigned",
+      taskId: "task-e2e-002",
+    });
+    expect(service.reassignDispatch).toHaveBeenCalledWith(
+      {},
+      "req-e2e-reassign",
+    );
+  });
 });

@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src --max-warnings=0",
-    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src tests --max-warnings=0",
+    "test": "vitest run tests/unit/map-geofence-fixtures.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }

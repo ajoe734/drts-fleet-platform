@@ -1,0 +1,49 @@
+# MAP-QA-002 Automated E2E Evidence
+
+Recorded: `2026-07-04T04:13:02Z`
+
+Branch under verification: `codex/map-qa-002`
+
+Verified code ref during the targeted rerun:
+
+- committed implementation: `codex/map-qa-002@83e38647fd4a848df7e3a1d281ade87e41ce83c0`
+
+Execution context:
+
+- isolated task worktree: `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-qa-002`
+- all repo-local reruns were executed after the anchor commit above
+- `playwright.map-geofence-ui` is implemented here as targeted surface configs rather than one monolithic config; the surface results below are the UI proof set for this task
+- the partner rerun is intentionally scoped to `tests/e2e/partner-map-booking-ui.spec.ts`; unrelated `partner-booking-surfaces.spec.ts` embed-state coverage is outside `MAP-QA-002`
+
+## Verification Summary
+
+| Command                                                                                                                                                                                                                                                                                                                  | Result | Evidence                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------- |
+| `pnpm exec eslint apps/ops-console-web/next.config.ts playwright.ops-console-parity.config.ts tests/e2e/ops-console-parity.spec.ts tests/e2e/tenant-map-booking-ui.spec.ts --max-warnings=0`                                                                                                                             | PASS   | `support/sidecars/MAP-QA-002/artifacts/eslint-map-geofence-qa-20260704T0413Z.txt`                 |
+| `pnpm exec tsc -p tsconfig.json --noEmit`                                                                                                                                                                                                                                                                                | PASS   | `support/sidecars/MAP-QA-002/artifacts/tsc-map-geofence-qa-20260704T0413Z.txt`                    |
+| `git diff --check`                                                                                                                                                                                                                                                                                                       | PASS   | `support/sidecars/MAP-QA-002/artifacts/git-diff-check-map-geofence-qa-20260704T0416Z.txt`         |
+| `pnpm --dir apps/api exec vitest run tests/unit/service-area.service.test.ts --reporter=json --outputFile ../../support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`                                                                                                                   | PASS   | `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`           |
+| `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts --reporter=json > support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`                                                                                                                                     | PASS   | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`       |
+| `pnpm exec playwright test -c playwright.ops-console-parity.config.ts --grep "callcenter" --reporter=json > support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json`                                                                                                             | PASS   | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json` |
+| `pnpm exec playwright test -c playwright.ops-console-parity.config.ts --grep "dispatch map board exposes governed spatial readiness hooks" --reporter=json > support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-ops-ui-20260704T0414Z.json`                                                                   | PASS   | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-ops-ui-20260704T0414Z.json`        |
+| `pnpm exec playwright test -c playwright.tenant-map-booking.config.ts --reporter=json > support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-tenant-ui-20260704T0414Z.json`                                                                                                                                     | PASS   | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-tenant-ui-20260704T0414Z.json`     |
+| `pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --reporter=json > support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260704T0414Z.json`                                                                                                                               | PASS   | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260704T0414Z.json`  |
+| `pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts tests/e2e/partner-map-booking-ui.spec.ts --reporter=json > support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-partner-ui-20260704T0414Z.json`                                                                                     | PASS   | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-partner-ui-20260704T0414Z.json`    |
+| `pnpm exec prettier --check apps/ops-console-web/next.config.ts playwright.ops-console-parity.config.ts tests/e2e/ops-console-parity.spec.ts tests/e2e/tenant-map-booking-ui.spec.ts support/sidecars/MAP-QA-002/MAP-QA-002-AUTOMATED-E2E-EVIDENCE-20260701.md support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md` | PASS   | `support/sidecars/MAP-QA-002/artifacts/prettier-map-geofence-qa-20260704T0416Z.txt`               |
+
+## Automated Acceptance Mapping
+
+| Scenario                                         | Result     | Evidence                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `E2E-MAP-001` Callcenter pinned booking          | PASS       | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json`                                                                                                                                                                                    |
+| `E2E-MAP-002` Admin publish no-pickup then block | PASS       | `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json`                                                                                           |
+| `E2E-MAP-003` Manual-review zone                 | PASS       | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-partner-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json` |
+| `E2E-MAP-004` Tenant/concierge consistency       | PASS       | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-tenant-ui-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260704T0414Z.json`                                                                                      |
+| `E2E-MAP-005` Provider outage degraded           | PASS       | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-harness-20260704T0414Z.json`, `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-callcenter-ui-20260704T0414Z.json`                                                                                       |
+| `E2E-MAP-006` Ops real map                       | PASS       | `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-ops-ui-20260704T0414Z.json`                                                                                                                                                                                           |
+| `E2E-MAP-007` Driver navigation                  | MANUAL-UAT | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`                                                                                                                                                                                                                 |
+
+## Notes
+
+- No Playwright failure trace bundle was emitted during this rerun because all targeted suites passed under configs that retain traces only on failure.
+- No repo-local mobile screenshot artifact was produced in this task worktree; the driver slice remains explicitly documented through `MAP-MOB-DRV-001` manual/UAT evidence.

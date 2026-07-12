@@ -1,0 +1,123 @@
+groups:
+  - name: map-geofence-production-observability
+    rules:
+      - alert: MapProviderErrorRateHigh
+        expr: sum(rate(map_provider_errors_total{retryable="true"}[5m])) by (provider, surface) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          route: ops-platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Map provider retryable errors are elevated.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#provider-outage
+
+      - alert: MapProviderLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, provider, surface, operation) (rate(map_geocode_latency_ms_bucket[10m]))) > 750
+        for: 10m
+        labels:
+          severity: warning
+          route: ops-platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Map provider p95 geocode latency is elevated.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#provider-outage
+
+      - alert: MapProviderQuotaUsageHigh
+        expr: max_over_time(map_provider_quota_usage_percent[15m]) >= 80
+        for: 15m
+        labels:
+          severity: warning
+          route: platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Map provider quota usage is above the warning threshold.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#provider-quota
+
+      - alert: MapProviderQuotaUsageCritical
+        expr: max_over_time(map_provider_quota_usage_percent[5m]) >= 95
+        for: 5m
+        labels:
+          severity: critical
+          route: platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Map provider quota usage is above the critical threshold.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#provider-quota
+
+      - alert: MapProviderOutageFailClosed
+        expr: max(map_provider_fail_closed{status="unhealthy"}) by (provider, environment) > 0
+        for: 2m
+        labels:
+          severity: critical
+          route: ops-platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Map provider is unhealthy and geo operations are failing closed.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#provider-outage
+
+      - alert: AddressAmbiguitySpike
+        expr: sum(rate(map_geocode_requests_total{result="address_ambiguity"}[15m])) by (surface, provider) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          route: ops
+          task: MAP-OBS-001
+        annotations:
+          summary: Address ambiguity/no-match outcomes are elevated.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#address-ambiguity
+
+      - alert: CoordinateLessDispatchAttemptHigh
+        expr: sum(rate(coordinate_less_booking_attempts_total[5m])) by (surface, actor_role, policy_result) > 0
+        for: 5m
+        labels:
+          severity: critical
+          route: ops-platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Coordinate-less booking or service-area attempts are occurring.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#coordinate-less-attempt
+
+      - alert: ServiceAreaPolicyBlockSpike
+        expr: sum(rate(service_area_policy_blocks_total[15m])) by (area_code, reason_code, direction) > 0.3
+        for: 15m
+        labels:
+          severity: warning
+          route: ops-platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Service-area policy denials are elevated.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#policy-denial
+
+      - alert: ServiceAreaEvaluationUnavailable
+        expr: sum(rate(service_area_evaluations_total{decision=~"manual_review|not_serviceable",reason_code=~"EVALUATOR_UNAVAILABLE|POSTGIS_UNAVAILABLE"}[10m])) by (surface, product_code) > 0
+        for: 10m
+        labels:
+          severity: critical
+          route: ops-platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Service-area evaluation is failing because the evaluator/PostGIS path is unavailable.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#postgis--evaluator-unavailable
+
+      - alert: ManualMapOverrideSpike
+        expr: sum(rate(geo_manual_overrides_total[30m])) by (surface, actor_role) > 0.1
+        for: 30m
+        labels:
+          severity: warning
+          route: ops
+          task: MAP-OBS-001
+        annotations:
+          summary: Manual map pin overrides are elevated.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#manual-override
+
+      - alert: ServiceAreaGeometryMutationUnexpected
+        expr: sum(rate(service_area_geometry_mutations_total{status!="approved"}[10m])) by (actor_role, action) > 0
+        for: 10m
+        labels:
+          severity: critical
+          route: platform
+          task: MAP-OBS-001
+        annotations:
+          summary: Unexpected service-area geometry mutation was observed.
+          runbook: docs/03-runbooks/map-geofence-observability-runbook.md#geometry-mutation

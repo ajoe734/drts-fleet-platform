@@ -11,13 +11,24 @@ import { ENTERPRISE_DISPATCH_TENANT_API_GAP_MAP } from "./tenant-api-gap-map";
 
 const DEFAULT_ACTOR_ID = "enterprise-dispatch-web";
 
+export type EnterpriseDispatchBookingSubmitResult = {
+  orderId: string;
+  bookingId: string;
+  serviceBucket: "business_dispatch";
+  businessDispatchSubtype: string;
+  dispatchSemantics: "reservation";
+  status: string;
+};
+
 export class EnterpriseDispatchTenantClient {
   constructor(private readonly client: ApiClient) {}
 
-  async createBookingFromFixture(fixture: EnterpriseDispatchBookingFixture) {
+  async createBookingFromFixture(
+    fixture: EnterpriseDispatchBookingFixture,
+  ): Promise<EnterpriseDispatchBookingSubmitResult> {
     return this.client.createTenantBooking(
       adaptBookingFixtureToCreateCommand(fixture),
-    );
+    ) as Promise<EnterpriseDispatchBookingSubmitResult>;
   }
 
   async getBooking(bookingId: string): Promise<BookingRecord> {

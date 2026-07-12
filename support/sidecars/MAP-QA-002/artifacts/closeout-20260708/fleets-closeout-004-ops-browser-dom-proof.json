@@ -1,0 +1,71 @@
+{
+  "generatedAt": "2026-07-08T07:02:13.334Z",
+  "closeoutTask": "FLEETS-CLOSEOUT-004",
+  "scope": "repo-local browser DOM evidence from mock Ops UI; final E2E-MAP-006 promotion composes this screenshot with FLEETS-CLOSEOUT-001 persisted snapshot proof, FLEETS-CLOSEOUT-004 backend/API readbacks, and MAP-OBS-001 final evidence.",
+  "command": "pnpm exec playwright test -c playwright.map-geofence-ops-closeout.config.ts --reporter=list",
+  "screenshot": "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.png",
+  "pageUrl": "http://127.0.0.1:3006/dispatch?board=assigned",
+  "sameOrderIdsAsCallcenterProof": ["ORD-SMOKE-001"],
+  "boardAttributes": {
+    "providerStatus": "degraded_projection",
+    "fallbackReason": "missing_coordinates",
+    "serviceAreas": "TAIPEI_CORE",
+    "policyCodes": "PICKUP_ZONE_A|DROPOFF_ZONE_B",
+    "routeCount": "1",
+    "overlayCount": "4"
+  },
+  "points": [
+    {
+      "kind": "pickup",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "governed"
+    },
+    {
+      "kind": "dropoff",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "governed"
+    },
+    {
+      "kind": "candidate",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "fresh"
+    },
+    {
+      "kind": "candidate",
+      "orderId": "ORD-SMOKE-001",
+      "jobId": "JOB-OPS-CLOSEOUT-001",
+      "freshness": "low_accuracy"
+    }
+  ],
+  "finalEvidencePromotion": {
+    "canSupportRows": [
+      "E2E-MAP-006",
+      "Ops visibility",
+      "service overlays",
+      "fallback state"
+    ],
+    "promotedRows": [
+      "MAP-QA-002 E2E-MAP-006 final PASS row",
+      "MAP-REL-001 FLEETS-CLOSEOUT-004 acceptance matrix"
+    ],
+    "composedAuthority": [
+      "FLEETS-CLOSEOUT-001 persisted API/DB snapshot proof for ORD-SMOKE-001",
+      "FLEETS-CLOSEOUT-004 backend/API readbacks for the same order/dispatch/candidate chain",
+      "MAP-OBS-001 final evidence for degraded projection, freshness, and audit signals"
+    ],
+    "finalArtifactLinks": [
+      "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.png",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-visibility-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-backend-linked-ops-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-api-envelope-ops-proof.json",
+      "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+      "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+      "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md"
+    ]
+  }
+}

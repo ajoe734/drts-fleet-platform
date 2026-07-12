@@ -78,6 +78,14 @@ export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
   "service-products": { href: "/service-products" },
   "vehicle-eligibility": { href: "/vehicle-eligibility" },
   "fleet-partners": { href: "/fleet-partners" },
+  sandbox: { href: "/sandbox" },
+  "service-area-governance": { href: "/service-area-governance" },
+  "sandbox-suspend": { href: "/sandbox/suspend" },
+  "sandbox-compliance": { href: "/platform-admin/compliance" },
+  "sandbox-investigations": { href: "/platform-admin/investigations" },
+  "sandbox-evidence-exports": { href: "/platform-admin/evidence/exports" },
+  "sandbox-legal-holds": { href: "/platform-admin/evidence/legal-holds" },
+  "sandbox-regulatory-reports": { href: "/platform-admin/regulatory-reports" },
   switchboard: { href: "/switchboard" },
   pricing: { href: "/pricing" },
   payments: { href: "/payments" },
@@ -173,11 +181,11 @@ const UNKNOWN_ROUTE_WARNING: RouteContextWarning = {
 };
 
 // ---------------------------------------------------------------------------
-// Route registry — all 19 Platform Admin routes
+// Route registry — all current Platform Admin routes
 // ---------------------------------------------------------------------------
 
 /**
- * The 19 routes. `bodyParityPending` marks the 3 routes that returned 404
+ * The registered routes. `bodyParityPending` marks the 3 routes that returned 404
  * on dev as of the 2026-06-02 body parity audit and whose bodies are owned by
  * separate workers; their metadata still resolves here.
  */
@@ -308,6 +316,96 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     defaultTab: null,
     refreshTier: "slow",
     paramEntities: [{ param: "fleetPartnerId", kind: "fleet-partner" }],
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING],
+  },
+  {
+    routeKey: "sandbox-compliance",
+    pathTemplate: "/platform-admin/compliance",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxCompliance.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING, LEGAL_HOLD_WARNING],
+  },
+  {
+    routeKey: "sandbox-compliance-trip-detail",
+    pathTemplate: "/platform-admin/compliance/trips/[tripId]",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxComplianceTripDetail.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING, LEGAL_HOLD_WARNING],
+  },
+  {
+    routeKey: "sandbox-investigations",
+    pathTemplate: "/platform-admin/investigations",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxInvestigations.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING],
+  },
+  {
+    routeKey: "sandbox-investigation-detail",
+    pathTemplate: "/platform-admin/investigations/[caseId]",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxInvestigationDetail.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING, LEGAL_HOLD_WARNING],
+  },
+  {
+    routeKey: "sandbox-investigation-timeline",
+    pathTemplate: "/platform-admin/investigations/[caseId]/timeline",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxInvestigationTimeline.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING, LEGAL_HOLD_WARNING],
+  },
+  {
+    routeKey: "sandbox-evidence-manifest",
+    pathTemplate: "/platform-admin/evidence/manifests/[manifestId]",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxEvidenceManifest.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [LEGAL_HOLD_WARNING],
+  },
+  {
+    routeKey: "sandbox-evidence-exports",
+    pathTemplate: "/platform-admin/evidence/exports",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxEvidenceExports.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING, LEGAL_HOLD_WARNING],
+  },
+  {
+    routeKey: "sandbox-legal-holds",
+    pathTemplate: "/platform-admin/evidence/legal-holds",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxLegalHolds.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING, LEGAL_HOLD_WARNING],
+  },
+  {
+    routeKey: "sandbox-regulatory-reports",
+    pathTemplate: "/platform-admin/regulatory-reports",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxRegulatoryReports.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "medium",
     baselineWarnings: [HIGH_RISK_ACTIONS_WARNING],
   },
   {

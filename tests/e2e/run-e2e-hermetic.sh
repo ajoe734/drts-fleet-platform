@@ -26,9 +26,21 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck source=../../scripts/db-common.sh
+source "$ROOT_DIR/scripts/db-common.sh"
+
 export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/drts_fleet_platform}"
 export E2E_API_URL="${E2E_API_URL:-http://localhost:3001}"
-API_START_CMD="${API_START_CMD:-pnpm --filter @drts/api start}"
+export API_HOST="${API_HOST:-0.0.0.0}"
+export JWT_SECRET="${JWT_SECRET:-ci-e2e-secret}"
+export JWT_ISSUER="${JWT_ISSUER:-drts-local}"
+export JWT_AUDIENCE="${JWT_AUDIENCE:-drts-api}"
+export CONTROLLED_DOWNLOAD_SIGNING_SECRET="${CONTROLLED_DOWNLOAD_SIGNING_SECRET:-ci-e2e-controlled-download-secret}"
+export PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT:-ci-e2e-alpha-ingress-key}"
+export PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT:-ci-e2e-beta-ingress-key}"
+DEFAULT_API_START_CMD="pnpm --filter @drts/api start"
+API_BUILD_CMD="${API_BUILD_CMD:-pnpm --filter @drts/api build}"
+API_START_CMD="${API_START_CMD:-$DEFAULT_API_START_CMD}"
 API_PORT="${API_PORT:-3001}"
 API_LOG="${API_LOG:-/tmp/drts-e2e-api.log}"
 
@@ -36,6 +48,8 @@ API_LOG="${API_LOG:-/tmp/drts-e2e-api.log}"
 db_field() { node -e "const u=new URL(process.env.DATABASE_URL); process.stdout.write(({name:u.pathname.slice(1),user:u.username,pass:u.password,host:u.hostname,port:u.port||'5432'})['$1'])"; }
 DB_NAME="$(db_field name)"; DB_USER="$(db_field user)"; DB_PASS="$(db_field pass)"; DB_HOST="$(db_field host)"; DB_PORT="$(db_field port)"
 ADMIN_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/postgres"
+DB_NAME_SQL_LITERAL="${DB_NAME//\'/\'\'}"
+DB_NAME_SQL_IDENTIFIER="${DB_NAME//\"/\"\"}"
 
 SUITES=("$@")
 EXPLICIT_SUITES=0
@@ -83,13 +97,101 @@ stop_api() {
   sleep 2
 }
 
+run_admin_psql() {
+  if use_local_psql; then
+    PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" "$@"
+    return
+  fi
+
+  if postgres_service_running; then
+    docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
+      -e PGPASSWORD="$DB_PASS" \
+      postgres \
+      psql -U "$DB_USER" -d postgres "$@"
+    return
+  fi
+
+  if postgres_container_running; then
+    docker exec -i \
+      -e PGPASSWORD="$DB_PASS" \
+      "$(postgres_container_name)" \
+      psql -U "$DB_USER" -d postgres "$@"
+    return
+  fi
+
+  echo "[hermetic] psql command not found and no usable postgres container is running; cannot reset ${DB_NAME}." >&2
+  return 1
+}
+
+wait_for_db() {
+  local attempt
+  for attempt in $(seq 1 20); do
+    if run_psql -tAc "SELECT 1;" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "[hermetic] database ${DB_NAME} did not become connectable after reset"
+  return 1
+}
+
+run_with_retry() { # label cmd...
+  local label="$1"
+  shift
+  local attempt log_file
+  for attempt in 1 2; do
+    log_file="$(mktemp)"
+    if "$@" >"$log_file" 2>&1; then
+      rm -f "$log_file"
+      return 0
+    fi
+    echo "[hermetic] ${label} failed (attempt ${attempt})"
+    cat "$log_file"
+    rm -f "$log_file"
+    if [[ "$attempt" -eq 2 ]]; then
+      return 1
+    fi
+    sleep 2
+    wait_for_db || return 1
+  done
+}
+
+run_logged() { # label cmd...
+  local label="$1"
+  shift
+  local log_file
+  log_file="$(mktemp)"
+  if "$@" >"$log_file" 2>&1; then
+    rm -f "$log_file"
+    return 0
+  fi
+  echo "[hermetic] ${label} failed"
+  cat "$log_file"
+  rm -f "$log_file"
+  return 1
+}
+
 reset_db() {
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c \
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${DB_NAME};" >/dev/null
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${DB_NAME};" >/dev/null
-  pnpm db:migrate >/dev/null 2>&1
-  pnpm db:seed >/dev/null 2>&1
+  run_admin_psql -v ON_ERROR_STOP=1 -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME_SQL_LITERAL}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
+  run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
+  run_admin_psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
+  wait_for_db || return 1
+  run_logged "db:migrate" pnpm db:migrate || return 1
+  run_logged "db:seed" pnpm db:seed || return 1
+}
+
+ensure_api_build() {
+  if [[ "$API_START_CMD" != "$DEFAULT_API_START_CMD" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$ROOT_DIR/apps/api/dist/main.js" ]]; then
+    return 0
+  fi
+
+  echo "[hermetic] building @drts/api because apps/api/dist/main.js is missing"
+  run_with_retry "api build" bash -lc "$API_BUILD_CMD" || return 1
 }
 
 start_api() {
@@ -104,11 +206,16 @@ start_api() {
 
 trap stop_api EXIT
 
+if ! ensure_api_build; then
+  echo "[hermetic] API build failed; aborting run"
+  exit 1
+fi
+
 PASS=(); FAIL=()
 for s in "${SUITES[@]}"; do
   echo "──────── hermetic E2E-${s} ────────"
   stop_api
-  reset_db
+  if ! reset_db; then FAIL+=("$s"); continue; fi
   if ! start_api; then FAIL+=("$s"); continue; fi
   if ./tests/e2e/run-e2e.sh --suite "$s"; then PASS+=("$s"); else FAIL+=("$s"); fi
 done

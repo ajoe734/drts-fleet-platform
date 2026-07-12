@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Compliance Console · FSD Sandbox · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#1B1840"/>
+  <path d="M50 20l22 9v14c0 14-9 22-22 27-13-5-22-13-22-27V29z" fill="none" stroke="#B0A7F0" stroke-width="3"/>
+  <path d="M40 48l7 7 14-14" fill="none" stroke="#B0A7F0" stroke-width="3" stroke-linecap="round"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="mgmt-primitives.jsx"></script>
+<script type="text/babel" src="mgmt-shell.jsx"></script>
+<script type="text/babel" src="mgmt-auth.jsx"></script>
+<script type="text/babel" src="compliance-screens.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": true,
+  "density": "compact"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const th = buildMgmtTheme({ console: 'compliance', dark: tw.dark, density: tw.density });
+  const W = 1440, H = 900;
+  const Frame = ({ children, chrome, url }) => chrome
+    ? <MacWindow title="Compliance Console · FSD Sandbox" url={'https://compliance.drts.com.tw' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
+    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
+  const Bare = ({ children }) => <Frame>{children}</Frame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Compliance & Investigation Console · FSD 沙盒"
+        subtitle="Phase 2 A5 + A6 · 歸屬裁定＝專屬新 console · 同步時間軸播放器 · 證據鏈 · 受控匯出 · 法律保留 · 主管機關唯讀 · zh-TW / en">
+
+        <DCSection id="investigation" title="A5 · 調查 Investigation" subtitle="合規總覽 / 行程合規 / 接管審查 / 事故案件">
+          <DCArtboard id="dashboard" label="合規總覽 · Dashboard" width={W} height={H}><Hero url="/"><CMP_Dashboard theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="trip-detail" label="行程合規詳情 · Trip Compliance" width={W} height={H}><Bare><CMP_TripDetail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="takeover-review" label="接管審查 · Takeover Review" width={W} height={H}><Bare><CMP_TakeoverReview theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="accident" label="事故案件 · Accident Case · cross-actor" width={W} height={H}><Bare><CMP_Accident theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="timeline-sec" title="A5 · 同步時間軸 Synchronized Timeline" subtitle="影像 + telemetry 對齊播放 · 多源同步 · 原廠缺口明示（高複雜度元件）">
+          <DCArtboard id="timeline" label="同步時間軸播放器 · video + telemetry" width={W} height={H}><Hero url="/timeline/trip_88240"><CMP_Timeline theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="evidence" title="A5 · 證據 Evidence" subtitle="證據清單 / 受控匯出 / 報表作業 / 法律保留">
+          <DCArtboard id="manifest" label="證據清單 · Manifest · 雜湊鏈 + 缺口明示" width={W} height={H}><Hero url="/manifest/acc_0214"><CMP_Manifest theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="export" label="受控匯出 · Controlled Export · 雙人覆核" width={W} height={H}><Bare><CMP_Export theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="reportjobs" label="監理報表作業 · Report Jobs" width={W} height={H}><Bare><CMP_ReportJobs theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="legalhold" label="法律保留 · Legal Hold · 覆寫保存政策" width={W} height={H}><Bare><CMP_LegalHold theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="regulator-sec" title="A6 · 主管機關檢視 Regulator Viewer" subtitle="受控唯讀 · scoped access · PII 遮罩（低優先 · 可選）">
+          <DCArtboard id="regulator" label="主管機關 Portal · read-only + 遮罩" width={W} height={H}><Hero url="/regulator"><CMP_Regulator theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfy' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useRouter } from "expo-router";
 import {
   PLATFORM_CODE_REGISTRY,
@@ -17,6 +24,17 @@ import {
   getDriverId,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import {
+  getActiveDriverHeartbeatWorkState,
+  stopDriverLocationHeartbeat,
+  syncDriverOnlineAvailableHeartbeat,
+} from "@/lib/driver-location-heartbeat";
+import {
+  evaluateDriverOnlineGateNow,
+  openDriverPermissionSettings,
+  type DriverOnlineGateReason,
+  type DriverOnlineGateResult,
+} from "@/lib/driver-online-gate";
 import {
   ActionButton,
   AppScreen,
@@ -267,9 +285,11 @@ export default function ShiftScreen() {
     useState<PlatformPresenceSummary | null>(null);
   const [presenceError, setPresenceError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [gate, setGate] = useState<DriverOnlineGateResult | null>(null);
 
   const odometerError = getOdometerValidationMessage(odometer);
   const hasValidationError = Boolean(odometerError);
+  const gateBlocked = gate?.canGoOnline === false;
 
   useEffect(() => {
     if (!activeShift) {
@@ -306,6 +326,67 @@ export default function ShiftScreen() {
       });
   }, [isProvisioned]);
 
+  // Pre-online permission gate (MOB-APP-003 / SD §6.4 + SA §6.3): keep the gate
+  // snapshot fresh on mount and whenever the app returns to the foreground, so a
+  // driver who toggles location permission in OS settings sees the update.
+  const refreshGate = async () => {
+    try {
+      setGate(await evaluateDriverOnlineGateNow());
+    } catch {
+      setGate(null);
+    }
+  };
+
+  useEffect(() => {
+    void refreshGate();
+
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        void refreshGate();
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  const handleGateResolution = async (reason: DriverOnlineGateReason) => {
+    if (reason.resolution === "onboarding") {
+      router.push("/onboarding");
+      return;
+    }
+
+    try {
+      await openDriverPermissionSettings();
+    } catch {
+      Alert.alert("無法開啟設定", "請手動前往系統設定開啟此 App 的定位權限。");
+    }
+  };
+
+  // online_available continuous tracking (MOB-APP-001 / SA §6.2): an active
+  // shift means the driver is on duty and available for dispatch, so emit
+  // background location at the online_available cadence. An active trip owns its
+  // own tracking, so never override it here.
+  const syncShiftAvailabilityTracking = async (shift: ShiftRecord | null) => {
+    try {
+      const workState = getActiveDriverHeartbeatWorkState();
+      if (!shift) {
+        if (workState === "available") {
+          await stopDriverLocationHeartbeat();
+        }
+        return null;
+      }
+
+      if (workState && workState !== "available") {
+        return null;
+      }
+
+      return await syncDriverOnlineAvailableHeartbeat();
+    } catch {
+      // Best-effort: availability tracking must not block the shift UI.
+      return null;
+    }
+  };
+
   const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
     if (!isProvisioned) {
       return;
@@ -333,6 +414,7 @@ export default function ShiftScreen() {
       ]);
       const active = shifts.find((shift) => shift.status === "active");
       setActiveShift(active ?? null);
+      void syncShiftAvailabilityTracking(active ?? null);
       setPresenceSummary(platformPresenceResult.summary);
       setPresenceError(platformPresenceResult.error);
       setScreenError(null);
@@ -346,18 +428,40 @@ export default function ShiftScreen() {
   };
 
   if (!isProvisioned) {
+    // Both DEVICE_NOT_BOUND and IDENTITY_INVALID clear provisioning, so an
+    // unprovisioned session can mean either an unbound device or an
+    // invalidated/suspended identity. Surface the specific gate reason — its
+    // copy and resolution action (e.g. "重新綁定裝置" for a revoked identity vs
+    // "前往配置裝置" for an unbound device) — instead of a single generic
+    // "device not configured" message, per SD §6.4 / SA §6.3. (MOB-APP-003.)
+    const gateReason =
+      gate?.reasons.find(
+        (reason) => reason.check === "identity" || reason.check === "device",
+      ) ?? null;
+
     return (
       <AppScreen scrollable={false}>
         <PageHeader
           title={driverStrings.shift.title}
-          subtitle="需要完成裝置配置"
+          subtitle={gateReason?.title ?? "需要完成裝置配置"}
         />
         <EmptyState
-          title="尚未完成裝置配置"
-          description="完成裝置綁定後，才能查看班表與進行上下線打卡。"
-          icon="lock-closed-outline"
-          actionTitle="前往配置裝置"
-          onAction={() => router.push("/onboarding")}
+          title={gateReason?.title ?? "尚未完成裝置配置"}
+          description={
+            gateReason?.description ??
+            "完成裝置綁定後，才能查看班表與進行上下線打卡。"
+          }
+          icon={
+            gateReason?.check === "identity"
+              ? "alert-circle-outline"
+              : "lock-closed-outline"
+          }
+          actionTitle={gateReason?.actionLabel ?? "前往配置裝置"}
+          onAction={() =>
+            gateReason
+              ? void handleGateResolution(gateReason)
+              : router.push("/onboarding")
+          }
           style={styles.fillState}
         />
       </AppScreen>
@@ -367,6 +471,19 @@ export default function ShiftScreen() {
   const handleClockIn = async () => {
     if (odometerError) {
       Alert.alert("輸入錯誤", odometerError);
+      return;
+    }
+
+    // SD §6.4 / SA §6.3 pre-online gate: re-evaluate against the live snapshot
+    // and block going online when any pre-condition (permission/device/identity)
+    // is unmet. A background-denied driver cannot enter online_available.
+    const currentGate = await evaluateDriverOnlineGateNow();
+    setGate(currentGate);
+    if (!currentGate.canGoOnline && currentGate.blockingReason) {
+      Alert.alert(
+        currentGate.blockingReason.title,
+        currentGate.blockingReason.description,
+      );
       return;
     }
 
@@ -385,7 +502,18 @@ export default function ShiftScreen() {
       setActiveShift(result);
       setScreenError(null);
       setNow(Date.now());
-      Alert.alert("成功", "已完成上線打卡。");
+      const tracking = await syncShiftAvailabilityTracking(result);
+      if (
+        tracking?.status === "permission_denied" &&
+        tracking.reason === "BACKGROUND_LOCATION_REQUIRED"
+      ) {
+        Alert.alert(
+          "需要背景定位",
+          "已完成上線打卡，但尚未取得背景定位權限，系統無法將你列入可派遣司機。請於系統設定開啟「永遠允許」定位。",
+        );
+      } else {
+        Alert.alert("成功", "已完成上線打卡。");
+      }
       setVehicleId("");
       setLocation("");
       setOdometer("");
@@ -415,6 +543,7 @@ export default function ShiftScreen() {
       });
       setActiveShift(null);
       setScreenError(null);
+      await syncShiftAvailabilityTracking(null);
       Alert.alert("成功", "已完成下線打卡。");
       setLocation("");
       setOdometer("");
@@ -600,6 +729,55 @@ export default function ShiftScreen() {
             />
           </View>
         </View>
+
+        {!activeShift ? (
+          <SectionCard
+            title="上線前檢查"
+            subtitle={
+              gate?.canGoOnline
+                ? "已符合上線條件，可開始上線打卡。"
+                : "上線需通過定位權限、裝置與身分檢查。"
+            }
+          >
+            {gate ? (
+              <View style={styles.gateBody}>
+                <View style={styles.gateChecklist}>
+                  {gate.checks.map((check) => (
+                    <View key={check.key} style={styles.gateCheckRow}>
+                      <StatusChip
+                        label={check.satisfied ? "通過" : "未通過"}
+                        variant={check.satisfied ? "success" : "danger"}
+                      />
+                      <Text style={styles.gateCheckLabel}>{check.label}</Text>
+                      <Text style={styles.gateCheckDetail}>{check.detail}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {gate.blockingReason ? (
+                  <View style={styles.gateReason}>
+                    <Text style={styles.gateReasonTitle}>
+                      {gate.blockingReason.title}
+                    </Text>
+                    <Text style={styles.gateReasonDescription}>
+                      {gate.blockingReason.description}
+                    </Text>
+                    <ActionButton
+                      title={gate.blockingReason.actionLabel}
+                      onPress={() =>
+                        void handleGateResolution(gate.blockingReason!)
+                      }
+                      variant="secondary"
+                      style={styles.gateAction}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            ) : (
+              <Text style={styles.gateChecking}>檢查上線條件中…</Text>
+            )}
+          </SectionCard>
+        ) : null}
 
         <SectionCard
           title={
@@ -827,7 +1005,9 @@ export default function ShiftScreen() {
         notice={
           activeShift
             ? "完成下線打卡前，可先更新里程與位置。"
-            : "上線打卡後才會建立 active shift。"
+            : gateBlocked
+              ? (gate?.blockingReason?.title ?? "尚未符合上線條件。")
+              : "上線打卡後才會建立 active shift。"
         }
       >
         {activeShift ? (
@@ -846,7 +1026,7 @@ export default function ShiftScreen() {
             onPress={handleClockIn}
             variant="primary"
             loading={submitting}
-            disabled={hasValidationError}
+            disabled={hasValidationError || gateBlocked}
             style={styles.bottomAction}
           />
         )}
@@ -878,6 +1058,49 @@ const styles = StyleSheet.create({
   },
   inlineEmptyState: {
     paddingVertical: Tokens.spacing.sm,
+  },
+  gateBody: {
+    gap: Tokens.spacing.md,
+  },
+  gateChecklist: {
+    gap: Tokens.spacing.sm,
+  },
+  gateCheckRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+  },
+  gateCheckLabel: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+    flex: 1,
+  },
+  gateCheckDetail: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  gateReason: {
+    backgroundColor: Tokens.colors.dangerBg,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: `${Tokens.colors.danger}22`,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.sm,
+  },
+  gateReasonTitle: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+  },
+  gateReasonDescription: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  gateAction: {
+    alignSelf: "flex-start",
+  },
+  gateChecking: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
   heroCard: {
     backgroundColor: Tokens.colors.surface,

@@ -10,7 +10,11 @@ import {
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
 import { syncDriverIdentityBootstrap } from "@/lib/driver-identity-bootstrap";
-import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import { evaluateTrackingRecovery } from "@/lib/driver-tracking-recovery";
+import {
+  allowUnprovisionedDriverRoute,
+  resetDriverAppToOnboarding,
+} from "@/lib/driver-identity-routing";
 import {
   getDriverClient,
   getDriverIdentityIssue,
@@ -26,15 +30,6 @@ const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 export const unstable_settings = {
   initialRouteName: "onboarding",
 };
-
-function allowUnprovisionedRoute(segments: string[]): boolean {
-  const topLevelRoute = segments[0];
-  return (
-    topLevelRoute == null ||
-    topLevelRoute === "index" ||
-    topLevelRoute === "onboarding"
-  );
-}
 
 function DriverHeartbeatBootstrap() {
   const router = useRouter();
@@ -52,7 +47,9 @@ function DriverHeartbeatBootstrap() {
 
     const syncWithActiveTrip = async () => {
       await syncDriverIdentityBootstrap({
-        allowUnprovisionedRoute: allowUnprovisionedRoute(segmentsRef.current),
+        allowUnprovisionedRoute: allowUnprovisionedDriverRoute(
+          segmentsRef.current,
+        ),
         cancelled: () => cancelled,
         getDriverIdentityIssue,
         initializeDriverIdentity,
@@ -64,6 +61,7 @@ function DriverHeartbeatBootstrap() {
         resetDriverAppToOnboarding,
         router,
         syncDriverLocationHeartbeat,
+        evaluateTrackingRecovery,
       });
     };
 
@@ -136,6 +134,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="settings"
           options={{ title: driverRouteTitles.settings }}
+        />
+        <Stack.Screen
+          name="safety-operator"
+          options={{ title: driverRouteTitles.safetyOperator }}
         />
       </Stack>
     </ThemeProvider>

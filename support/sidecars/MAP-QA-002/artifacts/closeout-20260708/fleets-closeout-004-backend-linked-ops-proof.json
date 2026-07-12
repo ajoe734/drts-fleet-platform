@@ -1,0 +1,260 @@
+{
+  "generatedAt": "2026-07-11T02:33:39.688Z",
+  "branchSha": "codex/fleets-closeout-004@f9c033bb1194",
+  "closeoutTask": "FLEETS-CLOSEOUT-004",
+  "scope": "repo-local backend service-layer plus Ops map model evidence; final E2E-MAP-006 promotion composes this readback with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, and MAP-OBS-001 final evidence.",
+  "command": "pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility-ops-map-closeout-proof.test.ts --reporter=verbose",
+  "sameOrderIdsAsCallcenterProof": ["ORD-SMOKE-001"],
+  "backendReadback": {
+    "order": {
+      "orderId": "ORD-SMOKE-001",
+      "orderNo": "O-20260410-000001",
+      "orderSource": "phone",
+      "serviceBucket": "standard_taxi",
+      "status": "ready_for_dispatch",
+      "queueFamily": "realtime_ready_queue",
+      "pickup": {
+        "address": "No. 1, City Hall Road, Xinyi District, Taipei",
+        "lat": 25.037519,
+        "lng": 121.56368,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "exact",
+        "providerCandidateId": "place-city-hall",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:00:00.000Z",
+        "surface": "callcenter"
+      },
+      "dropoff": {
+        "address": "No. 100, Songren Road, Xinyi District, Taipei",
+        "lat": 25.033879,
+        "lng": 121.568743,
+        "coordinateSource": "provider_candidate",
+        "geocodeProvider": "mock-geo",
+        "geocodeConfidence": "interpolated",
+        "providerCandidateId": "place-xinyi-office",
+        "selectedByActorId": "AGENT-OPS-001",
+        "selectedAt": "2026-07-08T05:01:00.000Z",
+        "surface": "callcenter"
+      },
+      "spatialAudit": {
+        "snapshotId": "snapshot-fleets-closeout-004-001",
+        "decision": "serviceable",
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "reasonCodes": [],
+        "missingItems": []
+      }
+    },
+    "dispatchJob": {
+      "dispatchJobId": "misc-fleets-closeout-004-2",
+      "orderId": "ORD-SMOKE-001",
+      "status": "matching",
+      "mode": "auto",
+      "latestEtaMinutes": 4,
+      "createdAt": "2026-07-11T02:33:39.681Z",
+      "updatedAt": "2026-07-11T02:33:39.681Z"
+    },
+    "dispatchTrace": [
+      {
+        "traceId": "trace-fleets-closeout-004-002",
+        "orderId": "ORD-SMOKE-001",
+        "eventType": "dispatch.matching",
+        "message": "dispatch.matching",
+        "createdAt": "2026-07-11T02:33:39.682Z",
+        "details": {
+          "dispatchJobId": "misc-fleets-closeout-004-2",
+          "candidateCount": 3
+        }
+      },
+      {
+        "traceId": "trace-fleets-closeout-004-001",
+        "orderId": "ORD-SMOKE-001",
+        "eventType": "callcenter.order_created",
+        "message": "callcenter.order_created",
+        "createdAt": "2026-07-11T02:33:39.675Z",
+        "details": {
+          "callId": "CALL-SMOKE-001",
+          "recordingId": "REC-SMOKE-001",
+          "recordingPending": false
+        }
+      }
+    ],
+    "candidates": [
+      {
+        "vehicleId": "vehicle-map-closeout-004-fresh",
+        "driverId": "driver-map-closeout-004-fresh",
+        "operatingArea": "taipei",
+        "etaMinutes": 4,
+        "locationState": "fresh",
+        "currentLocation": {
+          "driverId": "driver-map-closeout-004-fresh",
+          "lat": 25.0381,
+          "lng": 121.5646,
+          "accuracyM": 12,
+          "recordedAt": "2026-07-08T06:02:00.000Z",
+          "updatedAt": "2026-07-08T06:02:00.000Z"
+        }
+      },
+      {
+        "vehicleId": "vehicle-map-closeout-004-low-accuracy",
+        "driverId": "driver-map-closeout-004-low-accuracy",
+        "operatingArea": "taipei",
+        "etaMinutes": 7,
+        "locationState": "low_accuracy",
+        "currentLocation": {
+          "driverId": "driver-map-closeout-004-low-accuracy",
+          "lat": 25.0387,
+          "lng": 121.5654,
+          "accuracyM": 85,
+          "recordedAt": "2026-07-08T06:02:00.000Z",
+          "updatedAt": "2026-07-08T06:02:00.000Z"
+        }
+      },
+      {
+        "vehicleId": "vehicle-map-closeout-004-missing",
+        "driverId": "driver-map-closeout-004-missing",
+        "operatingArea": "taipei",
+        "etaMinutes": 9,
+        "locationState": "missing",
+        "currentLocation": null
+      }
+    ]
+  },
+  "opsBoard": {
+    "providerStatus": "degraded_projection",
+    "fallbackReason": "missing_coordinates",
+    "overlays": {
+      "serviceAreaCodes": ["TAIPEI_CORE"],
+      "policyCodes": [],
+      "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+      "reasonCodes": [],
+      "decisions": ["serviceable"]
+    },
+    "counts": {
+      "points": 4,
+      "candidateSupplyPoints": 2,
+      "staleCandidatePoints": 1,
+      "noLocationCandidateCount": 1,
+      "ordersMissingPickupCoordinates": 0
+    },
+    "points": [
+      {
+        "key": "ORD-SMOKE-001:pickup",
+        "kind": "pickup",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "misc-fleets-closeout-004-2",
+        "lat": 25.037519,
+        "lng": 121.56368,
+        "freshness": null
+      },
+      {
+        "key": "ORD-SMOKE-001:dropoff",
+        "kind": "dropoff",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "misc-fleets-closeout-004-2",
+        "lat": 25.033879,
+        "lng": 121.568743,
+        "freshness": null
+      },
+      {
+        "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-fresh:driver-map-closeout-004-fresh",
+        "kind": "candidate",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "misc-fleets-closeout-004-2",
+        "lat": 25.0381,
+        "lng": 121.5646,
+        "freshness": "fresh"
+      },
+      {
+        "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-low-accuracy:driver-map-closeout-004-low-accuracy",
+        "kind": "candidate",
+        "orderId": "ORD-SMOKE-001",
+        "jobId": "misc-fleets-closeout-004-2",
+        "lat": 25.0387,
+        "lng": 121.5654,
+        "freshness": "low_accuracy"
+      }
+    ],
+    "viewport": {
+      "centerLat": 25.0362895,
+      "centerLng": 121.56621150000001,
+      "zoom": 15,
+      "tileCount": 8,
+      "projectedPoints": [
+        {
+          "key": "ORD-SMOKE-001:pickup",
+          "kind": "pickup",
+          "projection": {
+            "leftPct": 41.80719091350006,
+            "topPct": 41.21648656385433,
+            "visible": true
+          }
+        },
+        {
+          "key": "ORD-SMOKE-001:dropoff",
+          "kind": "dropoff",
+          "projection": {
+            "leftPct": 58.192809086629296,
+            "topPct": 67.22028874572263,
+            "visible": true
+          }
+        },
+        {
+          "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-fresh:driver-map-closeout-004-fresh",
+          "kind": "candidate",
+          "projection": {
+            "leftPct": 44.78462893800396,
+            "topPct": 37.065808264952565,
+            "visible": true
+          }
+        },
+        {
+          "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-low-accuracy:driver-map-closeout-004-low-accuracy",
+          "kind": "candidate",
+          "projection": {
+            "leftPct": 47.37370548136015,
+            "topPct": 32.7793728628765,
+            "visible": true
+          }
+        }
+      ]
+    }
+  },
+  "finalEvidencePromotion": {
+    "canSupportRows": [
+      "E2E-MAP-006 backend/API readback to Ops map",
+      "same persisted order ID across callcenter, dispatch, and Ops map",
+      "dispatch candidate location freshness and no-location handling",
+      "service-area overlay from backend spatial audit"
+    ],
+    "promotedRows": [
+      "MAP-QA-002 E2E-MAP-006 final PASS row",
+      "MAP-REL-001 FLEETS-CLOSEOUT-004 acceptance matrix"
+    ],
+    "composedAuthority": [
+      "FLEETS-CLOSEOUT-001 persisted API/DB snapshot proof for ORD-SMOKE-001",
+      "FLEETS-CLOSEOUT-004 browser DOM screenshot and API-envelope readback for the same order/dispatch/candidate chain",
+      "MAP-OBS-001 final evidence for degraded projection, freshness, and audit signals"
+    ],
+    "finalArtifactLinks": [
+      "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.png",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-backend-linked-ops-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-api-envelope-ops-proof.json",
+      "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-visibility-proof.json",
+      "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
+      "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
+      "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE-PROMOTION-MATRIX-20260706.md"
+    ]
+  },
+  "assertions": [
+    "backend_order_readback_preserves_pickup_dropoff_coordinates",
+    "backend_dispatch_job_links_to_same_order_id",
+    "backend_candidate_api_returns_fresh_low_accuracy_and_missing_location_supply",
+    "ops_map_model_renders_backend_order_pickup_dropoff_and_visible_candidates",
+    "ops_map_model_exposes_service_area_overlay_from_backend_spatial_audit",
+    "ops_map_model_marks_missing_candidate_location_as_degraded_projection"
+  ]
+}

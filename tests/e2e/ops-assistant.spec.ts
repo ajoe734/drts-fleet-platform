@@ -292,7 +292,9 @@ test.describe("ops assistant verification", () => {
       .getByRole("button", { name: /Minimize assistant|最小化/ })
       .click();
     await expect(
-      page.getByText("Minimized. Expand to resume the live mock stream."),
+      page.getByText(
+        /Minimized\. Expand to resume the live mock stream\.|已最小化。展開即可恢復即時模擬串流。/,
+      ),
     ).toBeVisible();
     await expect(page.getByTestId("ops-assistant-restore")).toBeVisible();
 
@@ -341,8 +343,10 @@ test.describe("ops assistant verification", () => {
       .getByTestId("ops-assistant-composer")
       .fill("What actions are available for the current case?");
     await page.getByTestId("ops-assistant-send").click();
-    await expect(page.getByText(`目前範圍為客訴 ${CASE_NO}。`)).toBeVisible();
-    await expect(page.getByText(/可用動作：升級為事故/)).toBeVisible();
+    await expect(
+      page.getByText(`目前範圍為 complaint:${CASE_NO}。`, { exact: false }),
+    ).toBeVisible();
+    await expect(page.getByText(/availableActions：升級事故/)).toBeVisible();
   });
 
   test("tier2 actions stay confirm-gated and emit audit evidence", async ({
@@ -354,7 +358,7 @@ test.describe("ops assistant verification", () => {
     await openAssistant(page);
 
     await page.getByTestId("ops-assistant-action-escalate_to_incident").click();
-    await expect(page.getByText("待處理意圖 · 升級為事故")).toBeVisible();
+    await expect(page.getByText("待處理意圖 · 升級事故")).toBeVisible();
     await page.getByTestId("ops-assistant-open-confirmation").click();
 
     const confirmButton = page.getByRole("button", {
@@ -369,7 +373,7 @@ test.describe("ops assistant verification", () => {
     await confirmButton.click();
 
     await expect(
-      page.getByText(/稽核編號 audit-CMP-001-escalate_to_incident/),
+      page.getByText(/auditId audit-CMP-001-escalate_to_incident/),
     ).toBeVisible();
     await expect(page.getByRole("link", { name: /檢視稽核/ })).toBeVisible();
   });
@@ -393,7 +397,9 @@ test.describe("ops assistant verification", () => {
       .fill("How does incident confirmation work?");
     await page.getByTestId("ops-assistant-send").click();
     await expect(
-      page.getByText("LLM 已降級，改顯示整理過的說明搜尋備援。"),
+      page.getByText("LLM 已降級。顯示策展式 help-search 備援。", {
+        exact: false,
+      }),
     ).toBeVisible();
     await expect(
       page.getByText(

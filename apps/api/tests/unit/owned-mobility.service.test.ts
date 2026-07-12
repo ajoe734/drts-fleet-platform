@@ -7,16 +7,25 @@ import {
   RESERVATION_HOLD_VALID_TRANSITIONS,
   EXCEPTION_HOLD_REASON_CODES,
 } from "@drts/contracts";
+import type { ServiceAreaEvaluationResult } from "@drts/contracts";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
+const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
+  "veh-demo-001": "multi_purpose_taxi",
+  "veh-demo-002": "taxi",
+  "veh-demo-003": "taxi",
+  "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
+};
 
 function createOwnedMobilityService(options?: {
   candidates?: Array<{
@@ -37,9 +46,27 @@ function createOwnedMobilityService(options?: {
     serviceBuckets: string[];
   }>;
   vehicleDispatchable?: boolean;
+  getVehicleDispatchability?: (
+    vehicleId: string,
+    serviceBucket: string,
+  ) => boolean;
+  vehicleLicenseTypes?: Record<string, string>;
+  driverAvailable?: boolean;
+  getDriverAvailability?: (driverId: string, serviceBucket: string) => boolean;
   enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
   serviceProductOverrides?: Record<string, unknown>;
+  runtimeEligibilityEvaluator?: {
+    evaluate: ReturnType<typeof vi.fn>;
+  };
+  serviceAreaService?: ServiceAreaService;
+  repository?: {
+    isEnabled: () => boolean;
+    persistChanges: (...args: any[]) => Promise<unknown>;
+    persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
+    withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
+    reportPersistenceFailure: (...args: any[]) => void;
+  };
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
@@ -52,9 +79,23 @@ function createOwnedMobilityService(options?: {
         [],
     ),
     getVehicleDispatchability: vi.fn(
-      () => options?.vehicleDispatchable ?? true,
+      (vehicleId: string, serviceBucket: string) =>
+        options?.getVehicleDispatchability?.(vehicleId, serviceBucket) ??
+        options?.vehicleDispatchable ??
+        true,
     ),
-    getDriverAvailability: vi.fn(() => true),
+    getDriverAvailability: vi.fn(
+      (driverId: string, serviceBucket: string) =>
+        options?.getDriverAvailability?.(driverId, serviceBucket) ??
+        options?.driverAvailable ??
+        true,
+    ),
+    getVehicleLicenseType: vi.fn(
+      (vehicleId: string) =>
+        options?.vehicleLicenseTypes?.[vehicleId] ??
+        DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ??
+        null,
+    ),
   };
   const auditNotificationService = {
     recordNotification: vi.fn(),
@@ -111,10 +152,15 @@ function createOwnedMobilityService(options?: {
     callcenterService as never,
     taskEventsService,
     opsDispatchEventsService,
-    undefined,
+    options?.repository as never,
     options?.tenantPartnerService,
     vehicleEligibilityService,
     serviceProductService,
+    undefined,
+    options?.runtimeEligibilityEvaluator as never,
+    undefined,
+    undefined,
+    options?.serviceAreaService,
   );
 
   return {
@@ -127,6 +173,526 @@ function createOwnedMobilityService(options?: {
 describe("OwnedMobilityService queue and reservation orchestration", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("hard-blocks coordinate-bearing phone orders in no-pickup service-area policies", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    expect(() =>
+      service.createCallCenterOrder({
+        callId: "call-map-block-001",
+        agentId: "ops-agent-001",
+        recordingId: "recording-map-block-001",
+        pickup: {
+          address: "台北車站禁止上車區",
+          lat: 25.0478,
+          lng: 121.517,
+        },
+        dropoff: {
+          address: "信義區",
+          lat: 25.06,
+          lng: 121.58,
+        },
+        passenger: { name: "Map Rider", phone: "0912000000" },
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createCallCenterOrder({
+        callId: "call-map-block-002",
+        agentId: "ops-agent-001",
+        recordingId: "recording-map-block-002",
+        pickup: {
+          address: "台北車站禁止上車區",
+          lat: 25.0478,
+          lng: 121.517,
+        },
+        dropoff: {
+          address: "信義區",
+          lat: 25.06,
+          lng: 121.58,
+        },
+        passenger: { name: "Map Rider", phone: "0912000000" },
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PICKUP_NOT_ALLOWED",
+          details: {
+            decision: "not_serviceable",
+            reasonCodes: ["PICKUP_NOT_ALLOWED"],
+            geometryVersionRefs: [
+              "service_area:TAIPEI_CORE@1",
+              "stop_policy:TPE_STATION_PICKUP_BLOCK@1",
+            ],
+          },
+        },
+      });
+    }
+  });
+
+  it("routes manual-review service-area stops away from normal dispatch", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-001",
+          vehicleId: "vehicle-map-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createCallCenterOrder({
+      callId: "call-map-review-001",
+      agentId: "ops-agent-001",
+      recordingId: "recording-map-review-001",
+      pickup: {
+        address: "信義醫院管制入口",
+        lat: 25.0338,
+        lng: 121.5645,
+      },
+      dropoff: {
+        address: "市府轉運站",
+        lat: 25.041,
+        lng: 121.55,
+      },
+      passenger: { name: "Map Rider", phone: "0912000000" },
+    });
+
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.complianceFlags).toContain("service_area_manual_review");
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      blocking: false,
+      evidenceRefs: expect.arrayContaining([
+        "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1",
+        "STOP_REQUIRES_MANUAL_REVIEW",
+      ]),
+    });
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+    try {
+      service.dispatchOrder(order.orderId, { mode: "auto" });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "DISPATCH_REQUIRES_MANUAL_REVIEW",
+          details: {
+            gateTypes: ["service_area"],
+            reasonCodes: expect.arrayContaining([
+              "STOP_REQUIRES_MANUAL_REVIEW",
+            ]),
+          },
+        },
+      });
+    }
+  });
+
+  it("keeps provider-outage call-center capture in manual review instead of normal ready", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-provider-001",
+          vehicleId: "vehicle-map-provider-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createCallCenterOrder({
+      callId: "call-map-provider-001",
+      agentId: "ops-agent-001",
+      recordingId: "recording-map-provider-001",
+      pickup: {
+        address: "台北市政府",
+        lat: 25.0375,
+        lng: 121.5637,
+      },
+      dropoff: {
+        address: "松山文創園區",
+        lat: 25.0438,
+        lng: 121.5601,
+      },
+      passenger: { name: "Fallback Rider", phone: "0912000000" },
+      mapFallbackReview: {
+        reasonCode: "map_provider_unavailable",
+        providerAvailable: false,
+        providerDegraded: true,
+        providerReasonCode: "request_failed",
+      },
+    });
+
+    const detail = service.getOrder(order.orderId);
+    const addressCaptureGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "address_capture",
+    );
+
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(detail.mapFallbackReview).toMatchObject({
+      reasonCode: "map_provider_unavailable",
+      providerAvailable: false,
+      providerDegraded: true,
+      providerReasonCode: "request_failed",
+    });
+    expect(addressCaptureGate).toMatchObject({
+      state: "review_required",
+      blocking: false,
+      evidenceRefs: expect.arrayContaining([
+        "map_provider_unavailable",
+        "request_failed",
+      ]),
+    });
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+    try {
+      service.dispatchOrder(order.orderId, { mode: "auto" });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "DISPATCH_REQUIRES_MANUAL_REVIEW",
+          details: {
+            gateTypes: expect.arrayContaining(["address_capture"]),
+            reasonCodes: expect.arrayContaining([
+              "map_provider_unavailable",
+              "request_failed",
+            ]),
+          },
+        },
+      });
+    }
+  });
+
+  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    const order = service.createCallCenterOrder(
+      {
+        callId: "call-map-audit-001",
+        agentId: "ops-agent-geo-001",
+        recordingId: "recording-map-audit-001",
+        pickup: {
+          address: "台北市政府",
+          lat: 25.0375,
+          lng: 121.5637,
+          coordinateSource: "provider_candidate",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "exact",
+          providerCandidateId: "mock-candidate-city-hall",
+          selectedByActorId: "ops-agent-geo-001",
+          selectedAt: "2026-06-30T10:00:00.000Z",
+          surface: "callcenter",
+        },
+        dropoff: {
+          address: "信義區松仁路",
+          lat: 25.034,
+          lng: 121.568,
+          coordinateSource: "manual_pin",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "manual",
+          pinnedByActorId: "ops-agent-geo-001",
+          pinnedAt: "2026-06-30T10:01:00.000Z",
+          surface: "callcenter",
+        },
+        passenger: { name: "Map Audit Rider", phone: "0912000000" },
+      },
+      "req-map-audit-001",
+    );
+
+    const detail = service.getOrder(order.orderId);
+    const spatialAudit = detail.spatialAudit;
+
+    expect(spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "ops-agent-geo-001",
+      actorType: "ops_user",
+      surface: "callcenter",
+      serviceProductType: "taxi_realtime",
+      decision: "serviceable",
+      serviceAreaCodes: ["TAIPEI_CORE"],
+      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+      missingItems: [],
+    });
+    expect(spatialAudit?.stops).toEqual([
+      expect.objectContaining({
+        kind: "pickup",
+        addressText: "台北市政府",
+        location: { lat: 25.0375, lng: 121.5637 },
+        provenanceComplete: true,
+        missingItems: [],
+        coordinateProvenance: expect.objectContaining({
+          coordinateSource: "provider_candidate",
+          geocodeProvider: "mock_geo",
+          selectedByActorId: "ops-agent-geo-001",
+          surface: "callcenter",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "dropoff",
+        addressText: "信義區松仁路",
+        location: { lat: 25.034, lng: 121.568 },
+        provenanceComplete: true,
+        missingItems: [],
+        coordinateProvenance: expect.objectContaining({
+          coordinateSource: "manual_pin",
+          pinnedByActorId: "ops-agent-geo-001",
+          surface: "callcenter",
+        }),
+      }),
+    ]);
+    expect(detail.complianceFlags).toEqual(
+      expect.arrayContaining(["recording_bound", "service_area_serviceable"]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "ops-agent-geo-001",
+        actorType: "ops_user",
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: order.orderId,
+        requestId: "req-map-audit-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "serviceable",
+          surface: "callcenter",
+          serviceProductType: "taxi_realtime",
+          provenanceComplete: true,
+        }),
+      }),
+    );
+  });
+
+  it("keeps text-only legacy orders in explicit service-area manual review", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-legacy-001",
+          vehicleId: "vehicle-map-legacy-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Caller only gave a landmark" },
+      dropoff: { address: "Caller only gave another landmark" },
+      passenger: { name: "Legacy Rider", phone: "0912000000" },
+    });
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.complianceFlags).toContain(
+      "service_area_legacy_text_manual_review",
+    );
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      evidenceState: "missing",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      surface: "passenger_entry",
+      decision: "manual_review",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            surface: "passenger_entry",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            surface: "passenger_entry",
+          }),
+        }),
+      ],
+    });
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("exempts products with no active service area defined (e.g. insurance_replacement_vehicle) from service-area check", async () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      serviceProductOverrides: {
+        serviceProductType: "insurance_replacement_vehicle",
+        displayName: "Insurance Replacement",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+      candidates: [
+        {
+          driverId: "driver-map-exempt-001",
+          vehicleId: "vehicle-map-exempt-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "insurance_replacement_vehicle",
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        pickup: {
+          address: "Some place outside any service area",
+          lat: 24.15,
+          lng: 120.67,
+        },
+        dropoff: {
+          address: "Another place outside any service area",
+          lat: 24.25,
+          lng: 120.77,
+        },
+        passenger: { name: "Exempt Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const detail = service.getOrder(booking.orderId);
+    expect(detail.complianceFlags).toContain("service_area_serviceable");
+  });
+
+  it("uses immutable spatial snapshots instead of re-evaluating created orders", () => {
+    const serviceableEvaluation: ServiceAreaEvaluationResult = {
+      decision: "serviceable",
+      serviceProductType: "taxi_realtime",
+      evaluatedAt: "2026-06-30T10:02:00.000Z",
+      stops: [
+        {
+          kind: "pickup",
+          location: { lat: 25.0375, lng: 121.5637 },
+          serviceAreaCodes: ["TAIPEI_CORE"],
+          policyCodes: [],
+          geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        },
+        {
+          kind: "dropoff",
+          location: { lat: 25.041, lng: 121.55 },
+          serviceAreaCodes: ["TAIPEI_CORE"],
+          policyCodes: [],
+          geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        },
+      ],
+      serviceAreaCodes: ["TAIPEI_CORE"],
+      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+      reasonCodes: [],
+      reasonMessages: [],
+    };
+    const changedEvaluation: ServiceAreaEvaluationResult = {
+      ...serviceableEvaluation,
+      decision: "not_serviceable",
+      reasonCodes: ["PICKUP_AREA_NOT_SERVICEABLE"],
+      reasonMessages: ["pickup is outside the service area."],
+      stops: serviceableEvaluation.stops.map((stop) => ({
+        ...stop,
+        decision: "not_serviceable",
+        reasonCodes: ["PICKUP_AREA_NOT_SERVICEABLE"],
+        reasonMessages: ["pickup is outside the service area."],
+      })),
+    };
+    const evaluate = vi
+      .fn()
+      .mockReturnValueOnce(serviceableEvaluation)
+      .mockReturnValue(changedEvaluation);
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: { evaluate } as unknown as ServiceAreaService,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: {
+        address: "台北市政府",
+        lat: 25.0375,
+        lng: 121.5637,
+        coordinateSource: "provider_candidate",
+        geocodeProvider: "mock_geo",
+        geocodeConfidence: "exact",
+        selectedByActorId: "passenger-001",
+        selectedAt: "2026-06-30T10:02:00.000Z",
+      },
+      dropoff: {
+        address: "市府轉運站",
+        lat: 25.041,
+        lng: 121.55,
+        coordinateSource: "provider_candidate",
+        geocodeProvider: "mock_geo",
+        geocodeConfidence: "exact",
+        selectedByActorId: "passenger-001",
+        selectedAt: "2026-06-30T10:02:30.000Z",
+      },
+      passenger: { name: "Immutable Rider", phone: "0912000000" },
+    });
+    const firstDetail = service.getOrder(order.orderId);
+    firstDetail.spatialAudit?.reasonCodes.push("MUTATED_REASON");
+    if (firstDetail.spatialAudit?.stops[0]?.location) {
+      firstDetail.spatialAudit.stops[0].location.lat = 0;
+    }
+
+    const freshDetail = service.getOrder(order.orderId);
+    const serviceAreaGate = freshDetail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(freshDetail.spatialAudit).toMatchObject({
+      decision: "serviceable",
+      reasonCodes: [],
+      stops: [
+        expect.objectContaining({
+          location: { lat: 25.0375, lng: 121.5637 },
+        }),
+        expect.objectContaining({
+          location: { lat: 25.041, lng: 121.55 },
+        }),
+      ],
+    });
+    expect(serviceAreaGate).toMatchObject({
+      state: "clear",
+      evidenceRefs: ["service_area:TAIPEI_CORE@1"],
+    });
   });
 
   it("enforces queue check-in eligibility and keeps stable queue positions", () => {
@@ -178,7 +744,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("rejects enterprise-dispatch assignment when the vehicle is not eligible for the service product", async () => {
+  it("returns ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT when assignment recheck fails", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -226,14 +792,264 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     } catch (error) {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
-          code: "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
           details: {
+            dispatchJobId: dispatchJob.dispatchJobId,
             vehicleId: "veh-demo-002",
-            serviceProduct: "enterprise_dispatch",
+            driverId: "drv-demo-001",
+            serviceProductCode: "enterprise_dispatch",
+            reasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
           },
         },
       });
     }
+  });
+
+  it("resolves sandbox fallback billing treatment from partner and tenant policy", () => {
+    const { service } = createOwnedMobilityService();
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        pickup: { address: "台中市西屯區台灣大道 1 號" },
+        dropoff: { address: "台中市南屯區公益路 2 號" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+      },
+      "tenant-demo-001",
+    ) as { orderId: string };
+    const order = service
+      .listOrders()
+      .find((item) => item.orderId === booking.orderId);
+    expect(order).toBeDefined();
+
+    const completedTask = {
+      taskId: "task-human-fallback-001",
+      vehicleId: "veh-human-demo-001",
+      completedAt: "2026-06-27T12:00:00.000Z",
+    };
+    const grossEarning = { currency: "NTD", amountMinor: 150000 };
+    const fulfillmentSegments = [
+      {
+        fulfillmentSegmentId: "segment-av-attempt-001",
+        bookingId: order!.bookingId ?? order!.orderId,
+        orderId: order!.orderId,
+        sandboxTripId: order!.orderId,
+        segmentType: "tesla_av",
+        segmentReason: "sandbox_av_attempt",
+        startedAt: "2026-06-27T11:30:00.000Z",
+        endedAt: "2026-06-27T11:45:00.000Z",
+        vehicleId: "veh-av-demo-001",
+        vin: null,
+        driverId: "safety-op-001",
+        safetyOperatorId: "safety-op-001",
+        sourcePlatform: "portal",
+        distanceKm: null,
+        durationSeconds: null,
+        cost: null,
+        evidenceReference: null,
+        createdAt: "2026-06-27T11:30:00.000Z",
+      },
+    ];
+
+    const partnerTreatment = (service as any).buildSandboxBillingTreatment(
+      {
+        ...order,
+        partnerProgramId: "program-airport-alpha",
+      },
+      completedTask,
+      grossEarning,
+      fulfillmentSegments,
+    );
+    expect(partnerTreatment).toMatchObject({
+      treatmentType: "partner_program_adjusted",
+      fallbackCostAbsorber: "partner",
+      fallbackPolicyId: "fallback-policy-partner-airport-001",
+      policyResolution: "partner_policy",
+      partnerCharge: grossEarning,
+      tenantCharge: null,
+      platformAbsorbed: null,
+    });
+
+    const tenantTreatment = (service as any).buildSandboxBillingTreatment(
+      order,
+      completedTask,
+      grossEarning,
+      fulfillmentSegments,
+    );
+    expect(tenantTreatment).toMatchObject({
+      treatmentType: "tenant_contract_adjusted",
+      fallbackCostAbsorber: "tenant_contract",
+      fallbackPolicyId: "fallback-policy-tenant-demo-001",
+      policyResolution: "tenant_policy",
+      partnerCharge: null,
+      tenantCharge: grossEarning,
+      platformAbsorbed: null,
+    });
+
+    const defaultPlatformTreatment = (
+      service as any
+    ).buildSandboxBillingTreatment(
+      {
+        ...order,
+        tenantId: "tenant-no-policy-001",
+        partnerProgramId: null,
+      },
+      completedTask,
+      grossEarning,
+      fulfillmentSegments,
+    );
+    expect(defaultPlatformTreatment).toMatchObject({
+      treatmentType: "fallback_human",
+      fallbackCostAbsorber: "platform",
+      fallbackPolicyId: null,
+      policyResolution: "default_platform_no_contract",
+      partnerCharge: null,
+      tenantCharge: null,
+      platformAbsorbed: grossEarning,
+    });
+  });
+
+  it("persists exact service product on the driver task created by assignment", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    expect(service.getDriverTask(assignment.taskId)).toMatchObject({
+      taskId: assignment.taskId,
+      serviceProductCode: "credit_card_airport_transfer",
+    });
+  });
+
+  it("stamps serviceProductCode at booking intake and carries it through assignment + task", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    // Booking-origin: the precise code is on the order the moment it is created,
+    // before any dispatch/derivation downstream.
+    expect(service.getOrder(booking.orderId)?.serviceProductCode).toBe(
+      "credit_card_airport_transfer",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    // Same value flows to the driver task (carried from the order, not re-derived).
+    expect(service.getDriverTask(assignment.taskId)?.serviceProductCode).toBe(
+      "credit_card_airport_transfer",
+    );
+  });
+
+  it("uses repository transactions for assignment-time recheck when persistence is enabled", async () => {
+    let vehicleDispatchable = true;
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 4,
+          operatingArea: "north",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      repository,
+      getVehicleDispatchability: () => vehicleDispatchable,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+    const dispatchResult = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    vehicleDispatchable = false;
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId: "vehicle-001",
+        driverId: "driver-001",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+          details: {
+            reasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
+          },
+        },
+      },
+    });
+    expect(repository.withTransaction).toHaveBeenCalledTimes(1);
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
   });
 
   it("keeps owned-mobility dispatch candidates order-specific when vehicle eligibility is enabled", async () => {
@@ -281,7 +1097,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
     const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
 
-    expect(service.listDispatchCandidates(dispatchJob.dispatchJobId)).toEqual([
+    await expect(
+      service.listDispatchCandidates(dispatchJob.dispatchJobId),
+    ).resolves.toEqual([
       expect.objectContaining({
         driverId: "driver-nearby",
         etaMinutes: 3,
@@ -294,6 +1112,214 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       }),
     ]);
   });
+
+  it("decorates candidate decisions and hides ineligible rows by default", async () => {
+    const runtimeEligibilityEvaluator = {
+      evaluate: vi
+        .fn()
+        .mockResolvedValueOnce({
+          serviceProductId: "svc-enterprise",
+          serviceProductCode: "enterprise_dispatch",
+          policyVersion:
+            "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-1@2026-06-20T00:00:00.000Z",
+          decision: "conditionally_eligible",
+          hardReasonCodes: [],
+          softReasonCodes: ["STALE_LOCATION"],
+          missingRequirements: ["photo"],
+          locationState: "stale",
+          evaluatedAt: "2026-06-20T12:00:00.000Z",
+        })
+        .mockResolvedValueOnce({
+          serviceProductId: "svc-enterprise",
+          serviceProductCode: "enterprise_dispatch",
+          policyVersion:
+            "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-2@2026-06-20T00:00:00.000Z",
+          decision: "ineligible",
+          hardReasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
+          softReasonCodes: [],
+          missingRequirements: [],
+          locationState: "fresh",
+          evaluatedAt: "2026-06-20T12:00:01.000Z",
+        }),
+    };
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-eligible",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+        {
+          driverId: "drv-ineligible",
+          vehicleId: "veh-demo-002",
+          etaMinutes: 8,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      runtimeEligibilityEvaluator,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-20T13:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
+        dropoff: { address: "Airport" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    const candidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    );
+
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        driverId: "drv-eligible",
+        eligibilityDecision: "conditionally_eligible",
+        softReasonCodes: ["STALE_LOCATION"],
+        missingRequirements: ["photo"],
+        locationState: "stale",
+        serviceProductContext: {
+          serviceProductId: "svc-enterprise",
+          serviceProductCode: "enterprise_dispatch",
+          policyVersion:
+            "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-1@2026-06-20T00:00:00.000Z",
+          evaluatedAt: "2026-06-20T12:00:00.000Z",
+        },
+      }),
+    ]);
+    expect(runtimeEligibilityEvaluator.evaluate).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to decorated ineligible rows instead of returning a bare empty list", async () => {
+    const runtimeEligibilityEvaluator = {
+      evaluate: vi.fn().mockResolvedValue({
+        serviceProductId: "svc-enterprise",
+        serviceProductCode: "enterprise_dispatch",
+        policyVersion:
+          "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-2@2026-06-20T00:00:00.000Z",
+        decision: "ineligible",
+        hardReasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
+        softReasonCodes: [],
+        missingRequirements: [],
+        locationState: "fresh",
+        evaluatedAt: "2026-06-20T12:00:01.000Z",
+      }),
+    };
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-ineligible",
+          vehicleId: "veh-demo-002",
+          etaMinutes: 8,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      runtimeEligibilityEvaluator,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-20T13:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
+        dropoff: { address: "Airport" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    const fallbackCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    );
+    const allCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+      true,
+    );
+
+    expect(fallbackCandidates).toHaveLength(1);
+    expect(fallbackCandidates[0]?.eligibilityDecision).toBe("ineligible");
+    expect(allCandidates).toHaveLength(1);
+    expect(allCandidates[0]?.hardReasonCodes).toEqual([
+      "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+    ]);
+  });
+
+  it("never offers an airport-permit-failing vehicle even under scarcity", async () => {
+    const runtimeEligibilityEvaluator = {
+      evaluate: vi.fn().mockResolvedValue({
+        serviceProductId: "svc-airport",
+        serviceProductCode: "credit_card_airport_transfer",
+        policyVersion:
+          "service:svc-airport@2026-06-20T00:00:00.000Z|capability:cap-3@2026-06-20T00:00:00.000Z",
+        decision: "ineligible",
+        hardReasonCodes: ["MISSING_AIRPORT_ELIGIBILITY"],
+        softReasonCodes: [],
+        missingRequirements: [],
+        locationState: "fresh",
+        evaluatedAt: "2026-06-20T12:00:01.000Z",
+      }),
+    };
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-no-airport",
+          vehicleId: "veh-demo-002",
+          etaMinutes: 8,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      runtimeEligibilityEvaluator,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T13:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
+        dropoff: { address: "Taoyuan Airport" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    // Default dispatch must NOT re-admit the airport-ineligible vehicle: the
+    // broad business_dispatch candidate cannot satisfy the airport transfer.
+    const fallbackCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    );
+    expect(fallbackCandidates).toHaveLength(0);
+
+    // It still appears in the diagnostic includeIneligible view.
+    const allCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+      true,
+    );
+    expect(allCandidates).toHaveLength(1);
+    expect(allCandidates[0]?.hardReasonCodes).toEqual([
+      "MISSING_AIRPORT_ELIGIBILITY",
+    ]);
+  });
+
   it("resolves tenant booking passenger and addresses from governed master data", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
@@ -2113,6 +3139,74 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("allows reservation reassignment after the assignment release already finalized the hold", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const candidates = [
+      {
+        driverId: "driver-001",
+        vehicleId: "vehicle-001",
+        etaMinutes: 5,
+        operatingArea: "north",
+        serviceBuckets: ["business_dispatch"],
+      },
+    ];
+    const { service } = createOwnedMobilityService({ candidates });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const firstAssignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    expect(service.getOrder(booking.orderId).reservationHoldStatus).toBe(
+      "released",
+    );
+
+    const reassignResult = service.reassignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-002",
+      driverId: "driver-002",
+      reasonCode: "roc_human_fallback",
+      reasonNote: "Recorder unhealthy, rotating to human driver",
+    });
+    const order = service.getOrder(booking.orderId);
+    const trace = service.listDispatchTrace(booking.orderId);
+
+    expect(reassignResult.assignmentId).not.toBe(firstAssignment.assignmentId);
+    expect(order.status).toBe("assigned");
+    expect(order.reservationHoldStatus).toBe("released");
+    expect(
+      trace.filter((entry) => entry.eventType === "reservation.hold.released"),
+    ).toHaveLength(1);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "dispatch.reassigned",
+          details: expect.objectContaining({
+            reasonCode: "roc_human_fallback",
+            nextVehicleId: "vehicle-002",
+            nextDriverId: "driver-002",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("keeps reassign distinct from redispatch by rotating assignment inside the same dispatch job", () => {
     const candidates = [
       {
@@ -2188,6 +3282,102 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         actionName: "reassign_dispatch",
       }),
     );
+  });
+
+  it("restores the active assignment when reassign eligibility changes before reassignment completes", async () => {
+    let backupVehicleDispatchable = true;
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      repository,
+      getVehicleDispatchability: (vehicleId: string) =>
+        vehicleId === "vehicle-001" ? true : backupVehicleDispatchable,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "A" },
+      dropoff: { address: "B" },
+      passenger: { name: "Test", phone: "0911111111" },
+    });
+    const dispatchResult = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const firstAssignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    repository.persistChanges.mockClear();
+    repository.persistOrderWorkflow.mockClear();
+    backupVehicleDispatchable = false;
+
+    await expect(
+      service.reassignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId: "vehicle-002",
+        driverId: "driver-002",
+        reasonCode: "operator_reassign",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+        },
+      },
+    });
+
+    const snapshot = service.getReportingSnapshot();
+    expect(
+      snapshot.dispatchAssignments.filter(
+        (assignment) =>
+          assignment.dispatchJobId === dispatchResult.dispatchJobId,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        assignmentId: firstAssignment.assignmentId,
+        status: "assigned",
+        vehicleId: "vehicle-001",
+        driverId: "driver-001",
+      }),
+    ]);
+    expect(
+      snapshot.driverTasks.filter(
+        (task) => task.dispatchJobId === dispatchResult.dispatchJobId,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        taskId: firstAssignment.taskId,
+        status: "pending_acceptance",
+        vehicleId: "vehicle-001",
+        driverId: "driver-001",
+      }),
+    ]);
+    expect(service.listDispatchTrace(order.orderId)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "dispatch.reassigned",
+        }),
+      ]),
+    );
+    expect(repository.persistChanges).not.toHaveBeenCalled();
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
   });
 
   it("keeps redispatch distinct from reassign by opening a new dispatch job", () => {

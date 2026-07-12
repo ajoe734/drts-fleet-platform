@@ -10,3 +10,6 @@
 # grows monotonically toward full coverage.
 #
 # number   reason (owning round)
+# NOTE: the runner extracts EVERY integer run from each non-comment line, so a
+# reason string must contain no stray digits (they would be read as extra
+# deferred scenario numbers). Keep reasons digit-free.

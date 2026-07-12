@@ -5,6 +5,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import type {
   AuditLogRecord,
   CreateReportJobCommand,
+  DispatchDailyRecord,
   EvidenceSubjectGovernanceRecord,
   FilingPackageAccepted,
   FilingPackageRecord,
@@ -17,6 +18,7 @@ import type {
   ReportJobAccepted,
   ReportJobRecord,
   SettlementMatrixRecord,
+  SixMonthOperationsSummary,
   TenantCostCenterRecord,
 } from "@drts/contracts";
 
@@ -28,6 +30,7 @@ import {
 } from "../../common/evidence-governance";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import type { DailyDispatchRecordQuery } from "../reporting/reporting.repository";
 import {
   ReportingFilingRepository,
   type PersistReportingFilingChanges,
@@ -70,11 +73,15 @@ type TenantMonthlyTripReportRow = {
   exportedAt: string;
 };
 
-type ReportJobRow = DispatchRecordingIndexRow | TenantMonthlyTripReportRow;
+type ReportingJobRow =
+  | DispatchRecordingIndexRow
+  | DispatchDailyRecord
+  | SixMonthOperationsSummary
+  | TenantMonthlyTripReportRow;
 
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows?: ReportJobRow[];
+  rows?: ReportingJobRow[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
   evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
@@ -114,7 +121,7 @@ type FilingPackageDownloadMetadata = {
 
 type StoredReportJob = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows: ReportJobRow[];
+  rows: ReportingJobRow[];
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
   settlementMatrix: SettlementMatrixRecord[];
 };
@@ -128,6 +135,15 @@ type OrderFeedProvider = () => OwnedOrderRecord[];
 type CostCenterDirectoryProvider = (
   tenantId: string,
 ) => TenantCostCenterRecord[];
+type DailyDispatchRecordProvider = (
+  filters: DailyDispatchRecordQuery,
+) => Promise<DispatchDailyRecord[]> | DispatchDailyRecord[];
+type SixMonthOperationsSummaryProvider = (filters: {
+  from?: string;
+  to?: string;
+  businessArea?: string;
+  serviceProductCode?: string;
+}) => Promise<SixMonthOperationsSummary[]> | SixMonthOperationsSummary[];
 
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
@@ -142,6 +158,11 @@ export class ReportingFilingService implements OnModuleInit {
   private orderFeedProvider: OrderFeedProvider = () => [];
 
   private costCenterDirectoryProvider: CostCenterDirectoryProvider = () => [];
+
+  private dailyDispatchRecordProvider: DailyDispatchRecordProvider = () => [];
+
+  private sixMonthOperationsSummaryProvider: SixMonthOperationsSummaryProvider =
+    () => [];
 
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
@@ -205,6 +226,16 @@ export class ReportingFilingService implements OnModuleInit {
 
   registerCostCenterDirectoryProvider(provider: CostCenterDirectoryProvider) {
     this.costCenterDirectoryProvider = provider;
+  }
+
+  registerDailyDispatchRecordProvider(provider: DailyDispatchRecordProvider) {
+    this.dailyDispatchRecordProvider = provider;
+  }
+
+  registerSixMonthOperationsSummaryProvider(
+    provider: SixMonthOperationsSummaryProvider,
+  ) {
+    this.sixMonthOperationsSummaryProvider = provider;
   }
 
   createReportJob(
@@ -545,7 +576,7 @@ export class ReportingFilingService implements OnModuleInit {
 
     try {
       this.startReportJob(job);
-      this.completeReportJob(job, requestId);
+      await this.completeReportJob(job, requestId);
     } catch (error) {
       this.failReportJob(job, error, requestId);
     }
@@ -582,9 +613,15 @@ export class ReportingFilingService implements OnModuleInit {
     );
   }
 
-  private completeReportJob(job: StoredReportJob, requestId?: string) {
+  private async completeReportJob(job: StoredReportJob, requestId?: string) {
     if (job.jobType === "dispatch_recording_index") {
       job.rows = this.buildDispatchRecordingIndexRows();
+    }
+    if (job.jobType === "daily_dispatch_record") {
+      job.rows = await this.buildDailyDispatchRecordRows(job);
+    }
+    if (job.jobType === "six_month_operations_summary") {
+      job.rows = await this.buildSixMonthOperationsSummaryRows(job);
     }
     if (job.jobType === "monthly_trip_report") {
       job.rows = this.buildTenantMonthlyTripRows(job, requestId);
@@ -827,6 +864,21 @@ export class ReportingFilingService implements OnModuleInit {
       }));
   }
 
+  private async buildDailyDispatchRecordRows(job: StoredReportJob) {
+    const filters = this.extractDailyDispatchRecordFilters(job.filters);
+    const rows = await this.dailyDispatchRecordProvider(filters);
+    return rows.map((row) => ({ ...row }));
+  }
+
+  private async buildSixMonthOperationsSummaryRows(job: StoredReportJob) {
+    const filters = this.extractSixMonthOperationsSummaryFilters(job.filters);
+    const rows = await this.sixMonthOperationsSummaryProvider(filters);
+    return rows.map((row) => ({
+      ...row,
+      complaintsByCategory: { ...row.complaintsByCategory },
+    }));
+  }
+
   private buildTenantMonthlyTripRows(
     job: StoredReportJob,
     requestId?: string,
@@ -910,6 +962,89 @@ export class ReportingFilingService implements OnModuleInit {
         producerRequestId: requestId ?? null,
         exportedAt,
       }));
+  }
+
+  private extractDailyDispatchRecordFilters(
+    filters: Record<string, unknown>,
+  ): DailyDispatchRecordQuery {
+    const readText = (key: string) => {
+      const value = filters[key];
+      return typeof value === "string" && value.trim() ? value.trim() : null;
+    };
+    const query: DailyDispatchRecordQuery = {};
+    const serviceDate = readText("serviceDate");
+    const serviceDateFrom = readText("serviceDateFrom");
+    const serviceDateTo = readText("serviceDateTo");
+    const orderId = readText("orderId");
+    const orderSource = readText("orderSource");
+    const tenantId = readText("tenantId");
+    const partnerId = readText("partnerId");
+    const serviceProductCode = readText("serviceProductCode");
+    const finalStatus = readText("finalStatus");
+
+    if (serviceDate) {
+      query.serviceDate = serviceDate;
+    }
+    if (serviceDateFrom) {
+      query.serviceDateFrom = serviceDateFrom;
+    }
+    if (serviceDateTo) {
+      query.serviceDateTo = serviceDateTo;
+    }
+    if (orderId) {
+      query.orderId = orderId;
+    }
+    if (orderSource) {
+      query.orderSource = orderSource;
+    }
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    if (partnerId) {
+      query.partnerId = partnerId;
+    }
+    if (serviceProductCode) {
+      query.serviceProductCode = serviceProductCode;
+    }
+    if (finalStatus) {
+      query.finalStatus = finalStatus;
+    }
+
+    return query;
+  }
+
+  private extractSixMonthOperationsSummaryFilters(
+    filters: Record<string, unknown>,
+  ) {
+    const readText = (key: string) => {
+      const value = filters[key];
+      return typeof value === "string" && value.trim() ? value.trim() : null;
+    };
+    const query: {
+      from?: string;
+      to?: string;
+      businessArea?: string;
+      serviceProductCode?: string;
+    } = {};
+    const from = readText("from");
+    const to = readText("to");
+    const businessArea = readText("businessArea");
+    const serviceProductCode = readText("serviceProductCode");
+
+    if (from) {
+      query.from = from;
+    }
+    if (to) {
+      query.to = to;
+    }
+    if (businessArea) {
+      query.businessArea = businessArea;
+    }
+    if (serviceProductCode) {
+      query.serviceProductCode = serviceProductCode;
+    }
+
+    return query;
   }
 
   private buildPartnerRevenueSummaryRows(): PartnerRevenueSummaryRowRecord[] {
@@ -1168,7 +1303,7 @@ export class ReportingFilingService implements OnModuleInit {
   }
 
   private assertNonBlank(value: string, field: string) {
-    if (!value.trim()) {
+    if (!(value ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",

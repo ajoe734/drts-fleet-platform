@@ -60,8 +60,45 @@ use_local_psql() {
   command -v psql >/dev/null 2>&1
 }
 
+docker_available() {
+  command -v docker >/dev/null 2>&1
+}
+
 postgres_service_running() {
-  docker compose -f "$DOCKER_COMPOSE_FILE" ps --status running postgres 2>/dev/null | grep -q postgres
+  docker_available && docker compose -f "$DOCKER_COMPOSE_FILE" ps --status running postgres 2>/dev/null | grep -q postgres
+}
+
+postgres_container_name() {
+  printf '%s\n' "${POSTGRES_CONTAINER_NAME:-drts-postgres}"
+}
+
+postgres_container_running() {
+  docker_available && docker ps --format '{{.Names}}' | grep -qx "$(postgres_container_name)"
+}
+
+run_container_psql() {
+  local database="$1"
+  shift
+
+  if postgres_service_running; then
+    docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
+      -e PGPASSWORD="$(database_password)" \
+      postgres \
+      psql -U "$(database_user)" -d "$database" "$@"
+    return
+  fi
+
+  if postgres_container_running; then
+    docker exec -i \
+      -e PGPASSWORD="$(database_password)" \
+      "$(postgres_container_name)" \
+      psql -U "$(database_user)" -d "$database" "$@"
+    return
+  fi
+
+  echo "[error] psql is not installed and no usable postgres container is running." >&2
+  echo "[hint] Run ./scripts/dev-up.sh first, or install the PostgreSQL client locally." >&2
+  exit 1
 }
 
 run_psql() {
@@ -71,16 +108,7 @@ run_psql() {
     return
   fi
 
-  if ! postgres_service_running; then
-    echo "[error] psql is not installed and the docker postgres service is not running." >&2
-    echo "[hint] Run ./scripts/dev-up.sh first, or install the PostgreSQL client locally." >&2
-    exit 1
-  fi
-
-  docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
-    -e PGPASSWORD="$(database_password)" \
-    postgres \
-    psql -U "$(database_user)" -d "$(database_name)" "$@"
+  run_container_psql "$(database_name)" "$@"
 }
 
 run_psql_file() {
@@ -92,14 +120,23 @@ run_psql_file() {
     return
   fi
 
-  if ! postgres_service_running; then
-    echo "[error] psql is not installed and the docker postgres service is not running." >&2
-    echo "[hint] Run ./scripts/dev-up.sh first, or install the PostgreSQL client locally." >&2
-    exit 1
+  if postgres_service_running; then
+    docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
+      -e PGPASSWORD="$(database_password)" \
+      postgres \
+      psql -U "$(database_user)" -d "$(database_name)" -v ON_ERROR_STOP=1 "$@" < "$file"
+    return
   fi
 
-  docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
-    -e PGPASSWORD="$(database_password)" \
-    postgres \
-    psql -U "$(database_user)" -d "$(database_name)" -v ON_ERROR_STOP=1 "$@" < "$file"
+  if postgres_container_running; then
+    docker exec -i \
+      -e PGPASSWORD="$(database_password)" \
+      "$(postgres_container_name)" \
+      psql -U "$(database_user)" -d "$(database_name)" -v ON_ERROR_STOP=1 "$@" < "$file"
+    return
+  fi
+
+  echo "[error] psql is not installed and no usable postgres container is running." >&2
+  echo "[hint] Run ./scripts/dev-up.sh first, or install the PostgreSQL client locally." >&2
+  exit 1
 }

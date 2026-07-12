@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
+const DEFAULT_ENTERPRISE_DISPATCH_TENANT_ID =
+  "10000000-0000-0000-0000-000000000201";
+const DEFAULT_ENTERPRISE_DISPATCH_ACTOR_ID = "enterprise-dispatch-web";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
@@ -23,6 +26,7 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-roles",
   "x-scopes",
   "x-serverless-authorization",
+  "x-tenant-id",
 ]);
 
 export const dynamic = "force-dynamic";
@@ -48,12 +52,32 @@ function hasUnsafePathSegment(path: string[]): boolean {
   });
 }
 
+function normalizeProxyPath(path: string[]): string[] {
+  return path[0] === "api" ? path.slice(1) : path;
+}
+
+function isTenantBookingPath(path: string[]): boolean {
+  return path[0] === "tenant" && path[1] === "bookings";
+}
+
 function isAllowedEnterprisePath(path: string[], method: string) {
   if (hasUnsafePathSegment(path)) {
     return false;
   }
 
-  return path.length === 1 && path[0] === "health" && method === "GET";
+  if (path.length === 1 && path[0] === "health" && method === "GET") {
+    return true;
+  }
+
+  if (isTenantBookingPath(path) && path.length === 2 && method === "POST") {
+    return true;
+  }
+
+  if (isTenantBookingPath(path) && path.length === 3 && method === "GET") {
+    return true;
+  }
+
+  return false;
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
@@ -66,7 +90,21 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
   return targetUrl;
 }
 
-function copyRequestHeaders(request: NextRequest) {
+function resolveEnterpriseTenantId(): string {
+  return (
+    process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID?.trim() ||
+    DEFAULT_ENTERPRISE_DISPATCH_TENANT_ID
+  );
+}
+
+function resolveEnterpriseActorId(): string {
+  return (
+    process.env.DRTS_ENTERPRISE_DISPATCH_ACTOR_ID?.trim() ||
+    DEFAULT_ENTERPRISE_DISPATCH_ACTOR_ID
+  );
+}
+
+function copyRequestHeaders(request: NextRequest, path: string[]) {
   const headers = new Headers();
 
   request.headers.forEach((value, key) => {
@@ -76,7 +114,15 @@ function copyRequestHeaders(request: NextRequest) {
     headers.set(key, value);
   });
 
-  headers.set("x-realm", "enterprise_dispatch");
+  if (isTenantBookingPath(path)) {
+    headers.set("x-realm", "tenant");
+    headers.set("x-actor-type", "tenant_admin");
+    headers.set("x-actor-id", resolveEnterpriseActorId());
+    headers.set("x-tenant-id", resolveEnterpriseTenantId());
+  } else {
+    headers.set("x-realm", "enterprise_dispatch");
+  }
+
   return headers;
 }
 
@@ -147,7 +193,8 @@ async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
-  const { path } = await params;
+  const { path: rawPath } = await params;
+  const path = normalizeProxyPath(rawPath);
   const method = request.method.toUpperCase();
 
   if (!isAllowedEnterprisePath(path, method)) {
@@ -158,17 +205,23 @@ async function forward(
   }
 
   const targetUrl = buildTargetUrl(request, path);
-  const headers = copyRequestHeaders(request);
+  const headers = copyRequestHeaders(request, path);
   await applyUpstreamAuth(headers, targetUrl);
+
+  const init: RequestInit = {
+    method,
+    headers,
+    cache: "no-store",
+    redirect: "manual",
+  };
+
+  if (method !== "GET" && method !== "HEAD") {
+    init.body = await request.arrayBuffer();
+  }
 
   let upstream: Response;
   try {
-    upstream = await fetch(targetUrl, {
-      method,
-      headers,
-      cache: "no-store",
-      redirect: "manual",
-    });
+    upstream = await fetch(targetUrl, init);
   } catch (error) {
     return NextResponse.json(
       {
@@ -186,6 +239,13 @@ async function forward(
 }
 
 export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function POST(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {

@@ -329,7 +329,7 @@ export async function EnterpriseEmbedStatePage({
             t={t}
             pad={15}
             title={k("embed.handoffOk.cardTitle")}
-            sub="signed hand-off token"
+            sub={k("card.sub.handoffToken")}
           >
             <EmbedTokenRow
               ok

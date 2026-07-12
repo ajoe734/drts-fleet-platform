@@ -34,6 +34,7 @@
 <script type="text/babel" src="ent-shell.jsx"></script>
 <script type="text/babel" src="pe-data.jsx"></script>
 <script type="text/babel" src="passenger-embed-screens.jsx"></script>
+<script type="text/babel" src="pe-fallback.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -70,12 +71,18 @@ function App() {
           <DCArtboard id="neg-degraded" label="負向 · degraded" width={PW} height={PH}><Phone><PE_Negative t={t} p={p} kind="degraded" /></Phone></DCArtboard>
         </DCSection>
 
-        <DCSection id="trip" title="A3–A6 · 行程 · 歷史 · 收據 · 結果" subtitle="持久身分：重開宿主 App 仍可找回進行中行程與收據 · PII 遮罩">
-          <DCArtboard id="active" label="A3 · 進行中行程（持久）" width={PW} height={PH}><Phone><PE_Active t={t} p={p} /></Phone></DCArtboard>
+        <DCSection id="trip" title="A3–A6 · 行程 · 歷史 · 收據 · 結果" subtitle="持久身分：重開宿主 App 仍可找回進行中行程與收據 · PII 遮罩">          <DCArtboard id="active" label="A3 · 進行中行程（持久）" width={PW} height={PH}><Phone><PE_Active t={t} p={p} /></Phone></DCArtboard>
           <DCArtboard id="trips" label="A4 · 行程歷史" width={PW} height={PH}><Phone><PE_Trips t={t} p={p} /></Phone></DCArtboard>
           <DCArtboard id="receipt" label="A5 · 收據（PII 遮罩）" width={PW} height={PH}><Phone><PE_Receipt t={t} p={p} /></Phone></DCArtboard>
           <DCArtboard id="completed" label="A6 · 完成 + 評分" width={PW} height={PH}><Phone><PE_Outcome t={t} p={p} kind="completed" /></Phone></DCArtboard>
           <DCArtboard id="cancelled" label="A6 · 取消" width={PW} height={PH}><Phone><PE_Outcome t={t} p={p} kind="cancelled" /></Phone></DCArtboard>
+        </DCSection>
+
+        <DCSection id="av-fallback" title="V1 · AV→人駕 Fallback 乘客狀態 · Phase 2" subtitle="4 態 · 文案由 messageCode 渲染（不寫死）· 不顯示 AV/事故/人員 · 不重下單不加價 (C3/C4)">
+          <DCArtboard id="fb-vehicle-change" label="vehicle_change_in_progress · 重新安排車輛" width={PW} height={PH}><Phone><PE_FbVehicleChange t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="fb-human-assigned" label="human_fallback_assigned · 新車已指派" width={PW} height={PH}><Phone><PE_FbHumanAssigned t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="fb-service-continuing" label="service_continuing · 行程繼續" width={PW} height={PH}><Phone><PE_FbServiceContinuing t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="fb-eta-updated" label="eta_updated · 預計時間更新" width={PW} height={PH}><Phone><PE_FbEtaUpdated t={t} p={p} /></Phone></DCArtboard>
         </DCSection>
 
       </DesignCanvas>

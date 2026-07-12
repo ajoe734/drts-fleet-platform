@@ -16,6 +16,11 @@ The current thresholds are operational defaults for Phase 1. They are intentiona
 The formal workload, SLA, and degradation baseline now lives in
 `docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md`.
 
+Map/geofence recent-window alert rules are maintained separately in
+`infra/alerts/map-geofence-alerts.yaml`. Those rules cover provider error rate,
+provider latency, provider quota pressure, coordinate-less attempts,
+service-area policy block bursts, and PostGIS/evaluator unavailability.
+
 ## Alert Taxonomy
 
 | Alert key                    | Primary route | Secondary route | Measured value                                                | Warning | Critical |
@@ -25,6 +30,8 @@ The formal workload, SLA, and degradation baseline now lives in
 | `driver_state_lag`           | ops           | none            | oldest stale driver location lag for dispatch-eligible supply | 10 min  | 20 min   |
 | `webhook_failure_burst`      | platform      | none            | failed webhook deliveries in trailing 1 hour                  | 2       | 5        |
 | `eligibility_review_backlog` | ops           | platform        | total partner eligibility manual-review / denied queue        | 2       | 4        |
+| `map_provider_outage`        | ops           | platform        | map provider outage/fail-closed signal                        | 1       | 3        |
+| `map_geofence_denial_burst`  | ops           | platform        | service-area stop-policy denial count                         | 3       | 10       |
 
 ## Snapshot Fields
 
@@ -64,6 +71,11 @@ The shared snapshot exposes these workflow families:
   - dispatch-recording-index jobs still pending
 - `adapters`
   - healthy / degraded / down forwarder adapters
+- `mapGeofence`
+  - provider health and fail-closed state
+  - provider outage, address ambiguity, coordinate-less attempt, manual override, and resolved address counters
+  - service-area serviceable/manual-review/policy-denial/out-of-area counters
+  - geometry publish/retire/mutation counters
 
 ## Role Views
 
@@ -75,6 +87,7 @@ Focus areas:
 - recording
 - driver state
 - reporting
+- map geofence
 
 Default response order:
 
@@ -92,6 +105,7 @@ Focus areas:
 - eligibility
 - reporting
 - adapters
+- map geofence
 
 Default response order:
 
@@ -173,6 +187,55 @@ Likely actions:
 - review partner contract configuration
 - separate issuer outage from true ineligible traffic
 - clear or annotate fallback cases before dispatch / settlement release
+
+### `map_provider_outage`
+
+Check:
+
+- `GET /api/geo/health` provider status, mode, fail-closed flag, and missing secrets
+- `mapGeofence.geo.providerOutageCount`
+- whether address ambiguity and coordinate-less counters are also increasing
+
+Likely actions:
+
+- keep coordinate-less booking fail-closed
+- route retryable provider failures to provider/quota/secrets owners
+- use `docs/03-runbooks/map-geofence-observability-runbook.md#provider-outage`
+
+### `map_geofence_denial_burst`
+
+Check:
+
+- `mapGeofence.serviceArea.policyDenialCount`
+- latest `service_area.evaluated` audits for `policyCodes`, `reasonCodes`, and `geometryVersionRefs`
+- recent service-area boundary or stop-policy publish/retire audits
+
+Likely actions:
+
+- separate stop-policy denial from provider outage and out-of-area results
+- verify whether the denial is expected after a geometry mutation
+- use `docs/03-runbooks/map-geofence-observability-runbook.md#policy-denial`
+
+## Map/Geofence Recent-Window Rules
+
+Use `infra/alerts/map-geofence-alerts.yaml` when the issue is specifically
+about geo/provider/service-area safety rather than the broader in-process
+snapshot alert keys above.
+
+Check:
+
+- `MapProviderErrorRateHigh` for retryable provider failures
+- `MapProviderLatencyHigh` for p95 geocode latency regressions
+- `MapProviderQuotaUsageHigh` and `MapProviderQuotaUsageCritical` for quota pressure
+- `CoordinateLessDispatchAttemptHigh` for fail-closed attempts without coordinates
+- `ServiceAreaPolicyBlockSpike` for stop-policy or boundary denial bursts
+- `ServiceAreaEvaluationUnavailable` for evaluator/PostGIS failures that are not provider outages
+
+Likely actions:
+
+- separate provider outage from quota pressure before escalating
+- confirm address ambiguity/manual override counters are not masking evaluator failure
+- keep coordinate-less and evaluator-unavailable flows fail-closed until reviewed
 
 ## Tenant Governance Alerts
 

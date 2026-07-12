@@ -15,6 +15,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -419,6 +420,28 @@ def disk_guard_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("remove_dirty_worktrees", False)
     return settings
 
+def worktree_cleanup_settings(config: dict[str, Any], overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    supervisor_settings = config.get("supervisor", {}) if isinstance(config.get("supervisor"), dict) else {}
+    raw = supervisor_settings.get("worker_workspace_cleanup")
+    settings = dict(raw) if isinstance(raw, dict) else {}
+    if isinstance(overrides, dict):
+        settings.update(overrides)
+    settings.setdefault("enabled", True)
+    settings.setdefault("archive_dirty_worktrees", True)
+    settings.setdefault("force_remove_dirty_worktrees_after_archive", True)
+    settings.setdefault("archive_root", str(Path(tempfile.gettempdir()) / f"{THIS_DIR.parent.name}-worktree-archive"))
+    settings.setdefault("max_worktrees_removed_per_tick", 200)
+    settings.setdefault("worktree_retention_days", 3.0)
+    settings.setdefault("remove_dirty_worktrees", False)
+    settings.setdefault("max_copied_files_per_archive", 200)
+    settings.setdefault("max_copied_file_bytes", 2 * 1024 * 1024)
+    settings.setdefault("max_copied_bytes_per_archive", 20 * 1024 * 1024)
+    # Bound the dirty-worktree archive so it cannot grow without limit and fill
+    # the disk (which would trip the disk guard and block ALL dispatch).
+    settings.setdefault("archive_retention_days", 1.0)
+    settings.setdefault("archive_max_total_bytes", 2 * 1024 * 1024 * 1024)
+    return settings
+
 
 def _disk_guard_path(config: dict[str, Any], settings: dict[str, Any]) -> Path:
     raw_path = Path(str(settings.get("path") or ".")).expanduser()
@@ -453,7 +476,7 @@ def active_worker_workspace_roots(state: dict[str, Any]) -> set[str]:
     for worker in (state.get("workers", {}) or {}).values():
         if not isinstance(worker, dict):
             continue
-        if str(worker.get("status") or "") not in active_statuses:
+        if str(worker.get("status") or "") not in active_statuses and not pid_is_alive(worker.get("pid")):
             continue
         for key in ("workspace_root", "cwd", "worktree", "worktree_path"):
             value = worker.get(key)
@@ -489,29 +512,304 @@ def _registered_worktrees(repo_root: Path) -> list[dict[str, Any]]:
     return records
 
 
-def prune_stale_worker_worktrees(
+def _worktree_archive_root(settings: dict[str, Any]) -> Path:
+    raw_value = settings.get("archive_root")
+    if raw_value:
+        root = Path(str(raw_value)).expanduser()
+    else:
+        root = Path(tempfile.gettempdir()) / f"{THIS_DIR.parent.name}-worktree-archive"
+    if not root.is_absolute():
+        root = Path(tempfile.gettempdir()) / root
+    return root.resolve()
+
+
+def _prune_worktree_archive(settings: dict[str, Any]) -> dict[str, Any]:
+    """Keep the dirty-worktree archive bounded.
+
+    Each disk-guard cleanup archives dirty worktrees into a timestamped subdir
+    under the archive root, but nothing ever removed those subdirs, so the
+    archive grew without limit (observed at 90GB) and eventually filled the
+    disk — which trips the disk guard and blocks ALL dispatch. The archived
+    snapshots are only a best-effort recovery aid (the real work lives on the
+    pushed branches/PRs), so we cap them by age then by total size.
+    """
+    root = _worktree_archive_root(settings)
+    if not root.exists():
+        return {"removed": 0, "freed_bytes": 0}
+    retention_days = max(0.0, float(settings.get("archive_retention_days", 1.0) or 0.0))
+    max_total_bytes = max(0, int(settings.get("archive_max_total_bytes", 2 * 1024 * 1024 * 1024) or 0))
+
+    def _dir_size(path: Path) -> int:
+        total = 0
+        for dirpath, _dirs, files in os.walk(path):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, name))
+                except OSError:
+                    pass
+        return total
+
+    entries: list[tuple[Path, float, int]] = []
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return {"removed": 0, "freed_bytes": 0}
+    for child in children:
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            continue
+        entries.append((child, mtime, _dir_size(child)))
+
+    removed = 0
+    freed = 0
+    now = time.time()
+    cutoff = now - retention_days * 86400.0
+    survivors: list[tuple[Path, float, int]] = []
+    for child, mtime, size in entries:
+        if retention_days > 0 and mtime < cutoff:
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+            freed += size
+        else:
+            survivors.append((child, mtime, size))
+
+    if max_total_bytes > 0:
+        total = sum(size for _child, _mtime, size in survivors)
+        survivors.sort(key=lambda item: item[1])  # oldest first
+        for child, _mtime, size in survivors:
+            if total <= max_total_bytes:
+                break
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+            freed += size
+            total -= size
+    return {"removed": removed, "freed_bytes": freed}
+
+
+def _worktree_changed_paths_for_archive(worktree: Path) -> list[str]:
+    commands = (
+        ["diff", "--name-only"],
+        ["diff", "--cached", "--name-only"],
+        ["ls-files", "--others", "--exclude-standard"],
+    )
+    seen: set[str] = set()
+    paths: list[str] = []
+    for args in commands:
+        result = _git_capture(worktree, args, timeout=30.0)
+        if result.returncode != 0:
+            continue
+        for line in (result.stdout or "").splitlines():
+            candidate = line.strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            paths.append(candidate)
+    return paths
+
+
+def _archive_dirty_worktree(worktree: Path, settings: dict[str, Any]) -> tuple[Path | None, list[str]]:
+    warnings: list[str] = []
+    archive_root = _worktree_archive_root(settings)
+    try:
+        archive_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return None, [f"archive root unavailable: {exc}"]
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", worktree.name).strip("-") or "worktree"
+    archive_dir = archive_root / f"{stamp}-{slug}-{time.time_ns()}"
+    try:
+        archive_dir.mkdir(parents=True, exist_ok=False)
+    except OSError as exc:
+        return None, [f"archive directory unavailable: {exc}"]
+
+    snapshots = (
+        (["status", "--short", "--branch", "--untracked-files=all"], "git-status.txt"),
+        (["diff", "--binary", "--full-index"], "git-diff.patch"),
+        (["diff", "--cached", "--binary", "--full-index"], "git-diff-cached.patch"),
+        (["ls-files", "--others", "--exclude-standard"], "untracked.txt"),
+    )
+    for args, filename in snapshots:
+        result = _git_capture(worktree, args, timeout=60.0)
+        try:
+            (archive_dir / filename).write_text(result.stdout or result.stderr or "", encoding="utf-8")
+        except OSError as exc:
+            warnings.append(f"{filename}: {exc}")
+        if result.returncode != 0:
+            warnings.append(f"{' '.join(args)} exited {result.returncode}")
+
+    max_files = max(0, int(settings.get("max_copied_files_per_archive", 200)))
+    max_file_bytes = max(0, int(settings.get("max_copied_file_bytes", 2 * 1024 * 1024)))
+    max_total_bytes = max(0, int(settings.get("max_copied_bytes_per_archive", 20 * 1024 * 1024)))
+    copied_entries = 0
+    copied_bytes = 0
+    manifest: dict[str, Any] = {
+        "worktree_path": str(worktree),
+        "archived_at": utc_now(),
+        "copied_files": [],
+        "skipped_files": [],
+        "warnings": warnings,
+    }
+    files_root = archive_dir / "files"
+
+    for rel_path in _worktree_changed_paths_for_archive(worktree):
+        source = worktree / rel_path
+        if not _path_is_within(source.parent, worktree):
+            manifest["skipped_files"].append({"path": rel_path, "reason": "outside_worktree"})
+            continue
+        if source.is_symlink():
+            try:
+                target = os.readlink(source)
+            except OSError as exc:
+                target = f"<unreadable: {exc}>"
+            manifest["copied_files"].append({"path": rel_path, "kind": "symlink", "target": target})
+            copied_entries += 1
+            continue
+        if not source.exists():
+            manifest["skipped_files"].append({"path": rel_path, "reason": "missing"})
+            continue
+        if source.is_dir():
+            manifest["skipped_files"].append({"path": rel_path, "reason": "directory"})
+            continue
+        resolved = source.resolve()
+        if not _path_is_within(resolved, worktree):
+            manifest["skipped_files"].append({"path": rel_path, "reason": "outside_worktree"})
+            continue
+        if max_files and copied_entries >= max_files:
+            manifest["skipped_files"].append({"path": rel_path, "reason": "max_files"})
+            continue
+        try:
+            size = source.stat().st_size
+        except OSError as exc:
+            manifest["skipped_files"].append({"path": rel_path, "reason": f"stat_failed: {exc}"})
+            continue
+        if max_file_bytes and size > max_file_bytes:
+            manifest["skipped_files"].append({"path": rel_path, "reason": f"file_too_large:{size}"})
+            continue
+        if max_total_bytes and copied_bytes + size > max_total_bytes:
+            manifest["skipped_files"].append({"path": rel_path, "reason": "archive_budget_exceeded"})
+            continue
+        destination = files_root / rel_path
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        except OSError as exc:
+            manifest["skipped_files"].append({"path": rel_path, "reason": f"copy_failed: {exc}"})
+            continue
+        manifest["copied_files"].append({"path": rel_path, "kind": "file", "size": size})
+        copied_entries += 1
+        copied_bytes += size
+
+    manifest["copied_bytes"] = copied_bytes
+    try:
+        (archive_dir / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        warnings.append(f"manifest.json: {exc}")
+    return archive_dir, warnings
+
+
+def _cleanup_registered_worktree(
+    repo_root: Path,
+    worktree: Path,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    status = _git_capture(worktree, ["status", "--porcelain", "--untracked-files=all"], timeout=30.0)
+    if status.returncode != 0:
+        message = (status.stderr or status.stdout or "").strip().replace("\n", " | ")
+        return {"removed": False, "archived": None, "warning": None, "error": message[:240]}
+
+    dirty = bool((status.stdout or "").strip())
+    archive_dir: Path | None = None
+    warnings: list[str] = []
+    if dirty and bool(settings.get("archive_dirty_worktrees", True)):
+        archive_dir, warnings = _archive_dirty_worktree(worktree, settings)
+
+    command = ["worktree", "remove"]
+    force_remove = bool(
+        settings.get("force_remove_dirty_worktrees_after_archive", True)
+        or settings.get("remove_dirty_worktrees", False)
+    )
+    if dirty and force_remove:
+        command.append("--force")
+    command.append(str(worktree))
+    result = _git_capture(repo_root, command, timeout=60.0)
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "").strip().replace("\n", " | ")
+        if warnings:
+            message = f"{message} | archive: {' | '.join(warnings[:2])}"
+        return {
+            "removed": False,
+            "archived": str(archive_dir) if archive_dir else None,
+            "warning": None,
+            "error": message[:240],
+        }
+
+    warning_message = " | ".join(warnings[:2])[:240] if warnings else None
+    return {
+        "removed": True,
+        "archived": str(archive_dir) if archive_dir else None,
+        "warning": warning_message,
+        "error": None,
+    }
+
+
+def _cleanup_registered_worker_worktrees(
     config: dict[str, Any],
     state: dict[str, Any],
-    settings: dict[str, Any],
+    settings: dict[str, Any] | None,
+    *,
+    respect_retention: bool,
 ) -> dict[str, Any]:
     try:
         repo_root = config_path(config, "status_file").parent.resolve()
     except KeyError:
-        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": ["missing status_file path"]}
+        return {
+            "checked": 0,
+            "removed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "archived": 0,
+            "errors": ["missing status_file path"],
+        }
     if not _worker_worktrees_enabled(config):
-        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": ["worker worktrees disabled"]}
+        return {
+            "checked": 0,
+            "removed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "archived": 0,
+            "errors": ["worker worktrees disabled"],
+        }
+
+    cleanup_settings = worktree_cleanup_settings(config, settings)
+    if not cleanup_settings.get("enabled", True):
+        return {
+            "checked": 0,
+            "removed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "archived": 0,
+            "errors": ["worker workspace cleanup disabled"],
+        }
 
     base = _worker_worktree_base(config, repo_root)
     if not base.exists():
-        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": []}
+        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "archived": 0, "errors": []}
 
-    retention_seconds = max(0.0, float(settings.get("worktree_retention_days", 3.0))) * 86400.0
-    cutoff = time.time() - retention_seconds
-    max_removed = max(0, int(settings.get("max_worktrees_removed_per_tick", 200)))
-    remove_dirty = bool(settings.get("remove_dirty_worktrees", False))
+    cutoff = None
+    if respect_retention:
+        retention_seconds = max(0.0, float(cleanup_settings.get("worktree_retention_days", 3.0))) * 86400.0
+        cutoff = time.time() - retention_seconds
+
+    max_removed = max(0, int(cleanup_settings.get("max_worktrees_removed_per_tick", 200)))
     active_roots = active_worker_workspace_roots(state)
-    checked = removed = skipped = failed = 0
+    checked = removed = skipped = failed = archived = 0
     errors: list[str] = []
+    warnings: list[str] = []
 
     for record in sorted(_registered_worktrees(repo_root), key=lambda item: str(item.get("path") or "")):
         if max_removed and removed >= max_removed:
@@ -520,7 +818,7 @@ def prune_stale_worker_worktrees(
         if not raw_path:
             continue
         path = Path(raw_path).expanduser().resolve()
-        if path == repo_root or not str(path).startswith(str(base) + os.sep):
+        if path == repo_root or not _path_is_within(path, base):
             continue
         checked += 1
         if str(path) in active_roots:
@@ -531,26 +829,62 @@ def prune_stale_worker_worktrees(
         except OSError:
             skipped += 1
             continue
-        if stat.st_mtime > cutoff:
+        if cutoff is not None and stat.st_mtime > cutoff:
             skipped += 1
             continue
-        command = ["worktree", "remove"]
-        if remove_dirty:
-            command.append("--force")
-        command.append(str(path))
-        result = _git_capture(repo_root, command, timeout=30.0)
-        if result.returncode == 0:
+        outcome = _cleanup_registered_worktree(repo_root, path, cleanup_settings)
+        if outcome.get("removed"):
             removed += 1
+            if outcome.get("archived"):
+                archived += 1
+            warning = outcome.get("warning")
+            if warning and len(warnings) < 10:
+                warnings.append(f"{path}: {warning}")
             continue
         failed += 1
         if len(errors) < 10:
-            message = (result.stderr or result.stdout or "").strip().replace("\n", " | ")
-            errors.append(f"{path}: {message[:240]}")
+            errors.append(f"{path}: {outcome.get('error') or 'cleanup failed'}")
 
     prune = _git_capture(repo_root, ["worktree", "prune"], timeout=30.0)
     if prune.returncode != 0 and len(errors) < 10:
         errors.append(f"git worktree prune: {(prune.stderr or prune.stdout or '').strip()[:240]}")
-    return {"checked": checked, "removed": removed, "skipped": skipped, "failed": failed, "errors": errors}
+    result = {
+        "checked": checked,
+        "removed": removed,
+        "skipped": skipped,
+        "failed": failed,
+        "archived": archived,
+        "errors": errors,
+    }
+    if warnings:
+        result["warnings"] = warnings
+    return result
+
+
+def prune_stale_worker_worktrees(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    settings: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return _cleanup_registered_worker_worktrees(
+        config,
+        state,
+        settings,
+        respect_retention=True,
+    )
+
+
+def release_inactive_worker_worktrees(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _cleanup_registered_worker_worktrees(
+        config,
+        state,
+        settings,
+        respect_retention=False,
+    )
 
 
 def _disk_guard_should_cleanup(record: dict[str, Any], settings: dict[str, Any], snapshot: dict[str, Any]) -> bool:
@@ -585,6 +919,11 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
     cleanup_result: dict[str, Any] | None = None
     if _disk_guard_should_cleanup(record, settings, snapshot):
         cleanup_result = prune_stale_worker_worktrees(config, state, settings)
+        # Cleanup archives dirty worktrees; keep that archive bounded so it does
+        # not itself fill the disk and perpetuate the dispatch block.
+        archive_prune = _prune_worktree_archive(worktree_cleanup_settings(config))
+        if int(archive_prune.get("removed") or 0) > 0:
+            record["last_archive_prune"] = archive_prune
         record["last_cleanup_at"] = utc_now()
         record["last_cleanup"] = cleanup_result
         changed = True
@@ -609,19 +948,23 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
 
     warn_percent = float(settings.get("warn_usage_percent", 80.0))
     if cleanup_result and int(cleanup_result.get("removed") or 0) > 0:
+        archived = int(cleanup_result.get("archived") or 0)
+        message = f"Pruned {cleanup_result.get('removed')} stale auto worktree(s)"
+        if archived > 0:
+            message += f" after archiving {archived} dirty worktree(s)"
+        message += f"; disk usage now {usage_percent:.2f}% with {free_gb:.2f}GB free."
         try:
             write_activity_log(
                 config,
                 {
                     "type": "disk_guard_worktree_prune",
-                    "message": (
-                        f"Pruned {cleanup_result.get('removed')} stale clean auto worktree(s); "
-                        f"disk usage now {usage_percent:.2f}% with {free_gb:.2f}GB free."
-                    ),
+                    "message": message,
                     "checked": cleanup_result.get("checked"),
                     "removed": cleanup_result.get("removed"),
                     "skipped": cleanup_result.get("skipped"),
                     "failed": cleanup_result.get("failed"),
+                    "archived": cleanup_result.get("archived"),
+                    "errors": cleanup_result.get("errors"),
                     "usage_percent": usage_percent,
                     "free_gb": free_gb,
                 },
@@ -1063,42 +1406,71 @@ def ensure_coordination_workspace(
     return destination.resolve(), None, base_branch, "created_coordination_worktree"
 
 
-def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> None:
-    """Symlink node_modules from the canonical checkout into a fresh task worktree.
+def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> str | None:
+    """Bootstrap local node_modules inside a fresh task worktree.
 
-    Worktrees start empty of node_modules (gitignored) and nothing else provisioned
-    them, so a worker that didn't run a slow `pnpm install` itself failed tsc/next
-    build at closeout → task stranded `blocked`. pnpm's content-addressable store is
-    shared, so symlinks resolve correctly and cost nothing. Best-effort: never raises.
-    See fix/orchestrator-rca-worktree-nm-and-unblock-recursion.
+    Older supervisor provisioning symlinked node_modules back to the canonical
+    checkout. That avoided a per-worktree install, but it breaks the repository's
+    local-node-modules health contract and causes Turbopack to reject app-level
+    node_modules symlinks that escape the worktree root. Best-effort: return an
+    error summary instead of raising so worker dispatch can continue with evidence.
     """
     try:
         if destination.resolve() == repo_root.resolve():
-            return  # canonical fallback already has node_modules
-        src_root = repo_root / "node_modules"
-        if src_root.is_dir():
-            dst_root = destination / "node_modules"
-            if not dst_root.exists():
-                try:
-                    dst_root.symlink_to(src_root)
-                except OSError:
-                    pass
-        for parent in ("apps", "packages"):
-            base = repo_root / parent
-            if not base.is_dir():
-                continue
-            for pkg in base.iterdir():
-                src = pkg / "node_modules"
-                if not src.is_dir():
-                    continue
-                dst = destination / parent / pkg.name / "node_modules"
-                if dst.parent.is_dir() and not dst.exists():
-                    try:
-                        dst.symlink_to(src)
-                    except OSError:
-                        pass
-    except Exception:
-        pass
+            return None  # canonical fallback already has its own node_modules
+        repair_script = destination / "scripts" / "ensure-local-node-modules.py"
+        if not repair_script.is_file():
+            return f"missing node_modules repair script at {repair_script}"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(repair_script),
+                "repair",
+                "--root",
+                str(destination),
+            ],
+            cwd=str(destination),
+            text=True,
+            capture_output=True,
+            timeout=600.0,
+        )
+        if result.returncode == 0:
+            return None
+        detail = (result.stderr or result.stdout or "").strip().replace("\n", " ")
+        detail_suffix = f": {detail[:400]}" if detail else ""
+        return (
+            "local node_modules repair failed with "
+            f"exit code {result.returncode}{detail_suffix}"
+        )
+    except Exception as exc:
+        return f"local node_modules repair raised {exc!r}"
+
+
+def _bootstrap_worktree_node_modules(
+    config: dict[str, Any],
+    request: DeliveryRequest,
+    repo_root: Path,
+    destination: Path,
+    *,
+    branch: str,
+    source: str,
+) -> None:
+    bootstrap_error = _provision_worktree_node_modules(repo_root, destination)
+    if not bootstrap_error:
+        return
+    action = "Created" if source == "created_worktree" else "Reused"
+    write_activity_log(
+        config,
+        {
+            "type": "worker_workspace_bootstrap_warning",
+            "task_id": request.task_id,
+            "target_agent": display_name_for(config, request.agent_id),
+            "message": (
+                f"{action} isolated worker worktree but could not bootstrap local node_modules. "
+                f"branch={branch} workspace={destination} detail={bootstrap_error}"
+            ),
+        },
+    )
 
 
 def ensure_execution_workspace(
@@ -1120,11 +1492,27 @@ def ensure_execution_workspace(
     base = _worker_worktree_base(config, repo_root)
     existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
     if existing is not None:
+        _bootstrap_worktree_node_modules(
+            config,
+            request,
+            repo_root,
+            existing,
+            branch=branch,
+            source="existing_worktree",
+        )
         return existing, branch, base_branch, "existing_worktree"
 
     base.mkdir(parents=True, exist_ok=True)
     destination = _candidate_worktree_path(base, request.agent_id, request.task_id)
     if destination.exists() and _current_branch(destination) == branch:
+        _bootstrap_worktree_node_modules(
+            config,
+            request,
+            repo_root,
+            destination,
+            branch=branch,
+            source="existing_path",
+        )
         return destination.resolve(), branch, base_branch, "existing_path"
 
     branch_checked_out = _worktree_for_branch(repo_root, branch) is not None
@@ -1153,7 +1541,14 @@ def ensure_execution_workspace(
             },
         )
         return repo_root, branch, base_branch, "fallback_canonical"
-    _provision_worktree_node_modules(repo_root, destination)
+    _bootstrap_worktree_node_modules(
+        config,
+        request,
+        repo_root,
+        destination,
+        branch=branch,
+        source="created_worktree",
+    )
     return destination.resolve(), branch, base_branch, "created_worktree"
 
 
@@ -4636,12 +5031,11 @@ def poll_workers(
                     worker,
                     ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
                 ):
-                    if not SUPERVISOR_LOG_QUIET:
-                        console_log(
-                            f"supersede skipped (cooldown): task={worker.get('task_id')} "
-                            f"provider={worker.get('provider')} run={worker.get('run_id')}",
-                            quiet=SUPERVISOR_LOG_QUIET,
-                        )
+                    # supersede skipped: worker still within dispatch cooldown.
+                    # Intentionally silent — this branch is re-evaluated every
+                    # tick for every protected worker, so logging it floods the
+                    # journal with hundreds of identical lines and buries real
+                    # events. The cooldown check is cheap; only the log was noise.
                     continue
                 if alive:
                     terminate_worker_pid(worker.get("pid"))
@@ -4687,13 +5081,10 @@ def poll_workers(
                 worker,
                 ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
             ):
-                if not SUPERVISOR_LOG_QUIET:
-                    console_log(
-                        f"priority-escalation supersede skipped (cooldown): "
-                        f"task={worker.get('task_id')} provider={worker.get('provider')} "
-                        f"run={worker.get('run_id')}",
-                        quiet=SUPERVISOR_LOG_QUIET,
-                    )
+                # priority-escalation supersede skipped: worker still within
+                # dispatch cooldown. Intentionally silent for the same reason as
+                # the assignment-moved branch above — re-evaluated every tick per
+                # worker, so logging it is pure journal noise.
                 continue
             if alive:
                 terminate_worker_pid(worker.get("pid"))
@@ -5152,6 +5543,28 @@ def poll_workers(
                 # fires on genuinely dead lanes, not on intermittent blips.
                 clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
             changed = True
+    cleanup_result = release_inactive_worker_worktrees(config, state)
+    if int(cleanup_result.get("removed") or 0) > 0:
+        archived = int(cleanup_result.get("archived") or 0)
+        message = f"Released {cleanup_result.get('removed')} inactive auto worktree(s)"
+        if archived > 0:
+            message += f" after archiving {archived} dirty worktree(s)"
+        if int(cleanup_result.get("failed") or 0) > 0:
+            message += f"; {cleanup_result.get('failed')} cleanup failure(s) remain"
+        write_activity_log(
+            config,
+            {
+                "type": "worker_workspace_cleanup",
+                "message": message,
+                "checked": cleanup_result.get("checked"),
+                "removed": cleanup_result.get("removed"),
+                "skipped": cleanup_result.get("skipped"),
+                "failed": cleanup_result.get("failed"),
+                "archived": cleanup_result.get("archived"),
+                "errors": cleanup_result.get("errors"),
+            },
+        )
+        changed = True
     return changed
 
 

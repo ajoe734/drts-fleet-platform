@@ -38,6 +38,7 @@ export const enterpriseDispatchBookingRecord: BookingRecord = {
   partnerEntrySlug: null,
   eligibilityVerificationId: null,
   issuerAuthorizationRef: null,
+  passengerDisclosure: null,
   status: "active",
   serviceBucket: "business_dispatch",
   businessDispatchSubtype: "enterprise_dispatch",

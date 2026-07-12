@@ -38,6 +38,7 @@ function createServices() {
     ownedMobilityService.listOrders(),
   );
 
+  ownedMobilityService.registerCallRecordingListeners();
   return {
     auditService,
     callcenterService,
@@ -198,11 +199,16 @@ describe("reporting and filing service", () => {
     expect(job.artifact?.expiresAt).toBeTruthy();
     expect(job.rows).toHaveLength(2);
 
+    type JobRow = NonNullable<typeof job.rows>[number];
+    const hasOrderId = (
+      row: JobRow,
+    ): row is Extract<JobRow, { orderId: string }> => "orderId" in row;
+
     const missingRow = job.rows?.find(
-      (row) => row.orderId === missingRecordingOrder.orderId,
+      (row) => hasOrderId(row) && row.orderId === missingRecordingOrder.orderId,
     );
     const boundRow = job.rows?.find(
-      (row) => row.orderId === recordingBoundOrder.orderId,
+      (row) => hasOrderId(row) && row.orderId === recordingBoundOrder.orderId,
     );
 
     // Recording-index rows mask sensitive identifiers (callId / recordingId)

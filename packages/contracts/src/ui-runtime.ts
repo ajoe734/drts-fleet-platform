@@ -262,6 +262,7 @@ export interface CrossAppResourceLink {
   resourceId: string;
   openMode: "new_tab" | "same_tab";
   label: string;
+  requiredScopes?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

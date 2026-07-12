@@ -44,6 +44,11 @@ env:
   RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
   WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER }}
   SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
+  MAP_PROVIDER_BACKEND: ${{ vars.STAGING_MAP_PROVIDER_BACKEND || 'mock' }}
+  NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE: ${{ vars.STAGING_MAP_TILE_URL_TEMPLATE }}
+  MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.STAGING_MAP_PROVIDER_ALLOWED_ORIGINS || vars.MAP_PROVIDER_ALLOWED_ORIGINS || '' }}
+  MAP_PROVIDER_MONTHLY_BUDGET_USD: ${{ vars.STAGING_MAP_PROVIDER_MONTHLY_BUDGET_USD || vars.MAP_PROVIDER_MONTHLY_BUDGET_USD || '' }}
+  MAP_PROVIDER_BUDGET_ALERT_PCT: ${{ vars.STAGING_MAP_PROVIDER_BUDGET_ALERT_PCT || vars.MAP_PROVIDER_BUDGET_ALERT_PCT || '50;80;95' }}
   PLATFORM_ADMIN_ORIGIN: ${{ vars.STAGING_PLATFORM_ADMIN_ORIGIN || 'https://staging.drts-fleet.cctech-support.com' }}
   OPS_CONSOLE_ORIGIN: ${{ vars.STAGING_OPS_CONSOLE_ORIGIN || 'https://ops.staging.drts-fleet.cctech-support.com' }}
   CONTROL_PLANE_API_ORIGIN_ENV: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
@@ -106,6 +111,14 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Validate map provider runtime config
+        run: |
+          MAP_PROVIDER_DEPLOYMENT_TIER=staging \
+          MAP_PROVIDER_SECRET_SOURCE=secret_manager \
+          MAP_PROVIDER_PROJECT_ID="$PROJECT_ID" \
+          MAP_PROVIDER_SECRET_PREFIX="$SECRET_PREFIX" \
+          ./scripts/check-map-provider-config.sh
+
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
@@ -161,6 +174,8 @@ jobs:
           context: .
           file: apps/ops-console-web/Dockerfile
           push: true
+          build-args: |
+            NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=${{ env.NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE }}
           tags: |
             ${{ env.REGISTRY }}/ops-console-web:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/ops-console-web:latest
@@ -432,6 +447,22 @@ jobs:
             echo "::warning::Optional secret ${SECRET_PREFIX}-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
           fi
 
+          if [[ "${MAP_PROVIDER_BACKEND}" == "google" ]]; then
+            geocode_secret="${SECRET_PREFIX}-google-maps-geocoding-api-key"
+            routes_secret="${SECRET_PREFIX}-google-maps-routes-api-key"
+
+            if ! gcloud secrets describe "$geocode_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+              echo "::error::Required secret ${geocode_secret} not found in project ${PROJECT_ID}."
+              exit 1
+            fi
+            if ! gcloud secrets describe "$routes_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+              echo "::error::Required secret ${routes_secret} not found in project ${PROJECT_ID}."
+              exit 1
+            fi
+
+            secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${geocode_secret}:latest,GOOGLE_MAPS_ROUTES_API_KEY=${routes_secret}:latest"
+          fi
+
           printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
@@ -447,7 +478,7 @@ jobs:
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,API_PORT=3001" \
+            --set-env-vars "NODE_ENV=production,APP_ENV=staging,API_PORT=3001,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
             ${{ steps.exposure.outputs.api }} \
             --min-instances 0 \
             --max-instances 3 \

@@ -16,8 +16,14 @@ import type {
   DispatchExclusivityRecord,
   DriverEligibilityBlockReason,
   DriverEtaResponse,
+  DriverLocationHeartbeatAck,
+  DriverLocationHeartbeatBatchRequest,
+  DriverLocationHeartbeatBatchResponse,
+  DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
+  DriverLocationFreshness,
   DriverLocationSnapshot,
+  DriverTrackingStatus,
   DriverMasterLifecycleStatus,
   DriverRegistryRecord,
   InitiateVehicleOffboardingCommand,
@@ -26,15 +32,22 @@ import type {
   Phase1ServiceBucket,
   RejectExclusivityCommand,
   SupplyDispatchBlockReason,
+  SupplyDocumentRecord,
   SupplyLifecycleTraceRecord,
+  SupplySubmissionRecord,
   SubmitExclusivityReviewCommand,
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   VehicleContractLifecycleStatus,
   VehicleContractRecord,
+  VehicleFleetAffiliationRecord,
+  VehicleFleetAffiliationType,
+  VehicleLicenseType,
   VehicleRegistryRecord,
+  VehicleSupplyDraft,
   VehicleSupplyLifecycleRecord,
+  DriverSupplyDraft,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -43,6 +56,8 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import {
   RegulatoryRegistryRepository,
+  type RegulatoryRegistryQueryExecutor,
+  type DriverHeartbeatEventSnapshot,
   type PersistRegulatoryRegistryChanges,
   type RegulatorySupplyPair,
 } from "./regulatory-registry.repository";
@@ -54,6 +69,28 @@ const SEED_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 type EtaDestination = {
   lat: number;
   lng: number;
+};
+
+type DriverHeartbeatContext = DriverHeartbeatEventSnapshot;
+
+type ProvisionFromSubmissionCommand = {
+  submission: SupplySubmissionRecord;
+  driverDraft: DriverSupplyDraft | null;
+  vehicleDraft: VehicleSupplyDraft | null;
+  documents: SupplyDocumentRecord[];
+  approvedAt: string;
+  reviewerId: string;
+};
+
+export type ProvisionedCanonicalRecordIds = {
+  canonicalDriverId: string | null;
+  canonicalVehicleId: string | null;
+  canonicalContractId: string | null;
+  canonicalPolicyId: string | null;
+};
+
+export type SubmissionProvisioningResult = ProvisionedCanonicalRecordIds & {
+  vehicleAffiliation: VehicleFleetAffiliationRecord | null;
 };
 
 function createSeedDriver(
@@ -152,6 +189,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-001",
     plateNo: "ABC-1001",
+    licenseType: "multi_purpose_taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi", "business_dispatch"],
     dispatchableFlag: true,
@@ -163,6 +201,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-002",
     plateNo: "ABC-1002",
+    licenseType: "taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi"],
     dispatchableFlag: false,
@@ -174,6 +213,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-003",
     plateNo: "ABC-1003",
+    licenseType: "taxi",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["standard_taxi"],
     dispatchableFlag: true,
@@ -185,6 +225,19 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-004",
     plateNo: "ABC-1004",
+    licenseType: "business_vehicle",
+    operatingArea: "taichung-port",
+    supportedServiceBuckets: ["business_dispatch"],
+    dispatchableFlag: true,
+    exclusivityApproved: true,
+    insuranceStatus: "valid",
+    updatedAt: SEED_TIMESTAMP,
+    supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
+  },
+  {
+    vehicleId: "veh-av-demo-001",
+    plateNo: "ABC-AV01",
+    licenseType: "business_vehicle",
     operatingArea: "taichung-port",
     supportedServiceBuckets: ["business_dispatch"],
     dispatchableFlag: true,
@@ -224,6 +277,13 @@ const DRIVER_SEED: DriverRegistryRecord[] = [
     workState: "available",
     licensesValid: true,
   }),
+  createSeedDriver({
+    driverId: "safety-op-001",
+    name: "Safety Operator Demo One",
+    supportedServiceBuckets: ["business_dispatch"],
+    workState: "available",
+    licensesValid: true,
+  }),
 ];
 
 const CONTRACT_SEED: VehicleContractRecord[] = [
@@ -247,6 +307,23 @@ const CONTRACT_SEED: VehicleContractRecord[] = [
   {
     contractId: "contract-demo-004",
     vehicleId: "veh-demo-004",
+    partnerId: "partner-demo-004",
+    partnerType: "enterprise_partner",
+    contractType: "service_fleet_contract",
+    operatingAreaId: "taichung-port",
+    serviceScope: "business_dispatch",
+    startAt: "2026-01-01T00:00:00.000Z",
+    endAt: "2026-12-31T23:59:59.000Z",
+    status: "active",
+    lifecycleStatus: "active",
+    approvedBy: "platform-admin-demo-001",
+    approvedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    contractId: "contract-av-demo-001",
+    vehicleId: "veh-av-demo-001",
     partnerId: "partner-demo-004",
     partnerType: "enterprise_partner",
     contractType: "service_fleet_contract",
@@ -306,6 +383,20 @@ const POLICY_SEED: InsurancePolicyRecord[] = [
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
+  {
+    policyId: "policy-av-demo-001",
+    vehicleId: "veh-av-demo-001",
+    policyNo: "POL-BIZ-AV01",
+    insuranceType: "passenger_liability",
+    insurerName: "Demo Insurance",
+    coverageAmount: 3000000,
+    startAt: "2026-01-01T00:00:00.000Z",
+    endAt: "2026-12-31T23:59:59.000Z",
+    status: "active",
+    lifecycleStatus: "active",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
 ];
 
 const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
@@ -351,6 +442,20 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
     terminationReason: null,
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
+  {
+    vehicleId: "veh-av-demo-001",
+    declarationStatus: "submitted",
+    declarationFileId: "file-av-demo-001",
+    reviewStatus: "approved",
+    lifecycleStatus: "active",
+    reviewerId: "platform-admin-demo-001",
+    reviewedAt: "2026-01-01T00:00:00.000Z",
+    exclusiveProviderName: "Acme Dispatch",
+    effectiveStart: "2026-01-01T00:00:00.000Z",
+    effectiveEnd: "2026-12-31T23:59:59.000Z",
+    terminationReason: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
 ];
 
 @Injectable()
@@ -360,6 +465,24 @@ export class RegulatoryRegistryService implements OnModuleInit {
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
 
   private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
+
+  private latestDriverHeartbeatUploads = new Map<
+    string,
+    Pick<
+      DriverHeartbeatContext,
+      | "eventId"
+      | "deviceId"
+      | "driverId"
+      | "sequenceNo"
+      | "recordedAt"
+      | "receivedAt"
+    >
+  >();
+
+  private currentDriverHeartbeatContexts = new Map<
+    string,
+    DriverHeartbeatContext
+  >();
 
   private supplyPairs: RegulatorySupplyPair[] = [
     {
@@ -380,6 +503,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
     {
       vehicleId: "veh-demo-004",
       driverId: "drv-demo-004",
+      etaMinutes: 9,
+    },
+    {
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
       etaMinutes: 9,
     },
   ];
@@ -495,6 +623,13 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return this.vehicles.map((vehicle) => this.cloneVehicle(vehicle));
   }
 
+  getVehicleLicenseType(vehicleId: string): VehicleLicenseType | null {
+    const vehicle = this.vehicles.find(
+      (candidateVehicle) => candidateVehicle.vehicleId === vehicleId,
+    );
+    return this.normalizeVehicleLicenseType(vehicle?.licenseType);
+  }
+
   listDrivers() {
     return this.drivers.map((driver) =>
       this.cloneDriver(this.decorateDriver(driver)),
@@ -511,6 +646,138 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
   }
 
+  async provisionFromSubmission(
+    executor: RegulatoryRegistryQueryExecutor | null,
+    command: ProvisionFromSubmissionCommand,
+  ): Promise<SubmissionProvisioningResult> {
+    const current = command.submission;
+    if (
+      current.canonicalDriverId ||
+      current.canonicalVehicleId ||
+      current.canonicalContractId ||
+      current.canonicalPolicyId
+    ) {
+      return {
+        canonicalDriverId: current.canonicalDriverId,
+        canonicalVehicleId: current.canonicalVehicleId,
+        canonicalContractId: current.canonicalContractId,
+        canonicalPolicyId: current.canonicalPolicyId,
+        vehicleAffiliation: null,
+      };
+    }
+
+    const changes: PersistRegulatoryRegistryChanges = {};
+    const canonicalDriver = command.driverDraft
+      ? this.provisionDriverFromDraft(command.driverDraft, command.approvedAt)
+      : null;
+    if (canonicalDriver) {
+      changes.drivers = [this.cloneDriver(canonicalDriver)];
+    }
+
+    const canonicalVehicle = command.vehicleDraft
+      ? this.provisionVehicleFromDraft(command.vehicleDraft, command.approvedAt)
+      : null;
+    if (canonicalVehicle) {
+      changes.vehicles = [this.cloneVehicle(canonicalVehicle)];
+    }
+
+    const contract = canonicalVehicle
+      ? this.provisionContractFromDocuments(
+          canonicalVehicle.vehicleId,
+          command,
+          command.approvedAt,
+        )
+      : null;
+    if (contract) {
+      changes.contracts = [this.cloneContract(contract)];
+    }
+
+    const policy = canonicalVehicle
+      ? this.provisionPolicyFromDocuments(
+          canonicalVehicle.vehicleId,
+          command,
+          command.approvedAt,
+        )
+      : null;
+    if (policy) {
+      changes.policies = [this.clonePolicy(policy)];
+    }
+
+    const resolvedCanonicalDriverId =
+      canonicalDriver?.driverId ?? current.subjectDriverId ?? null;
+    const resolvedCanonicalVehicleId =
+      canonicalVehicle?.vehicleId ?? current.subjectVehicleId ?? null;
+    const vehicleAffiliation = resolvedCanonicalVehicleId
+      ? this.createVehicleFleetAffiliation(
+          resolvedCanonicalVehicleId,
+          command,
+          command.approvedAt,
+        )
+      : null;
+
+    if (
+      resolvedCanonicalVehicleId &&
+      this.vehicles.some(
+        (candidate) => candidate.vehicleId === resolvedCanonicalVehicleId,
+      )
+    ) {
+      const reconciledVehicle = this.reconcileVehicleLifecycle(
+        resolvedCanonicalVehicleId,
+        {
+          entityType: "vehicle",
+          message:
+            "Vehicle canonical state provisioned from approved submission.",
+          occurredAt: command.approvedAt,
+          relatedEntityId: current.submissionId,
+          emitEvent: false,
+          persistContext: null,
+          touchUpdatedAt: true,
+        },
+      );
+      changes.vehicles = [this.cloneVehicle(reconciledVehicle)];
+    }
+
+    if (Object.keys(changes).length > 0) {
+      if (executor && this.regulatoryRegistryRepository?.isEnabled()) {
+        await this.regulatoryRegistryRepository.persistChangesWithExecutor(
+          executor,
+          changes,
+        );
+      } else {
+        this.persistChanges(changes, "provision_from_submission");
+      }
+    }
+
+    return {
+      canonicalDriverId: resolvedCanonicalDriverId,
+      canonicalVehicleId: resolvedCanonicalVehicleId,
+      canonicalContractId: contract?.contractId ?? null,
+      canonicalPolicyId: policy?.policyId ?? null,
+      vehicleAffiliation,
+    };
+  }
+
+  recordVehicleFleetAffiliationCreated(
+    affiliation: VehicleFleetAffiliationRecord,
+    reviewerId: string,
+    requestId?: string,
+  ) {
+    this.recordAudit(
+      {
+        actorId: reviewerId,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "create_vehicle_fleet_affiliation",
+        resourceType: "vehicle_fleet_affiliation",
+        resourceId: affiliation.affiliationId,
+        newValuesSummary:
+          this.buildVehicleFleetAffiliationAuditSummary(affiliation),
+      },
+      requestId,
+    );
+  }
+
   createDriver(command: CreateDriverMasterCommand, requestId?: string) {
     const driverId = command.driverId?.trim() || `drv_${randomUUID()}`;
     this.assertNonBlank(driverId, "driverId");
@@ -523,6 +790,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       );
     }
 
+    this.assertNonBlank(command.name, "name");
     const lifecycleStatus = command.lifecycleStatus ?? "draft";
     const now = new Date().toISOString();
     const created = this.decorateDriver({
@@ -660,38 +928,240 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
     this.requireDriver(driverId);
 
-    await this.requireLocationRepository().upsertDriverLocation({
-      driverId,
-      lat: command.lat,
-      lng: command.lng,
-      recordedAt,
-      ...(command.accuracyM === undefined
-        ? {}
-        : { accuracyM: command.accuracyM }),
-    });
-
+    const locationRepository = this.getLocationRepository();
     const updatedAt = new Date().toISOString();
-    this.setLatestDriverLocation({
-      driverId,
-      lat: command.lat,
-      lng: command.lng,
-      accuracyM: command.accuracyM ?? null,
-      recordedAt,
-      updatedAt,
-    });
-    this.opsDispatchEventsService.publishDriverLocationUpdated(
-      {
+    const currentLocationUpdated =
+      locationRepository === null
+        ? true
+        : await locationRepository.upsertDriverLocation({
+            driverId,
+            lat: command.lat,
+            lng: command.lng,
+            recordedAt,
+            ...(command.accuracyM === undefined
+              ? {}
+              : { accuracyM: command.accuracyM }),
+          });
+
+    if (
+      currentLocationUpdated &&
+      this.applyLatestDriverLocation({
         driverId,
         lat: command.lat,
         lng: command.lng,
         accuracyM: command.accuracyM ?? null,
         recordedAt,
         updatedAt,
-      },
-      undefined,
-    );
+      })
+    ) {
+      const latestLocation = this.cloneDriverLocation(
+        this.latestDriverLocations.get(driverId)!,
+      );
+      this.opsDispatchEventsService.publishDriverLocationUpdated(
+        latestLocation,
+        undefined,
+      );
+    }
 
     return { success: true };
+  }
+
+  async recordDriverLocationBatch(
+    request: DriverLocationHeartbeatBatchRequest,
+  ): Promise<DriverLocationHeartbeatBatchResponse> {
+    if (!request || !Array.isArray(request.items)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_REQUIRED",
+        "items is required.",
+        {
+          field: "items",
+        },
+      );
+    }
+
+    if (request.items.length > 100) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BATCH_LIMIT_EXCEEDED",
+        "A heartbeat batch can contain at most 100 items.",
+        {
+          field: "items",
+          maxItems: 100,
+          received: request.items.length,
+        },
+      );
+    }
+
+    const items: DriverLocationHeartbeatAck[] = [];
+    for (const item of request.items) {
+      items.push(await this.recordBatchHeartbeatItem(item));
+    }
+
+    return { items };
+  }
+
+  private async recordBatchHeartbeatItem(
+    item: DriverLocationHeartbeatEnvelope,
+  ): Promise<DriverLocationHeartbeatAck> {
+    const heartbeat = this.normalizeHeartbeatEnvelope(item);
+
+    const locationRepository = this.getLocationRepository();
+    const persistedResult =
+      locationRepository === null
+        ? {
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: new Date().toISOString(),
+          }
+        : await locationRepository.recordDriverLocationEvent(heartbeat);
+
+    const currentLocationUpdated =
+      persistedResult.currentLocationUpdated &&
+      this.applyLatestDriverLocation({
+        driverId: heartbeat.driverId,
+        lat: heartbeat.lat,
+        lng: heartbeat.lng,
+        accuracyM: heartbeat.accuracyM,
+        recordedAt: heartbeat.recordedAt,
+        updatedAt: persistedResult.serverReceivedAt,
+      });
+
+    this.setLatestDriverHeartbeatUpload({
+      eventId: heartbeat.eventId,
+      deviceId: heartbeat.deviceId,
+      driverId: heartbeat.driverId,
+      sequenceNo: heartbeat.sequenceNo,
+      recordedAt: heartbeat.recordedAt,
+      receivedAt: persistedResult.serverReceivedAt,
+    });
+
+    if (currentLocationUpdated) {
+      this.setCurrentDriverHeartbeatContext({
+        ...heartbeat,
+        receivedAt: persistedResult.serverReceivedAt,
+      });
+    }
+
+    if (currentLocationUpdated) {
+      const latestLocation = this.cloneDriverLocation(
+        this.latestDriverLocations.get(heartbeat.driverId)!,
+      );
+      this.opsDispatchEventsService.publishDriverLocationUpdated(
+        latestLocation,
+        undefined,
+      );
+    }
+
+    return {
+      eventId: heartbeat.eventId,
+      accepted: true,
+      duplicate: persistedResult.duplicate,
+      currentLocationUpdated,
+      serverReceivedAt: persistedResult.serverReceivedAt,
+    };
+  }
+
+  async getDriverTrackingStatus(
+    driverId: string,
+  ): Promise<DriverTrackingStatus> {
+    // Guard against a missing driverId query param: `driverId.trim()` on an
+    // undefined value threw a TypeError -> 500. Normalize to "" so the
+    // assertNonBlank guard returns a clean 400 FIELD_REQUIRED instead.
+    const normalizedDriverId = (driverId ?? "").trim();
+    this.assertNonBlank(normalizedDriverId, "driverId");
+    this.requireDriver(normalizedDriverId);
+
+    const currentLocation =
+      await this.resolveLatestDriverLocation(normalizedDriverId);
+    const currentContext =
+      (await this.resolveCurrentDriverHeartbeatContext(
+        normalizedDriverId,
+        currentLocation,
+      )) ?? null;
+    const latestUpload =
+      this.latestDriverHeartbeatUploads.get(normalizedDriverId) ??
+      (await this.regulatoryRegistryRepository?.findLatestDriverHeartbeatEvent?.(
+        normalizedDriverId,
+      )) ??
+      null;
+    const lastHeartbeat = latestUpload ?? currentContext;
+
+    return {
+      driverId: normalizedDriverId,
+      locationFreshness: this.classifyDriverLocationFreshness(currentLocation),
+      currentLocation: currentLocation
+        ? this.cloneDriverLocation(currentLocation)
+        : null,
+      currentVehicleId: currentContext?.vehicleId ?? null,
+      currentTaskId: currentContext?.taskId ?? null,
+      trackingState: currentContext?.workState ?? null,
+      appState: currentContext?.appState ?? null,
+      transportMode: currentContext?.transportMode ?? null,
+      networkType: currentContext?.networkType ?? null,
+      lastEventId: lastHeartbeat?.eventId ?? null,
+      lastDeviceId: lastHeartbeat?.deviceId ?? null,
+      lastSequenceNo: lastHeartbeat?.sequenceNo ?? null,
+      lastHeartbeatRecordedAt:
+        lastHeartbeat?.recordedAt ?? currentLocation?.recordedAt ?? null,
+      lastHeartbeatReceivedAt:
+        lastHeartbeat?.receivedAt ?? currentLocation?.updatedAt ?? null,
+      lastSuccessfulUploadAt:
+        lastHeartbeat?.receivedAt ?? currentLocation?.updatedAt ?? null,
+    };
+  }
+
+  private normalizeHeartbeatEnvelope(
+    item: DriverLocationHeartbeatEnvelope,
+  ): DriverLocationHeartbeatEnvelope {
+    const eventId = item.eventId.trim();
+    const deviceId = item.deviceId.trim();
+    const driverId = item.driverId.trim();
+    this.assertNonBlank(eventId, "eventId");
+    this.assertNonBlank(deviceId, "deviceId");
+    this.assertNonBlank(driverId, "driverId");
+    this.assertSequenceNo(item.sequenceNo, "sequenceNo");
+    this.assertCoordinate(item.lat, "lat", -90, 90);
+    this.assertCoordinate(item.lng, "lng", -180, 180);
+    this.assertOptionalNonNegativeNumber(
+      item.accuracyM ?? undefined,
+      "accuracyM",
+    );
+    this.assertAllowedValue(item.workState, "workState", [
+      "offline",
+      "available",
+      "assigned",
+      "enroute",
+      "arrived",
+      "on_trip",
+      "incident",
+    ]);
+    this.assertAllowedValue(item.appState, "appState", [
+      "foreground",
+      "background",
+    ]);
+    this.assertAllowedValue(item.transportMode, "transportMode", [
+      "foreground",
+      "background",
+    ]);
+    this.assertAllowedValue(item.networkType, "networkType", [
+      "wifi",
+      "cellular",
+      "offline",
+      "unknown",
+    ]);
+
+    this.requireDriver(driverId);
+
+    return {
+      ...item,
+      eventId,
+      deviceId,
+      driverId,
+      vehicleId: this.normalizeNullableText(item.vehicleId),
+      taskId: this.normalizeNullableText(item.taskId),
+      recordedAt: this.normalizeHeartbeatRecordedAt(item.recordedAt),
+    };
   }
 
   async getDriverEta(
@@ -704,10 +1174,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     this.assertCoordinate(destLng, "destLng", -180, 180);
     this.requireDriver(driverId);
 
-    const driverLocation =
-      await this.requireLocationRepository().findLatestDriverLocation(
-        driverId.trim(),
-      );
+    const driverLocation = await this.resolveLatestDriverLocation(
+      driverId.trim(),
+    );
 
     if (!driverLocation) {
       throw new ApiRequestError(
@@ -1464,6 +1933,238 @@ export class RegulatoryRegistryService implements OnModuleInit {
     }
   }
 
+  private provisionDriverFromDraft(
+    draft: DriverSupplyDraft,
+    approvedAt: string,
+  ): DriverRegistryRecord {
+    const driverId = `drv_${randomUUID()}`;
+    const created = this.decorateDriver({
+      driverId,
+      name: draft.name.trim(),
+      supportedServiceBuckets: this.mapServiceBuckets(
+        draft.supportedServiceProductCodes,
+      ),
+      workState: "available",
+      licensesValid: true,
+      lifecycleStatus: "active",
+      eligibilityBlockedReasons: [],
+      dispatchEligible: false,
+      createdAt: approvedAt,
+      updatedAt: approvedAt,
+      activatedAt: approvedAt,
+      suspendedAt: null,
+      retiredAt: null,
+      profileUpdatedAt: approvedAt,
+      deviceBindings: [],
+    });
+
+    this.drivers = [this.cloneDriver(created), ...this.drivers];
+    return created;
+  }
+
+  private provisionVehicleFromDraft(
+    draft: VehicleSupplyDraft,
+    approvedAt: string,
+  ): VehicleRegistryRecord {
+    const created: VehicleRegistryRecord = {
+      vehicleId: `veh_${randomUUID()}`,
+      plateNo: draft.plateNo.trim(),
+      licenseType: this.normalizeVehicleLicenseType(draft.licenseType),
+      operatingArea: draft.businessArea.trim(),
+      supportedServiceBuckets: this.mapServiceBuckets(
+        draft.supportedServiceProductCodes,
+      ),
+      dispatchableFlag: false,
+      exclusivityApproved: false,
+      insuranceStatus: "expired",
+      updatedAt: approvedAt,
+      supplyLifecycle: createEmptySupplyLifecycle(approvedAt),
+    };
+
+    this.vehicles = [this.cloneVehicle(created), ...this.vehicles];
+    return created;
+  }
+
+  private provisionContractFromDocuments(
+    vehicleId: string,
+    command: ProvisionFromSubmissionCommand,
+    approvedAt: string,
+  ): VehicleContractRecord | null {
+    const contractDocument = command.documents.find((document) =>
+      [
+        "fleet_participation_contract",
+        "driver_management_contract",
+        "vehicle_management_contract",
+      ].includes(document.documentType),
+    );
+    if (!contractDocument) {
+      return null;
+    }
+
+    const contract: VehicleContractRecord = this.applyContractLifecycle(
+      {
+        contractId: `contract_${randomUUID()}`,
+        vehicleId,
+        partnerId: command.submission.fleetPartnerId,
+        partnerType: "fleet_partner",
+        contractType: contractDocument.documentType,
+        operatingAreaId: command.vehicleDraft?.businessArea ?? null,
+        serviceScope: this.mapServiceBuckets(
+          command.vehicleDraft?.supportedServiceProductCodes ??
+            command.driverDraft?.supportedServiceProductCodes ??
+            [],
+        ).join(","),
+        startAt:
+          this.dateOnlyToIso(contractDocument.effectiveFrom) ?? approvedAt,
+        endAt:
+          this.dateOnlyToInclusiveIso(contractDocument.effectiveUntil) ??
+          "2099-12-31T23:59:59.000Z",
+        status: "active",
+        lifecycleStatus: "draft",
+        approvedBy: command.reviewerId,
+        approvedAt,
+        createdAt: approvedAt,
+        updatedAt: approvedAt,
+      },
+      approvedAt,
+    );
+
+    this.contracts = [this.cloneContract(contract), ...this.contracts];
+    return contract;
+  }
+
+  private provisionPolicyFromDocuments(
+    vehicleId: string,
+    command: ProvisionFromSubmissionCommand,
+    approvedAt: string,
+  ): InsurancePolicyRecord | null {
+    const policyDocument = command.documents.find(
+      (document) => document.documentType === "insurance_policy",
+    );
+    if (!policyDocument) {
+      return null;
+    }
+
+    const policy: InsurancePolicyRecord = this.applyPolicyLifecycle(
+      {
+        policyId: `policy_${randomUUID()}`,
+        vehicleId,
+        policyNo: policyDocument.documentId,
+        insuranceType: "passenger_liability",
+        insurerName: "submission_provisioned",
+        coverageAmount: 0,
+        startAt: this.dateOnlyToIso(policyDocument.effectiveFrom) ?? approvedAt,
+        endAt:
+          this.dateOnlyToInclusiveIso(policyDocument.effectiveUntil) ??
+          "2099-12-31T23:59:59.000Z",
+        status: "active",
+        lifecycleStatus: "pending",
+        createdAt: approvedAt,
+        updatedAt: approvedAt,
+      },
+      approvedAt,
+    );
+
+    this.policies = [this.clonePolicy(policy), ...this.policies];
+    return policy;
+  }
+
+  private createVehicleFleetAffiliation(
+    vehicleId: string,
+    command: ProvisionFromSubmissionCommand,
+    approvedAt: string,
+  ): VehicleFleetAffiliationRecord {
+    const basisDocument = this.selectVehicleAffiliationBasisDocument(
+      command.documents,
+    );
+
+    return {
+      affiliationId: randomUUID(),
+      vehicleId,
+      fleetPartnerId: command.submission.fleetPartnerId,
+      affiliationType: this.mapVehicleAffiliationType(
+        basisDocument?.documentType ?? null,
+      ),
+      effectiveFrom:
+        this.dateOnlyToIso(basisDocument?.effectiveFrom ?? null) ?? approvedAt,
+      effectiveUntil: this.dateOnlyToInclusiveIso(
+        basisDocument?.effectiveUntil ?? null,
+      ),
+      status: "active",
+      sourceSubmissionId: command.submission.submissionId,
+      createdAt: approvedAt,
+      updatedAt: approvedAt,
+    };
+  }
+
+  private selectVehicleAffiliationBasisDocument(
+    documents: readonly SupplyDocumentRecord[],
+  ): SupplyDocumentRecord | null {
+    return (
+      documents.find(
+        (document) => document.documentType === "vehicle_management_contract",
+      ) ??
+      documents.find(
+        (document) => document.documentType === "driver_management_contract",
+      ) ??
+      documents.find(
+        (document) => document.documentType === "fleet_participation_contract",
+      ) ??
+      null
+    );
+  }
+
+  private mapVehicleAffiliationType(
+    documentType: SupplyDocumentRecord["documentType"] | null,
+  ): VehicleFleetAffiliationType {
+    if (
+      documentType === "vehicle_management_contract" ||
+      documentType === "driver_management_contract"
+    ) {
+      return "managed_by";
+    }
+    if (documentType === "fleet_participation_contract") {
+      return "contracted_under";
+    }
+    return "owned_by";
+  }
+
+  private mapServiceBuckets(
+    serviceProductCodes: readonly string[],
+  ): Phase1ServiceBucket[] {
+    if (
+      serviceProductCodes.some((code) =>
+        /business|airport|premium|dispatch/i.test(code),
+      )
+    ) {
+      return ["business_dispatch"];
+    }
+
+    return ["standard_taxi"];
+  }
+
+  private dateOnlyToIso(value: string | null): string | null {
+    return value ? `${value}T00:00:00.000Z` : null;
+  }
+
+  private dateOnlyToInclusiveIso(value: string | null): string | null {
+    return value ? `${value}T23:59:59.000Z` : null;
+  }
+
+  private buildVehicleFleetAffiliationAuditSummary(
+    affiliation: VehicleFleetAffiliationRecord,
+  ) {
+    return {
+      vehicleId: affiliation.vehicleId,
+      fleetPartnerId: affiliation.fleetPartnerId,
+      affiliationType: affiliation.affiliationType,
+      effectiveFrom: affiliation.effectiveFrom,
+      effectiveUntil: affiliation.effectiveUntil,
+      status: affiliation.status,
+      sourceSubmissionId: affiliation.sourceSubmissionId,
+    };
+  }
+
   private reconcileVehicleLifecycle(
     vehicleId: string,
     options?: {
@@ -1852,6 +2553,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       : createEmptySupplyLifecycle(updatedAt);
     return {
       ...vehicle,
+      licenseType: this.normalizeVehicleLicenseType(vehicle.licenseType),
       supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
       updatedAt,
       supplyLifecycle: {
@@ -1929,6 +2631,21 @@ export class RegulatoryRegistryService implements OnModuleInit {
         ? profile.deviceBindings.map((binding) => ({ ...binding }))
         : [],
     };
+  }
+
+  private normalizeVehicleLicenseType(
+    licenseType?: string | null,
+  ): VehicleLicenseType | null {
+    switch (licenseType) {
+      case "taxi":
+      case "multi_purpose_taxi":
+      case "rental_car":
+      case "business_vehicle":
+      case "airport_transfer_vehicle":
+        return licenseType;
+      default:
+        return null;
+    }
   }
 
   private computeDriverEligibilityBlockedReasons(
@@ -2064,6 +2781,113 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
   }
 
+  private applyLatestDriverLocation(location: DriverLocationSnapshot): boolean {
+    const existing = this.latestDriverLocations.get(location.driverId);
+    if (
+      existing &&
+      Date.parse(existing.recordedAt) >= Date.parse(location.recordedAt)
+    ) {
+      return false;
+    }
+
+    this.setLatestDriverLocation(location);
+    return true;
+  }
+
+  private setLatestDriverHeartbeatUpload(
+    upload: Pick<
+      DriverHeartbeatContext,
+      | "eventId"
+      | "deviceId"
+      | "driverId"
+      | "sequenceNo"
+      | "recordedAt"
+      | "receivedAt"
+    >,
+  ): void {
+    const existing = this.latestDriverHeartbeatUploads.get(upload.driverId);
+    if (
+      existing &&
+      Date.parse(existing.receivedAt) > Date.parse(upload.receivedAt)
+    ) {
+      return;
+    }
+
+    this.latestDriverHeartbeatUploads.set(upload.driverId, { ...upload });
+  }
+
+  private setCurrentDriverHeartbeatContext(
+    context: DriverHeartbeatContext,
+  ): void {
+    const existing = this.currentDriverHeartbeatContexts.get(context.driverId);
+    if (
+      existing &&
+      Date.parse(existing.recordedAt) > Date.parse(context.recordedAt)
+    ) {
+      return;
+    }
+
+    this.currentDriverHeartbeatContexts.set(context.driverId, { ...context });
+  }
+
+  private async resolveLatestDriverLocation(
+    driverId: string,
+  ): Promise<DriverLocationSnapshot | null> {
+    const inMemory = this.latestDriverLocations.get(driverId);
+    if (inMemory) {
+      return this.cloneDriverLocation(inMemory);
+    }
+
+    return (
+      (await this.regulatoryRegistryRepository?.findLatestDriverLocation?.(
+        driverId,
+      )) ?? null
+    );
+  }
+
+  private async resolveCurrentDriverHeartbeatContext(
+    driverId: string,
+    currentLocation: DriverLocationSnapshot | null,
+  ): Promise<DriverHeartbeatContext | null> {
+    const inMemory = this.currentDriverHeartbeatContexts.get(driverId);
+    if (
+      inMemory &&
+      (!currentLocation || inMemory.recordedAt === currentLocation.recordedAt)
+    ) {
+      return { ...inMemory };
+    }
+
+    if (!currentLocation) {
+      return null;
+    }
+
+    const persisted =
+      await this.regulatoryRegistryRepository?.findDriverHeartbeatEventByRecordedAt?.(
+        driverId,
+        currentLocation.recordedAt,
+        currentLocation.updatedAt,
+      );
+    return persisted ? { ...persisted } : null;
+  }
+
+  private classifyDriverLocationFreshness(
+    location: DriverLocationSnapshot | null,
+  ): DriverLocationFreshness {
+    if (!location) {
+      return "missing";
+    }
+
+    if (Date.now() - Date.parse(location.updatedAt) > 90_000) {
+      return "stale";
+    }
+
+    if (location.accuracyM !== null && location.accuracyM > 100) {
+      return "low_accuracy";
+    }
+
+    return "fresh";
+  }
+
   private resolveCandidateEta(
     pair: RegulatorySupplyPair,
     driverId: string,
@@ -2125,7 +2949,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
   }
 
   private assertNonBlank(value: string, fieldName: string) {
-    if (!value.trim()) {
+    if (!(value ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",
@@ -2186,6 +3010,37 @@ export class RegulatoryRegistryService implements OnModuleInit {
     }
   }
 
+  private assertSequenceNo(value: number, fieldName: string): void {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_NUMBER",
+        `${fieldName} must be a non-negative safe integer.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+  }
+
+  private assertAllowedValue(
+    value: string,
+    fieldName: string,
+    allowedValues: readonly string[],
+  ): void {
+    if (!allowedValues.includes(value)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_INVALID",
+        `${fieldName} must be one of: ${allowedValues.join(", ")}.`,
+        {
+          field: fieldName,
+          allowedValues,
+        },
+      );
+    }
+  }
+
   private assertTimeRange(startAt: string, endAt: string) {
     if (
       Number.isNaN(new Date(startAt).getTime()) ||
@@ -2240,13 +3095,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return driver;
   }
 
-  private requireLocationRepository(): RegulatoryRegistryRepository {
+  private getLocationRepository(): RegulatoryRegistryRepository | null {
     if (!this.regulatoryRegistryRepository?.isEnabled()) {
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "DRIVER_LOCATION_STORAGE_UNAVAILABLE",
-        "Driver location storage is not available.",
-      );
+      return null;
     }
 
     return this.regulatoryRegistryRepository;

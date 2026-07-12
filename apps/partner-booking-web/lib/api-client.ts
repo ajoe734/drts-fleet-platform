@@ -262,10 +262,13 @@ function canUseLocalPartnerShellFallback(
   options?: {
     allowInactive?: boolean;
     allowMissing?: boolean;
+    allowAuthorityOutage?: boolean;
   },
 ) {
   const publicShellFallbackAllowed =
     options?.allowInactive || options?.allowMissing;
+  const authorityOutageFallbackAllowed =
+    options?.allowAuthorityOutage || publicShellFallbackAllowed;
 
   if (error.code === "PARTNER_ENTRY_INACTIVE") {
     return options?.allowInactive;
@@ -276,7 +279,7 @@ function canUseLocalPartnerShellFallback(
   }
 
   if (
-    publicShellFallbackAllowed &&
+    authorityOutageFallbackAllowed &&
     (error.retryable ||
       error.status >= 500 ||
       error.code === "PARTNER_AUTHORITY_REQUEST_FAILED")
@@ -288,7 +291,7 @@ function canUseLocalPartnerShellFallback(
     (error.code === "INTERNAL_KEY_REQUIRED" ||
       error.code === "INTERNAL_KEY_INVALID" ||
       error.code === "PARTNER_AUTHORITY_UNAVAILABLE") &&
-    publicShellFallbackAllowed
+    authorityOutageFallbackAllowed
   );
 }
 
@@ -494,6 +497,7 @@ export async function getPartnerRouteContext(
   options?: {
     allowInactive?: boolean;
     allowMissing?: boolean;
+    allowAuthorityOutage?: boolean;
   },
 ): Promise<PartnerRouteContext> {
   try {

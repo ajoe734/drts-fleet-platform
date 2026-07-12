@@ -3,7 +3,10 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "moduleResolution": "Bundler",
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@drts/ui-tokens": ["../ui-tokens/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

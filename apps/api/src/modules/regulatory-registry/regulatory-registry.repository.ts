@@ -2,10 +2,12 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   DispatchExclusivityRecord,
+  DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
   DriverLocationSnapshot,
   DriverRegistryRecord,
   InsurancePolicyRecord,
+  VehicleLicenseType,
   VehicleContractRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
@@ -14,6 +16,13 @@ import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
+};
+
+export type RegulatoryRegistryQueryExecutor = {
+  query<T extends { [key: string]: unknown }>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[] }>;
 };
 
 export type RegulatorySupplyPair = {
@@ -49,6 +58,53 @@ type DriverLocationRow = {
   updated_at: Date | string;
 };
 
+type VehicleLicenseClassRow = {
+  vehicle_id: string;
+  license_class: string;
+};
+
+type DriverLocationEventRow = {
+  event_id: string;
+  device_id: string;
+  driver_id: string;
+  vehicle_id: string | null;
+  task_id: string | null;
+  sequence_no: number | string;
+  recorded_at: Date | string;
+  received_at: Date | string;
+  lat: number | string;
+  lng: number | string;
+  accuracy_m: number | string | null;
+  work_state: DriverLocationHeartbeatEnvelope["workState"];
+  app_state: DriverLocationHeartbeatEnvelope["appState"];
+  transport_mode: DriverLocationHeartbeatEnvelope["transportMode"];
+  network_type: DriverLocationHeartbeatEnvelope["networkType"];
+};
+
+export type RecordDriverLocationEventResult = {
+  duplicate: boolean;
+  currentLocationUpdated: boolean;
+  serverReceivedAt: string;
+};
+
+export type DriverHeartbeatEventSnapshot = {
+  eventId: string;
+  deviceId: string;
+  driverId: string;
+  vehicleId: string | null;
+  taskId: string | null;
+  sequenceNo: number;
+  recordedAt: string;
+  receivedAt: string;
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  workState: DriverLocationHeartbeatEnvelope["workState"];
+  appState: DriverLocationHeartbeatEnvelope["appState"];
+  transportMode: DriverLocationHeartbeatEnvelope["transportMode"];
+  networkType: DriverLocationHeartbeatEnvelope["networkType"];
+};
+
 @Injectable()
 export class RegulatoryRegistryRepository {
   private readonly logger = new Logger(RegulatoryRegistryRepository.name);
@@ -78,6 +134,7 @@ export class RegulatoryRegistryRepository {
       contractsResult,
       policiesResult,
       exclusivitiesResult,
+      vehicleLicenseClassResult,
     ] = await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `
@@ -121,15 +178,41 @@ export class RegulatoryRegistryRepository {
           ORDER BY updated_at DESC
         `,
       ),
+      this.databaseService!.query<VehicleLicenseClassRow>(
+        `
+          SELECT vehicle_id, license_class
+          FROM reg.vehicles
+        `,
+      ),
     ]);
 
+    const vehicleLicenseTypes = new Map(
+      vehicleLicenseClassResult.rows
+        .map(
+          (row) =>
+            [
+              row.vehicle_id,
+              this.mapVehicleLicenseClass(row.license_class),
+            ] as const,
+        )
+        .filter(
+          (entry): entry is readonly [string, VehicleLicenseType] =>
+            entry[1] !== null,
+        ),
+    );
+
     return {
-      vehicles: vehiclesResult.rows.map((row) =>
-        this.parseRecord<VehicleRegistryRecord>(
+      vehicles: vehiclesResult.rows.map((row) => {
+        const record = this.parseRecord<VehicleRegistryRecord>(
           row.record,
           "reg.phase1_registry_vehicles",
-        ),
-      ),
+        );
+        const licenseType =
+          record.licenseType ??
+          vehicleLicenseTypes.get(record.vehicleId) ??
+          null;
+        return licenseType ? { ...record, licenseType } : record;
+      }),
       drivers: driversResult.rows.map((row) =>
         this.parseRecord<DriverRegistryRecord>(
           row.record,
@@ -168,11 +251,25 @@ export class RegulatoryRegistryRepository {
       return;
     }
 
+    await this.persistChangesWithExecutor(this.databaseService!, changes);
+  }
+
+  async persistChangesWithExecutor(
+    executor: RegulatoryRegistryQueryExecutor,
+    changes: PersistRegulatoryRegistryChanges,
+  ) {
+    await this.persistChangesInternal(executor, changes);
+  }
+
+  private async persistChangesInternal(
+    executor: RegulatoryRegistryQueryExecutor,
+    changes: PersistRegulatoryRegistryChanges,
+  ) {
     const writes: Promise<unknown>[] = [];
 
     for (const vehicle of changes.vehicles ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_vehicles (
               vehicle_id,
@@ -208,7 +305,7 @@ export class RegulatoryRegistryRepository {
 
     for (const driver of changes.drivers ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_drivers (
               driver_id,
@@ -241,7 +338,7 @@ export class RegulatoryRegistryRepository {
 
     for (const pair of changes.supplyPairs ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_supply_pairs (
               pair_id,
@@ -274,7 +371,7 @@ export class RegulatoryRegistryRepository {
 
     for (const contract of changes.contracts ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_contracts (
               contract_id,
@@ -307,7 +404,7 @@ export class RegulatoryRegistryRepository {
 
     for (const policy of changes.policies ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_policies (
               policy_id,
@@ -340,7 +437,7 @@ export class RegulatoryRegistryRepository {
 
     for (const exclusivity of changes.exclusivities ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_exclusivities (
               vehicle_id,
@@ -370,10 +467,10 @@ export class RegulatoryRegistryRepository {
 
   async upsertDriverLocation(
     command: DriverLocationHeartbeatCommand,
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.assertDatabaseEnabled("upsert driver location");
 
-    await this.databaseService!.query(
+    const result = await this.databaseService!.query(
       `
         INSERT INTO ops.phase1_driver_locations (
           driver_id,
@@ -391,6 +488,7 @@ export class RegulatoryRegistryRepository {
           accuracy_m = EXCLUDED.accuracy_m,
           recorded_at = EXCLUDED.recorded_at,
           updated_at = now()
+        WHERE ops.phase1_driver_locations.recorded_at < EXCLUDED.recorded_at
       `,
       [
         command.driverId,
@@ -400,6 +498,134 @@ export class RegulatoryRegistryRepository {
         command.recordedAt ?? new Date().toISOString(),
       ],
     );
+
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async recordDriverLocationEvent(
+    event: DriverLocationHeartbeatEnvelope,
+  ): Promise<RecordDriverLocationEventResult> {
+    this.assertDatabaseEnabled("record driver location event");
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+
+      const insertResult = await client.query<
+        Pick<DriverLocationEventRow, "received_at">
+      >(
+        `
+          INSERT INTO telemetry.driver_location_events (
+            event_id,
+            device_id,
+            driver_id,
+            vehicle_id,
+            task_id,
+            sequence_no,
+            recorded_at,
+            lat,
+            lng,
+            accuracy_m,
+            work_state,
+            app_state,
+            transport_mode,
+            network_type,
+            out_of_order
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14,
+            EXISTS (
+              SELECT 1
+              FROM ops.phase1_driver_locations
+              WHERE driver_id = $3
+                AND recorded_at >= $7::timestamptz
+            )
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING received_at
+        `,
+        [
+          event.eventId,
+          event.deviceId,
+          event.driverId,
+          event.vehicleId,
+          event.taskId,
+          event.sequenceNo,
+          event.recordedAt,
+          event.lat,
+          event.lng,
+          event.accuracyM,
+          event.workState,
+          event.appState,
+          event.transportMode,
+          event.networkType,
+        ],
+      );
+
+      const inserted = (insertResult.rowCount ?? 0) > 0;
+      let serverReceivedAt: string;
+      let currentLocationUpdated = false;
+
+      if (inserted) {
+        const insertedRow = insertResult.rows[0];
+        if (!insertedRow) {
+          throw new Error(
+            "Driver location event insert did not return received_at.",
+          );
+        }
+        serverReceivedAt = this.toIsoString(insertedRow.received_at);
+        currentLocationUpdated = await this.updateCurrentDriverLocation(
+          client,
+          {
+            driverId: event.driverId,
+            lat: event.lat,
+            lng: event.lng,
+            recordedAt: event.recordedAt,
+            ...(event.accuracyM === null ? {} : { accuracyM: event.accuracyM }),
+          },
+        );
+      } else {
+        const existingResult = await client.query<DriverLocationEventRow>(
+          `
+            SELECT received_at
+            FROM telemetry.driver_location_events
+            WHERE event_id = $1
+               OR (device_id = $2 AND sequence_no = $3)
+            ORDER BY received_at ASC
+            LIMIT 1
+          `,
+          [event.eventId, event.deviceId, event.sequenceNo],
+        );
+        serverReceivedAt = this.toIsoString(
+          existingResult.rows[0]?.received_at ?? new Date(),
+        );
+      }
+
+      await client.query("COMMIT");
+      return {
+        duplicate: !inserted,
+        currentLocationUpdated,
+        serverReceivedAt,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findLatestDriverLocation(
@@ -473,6 +699,85 @@ export class RegulatoryRegistryRepository {
     }));
   }
 
+  async findLatestDriverHeartbeatEvent(
+    driverId: string,
+  ): Promise<DriverHeartbeatEventSnapshot | null> {
+    this.assertDatabaseEnabled("find latest driver heartbeat event");
+
+    const result = await this.databaseService!.query<DriverLocationEventRow>(
+      `
+        SELECT
+          event_id,
+          device_id,
+          driver_id,
+          vehicle_id,
+          task_id,
+          sequence_no,
+          recorded_at,
+          received_at,
+          lat,
+          lng,
+          accuracy_m,
+          work_state,
+          app_state,
+          transport_mode,
+          network_type
+        FROM telemetry.driver_location_events
+        WHERE driver_id = $1
+        ORDER BY received_at DESC, recorded_at DESC, sequence_no DESC
+        LIMIT 1
+      `,
+      [driverId],
+    );
+
+    return this.toHeartbeatEventSnapshot(result.rows[0] ?? null);
+  }
+
+  async findDriverHeartbeatEventByRecordedAt(
+    driverId: string,
+    recordedAt: string,
+    receivedAt?: string,
+  ): Promise<DriverHeartbeatEventSnapshot | null> {
+    this.assertDatabaseEnabled("find driver heartbeat event by recordedAt");
+
+    const result = await this.databaseService!.query<DriverLocationEventRow>(
+      `
+        SELECT
+          event_id,
+          device_id,
+          driver_id,
+          vehicle_id,
+          task_id,
+          sequence_no,
+          recorded_at,
+          received_at,
+          lat,
+          lng,
+          accuracy_m,
+          work_state,
+          app_state,
+          transport_mode,
+          network_type
+        FROM telemetry.driver_location_events
+        WHERE driver_id = $1
+          AND recorded_at = $2::timestamptz
+          AND ($3::timestamptz IS NULL OR received_at = $3::timestamptz)
+        ORDER BY
+          CASE
+            WHEN $3::timestamptz IS NOT NULL AND received_at = $3::timestamptz
+              THEN 0
+            ELSE 1
+          END,
+          received_at ASC,
+          sequence_no ASC
+        LIMIT 1
+      `,
+      [driverId, recordedAt, receivedAt ?? null],
+    );
+
+    return this.toHeartbeatEventSnapshot(result.rows[0] ?? null);
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -490,6 +795,25 @@ export class RegulatoryRegistryRepository {
     }
 
     return record as T;
+  }
+
+  private mapVehicleLicenseClass(
+    licenseClass: string | null | undefined,
+  ): VehicleLicenseType | null {
+    switch (licenseClass) {
+      case "taxi":
+        return "taxi";
+      case "multi_taxi":
+        return "multi_purpose_taxi";
+      case "rental":
+        return "rental_car";
+      case "other":
+        // The regulatory registry enum is coarser than the runtime eligibility
+        // matrix; the "other" bucket maps to business-dispatch-capable vehicles.
+        return "business_vehicle";
+      default:
+        return null;
+    }
   }
 
   private assertDatabaseEnabled(context: string): void {
@@ -511,5 +835,75 @@ export class RegulatoryRegistryRepository {
     return value instanceof Date
       ? value.toISOString()
       : new Date(value).toISOString();
+  }
+
+  private toHeartbeatEventSnapshot(
+    row: DriverLocationEventRow | null,
+  ): DriverHeartbeatEventSnapshot | null {
+    if (!row) {
+      return null;
+    }
+
+    return {
+      eventId: row.event_id,
+      deviceId: row.device_id,
+      driverId: row.driver_id,
+      vehicleId: row.vehicle_id,
+      taskId: row.task_id,
+      sequenceNo: Number(row.sequence_no),
+      recordedAt: this.toIsoString(row.recorded_at),
+      receivedAt: this.toIsoString(row.received_at),
+      lat: this.parseNumericValue(row.lat, "lat"),
+      lng: this.parseNumericValue(row.lng, "lng"),
+      accuracyM:
+        row.accuracy_m === null
+          ? null
+          : this.parseNumericValue(row.accuracy_m, "accuracy_m"),
+      workState: row.work_state,
+      appState: row.app_state,
+      transportMode: row.transport_mode,
+      networkType: row.network_type,
+    };
+  }
+
+  private async updateCurrentDriverLocation(
+    client: {
+      query<T extends { [key: string]: unknown }>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<{ rowCount: number | null; rows: T[] }>;
+    },
+    command: DriverLocationHeartbeatCommand,
+  ): Promise<boolean> {
+    const result = await client.query(
+      `
+        INSERT INTO ops.phase1_driver_locations (
+          driver_id,
+          lat,
+          lng,
+          accuracy_m,
+          recorded_at,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, now()
+        )
+        ON CONFLICT (driver_id) DO UPDATE SET
+          lat = EXCLUDED.lat,
+          lng = EXCLUDED.lng,
+          accuracy_m = EXCLUDED.accuracy_m,
+          recorded_at = EXCLUDED.recorded_at,
+          updated_at = now()
+        WHERE ops.phase1_driver_locations.recorded_at < EXCLUDED.recorded_at
+      `,
+      [
+        command.driverId,
+        command.lat,
+        command.lng,
+        command.accuracyM ?? null,
+        command.recordedAt ?? new Date().toISOString(),
+      ],
+    );
+
+    return (result.rowCount ?? 0) > 0;
   }
 }

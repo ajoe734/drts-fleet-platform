@@ -1,0 +1,21 @@
+{
+  "taskId": "MAP-QA-001",
+  "suite": "playwright-map-geofence-harness",
+  "command": "pnpm exec playwright test -c playwright.map-geofence-harness.config.ts",
+  "status": "passed",
+  "executedAt": "2026-07-03T16:37:18Z",
+  "branch": "codex/map-qa-001",
+  "ref": "codex/map-qa-001@e74721c1367d4ec82f57df5d51eb4ae5037a0d7a",
+  "results": {
+    "testsPassed": 4,
+    "testsFailed": 0,
+    "workers": 1,
+    "durationMs": 1700
+  },
+  "coverage": [
+    "direct /api geo and service-area routes",
+    "control-plane-proxy mirrored routes",
+    "provider unavailable and no-geocode states",
+    "mock map tile rendering without a live provider"
+  ]
+}

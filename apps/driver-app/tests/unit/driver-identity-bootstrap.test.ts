@@ -131,7 +131,69 @@ describe("syncDriverIdentityBootstrap", () => {
     expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith({
       taskId: "task-001",
       driverId: "driver-001",
+      status: "on_trip",
     });
     expect(resetDriverAppToOnboarding).not.toHaveBeenCalled();
+  });
+
+  it("evaluates tracking recovery for the active task before resuming heartbeats", async () => {
+    const callOrder: string[] = [];
+    const evaluateTrackingRecovery = vi.fn(async () => {
+      callOrder.push("recovery");
+    });
+    const syncDriverLocationHeartbeat = vi.fn(async () => {
+      callOrder.push("sync");
+    });
+    const listDriverTasks = vi
+      .fn()
+      .mockResolvedValue([
+        {
+          taskId: "task-001",
+          driverId: "driver-001",
+          status: "enroute_pickup",
+        },
+      ]);
+
+    const result = await syncDriverIdentityBootstrap({
+      getDriverIdentityIssue: () => null,
+      initializeDriverIdentity: async () => {},
+      isDriverIdentityProvisioned: () => true,
+      listDriverTasks,
+      resetDriverAppToOnboarding: vi.fn(),
+      router: createRouter(),
+      syncDriverLocationHeartbeat,
+      evaluateTrackingRecovery,
+    });
+
+    expect(result).toBe("synced");
+    expect(evaluateTrackingRecovery).toHaveBeenCalledWith({
+      activeAssignment: { taskId: "task-001", driverId: "driver-001" },
+    });
+    // Recovery must run before the new fixes re-baseline the marker.
+    expect(callOrder).toEqual(["recovery", "sync"]);
+  });
+
+  it("evaluates tracking recovery with no active assignment when no trip is active", async () => {
+    const evaluateTrackingRecovery = vi.fn().mockResolvedValue(undefined);
+    const listDriverTasks = vi
+      .fn()
+      .mockResolvedValue([
+        { taskId: "task-002", driverId: "driver-001", status: "queued" },
+      ]);
+
+    await syncDriverIdentityBootstrap({
+      getDriverIdentityIssue: () => null,
+      initializeDriverIdentity: async () => {},
+      isDriverIdentityProvisioned: () => true,
+      listDriverTasks,
+      resetDriverAppToOnboarding: vi.fn(),
+      router: createRouter(),
+      syncDriverLocationHeartbeat: vi.fn().mockResolvedValue(undefined),
+      evaluateTrackingRecovery,
+    });
+
+    expect(evaluateTrackingRecovery).toHaveBeenCalledWith({
+      activeAssignment: null,
+    });
   });
 });

@@ -100,6 +100,42 @@ export class FeatureFlagsService {
         enabled: true,
         description: "Enable Phase 1 smoke test endpoints",
       },
+      {
+        key: "geoProviderEnabled",
+        enabled: false,
+        description:
+          "Enable production map/geocode provider calls through the backend adapter",
+      },
+      {
+        key: "addressMapPickerEnabled",
+        enabled: false,
+        description:
+          "Enable interactive address map picker flows on operator and tenant surfaces",
+      },
+      {
+        key: "serviceAreaGateEnforced",
+        enabled: false,
+        description:
+          "Enforce service-area eligibility as a blocking gate for map-backed booking flows",
+      },
+      {
+        key: "opsRealMapEnabled",
+        enabled: false,
+        description:
+          "Enable live map rendering on ops and dispatch surfaces",
+      },
+      {
+        key: "platformGeometryEditorEnabled",
+        enabled: false,
+        description:
+          "Enable platform-admin service-area geometry editing surfaces",
+      },
+      {
+        key: "driverTripMapEnabled",
+        enabled: false,
+        description:
+          "Enable embedded trip-map surfaces in the driver application",
+      },
     ];
 
     for (const flag of defaultFlags) {
