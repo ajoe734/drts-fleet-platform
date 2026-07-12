@@ -52,6 +52,7 @@ ai-task-archive.jsonl
 .orchestrator/backups/
 .orchestrator/claude-approval-broker.mcp.json
 .orchestrator/provider_capabilities.json
+.orchestrator/antigravity-rotation.json
 .orchestrator/state.json
 .orchestrator/.state.json.*.tmp
 .orchestrator/chair-reviews/

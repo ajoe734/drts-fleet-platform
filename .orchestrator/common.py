@@ -242,6 +242,108 @@ def delivery_workspace_root(config: dict[str, Any], metadata: dict[str, Any] | N
     return canonical_workspace_root(config)
 
 
+# --- Antigravity model rotation -------------------------------------------
+#
+# The `agy` CLI can drive either its default Gemini model or an explicit
+# fallback model in the same non-interactive run. When a rotation-enabled
+# Antigravity provider exhausts the model it is currently using (Gemini quota
+# "hit your limit", capacity/quota walls), the supervisor records a short
+# cooldown for that model in a shared state file and lets the SAME lane
+# re-dispatch so this selector picks the other model instead of pausing the
+# whole lane. The lane only truly pauses when both pools are cooling.
+ANTIGRAVITY_ROTATION_DEFAULT_FALLBACK = "Claude Sonnet 4.6 (Thinking)"
+ANTIGRAVITY_ROTATION_COOLDOWN_SECONDS = 900
+ROTATION_PRIMARY_SLOT = "gemini"
+ROTATION_FALLBACK_SLOT = "claude"
+ANTIGRAVITY_ROTATION_PATH_DEFAULT = ".orchestrator/antigravity-rotation.json"
+
+
+def antigravity_rotation_path(config: dict[str, Any]) -> Path:
+    return config_path(config, "antigravity_rotation", ANTIGRAVITY_ROTATION_PATH_DEFAULT)
+
+
+def antigravity_rotation_config(settings: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize a provider's `antigravity.model_rotation` block.
+
+    `primary` empty means "use the agy default model" (i.e. do not pass
+    `--model`), which is Gemini.
+    """
+    raw = settings.get("model_rotation") if isinstance(settings, dict) else None
+    raw = raw if isinstance(raw, dict) else {}
+    try:
+        cooldown = int(raw.get("cooldown_seconds") or ANTIGRAVITY_ROTATION_COOLDOWN_SECONDS)
+    except (TypeError, ValueError):
+        cooldown = ANTIGRAVITY_ROTATION_COOLDOWN_SECONDS
+    return {
+        "enabled": bool(raw.get("enabled", False)),
+        "primary": str(raw.get("primary") or "").strip(),
+        "fallback": str(raw.get("fallback") or ANTIGRAVITY_ROTATION_DEFAULT_FALLBACK).strip(),
+        "cooldown_seconds": max(1, cooldown),
+    }
+
+
+def load_rotation_cooldowns(config: dict[str, Any], provider_key: str) -> dict[str, float]:
+    """Return {gemini_until, claude_until} epoch seconds for a provider (0 = warm)."""
+    data = load_json(antigravity_rotation_path(config), default={}) or {}
+    entry = data.get(str(provider_key)) if isinstance(data, dict) else None
+    entry = entry if isinstance(entry, dict) else {}
+    result: dict[str, float] = {}
+    for slot in (ROTATION_PRIMARY_SLOT, ROTATION_FALLBACK_SLOT):
+        key = f"{slot}_until"
+        try:
+            result[key] = float(entry.get(key) or 0)
+        except (TypeError, ValueError):
+            result[key] = 0.0
+    return result
+
+
+def record_rotation_cooldown(
+    config: dict[str, Any], provider_key: str, slot: str, until_ts: float
+) -> dict[str, float]:
+    """Persist a per-model cooldown and return the provider's full cooldown map."""
+    path = antigravity_rotation_path(config)
+    data = load_json(path, default={}) or {}
+    if not isinstance(data, dict):
+        data = {}
+    entry = data.get(str(provider_key))
+    if not isinstance(entry, dict):
+        entry = {}
+    entry[f"{slot}_until"] = float(until_ts)
+    data[str(provider_key)] = entry
+    write_json(path, data)
+    result: dict[str, float] = {}
+    for other in (ROTATION_PRIMARY_SLOT, ROTATION_FALLBACK_SLOT):
+        key = f"{other}_until"
+        try:
+            result[key] = float(entry.get(key) or 0)
+        except (TypeError, ValueError):
+            result[key] = 0.0
+    return result
+
+
+def select_rotation_model(
+    config: dict[str, Any],
+    provider_key: str,
+    rotation: dict[str, Any],
+    *,
+    now: float | None = None,
+) -> tuple[str | None, str | None, bool]:
+    """Pick the model to dispatch with.
+
+    Returns (slot, model, both_cooling):
+      - primary pool warm            -> (ROTATION_PRIMARY_SLOT, rotation.primary, False)
+      - primary cooling, fallback ok -> (ROTATION_FALLBACK_SLOT, rotation.fallback, False)
+      - both cooling                 -> (None, None, True)
+    """
+    now = now if now is not None else datetime.now(timezone.utc).timestamp()
+    cooldowns = load_rotation_cooldowns(config, provider_key)
+    if cooldowns.get(f"{ROTATION_PRIMARY_SLOT}_until", 0.0) <= now:
+        return ROTATION_PRIMARY_SLOT, str(rotation.get("primary") or ""), False
+    if cooldowns.get(f"{ROTATION_FALLBACK_SLOT}_until", 0.0) <= now:
+        return ROTATION_FALLBACK_SLOT, str(rotation.get("fallback") or ""), False
+    return None, None, True
+
+
 def apply_orchestrator_runtime_env(
     env: dict[str, str],
     config: dict[str, Any],
