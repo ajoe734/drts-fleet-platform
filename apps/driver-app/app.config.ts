@@ -1,6 +1,10 @@
-const staticConfig = require("./app.json").expo;
+import type { ExpoConfig } from "expo/config";
 
-module.exports = () => {
+import staticApp from "./app.json";
+
+const staticConfig = staticApp.expo as ExpoConfig;
+
+export default (): ExpoConfig => {
   const androidKey = process.env.GOOGLE_MAPS_ANDROID_KEY?.trim();
   const iosKey = process.env.GOOGLE_MAPS_IOS_KEY?.trim();
   const requireLiveMap =
