@@ -38,7 +38,15 @@ describe("map provider browser config", () => {
     vi.stubEnv("MAP_PROVIDER_ALLOWED_ORIGINS", "https://ops.example.test");
 
     const response = GET(
-      new NextRequest("https://untrusted.example.test/api/map-provider-config"),
+      new NextRequest(
+        "https://untrusted.example.test/api/map-provider-config",
+        {
+          headers: {
+            origin: "https://untrusted.example.test",
+            "sec-fetch-site": "cross-site",
+          },
+        },
+      ),
     );
 
     await expect(response.json()).resolves.toMatchObject({
@@ -49,7 +57,7 @@ describe("map provider browser config", () => {
     });
   });
 
-  it("uses the external proxy origin instead of Next's internal origin", async () => {
+  it("uses browser provenance instead of Next's internal proxy origin", async () => {
     vi.stubEnv("MAP_PROVIDER_MODE", "external");
     vi.stubEnv("MAP_PROVIDER_NAME", "google");
     vi.stubEnv("GOOGLE_MAPS_BROWSER_KEY", "browser-key");
@@ -58,10 +66,28 @@ describe("map provider browser config", () => {
     const response = GET(
       new NextRequest("http://localhost:3000/api/map-provider-config", {
         headers: {
-          host: "ops.example.test",
-          "x-forwarded-proto": "https",
+          referer: "https://ops.example.test/dispatch",
+          "sec-fetch-site": "same-origin",
         },
       }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "google",
+      enabled: true,
+      browserKey: "browser-key",
+      reasonCode: null,
+    });
+  });
+
+  it("allows a server-side probe without browser provenance headers", async () => {
+    vi.stubEnv("MAP_PROVIDER_MODE", "external");
+    vi.stubEnv("MAP_PROVIDER_NAME", "google");
+    vi.stubEnv("GOOGLE_MAPS_BROWSER_KEY", "browser-key");
+    vi.stubEnv("MAP_PROVIDER_ALLOWED_ORIGINS", "https://ops.example.test");
+
+    const response = GET(
+      new NextRequest("http://localhost:3000/api/map-provider-config"),
     );
 
     await expect(response.json()).resolves.toMatchObject({

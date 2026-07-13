@@ -13,23 +13,32 @@ function firstHeaderValue(value: string | null) {
   return value?.split(",", 1)[0]?.trim() || null;
 }
 
-function externalRequestOrigin(request: NextRequest) {
-  const host =
-    firstHeaderValue(request.headers.get("host")) ??
-    firstHeaderValue(request.headers.get("x-forwarded-host"));
-  const protocol =
-    firstHeaderValue(request.headers.get("x-forwarded-proto")) ??
-    request.nextUrl.protocol.replace(/:$/, "");
+function browserRequestOrigin(request: NextRequest) {
+  const source =
+    firstHeaderValue(request.headers.get("origin")) ??
+    firstHeaderValue(request.headers.get("referer"));
+  if (!source) return null;
 
-  if (host && (protocol === "http" || protocol === "https")) {
-    try {
-      return new URL(`${protocol}://${host}`).origin;
-    } catch {
-      // Fall back to Next's parsed origin when proxy headers are malformed.
-    }
+  try {
+    const parsed = new URL(source);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.origin
+      : "invalid";
+  } catch {
+    return "invalid";
+  }
+}
+
+function isOriginAllowed(request: NextRequest, origins: string[]) {
+  const fetchSite = firstHeaderValue(request.headers.get("sec-fetch-site"));
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return false;
   }
 
-  return request.nextUrl.origin;
+  const requestOrigin = browserRequestOrigin(request);
+  return (
+    !requestOrigin || origins.length === 0 || origins.includes(requestOrigin)
+  );
 }
 
 export function GET(request: NextRequest) {
@@ -37,8 +46,7 @@ export function GET(request: NextRequest) {
   const provider = (process.env.MAP_PROVIDER_NAME ?? "google").toLowerCase();
   const browserKey = process.env.GOOGLE_MAPS_BROWSER_KEY?.trim() ?? "";
   const origins = allowedOrigins();
-  const requestOrigin = externalRequestOrigin(request).replace(/\/$/, "");
-  const originAllowed = origins.length === 0 || origins.includes(requestOrigin);
+  const originAllowed = isOriginAllowed(request, origins);
   const enabled =
     mode === "external" &&
     provider === "google" &&
