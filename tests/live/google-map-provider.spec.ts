@@ -23,7 +23,13 @@ async function expectReadyGoogleMap(page: Page) {
   await expect(layer).toHaveAttribute("data-google-map-status", "ready", {
     timeout: 45_000,
   });
-  await expect(layer.locator(".gm-style")).toBeVisible({ timeout: 15_000 });
+  await expect(
+    layer.locator(
+      'img[src^="https://maps.googleapis.com/maps/api/js/StaticMapService.GetMapImage"]',
+    ),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(layer).toHaveCSS("width", /[1-9]\d*px/);
+  await expect(layer).toHaveCSS("height", /[1-9]\d*px/);
 }
 
 test("deployed Ops and Callcenter render the live Google base map", async ({
