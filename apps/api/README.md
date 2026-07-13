@@ -97,6 +97,7 @@ Map provider runtime notes:
 
 - `MAP_PROVIDER_BACKEND=mock` is the safe default for local development, tests, and CI.
 - `MAP_PROVIDER_BACKEND=google` requires `GOOGLE_MAPS_GEOCODING_API_KEY` plus `GOOGLE_MAPS_ROUTES_API_KEY` in staging / production; otherwise the API startup guard fails closed.
+- Set `MAP_PROVIDER_MODE=external` and `MAP_PROVIDER_NAME=google` to select the implemented Google Geocoding and Routes adapter. `POST /api/geo/route` returns distance, duration, and encoded polyline through the shared contract.
 - Local / CI may still request `MAP_PROVIDER_BACKEND=google`; when the live keys are absent the runtime reports mock fallback in `/health` and keeps quota spend at zero.
 - `MAP_PROVIDER_ALLOWED_ORIGINS` and `MAP_PROVIDER_BUDGET_ALERT_PCT` accept either `,` or `;` delimiters. Use `;` in deploy rails because `gcloud run deploy --set-env-vars` reserves `,`.
 - `scripts/check-map-provider-config.sh` is the shared preflight for local shells and deploy workflows.

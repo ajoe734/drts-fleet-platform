@@ -432,6 +432,7 @@ jobs:
           set -euo pipefail
 
           secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
+          ops_secret_args="JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
           controlled_download_secret="${SECRET_PREFIX}-controlled-download-signing-secret"
 
           if ! gcloud secrets describe "$controlled_download_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
@@ -450,6 +451,7 @@ jobs:
           if [[ "${MAP_PROVIDER_BACKEND}" == "google" ]]; then
             geocode_secret="${SECRET_PREFIX}-google-maps-geocoding-api-key"
             routes_secret="${SECRET_PREFIX}-google-maps-routes-api-key"
+            browser_secret="${SECRET_PREFIX}-google-maps-browser-key"
 
             if ! gcloud secrets describe "$geocode_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
               echo "::error::Required secret ${geocode_secret} not found in project ${PROJECT_ID}."
@@ -459,15 +461,35 @@ jobs:
               echo "::error::Required secret ${routes_secret} not found in project ${PROJECT_ID}."
               exit 1
             fi
+            if ! gcloud secrets describe "$browser_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+              echo "::error::Required secret ${browser_secret} not found in project ${PROJECT_ID}."
+              exit 1
+            fi
 
             secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${geocode_secret}:latest,GOOGLE_MAPS_ROUTES_API_KEY=${routes_secret}:latest"
+            ops_secret_args="${ops_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
           fi
 
           printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
+          printf 'ops=%s\n' "$ops_secret_args" >> "$GITHUB_OUTPUT"
+
+      - name: Verify live Google Maps provider
+        if: ${{ env.MAP_PROVIDER_BACKEND == 'google' }}
+        run: |
+          set -euo pipefail
+          export GOOGLE_MAPS_GEOCODING_API_KEY="$(gcloud secrets versions access latest --secret="${SECRET_PREFIX}-google-maps-geocoding-api-key" --project="$PROJECT_ID")"
+          export GOOGLE_MAPS_ROUTES_API_KEY="$(gcloud secrets versions access latest --secret="${SECRET_PREFIX}-google-maps-routes-api-key" --project="$PROJECT_ID")"
+          export GOOGLE_MAPS_BROWSER_KEY="$(gcloud secrets versions access latest --secret="${SECRET_PREFIX}-google-maps-browser-key" --project="$PROJECT_ID")"
+          export MAP_PROVIDER_SMOKE_ORIGIN="$OPS_CONSOLE_ORIGIN"
+          echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
+          echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
+          echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
+          node scripts/verify-google-map-provider-live.mjs
 
       - name: Deploy — api
         run: |
           IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
+          map_provider_mode="$([[ "$MAP_PROVIDER_BACKEND" == "google" ]] && echo external || echo mock)"
           # Use deploy for both create and update so the runtime identity, Cloud SQL
           # binding, and secret mounts are re-applied on every release.
           gcloud run deploy drts-api \
@@ -478,7 +500,7 @@ jobs:
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,APP_ENV=staging,API_PORT=3001,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
+            --set-env-vars "NODE_ENV=production,APP_ENV=staging,DRTS_ENV=staging,API_PORT=3001,MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
             ${{ steps.exposure.outputs.api }} \
             --min-instances 0 \
             --max-instances 3 \
@@ -514,14 +536,15 @@ jobs:
       - name: Deploy — ops-console-web
         run: |
           IMAGE="${{ env.REGISTRY }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
+          map_provider_mode="$([[ "$MAP_PROVIDER_BACKEND" == "google" ]] && echo external || echo mock)"
           gcloud run deploy drts-ops-console-web \
             --region "$REGION" \
             --image  "$IMAGE" \
             --port   3003 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
+            --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy,MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS}" \
             ${{ steps.exposure.outputs.ops_console }} \
             --min-instances 0 \
             --max-instances 2 \

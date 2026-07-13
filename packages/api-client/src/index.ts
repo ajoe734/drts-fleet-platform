@@ -35,6 +35,7 @@ import type {
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
+  ComputeGeoRouteCommand,
   CreateDriverMasterCommand,
   CreateDriverFleetAffiliationCommand,
   CreateEvidenceDeletionExceptionCommand,
@@ -121,6 +122,7 @@ import type {
   GeoProviderHealthResponse,
   GeoResolveResponse,
   GeoReverseResponse,
+  GeoRouteResponse,
   GeoSearchResponse,
   GenerateFilingPackageCommand,
   GeneratePlacardVersionCommand,
@@ -724,6 +726,12 @@ export class ApiClient {
     command: ReverseGeocodeCommand,
   ): Promise<GeoReverseResponse> {
     return this.post<GeoReverseResponse>("/api/geo/reverse", { body: command });
+  }
+
+  async computeGeoRoute(
+    command: ComputeGeoRouteCommand,
+  ): Promise<GeoRouteResponse> {
+    return this.post<GeoRouteResponse>("/api/geo/route", { body: command });
   }
 
   async getServiceAreaDefinitions(): Promise<ServiceAreaDefinitionsResponse> {

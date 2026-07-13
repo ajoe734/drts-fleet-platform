@@ -208,6 +208,25 @@ export interface GeoReverseResponse {
   resolvedAt: string;
 }
 
+export const GEO_ROUTE_TRAVEL_MODES = ["drive", "two_wheeler", "walk"] as const;
+export type GeoRouteTravelMode = (typeof GEO_ROUTE_TRAVEL_MODES)[number];
+
+export interface ComputeGeoRouteCommand {
+  origin: GeoPoint;
+  destination: GeoPoint;
+  travelMode?: GeoRouteTravelMode;
+  locale?: string;
+  requestedByActorId?: string | null;
+}
+
+export interface GeoRouteResponse {
+  provider: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  encodedPolyline: string | null;
+  generatedAt: string;
+}
+
 export const GEO_PROVIDER_MODES = ["mock", "external", "disabled"] as const;
 export type GeoProviderMode = (typeof GEO_PROVIDER_MODES)[number];
 

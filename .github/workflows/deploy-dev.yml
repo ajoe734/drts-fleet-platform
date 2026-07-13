@@ -52,6 +52,7 @@ env:
   DEV_ARTIFACT_REGION: ${{ vars.DEV_ARTIFACT_REGION }}
   DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
   DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
+  DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
   DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
   DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
@@ -581,6 +582,8 @@ jobs:
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          ops_secret_args="$web_secret_args"
+          map_provider_mode="mock"
           assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
           llm_provider="mock"
           llm_chat_model="mock-chat-v1"
@@ -599,6 +602,24 @@ jobs:
           if gcloud secrets describe "${secret_prefix}-internal-key" --project "$project_id" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
             web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
+          fi
+
+          geocoding_secret="${secret_prefix}-google-maps-geocoding-api-key"
+          routes_secret="${secret_prefix}-google-maps-routes-api-key"
+          browser_secret="${secret_prefix}-google-maps-browser-key"
+          map_secret_count=0
+          for map_secret in "$geocoding_secret" "$routes_secret" "$browser_secret"; do
+            if gcloud secrets describe "$map_secret" --project "$project_id" >/dev/null 2>&1; then
+              map_secret_count=$((map_secret_count + 1))
+            fi
+          done
+          if [[ "$map_secret_count" -eq 3 ]]; then
+            secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${geocoding_secret}:latest,GOOGLE_MAPS_ROUTES_API_KEY=${routes_secret}:latest"
+            ops_secret_args="${ops_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
+            map_provider_mode="external"
+          elif [[ "$map_secret_count" -ne 0 ]]; then
+            echo "::error::Google Maps configuration is partial. Geocoding, Routes, and Browser secrets must be provisioned together."
+            exit 1
           fi
 
           llm_secret="${secret_prefix}-llm-gateway-api-key"
@@ -620,6 +641,8 @@ jobs:
 
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
           echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
           echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
           echo "llm_summarizer_model=${llm_summarizer_model}" >> "$GITHUB_OUTPUT"
@@ -627,12 +650,31 @@ jobs:
           echo "openclaw_auth_provider=${openclaw_auth_provider}" >> "$GITHUB_OUTPUT"
           echo "openclaw_home=${openclaw_home}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify live Google Maps provider
+        if: ${{ steps.api_secrets.outputs.map_provider_mode == 'external' }}
+        run: |
+          set -euo pipefail
+
+          project_id="${{ needs.prepare.outputs.project_id }}"
+          secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
+          export GOOGLE_MAPS_GEOCODING_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-geocoding-api-key" --project="$project_id")"
+          export GOOGLE_MAPS_ROUTES_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-routes-api-key" --project="$project_id")"
+          export GOOGLE_MAPS_BROWSER_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-browser-key" --project="$project_id")"
+          export MAP_PROVIDER_SMOKE_ORIGIN="${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
+          echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
+          echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
+          node scripts/verify-google-map-provider-live.mjs
+
       - name: Build API env vars
         id: api_env
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,API_PORT=3001,DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,API_PORT=3001,DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
+            env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          fi
           if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
             env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
           fi
@@ -685,7 +727,10 @@ jobs:
             api_origin="${{ steps.api_url.outputs.url }}"
           fi
 
-          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201"
+          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
+            env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          fi
 
           if [[ -n "${DEV_IAP_CLIENT_ID:-}" ]]; then
             env_vars="${env_vars},DRTS_API_AUTH_AUDIENCE=${DEV_IAP_CLIENT_ID}"
@@ -703,7 +748,7 @@ jobs:
             --port 3002 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --min-instances 0 \
@@ -720,7 +765,7 @@ jobs:
             --port 3003 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --min-instances 0 \

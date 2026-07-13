@@ -1,9 +1,12 @@
 import { HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
 
 import {
+  type ComputeGeoRouteCommand,
+  GEO_ROUTE_TRAVEL_MODES,
   GEO_RESOLUTION_SURFACES,
   type GeoPoint,
   type GeoResolveResponse,
+  type GeoRouteResponse,
   type GeoResolutionSurface,
   type GeoReverseResponse,
   type GeoSearchResponse,
@@ -20,11 +23,16 @@ import {
   MapGeofenceObservabilityService,
 } from "../operational-observability/map-geofence-observability.service";
 import { GeoProviderConfigService } from "./geo-provider-config.service";
-import { GEO_PROVIDER, GeoProviderError, type GeoProvider } from "./geo.provider";
+import {
+  GEO_PROVIDER,
+  GeoProviderError,
+  type GeoProvider,
+} from "./geo.provider";
 
 const DEFAULT_SEARCH_LIMIT = 8;
 const MAX_SEARCH_LIMIT = 20;
 const SURFACE_SET = new Set<string>(GEO_RESOLUTION_SURFACES);
+const ROUTE_TRAVEL_MODE_SET = new Set<string>(GEO_ROUTE_TRAVEL_MODES);
 
 type SearchHttpQuery = {
   q?: string;
@@ -165,12 +173,39 @@ export class GeoService {
     return response;
   }
 
+  async route(command: ComputeGeoRouteCommand): Promise<GeoRouteResponse> {
+    const travelMode = command.travelMode ?? "drive";
+    if (!ROUTE_TRAVEL_MODE_SET.has(travelMode)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_GEO_ROUTE_TRAVEL_MODE",
+        `travelMode must be one of ${GEO_ROUTE_TRAVEL_MODES.join(", ")}.`,
+      );
+    }
+    const normalized: ComputeGeoRouteCommand = {
+      origin: this.normalizePoint(command.origin, "origin"),
+      destination: this.normalizePoint(command.destination, "destination"),
+      travelMode,
+      requestedByActorId: command.requestedByActorId ?? null,
+    };
+    if (command.locale) {
+      normalized.locale = command.locale;
+    }
+    this.assertProviderUsable("route");
+    return this.withProviderErrorMapping(
+      "route",
+      normalized,
+      () => this.provider().route(normalized),
+      () => "resolved",
+    );
+  }
+
   private providerConfig() {
     return this.geoProviderConfigService ?? new GeoProviderConfigService();
   }
 
   private assertProviderUsable(
-    operationName: "search" | "resolve" | "reverse",
+    operationName: "search" | "resolve" | "reverse" | "route",
   ) {
     const health = this.providerConfig().getHealth();
     this.recordProviderHealth(health);
@@ -203,8 +238,12 @@ export class GeoService {
   }
 
   private async withProviderErrorMapping<T>(
-    operationName: "search" | "resolve" | "reverse",
-    command: SearchGeoQuery | ResolveAddressCommand | ReverseGeocodeCommand,
+    operationName: "search" | "resolve" | "reverse" | "route",
+    command:
+      | SearchGeoQuery
+      | ResolveAddressCommand
+      | ReverseGeocodeCommand
+      | ComputeGeoRouteCommand,
     operation: () => Promise<T>,
     resolveSuccessOutcome: (result: T) => MapGeofenceGeoOutcome,
   ) {
@@ -256,8 +295,12 @@ export class GeoService {
   }
 
   private recordGeoProviderError(
-    operationName: "search" | "resolve" | "reverse",
-    command: SearchGeoQuery | ResolveAddressCommand | ReverseGeocodeCommand,
+    operationName: "search" | "resolve" | "reverse" | "route",
+    command:
+      | SearchGeoQuery
+      | ResolveAddressCommand
+      | ReverseGeocodeCommand
+      | ComputeGeoRouteCommand,
     error: GeoProviderError,
   ) {
     if (error.statusCode >= 500 || error.retryable) {

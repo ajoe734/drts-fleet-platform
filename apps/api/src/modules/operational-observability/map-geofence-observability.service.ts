@@ -13,7 +13,11 @@ export type MapGeofenceGeoOutcome =
   | "coordinate_less_attempt"
   | "provider_outage";
 
-export type MapGeofenceGeocodeOperation = "search" | "resolve" | "reverse";
+export type MapGeofenceGeocodeOperation =
+  | "search"
+  | "resolve"
+  | "reverse"
+  | "route";
 
 export type MapGeofenceGeometryMutationKind =
   | "service_area_published"
@@ -56,6 +60,7 @@ export interface MapGeofenceObservabilitySnapshot {
         search: number;
         resolve: number;
         reverse: number;
+        route: number;
       };
       byResult: {
         resolved: number;
@@ -146,6 +151,7 @@ export class MapGeofenceObservabilityService {
       search: 0,
       resolve: 0,
       reverse: 0,
+      route: 0,
     },
     byResult: {
       resolved: 0,

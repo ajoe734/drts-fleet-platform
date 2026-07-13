@@ -13,10 +13,11 @@
   },
   "dependencies": {
     "@drts/api-client": "workspace:*",
-    "@drts/control-plane-auth": "workspace:*",
     "@drts/contracts": "workspace:*",
+    "@drts/control-plane-auth": "workspace:*",
     "@drts/shared-types": "workspace:*",
     "@drts/ui-web": "workspace:*",
+    "@googlemaps/js-api-loader": "^2.1.1",
     "@tailwindcss/postcss": "^4.2.4",
     "clsx": "^2.1.1",
     "lucide-react": "^1.9.0",
@@ -26,5 +27,8 @@
     "react-dom": "^19.2.5",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.4"
+  },
+  "devDependencies": {
+    "@types/google.maps": "^3.65.2"
   }
 }

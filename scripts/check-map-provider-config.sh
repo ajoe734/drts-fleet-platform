@@ -72,7 +72,7 @@ case "$TIER" in
 esac
 
 TILE_URL_TEMPLATE="${NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE:-${MAP_PROVIDER_TILE_URL_TEMPLATE:-}}"
-if [[ "$STRICT_RUNTIME" == "true" ]]; then
+if [[ "$STRICT_RUNTIME" == "true" && "$BACKEND" != "google" ]]; then
   if [[ -z "$TILE_URL_TEMPLATE" ]]; then
     echo "MAP provider config check: tier=${TIER} requires NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE for web map rendering." >&2
     exit 1
@@ -95,7 +95,7 @@ if [[ "$BACKEND" == "mock" ]]; then
 fi
 
 SECRET_SOURCE="$(lower "${MAP_PROVIDER_SECRET_SOURCE:-env}")"
-REQUIRE_BROWSER_KEY="$(parse_bool "${MAP_PROVIDER_REQUIRE_BROWSER_KEY:-false}")"
+REQUIRE_BROWSER_KEY="$(parse_bool "${MAP_PROVIDER_REQUIRE_BROWSER_KEY:-$STRICT_RUNTIME}")"
 REQUIRE_ANDROID_KEY="$(parse_bool "${MAP_PROVIDER_REQUIRE_ANDROID_KEY:-false}")"
 REQUIRE_IOS_KEY="$(parse_bool "${MAP_PROVIDER_REQUIRE_IOS_KEY:-false}")"
 REQUIRE_WEB_CSP_READY="$(parse_bool "${MAP_PROVIDER_REQUIRE_WEB_CSP_READY:-false}")"
@@ -106,12 +106,18 @@ case "$SECRET_SOURCE" in
   env )
     check_env_present "GOOGLE_MAPS_GEOCODING_API_KEY"
     check_env_present "GOOGLE_MAPS_ROUTES_API_KEY"
+    if [[ "$REQUIRE_BROWSER_KEY" == "true" ]]; then
+      check_env_present "GOOGLE_MAPS_BROWSER_KEY"
+    fi
     ;;
   secret_manager )
     : "${MAP_PROVIDER_PROJECT_ID:?MAP_PROVIDER_PROJECT_ID is required when MAP_PROVIDER_SECRET_SOURCE=secret_manager}"
     : "${MAP_PROVIDER_SECRET_PREFIX:?MAP_PROVIDER_SECRET_PREFIX is required when MAP_PROVIDER_SECRET_SOURCE=secret_manager}"
     check_secret_present "${MAP_PROVIDER_SECRET_PREFIX}-google-maps-geocoding-api-key"
     check_secret_present "${MAP_PROVIDER_SECRET_PREFIX}-google-maps-routes-api-key"
+    if [[ "$REQUIRE_BROWSER_KEY" == "true" ]]; then
+      check_secret_present "${MAP_PROVIDER_SECRET_PREFIX}-google-maps-browser-key"
+    fi
     ;;
   * )
     echo "MAP provider config check: MAP_PROVIDER_SECRET_SOURCE must be env or secret_manager (received '${SECRET_SOURCE}')." >&2
@@ -120,7 +126,6 @@ case "$SECRET_SOURCE" in
 esac
 
 if [[ "$REQUIRE_BROWSER_KEY" == "true" ]]; then
-  check_env_present "GOOGLE_MAPS_BROWSER_KEY"
   check_env_present "MAP_PROVIDER_ALLOWED_ORIGINS"
 fi
 
@@ -149,4 +154,4 @@ if (( ${#MISSING[@]} > 0 )); then
   exit 0
 fi
 
-echo "MAP provider config check: backend=google tier=${TIER}; live server-side config is ready."
+echo "MAP provider config check: backend=google tier=${TIER}; live provider config is ready."
