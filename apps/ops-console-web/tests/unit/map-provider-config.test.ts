@@ -48,4 +48,27 @@ describe("map provider browser config", () => {
       reasonCode: "origin_not_allowed",
     });
   });
+
+  it("uses the external proxy origin instead of Next's internal origin", async () => {
+    vi.stubEnv("MAP_PROVIDER_MODE", "external");
+    vi.stubEnv("MAP_PROVIDER_NAME", "google");
+    vi.stubEnv("GOOGLE_MAPS_BROWSER_KEY", "browser-key");
+    vi.stubEnv("MAP_PROVIDER_ALLOWED_ORIGINS", "https://ops.example.test");
+
+    const response = GET(
+      new NextRequest("http://localhost:3000/api/map-provider-config", {
+        headers: {
+          host: "ops.example.test",
+          "x-forwarded-proto": "https",
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "google",
+      enabled: true,
+      browserKey: "browser-key",
+      reasonCode: null,
+    });
+  });
 });
