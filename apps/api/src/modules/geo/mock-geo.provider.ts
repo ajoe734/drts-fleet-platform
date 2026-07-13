@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
 
 import type {
+  ComputeGeoRouteCommand,
   GeoGeocodeConfidence,
   GeoPoint,
   GeoResolveResponse,
   GeoReverseResponse,
+  GeoRouteResponse,
   GeoSearchResponse,
   GeocodeCandidate,
   ResolveAddressCommand,
@@ -254,6 +256,31 @@ export class MockGeoProvider implements GeoProvider {
       },
       provider: this.providerId,
       resolvedAt,
+    };
+  }
+
+  async route(command: ComputeGeoRouteCommand): Promise<GeoRouteResponse> {
+    const directMeters = this.distanceMeters(
+      command.origin,
+      command.destination,
+    );
+    const distanceMeters = Math.max(1, Math.round(directMeters * 1.22));
+    const speedMetersPerSecond =
+      command.travelMode === "walk"
+        ? 1.35
+        : command.travelMode === "two_wheeler"
+          ? 8.3
+          : 9.7;
+
+    return {
+      provider: this.providerId,
+      distanceMeters,
+      durationSeconds: Math.max(
+        1,
+        Math.round(distanceMeters / speedMetersPerSecond),
+      ),
+      encodedPolyline: null,
+      generatedAt: new Date().toISOString(),
     };
   }
 

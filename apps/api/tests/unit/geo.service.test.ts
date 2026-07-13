@@ -262,6 +262,25 @@ describe("GeoService", () => {
     });
   });
 
+  it("computes deterministic mock routes through the canonical route contract", async () => {
+    const service = createService();
+
+    const result = await service.route({
+      origin: { lat: 25.0478, lng: 121.5171 },
+      destination: { lat: 25.0375, lng: 121.5637 },
+      travelMode: "drive",
+    });
+
+    expect(result).toMatchObject({
+      provider: "mock",
+      distanceMeters: expect.any(Number),
+      durationSeconds: expect.any(Number),
+      encodedPolyline: null,
+    });
+    expect(result.distanceMeters).toBeGreaterThan(0);
+    expect(result.durationSeconds).toBeGreaterThan(0);
+  });
+
   it("normalizes provider outage into retryable API errors", async () => {
     const service = createService();
 

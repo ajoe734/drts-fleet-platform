@@ -18,6 +18,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
+import { GoogleMapBaseLayer } from "@/components/google-map-base-layer";
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
@@ -333,6 +334,7 @@ const spatialMapFallbackStyle: CSSProperties = {
 const spatialRouteOverlayStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
+  zIndex: 2,
   width: "100%",
   height: "100%",
   pointerEvents: "none",
@@ -361,6 +363,7 @@ const spatialMapControlStyle: CSSProperties = {
 
 const spatialPointBaseStyle: CSSProperties = {
   position: "absolute",
+  zIndex: 3,
   transform: "translate(-50%, -50%)",
   width: 32,
   height: 32,
@@ -1765,6 +1768,7 @@ function renderDispatchSpatialBoard({
   const hasOverlays = overlayCount > 0;
   const axisBadgeStyle: CSSProperties = {
     position: "absolute",
+    zIndex: 4,
     left: 12,
     padding: "5px 8px",
     borderRadius: 999,
@@ -1940,6 +1944,14 @@ function renderDispatchSpatialBoard({
                 {t("dispatch.workflow.map.tileFallback", locale)}
               </div>
             )}
+            <GoogleMapBaseLayer
+              ariaLabel={t("dispatch.workflow.map.title", locale)}
+              center={{
+                lat: viewport.centerLat,
+                lng: viewport.centerLng,
+              }}
+              zoom={viewport.zoom}
+            />
             {model.routeSegments.length > 0 ? (
               <svg
                 aria-hidden="true"

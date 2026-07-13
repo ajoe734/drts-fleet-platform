@@ -33,13 +33,24 @@ export class GeoProviderConfigService {
     const productionLike = PRODUCTION_ENVIRONMENTS.has(environment);
     const allowMockInProduction =
       this.booleanValue("MAP_PROVIDER_ALLOW_MOCK_IN_PROD") === true;
-    const serverKeyConfigured = this.hasValue("MAP_PROVIDER_SERVER_KEY");
-    const browserKeyConfigured = this.hasValue("MAP_PROVIDER_BROWSER_KEY");
+    const providerName = this.text("MAP_PROVIDER_NAME", mode)
+      .trim()
+      .toLowerCase();
+    const googleProvider = mode === "external" && providerName === "google";
     const requiredSecretNames =
-      mode === "external" ? ["MAP_PROVIDER_SERVER_KEY"] : [];
+      mode !== "external"
+        ? []
+        : googleProvider
+          ? ["GOOGLE_MAPS_GEOCODING_API_KEY", "GOOGLE_MAPS_ROUTES_API_KEY"]
+          : ["MAP_PROVIDER_SERVER_KEY"];
     const missingSecretNames = requiredSecretNames.filter(
       (name) => !this.hasValue(name),
     );
+    const serverKeyConfigured =
+      requiredSecretNames.length > 0 && missingSecretNames.length === 0;
+    const browserKeyConfigured =
+      this.hasValue("GOOGLE_MAPS_BROWSER_KEY") ||
+      this.hasValue("MAP_PROVIDER_BROWSER_KEY");
     const dailyLimit = this.positiveInteger("MAP_PROVIDER_DAILY_QUOTA");
     const minuteLimit = this.positiveInteger("MAP_PROVIDER_MINUTE_QUOTA");
     const dailyUsed = this.nonNegativeInteger("MAP_PROVIDER_DAILY_QUOTA_USED");
@@ -111,12 +122,17 @@ export class GeoProviderConfigService {
       });
     }
 
-    if (mode === "external") {
+    if (mode === "external" && googleProvider) {
+      checks.push({
+        name: "external_adapter",
+        status: "pass",
+        message: "Google Geocoding and Routes adapters are configured.",
+      });
+    } else if (mode === "external") {
       checks.push({
         name: "external_adapter",
         status: "fail",
-        message:
-          "External geo provider adapter is not implemented in this runtime yet; keep production fail-closed until MAP-INFRA-001 is paired with a provider adapter task.",
+        message: `Unsupported external map provider: ${providerName}.`,
       });
     }
 
@@ -139,7 +155,7 @@ export class GeoProviderConfigService {
         : "healthy";
 
     return {
-      provider: mode === "mock" ? "mock" : this.text("MAP_PROVIDER_NAME", mode),
+      provider: mode === "mock" ? "mock" : providerName,
       mode,
       status,
       environment,
@@ -183,7 +199,23 @@ export class GeoProviderConfigService {
   }
 
   private rawProviderMode() {
-    return this.text("MAP_PROVIDER_MODE", "mock").trim().toLowerCase();
+    const explicitMode = this.text("MAP_PROVIDER_MODE", "")
+      .trim()
+      .toLowerCase();
+    if (explicitMode) {
+      return explicitMode;
+    }
+    return this.text("MAP_PROVIDER_BACKEND", "mock").trim().toLowerCase() ===
+      "google"
+      ? "external"
+      : "mock";
+  }
+
+  useGoogleProvider() {
+    return (
+      this.rawProviderMode() === "external" &&
+      this.text("MAP_PROVIDER_NAME", "google").trim().toLowerCase() === "google"
+    );
   }
 
   private hasValue(name: string) {
