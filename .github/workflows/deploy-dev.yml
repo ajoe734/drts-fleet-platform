@@ -561,6 +561,11 @@ jobs:
     environment: dev
 
     steps:
+      - name: Checkout deploy source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
