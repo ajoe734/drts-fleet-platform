@@ -6,6 +6,7 @@ import { ComplaintModule } from "../complaint/complaint.module";
 import { IncidentController } from "./incident.controller";
 import { IncidentRepository } from "./incident.repository";
 import { IncidentService } from "./incident.service";
+import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { IncidentService } from "./incident.service";
     forwardRef(() => ComplaintModule),
   ],
   controllers: [IncidentController],
-  providers: [IncidentRepository, IncidentService],
+  providers: [IncidentRepository, IncidentService, OpsDispatchEventsService],
   exports: [IncidentService],
 })
 export class IncidentModule {}

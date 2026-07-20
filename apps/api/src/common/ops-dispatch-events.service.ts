@@ -13,6 +13,7 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import type {
   DispatchJobRecord,
   DriverLocationSnapshot,
+  IncidentRecord,
   OpsDispatchStreamEventEnvelope,
   OpsDispatchStreamEventType,
   OwnedOrderRecord,
@@ -211,6 +212,37 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
       },
       null,
     );
+  }
+
+  publishIncidentCreated(incident: IncidentRecord, requestId?: string) {
+    this.publish("incident_created", incident.incidentId, requestId, {
+      incident: this.cloneIncident(incident),
+    });
+  }
+
+  publishIncidentUpdated(incident: IncidentRecord, requestId?: string) {
+    this.publish("incident_updated", incident.incidentId, requestId, {
+      incident: this.cloneIncident(incident),
+    });
+  }
+
+  private cloneIncident(incident: IncidentRecord): IncidentRecord {
+    return {
+      ...incident,
+      serviceRecoveryActions: incident.serviceRecoveryActions.map((action) => ({
+        ...action,
+      })),
+      matchingSuppression: incident.matchingSuppression
+        ? { ...incident.matchingSuppression }
+        : null,
+      ...(incident.availableActions
+        ? {
+            availableActions: incident.availableActions.map((action) => ({
+              ...action,
+            })),
+          }
+        : {}),
+    };
   }
 
   private publish(

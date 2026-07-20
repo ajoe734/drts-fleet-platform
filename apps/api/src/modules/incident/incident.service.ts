@@ -21,6 +21,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IncidentRepository } from "./incident.repository";
+import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 
 const DRIVER_MATCHING_SUPPRESSION_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const INCIDENT_STATUS_VALUES = [
@@ -91,6 +92,7 @@ export class IncidentService implements OnModuleInit {
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly incidentRepository?: IncidentRepository,
+    @Optional() private readonly opsDispatchEventsService?: OpsDispatchEventsService,
   ) {}
 
   async onModuleInit() {
@@ -221,6 +223,8 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+
+    this.opsDispatchEventsService?.publishIncidentCreated(decorated, requestId);
 
     return this.cloneIncident(decorated);
   }
@@ -401,6 +405,8 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
+
     return this.cloneIncident(decorated);
   }
 
@@ -472,6 +478,9 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+
+    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
+
     return this.cloneIncident(updated);
   }
 
@@ -569,6 +578,8 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    this.opsDispatchEventsService?.publishIncidentCreated(decorated, requestId);
+
     return this.cloneIncident(decorated);
   }
 
@@ -644,6 +655,8 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+
+    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
 
     return { ...action };
   }
@@ -733,6 +746,8 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
+
     return this.cloneIncident(updated);
   }
 
@@ -783,6 +798,12 @@ export class IncidentService implements OnModuleInit {
       this.incidentSequence,
       this.deriveNextSequence([decorated]),
     );
+
+    if (existing) {
+      this.opsDispatchEventsService?.publishIncidentUpdated(decorated);
+    } else {
+      this.opsDispatchEventsService?.publishIncidentCreated(decorated);
+    }
 
     return this.cloneIncident(decorated);
   }
