@@ -5,6 +5,7 @@ export const driverRouteTitles = {
   onboarding: "裝置啟用",
   jobs: "任務收件匣",
   trip: "行程作業台",
+  sos: "安全求援",
   incident: "SOS 緊急通報",
   earnings: "收益儀表板",
   platformPresence: "平台上線狀態",

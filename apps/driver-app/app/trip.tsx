@@ -1721,7 +1721,7 @@ export default function TripScreen() {
                     {
                       text: "前往 SOS",
                       style: "destructive",
-                      onPress: () => router.push("/incident"),
+                      onPress: () => router.push("/sos"),
                     },
                   ],
                 )
