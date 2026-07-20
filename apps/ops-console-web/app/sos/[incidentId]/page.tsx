@@ -15,8 +15,7 @@ import {
 } from "@drts/ui-web";
 import type { IncidentRecord, IncidentTimelineEntry } from "@drts/contracts";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
-import { MapPin, ShieldAlert, ArrowLeft, ExternalLink, Play } from "lucide-react";
+import { ExternalLink, Play } from "lucide-react";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -34,7 +33,6 @@ interface TimelineEvent {
 }
 
 export default function SosDetailPage() {
-  const { t, locale } = useTranslation();
   const { incidentId } = useParams() as { incidentId: string };
   const router = useRouter();
 
@@ -42,7 +40,6 @@ export default function SosDetailPage() {
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [nowTime, setNowTime] = useState<number>(Date.now());
 
   // Fetch incident details & timeline
   const fetchData = async () => {
@@ -51,8 +48,12 @@ export default function SosDetailPage() {
       const incRes = await client.get<any>(`/api/incidents/${incidentId}`);
       setIncident(incRes);
 
-      const timelineRes = await client.get<any>(`/api/incidents/${incidentId}/timeline`);
-      const items = Array.isArray(timelineRes) ? timelineRes : timelineRes?.items || [];
+      const timelineRes = await client.get<any>(
+        `/api/incidents/${incidentId}/timeline`,
+      );
+      const items = Array.isArray(timelineRes)
+        ? timelineRes
+        : timelineRes?.items || [];
       setTimeline(items);
       setErrorMsg(null);
     } catch (err: any) {
@@ -65,9 +66,6 @@ export default function SosDetailPage() {
 
   useEffect(() => {
     void fetchData();
-    const timer = setInterval(() => {
-      setNowTime(Date.now());
-    }, 5000);
 
     // Wire SSE stream for live updates
     let sse: EventSource | null = null;
@@ -87,14 +85,20 @@ export default function SosDetailPage() {
     }
 
     return () => {
-      clearInterval(timer);
       if (sse) sse.close();
     };
   }, [incidentId]);
 
   if (loading) {
     return (
-      <div style={{ padding: 24, color: theme.textMuted, background: theme.bg, minHeight: "100%" }}>
+      <div
+        style={{
+          padding: 24,
+          color: theme.textMuted,
+          background: theme.bg,
+          minHeight: "100%",
+        }}
+      >
         正在載入事件資料...
       </div>
     );
@@ -103,7 +107,13 @@ export default function SosDetailPage() {
   if (errorMsg || !incident) {
     return (
       <div style={{ padding: 24, background: theme.bg, minHeight: "100%" }}>
-        <Banner theme={theme} tone="danger" icon="warn" title="載入錯誤" body={errorMsg || "找不到該事件。"} />
+        <Banner
+          theme={theme}
+          tone="danger"
+          icon="warn"
+          title="載入錯誤"
+          body={errorMsg || "找不到該事件。"}
+        />
         <div style={{ marginTop: 14 }}>
           <Btn theme={theme} onClick={() => router.push("/sos")}>
             返回 SOS 佇列
@@ -122,15 +132,20 @@ export default function SosDetailPage() {
 
   const isAcked = !!incident.assignedTo;
   const isInvestigating = incident.status === "investigating";
-  const isClosed = incident.status === "closed" || incident.status === "resolved";
+  const isClosed =
+    incident.status === "closed" || incident.status === "resolved";
 
   // Actions
   const handleAcknowledge = async () => {
     try {
       const client = getOpsClient();
-      const freshInc = await client.get<IncidentRecord>(`/api/incidents/${incidentId}`);
+      const freshInc = await client.get<IncidentRecord>(
+        `/api/incidents/${incidentId}`,
+      );
       if (freshInc.assignedTo) {
-        alert(`確認失敗：已由 ${freshInc.assignedTo} 先行接手！ (First-Writer-Wins)`);
+        alert(
+          `確認失敗：已由 ${freshInc.assignedTo} 先行接手！ (First-Writer-Wins)`,
+        );
         void fetchData();
         return;
       }
@@ -202,26 +217,31 @@ export default function SosDetailPage() {
   // Mapped severity
   const severityLabel = incident.severity === "critical" ? "重大" : "一般";
 
-  // Format wait/elapsed time
-  let elapsedText = "—";
-  if (incident.status === "open" && !incident.assignedTo) {
-    const occurred = new Date(incident.occurredAt || incident.createdAt);
-    const diff = Math.max(0, Math.floor((nowTime - occurred.getTime()) / 1000));
-    const mins = Math.floor(diff / 60).toString().padStart(2, "0");
-    const secs = (diff % 60).toString().padStart(2, "0");
-    elapsedText = `${mins}:${secs}`;
-  }
-
   // Map timeline events
   const timelineEvents: TimelineEvent[] = timeline.map((entry) => {
     let tone: CanvasTone = "info";
-    if (entry.action === "incident_created" || entry.action === "created") {
+    const isCreated =
+      entry.action === "incident_created" || entry.action === "created";
+    const isAssigned =
+      entry.action === "incident_assigned" || entry.action === "assigned";
+    const isStatusChanged =
+      entry.action === "status_changed" || entry.action === "statusChanged";
+    const isResolved =
+      entry.action === "incident_resolved" || entry.action === "resolved";
+    const isClosed =
+      entry.action === "incident_closed" || entry.action === "closed";
+
+    if (isCreated) {
       tone = "danger";
-    } else if (entry.action === "incident_assigned" || entry.action === "assigned") {
+    } else if (isAssigned) {
       tone = "success";
-    } else if (entry.action === "statusChanged" && entry.note.includes("investigating")) {
+    } else if (
+      isStatusChanged &&
+      (entry.note.includes("investigating") ||
+        entry.note.includes("investigation"))
+    ) {
       tone = "warn";
-    } else if (entry.action === "resolved" || entry.action === "closed") {
+    } else if (isResolved || isClosed) {
       tone = "success";
     }
 
@@ -229,13 +249,19 @@ export default function SosDetailPage() {
 
     // Clean up title
     let actionTitle = entry.action;
-    if (entry.action === "created" || entry.action === "incident_created") {
+    if (isCreated) {
       actionTitle = "系統收到通報";
-    } else if (entry.action === "assigned" || entry.action === "incident_assigned") {
+    } else if (isAssigned) {
       actionTitle = "值班人員已確認";
-    } else if (entry.action === "statusChanged" && entry.note.includes("investigating")) {
+    } else if (
+      isStatusChanged &&
+      (entry.note.includes("investigating") ||
+        entry.note.includes("investigation"))
+    ) {
       actionTitle = "開始調查";
-    } else if (entry.action === "closed") {
+    } else if (isResolved) {
+      actionTitle = "已處理";
+    } else if (isClosed) {
       actionTitle = "已結案";
     }
 
@@ -252,7 +278,9 @@ export default function SosDetailPage() {
   // If no timeline events exist, add a stub matching design
   if (timelineEvents.length === 0) {
     timelineEvents.push({
-      at: new Date(incident.occurredAt || incident.createdAt).toLocaleTimeString("zh-TW"),
+      at: new Date(
+        incident.occurredAt || incident.createdAt,
+      ).toLocaleTimeString("zh-TW"),
       tone: "danger",
       t: "駕駛啟動 SOS",
       body: "行程中長按啟動",
@@ -260,7 +288,9 @@ export default function SosDetailPage() {
       actorRealm: "driver",
     });
     timelineEvents.push({
-      at: new Date(new Date(incident.occurredAt || incident.createdAt).getTime() + 2000).toLocaleTimeString("zh-TW"),
+      at: new Date(
+        new Date(incident.occurredAt || incident.createdAt).getTime() + 2000,
+      ).toLocaleTimeString("zh-TW"),
       tone: "info",
       t: "系統收到通報",
       body: `事件編號 ${eventNo}`,
@@ -287,13 +317,21 @@ export default function SosDetailPage() {
             <Pill theme={theme} tone={statusTone} dot>
               {statusLabel}
             </Pill>
-            {isAcked && <Pill theme={theme} tone="success">已由 {incident.assignedTo} 確認接手</Pill>}
+            {isAcked && (
+              <Pill theme={theme} tone="success">
+                已由 {incident.assignedTo} 確認接手
+              </Pill>
+            )}
           </div>
         }
         subtitle={`${categoryLabel} · ${severityLabel} · ${incident.relatedDriverId || "吳明翰"} · ${incident.relatedVehicleId || "BKR-2208"} · ${incident.relatedOrderId || "ZX-240720-0186"}`}
         actions={
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn theme={theme} icon="arrow-left" onClick={() => router.push("/sos")}>
+            <Btn
+              theme={theme}
+              icon="arrow-left"
+              onClick={() => router.push("/sos")}
+            >
               返回佇列
             </Btn>
             {!isAcked && (
@@ -302,7 +340,11 @@ export default function SosDetailPage() {
               </Btn>
             )}
             {isAcked && !isInvestigating && !isClosed && (
-              <Btn theme={theme} variant="primary" onClick={handleStartInvestigation}>
+              <Btn
+                theme={theme}
+                variant="primary"
+                onClick={handleStartInvestigation}
+              >
                 開始調查
               </Btn>
             )}
@@ -313,7 +355,8 @@ export default function SosDetailPage() {
             )}
             <Link href={`/incidents/${incidentId}`} passHref legacyBehavior>
               <Btn theme={theme}>
-                關聯事件案件 <ExternalLink size={12} style={{ marginLeft: 4 }} />
+                關聯事件案件{" "}
+                <ExternalLink size={12} style={{ marginLeft: 4 }} />
               </Btn>
             </Link>
           </div>
@@ -390,13 +433,19 @@ export default function SosDetailPage() {
                 }}
               >
                 {incident.location || "信義區松仁路 100 號附近"} · 精度 12m ·{" "}
-                {new Date(incident.occurredAt || incident.createdAt).toLocaleTimeString("zh-TW")}
+                {new Date(
+                  incident.occurredAt || incident.createdAt,
+                ).toLocaleTimeString("zh-TW")}
               </div>
             </div>
           </Card>
 
           {/* Timeline Card */}
-          <Card theme={theme} title="SOS 時間軸" subtitle="occurredAt / actor / source 完整入稽核">
+          <Card
+            theme={theme}
+            title="SOS 時間軸"
+            subtitle="occurredAt / actor / source 完整入稽核"
+          >
             <ol
               style={{
                 listStyle: "none",
@@ -408,7 +457,15 @@ export default function SosDetailPage() {
               }}
             >
               {timelineEvents.map((e, i) => (
-                <li key={i} style={{ display: "flex", gap: 12, position: "relative", padding: "8px 0" }}>
+                <li
+                  key={i}
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    position: "relative",
+                    padding: "8px 0",
+                  }}
+                >
                   <div
                     style={{
                       display: "flex",
@@ -454,8 +511,23 @@ export default function SosDetailPage() {
                     )}
                   </div>
                   <div style={{ flex: 1, minWidth: 0, paddingBottom: 6 }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{e.t}</span>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: theme.text,
+                        }}
+                      >
+                        {e.t}
+                      </span>
                       <span
                         style={{
                           fontSize: 10.5,
@@ -478,12 +550,23 @@ export default function SosDetailPage() {
                           gap: 6,
                         }}
                       >
-                        {e.actorRealm && <Pill theme={theme} tone={e.actorRealm as any}>{e.actorRealm}</Pill>}
+                        {e.actorRealm && (
+                          <Pill theme={theme} tone={e.actorRealm as any}>
+                            {e.actorRealm}
+                          </Pill>
+                        )}
                         {e.actor}
                       </div>
                     )}
                     {e.body && (
-                      <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4, lineHeight: 1.45 }}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: theme.textMuted,
+                          marginTop: 4,
+                          lineHeight: 1.45,
+                        }}
+                      >
                         {e.body}
                       </div>
                     )}
@@ -502,12 +585,22 @@ export default function SosDetailPage() {
               theme={theme}
               cols={1}
               items={[
-                { k: "行程編號", v: incident.relatedOrderId || "ZX-240720-0186", mono: true },
-                { k: "車牌", v: incident.relatedVehicleId || "BKR-2208", mono: true },
+                {
+                  k: "行程編號",
+                  v: incident.relatedOrderId || "ZX-240720-0186",
+                  mono: true,
+                },
+                {
+                  k: "車牌",
+                  v: incident.relatedVehicleId || "BKR-2208",
+                  mono: true,
+                },
                 { k: "駕駛", v: incident.relatedDriverId || "吳明翰" },
                 {
                   k: "原始觸發時間",
-                  v: new Date(incident.occurredAt || incident.createdAt).toLocaleString("zh-TW"),
+                  v: new Date(
+                    incident.occurredAt || incident.createdAt,
+                  ).toLocaleString("zh-TW"),
                   mono: true,
                 },
                 { k: "觸發時網路", v: "連線中 · 即時送達" },
@@ -524,7 +617,12 @@ export default function SosDetailPage() {
                   cols={1}
                   items={[
                     { k: "事件類型", v: `${categoryLabel} · ${severityLabel}` },
-                    { k: "說明", v: incident.description || "與後方車輛擦撞，人員無明顯外傷。" },
+                    {
+                      k: "說明",
+                      v:
+                        incident.description ||
+                        "與後方車輛擦撞，人員無明顯外傷。",
+                    },
                   ]}
                 />
                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
