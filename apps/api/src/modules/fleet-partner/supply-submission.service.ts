@@ -1064,6 +1064,12 @@ export class SupplySubmissionService implements OnModuleInit {
           draft.color === undefined
         ) {
           submission.status = "needs_revision";
+          submission.reviewReasonCode = "MISSING_MANDATORY_FIELDS";
+          submission.reviewComment = "Backfill: missing door count or color.";
+          submission.canonicalDriverId = null;
+          submission.canonicalVehicleId = null;
+          submission.canonicalContractId = null;
+          submission.canonicalPolicyId = null;
           submission.updatedAt = new Date().toISOString();
           modified = true;
         }

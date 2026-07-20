@@ -1118,6 +1118,12 @@ export class RegulatoryRegistryRepository {
     await this.databaseService!.query(`
       UPDATE fleet.supply_submissions s
       SET status = 'needs_revision',
+          review_reason_code = 'MISSING_MANDATORY_FIELDS',
+          review_comment = 'Backfill: missing door count or color.',
+          canonical_driver_id = NULL,
+          canonical_vehicle_id = NULL,
+          canonical_contract_id = NULL,
+          canonical_policy_id = NULL,
           updated_at = now()
       FROM fleet.vehicle_supply_drafts d
       WHERE s.submission_id = d.submission_id

@@ -215,10 +215,10 @@ describe("SupplySubmissionService", () => {
       reviewedAt: null,
       reviewReasonCode: null,
       reviewComment: null,
-      canonicalDriverId: null,
-      canonicalVehicleId: null,
-      canonicalContractId: null,
-      canonicalPolicyId: null,
+      canonicalDriverId: "canonical-drv-123",
+      canonicalVehicleId: "canonical-veh-123",
+      canonicalContractId: "canonical-contract-123",
+      canonicalPolicyId: "canonical-policy-123",
       createdAt: "2026-07-20T08:00:00Z",
       updatedAt: "2026-07-20T08:00:00Z",
     };
@@ -248,8 +248,14 @@ describe("SupplySubmissionService", () => {
     // Run onModuleInit, which triggers backfill
     await service.onModuleInit();
 
-    // Verify submission status was backfilled to needs_revision
+    // Verify submission status was backfilled to needs_revision with reason and comment
     const detail = await service.getSupplySubmissionDetail("fleet-demo-001", submissionId);
     expect(detail.submission.status).toBe("needs_revision");
+    expect(detail.submission.reviewReasonCode).toBe("MISSING_MANDATORY_FIELDS");
+    expect(detail.submission.reviewComment).toBe("Backfill: missing door count or color.");
+    expect(detail.submission.canonicalDriverId).toBeNull();
+    expect(detail.submission.canonicalVehicleId).toBeNull();
+    expect(detail.submission.canonicalContractId).toBeNull();
+    expect(detail.submission.canonicalPolicyId).toBeNull();
   });
 });
