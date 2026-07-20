@@ -1,7 +1,7 @@
 {
   "tenantServiceableBooking": {
     "booking": {
-      "orderId": "40bc1c96-20ea-4df8-abaa-2412e8d6ebf3",
+      "orderId": "59f71326-0487-43c6-998b-c58dc894b641",
       "bookingId": "booking-000001",
       "serviceBucket": "business_dispatch",
       "businessDispatchSubtype": "enterprise_dispatch",
@@ -9,7 +9,7 @@
       "status": "created"
     },
     "apiOrder": {
-      "orderId": "40bc1c96-20ea-4df8-abaa-2412e8d6ebf3",
+      "orderId": "59f71326-0487-43c6-998b-c58dc894b641",
       "orderNo": "O-20260410-000001",
       "orderSource": "portal",
       "orderDomain": "owned",
@@ -99,18 +99,18 @@
       "cancelledAt": null,
       "cancelReason": null,
       "reservationHoldStatus": "requested",
-      "reservationHoldId": "dc092bdd-ad63-4e52-af66-7570e7d8bbae",
+      "reservationHoldId": "8160756c-b9d4-4392-8d67-3c58488d9f0a",
       "reservationHoldExpiresAt": "2026-07-11T10:00:00.000Z",
       "dispatchAttemptCount": 0,
       "lastDispatchFailureReason": null,
       "noSupplyEscalation": null,
       "dispatchTimeout": null,
-      "createdAt": "2026-07-20T09:28:32.424Z",
-      "updatedAt": "2026-07-20T09:28:32.424Z",
+      "createdAt": "2026-07-20T10:13:14.479Z",
+      "updatedAt": "2026-07-20T10:13:14.479Z",
       "spatialAudit": {
-        "snapshotId": "e3e2fc7e-cc64-4dbc-9f21-b7d7f1b49ce8",
+        "snapshotId": "0aebb23e-05c4-4bac-bc44-a77904ec0b8c",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-20T09:28:32.426Z",
+        "capturedAt": "2026-07-20T10:13:14.482Z",
         "capturedReason": "booking_creation",
         "actorId": "tenant-admin-001",
         "actorType": "tenant_admin",
@@ -160,7 +160,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "enterprise_dispatch",
-          "evaluatedAt": "2026-07-20T09:28:32.426Z",
+          "evaluatedAt": "2026-07-20T10:13:14.481Z",
           "stops": [
             {
               "kind": "pickup",
@@ -283,7 +283,7 @@
       "payload": {
         "orders": [
           {
-            "orderId": "40bc1c96-20ea-4df8-abaa-2412e8d6ebf3",
+            "orderId": "59f71326-0487-43c6-998b-c58dc894b641",
             "orderNo": "O-20260410-000001",
             "orderSource": "portal",
             "orderDomain": "owned",
@@ -373,18 +373,18 @@
             "cancelledAt": null,
             "cancelReason": null,
             "reservationHoldStatus": "requested",
-            "reservationHoldId": "dc092bdd-ad63-4e52-af66-7570e7d8bbae",
+            "reservationHoldId": "8160756c-b9d4-4392-8d67-3c58488d9f0a",
             "reservationHoldExpiresAt": "2026-07-11T10:00:00.000Z",
             "dispatchAttemptCount": 0,
             "lastDispatchFailureReason": null,
             "noSupplyEscalation": null,
             "dispatchTimeout": null,
-            "createdAt": "2026-07-20T09:28:32.424Z",
-            "updatedAt": "2026-07-20T09:28:32.424Z",
+            "createdAt": "2026-07-20T10:13:14.479Z",
+            "updatedAt": "2026-07-20T10:13:14.479Z",
             "spatialAudit": {
-              "snapshotId": "e3e2fc7e-cc64-4dbc-9f21-b7d7f1b49ce8",
+              "snapshotId": "0aebb23e-05c4-4bac-bc44-a77904ec0b8c",
               "snapshotVersion": 1,
-              "capturedAt": "2026-07-20T09:28:32.426Z",
+              "capturedAt": "2026-07-20T10:13:14.482Z",
               "capturedReason": "booking_creation",
               "actorId": "tenant-admin-001",
               "actorType": "tenant_admin",
@@ -434,7 +434,7 @@
               "serviceAreaEvaluation": {
                 "decision": "serviceable",
                 "serviceProductType": "enterprise_dispatch",
-                "evaluatedAt": "2026-07-20T09:28:32.426Z",
+                "evaluatedAt": "2026-07-20T10:13:14.481Z",
                 "stops": [
                   {
                     "kind": "pickup",
@@ -554,11 +554,11 @@
         ],
         "dispatchTraceLogs": [
           {
-            "traceId": "b9049dc2-48cb-4438-a5bd-4157ea4b2f78",
-            "orderId": "40bc1c96-20ea-4df8-abaa-2412e8d6ebf3",
+            "traceId": "aaff6612-5a02-4bb8-be97-5b9c3c78b46e",
+            "orderId": "59f71326-0487-43c6-998b-c58dc894b641",
             "eventType": "tenant.booking_created",
             "message": "tenant.booking_created",
-            "createdAt": "2026-07-20T09:28:32.427Z",
+            "createdAt": "2026-07-20T10:13:14.482Z",
             "details": {
               "bookingId": "booking-000001",
               "businessDispatchSubtype": "enterprise_dispatch",
@@ -566,14 +566,14 @@
             }
           },
           {
-            "traceId": "ec6692d2-2580-4971-beb3-d504a2ab3de6",
-            "orderId": "40bc1c96-20ea-4df8-abaa-2412e8d6ebf3",
+            "traceId": "6a0675c8-607c-463d-be07-4ca2fdd57eec",
+            "orderId": "59f71326-0487-43c6-998b-c58dc894b641",
             "eventType": "reservation.hold.created",
             "message": "reservation.hold.created",
-            "createdAt": "2026-07-20T09:28:32.427Z",
+            "createdAt": "2026-07-20T10:13:14.482Z",
             "details": {
               "bookingId": "booking-000001",
-              "reservationHoldId": "dc092bdd-ad63-4e52-af66-7570e7d8bbae",
+              "reservationHoldId": "8160756c-b9d4-4392-8d67-3c58488d9f0a",
               "holdState": "requested",
               "confirmationWindowMinutes": 30
             }
@@ -592,10 +592,10 @@
         "moduleName": "order",
         "actionName": "order.spatial_audit.snapshot_created",
         "resourceType": "order",
-        "resourceId": "40bc1c96-20ea-4df8-abaa-2412e8d6ebf3",
+        "resourceId": "59f71326-0487-43c6-998b-c58dc894b641",
         "oldValuesSummary": null,
         "newValuesSummary": {
-          "snapshotId": "e3e2fc7e-cc64-4dbc-9f21-b7d7f1b49ce8",
+          "snapshotId": "0aebb23e-05c4-4bac-bc44-a77904ec0b8c",
           "decision": "serviceable",
           "surface": "tenant_console",
           "serviceProductType": "enterprise_dispatch",
@@ -610,9 +610,9 @@
     ]
   },
   "conciergeServiceableOrder": {
-    "orderId": "554f2271-ae3d-4827-969e-f7386762bb20",
+    "orderId": "2242399d-0d91-4f04-a6d6-342abd8e1356",
     "apiOrder": {
-      "orderId": "554f2271-ae3d-4827-969e-f7386762bb20",
+      "orderId": "2242399d-0d91-4f04-a6d6-342abd8e1356",
       "orderNo": "O-20260410-000002",
       "orderSource": "phone",
       "orderDomain": "owned",
@@ -663,7 +663,7 @@
       "bookingType": null,
       "etaSnapshot": {
         "etaMinutes": 10,
-        "calculatedAt": "2026-07-20T09:28:32.438Z"
+        "calculatedAt": "2026-07-20T10:13:14.494Z"
       },
       "callId": "CALL-CONCIERGE-001",
       "recordingId": "REC-CONCIERGE-001",
@@ -706,12 +706,12 @@
       "lastDispatchFailureReason": null,
       "noSupplyEscalation": null,
       "dispatchTimeout": null,
-      "createdAt": "2026-07-20T09:28:32.438Z",
-      "updatedAt": "2026-07-20T09:28:32.438Z",
+      "createdAt": "2026-07-20T10:13:14.494Z",
+      "updatedAt": "2026-07-20T10:13:14.494Z",
       "spatialAudit": {
-        "snapshotId": "d8ce40ed-d523-417b-8b40-58bf7722c415",
+        "snapshotId": "0e9e2eb5-c00f-4950-99fb-5526ea11d84f",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-20T09:28:32.439Z",
+        "capturedAt": "2026-07-20T10:13:14.494Z",
         "capturedReason": "booking_creation",
         "actorId": "concierge-ops-001",
         "actorType": "ops_user",
@@ -761,7 +761,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-20T09:28:32.438Z",
+          "evaluatedAt": "2026-07-20T10:13:14.494Z",
           "stops": [
             {
               "kind": "pickup",
@@ -883,7 +883,7 @@
       "payload": {
         "orders": [
           {
-            "orderId": "554f2271-ae3d-4827-969e-f7386762bb20",
+            "orderId": "2242399d-0d91-4f04-a6d6-342abd8e1356",
             "orderNo": "O-20260410-000002",
             "orderSource": "phone",
             "orderDomain": "owned",
@@ -934,7 +934,7 @@
             "bookingType": null,
             "etaSnapshot": {
               "etaMinutes": 10,
-              "calculatedAt": "2026-07-20T09:28:32.438Z"
+              "calculatedAt": "2026-07-20T10:13:14.494Z"
             },
             "callId": "CALL-CONCIERGE-001",
             "recordingId": "REC-CONCIERGE-001",
@@ -977,12 +977,12 @@
             "lastDispatchFailureReason": null,
             "noSupplyEscalation": null,
             "dispatchTimeout": null,
-            "createdAt": "2026-07-20T09:28:32.438Z",
-            "updatedAt": "2026-07-20T09:28:32.438Z",
+            "createdAt": "2026-07-20T10:13:14.494Z",
+            "updatedAt": "2026-07-20T10:13:14.494Z",
             "spatialAudit": {
-              "snapshotId": "d8ce40ed-d523-417b-8b40-58bf7722c415",
+              "snapshotId": "0e9e2eb5-c00f-4950-99fb-5526ea11d84f",
               "snapshotVersion": 1,
-              "capturedAt": "2026-07-20T09:28:32.439Z",
+              "capturedAt": "2026-07-20T10:13:14.494Z",
               "capturedReason": "booking_creation",
               "actorId": "concierge-ops-001",
               "actorType": "ops_user",
@@ -1032,7 +1032,7 @@
               "serviceAreaEvaluation": {
                 "decision": "serviceable",
                 "serviceProductType": "taxi_realtime",
-                "evaluatedAt": "2026-07-20T09:28:32.438Z",
+                "evaluatedAt": "2026-07-20T10:13:14.494Z",
                 "stops": [
                   {
                     "kind": "pickup",
@@ -1151,11 +1151,11 @@
         ],
         "dispatchTraceLogs": [
           {
-            "traceId": "d767ea8a-b244-4503-8e75-1af574831371",
-            "orderId": "554f2271-ae3d-4827-969e-f7386762bb20",
+            "traceId": "aabd0298-530e-48cc-959a-b577bf1dc31a",
+            "orderId": "2242399d-0d91-4f04-a6d6-342abd8e1356",
             "eventType": "callcenter.order_created",
             "message": "callcenter.order_created",
-            "createdAt": "2026-07-20T09:28:32.439Z",
+            "createdAt": "2026-07-20T10:13:14.494Z",
             "details": {
               "callId": "CALL-CONCIERGE-001",
               "recordingId": "REC-CONCIERGE-001",
@@ -1176,7 +1176,7 @@
         "moduleName": "callcenter",
         "actionName": "create_phone_order",
         "resourceType": "order",
-        "resourceId": "554f2271-ae3d-4827-969e-f7386762bb20",
+        "resourceId": "2242399d-0d91-4f04-a6d6-342abd8e1356",
         "oldValuesSummary": null,
         "newValuesSummary": {
           "callId": "CALL-CONCIERGE-001",
@@ -1195,10 +1195,10 @@
         "moduleName": "order",
         "actionName": "order.spatial_audit.snapshot_created",
         "resourceType": "order",
-        "resourceId": "554f2271-ae3d-4827-969e-f7386762bb20",
+        "resourceId": "2242399d-0d91-4f04-a6d6-342abd8e1356",
         "oldValuesSummary": null,
         "newValuesSummary": {
-          "snapshotId": "d8ce40ed-d523-417b-8b40-58bf7722c415",
+          "snapshotId": "0e9e2eb5-c00f-4950-99fb-5526ea11d84f",
           "decision": "serviceable",
           "surface": "callcenter",
           "serviceProductType": "taxi_realtime",
@@ -1214,7 +1214,7 @@
   },
   "partnerServiceableBooking": {
     "booking": {
-      "orderId": "576034cb-5e2f-475e-8108-4aafcb9679aa",
+      "orderId": "2699d125-d053-453b-86d0-cce76eb675a7",
       "bookingId": "booking-000002",
       "serviceBucket": "business_dispatch",
       "businessDispatchSubtype": "credit_card_airport_transfer",
@@ -1222,12 +1222,12 @@
       "status": "created"
     },
     "eligibilityVerification": {
-      "eligibilityVerificationId": "elig_d0265ff7-a785-4260-a024-ce703e1f9efe",
+      "eligibilityVerificationId": "elig_1de37665-8618-4fa2-978e-78268563be73",
       "verificationStatus": "eligible",
       "partnerEntrySlug": "ctbc"
     },
     "apiOrder": {
-      "orderId": "576034cb-5e2f-475e-8108-4aafcb9679aa",
+      "orderId": "2699d125-d053-453b-86d0-cce76eb675a7",
       "orderNo": "O-20260410-000003",
       "orderSource": "portal",
       "orderDomain": "owned",
@@ -1235,7 +1235,7 @@
       "partnerId": "partner-ctbc-card-001",
       "partnerProgramId": "program-ctbc-world-elite",
       "partnerEntrySlug": "ctbc",
-      "eligibilityVerificationId": "elig_d0265ff7-a785-4260-a024-ce703e1f9efe",
+      "eligibilityVerificationId": "elig_1de37665-8618-4fa2-978e-78268563be73",
       "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
       "passengerDisclosure": null,
       "serviceBucket": "business_dispatch",
@@ -1317,18 +1317,18 @@
       "cancelledAt": null,
       "cancelReason": null,
       "reservationHoldStatus": "requested",
-      "reservationHoldId": "eb23081b-8d21-4e39-99f0-6af198abcaa9",
+      "reservationHoldId": "afee34fd-211b-45a7-a314-fe4334238703",
       "reservationHoldExpiresAt": "2026-07-11T12:00:00.000Z",
       "dispatchAttemptCount": 0,
       "lastDispatchFailureReason": null,
       "noSupplyEscalation": null,
       "dispatchTimeout": null,
-      "createdAt": "2026-07-20T09:28:32.440Z",
-      "updatedAt": "2026-07-20T09:28:32.440Z",
+      "createdAt": "2026-07-20T10:13:14.499Z",
+      "updatedAt": "2026-07-20T10:13:14.499Z",
       "spatialAudit": {
-        "snapshotId": "f943c2d5-246b-4380-bcb4-c238e98a8c3f",
+        "snapshotId": "873786ac-43dd-4dbd-8c6e-39fcc01f05aa",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-20T09:28:32.441Z",
+        "capturedAt": "2026-07-20T10:13:14.499Z",
         "capturedReason": "booking_creation",
         "actorId": "partner-api-001",
         "actorType": "partner_api_key",
@@ -1378,7 +1378,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "credit_card_airport_transfer",
-          "evaluatedAt": "2026-07-20T09:28:32.441Z",
+          "evaluatedAt": "2026-07-20T10:13:14.499Z",
           "stops": [
             {
               "kind": "pickup",
@@ -1498,7 +1498,7 @@
           "required": true,
           "blocking": false,
           "evidenceState": "verified",
-          "evidenceRefs": ["elig_d0265ff7-a785-4260-a024-ce703e1f9efe"],
+          "evidenceRefs": ["elig_1de37665-8618-4fa2-978e-78268563be73"],
           "missingItems": [],
           "nextAction": "Eligibility verification is approved and within TTL.",
           "reviewerLabel": "partner ops reviewer",
@@ -1532,7 +1532,7 @@
       "payload": {
         "orders": [
           {
-            "orderId": "576034cb-5e2f-475e-8108-4aafcb9679aa",
+            "orderId": "2699d125-d053-453b-86d0-cce76eb675a7",
             "orderNo": "O-20260410-000003",
             "orderSource": "portal",
             "orderDomain": "owned",
@@ -1540,7 +1540,7 @@
             "partnerId": "partner-ctbc-card-001",
             "partnerProgramId": "program-ctbc-world-elite",
             "partnerEntrySlug": "ctbc",
-            "eligibilityVerificationId": "elig_d0265ff7-a785-4260-a024-ce703e1f9efe",
+            "eligibilityVerificationId": "elig_1de37665-8618-4fa2-978e-78268563be73",
             "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
             "passengerDisclosure": null,
             "serviceBucket": "business_dispatch",
@@ -1622,18 +1622,18 @@
             "cancelledAt": null,
             "cancelReason": null,
             "reservationHoldStatus": "requested",
-            "reservationHoldId": "eb23081b-8d21-4e39-99f0-6af198abcaa9",
+            "reservationHoldId": "afee34fd-211b-45a7-a314-fe4334238703",
             "reservationHoldExpiresAt": "2026-07-11T12:00:00.000Z",
             "dispatchAttemptCount": 0,
             "lastDispatchFailureReason": null,
             "noSupplyEscalation": null,
             "dispatchTimeout": null,
-            "createdAt": "2026-07-20T09:28:32.440Z",
-            "updatedAt": "2026-07-20T09:28:32.440Z",
+            "createdAt": "2026-07-20T10:13:14.499Z",
+            "updatedAt": "2026-07-20T10:13:14.499Z",
             "spatialAudit": {
-              "snapshotId": "f943c2d5-246b-4380-bcb4-c238e98a8c3f",
+              "snapshotId": "873786ac-43dd-4dbd-8c6e-39fcc01f05aa",
               "snapshotVersion": 1,
-              "capturedAt": "2026-07-20T09:28:32.441Z",
+              "capturedAt": "2026-07-20T10:13:14.499Z",
               "capturedReason": "booking_creation",
               "actorId": "partner-api-001",
               "actorType": "partner_api_key",
@@ -1683,7 +1683,7 @@
               "serviceAreaEvaluation": {
                 "decision": "serviceable",
                 "serviceProductType": "credit_card_airport_transfer",
-                "evaluatedAt": "2026-07-20T09:28:32.441Z",
+                "evaluatedAt": "2026-07-20T10:13:14.499Z",
                 "stops": [
                   {
                     "kind": "pickup",
@@ -1802,7 +1802,7 @@
                 "required": true,
                 "blocking": false,
                 "evidenceState": "verified",
-                "evidenceRefs": ["elig_d0265ff7-a785-4260-a024-ce703e1f9efe"],
+                "evidenceRefs": ["elig_1de37665-8618-4fa2-978e-78268563be73"],
                 "missingItems": [],
                 "nextAction": "Eligibility verification is approved and within TTL.",
                 "reviewerLabel": "partner ops reviewer",
@@ -1834,11 +1834,11 @@
         ],
         "dispatchTraceLogs": [
           {
-            "traceId": "1b8d7c10-d955-4298-b0f3-9577e80ddc96",
-            "orderId": "576034cb-5e2f-475e-8108-4aafcb9679aa",
+            "traceId": "820c64e2-7ea5-47a8-94c2-6b2a38a8314f",
+            "orderId": "2699d125-d053-453b-86d0-cce76eb675a7",
             "eventType": "tenant.booking_created",
             "message": "tenant.booking_created",
-            "createdAt": "2026-07-20T09:28:32.441Z",
+            "createdAt": "2026-07-20T10:13:14.499Z",
             "details": {
               "bookingId": "booking-000002",
               "businessDispatchSubtype": "credit_card_airport_transfer",
@@ -1846,14 +1846,14 @@
             }
           },
           {
-            "traceId": "d3a19b63-521d-4c4e-9430-4068cd1b3278",
-            "orderId": "576034cb-5e2f-475e-8108-4aafcb9679aa",
+            "traceId": "21b22109-4a94-4e0e-bb3a-61ce506abe84",
+            "orderId": "2699d125-d053-453b-86d0-cce76eb675a7",
             "eventType": "reservation.hold.created",
             "message": "reservation.hold.created",
-            "createdAt": "2026-07-20T09:28:32.441Z",
+            "createdAt": "2026-07-20T10:13:14.499Z",
             "details": {
               "bookingId": "booking-000002",
-              "reservationHoldId": "eb23081b-8d21-4e39-99f0-6af198abcaa9",
+              "reservationHoldId": "afee34fd-211b-45a7-a314-fe4334238703",
               "holdState": "requested",
               "confirmationWindowMinutes": 60
             }
@@ -1872,10 +1872,10 @@
         "moduleName": "order",
         "actionName": "order.spatial_audit.snapshot_created",
         "resourceType": "order",
-        "resourceId": "576034cb-5e2f-475e-8108-4aafcb9679aa",
+        "resourceId": "2699d125-d053-453b-86d0-cce76eb675a7",
         "oldValuesSummary": null,
         "newValuesSummary": {
-          "snapshotId": "f943c2d5-246b-4380-bcb4-c238e98a8c3f",
+          "snapshotId": "873786ac-43dd-4dbd-8c6e-39fcc01f05aa",
           "decision": "serviceable",
           "surface": "partner_booking",
           "serviceProductType": "credit_card_airport_transfer",
@@ -1891,9 +1891,9 @@
   },
   "providerOutageManualReview": {
     "callcenter": {
-      "orderId": "7f84324c-ea55-4749-a8de-4a0d7f2ab56b",
+      "orderId": "e3c8edb7-248d-4804-afa6-6e193a2fd5c9",
       "apiOrder": {
-        "orderId": "7f84324c-ea55-4749-a8de-4a0d7f2ab56b",
+        "orderId": "e3c8edb7-248d-4804-afa6-6e193a2fd5c9",
         "orderNo": "O-20260410-000004",
         "orderSource": "phone",
         "orderDomain": "owned",
@@ -1952,7 +1952,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-20T09:28:32.444Z"
+          "calculatedAt": "2026-07-20T10:13:14.504Z"
         },
         "callId": "CALL-OUTAGE-001",
         "recordingId": "REC-OUTAGE-001",
@@ -2000,12 +2000,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-20T09:28:32.444Z",
-        "updatedAt": "2026-07-20T09:28:32.444Z",
+        "createdAt": "2026-07-20T10:13:14.504Z",
+        "updatedAt": "2026-07-20T10:13:14.504Z",
         "spatialAudit": {
-          "snapshotId": "dcac3196-60cd-45e9-985b-0f80e09a8bf6",
+          "snapshotId": "d9f37abc-56af-47c7-883a-9995837a5333",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-20T09:28:32.445Z",
+          "capturedAt": "2026-07-20T10:13:14.505Z",
           "capturedReason": "booking_creation",
           "actorId": "ops-agent-001",
           "actorType": "ops_user",
@@ -2061,7 +2061,7 @@
           "serviceAreaEvaluation": {
             "decision": "serviceable",
             "serviceProductType": "taxi_realtime",
-            "evaluatedAt": "2026-07-20T09:28:32.445Z",
+            "evaluatedAt": "2026-07-20T10:13:14.505Z",
             "stops": [
               {
                 "kind": "pickup",
@@ -2214,7 +2214,7 @@
         "payload": {
           "orders": [
             {
-              "orderId": "7f84324c-ea55-4749-a8de-4a0d7f2ab56b",
+              "orderId": "e3c8edb7-248d-4804-afa6-6e193a2fd5c9",
               "orderNo": "O-20260410-000004",
               "orderSource": "phone",
               "orderDomain": "owned",
@@ -2273,7 +2273,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-20T09:28:32.444Z"
+                "calculatedAt": "2026-07-20T10:13:14.504Z"
               },
               "callId": "CALL-OUTAGE-001",
               "recordingId": "REC-OUTAGE-001",
@@ -2324,12 +2324,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-20T09:28:32.444Z",
-              "updatedAt": "2026-07-20T09:28:32.444Z",
+              "createdAt": "2026-07-20T10:13:14.504Z",
+              "updatedAt": "2026-07-20T10:13:14.504Z",
               "spatialAudit": {
-                "snapshotId": "dcac3196-60cd-45e9-985b-0f80e09a8bf6",
+                "snapshotId": "d9f37abc-56af-47c7-883a-9995837a5333",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-20T09:28:32.445Z",
+                "capturedAt": "2026-07-20T10:13:14.505Z",
                 "capturedReason": "booking_creation",
                 "actorId": "ops-agent-001",
                 "actorType": "ops_user",
@@ -2385,7 +2385,7 @@
                 "serviceAreaEvaluation": {
                   "decision": "serviceable",
                   "serviceProductType": "taxi_realtime",
-                  "evaluatedAt": "2026-07-20T09:28:32.445Z",
+                  "evaluatedAt": "2026-07-20T10:13:14.505Z",
                   "stops": [
                     {
                       "kind": "pickup",
@@ -2538,11 +2538,11 @@
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "09a2fdcf-2c47-4e12-b64f-9abfbaf2d649",
-              "orderId": "7f84324c-ea55-4749-a8de-4a0d7f2ab56b",
+              "traceId": "e0262a7b-e910-42c4-a7ed-8353adb34198",
+              "orderId": "e3c8edb7-248d-4804-afa6-6e193a2fd5c9",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-20T09:28:32.445Z",
+              "createdAt": "2026-07-20T10:13:14.505Z",
               "details": {
                 "callId": "CALL-OUTAGE-001",
                 "recordingId": "REC-OUTAGE-001",
@@ -2563,7 +2563,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "7f84324c-ea55-4749-a8de-4a0d7f2ab56b",
+          "resourceId": "e3c8edb7-248d-4804-afa6-6e193a2fd5c9",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-OUTAGE-001",
@@ -2582,10 +2582,10 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "7f84324c-ea55-4749-a8de-4a0d7f2ab56b",
+          "resourceId": "e3c8edb7-248d-4804-afa6-6e193a2fd5c9",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "dcac3196-60cd-45e9-985b-0f80e09a8bf6",
+            "snapshotId": "d9f37abc-56af-47c7-883a-9995837a5333",
             "decision": "serviceable",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
@@ -2604,22 +2604,22 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "7f84324c-ea55-4749-a8de-4a0d7f2ab56b",
+              "orderId": "e3c8edb7-248d-4804-afa6-6e193a2fd5c9",
               "gateTypes": ["address_capture"],
               "reasonCodes": ["map_provider_unavailable", "request_failed"],
               "missingItems": []
             },
             "retryable": false,
-            "traceId": "20fce130-8c1a-463a-a43b-794b4ccce4ca"
+            "traceId": "b6572e1f-afbe-43db-8d07-5f0f17978a4a"
           }
         },
         "dispatchJobsForOrder": []
       }
     },
     "concierge": {
-      "orderId": "0fcfff5d-cc7b-40b9-9b76-4f8733f793dc",
+      "orderId": "8ca9c357-c116-4b6c-ad0a-aaf87468fb88",
       "apiOrder": {
-        "orderId": "0fcfff5d-cc7b-40b9-9b76-4f8733f793dc",
+        "orderId": "8ca9c357-c116-4b6c-ad0a-aaf87468fb88",
         "orderNo": "O-20260410-000005",
         "orderSource": "phone",
         "orderDomain": "owned",
@@ -2678,7 +2678,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-20T09:28:32.448Z"
+          "calculatedAt": "2026-07-20T10:13:14.505Z"
         },
         "callId": "CALL-CONCIERGE-OUTAGE-001",
         "recordingId": "REC-CONCIERGE-OUTAGE-001",
@@ -2726,12 +2726,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-20T09:28:32.448Z",
-        "updatedAt": "2026-07-20T09:28:32.448Z",
+        "createdAt": "2026-07-20T10:13:14.505Z",
+        "updatedAt": "2026-07-20T10:13:14.505Z",
         "spatialAudit": {
-          "snapshotId": "0e3a909e-8ab1-416f-896d-2b37f6fc69ba",
+          "snapshotId": "dc28cc4a-abf4-4793-aaea-0af0df653d63",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-20T09:28:32.448Z",
+          "capturedAt": "2026-07-20T10:13:14.506Z",
           "capturedReason": "booking_creation",
           "actorId": "concierge-ops-002",
           "actorType": "ops_user",
@@ -2787,7 +2787,7 @@
           "serviceAreaEvaluation": {
             "decision": "serviceable",
             "serviceProductType": "taxi_realtime",
-            "evaluatedAt": "2026-07-20T09:28:32.448Z",
+            "evaluatedAt": "2026-07-20T10:13:14.506Z",
             "stops": [
               {
                 "kind": "pickup",
@@ -2940,7 +2940,7 @@
         "payload": {
           "orders": [
             {
-              "orderId": "0fcfff5d-cc7b-40b9-9b76-4f8733f793dc",
+              "orderId": "8ca9c357-c116-4b6c-ad0a-aaf87468fb88",
               "orderNo": "O-20260410-000005",
               "orderSource": "phone",
               "orderDomain": "owned",
@@ -2999,7 +2999,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-20T09:28:32.448Z"
+                "calculatedAt": "2026-07-20T10:13:14.505Z"
               },
               "callId": "CALL-CONCIERGE-OUTAGE-001",
               "recordingId": "REC-CONCIERGE-OUTAGE-001",
@@ -3050,12 +3050,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-20T09:28:32.448Z",
-              "updatedAt": "2026-07-20T09:28:32.448Z",
+              "createdAt": "2026-07-20T10:13:14.505Z",
+              "updatedAt": "2026-07-20T10:13:14.505Z",
               "spatialAudit": {
-                "snapshotId": "0e3a909e-8ab1-416f-896d-2b37f6fc69ba",
+                "snapshotId": "dc28cc4a-abf4-4793-aaea-0af0df653d63",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-20T09:28:32.448Z",
+                "capturedAt": "2026-07-20T10:13:14.506Z",
                 "capturedReason": "booking_creation",
                 "actorId": "concierge-ops-002",
                 "actorType": "ops_user",
@@ -3111,7 +3111,7 @@
                 "serviceAreaEvaluation": {
                   "decision": "serviceable",
                   "serviceProductType": "taxi_realtime",
-                  "evaluatedAt": "2026-07-20T09:28:32.448Z",
+                  "evaluatedAt": "2026-07-20T10:13:14.506Z",
                   "stops": [
                     {
                       "kind": "pickup",
@@ -3264,11 +3264,11 @@
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "17dd60fa-9369-43e6-8349-40c22d0a9cad",
-              "orderId": "0fcfff5d-cc7b-40b9-9b76-4f8733f793dc",
+              "traceId": "f733d0a1-2751-426a-8816-32f6988d02b9",
+              "orderId": "8ca9c357-c116-4b6c-ad0a-aaf87468fb88",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-20T09:28:32.448Z",
+              "createdAt": "2026-07-20T10:13:14.506Z",
               "details": {
                 "callId": "CALL-CONCIERGE-OUTAGE-001",
                 "recordingId": "REC-CONCIERGE-OUTAGE-001",
@@ -3289,7 +3289,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "0fcfff5d-cc7b-40b9-9b76-4f8733f793dc",
+          "resourceId": "8ca9c357-c116-4b6c-ad0a-aaf87468fb88",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-CONCIERGE-OUTAGE-001",
@@ -3308,10 +3308,10 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "0fcfff5d-cc7b-40b9-9b76-4f8733f793dc",
+          "resourceId": "8ca9c357-c116-4b6c-ad0a-aaf87468fb88",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "0e3a909e-8ab1-416f-896d-2b37f6fc69ba",
+            "snapshotId": "dc28cc4a-abf4-4793-aaea-0af0df653d63",
             "decision": "serviceable",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
@@ -3330,13 +3330,13 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "0fcfff5d-cc7b-40b9-9b76-4f8733f793dc",
+              "orderId": "8ca9c357-c116-4b6c-ad0a-aaf87468fb88",
               "gateTypes": ["address_capture"],
               "reasonCodes": ["map_provider_unavailable", "request_failed"],
               "missingItems": []
             },
             "retryable": false,
-            "traceId": "a6c4d46e-4757-4175-8230-2913ad7f6b8d"
+            "traceId": "775d48e8-c16e-4118-9705-1348ef449ff8"
           }
         },
         "dispatchJobsForOrder": []
@@ -3346,7 +3346,7 @@
   "coordinateLessAntiBypass": {
     "tenant": {
       "booking": {
-        "orderId": "a410c33b-7a1c-4753-bf63-4d5756dcab75",
+        "orderId": "8205c26d-dda3-4123-ba43-d33a080243a7",
         "bookingId": "booking-000003",
         "serviceBucket": "business_dispatch",
         "businessDispatchSubtype": "enterprise_dispatch",
@@ -3354,7 +3354,7 @@
         "status": "created"
       },
       "apiOrder": {
-        "orderId": "a410c33b-7a1c-4753-bf63-4d5756dcab75",
+        "orderId": "8205c26d-dda3-4123-ba43-d33a080243a7",
         "orderNo": "O-20260410-000006",
         "orderSource": "portal",
         "orderDomain": "owned",
@@ -3422,18 +3422,18 @@
         "cancelledAt": null,
         "cancelReason": null,
         "reservationHoldStatus": "requested",
-        "reservationHoldId": "1cb55da8-c942-4532-a035-c5c49cd66857",
+        "reservationHoldId": "40fd942c-83e5-4924-9b75-254051d8c651",
         "reservationHoldExpiresAt": "2026-07-11T14:00:00.000Z",
         "dispatchAttemptCount": 0,
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-20T09:28:32.449Z",
-        "updatedAt": "2026-07-20T09:28:32.449Z",
+        "createdAt": "2026-07-20T10:13:14.507Z",
+        "updatedAt": "2026-07-20T10:13:14.507Z",
         "spatialAudit": {
-          "snapshotId": "ac269f0b-16b2-4eaa-8e12-2534f5677c64",
+          "snapshotId": "3972644c-6a49-4b3d-911f-36791f0d8c6a",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-20T09:28:32.449Z",
+          "capturedAt": "2026-07-20T10:13:14.507Z",
           "capturedReason": "booking_creation",
           "actorId": "tenant-admin-001",
           "actorType": "tenant_admin",
@@ -3574,7 +3574,7 @@
         "payload": {
           "orders": [
             {
-              "orderId": "a410c33b-7a1c-4753-bf63-4d5756dcab75",
+              "orderId": "8205c26d-dda3-4123-ba43-d33a080243a7",
               "orderNo": "O-20260410-000006",
               "orderSource": "portal",
               "orderDomain": "owned",
@@ -3642,18 +3642,18 @@
               "cancelledAt": null,
               "cancelReason": null,
               "reservationHoldStatus": "requested",
-              "reservationHoldId": "1cb55da8-c942-4532-a035-c5c49cd66857",
+              "reservationHoldId": "40fd942c-83e5-4924-9b75-254051d8c651",
               "reservationHoldExpiresAt": "2026-07-11T14:00:00.000Z",
               "dispatchAttemptCount": 0,
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-20T09:28:32.449Z",
-              "updatedAt": "2026-07-20T09:28:32.449Z",
+              "createdAt": "2026-07-20T10:13:14.507Z",
+              "updatedAt": "2026-07-20T10:13:14.507Z",
               "spatialAudit": {
-                "snapshotId": "ac269f0b-16b2-4eaa-8e12-2534f5677c64",
+                "snapshotId": "3972644c-6a49-4b3d-911f-36791f0d8c6a",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-20T09:28:32.449Z",
+                "capturedAt": "2026-07-20T10:13:14.507Z",
                 "capturedReason": "booking_creation",
                 "actorId": "tenant-admin-001",
                 "actorType": "tenant_admin",
@@ -3791,11 +3791,11 @@
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "a10d0946-36cf-4718-af37-e1a460d5d554",
-              "orderId": "a410c33b-7a1c-4753-bf63-4d5756dcab75",
+              "traceId": "c1d732f4-4bec-435a-a36c-bd9c0b4478bc",
+              "orderId": "8205c26d-dda3-4123-ba43-d33a080243a7",
               "eventType": "tenant.booking_created",
               "message": "tenant.booking_created",
-              "createdAt": "2026-07-20T09:28:32.449Z",
+              "createdAt": "2026-07-20T10:13:14.507Z",
               "details": {
                 "bookingId": "booking-000003",
                 "businessDispatchSubtype": "enterprise_dispatch",
@@ -3803,14 +3803,14 @@
               }
             },
             {
-              "traceId": "4d586fa5-c410-4a3f-9ab8-c2a538481c93",
-              "orderId": "a410c33b-7a1c-4753-bf63-4d5756dcab75",
+              "traceId": "6e22ade4-c66f-4c2d-8c0e-cd4083c755a3",
+              "orderId": "8205c26d-dda3-4123-ba43-d33a080243a7",
               "eventType": "reservation.hold.created",
               "message": "reservation.hold.created",
-              "createdAt": "2026-07-20T09:28:32.449Z",
+              "createdAt": "2026-07-20T10:13:14.507Z",
               "details": {
                 "bookingId": "booking-000003",
-                "reservationHoldId": "1cb55da8-c942-4532-a035-c5c49cd66857",
+                "reservationHoldId": "40fd942c-83e5-4924-9b75-254051d8c651",
                 "holdState": "requested",
                 "confirmationWindowMinutes": 30
               }
@@ -3829,10 +3829,10 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "a410c33b-7a1c-4753-bf63-4d5756dcab75",
+          "resourceId": "8205c26d-dda3-4123-ba43-d33a080243a7",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "ac269f0b-16b2-4eaa-8e12-2534f5677c64",
+            "snapshotId": "3972644c-6a49-4b3d-911f-36791f0d8c6a",
             "decision": "manual_review",
             "surface": "tenant_console",
             "serviceProductType": "enterprise_dispatch",
@@ -3851,13 +3851,13 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "a410c33b-7a1c-4753-bf63-4d5756dcab75",
+              "orderId": "8205c26d-dda3-4123-ba43-d33a080243a7",
               "gateTypes": ["service_area"],
               "reasonCodes": [],
               "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
             },
             "retryable": false,
-            "traceId": "caa5f072-1e12-4ec4-9adb-6a8b4c78d399"
+            "traceId": "93ba6ca0-d0d2-4666-8e8b-a286359cbf31"
           }
         },
         "dispatchJobsForOrder": []
@@ -3865,7 +3865,7 @@
     },
     "partner": {
       "booking": {
-        "orderId": "be8e8076-b728-4a42-a422-c87116e921cd",
+        "orderId": "3b1505fb-0aed-4c23-a212-7f88629cb982",
         "bookingId": "booking-000004",
         "serviceBucket": "business_dispatch",
         "businessDispatchSubtype": "credit_card_airport_transfer",
@@ -3873,7 +3873,7 @@
         "status": "created"
       },
       "apiOrder": {
-        "orderId": "be8e8076-b728-4a42-a422-c87116e921cd",
+        "orderId": "3b1505fb-0aed-4c23-a212-7f88629cb982",
         "orderNo": "O-20260410-000007",
         "orderSource": "portal",
         "orderDomain": "owned",
@@ -3881,7 +3881,7 @@
         "partnerId": "partner-ctbc-card-001",
         "partnerProgramId": "program-ctbc-world-elite",
         "partnerEntrySlug": "ctbc",
-        "eligibilityVerificationId": "elig_d0265ff7-a785-4260-a024-ce703e1f9efe",
+        "eligibilityVerificationId": "elig_1de37665-8618-4fa2-978e-78268563be73",
         "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
         "passengerDisclosure": null,
         "serviceBucket": "business_dispatch",
@@ -3941,18 +3941,18 @@
         "cancelledAt": null,
         "cancelReason": null,
         "reservationHoldStatus": "requested",
-        "reservationHoldId": "607fcfcc-87e2-4592-b97f-cd3069105158",
+        "reservationHoldId": "7713b954-442c-483f-a4ce-9c1d79f85544",
         "reservationHoldExpiresAt": "2026-07-11T16:00:00.000Z",
         "dispatchAttemptCount": 0,
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-20T09:28:32.450Z",
-        "updatedAt": "2026-07-20T09:28:32.450Z",
+        "createdAt": "2026-07-20T10:13:14.510Z",
+        "updatedAt": "2026-07-20T10:13:14.510Z",
         "spatialAudit": {
-          "snapshotId": "283dc46f-e8e5-4590-899e-5946d69fe2a5",
+          "snapshotId": "dfa13497-5e1a-4065-a099-6c85c03a2b7d",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-20T09:28:32.450Z",
+          "capturedAt": "2026-07-20T10:13:14.510Z",
           "capturedReason": "booking_creation",
           "actorId": "partner-api-001",
           "actorType": "partner_api_key",
@@ -4090,7 +4090,7 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["elig_d0265ff7-a785-4260-a024-ce703e1f9efe"],
+            "evidenceRefs": ["elig_1de37665-8618-4fa2-978e-78268563be73"],
             "missingItems": [],
             "nextAction": "Eligibility verification is approved and within TTL.",
             "reviewerLabel": "partner ops reviewer",
@@ -4124,7 +4124,7 @@
         "payload": {
           "orders": [
             {
-              "orderId": "be8e8076-b728-4a42-a422-c87116e921cd",
+              "orderId": "3b1505fb-0aed-4c23-a212-7f88629cb982",
               "orderNo": "O-20260410-000007",
               "orderSource": "portal",
               "orderDomain": "owned",
@@ -4132,7 +4132,7 @@
               "partnerId": "partner-ctbc-card-001",
               "partnerProgramId": "program-ctbc-world-elite",
               "partnerEntrySlug": "ctbc",
-              "eligibilityVerificationId": "elig_d0265ff7-a785-4260-a024-ce703e1f9efe",
+              "eligibilityVerificationId": "elig_1de37665-8618-4fa2-978e-78268563be73",
               "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
               "passengerDisclosure": null,
               "serviceBucket": "business_dispatch",
@@ -4192,18 +4192,18 @@
               "cancelledAt": null,
               "cancelReason": null,
               "reservationHoldStatus": "requested",
-              "reservationHoldId": "607fcfcc-87e2-4592-b97f-cd3069105158",
+              "reservationHoldId": "7713b954-442c-483f-a4ce-9c1d79f85544",
               "reservationHoldExpiresAt": "2026-07-11T16:00:00.000Z",
               "dispatchAttemptCount": 0,
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-20T09:28:32.450Z",
-              "updatedAt": "2026-07-20T09:28:32.450Z",
+              "createdAt": "2026-07-20T10:13:14.510Z",
+              "updatedAt": "2026-07-20T10:13:14.510Z",
               "spatialAudit": {
-                "snapshotId": "283dc46f-e8e5-4590-899e-5946d69fe2a5",
+                "snapshotId": "dfa13497-5e1a-4065-a099-6c85c03a2b7d",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-20T09:28:32.450Z",
+                "capturedAt": "2026-07-20T10:13:14.510Z",
                 "capturedReason": "booking_creation",
                 "actorId": "partner-api-001",
                 "actorType": "partner_api_key",
@@ -4340,7 +4340,7 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["elig_d0265ff7-a785-4260-a024-ce703e1f9efe"],
+                  "evidenceRefs": ["elig_1de37665-8618-4fa2-978e-78268563be73"],
                   "missingItems": [],
                   "nextAction": "Eligibility verification is approved and within TTL.",
                   "reviewerLabel": "partner ops reviewer",
@@ -4372,11 +4372,11 @@
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "6215ebdb-37ec-4269-af06-e48ee171ac73",
-              "orderId": "be8e8076-b728-4a42-a422-c87116e921cd",
+              "traceId": "622a6d01-c321-4855-aaea-024929e7070a",
+              "orderId": "3b1505fb-0aed-4c23-a212-7f88629cb982",
               "eventType": "tenant.booking_created",
               "message": "tenant.booking_created",
-              "createdAt": "2026-07-20T09:28:32.450Z",
+              "createdAt": "2026-07-20T10:13:14.510Z",
               "details": {
                 "bookingId": "booking-000004",
                 "businessDispatchSubtype": "credit_card_airport_transfer",
@@ -4384,14 +4384,14 @@
               }
             },
             {
-              "traceId": "5a1f1c1d-c86a-4289-8413-7cb6efe30d76",
-              "orderId": "be8e8076-b728-4a42-a422-c87116e921cd",
+              "traceId": "9098453b-b5d1-4ba4-83de-46484c9ac17d",
+              "orderId": "3b1505fb-0aed-4c23-a212-7f88629cb982",
               "eventType": "reservation.hold.created",
               "message": "reservation.hold.created",
-              "createdAt": "2026-07-20T09:28:32.450Z",
+              "createdAt": "2026-07-20T10:13:14.510Z",
               "details": {
                 "bookingId": "booking-000004",
-                "reservationHoldId": "607fcfcc-87e2-4592-b97f-cd3069105158",
+                "reservationHoldId": "7713b954-442c-483f-a4ce-9c1d79f85544",
                 "holdState": "requested",
                 "confirmationWindowMinutes": 60
               }
@@ -4410,10 +4410,10 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "be8e8076-b728-4a42-a422-c87116e921cd",
+          "resourceId": "3b1505fb-0aed-4c23-a212-7f88629cb982",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "283dc46f-e8e5-4590-899e-5946d69fe2a5",
+            "snapshotId": "dfa13497-5e1a-4065-a099-6c85c03a2b7d",
             "decision": "manual_review",
             "surface": "partner_booking",
             "serviceProductType": "credit_card_airport_transfer",
@@ -4432,22 +4432,22 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "be8e8076-b728-4a42-a422-c87116e921cd",
+              "orderId": "3b1505fb-0aed-4c23-a212-7f88629cb982",
               "gateTypes": ["service_area"],
               "reasonCodes": [],
               "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
             },
             "retryable": false,
-            "traceId": "2a0d96ee-fcf0-4c28-8ef1-2efde9697a6f"
+            "traceId": "39c861d1-0158-4fd1-aeb3-7c210d3fa4ee"
           }
         },
         "dispatchJobsForOrder": []
       }
     },
     "callcenter": {
-      "orderId": "e0255f6a-c53b-4142-b260-e72e6cd6e258",
+      "orderId": "0e482624-531e-4835-9c17-87f20aba4233",
       "apiOrder": {
-        "orderId": "e0255f6a-c53b-4142-b260-e72e6cd6e258",
+        "orderId": "0e482624-531e-4835-9c17-87f20aba4233",
         "orderNo": "O-20260410-000008",
         "orderSource": "phone",
         "orderDomain": "owned",
@@ -4478,7 +4478,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-20T09:28:32.452Z"
+          "calculatedAt": "2026-07-20T10:13:14.512Z"
         },
         "callId": "CALL-COORDLESS-001",
         "recordingId": "REC-COORDLESS-001",
@@ -4524,12 +4524,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-20T09:28:32.452Z",
-        "updatedAt": "2026-07-20T09:28:32.452Z",
+        "createdAt": "2026-07-20T10:13:14.512Z",
+        "updatedAt": "2026-07-20T10:13:14.512Z",
         "spatialAudit": {
-          "snapshotId": "3cc8c38e-489c-46a5-a284-68e0e652d262",
+          "snapshotId": "92622143-ad55-41df-987a-a6b6bb1e6219",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-20T09:28:32.452Z",
+          "capturedAt": "2026-07-20T10:13:14.512Z",
           "capturedReason": "booking_creation",
           "actorId": "ops-agent-001",
           "actorType": "ops_user",
@@ -4669,7 +4669,7 @@
         "payload": {
           "orders": [
             {
-              "orderId": "e0255f6a-c53b-4142-b260-e72e6cd6e258",
+              "orderId": "0e482624-531e-4835-9c17-87f20aba4233",
               "orderNo": "O-20260410-000008",
               "orderSource": "phone",
               "orderDomain": "owned",
@@ -4700,7 +4700,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-20T09:28:32.452Z"
+                "calculatedAt": "2026-07-20T10:13:14.512Z"
               },
               "callId": "CALL-COORDLESS-001",
               "recordingId": "REC-COORDLESS-001",
@@ -4746,12 +4746,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-20T09:28:32.452Z",
-              "updatedAt": "2026-07-20T09:28:32.452Z",
+              "createdAt": "2026-07-20T10:13:14.512Z",
+              "updatedAt": "2026-07-20T10:13:14.512Z",
               "spatialAudit": {
-                "snapshotId": "3cc8c38e-489c-46a5-a284-68e0e652d262",
+                "snapshotId": "92622143-ad55-41df-987a-a6b6bb1e6219",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-20T09:28:32.452Z",
+                "capturedAt": "2026-07-20T10:13:14.512Z",
                 "capturedReason": "booking_creation",
                 "actorId": "ops-agent-001",
                 "actorType": "ops_user",
@@ -4888,11 +4888,11 @@
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "dddee5ce-3a39-4320-92c0-435a03665e16",
-              "orderId": "e0255f6a-c53b-4142-b260-e72e6cd6e258",
+              "traceId": "ce765e69-65ac-4e1b-a472-ab2b59765a0d",
+              "orderId": "0e482624-531e-4835-9c17-87f20aba4233",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-20T09:28:32.452Z",
+              "createdAt": "2026-07-20T10:13:14.512Z",
               "details": {
                 "callId": "CALL-COORDLESS-001",
                 "recordingId": "REC-COORDLESS-001",
@@ -4913,7 +4913,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "e0255f6a-c53b-4142-b260-e72e6cd6e258",
+          "resourceId": "0e482624-531e-4835-9c17-87f20aba4233",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-COORDLESS-001",
@@ -4932,10 +4932,10 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "e0255f6a-c53b-4142-b260-e72e6cd6e258",
+          "resourceId": "0e482624-531e-4835-9c17-87f20aba4233",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "3cc8c38e-489c-46a5-a284-68e0e652d262",
+            "snapshotId": "92622143-ad55-41df-987a-a6b6bb1e6219",
             "decision": "manual_review",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
@@ -4954,22 +4954,22 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "e0255f6a-c53b-4142-b260-e72e6cd6e258",
+              "orderId": "0e482624-531e-4835-9c17-87f20aba4233",
               "gateTypes": ["service_area"],
               "reasonCodes": [],
               "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
             },
             "retryable": false,
-            "traceId": "c96e9541-e031-46b7-9ea5-ef8a964ffef4"
+            "traceId": "42581f35-640a-4448-aed0-2049237bb7c3"
           }
         },
         "dispatchJobsForOrder": []
       }
     },
     "concierge": {
-      "orderId": "329f6c59-54b3-4d58-b566-073de7529a06",
+      "orderId": "fda404d1-b330-4443-9278-27f38516559c",
       "apiOrder": {
-        "orderId": "329f6c59-54b3-4d58-b566-073de7529a06",
+        "orderId": "fda404d1-b330-4443-9278-27f38516559c",
         "orderNo": "O-20260410-000009",
         "orderSource": "phone",
         "orderDomain": "owned",
@@ -5000,7 +5000,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-20T09:28:32.453Z"
+          "calculatedAt": "2026-07-20T10:13:14.512Z"
         },
         "callId": "CALL-CONCIERGE-COORDLESS-001",
         "recordingId": "REC-CONCIERGE-COORDLESS-001",
@@ -5046,12 +5046,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-20T09:28:32.453Z",
-        "updatedAt": "2026-07-20T09:28:32.453Z",
+        "createdAt": "2026-07-20T10:13:14.512Z",
+        "updatedAt": "2026-07-20T10:13:14.512Z",
         "spatialAudit": {
-          "snapshotId": "7b624178-2ca6-44dd-ae16-b0745aa74e57",
+          "snapshotId": "4078f2a4-13df-4bcd-b4cc-fb3fb300e9e7",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-20T09:28:32.453Z",
+          "capturedAt": "2026-07-20T10:13:14.513Z",
           "capturedReason": "booking_creation",
           "actorId": "concierge-ops-003",
           "actorType": "ops_user",
@@ -5191,7 +5191,7 @@
         "payload": {
           "orders": [
             {
-              "orderId": "329f6c59-54b3-4d58-b566-073de7529a06",
+              "orderId": "fda404d1-b330-4443-9278-27f38516559c",
               "orderNo": "O-20260410-000009",
               "orderSource": "phone",
               "orderDomain": "owned",
@@ -5222,7 +5222,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-20T09:28:32.453Z"
+                "calculatedAt": "2026-07-20T10:13:14.512Z"
               },
               "callId": "CALL-CONCIERGE-COORDLESS-001",
               "recordingId": "REC-CONCIERGE-COORDLESS-001",
@@ -5268,12 +5268,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-20T09:28:32.453Z",
-              "updatedAt": "2026-07-20T09:28:32.453Z",
+              "createdAt": "2026-07-20T10:13:14.512Z",
+              "updatedAt": "2026-07-20T10:13:14.512Z",
               "spatialAudit": {
-                "snapshotId": "7b624178-2ca6-44dd-ae16-b0745aa74e57",
+                "snapshotId": "4078f2a4-13df-4bcd-b4cc-fb3fb300e9e7",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-20T09:28:32.453Z",
+                "capturedAt": "2026-07-20T10:13:14.513Z",
                 "capturedReason": "booking_creation",
                 "actorId": "concierge-ops-003",
                 "actorType": "ops_user",
@@ -5410,11 +5410,11 @@
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "54540db5-0faf-409c-bf78-2de18cc0c52b",
-              "orderId": "329f6c59-54b3-4d58-b566-073de7529a06",
+              "traceId": "8e9eb763-edb7-49f6-9eca-5059ce1b8ba4",
+              "orderId": "fda404d1-b330-4443-9278-27f38516559c",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-20T09:28:32.453Z",
+              "createdAt": "2026-07-20T10:13:14.513Z",
               "details": {
                 "callId": "CALL-CONCIERGE-COORDLESS-001",
                 "recordingId": "REC-CONCIERGE-COORDLESS-001",
@@ -5435,7 +5435,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "329f6c59-54b3-4d58-b566-073de7529a06",
+          "resourceId": "fda404d1-b330-4443-9278-27f38516559c",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-CONCIERGE-COORDLESS-001",
@@ -5454,10 +5454,10 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "329f6c59-54b3-4d58-b566-073de7529a06",
+          "resourceId": "fda404d1-b330-4443-9278-27f38516559c",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "7b624178-2ca6-44dd-ae16-b0745aa74e57",
+            "snapshotId": "4078f2a4-13df-4bcd-b4cc-fb3fb300e9e7",
             "decision": "manual_review",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
@@ -5476,13 +5476,13 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "329f6c59-54b3-4d58-b566-073de7529a06",
+              "orderId": "fda404d1-b330-4443-9278-27f38516559c",
               "gateTypes": ["service_area"],
               "reasonCodes": [],
               "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
             },
             "retryable": false,
-            "traceId": "991eec32-5e37-4038-a0ac-75462da54d58"
+            "traceId": "25e07f94-caa6-4dda-91f0-9218ec15affb"
           }
         },
         "dispatchJobsForOrder": []

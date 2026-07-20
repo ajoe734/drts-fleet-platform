@@ -345,18 +345,12 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
   });
 
   const artifactPath = resolve(
-    process.cwd(),
-    "..",
-    "..",
+    __dirname,
+    "../../../..",
     BACKEND_ARTIFACT_RELATIVE_PATH,
   );
   mkdirSync(
-    resolve(
-      process.cwd(),
-      "..",
-      "..",
-      "support/sidecars/MAP-REL-001/artifacts",
-    ),
+    resolve(__dirname, "../../../..", "support/sidecars/MAP-REL-001/artifacts"),
     {
       recursive: true,
     },

@@ -403,9 +403,8 @@ it("writes row-level QA final evidence proof payloads", async () => {
   }
 
   const artifactPath = resolve(
-    process.cwd(),
-    "..",
-    "..",
+    __dirname,
+    "../../../..",
     ARTIFACT_RELATIVE_PATH,
   );
   mkdirSync(resolve(artifactPath, ".."), { recursive: true });

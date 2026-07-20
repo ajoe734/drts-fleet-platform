@@ -265,9 +265,8 @@ it("writes admin publish closeout proof payloads", async () => {
   }
 
   const artifactPath = resolve(
-    process.cwd(),
-    "..",
-    "..",
+    __dirname,
+    "../../../..",
     ARTIFACT_RELATIVE_PATH,
   );
   mkdirSync(resolve(artifactPath, ".."), { recursive: true });

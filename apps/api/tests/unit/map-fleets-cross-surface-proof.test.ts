@@ -624,18 +624,12 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
   );
 
   const artifactPath = resolve(
-    process.cwd(),
-    "..",
-    "..",
+    __dirname,
+    "../../../..",
     ARTIFACT_RELATIVE_PATH,
   );
   mkdirSync(
-    resolve(
-      process.cwd(),
-      "..",
-      "..",
-      "support/sidecars/MAP-REL-001/artifacts",
-    ),
+    resolve(__dirname, "../../../..", "support/sidecars/MAP-REL-001/artifacts"),
     {
       recursive: true,
     },

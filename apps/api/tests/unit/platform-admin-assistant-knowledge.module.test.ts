@@ -9,7 +9,7 @@ import {
 
 describe("PlatformAdminAssistantKnowledgeModule", () => {
   it("finds the repo root from the knowledge module path instead of process cwd", () => {
-    const expectedRepositoryRoot = resolve(process.cwd(), "..", "..");
+    const expectedRepositoryRoot = resolve(__dirname, "../../../..");
     const repositoryRoot = resolveKnowledgeRepositoryRoot(
       resolve(
         expectedRepositoryRoot,
@@ -21,7 +21,7 @@ describe("PlatformAdminAssistantKnowledgeModule", () => {
   });
 
   it("loads approved knowledge docs from the resolved repository root", () => {
-    const repositoryRoot = resolve(process.cwd(), "..", "..");
+    const repositoryRoot = resolve(__dirname, "../../../..");
     const documents = loadApprovedKnowledgeDocuments(
       resolveKnowledgeRepositoryRoot(
         resolve(

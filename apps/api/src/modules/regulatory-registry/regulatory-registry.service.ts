@@ -694,168 +694,177 @@ export class RegulatoryRegistryService implements OnModuleInit {
       };
     }
 
-    const changes: PersistRegulatoryRegistryChanges = {};
-    const canonicalDriver = command.driverDraft
-      ? this.provisionDriverFromDraft(command.driverDraft, command.approvedAt)
-      : null;
-    if (canonicalDriver) {
-      changes.drivers = [this.cloneDriver(canonicalDriver)];
-    }
+    const backupState = this.snapshotState();
+    try {
+      const changes: PersistRegulatoryRegistryChanges = {};
+      const canonicalDriver = command.driverDraft
+        ? this.provisionDriverFromDraft(command.driverDraft, command.approvedAt)
+        : null;
+      if (canonicalDriver) {
+        changes.drivers = [this.cloneDriver(canonicalDriver)];
+      }
 
-    const canonicalVehicle = command.vehicleDraft
-      ? this.provisionVehicleFromDraft(command.vehicleDraft, command.approvedAt)
-      : null;
-    if (canonicalVehicle) {
-      changes.vehicles = [this.cloneVehicle(canonicalVehicle)];
-    }
+      const canonicalVehicle = command.vehicleDraft
+        ? this.provisionVehicleFromDraft(
+            command.vehicleDraft,
+            command.approvedAt,
+          )
+        : null;
+      if (canonicalVehicle) {
+        changes.vehicles = [this.cloneVehicle(canonicalVehicle)];
+      }
 
-    const contract = canonicalVehicle
-      ? this.provisionContractFromDocuments(
-          canonicalVehicle.vehicleId,
-          command,
-          command.approvedAt,
-        )
-      : null;
-    if (contract) {
-      changes.contracts = [this.cloneContract(contract)];
-    }
+      const contract = canonicalVehicle
+        ? this.provisionContractFromDocuments(
+            canonicalVehicle.vehicleId,
+            command,
+            command.approvedAt,
+          )
+        : null;
+      if (contract) {
+        changes.contracts = [this.cloneContract(contract)];
+      }
 
-    const policy = canonicalVehicle
-      ? this.provisionPolicyFromDocuments(
-          canonicalVehicle.vehicleId,
-          command,
-          command.approvedAt,
-        )
-      : null;
-    if (policy) {
-      changes.policies = [this.clonePolicy(policy)];
-    }
+      const policy = canonicalVehicle
+        ? this.provisionPolicyFromDocuments(
+            canonicalVehicle.vehicleId,
+            command,
+            command.approvedAt,
+          )
+        : null;
+      if (policy) {
+        changes.policies = [this.clonePolicy(policy)];
+      }
 
-    const resolvedCanonicalDriverId =
-      canonicalDriver?.driverId ?? current.subjectDriverId ?? null;
-    const resolvedCanonicalVehicleId =
-      canonicalVehicle?.vehicleId ?? current.subjectVehicleId ?? null;
+      const resolvedCanonicalDriverId =
+        canonicalDriver?.driverId ?? current.subjectDriverId ?? null;
+      const resolvedCanonicalVehicleId =
+        canonicalVehicle?.vehicleId ?? current.subjectVehicleId ?? null;
 
-    let disclosureProfile: VehiclePassengerDisclosureProfile | null = null;
-    if (command.vehicleDraft && resolvedCanonicalVehicleId) {
-      const draft = command.vehicleDraft;
+      let disclosureProfile: VehiclePassengerDisclosureProfile | null = null;
+      if (command.vehicleDraft && resolvedCanonicalVehicleId) {
+        const draft = command.vehicleDraft;
+        if (
+          !draft.brand ||
+          !draft.model ||
+          draft.modelYear === null ||
+          draft.doorCount === null
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "DISCLOSURE_PROFILE_MISSING_REQUIRED_FIELDS",
+            "Vehicle brand, model, modelYear, and doorCount are required to provision the passenger disclosure profile.",
+          );
+        }
+        disclosureProfile = {
+          vehicleId: resolvedCanonicalVehicleId,
+          make: draft.brand.trim(),
+          model: draft.model.trim(),
+          modelYear: draft.modelYear,
+          doorCount: draft.doorCount,
+          color: draft.color ? draft.color.trim() : null,
+          status: "complete",
+          missingFieldCodes: [],
+          verifiedByActorId: command.reviewerId,
+          verifiedAt: command.approvedAt,
+          sourceSubmissionId: current.submissionId,
+          version: 1,
+          updatedAt: command.approvedAt,
+        };
+        changes.disclosureProfiles = [disclosureProfile];
+
+        this.disclosureProfiles = [
+          ...this.disclosureProfiles.filter(
+            (p) => p.vehicleId !== resolvedCanonicalVehicleId,
+          ),
+          disclosureProfile,
+        ];
+      }
+
+      let driverCredential: DriverPublicRegistrationCredential | null = null;
+      if (command.driverDraft && resolvedCanonicalDriverId) {
+        const draft = command.driverDraft;
+        const registrationNo = draft.taxiDriverRegistrationNo;
+        const maskedDisplay =
+          registrationNo.length <= 4
+            ? "***"
+            : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
+        driverCredential = {
+          driverId: resolvedCanonicalDriverId,
+          registrationNo: registrationNo,
+          registrationArea: draft.taxiDriverRegistrationArea,
+          effectiveFrom: null,
+          effectiveUntil: draft.taxiDriverRegistrationExpiry,
+          status: "unverified",
+          maskedDisplay,
+          verifiedByActorId: null,
+          verifiedAt: null,
+          sourceSubmissionId: current.submissionId,
+          version: 1,
+          updatedAt: command.approvedAt,
+        };
+        changes.driverCredentials = [driverCredential];
+
+        this.driverCredentials = [
+          ...this.driverCredentials.filter(
+            (c) => c.driverId !== resolvedCanonicalDriverId,
+          ),
+          driverCredential,
+        ];
+      }
+
+      const vehicleAffiliation = resolvedCanonicalVehicleId
+        ? this.createVehicleFleetAffiliation(
+            resolvedCanonicalVehicleId,
+            command,
+            command.approvedAt,
+          )
+        : null;
+
       if (
-        !draft.brand ||
-        !draft.model ||
-        draft.modelYear === null ||
-        draft.doorCount === null
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "DISCLOSURE_PROFILE_MISSING_REQUIRED_FIELDS",
-          "Vehicle brand, model, modelYear, and doorCount are required to provision the passenger disclosure profile.",
-        );
-      }
-      disclosureProfile = {
-        vehicleId: resolvedCanonicalVehicleId,
-        make: draft.brand.trim(),
-        model: draft.model.trim(),
-        modelYear: draft.modelYear,
-        doorCount: draft.doorCount,
-        color: draft.color ? draft.color.trim() : null,
-        status: "complete",
-        missingFieldCodes: [],
-        verifiedByActorId: command.reviewerId,
-        verifiedAt: command.approvedAt,
-        sourceSubmissionId: current.submissionId,
-        version: 1,
-        updatedAt: command.approvedAt,
-      };
-      changes.disclosureProfiles = [disclosureProfile];
-
-      this.disclosureProfiles = [
-        ...this.disclosureProfiles.filter(
-          (p) => p.vehicleId !== resolvedCanonicalVehicleId,
-        ),
-        disclosureProfile,
-      ];
-    }
-
-    let driverCredential: DriverPublicRegistrationCredential | null = null;
-    if (command.driverDraft && resolvedCanonicalDriverId) {
-      const draft = command.driverDraft;
-      const registrationNo = draft.taxiDriverRegistrationNo;
-      const maskedDisplay =
-        registrationNo.length <= 4
-          ? "***"
-          : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
-      driverCredential = {
-        driverId: resolvedCanonicalDriverId,
-        registrationNo: registrationNo,
-        registrationArea: draft.taxiDriverRegistrationArea,
-        effectiveFrom: null,
-        effectiveUntil: draft.taxiDriverRegistrationExpiry,
-        status: "unverified",
-        maskedDisplay,
-        verifiedByActorId: null,
-        verifiedAt: null,
-        sourceSubmissionId: current.submissionId,
-        version: 1,
-        updatedAt: command.approvedAt,
-      };
-      changes.driverCredentials = [driverCredential];
-
-      this.driverCredentials = [
-        ...this.driverCredentials.filter(
-          (c) => c.driverId !== resolvedCanonicalDriverId,
-        ),
-        driverCredential,
-      ];
-    }
-
-    const vehicleAffiliation = resolvedCanonicalVehicleId
-      ? this.createVehicleFleetAffiliation(
-          resolvedCanonicalVehicleId,
-          command,
-          command.approvedAt,
+        resolvedCanonicalVehicleId &&
+        this.vehicles.some(
+          (candidate) => candidate.vehicleId === resolvedCanonicalVehicleId,
         )
-      : null;
-
-    if (
-      resolvedCanonicalVehicleId &&
-      this.vehicles.some(
-        (candidate) => candidate.vehicleId === resolvedCanonicalVehicleId,
-      )
-    ) {
-      const reconciledVehicle = this.reconcileVehicleLifecycle(
-        resolvedCanonicalVehicleId,
-        {
-          entityType: "vehicle",
-          message:
-            "Vehicle canonical state provisioned from approved submission.",
-          occurredAt: command.approvedAt,
-          relatedEntityId: current.submissionId,
-          emitEvent: false,
-          persistContext: null,
-          touchUpdatedAt: true,
-        },
-      );
-      changes.vehicles = [this.cloneVehicle(reconciledVehicle)];
-    }
-
-    if (Object.keys(changes).length > 0) {
-      if (executor && this.regulatoryRegistryRepository?.isEnabled()) {
-        await this.regulatoryRegistryRepository.persistChangesWithExecutor(
-          executor,
-          changes,
+      ) {
+        const reconciledVehicle = this.reconcileVehicleLifecycle(
+          resolvedCanonicalVehicleId,
+          {
+            entityType: "vehicle",
+            message:
+              "Vehicle canonical state provisioned from approved submission.",
+            occurredAt: command.approvedAt,
+            relatedEntityId: current.submissionId,
+            emitEvent: false,
+            persistContext: null,
+            touchUpdatedAt: true,
+          },
         );
-      } else {
-        this.persistChanges(changes, "provision_from_submission");
+        changes.vehicles = [this.cloneVehicle(reconciledVehicle)];
       }
-    }
 
-    return {
-      canonicalDriverId: resolvedCanonicalDriverId,
-      canonicalVehicleId: resolvedCanonicalVehicleId,
-      canonicalContractId: contract?.contractId ?? null,
-      canonicalPolicyId: policy?.policyId ?? null,
-      vehicleAffiliation,
-    };
+      if (Object.keys(changes).length > 0) {
+        if (executor && this.regulatoryRegistryRepository?.isEnabled()) {
+          await this.regulatoryRegistryRepository.persistChangesWithExecutor(
+            executor,
+            changes,
+          );
+        } else {
+          this.persistChanges(changes, "provision_from_submission");
+        }
+      }
+
+      return {
+        canonicalDriverId: resolvedCanonicalDriverId,
+        canonicalVehicleId: resolvedCanonicalVehicleId,
+        canonicalContractId: contract?.contractId ?? null,
+        canonicalPolicyId: policy?.policyId ?? null,
+        vehicleAffiliation,
+      };
+    } catch (error) {
+      this.restoreState(backupState);
+      throw error;
+    }
   }
 
   recordVehicleFleetAffiliationCreated(
@@ -3419,4 +3428,3 @@ export class RegulatoryRegistryService implements OnModuleInit {
     this.driverCredentials = state.driverCredentials;
   }
 }
-

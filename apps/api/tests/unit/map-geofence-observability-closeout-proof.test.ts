@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, it } from "vitest";
 
-const workspaceRoot = path.resolve(process.cwd(), "..", "..");
+const workspaceRoot = path.resolve(__dirname, "../../../..");
 const finalEvidenceRelativePath =
   "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md";
 const automatedEvidenceRelativePath =

@@ -2769,9 +2769,8 @@ describe("TenantPartnerService approval rules", () => {
     const dashboard = JSON.parse(
       readFileSync(
         resolve(
-          process.cwd(),
-          "..",
-          "..",
+          __dirname,
+          "../../../..",
           "infra/grafana/dashboards/tenant-governance.json",
         ),
         "utf8",
