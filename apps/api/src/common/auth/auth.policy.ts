@@ -354,6 +354,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "driver/sos-events" && upperMethod === "POST") {
+    return {
+      routeKey: "driver:sos-events:create",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver SOS event submission",
+    };
+  }
+
   if (routePath.startsWith("callcenter/")) {
     return {
       routeKey: `callcenter:${upperMethod}`,
@@ -384,8 +393,8 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: "incidents:create",
       requiredScopes: ["incident:write"],
-      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
-      description: "Incident creation (incl. driver SOS, scoped to self)",
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Incident creation",
     };
   }
 
