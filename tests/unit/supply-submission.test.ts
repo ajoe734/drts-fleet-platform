@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -137,6 +137,8 @@ describe("SupplySubmissionService", () => {
         currentDriverSubmissionId: null,
         doorCount: null, // missing
         color: null, // missing
+        fixedFareAllowed: false,
+        airportTransferEligible: false,
       },
     );
 
@@ -168,6 +170,8 @@ describe("SupplySubmissionService", () => {
         currentDriverSubmissionId: null,
         doorCount: 4,
         color: "yellow",
+        fixedFareAllowed: false,
+        airportTransferEligible: false,
       },
     );
 

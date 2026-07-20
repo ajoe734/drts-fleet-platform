@@ -3296,23 +3296,51 @@ export class RegulatoryRegistryService implements OnModuleInit {
   }
 
   private runInMemoryIdempotentBackfill() {
+    const regProfiles = [
+      { driverId: "drv-demo-001", taxiRegistrationNo: "REG-TAXI-0001", taxiRegistrationExpiry: "2027-12-31" },
+      { driverId: "drv-demo-002", taxiRegistrationNo: "REG-TAXI-0002", taxiRegistrationExpiry: "2027-12-31" },
+      { driverId: "drv-demo-003", taxiRegistrationNo: "REG-BIZ-0001", taxiRegistrationExpiry: "2027-12-31" },
+    ];
+
     for (const driver of this.drivers) {
       const exists = this.driverCredentials.some((c) => c.driverId === driver.driverId);
       if (!exists) {
-        this.driverCredentials.push({
-          driverId: driver.driverId,
-          registrationNo: "UNKNOWN",
-          registrationArea: "TPE",
-          effectiveFrom: null,
-          effectiveUntil: "2027-12-31",
-          status: "unverified",
-          maskedDisplay: "***",
-          verifiedByActorId: null,
-          verifiedAt: null,
-          sourceSubmissionId: null,
-          version: 1,
-          updatedAt: new Date().toISOString(),
-        });
+        const profile = regProfiles.find((p) => p.driverId === driver.driverId);
+        if (profile) {
+          const registrationNo = profile.taxiRegistrationNo;
+          const maskedDisplay = registrationNo.length <= 4
+            ? "***"
+            : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
+          this.driverCredentials.push({
+            driverId: driver.driverId,
+            registrationNo,
+            registrationArea: "TPE",
+            effectiveFrom: null,
+            effectiveUntil: profile.taxiRegistrationExpiry,
+            status: "unverified",
+            maskedDisplay,
+            verifiedByActorId: null,
+            verifiedAt: null,
+            sourceSubmissionId: null,
+            version: 1,
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          this.driverCredentials.push({
+            driverId: driver.driverId,
+            registrationNo: null,
+            registrationArea: null,
+            effectiveFrom: null,
+            effectiveUntil: null,
+            status: "missing",
+            maskedDisplay: "***",
+            verifiedByActorId: null,
+            verifiedAt: null,
+            sourceSubmissionId: null,
+            version: 1,
+            updatedAt: new Date().toISOString(),
+          });
+        }
       }
     }
   }

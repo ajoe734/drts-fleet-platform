@@ -773,7 +773,7 @@ describe("regulatory registry controller", () => {
     expect(() => controller.getVehiclePassengerDisclosureProfile("veh-unknown", "req-123")).toThrow();
 
     const credRes = controller.getDriverPublicRegistrationCredential("drv-123", "req-123");
-    expect(credRes.data.registrationNo).toBe("REG-123");
+    expect(credRes.data.registrationNo).toBe("RE***23");
     expect(service.getDriverPublicRegistrationCredential).toHaveBeenCalledWith("drv-123");
 
     expect(() => controller.getDriverPublicRegistrationCredential("drv-unknown", "req-123")).toThrow();
@@ -800,7 +800,14 @@ describe("regulatory registry controller", () => {
     await service.onModuleInit();
     const credentials = service.listDriverPublicRegistrationCredentials();
     expect(credentials.length).toBeGreaterThan(0);
-    expect(credentials[0].status).toBe("unverified");
-    expect(credentials[0].maskedDisplay).toBe("***");
+    const firstCred = credentials[0];
+    expect(firstCred).toBeDefined();
+    expect(firstCred!.status).toBe("unverified");
+    expect(firstCred!.maskedDisplay).toBe("RE***01");
+    // drv-demo-004 has no registration profile and should be backfilled with 'missing' status and default maskedDisplay '***'
+    const missingCred = credentials.find(c => c.driverId === "drv-demo-004");
+    expect(missingCred).toBeDefined();
+    expect(missingCred!.status).toBe("missing");
+    expect(missingCred!.maskedDisplay).toBe("***");
   });
 });

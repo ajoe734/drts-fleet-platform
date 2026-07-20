@@ -129,10 +129,10 @@ type VehiclePassengerDisclosureProfileRow = {
 
 type DriverPublicRegistrationCredentialRow = {
   driver_id: string;
-  registration_no: string;
-  registration_area: string;
+  registration_no: string | null;
+  registration_area: string | null;
   effective_from: string | Date | null;
-  effective_until: string | Date;
+  effective_until: string | Date | null;
   status: string;
   masked_display: string;
   verified_by_actor_id: string | null;
@@ -1090,13 +1090,14 @@ export class RegulatoryRegistryRepository {
       )
       SELECT 
         d.driver_id,
-        COALESCE(dp.taxi_registration_no, 'UNKNOWN'),
-        'TPE',
+        dp.taxi_registration_no,
+        CASE WHEN dp.taxi_registration_no IS NOT NULL THEN 'TPE' ELSE NULL END,
         NULL,
-        COALESCE(dp.taxi_registration_expiry, '2027-12-31'::date),
-        'unverified',
+        dp.taxi_registration_expiry,
+        CASE WHEN dp.taxi_registration_no IS NOT NULL THEN 'unverified' ELSE 'missing' END,
         CASE 
-          WHEN dp.taxi_registration_no IS NULL OR length(dp.taxi_registration_no) <= 4 THEN '***'
+          WHEN dp.taxi_registration_no IS NULL THEN '***'
+          WHEN length(dp.taxi_registration_no) <= 4 THEN '***'
           ELSE concat(left(dp.taxi_registration_no, 2), '***', right(dp.taxi_registration_no, 2))
         END,
         1,
@@ -1147,7 +1148,7 @@ export class RegulatoryRegistryRepository {
       registrationNo: row.registration_no,
       registrationArea: row.registration_area,
       effectiveFrom: row.effective_from ? new Date(row.effective_from).toISOString().slice(0, 10) : null,
-      effectiveUntil: new Date(row.effective_until).toISOString().slice(0, 10),
+      effectiveUntil: row.effective_until ? new Date(row.effective_until).toISOString().slice(0, 10) : null,
       status: row.status as DriverPublicRegistrationCredential["status"],
       maskedDisplay: row.masked_display,
       verifiedByActorId: row.verified_by_actor_id,
