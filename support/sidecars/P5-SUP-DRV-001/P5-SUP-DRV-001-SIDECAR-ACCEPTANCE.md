@@ -5,7 +5,7 @@ This document is the support-only acceptance packet for
 It does not change canonical truth, runtime code, or the parent backlog item.
 It consolidates the current machine-truth posture, the true parent review
 surface, and the dependency/reviewer map for `P5-SUP-DRV-001` as of
-`2026-07-20T09:50:52Z` (UTC).
+`2026-07-20T09:56:04Z` (UTC).
 
 Anchors used here:
 
@@ -39,9 +39,10 @@ Guardrails for this packet:
 
 ## 2. Machine-Truth Snapshot
 
-This refresh replaces the earlier reopen-era snapshot. The parent task is no
-longer in blocker rework; machine truth now shows it back in `review` with the
-blocker fixes recorded and ready for reviewer pass/fail.
+This refresh supersedes the earlier `review_approved` packet. The prior approval
+became stale when the parent task was reopened at `2026-07-20T09:54:16Z`; the
+machine-truth snapshot below now reflects the parent back in `in_progress`
+while the acceptance packet is refreshed for a later reviewer pass.
 
 ### 2.1 Sidecar row: `P5-SUP-DRV-001-SIDECAR-ACCEPTANCE`
 
@@ -52,28 +53,28 @@ blocker fixes recorded and ready for reviewer pass/fail.
 | Owner | `Codex` |
 | Reviewer | `Gemini` |
 | Depends on | `P5S3-FOUND-001` |
-| Last update | `2026-07-20T09:50:38Z` |
-| Next | `Refreshing the sidecar acceptance packet to match latest machine truth: parent task is back in review with blocker fixes landed, parent branch now carries five parent-only commits, and the packet must be revalidated before final closeout.` |
+| Last update | `2026-07-20T09:56:04Z` |
+| Next | `Refreshing acceptance packet after parent task P5-SUP-DRV-001 reopened at 2026-07-20T09:54:16Z; prior review_approved snapshot is stale and needs updated machine-truth/review-surface notes before re-handoff.` |
 
 Why the sidecar is still `in_progress` in this snapshot:
 
-- This packet was refreshed before the owner created the closeout commit and
-  re-handoff.
-- The support artifact below is already aligned to the current parent
-  machine-truth posture, so the remaining sidecar work is only
-  commit/push/handoff.
+- `Gemini` approved the earlier refresh at `2026-07-20T09:53:36Z`.
+- `Codex` then reopened the parent at `2026-07-20T09:54:16Z`, which invalidated
+  that approval snapshot one minute later.
+- The remaining sidecar work is to refresh the support packet to the reopened
+  parent posture, then re-handoff it for reviewer confirmation.
 
 ### 2.2 Parent row: `P5-SUP-DRV-001`
 
 | Field | Value |
 | --- | --- |
 | Title | `P-5 W1 disclosure data-authority service` |
-| Status | `review` |
+| Status | `in_progress` |
 | Owner | `Gemini` |
 | Reviewer | `Codex` |
 | Depends on | `P5S3-FOUND-001` |
-| Last update | `2026-07-20T09:47:15Z` |
-| Latest machine-truth note | `Fixed backfill flipping approved vehicle submissions to needs_revision without reasonCode/comment and leaving canonical_* ids intact. Backfill sets reviewReasonCode/reviewComment and sets canonical ids to NULL. Verified that driver credential backfill projects registrationArea=NULL (no fabrication of TPE) and all unit tests pass.` |
+| Last update | `2026-07-20T09:54:26Z` |
+| Current machine-truth note | `Investigating files and starting implementation` |
 
 Recorded parent acceptance from machine truth:
 
@@ -86,10 +87,14 @@ Recorded parent acceptance from machine truth:
 
 Implication for this sidecar packet:
 
-- The reopen blockers are no longer the live parent posture.
-- Parent review should focus on whether the new fix commit actually closes the
-  correction-queue and credential-truthfulness findings, not on the stale
-  reopen note from the earlier packet revision.
+- The earlier blocker-fix posture is no longer the live parent posture.
+- The latest reviewer finding from `2026-07-20T09:54:16Z` is now the operative
+  acceptance risk: `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts`
+  mutates `disclosureProfiles` / `driverCredentials` before
+  `persistChangesWithExecutor`, so a failed approval transaction can expose
+  phantom public disclosure or credential projections from in-memory state.
+- Parent review should not close until that transactional-boundary issue is
+  resolved and the branch re-enters `review`.
 
 ### 2.3 Hard dependency: `P5S3-FOUND-001`
 
@@ -116,7 +121,7 @@ Why `P5S3-FOUND-001` still matters:
 
 ## 3. Parent Branch Posture
 
-The current parent branch under review is `origin/gemini/p5-sup-drv-001`.
+The current parent branch for this packet is `origin/gemini/p5-sup-drv-001`.
 
 Branch facts on `2026-07-20`:
 
@@ -136,15 +141,18 @@ Reviewer implication:
 - Do not use a raw double-dot diff as acceptance truth without filtering; that
   view shows reverse noise from `S3-UI-DRIVER-001` because the parent branch
   has not rebased onto the latest `origin/dev`.
-- The new parent fact relative to the older packet revision is the fifth commit
-  `597186d95`, which is the blocker-fix commit reflected in machine truth.
+- The branch tip is unchanged from the just-approved packet revision: the parent
+  still carries the same five parent-only commits.
+- The new parent fact relative to that approved packet is not a sixth commit but
+  the `2026-07-20T09:54:16Z` reopen finding against transactional mutation
+  ordering in `regulatory-registry.service.ts`.
 
 ## 4. True Review Surface for `P5-SUP-DRV-001`
 
 The three-dot diff (`origin/dev...origin/gemini/p5-sup-drv-001`) still shows
 three primary acceptance surfaces plus a small amount of branch noise. The
-review focus below is updated to reflect the blocker-fix commit now present at
-the parent tip.
+focus below is updated to reflect both the blocker-fix commit at the parent tip
+and the newer reopen finding that keeps the task out of `review`.
 
 ### 4.1 Supply submission capture and correction queue
 
@@ -207,6 +215,9 @@ What changed:
   `registration_area = NULL` instead of fabricating `"TPE"`.
 - Backfill creates `missing` or `unverified` credential rows without
   pretending those records are already verified.
+- The latest reopen finding says approval-path mutation order is still unsafe:
+  disclosure-profile and driver-credential in-memory state is mutated before the
+  persistence executor commits successfully.
 
 Acceptance consequence:
 
@@ -217,6 +228,9 @@ Acceptance consequence:
   surface.
 - The disclosure profile acceptance is about truthful projection from approved
   submission data, not about enriching missing fields with fake defaults.
+- The next parent review pass must also confirm failed approval transactions
+  cannot leak phantom disclosure/credential projections from pre-persist
+  in-memory mutation.
 
 ### 4.3 `multi_taxi_direct` reservation-only guard
 
@@ -291,19 +305,21 @@ not create new machine-truth `depends_on` edges.
 
 ## 6. Reviewer Checklist for the Parent Task
 
-Use this checklist when reviewing `P5-SUP-DRV-001`.
+Use this checklist for the next review pass of `P5-SUP-DRV-001`.
 
 ### 6.1 Machine truth and branch posture
 
-- [ ] Parent task currently shows `status=review`, `owner=Gemini`,
-      `reviewer=Codex`, with blocker-fix note recorded at
-      `2026-07-20T09:47:15Z`.
+- [ ] Parent task currently shows `status=in_progress`, `owner=Gemini`,
+      `reviewer=Codex`, with latest machine-truth update at
+      `2026-07-20T09:54:26Z`.
 - [ ] Dependency `P5S3-FOUND-001` is still `done` and `merged_to_dev`.
 - [ ] Reviewer uses the three-dot diff against `origin/dev`.
 - [ ] Reviewer explicitly notes that the parent branch is behind `origin/dev` by
       `S3-UI-DRIVER-001` and filters double-dot reverse noise accordingly.
 - [ ] Reviewer confirms the branch tip now contains the five parent-only commits
       captured in this packet, including `597186d95`.
+- [ ] Reviewer or owner carries forward the `2026-07-20T09:54:16Z` reopen
+      finding on approval-path mutation ordering before attempting closeout.
 
 ### 6.2 Supply submission and correction queue
 
@@ -332,6 +348,9 @@ Use this checklist when reviewing `P5-SUP-DRV-001`.
       source data remains `NULL`.
 - [ ] Migration `V0054` and contract nullability line up with the backfill
       behavior.
+- [ ] Approval-path state mutation happens inside the persisted transaction
+      boundary, or is rolled back on failure, so public projections cannot
+      observe phantom disclosure/credential data.
 
 ### 6.4 Runtime profile guardrails
 
@@ -347,6 +366,8 @@ Use this checklist when reviewing `P5-SUP-DRV-001`.
 
 - [ ] Recorded `unit+contract+lint` success is rechecked against the branch tip
       being reviewed.
+- [ ] Re-verification covers the reopen finding, not only the earlier
+      correction-queue and credential-nullability fixes.
 - [ ] Reviewer does not treat unrelated JSON artifact refreshes as substitutes
       for the task's real acceptance checks.
 
@@ -358,8 +379,8 @@ Use this checklist when reviewing `P5-SUP-DRV-001`.
 - [x] Packet distinguishes parent-only changes from `origin/dev` drift.
 - [x] Packet captures the three actual acceptance surfaces in the parent diff:
       supply capture/backfill, registry projection, and runtime-profile guard.
-- [x] Packet reflects the blocker-fix parent posture now recorded in machine
-      truth.
+- [x] Packet reflects the reopened parent posture now recorded in machine
+      truth, including the active transactional-boundary finding.
 - [x] Packet flags non-core diff noise that should not be conflated with parent
       acceptance.
 
@@ -370,14 +391,18 @@ from scratch.
 
 Approval focus:
 
-1. Confirm the machine-truth snapshot now reflects the parent `review` posture
-   recorded at `2026-07-20T09:47:15Z`, not the older reopen note.
+1. Confirm the machine-truth snapshot now reflects the parent `in_progress`
+   reopen posture that followed `2026-07-20T09:54:16Z`, not the earlier
+   `review_approved` snapshot.
 2. Confirm the dependency section still correctly treats `P5S3-FOUND-001` as
    resolved and merged to `dev`.
-3. Confirm the branch-posture note is now accurate: parent branch carries five
+3. Confirm the packet captures the active parent acceptance risk in
+   `regulatory-registry.service.ts`: pre-persist mutation can leak phantom
+   disclosure/credential projections on failed approval.
+4. Confirm the branch-posture note is still accurate: parent branch carries five
    parent-only commits and is behind `origin/dev` by one unrelated
    `S3-UI-DRIVER-001` commit.
-4. Confirm the packet stays within sidecar scope and does not modify canonical
+5. Confirm the packet stays within sidecar scope and does not modify canonical
    truth or runtime implementations.
 
 If the parent branch tip or task status changes again after this refresh, update
