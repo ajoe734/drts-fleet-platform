@@ -10,13 +10,15 @@ import {
   CanvasDL as DL,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
+  CanvasEmptyState,
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
-import type { IncidentRecord, IncidentTimelineEntry } from "@drts/contracts";
+import type { IncidentRecord, IncidentTimelineEntry, GeoPoint } from "@drts/contracts";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 import { ExternalLink, Play } from "lucide-react";
-import { useSosSound } from "@/components/sos-sound-context";
+
+import { GoogleMapBaseLayer } from "@/components/google-map-base-layer";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -36,12 +38,26 @@ interface TimelineEvent {
 export default function SosDetailPage() {
   const { incidentId } = useParams() as { incidentId: string };
   const router = useRouter();
-  const { soundOff, audioBlocked, handleEnableSound } = useSosSound();
+
 
   const [incident, setIncident] = useState<IncidentRecord | null>(null);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [mapCenter, setMapCenter] = useState<GeoPoint | null>(null);
+
+  const parseCoordinates = (locStr: string | null): { lat: number; lng: number } | null => {
+    if (!locStr) return null;
+    const match = locStr.match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
+    if (match && match[1] !== undefined && match[2] !== undefined) {
+      const lat = parseFloat(match[1]);
+      const lng = parseFloat(match[2]);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        return { lat, lng };
+      }
+    }
+    return null;
+  };
 
   // Fetch incident details & timeline
   const fetchData = async () => {
@@ -49,6 +65,30 @@ export default function SosDetailPage() {
       const client = getOpsClient();
       const incRes = await client.get<any>(`/api/incidents/${incidentId}`);
       setIncident(incRes);
+
+      // Resolve map center: try parsing coordinates from location string first
+      let resolvedCenter = parseCoordinates(incRes.location);
+
+      // If not parsed, try to fetch order and get its pickup coordinates
+      if (!resolvedCenter && incRes.relatedOrderId) {
+        try {
+          const orderRes = await client.get<any>(`/api/orders/${incRes.relatedOrderId}`);
+          if (
+            orderRes &&
+            orderRes.pickup &&
+            typeof orderRes.pickup.lat === "number" &&
+            typeof orderRes.pickup.lng === "number" &&
+            Number.isFinite(orderRes.pickup.lat) &&
+            Number.isFinite(orderRes.pickup.lng)
+          ) {
+            resolvedCenter = { lat: orderRes.pickup.lat, lng: orderRes.pickup.lng };
+          }
+        } catch (err) {
+          console.error("Failed to fetch order for map coordinates:", err);
+        }
+      }
+
+      setMapCenter(resolvedCenter);
 
       const timelineRes = await client.get<any>(
         `/api/incidents/${incidentId}/timeline`,
@@ -301,7 +341,7 @@ export default function SosDetailPage() {
       tone: "danger",
       t: "駕駛啟動 SOS",
       body: "行程中長按啟動",
-      actor: incident.relatedDriverId || "d_8843",
+      actor: incident.relatedDriverId || "",
       actorRealm: "driver",
     });
     timelineEvents.push({
@@ -380,31 +420,7 @@ export default function SosDetailPage() {
         }
       />
 
-      {(soundOff || audioBlocked) && (
-        <div style={{ padding: "0 24px 14px 24px" }}>
-          <Banner
-            theme={theme}
-            tone="warn"
-            icon="warn"
-            title="SOS 提示音尚未啟用"
-            body={
-              audioBlocked
-                ? "瀏覽器已封鎖自動播放音效。請點此或與頁面互動以啟用提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
-                : "請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
-            }
-            actions={
-              <Btn
-                theme={theme}
-                size="xs"
-                variant="primary"
-                onClick={handleEnableSound}
-              >
-                啟用提示音
-              </Btn>
-            }
-          />
-        </div>
-      )}
+
 
       <div
         style={{
@@ -422,44 +438,59 @@ export default function SosDetailPage() {
             <div
               style={{
                 height: 190,
-                background: `linear-gradient(135deg, ${theme.accentBg}, ${theme.surfaceLo})`,
                 position: "relative",
                 borderRadius: "0 0 12px 12px",
                 overflow: "hidden",
                 borderTop: `1px solid ${theme.border}`,
               }}
             >
-              {/* Map Mock Grid lines */}
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  backgroundImage: `radial-gradient(${theme.borderStrong} 1px, transparent 1px)`,
-                  backgroundSize: "24px 24px",
-                  opacity: 0.35,
-                }}
-              />
-              {/* Red marker in the center */}
-              <div
-                style={{
-                  position: "absolute",
-                  left: "46%",
-                  top: "40%",
-                  transform: "translate(-50%, -50%)",
-                }}
-              >
-                <span
-                  style={{
-                    display: "block",
-                    width: 16,
-                    height: 16,
-                    borderRadius: 8,
-                    background: theme.danger,
-                    border: `3px solid ${theme.surface}`,
-                    boxShadow: `0 0 0 6px ${theme.danger}33`,
-                  }}
+              {mapCenter ? (
+                <GoogleMapBaseLayer
+                  ariaLabel="SOS incident location Google Map"
+                  center={mapCenter}
+                  selectedPoint={mapCenter}
+                  zoom={15}
+                  interactive={false}
                 />
-              </div>
+              ) : (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: `linear-gradient(135deg, ${theme.accentBg}, ${theme.surfaceLo})`,
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      backgroundImage: `radial-gradient(${theme.borderStrong} 1px, transparent 1px)`,
+                      backgroundSize: "24px 24px",
+                      opacity: 0.35,
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: "46%",
+                      top: "40%",
+                      transform: "translate(-50%, -50%)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: "block",
+                        width: 16,
+                        height: 16,
+                        borderRadius: 8,
+                        background: theme.danger,
+                        border: `3px solid ${theme.surface}`,
+                        boxShadow: `0 0 0 6px ${theme.danger}33`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
               {/* Location Tag */}
               <div
                 style={{
@@ -473,6 +504,7 @@ export default function SosDetailPage() {
                   color: theme.textMuted,
                   border: `1px solid ${theme.border}`,
                   boxShadow: theme.shadowSm,
+                  zIndex: 10,
                 }}
               >
                 {incident.location || "—"} · 精度 12m ·{" "}
@@ -670,20 +702,13 @@ export default function SosDetailPage() {
                   const attachments = (incident as any).attachments || [];
                   if (!Array.isArray(attachments) || attachments.length === 0) {
                     return (
-                      <div
-                        style={{
-                          padding: "16px 8px",
-                          textAlign: "center",
-                          border: `1px dashed ${theme.border}`,
-                          borderRadius: 8,
-                          background: theme.surfaceLo,
-                          color: theme.textDim,
-                          fontSize: 12,
-                          marginTop: 12,
-                        }}
-                      >
-                        無附件
-                      </div>
+                      <CanvasEmptyState
+                        theme={theme}
+                        tone="neutral"
+                        title="無附件"
+                        body="駕駛尚未上傳任何照片或語音附件。"
+                        style={{ marginTop: 12 }}
+                      />
                     );
                   }
                   return (
@@ -740,19 +765,12 @@ export default function SosDetailPage() {
                 })()}
               </>
             ) : (
-              <div
-                style={{
-                  padding: "16px 8px",
-                  textAlign: "center",
-                  border: `1px dashed ${theme.border}`,
-                  borderRadius: 8,
-                  background: theme.surfaceLo,
-                  color: theme.textDim,
-                  fontSize: 12,
-                }}
-              >
-                駕駛尚未補充；不影響值班處置。
-              </div>
+              <CanvasEmptyState
+                theme={theme}
+                tone="neutral"
+                title="無補充資料"
+                body="駕駛尚未補充；不影響值班處置。"
+              />
             )}
           </Card>
 

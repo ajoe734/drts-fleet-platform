@@ -17,6 +17,7 @@ export interface SosSoundContextType {
   soundLabel: string;
   soundTag: string;
   fetchIncidents: () => Promise<void>;
+  audioError: string | null;
 }
 
 const SosSoundContext = createContext<SosSoundContextType | undefined>(undefined);
@@ -25,7 +26,9 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [soundOff, setSoundOff] = useState<boolean>(false);
   const [audioBlocked, setAudioBlocked] = useState<boolean>(true);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const [nowTime, setNowTime] = useState<number>(Date.now());
+  const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null);
 
   // Fetch incidents from API
   const fetchIncidents = async () => {
@@ -75,42 +78,43 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
       setSoundOff(true);
     }
 
-    // Check initial AudioContext block state
+    // Initialize persistent AudioContext
+    let localCtx: AudioContext | null = null;
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
-        const tempCtx = new AudioCtx();
-        if (tempCtx.state === "running") {
+        localCtx = new AudioCtx();
+        setAudioCtx(localCtx);
+        if (localCtx.state === "running") {
           setAudioBlocked(false);
         } else {
           setAudioBlocked(true);
         }
-        tempCtx.close();
       } else {
         setAudioBlocked(true);
+        setAudioError("瀏覽器不支援 AudioContext");
       }
-    } catch {
+    } catch (err: any) {
       setAudioBlocked(true);
+      setAudioError(err?.message || "無法初始化 AudioContext");
     }
 
     // Listen to user interaction to detect if browser unblocks audio
     const handleInteraction = async () => {
       try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const tempCtx = new AudioCtx();
-          if (tempCtx.state === "suspended") {
-            await tempCtx.resume();
+        if (localCtx) {
+          if (localCtx.state === "suspended") {
+            await localCtx.resume();
           }
-          if (tempCtx.state === "running") {
+          if (localCtx.state === "running") {
             setAudioBlocked(false);
+            setAudioError(null);
             document.removeEventListener("click", handleInteraction);
             document.removeEventListener("keydown", handleInteraction);
           }
-          tempCtx.close();
         }
-      } catch {
-        // Ignore browser autoplay check errors
+      } catch (err: any) {
+        setAudioError(err?.message || "無法啟用 AudioContext");
       }
     };
 
@@ -122,6 +126,9 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
       if (sse) sse.close();
       document.removeEventListener("click", handleInteraction);
       document.removeEventListener("keydown", handleInteraction);
+      if (localCtx) {
+        localCtx.close().catch(() => {});
+      }
     };
   }, []);
 
@@ -223,17 +230,13 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
 
   // Play beep periodically if there's a pending alert
   useEffect(() => {
-    if (!pendingAlert || soundOff || audioBlocked) return;
+    if (!pendingAlert || soundOff || audioBlocked || !audioCtx) return;
 
     function playBeep() {
       try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (!AudioCtx) return;
-        const audioCtx = new AudioCtx();
-
+        if (!audioCtx) return;
         if (audioCtx.state === "suspended") {
           setAudioBlocked(true);
-          audioCtx.close();
           return;
         }
 
@@ -249,40 +252,32 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
 
         osc.start();
         osc.stop(audioCtx.currentTime + 0.25); // beep for 250ms
-
-        setTimeout(() => {
-          try {
-            audioCtx.close();
-          } catch {
-            // Ignore potential close errors
-          }
-        }, 300);
-      } catch (e) {
+      } catch (e: any) {
         console.error("Audio Context playback blocked or failed:", e);
         setAudioBlocked(true);
+        setAudioError(e?.message || "播放提示音失敗");
       }
     }
 
     playBeep();
     const alertInterval = setInterval(playBeep, 4000);
     return () => clearInterval(alertInterval);
-  }, [pendingAlert, soundOff, audioBlocked]);
+  }, [pendingAlert, soundOff, audioBlocked, audioCtx]);
 
   const resumeAudio = async () => {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const tempCtx = new AudioCtx();
-        if (tempCtx.state === "suspended") {
-          await tempCtx.resume();
+      if (audioCtx) {
+        if (audioCtx.state === "suspended") {
+          await audioCtx.resume();
         }
-        if (tempCtx.state === "running") {
+        if (audioCtx.state === "running") {
           setAudioBlocked(false);
+          setAudioError(null);
         }
-        tempCtx.close();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to resume audio context:", e);
+      setAudioError(e?.message || "無法啟用 AudioContext");
     }
   };
 
@@ -315,6 +310,7 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
         soundLabel,
         soundTag,
         fetchIncidents,
+        audioError,
       }}
     >
       {children}

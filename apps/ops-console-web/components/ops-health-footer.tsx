@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Languages } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { Languages, Volume2, VolumeX } from "lucide-react";
 import { buildCanvasTheme } from "@drts/ui-web";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
+import { useSosSound } from "@/components/sos-sound-context";
 
 // Sidebar footer required by the ops-console design packet §3.3: surface
 // API health (healthy / degraded / down) + lastCheckedAt from the backend
@@ -65,6 +67,8 @@ function useApiHealth() {
 export function OpsHealthFooter() {
   const { locale, setLocale, t } = useTranslation();
   const { status, lastCheckedAt } = useApiHealth();
+  const pathname = usePathname() ?? "";
+  const { toggleSound, soundTone, soundLabel, soundTag } = useSosSound();
 
   const copy: Record<
     ApiHealthStatus,
@@ -113,6 +117,41 @@ export function OpsHealthFooter() {
         boxShadow: theme.shadowSm,
       }}
     >
+      {pathname.startsWith("/sos") && (
+        <button
+          type="button"
+          onClick={toggleSound}
+          aria-label="Toggle SOS Alert sound"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+            padding: "8px 9px",
+            borderRadius: 10,
+            background: soundTone === "success" ? theme.successBg : soundTone === "warn" ? theme.warnBg : theme.dangerBg,
+            border: `1px solid ${soundTone === "success" ? theme.successBorder : soundTone === "warn" ? theme.warnBorder : theme.dangerBorder}`,
+            color: soundTone === "success" ? theme.success : soundTone === "warn" ? theme.warn : theme.danger,
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: "pointer",
+            width: "100%",
+            transition: "all 0.15s ease",
+          }}
+        >
+          {soundTone === "success" ? <Volume2 size={13} /> : <VolumeX size={13} />}
+          <span style={{ flex: 1, textAlign: "left" }}>{soundLabel}</span>
+          <span
+            style={{
+              opacity: 0.6,
+              fontFamily: theme.monoFamily,
+              fontSize: 9.5,
+            }}
+          >
+            {soundTag}
+          </span>
+        </button>
+      )}
+
       <div
         style={{
           display: "flex",

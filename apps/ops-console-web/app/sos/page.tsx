@@ -57,10 +57,7 @@ export default function SosQueuePage() {
   const router = useRouter();
   const {
     incidents,
-    soundOff,
-    audioBlocked,
     toggleSound,
-    handleEnableSound,
     soundTone,
     soundLabel,
     soundTag,
@@ -228,29 +225,7 @@ export default function SosQueuePage() {
             gap: 14,
           }}
         >
-          {(soundOff || audioBlocked) && (
-            <Banner
-              theme={theme}
-              tone="warn"
-              icon="warn"
-              title="SOS 提示音尚未啟用"
-              body={
-                audioBlocked
-                  ? "瀏覽器已封鎖自動播放音效。請點此或與頁面互動以啟用提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
-                  : "請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
-              }
-              actions={
-                <Btn
-                  theme={theme}
-                  size="xs"
-                  variant="primary"
-                  onClick={handleEnableSound}
-                >
-                  啟用提示音
-                </Btn>
-              }
-            />
-          )}
+
 
           {errorMsg && (
             <Banner
