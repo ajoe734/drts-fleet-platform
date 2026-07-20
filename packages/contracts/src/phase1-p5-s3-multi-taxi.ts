@@ -395,8 +395,18 @@ export type DriverSosEventType = (typeof DRIVER_SOS_EVENT_TYPES)[number];
 
 export type DriverSosSeverity = "major" | "normal";
 
+export interface DriverSosLocationSnapshot {
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  recordedAt: string;
+  reverseGeocodedAddress: string | null;
+  geocodeProvider: string | null;
+}
+
 export interface DriverSosEventRecord {
   sosEventId: string;
+  clientEventId: string;
   eventNo: string;
   incidentId: string | null;
 
@@ -411,14 +421,7 @@ export interface DriverSosEventRecord {
   severity: DriverSosSeverity | null;
   description: string | null;
 
-  location: {
-    lat: number;
-    lng: number;
-    accuracyM: number | null;
-    recordedAt: string;
-    reverseGeocodedAddress: string | null;
-    geocodeProvider: string | null;
-  } | null;
+  location: DriverSosLocationSnapshot | null;
 
   originalTriggeredAt: string;
   serverReceivedAt: string | null;
@@ -440,6 +443,21 @@ export interface DriverSosEventRecord {
   updatedAt: string;
 }
 
+export interface SubmitDriverSosEventCommand {
+  clientEventId: string;
+  driverId?: string | null;
+  vehicleId?: string | null;
+  plateNo?: string | null;
+  orderId?: string | null;
+  taskId?: string | null;
+  eventType?: DriverSosEventType | null;
+  severity?: DriverSosSeverity | null;
+  description?: string | null;
+  location?: DriverSosLocationSnapshot | null;
+  originalTriggeredAt: string;
+  offlineAtTrigger: boolean;
+}
+
 export const DRIVER_SOS_TIMELINE_EVENTS = [
   "sos_local_triggered",
   "fleet_report_confirmed",
@@ -456,6 +474,56 @@ export const DRIVER_SOS_TIMELINE_EVENTS = [
 ] as const;
 export type DriverSosTimelineEvent =
   (typeof DRIVER_SOS_TIMELINE_EVENTS)[number];
+
+export type DriverSosTimelineActorType = "system" | "driver" | "ops";
+
+export interface DriverSosTimelineEntry {
+  timelineId: string;
+  sosEventId: string;
+  eventType: DriverSosTimelineEvent;
+  actorType: DriverSosTimelineActorType;
+  actorId: string | null;
+  occurredAt: string;
+  recordedAt: string;
+  payload: Record<string, unknown>;
+}
+
+export const DRIVER_SOS_URGENT_ALERT_OUTBOX_STATUSES = [
+  "pending",
+  "sending",
+  "delivered",
+  "failed",
+] as const;
+export type DriverSosUrgentAlertOutboxStatus =
+  (typeof DRIVER_SOS_URGENT_ALERT_OUTBOX_STATUSES)[number];
+
+export interface DriverSosUrgentAlertOutboxRecord {
+  outboxId: string;
+  sosEventId: string;
+  incidentId: string;
+  driverId: string;
+  eventNo: string;
+  status: DriverSosUrgentAlertOutboxStatus;
+  attemptCount: number;
+  nextAttemptAt: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  deliveredAt: string | null;
+}
+
+export interface DriverSosSubmissionReceipt {
+  sosEventId: string;
+  incidentId: string;
+  clientEventId: string;
+  eventNo: string;
+  duplicate: boolean;
+  serverReceivedAt: string;
+}
+
+export interface SubmitDriverSosEventResult {
+  event: DriverSosEventRecord;
+  receipt: DriverSosSubmissionReceipt;
+}
 
 // §20 Driver-app offline outbox item (client durable state)
 export interface PendingSosOutboxItem {

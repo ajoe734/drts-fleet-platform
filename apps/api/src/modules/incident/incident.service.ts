@@ -743,6 +743,50 @@ export class IncidentService implements OnModuleInit {
     }));
   }
 
+  allocateIncidentId() {
+    return this.nextIncidentId();
+  }
+
+  registerPersistedIncident(
+    incident: IncidentRecord,
+    timelineEntries: readonly IncidentTimelineEntry[],
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    const suppression = incident.matchingSuppression;
+    if (suppression) {
+      this.suppressions.set(incident.incidentId, { ...suppression });
+    }
+
+    const decorated = this.decorateIncident(this.cloneIncident(incident), identity);
+    const existing = this.incidents.some(
+      (candidate) => candidate.incidentId === decorated.incidentId,
+    );
+    if (existing) {
+      this.replace(decorated);
+    } else {
+      this.incidents = [decorated, ...this.incidents];
+    }
+
+    if (timelineEntries.length > 0) {
+      const merged = [
+        ...(this.timelines.get(decorated.incidentId) ?? []),
+        ...timelineEntries.map((entry) => ({ ...entry })),
+      ];
+      const byEntryId = new Map<string, IncidentTimelineEntry>();
+      for (const entry of merged) {
+        byEntryId.set(entry.entryId, entry);
+      }
+      this.timelines.set(decorated.incidentId, [...byEntryId.values()]);
+    }
+
+    this.incidentSequence = Math.max(
+      this.incidentSequence,
+      this.deriveNextSequence([decorated]),
+    );
+
+    return this.cloneIncident(decorated);
+  }
+
   private hydrateSuppressions(
     suppressions: readonly DriverMatchingSuppression[],
   ) {
