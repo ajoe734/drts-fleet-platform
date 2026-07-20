@@ -1,6 +1,6 @@
 # S3-BE-001 SIDECAR ACCEPTANCE
 
-Status: review
+Status: review_approved
 Owner: Gemini
 Reviewer: Codex
 Last Update: 2026-07-20
