@@ -67,7 +67,25 @@ export default function SosTripsPage() {
       sse.addEventListener("message", () => {
         void fetchTrips();
       });
+      sse.addEventListener("order_created", () => {
+        void fetchTrips();
+      });
       sse.addEventListener("order_updated", () => {
+        void fetchTrips();
+      });
+      sse.addEventListener("dispatch_job_updated", () => {
+        void fetchTrips();
+      });
+      sse.addEventListener("driver_location_updated", () => {
+        void fetchTrips();
+      });
+      sse.addEventListener("supply_lifecycle_updated", () => {
+        void fetchTrips();
+      });
+      sse.addEventListener("incident_created", () => {
+        void fetchTrips();
+      });
+      sse.addEventListener("incident_updated", () => {
         void fetchTrips();
       });
     } catch (e) {

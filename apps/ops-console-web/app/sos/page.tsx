@@ -43,6 +43,7 @@ export default function SosQueuePage() {
   const router = useRouter();
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [soundOff, setSoundOff] = useState<boolean>(false);
+  const [audioBlocked, setAudioBlocked] = useState<boolean>(true);
   const [nowTime, setNowTime] = useState<number>(Date.now());
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -76,10 +77,19 @@ export default function SosQueuePage() {
       sse.addEventListener("message", () => {
         void fetchIncidents();
       });
-      sse.addEventListener("driver_location_updated", () => {
+      sse.addEventListener("order_created", () => {
         void fetchIncidents();
       });
       sse.addEventListener("order_updated", () => {
+        void fetchIncidents();
+      });
+      sse.addEventListener("dispatch_job_updated", () => {
+        void fetchIncidents();
+      });
+      sse.addEventListener("driver_location_updated", () => {
+        void fetchIncidents();
+      });
+      sse.addEventListener("supply_lifecycle_updated", () => {
         void fetchIncidents();
       });
       sse.addEventListener("incident_created", () => {
@@ -98,9 +108,50 @@ export default function SosQueuePage() {
       setSoundOff(true);
     }
 
+    // Check initial AudioContext block state
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const tempCtx = new AudioCtx();
+        if (tempCtx.state === "running") {
+          setAudioBlocked(false);
+        } else {
+          setAudioBlocked(true);
+        }
+        tempCtx.close();
+      } else {
+        setAudioBlocked(true);
+      }
+    } catch {
+      setAudioBlocked(true);
+    }
+
+    // Listen to user interaction to detect if browser unblocks audio
+    const handleInteraction = () => {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const tempCtx = new AudioCtx();
+          if (tempCtx.state === "running") {
+            setAudioBlocked(false);
+            document.removeEventListener("click", handleInteraction);
+            document.removeEventListener("keydown", handleInteraction);
+          }
+          tempCtx.close();
+        }
+      } catch {
+        // Ignore browser autoplay check errors
+      }
+    };
+
+    document.addEventListener("click", handleInteraction);
+    document.addEventListener("keydown", handleInteraction);
+
     return () => {
       clearInterval(timer);
       if (sse) sse.close();
+      document.removeEventListener("click", handleInteraction);
+      document.removeEventListener("keydown", handleInteraction);
     };
   }, []);
 
@@ -191,15 +242,24 @@ export default function SosQueuePage() {
   // Top unacknowledged event for overlay
   const pendingAlert = rows.find((r) => r.hl);
 
+  const soundEnabled = !soundOff && !audioBlocked;
+
   // Play periodic alert sound using Web Audio API beep synthesizer if pending alert exists and sound is on
   useEffect(() => {
-    if (!pendingAlert || soundOff) return;
+    if (!pendingAlert || soundOff || audioBlocked) return;
 
     function playBeep() {
       try {
-        const audioCtx = new (
-          window.AudioContext || (window as any).webkitAudioContext
-        )();
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+        const audioCtx = new AudioCtx();
+
+        if (audioCtx.state === "suspended") {
+          setAudioBlocked(true);
+          audioCtx.close();
+          return;
+        }
+
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
 
@@ -212,20 +272,56 @@ export default function SosQueuePage() {
 
         osc.start();
         osc.stop(audioCtx.currentTime + 0.25); // beep for 250ms
+
+        setTimeout(() => {
+          try {
+            audioCtx.close();
+          } catch {
+            // Ignore potential close errors
+          }
+        }, 300);
       } catch (e) {
         console.error("Audio Context playback blocked or failed:", e);
+        setAudioBlocked(true);
       }
     }
 
     playBeep();
     const alertInterval = setInterval(playBeep, 4000);
     return () => clearInterval(alertInterval);
-  }, [pendingAlert, soundOff]);
+  }, [pendingAlert, soundOff, audioBlocked]);
 
-  const toggleSound = () => {
+  const resumeAudio = async () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const tempCtx = new AudioCtx();
+        if (tempCtx.state === "suspended") {
+          await tempCtx.resume();
+        }
+        if (tempCtx.state === "running") {
+          setAudioBlocked(false);
+        }
+        tempCtx.close();
+      }
+    } catch (e) {
+      console.error("Failed to resume audio context:", e);
+    }
+  };
+
+  const toggleSound = async () => {
     const nextVal = !soundOff;
     setSoundOff(nextVal);
     localStorage.setItem("drts-sos-sound-off", String(nextVal));
+    if (!nextVal) {
+      await resumeAudio();
+    }
+  };
+
+  const handleEnableSound = async () => {
+    setSoundOff(false);
+    localStorage.setItem("drts-sos-sound-off", "false");
+    await resumeAudio();
   };
 
   const handleAcknowledge = async (incidentId: string) => {
@@ -292,19 +388,21 @@ export default function SosQueuePage() {
             gap: 14,
           }}
         >
-          {soundOff && (
+          {(soundOff || audioBlocked) && (
             <Banner
               theme={theme}
               tone="warn"
               icon="warn"
               title="SOS 提示音尚未啟用"
-              body="請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
+              body={audioBlocked
+                ? "瀏覽器已封鎖自動播放音效。請點此或與頁面互動以啟用提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
+                : "請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"}
               actions={
                 <Btn
                   theme={theme}
                   size="xs"
                   variant="primary"
-                  onClick={toggleSound}
+                  onClick={handleEnableSound}
                 >
                   啟用提示音
                 </Btn>
@@ -336,8 +434,8 @@ export default function SosQueuePage() {
                 }}
               >
                 <div onClick={toggleSound} style={{ cursor: "pointer" }}>
-                  <Pill theme={theme} tone={!soundOff ? "success" : "warn"} dot>
-                    {!soundOff ? "提示音已啟用" : "提示音未啟用"}
+                  <Pill theme={theme} tone={soundEnabled ? "success" : "warn"} dot>
+                    {soundEnabled ? "提示音已啟用" : "提示音未啟用"}
                     <span
                       style={{
                         marginLeft: 4,
@@ -346,7 +444,7 @@ export default function SosQueuePage() {
                         fontSize: 9,
                       }}
                     >
-                      {!soundOff ? "sound_on" : "sound_off"}
+                      {soundEnabled ? "sound_on" : "sound_off"}
                     </span>
                   </Pill>
                 </div>
@@ -482,8 +580,8 @@ export default function SosQueuePage() {
               </Pill>
               <span style={{ flex: 1 }} />
               <div onClick={toggleSound} style={{ cursor: "pointer" }}>
-                <Pill theme={theme} tone={!soundOff ? "success" : "warn"} dot>
-                  {!soundOff ? "提示音已啟用" : "提示音未啟用"}
+                <Pill theme={theme} tone={soundEnabled ? "success" : "warn"} dot>
+                  {soundEnabled ? "提示音已啟用" : "提示音未啟用"}
                 </Pill>
               </div>
             </div>

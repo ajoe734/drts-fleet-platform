@@ -65,6 +65,27 @@ export default function SosRecordsPage() {
       sse.addEventListener("message", () => {
         void fetchRecords();
       });
+      sse.addEventListener("order_created", () => {
+        void fetchRecords();
+      });
+      sse.addEventListener("order_updated", () => {
+        void fetchRecords();
+      });
+      sse.addEventListener("dispatch_job_updated", () => {
+        void fetchRecords();
+      });
+      sse.addEventListener("driver_location_updated", () => {
+        void fetchRecords();
+      });
+      sse.addEventListener("supply_lifecycle_updated", () => {
+        void fetchRecords();
+      });
+      sse.addEventListener("incident_created", () => {
+        void fetchRecords();
+      });
+      sse.addEventListener("incident_updated", () => {
+        void fetchRecords();
+      });
     } catch (e) {
       console.error("SSE connection error in records:", e);
     }

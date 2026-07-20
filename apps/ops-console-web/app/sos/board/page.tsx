@@ -82,10 +82,25 @@ export default function SosBoardPage() {
       sse.addEventListener("message", () => {
         void fetchJobs();
       });
-      sse.addEventListener("task_assigned", () => {
+      sse.addEventListener("order_created", () => {
         void fetchJobs();
       });
-      sse.addEventListener("task_updated", () => {
+      sse.addEventListener("order_updated", () => {
+        void fetchJobs();
+      });
+      sse.addEventListener("dispatch_job_updated", () => {
+        void fetchJobs();
+      });
+      sse.addEventListener("driver_location_updated", () => {
+        void fetchJobs();
+      });
+      sse.addEventListener("supply_lifecycle_updated", () => {
+        void fetchJobs();
+      });
+      sse.addEventListener("incident_created", () => {
+        void fetchJobs();
+      });
+      sse.addEventListener("incident_updated", () => {
         void fetchJobs();
       });
     } catch (e) {
