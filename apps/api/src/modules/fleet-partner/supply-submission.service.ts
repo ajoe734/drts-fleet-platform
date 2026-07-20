@@ -69,6 +69,9 @@ export class SupplySubmissionService implements OnModuleInit {
     try {
       const state = await this.supplySubmissionRepository.loadState();
       this.hydrateState(state);
+      if (!this.supplySubmissionRepository.isEnabled()) {
+        this.runInMemoryIdempotentBackfill();
+      }
     } catch (error) {
       this.supplySubmissionRepository.reportPersistenceFailure(
         error,
@@ -676,6 +679,17 @@ export class SupplySubmissionService implements OnModuleInit {
     if (command.modelYear !== null && command.modelYear !== undefined) {
       this.assertPositiveInteger(command.modelYear, "modelYear");
     }
+    if (command.doorCount !== null && command.doorCount !== undefined) {
+      this.assertPositiveInteger(command.doorCount, "doorCount");
+      if (command.doorCount < 3 || command.doorCount > 6) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          "doorCount must be between 3 and 6.",
+          { fieldName: "doorCount", value: command.doorCount },
+        );
+      }
+    }
   }
 
   private normalizeDriverDraft(
@@ -714,6 +728,8 @@ export class SupplySubmissionService implements OnModuleInit {
       ),
       currentDriverSubmissionId:
         command.currentDriverSubmissionId?.trim() || null,
+      doorCount: command.doorCount !== undefined ? command.doorCount : null,
+      color: command.color?.trim() || null,
     };
   }
 
@@ -812,6 +828,28 @@ export class SupplySubmissionService implements OnModuleInit {
   }
 
   private assertSubmissionComplete(submission: SupplySubmissionRecord) {
+    if (submission.submissionType === "vehicle_onboarding") {
+      const draft = this.vehicleDrafts.find(
+        (candidate) => candidate.submissionId === submission.submissionId,
+      );
+      if (
+        !draft ||
+        draft.doorCount === null ||
+        draft.doorCount === undefined ||
+        !draft.color?.trim()
+      ) {
+        throw this.conflict(
+          "VEHICLE_DRAFT_INCOMPLETE",
+          "Vehicle door count and color must be specified before submitting.",
+          {
+            submissionId: submission.submissionId,
+            doorCount: draft?.doorCount ?? null,
+            color: draft?.color ?? null,
+          },
+        );
+      }
+    }
+
     const documents = this.listDocumentsForSubmission(submission.submissionId);
     const today = new Date().toISOString().slice(0, 10);
     const expiredDocument = documents.find(
@@ -1004,5 +1042,38 @@ export class SupplySubmissionService implements OnModuleInit {
     details?: Record<string, unknown>,
   ) {
     return new ApiRequestError(HttpStatus.CONFLICT, code, message, details);
+  }
+
+  private runInMemoryIdempotentBackfill() {
+    let modified = false;
+    for (const submission of this.submissions) {
+      if (
+        (submission.status === "submitted" ||
+          submission.status === "in_review" ||
+          submission.status === "approved") &&
+        submission.submissionType === "vehicle_onboarding"
+      ) {
+        const draft = this.vehicleDrafts.find(
+          (d) => d.submissionId === submission.submissionId,
+        );
+        if (
+          !draft ||
+          draft.doorCount === null ||
+          draft.doorCount === undefined ||
+          draft.color === null ||
+          draft.color === undefined
+        ) {
+          submission.status = "needs_revision";
+          submission.updatedAt = new Date().toISOString();
+          modified = true;
+        }
+      }
+    }
+    if (modified) {
+      void this.persistChanges(
+        { submissions: this.submissions },
+        "in-memory backfill",
+      );
+    }
   }
 }

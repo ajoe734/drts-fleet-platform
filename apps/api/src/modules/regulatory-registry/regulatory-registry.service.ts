@@ -48,6 +48,8 @@ import type {
   VehicleSupplyDraft,
   VehicleSupplyLifecycleRecord,
   DriverSupplyDraft,
+  VehiclePassengerDisclosureProfile,
+  DriverPublicRegistrationCredential,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -522,6 +524,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
     this.cloneExclusivity(exclusivity),
   );
 
+  private disclosureProfiles: VehiclePassengerDisclosureProfile[] = [];
+
+  private driverCredentials: DriverPublicRegistrationCredential[] = [];
+
   constructor(
     private readonly opsDispatchEventsService: OpsDispatchEventsService,
     private readonly auditNotificationService: AuditNotificationService,
@@ -545,6 +551,12 @@ export class RegulatoryRegistryService implements OnModuleInit {
         (await this.regulatoryRegistryRepository.listLatestDriverLocations?.()) ??
         [];
       this.replaceLatestDriverLocations(latestDriverLocations);
+
+      if (this.regulatoryRegistryRepository.isEnabled()) {
+        await this.regulatoryRegistryRepository.runIdempotentBackfill?.();
+      } else {
+        this.runInMemoryIdempotentBackfill();
+      }
 
       const persistedState =
         await this.regulatoryRegistryRepository.loadState();
@@ -603,12 +615,18 @@ export class RegulatoryRegistryService implements OnModuleInit {
           this.hydrateExclusivity(exclusivity),
         );
       }
+      if (persistedState.disclosureProfiles && persistedState.disclosureProfiles.length > 0) {
+        this.disclosureProfiles = persistedState.disclosureProfiles.map((profile) => ({ ...profile }));
+      }
+      if (persistedState.driverCredentials && persistedState.driverCredentials.length > 0) {
+        this.driverCredentials = persistedState.driverCredentials.map((cred) => ({ ...cred }));
+      }
       this.reconcileSupplyLifecycleForAll({
         emitEvent: false,
         persistContext: null,
       });
     } catch (error) {
-      this.regulatoryRegistryRepository.reportPersistenceFailure(
+      this.regulatoryRegistryRepository.reportPersistenceFailure?.(
         error,
         "module init",
       );
@@ -707,6 +725,69 @@ export class RegulatoryRegistryService implements OnModuleInit {
       canonicalDriver?.driverId ?? current.subjectDriverId ?? null;
     const resolvedCanonicalVehicleId =
       canonicalVehicle?.vehicleId ?? current.subjectVehicleId ?? null;
+
+    let disclosureProfile: VehiclePassengerDisclosureProfile | null = null;
+    if (command.vehicleDraft && resolvedCanonicalVehicleId) {
+      const draft = command.vehicleDraft;
+      if (!draft.brand || !draft.model || draft.modelYear === null || draft.doorCount === null) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "DISCLOSURE_PROFILE_MISSING_REQUIRED_FIELDS",
+          "Vehicle brand, model, modelYear, and doorCount are required to provision the passenger disclosure profile.",
+        );
+      }
+      disclosureProfile = {
+        vehicleId: resolvedCanonicalVehicleId,
+        make: draft.brand.trim(),
+        model: draft.model.trim(),
+        modelYear: draft.modelYear,
+        doorCount: draft.doorCount,
+        color: draft.color ? draft.color.trim() : null,
+        status: "complete",
+        missingFieldCodes: [],
+        verifiedByActorId: command.reviewerId,
+        verifiedAt: command.approvedAt,
+        sourceSubmissionId: current.submissionId,
+        version: 1,
+        updatedAt: command.approvedAt,
+      };
+      changes.disclosureProfiles = [disclosureProfile];
+
+      this.disclosureProfiles = [
+        ...this.disclosureProfiles.filter((p) => p.vehicleId !== resolvedCanonicalVehicleId),
+        disclosureProfile,
+      ];
+    }
+
+    let driverCredential: DriverPublicRegistrationCredential | null = null;
+    if (command.driverDraft && resolvedCanonicalDriverId) {
+      const draft = command.driverDraft;
+      const registrationNo = draft.taxiDriverRegistrationNo;
+      const maskedDisplay = registrationNo.length <= 4
+        ? "***"
+        : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
+      driverCredential = {
+        driverId: resolvedCanonicalDriverId,
+        registrationNo: registrationNo,
+        registrationArea: draft.taxiDriverRegistrationArea,
+        effectiveFrom: null,
+        effectiveUntil: draft.taxiDriverRegistrationExpiry,
+        status: "unverified",
+        maskedDisplay,
+        verifiedByActorId: null,
+        verifiedAt: null,
+        sourceSubmissionId: current.submissionId,
+        version: 1,
+        updatedAt: command.approvedAt,
+      };
+      changes.driverCredentials = [driverCredential];
+
+      this.driverCredentials = [
+        ...this.driverCredentials.filter((c) => c.driverId !== resolvedCanonicalDriverId),
+        driverCredential,
+      ];
+    }
+
     const vehicleAffiliation = resolvedCanonicalVehicleId
       ? this.createVehicleFleetAffiliation(
           resolvedCanonicalVehicleId,
@@ -3194,5 +3275,45 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   private degreesToRadians(value: number): number {
     return (value * Math.PI) / 180;
+  }
+
+  getVehiclePassengerDisclosureProfile(vehicleId: string): VehiclePassengerDisclosureProfile | null {
+    const profile = this.disclosureProfiles.find((p) => p.vehicleId === vehicleId);
+    return profile ? { ...profile } : null;
+  }
+
+  getDriverPublicRegistrationCredential(driverId: string): DriverPublicRegistrationCredential | null {
+    const cred = this.driverCredentials.find((c) => c.driverId === driverId);
+    return cred ? { ...cred } : null;
+  }
+
+  listVehiclePassengerDisclosureProfiles(): VehiclePassengerDisclosureProfile[] {
+    return this.disclosureProfiles.map((p) => ({ ...p }));
+  }
+
+  listDriverPublicRegistrationCredentials(): DriverPublicRegistrationCredential[] {
+    return this.driverCredentials.map((c) => ({ ...c }));
+  }
+
+  private runInMemoryIdempotentBackfill() {
+    for (const driver of this.drivers) {
+      const exists = this.driverCredentials.some((c) => c.driverId === driver.driverId);
+      if (!exists) {
+        this.driverCredentials.push({
+          driverId: driver.driverId,
+          registrationNo: "UNKNOWN",
+          registrationArea: "TPE",
+          effectiveFrom: null,
+          effectiveUntil: "2027-12-31",
+          status: "unverified",
+          maskedDisplay: "***",
+          verifiedByActorId: null,
+          verifiedAt: null,
+          sourceSubmissionId: null,
+          version: 1,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
   }
 }

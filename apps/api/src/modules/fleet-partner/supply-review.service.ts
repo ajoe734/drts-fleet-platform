@@ -99,6 +99,8 @@ const REVIEW_VEHICLE_DRAFTS_SEED: VehicleSupplyDraft[] = [
     airportTransferEligible: false,
     fixedFareAllowed: true,
     currentDriverSubmissionId: null,
+    doorCount: 4,
+    color: "yellow",
   },
 ];
 

@@ -376,7 +376,9 @@ export class OwnedMobilityService implements OnModuleInit {
     command: CreateOwnedOrderCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
+    runtimeProfileCodeHeader?: string,
   ) {
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, false);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
 
@@ -515,7 +517,9 @@ export class OwnedMobilityService implements OnModuleInit {
   createCallCenterOrder(
     command: CreateCallCenterOrderCommand,
     requestId?: string,
+    runtimeProfileCodeHeader?: string,
   ) {
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, false);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
     if (!command.callId?.trim()) {
@@ -693,7 +697,9 @@ export class OwnedMobilityService implements OnModuleInit {
     tenantId: string,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
+    runtimeProfileCodeHeader?: string,
   ): MaybePromise<TenantBookingResult> {
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, true);
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
     this.assertBookingRules(
@@ -4227,6 +4233,31 @@ export class OwnedMobilityService implements OnModuleInit {
           direction,
         },
       );
+    }
+  }
+
+  private assertRuntimeProfileAllowances(
+    command: any,
+    runtimeProfileCodeHeader?: string,
+    isBooking = false,
+  ) {
+    const profileCode = command.runtimeProfileCode || runtimeProfileCodeHeader;
+    if (profileCode === "multi_taxi_direct") {
+      if (!isBooking) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "RESERVATION_ONLY_PROFILE",
+          "The multi_taxi_direct runtime profile only allows reservation-only orders.",
+        );
+      }
+
+      if (command.businessDispatchSubtype !== "taxi_reservation") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SERVICE_PRODUCT_NOT_ALLOWED",
+          `The multi_taxi_direct runtime profile only allows the 'taxi_reservation' service product.`,
+        );
+      }
     }
   }
 
