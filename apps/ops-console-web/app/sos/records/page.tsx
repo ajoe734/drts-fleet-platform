@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   CanvasCard as Card,
   CanvasPageHeader as PageHeader,
@@ -7,6 +8,7 @@ import {
   CanvasTable as Table,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -14,13 +16,64 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const mockRecords = [
-  { id: "REC-240720-0012", operator: "王小明", action: "acknowledge_sos", target: "SOS-20260720-0012", time: "14:31:02" },
-  { id: "REC-240720-0011", operator: "王小明", action: "start_investigation", target: "SOS-20260720-0011", time: "14:20:00" },
-  { id: "REC-240719-0009", operator: "陳雅雯", action: "close_sos_false_alarm", target: "SOS-20260719-0009", time: "13:05:15" },
-];
+interface AuditLogRow {
+  id: string;
+  operator: string;
+  action: string;
+  target: string;
+  time: string;
+  createdAt: string;
+}
 
 export default function SosRecordsPage() {
+  const [records, setRecords] = useState<AuditLogRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const fetchRecords = async () => {
+    try {
+      const client = getOpsClient();
+      const res = await client.get<any>("/api/audit");
+      const items = Array.isArray(res) ? res : res?.items || [];
+      const mapped: AuditLogRow[] = items.map((audit: any) => ({
+        id: audit.auditId,
+        operator: audit.actorId || "系統",
+        action: audit.actionName,
+        target: audit.resourceId || "—",
+        time: new Date(audit.createdAt).toLocaleTimeString("zh-TW"),
+        createdAt: audit.createdAt,
+      }));
+
+      // Sort descending by creation date
+      mapped.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      setRecords(mapped);
+    } catch (err) {
+      console.error("Failed to fetch audit logs:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchRecords();
+
+    let sse: EventSource | null = null;
+    try {
+      sse = createOpsDispatchEventSource();
+      sse.addEventListener("message", () => {
+        void fetchRecords();
+      });
+    } catch (e) {
+      console.error("SSE connection error in records:", e);
+    }
+
+    return () => {
+      if (sse) sse.close();
+    };
+  }, []);
+
   return (
     <div style={{ background: theme.bg, minHeight: "100%" }}>
       <PageHeader
@@ -28,14 +81,20 @@ export default function SosRecordsPage() {
         title={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span>營運紀錄</span>
-            <Pill theme={theme} tone="accent">稽核追蹤</Pill>
+            <Pill theme={theme} tone="accent">
+              稽核追蹤
+            </Pill>
           </div>
         }
         subtitle="值班安全人員與系統操作稽核紀錄"
       />
 
       <div style={{ padding: 24 }}>
-        <Card theme={theme} padding={0} title="值班室操作日誌">
+        <Card
+          theme={theme}
+          padding={0}
+          title={loading ? "載入中..." : "值班室操作日誌"}
+        >
           <Table
             theme={theme}
             columns={[
@@ -45,7 +104,7 @@ export default function SosRecordsPage() {
               { h: "目標事件", k: "target", w: 160, mono: true },
               { h: "時間", k: "time", w: 120, mono: true },
             ]}
-            rows={mockRecords}
+            rows={records}
           />
         </Card>
       </div>

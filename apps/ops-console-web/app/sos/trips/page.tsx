@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   CanvasCard as Card,
   CanvasPageHeader as PageHeader,
@@ -7,6 +8,7 @@ import {
   CanvasTable as Table,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -14,13 +16,69 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const mockTrips = [
-  { id: "TRP-240720-0902", orderId: "ZX-240720-0186", status: "cancelled", start: "信義區松仁路 100 號附近", end: "大安區和平東路二段", time: "14:30:12" },
-  { id: "TRP-240720-0899", orderId: "ZX-240720-0171", status: "in_progress", start: "中山區民生東路二段", end: "萬華區艋舺大道", time: "14:15:00" },
-  { id: "TRP-240719-0744", orderId: "ZX-240719-0105", status: "completed", start: "內湖區瑞光路", end: "松山機場", time: "12:00:22" },
-];
+interface TripRow {
+  id: string;
+  orderId: string;
+  status: string;
+  start: string;
+  end: string;
+  time: string;
+  createdAt: string;
+}
 
 export default function SosTripsPage() {
+  const [trips, setTrips] = useState<TripRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const fetchTrips = async () => {
+    try {
+      const client = getOpsClient();
+      const res = await client.get<any>("/api/orders");
+      const items = Array.isArray(res) ? res : res?.items || [];
+      const mapped: TripRow[] = items.map((order: any) => ({
+        id: `TRP-${order.orderId}`,
+        orderId: order.orderId,
+        status: order.status,
+        start: order.pickup?.address || "—",
+        end: order.dropoff?.address || "—",
+        time: new Date(order.createdAt).toLocaleTimeString("zh-TW"),
+        createdAt: order.createdAt,
+      }));
+
+      // Sort descending by creation date
+      mapped.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      setTrips(mapped);
+    } catch (err) {
+      console.error("Failed to fetch trips:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchTrips();
+
+    let sse: EventSource | null = null;
+    try {
+      sse = createOpsDispatchEventSource();
+      sse.addEventListener("message", () => {
+        void fetchTrips();
+      });
+      sse.addEventListener("order_updated", () => {
+        void fetchTrips();
+      });
+    } catch (e) {
+      console.error("SSE connection error in trips:", e);
+    }
+
+    return () => {
+      if (sse) sse.close();
+    };
+  }, []);
+
   return (
     <div style={{ background: theme.bg, minHeight: "100%" }}>
       <PageHeader
@@ -28,14 +86,20 @@ export default function SosTripsPage() {
         title={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span>行程</span>
-            <Pill theme={theme} tone="accent">行程管理</Pill>
+            <Pill theme={theme} tone="accent">
+              行程管理
+            </Pill>
           </div>
         }
         subtitle="智行叫車 · 預約制多元計程車歷史行程"
       />
 
       <div style={{ padding: 24 }}>
-        <Card theme={theme} padding={0} title="多元計程車行程清單">
+        <Card
+          theme={theme}
+          padding={0}
+          title={loading ? "載入中..." : "多元計程車行程清單"}
+        >
           <Table
             theme={theme}
             columns={[
@@ -46,7 +110,7 @@ export default function SosTripsPage() {
               { h: "終點", k: "end", w: 220 },
               { h: "觸發時間", k: "time", w: 120, mono: true },
             ]}
-            rows={mockTrips}
+            rows={trips}
           />
         </Card>
       </div>

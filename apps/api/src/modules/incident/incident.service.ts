@@ -92,7 +92,8 @@ export class IncidentService implements OnModuleInit {
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly incidentRepository?: IncidentRepository,
-    @Optional() private readonly opsDispatchEventsService?: OpsDispatchEventsService,
+    @Optional()
+    private readonly opsDispatchEventsService?: OpsDispatchEventsService,
   ) {}
 
   async onModuleInit() {
@@ -293,16 +294,30 @@ export class IncidentService implements OnModuleInit {
     }
 
     if (command.assignedTo !== undefined) {
+      if (incident.assignedTo && incident.assignedTo !== command.assignedTo) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "INCIDENT_ASSIGNMENT_CONFLICT",
+          `Incident ${incidentId} is already assigned to ${incident.assignedTo}.`,
+          {
+            incidentId,
+            existingAssignment: incident.assignedTo,
+            requestedAssignment: command.assignedTo,
+          },
+        );
+      }
       updated.assignedTo = command.assignedTo;
-      timelineEntries.push(
-        this.createTimelineEntry(
-          incidentId,
-          TIMELINE_ACTIONS.assigned,
-          `Assigned to ${command.assignedTo}.`,
-          this.resolveActorId(identity, "ops_user"),
-          now,
-        ),
-      );
+      if (incident.assignedTo !== command.assignedTo) {
+        timelineEntries.push(
+          this.createTimelineEntry(
+            incidentId,
+            TIMELINE_ACTIONS.assigned,
+            `Assigned to ${command.assignedTo}.`,
+            this.resolveActorId(identity, "ops_user"),
+            now,
+          ),
+        );
+      }
     }
 
     if (command.severity !== undefined) {
@@ -772,7 +787,10 @@ export class IncidentService implements OnModuleInit {
       this.suppressions.set(incident.incidentId, { ...suppression });
     }
 
-    const decorated = this.decorateIncident(this.cloneIncident(incident), identity);
+    const decorated = this.decorateIncident(
+      this.cloneIncident(incident),
+      identity,
+    );
     const existing = this.incidents.some(
       (candidate) => candidate.incidentId === decorated.incidentId,
     );

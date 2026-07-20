@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   CanvasCard as Card,
   CanvasPageHeader as PageHeader,
@@ -7,6 +8,7 @@ import {
   CanvasTable as Table,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -14,13 +16,87 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const mockJobs = [
-  { id: "ZX-Job-1002", orderId: "ZX-240720-0186", status: "exception_hold", driver: "吳明翰", plate: "BKR-2208", time: "14:30:12", eta: "5m" },
-  { id: "ZX-Job-1001", orderId: "ZX-240720-0171", status: "dispatched", driver: "林建成", plate: "TDK-9317", time: "14:15:00", eta: "8m" },
-  { id: "ZX-Job-0998", orderId: "ZX-240719-0105", status: "completed", driver: "張志豪", plate: "AKQ-5566", time: "12:00:22", eta: "—" },
-];
+interface DispatchJobRow {
+  id: string;
+  orderId: string;
+  status: string;
+  driver: string;
+  plate: string;
+  time: string;
+  eta: string;
+  createdAt: string;
+}
 
 export default function SosBoardPage() {
+  const [jobs, setJobs] = useState<DispatchJobRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const fetchJobs = async () => {
+    try {
+      const client = getOpsClient();
+      const [jobsRes, tasksRes] = await Promise.all([
+        client.get<any>("/api/dispatch/tasks"),
+        client.get<any>("/api/driver/tasks"),
+      ]);
+
+      const jobsItems = Array.isArray(jobsRes) ? jobsRes : jobsRes?.items || [];
+      const tasksItems = Array.isArray(tasksRes)
+        ? tasksRes
+        : tasksRes?.items || [];
+
+      const mapped: DispatchJobRow[] = jobsItems.map((job: any) => {
+        const relatedTask = tasksItems.find(
+          (t: any) => t.dispatchJobId === job.dispatchJobId,
+        );
+        return {
+          id: job.dispatchJobId,
+          orderId: job.orderId,
+          status: job.status,
+          driver: relatedTask?.driverId || "—",
+          plate: relatedTask?.vehicleId || "—",
+          time: new Date(job.createdAt).toLocaleTimeString("zh-TW"),
+          eta: job.latestEtaMinutes ? `${job.latestEtaMinutes}m` : "—",
+          createdAt: job.createdAt,
+        };
+      });
+
+      // Sort descending by creation date
+      mapped.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      setJobs(mapped);
+    } catch (err) {
+      console.error("Failed to fetch dispatch jobs:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchJobs();
+
+    let sse: EventSource | null = null;
+    try {
+      sse = createOpsDispatchEventSource();
+      sse.addEventListener("message", () => {
+        void fetchJobs();
+      });
+      sse.addEventListener("task_assigned", () => {
+        void fetchJobs();
+      });
+      sse.addEventListener("task_updated", () => {
+        void fetchJobs();
+      });
+    } catch (e) {
+      console.error("SSE connection error in board:", e);
+    }
+
+    return () => {
+      if (sse) sse.close();
+    };
+  }, []);
+
   return (
     <div style={{ background: theme.bg, minHeight: "100%" }}>
       <PageHeader
@@ -28,14 +104,20 @@ export default function SosBoardPage() {
         title={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span>派車看板</span>
-            <Pill theme={theme} tone="accent">多元計程車專用</Pill>
+            <Pill theme={theme} tone="accent">
+              多元計程車專用
+            </Pill>
           </div>
         }
         subtitle="智行叫車 · 即時派車調度看板"
       />
 
       <div style={{ padding: 24 }}>
-        <Card theme={theme} padding={0} title="即時派遣狀態">
+        <Card
+          theme={theme}
+          padding={0}
+          title={loading ? "載入中..." : "即時派遣狀態"}
+        >
           <Table
             theme={theme}
             columns={[
@@ -47,7 +129,7 @@ export default function SosBoardPage() {
               { h: "時間", k: "time", w: 120, mono: true },
               { h: "預估到達", k: "eta", w: 90 },
             ]}
-            rows={mockJobs}
+            rows={jobs}
           />
         </Card>
       </div>

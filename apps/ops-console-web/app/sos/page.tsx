@@ -13,11 +13,9 @@ import {
   CanvasTable as Table,
   buildCanvasTheme,
   type CanvasTone,
-  CanvasIcon,
 } from "@drts/ui-web";
 import type { IncidentRecord } from "@drts/contracts";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -42,10 +40,8 @@ interface SosRow {
 }
 
 export default function SosQueuePage() {
-  const { t, locale } = useTranslation();
   const router = useRouter();
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
   const [soundOff, setSoundOff] = useState<boolean>(false);
   const [nowTime, setNowTime] = useState<number>(Date.now());
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -55,14 +51,14 @@ export default function SosQueuePage() {
     try {
       const client = getOpsClient();
       const res = await client.get<any>("/api/incidents");
-      const items: IncidentRecord[] = Array.isArray(res) ? res : res?.items || [];
+      const items: IncidentRecord[] = Array.isArray(res)
+        ? res
+        : res?.items || [];
       setIncidents(items);
       setErrorMsg(null);
     } catch (err: any) {
       console.error("Failed to fetch incidents:", err);
       setErrorMsg("無法載入事故資料，請檢查後端連線。");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -114,7 +110,7 @@ export default function SosQueuePage() {
       inc.category === "safety" ||
       inc.category === "traffic" ||
       inc.category === "passenger_injury" ||
-      (inc.title && inc.title.includes("SOS"))
+      (inc.title && inc.title.includes("SOS")),
   );
 
   // Map to SosRow
@@ -146,8 +142,13 @@ export default function SosQueuePage() {
     let waitText = "—";
     if (incident.status === "open" && !incident.assignedTo) {
       const occurred = new Date(incident.occurredAt || incident.createdAt);
-      const diff = Math.max(0, Math.floor((nowTime - occurred.getTime()) / 1000));
-      const mins = Math.floor(diff / 60).toString().padStart(2, "0");
+      const diff = Math.max(
+        0,
+        Math.floor((nowTime - occurred.getTime()) / 1000),
+      );
+      const mins = Math.floor(diff / 60)
+        .toString()
+        .padStart(2, "0");
       const secs = (diff % 60).toString().padStart(2, "0");
       waitText = `${mins}:${secs}`;
     }
@@ -178,8 +179,12 @@ export default function SosQueuePage() {
   rows.sort((a, b) => {
     if (a.hl && !b.hl) return -1;
     if (!a.hl && b.hl) return 1;
-    const aTime = new Date(a.originalRecord.occurredAt || a.originalRecord.createdAt).getTime();
-    const bTime = new Date(b.originalRecord.occurredAt || b.originalRecord.createdAt).getTime();
+    const aTime = new Date(
+      a.originalRecord.occurredAt || a.originalRecord.createdAt,
+    ).getTime();
+    const bTime = new Date(
+      b.originalRecord.occurredAt || b.originalRecord.createdAt,
+    ).getTime();
     return bTime - aTime;
   });
 
@@ -192,7 +197,9 @@ export default function SosQueuePage() {
 
     function playBeep() {
       try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const audioCtx = new (
+          window.AudioContext || (window as any).webkitAudioContext
+        )();
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
 
@@ -227,7 +234,9 @@ export default function SosQueuePage() {
       // First check if it's already assigned
       const current = incidents.find((i) => i.incidentId === incidentId);
       if (current?.assignedTo) {
-        alert(`確認失敗：已由 ${current.assignedTo} 先行接手！ (First-Writer-Wins)`);
+        alert(
+          `確認失敗：已由 ${current.assignedTo} 先行接手！ (First-Writer-Wins)`,
+        );
         void fetchIncidents();
         return;
       }
@@ -244,38 +253,17 @@ export default function SosQueuePage() {
     }
   };
 
-  // Helper to trigger a mock SOS incident for UAT/visual testing
-  const handleCreateMockSos = async () => {
-    try {
-      const client = getOpsClient();
-      const compactNo = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-      const mockEventNo = `SOS-${compactNo}-MOCK`;
-
-      await client.post("/api/incidents", {
-        body: {
-          title: `交通事故 ${mockEventNo}`,
-          description: "交通事故 · 重大. 與後方車輛擦撞，人員無明顯外傷。",
-          category: "traffic",
-          severity: "critical",
-          reportedBy: "d_8843",
-          relatedDriverId: "d_8843",
-          relatedVehicleId: "BKR-2208",
-          relatedOrderId: "ZX-240720-0186",
-          occurredAt: new Date().toISOString(),
-          location: "信義區松仁路 100 號附近",
-        },
-      });
-      void fetchIncidents();
-    } catch (err: any) {
-      console.error("Failed to create mock SOS incident:", err);
-      alert("建立模擬事件失敗。");
-    }
-  };
-
   return (
-    <div style={{ position: "relative", minHeight: "100%", background: theme.bg }}>
+    <div
+      style={{ position: "relative", minHeight: "100%", background: theme.bg }}
+    >
       {/* Background Page Body */}
-      <div style={{ opacity: pendingAlert ? 0.35 : 1, pointerEvents: pendingAlert ? "none" : "auto" }}>
+      <div
+        style={{
+          opacity: pendingAlert ? 0.35 : 1,
+          pointerEvents: pendingAlert ? "none" : "auto",
+        }}
+      >
         <PageHeader
           theme={theme}
           title={
@@ -289,9 +277,6 @@ export default function SosQueuePage() {
           subtitle="線上通報 p95 ≤ 5 秒送達值班端 · 先確認者取得處理權"
           actions={
             <div style={{ display: "flex", gap: 8 }}>
-              <Btn theme={theme} icon="plus" onClick={handleCreateMockSos}>
-                觸發模擬 SOS
-              </Btn>
               <Btn theme={theme} icon="filter">
                 篩選
               </Btn>
@@ -299,7 +284,14 @@ export default function SosQueuePage() {
           }
         />
 
-        <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div
+          style={{
+            padding: 24,
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}
+        >
           {soundOff && (
             <Banner
               theme={theme}
@@ -308,7 +300,12 @@ export default function SosQueuePage() {
               title="SOS 提示音尚未啟用"
               body="請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
               actions={
-                <Btn theme={theme} size="xs" variant="primary" onClick={toggleSound}>
+                <Btn
+                  theme={theme}
+                  size="xs"
+                  variant="primary"
+                  onClick={toggleSound}
+                >
                   啟用提示音
                 </Btn>
               }
@@ -316,7 +313,13 @@ export default function SosQueuePage() {
           )}
 
           {errorMsg && (
-            <Banner theme={theme} tone="danger" icon="warn" title="系統錯誤" body={errorMsg} />
+            <Banner
+              theme={theme}
+              tone="danger"
+              icon="warn"
+              title="系統錯誤"
+              body={errorMsg}
+            />
           )}
 
           <Card
@@ -324,11 +327,25 @@ export default function SosQueuePage() {
             padding={0}
             title="SOS 佇列"
             actions={
-              <div style={{ display: "flex", alignItems: "center", gap: 8, paddingRight: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingRight: 12,
+                }}
+              >
                 <div onClick={toggleSound} style={{ cursor: "pointer" }}>
                   <Pill theme={theme} tone={!soundOff ? "success" : "warn"} dot>
                     {!soundOff ? "提示音已啟用" : "提示音未啟用"}
-                    <span style={{ marginLeft: 4, opacity: 0.6, fontFamily: theme.monoFamily, fontSize: 9 }}>
+                    <span
+                      style={{
+                        marginLeft: 4,
+                        opacity: 0.6,
+                        fontFamily: theme.monoFamily,
+                        fontSize: 9,
+                      }}
+                    >
                       {!soundOff ? "sound_on" : "sound_off"}
                     </span>
                   </Pill>
@@ -344,8 +361,17 @@ export default function SosQueuePage() {
                   w: 170,
                   mono: true,
                   r: (r: SosRow) => (
-                    <Link href={`/sos/${r.id}`} style={{ textDecoration: "none" }}>
-                      <span style={{ color: r.hl ? theme.danger : theme.accent, fontWeight: 700, cursor: "pointer" }}>
+                    <Link
+                      href={`/sos/${r.id}`}
+                      style={{ textDecoration: "none" }}
+                    >
+                      <span
+                        style={{
+                          color: r.hl ? theme.danger : theme.accent,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
                         {r.no}
                       </span>
                     </Link>
@@ -365,7 +391,12 @@ export default function SosQueuePage() {
                   w: 70,
                   mono: true,
                   r: (r: SosRow) => (
-                    <span style={{ color: r.hl ? theme.danger : theme.text, fontWeight: r.hl ? 700 : 400 }}>
+                    <span
+                      style={{
+                        color: r.hl ? theme.danger : theme.text,
+                        fontWeight: r.hl ? 700 : 400,
+                      }}
+                    >
                       {r.wait}
                     </span>
                   ),
@@ -412,16 +443,38 @@ export default function SosQueuePage() {
             }}
           >
             <span style={{ fontSize: 16, display: "inline-flex" }}>⚠️</span>
-            <span style={{ fontSize: 14.5, fontWeight: 800, flex: 1 }}>SOS 緊急通報 · 待確認</span>
-            <span style={{ fontFamily: theme.monoFamily, fontSize: 13, fontWeight: 700 }}>
+            <span style={{ fontSize: 14.5, fontWeight: 800, flex: 1 }}>
+              SOS 緊急通報 · 待確認
+            </span>
+            <span
+              style={{
+                fontFamily: theme.monoFamily,
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
               已等待 {pendingAlert.wait}
             </span>
           </div>
 
           {/* Body */}
           <div style={{ padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <span style={{ fontFamily: theme.monoFamily, fontSize: 16, fontWeight: 800, color: theme.danger }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 14,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: theme.monoFamily,
+                  fontSize: 16,
+                  fontWeight: 800,
+                  color: theme.danger,
+                }}
+              >
                 {pendingAlert.no}
               </span>
               <Pill theme={theme} tone="danger" dot>
@@ -445,7 +498,10 @@ export default function SosQueuePage() {
                 { k: "位置", v: pendingAlert.loc },
                 {
                   k: "觸發時間",
-                  v: new Date(pendingAlert.originalRecord.occurredAt || pendingAlert.originalRecord.createdAt).toLocaleTimeString("zh-TW"),
+                  v: new Date(
+                    pendingAlert.originalRecord.occurredAt ||
+                      pendingAlert.originalRecord.createdAt,
+                  ).toLocaleTimeString("zh-TW"),
                   mono: true,
                 },
                 { k: "附件", v: "照片 2 · 語音 1" },
@@ -453,7 +509,14 @@ export default function SosQueuePage() {
             />
 
             {/* Actions */}
-            <div style={{ display: "flex", gap: 9, marginTop: 18, alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 9,
+                marginTop: 18,
+                alignItems: "center",
+              }}
+            >
               <Btn
                 theme={theme}
                 variant="primary"
@@ -461,11 +524,16 @@ export default function SosQueuePage() {
               >
                 確認接手 · Acknowledge
               </Btn>
-              <Btn theme={theme} onClick={() => router.push(`/sos/${pendingAlert.id}`)}>
+              <Btn
+                theme={theme}
+                onClick={() => router.push(`/sos/${pendingAlert.id}`)}
+              >
                 開啟詳情
               </Btn>
               <span style={{ flex: 1 }} />
-              <span style={{ fontSize: 11, color: theme.textDim }}>此警示不會自動消失</span>
+              <span style={{ fontSize: 11, color: theme.textDim }}>
+                此警示不會自動消失
+              </span>
             </div>
           </div>
         </div>
