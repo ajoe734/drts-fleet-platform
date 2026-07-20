@@ -1,0 +1,43 @@
+{
+  "pack": "phase1-p5-s3-multi-taxi",
+  "archivedDate": "2026-07-20",
+  "runtimeProfile": "multi_taxi_direct",
+  "baseBranch": "dev",
+  "domains": ["P-5 passenger statutory disclosure", "S-3 driver SOS"],
+  "productLinePivot": {
+    "from": "phase2-tesla-fsd-sandbox (AV/FSD)",
+    "to": "multi_taxi_direct (human multi-taxi, reservation-only, owned orders)",
+    "forbiddenVocabulary": ["FSD", "自駕", "無人駕駛", "安全員", "sandbox", "Tesla", "AV", "forwarded", "mirror", "native status", "external platform badge"]
+  },
+  "sourceDocs": [
+    {"file": "01_system_development_team_spec_20260720.md", "version": "v2.0", "role": "system-dev requirements", "archived": "cataloged-normative", "note": "raw Chinese prose original pending clean UTF-8 drop-in"},
+    {"file": "02_ui_visual_design_team_brief_20260720.md", "version": "v2.0", "role": "UI/UX brief", "archived": "cataloged-normative", "note": "same"},
+    {"file": "03_cross_team_handoff_matrix_20260720.md", "version": "n/a", "role": "ownership + mapping + gates", "archived": "cataloged-normative", "note": "same"}
+  ],
+  "deliverables": [
+    "README.md",
+    "00_source_specs_index.md",
+    "03_gap_closure_implementation_plan.md",
+    "manifest.json"
+  ],
+  "schemaReconciliation": {
+    "registry->reg": true,
+    "safety->new": true,
+    "mobility": "exists",
+    "reporting": "exists",
+    "vehicle.make->brand": true,
+    "addVehicleColumns": ["door_count", "color"]
+  },
+  "reusableSpine": [
+    "mobility.runtime_eligibility_decisions (hard/soft/missing reasons)",
+    "ops.dispatch_assignments.version_no (assignmentVersion + redispatch)",
+    "owned-mobility @Sse driver/task-events + ops/dispatch-events (SSE bus)",
+    "geo provider abstraction (route/ETA)",
+    "incident module (SOS<->Incident correlation)"
+  ],
+  "netNew": {
+    "P5": ["vehicle_passenger_disclosure_profile", "driver_public_registration_credential", "rating_authority", "disclosure_snapshot", "route_fare_snapshot", "public_fare_version", "passenger_ride_token+API", "consumer_notification_outbox", "masked_calling", "seatbelt", "payment", "ride_certificate", "two_year_operational_record"],
+    "S3": ["safety schema", "driver_sos_events+timeline+attachments", "server_context_resolver", "urgent_alert_outbox", "ops_sos_apis+stream", "driver_app_sos+dial+offline_outbox+attachments"]
+  },
+  "proposedMigrations": ["V0038__p5_vehicle_disclosure_and_driver_credentials.sql", "V0039__s3_driver_sos.sql"]
+}
