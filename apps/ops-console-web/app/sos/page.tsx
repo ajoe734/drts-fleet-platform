@@ -110,7 +110,8 @@ export default function SosQueuePage() {
 
     // Check initial AudioContext block state
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         const tempCtx = new AudioCtx();
         if (tempCtx.state === "running") {
@@ -127,11 +128,15 @@ export default function SosQueuePage() {
     }
 
     // Listen to user interaction to detect if browser unblocks audio
-    const handleInteraction = () => {
+    const handleInteraction = async () => {
       try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const AudioCtx =
+          window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtx) {
           const tempCtx = new AudioCtx();
+          if (tempCtx.state === "suspended") {
+            await tempCtx.resume();
+          }
           if (tempCtx.state === "running") {
             setAudioBlocked(false);
             document.removeEventListener("click", handleInteraction);
@@ -242,7 +247,20 @@ export default function SosQueuePage() {
   // Top unacknowledged event for overlay
   const pendingAlert = rows.find((r) => r.hl);
 
-  const soundEnabled = !soundOff && !audioBlocked;
+
+  let soundLabel = "提示音已啟用";
+  let soundTone: CanvasTone = "success";
+  let soundTag = "sound_on";
+
+  if (soundOff) {
+    soundLabel = "提示音已關閉";
+    soundTone = "warn";
+    soundTag = "sound_off";
+  } else if (audioBlocked) {
+    soundLabel = "瀏覽器已封鎖音效";
+    soundTone = "danger";
+    soundTag = "sound_blocked";
+  }
 
   // Play periodic alert sound using Web Audio API beep synthesizer if pending alert exists and sound is on
   useEffect(() => {
@@ -250,7 +268,8 @@ export default function SosQueuePage() {
 
     function playBeep() {
       try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const AudioCtx =
+          window.AudioContext || (window as any).webkitAudioContext;
         if (!AudioCtx) return;
         const audioCtx = new AudioCtx();
 
@@ -293,7 +312,8 @@ export default function SosQueuePage() {
 
   const resumeAudio = async () => {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         const tempCtx = new AudioCtx();
         if (tempCtx.state === "suspended") {
@@ -394,9 +414,11 @@ export default function SosQueuePage() {
               tone="warn"
               icon="warn"
               title="SOS 提示音尚未啟用"
-              body={audioBlocked
-                ? "瀏覽器已封鎖自動播放音效。請點此或與頁面互動以啟用提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
-                : "請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"}
+              body={
+                audioBlocked
+                  ? "瀏覽器已封鎖自動播放音效。請點此或與頁面互動以啟用提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
+                  : "請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
+              }
               actions={
                 <Btn
                   theme={theme}
@@ -434,8 +456,8 @@ export default function SosQueuePage() {
                 }}
               >
                 <div onClick={toggleSound} style={{ cursor: "pointer" }}>
-                  <Pill theme={theme} tone={soundEnabled ? "success" : "warn"} dot>
-                    {soundEnabled ? "提示音已啟用" : "提示音未啟用"}
+                  <Pill theme={theme} tone={soundTone} dot>
+                    {soundLabel}
                     <span
                       style={{
                         marginLeft: 4,
@@ -444,7 +466,7 @@ export default function SosQueuePage() {
                         fontSize: 9,
                       }}
                     >
-                      {soundEnabled ? "sound_on" : "sound_off"}
+                      {soundTag}
                     </span>
                   </Pill>
                 </div>
@@ -580,8 +602,8 @@ export default function SosQueuePage() {
               </Pill>
               <span style={{ flex: 1 }} />
               <div onClick={toggleSound} style={{ cursor: "pointer" }}>
-                <Pill theme={theme} tone={soundEnabled ? "success" : "warn"} dot>
-                  {soundEnabled ? "提示音已啟用" : "提示音未啟用"}
+                <Pill theme={theme} tone={soundTone} dot>
+                  {soundLabel}
                 </Pill>
               </div>
             </div>

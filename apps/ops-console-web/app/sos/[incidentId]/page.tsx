@@ -74,6 +74,21 @@ export default function SosDetailPage() {
       sse.addEventListener("message", () => {
         void fetchData();
       });
+      sse.addEventListener("order_created", () => {
+        void fetchData();
+      });
+      sse.addEventListener("order_updated", () => {
+        void fetchData();
+      });
+      sse.addEventListener("dispatch_job_updated", () => {
+        void fetchData();
+      });
+      sse.addEventListener("driver_location_updated", () => {
+        void fetchData();
+      });
+      sse.addEventListener("supply_lifecycle_updated", () => {
+        void fetchData();
+      });
       sse.addEventListener("incident_created", () => {
         void fetchData();
       });
