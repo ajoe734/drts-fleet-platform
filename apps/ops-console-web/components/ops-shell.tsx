@@ -1,13 +1,15 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   CanvasShell,
   buildCanvasTheme,
   type CanvasShellNavItem,
 } from "@drts/ui-web";
+import type { IncidentRecord } from "@drts/contracts";
 import { OpsHealthFooter } from "@/components/ops-health-footer";
+import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -54,12 +56,100 @@ export function OpsShell({
   children,
 }: OpsShellProps) {
   const pathname = usePathname() ?? "";
-  const breadcrumb = deriveBreadcrumb(nav, pathname);
+  const [sosBadgeCount, setSosBadgeCount] = useState<number>(0);
+
+  useEffect(() => {
+    let active = true;
+    const client = getOpsClient();
+
+    async function fetchBadgeCount() {
+      try {
+        const res = await client.get<any>("/api/incidents");
+        const items: IncidentRecord[] = Array.isArray(res) ? res : res?.items || [];
+        const pendingCount = items.filter(
+          (incident) =>
+            incident.status === "open" &&
+            incident.assignedTo === null &&
+            (incident.category === "safety" ||
+              incident.category === "traffic" ||
+              incident.category === "passenger_injury" ||
+              (incident.title && incident.title.includes("SOS")))
+        ).length;
+        if (active) {
+          setSosBadgeCount(pendingCount);
+        }
+      } catch (err) {
+        console.error("Failed to fetch pending SOS badge count", err);
+      }
+    }
+
+    void fetchBadgeCount();
+    const interval = setInterval(fetchBadgeCount, 10000);
+
+    let sse: EventSource | null = null;
+    try {
+      sse = createOpsDispatchEventSource();
+      sse.addEventListener("message", () => {
+        void fetchBadgeCount();
+      });
+      sse.addEventListener("driver_location_updated", () => {
+        void fetchBadgeCount();
+      });
+      sse.addEventListener("order_updated", () => {
+        void fetchBadgeCount();
+      });
+    } catch (e) {
+      console.error("Failed to initialize SSE in OpsShell", e);
+    }
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      if (sse) {
+        sse.close();
+      }
+    };
+  }, []);
+
+  let currentNav = nav;
+  if (pathname.startsWith("/sos")) {
+    currentNav = [
+      { divider: "智行叫車 · 值班" },
+      {
+        key: "board",
+        href: "/sos/board",
+        icon: "dispatch",
+        label: "派車看板 · Board",
+      },
+      {
+        key: "sos",
+        href: "/sos",
+        icon: "incidents",
+        label: "SOS 緊急事件",
+        badge: sosBadgeCount > 0 ? String(sosBadgeCount) : undefined,
+        badgeTone: "danger",
+      },
+      {
+        key: "trips",
+        href: "/sos/trips",
+        icon: "reports",
+        label: "行程 · Trips",
+      },
+      {
+        key: "records",
+        href: "/sos/records",
+        icon: "audit",
+        label: "營運紀錄 · Records",
+      },
+    ];
+  }
+
+  const breadcrumb = deriveBreadcrumb(currentNav, pathname);
 
   return (
     <CanvasShell
       theme={theme}
-      nav={nav}
+      nav={currentNav}
       currentPath={pathname}
       brandLabel={brandLabel}
       brandSubLabel={brandSubLabel}
@@ -75,3 +165,4 @@ export function OpsShell({
     </CanvasShell>
   );
 }
+
