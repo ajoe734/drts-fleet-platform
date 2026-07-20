@@ -91,10 +91,10 @@ export type TaxiDriverRegistrationStatus =
 
 export interface DriverPublicRegistrationCredential {
   driverId: string;
-  registrationNo: string;
-  registrationArea: string;
+  registrationNo: string | null;
+  registrationArea: string | null;
   effectiveFrom: string | null;
-  effectiveUntil: string;
+  effectiveUntil: string | null;
   status: TaxiDriverRegistrationStatus;
   maskedDisplay: string;
 

@@ -394,7 +394,11 @@ export class RegulatoryRegistryController {
         `Driver public registration credential for '${driverId}' not found.`,
       );
     }
-    return toApiSuccessEnvelope(credential, requestId);
+    const projected = {
+      ...credential,
+      registrationNo: credential.maskedDisplay,
+    };
+    return toApiSuccessEnvelope(projected, requestId);
   }
 
   private parseFiniteQueryNumber(
