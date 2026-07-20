@@ -16,6 +16,7 @@ import {
   resolveOpsAssistantIdentity,
   seedOpsAssistantHealth,
 } from "@/lib/ops-assistant-context.server";
+import { SosSoundProvider } from "@/components/sos-sound-context";
 
 import "./globals.css";
 
@@ -51,17 +52,19 @@ export default async function RootLayout({
             identity={assistantIdentity}
             initialHealth={assistantHealth}
           >
-            <OpsShell
-              nav={nav}
-              brandLabel={t("app.name", locale)}
-              brandSubLabel={t("app.sub", locale)}
-              searchPlaceholder={t("common.search", locale)}
-              avatarLabel={t("app.avatarLabel", locale)}
-              versionLabel={t("app.versionLabel", locale)}
-              env={t("app.environment.production", locale)}
-            >
-              {children}
-            </OpsShell>
+            <SosSoundProvider>
+              <OpsShell
+                nav={nav}
+                brandLabel={t("app.name", locale)}
+                brandSubLabel={t("app.sub", locale)}
+                searchPlaceholder={t("common.search", locale)}
+                avatarLabel={t("app.avatarLabel", locale)}
+                versionLabel={t("app.versionLabel", locale)}
+                env={t("app.environment.production", locale)}
+              >
+                {children}
+              </OpsShell>
+            </SosSoundProvider>
             <OpsAssistantWidget />
           </OpsAssistantContextProvider>
         </LanguageProvider>
@@ -69,3 +72,4 @@ export default async function RootLayout({
     </html>
   );
 }
+

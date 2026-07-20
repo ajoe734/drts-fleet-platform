@@ -15,7 +15,8 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 import type { IncidentRecord } from "@drts/contracts";
-import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
+import { getOpsClient } from "@/lib/api-client";
+import { useSosSound } from "@/components/sos-sound-context";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -39,130 +40,46 @@ interface SosRow {
   originalRecord: IncidentRecord;
 }
 
+function formatAttachmentsSummary(incident: IncidentRecord): string {
+  const attachments = (incident as any).attachments;
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return "無";
+  }
+  const photos = attachments.filter((a: any) => a.type === "image" || a.type === "photo").length;
+  const audios = attachments.filter((a: any) => a.type === "audio" || a.type === "voice").length;
+  const parts: string[] = [];
+  if (photos > 0) parts.push(`照片 ${photos}`);
+  if (audios > 0) parts.push(`語音 ${audios}`);
+  return parts.length > 0 ? parts.join(" · ") : "無";
+}
+
 export default function SosQueuePage() {
   const router = useRouter();
-  const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
-  const [soundOff, setSoundOff] = useState<boolean>(false);
-  const [audioBlocked, setAudioBlocked] = useState<boolean>(true);
-  const [nowTime, setNowTime] = useState<number>(Date.now());
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const {
+    incidents,
+    soundOff,
+    audioBlocked,
+    toggleSound,
+    handleEnableSound,
+    soundTone,
+    soundLabel,
+    soundTag,
+    fetchIncidents,
+  } = useSosSound();
 
-  // Fetch incidents
-  const fetchIncidents = async () => {
-    try {
-      const client = getOpsClient();
-      const res = await client.get<any>("/api/incidents");
-      const items: IncidentRecord[] = Array.isArray(res)
-        ? res
-        : res?.items || [];
-      setIncidents(items);
-      setErrorMsg(null);
-    } catch (err: any) {
-      console.error("Failed to fetch incidents:", err);
-      setErrorMsg("無法載入事故資料，請檢查後端連線。");
-    }
-  };
+  const [nowTime, setNowTime] = useState<number>(Date.now());
+  const [errorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchIncidents();
-    // Poll every 5s for elapsed timer update
     const timer = setInterval(() => {
       setNowTime(Date.now());
     }, 5000);
-
-    // Wire SSE stream for live updates
-    let sse: EventSource | null = null;
-    try {
-      sse = createOpsDispatchEventSource();
-      sse.addEventListener("message", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("order_created", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("order_updated", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("dispatch_job_updated", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("driver_location_updated", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("supply_lifecycle_updated", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("incident_created", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("incident_updated", () => {
-        void fetchIncidents();
-      });
-    } catch (e) {
-      console.error("SSE connection error:", e);
-    }
-
-    // Read sound settings from localStorage
-    const savedSound = localStorage.getItem("drts-sos-sound-off");
-    if (savedSound === "true") {
-      setSoundOff(true);
-    }
-
-    // Check initial AudioContext block state
-    try {
-      const AudioCtx =
-        window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const tempCtx = new AudioCtx();
-        if (tempCtx.state === "running") {
-          setAudioBlocked(false);
-        } else {
-          setAudioBlocked(true);
-        }
-        tempCtx.close();
-      } else {
-        setAudioBlocked(true);
-      }
-    } catch {
-      setAudioBlocked(true);
-    }
-
-    // Listen to user interaction to detect if browser unblocks audio
-    const handleInteraction = async () => {
-      try {
-        const AudioCtx =
-          window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const tempCtx = new AudioCtx();
-          if (tempCtx.state === "suspended") {
-            await tempCtx.resume();
-          }
-          if (tempCtx.state === "running") {
-            setAudioBlocked(false);
-            document.removeEventListener("click", handleInteraction);
-            document.removeEventListener("keydown", handleInteraction);
-          }
-          tempCtx.close();
-        }
-      } catch {
-        // Ignore browser autoplay check errors
-      }
-    };
-
-    document.addEventListener("click", handleInteraction);
-    document.addEventListener("keydown", handleInteraction);
-
-    return () => {
-      clearInterval(timer);
-      if (sse) sse.close();
-      document.removeEventListener("click", handleInteraction);
-      document.removeEventListener("keydown", handleInteraction);
-    };
+    return () => clearInterval(timer);
   }, []);
 
   // Filter for SOS incidents
   const sosIncidents = incidents.filter(
-    (inc) =>
+    (inc: IncidentRecord) =>
       inc.category === "safety" ||
       inc.category === "traffic" ||
       inc.category === "passenger_injury" ||
@@ -170,7 +87,7 @@ export default function SosQueuePage() {
   );
 
   // Map to SosRow
-  const rows: SosRow[] = sosIncidents.map((incident) => {
+  const rows: SosRow[] = sosIncidents.map((incident: IncidentRecord) => {
     const title = incident.title || "";
     let eventNo = incident.incidentId;
     const match = title.match(/SOS-\d+-\w+/);
@@ -247,108 +164,11 @@ export default function SosQueuePage() {
   // Top unacknowledged event for overlay
   const pendingAlert = rows.find((r) => r.hl);
 
-
-  let soundLabel = "提示音已啟用";
-  let soundTone: CanvasTone = "success";
-  let soundTag = "sound_on";
-
-  if (soundOff) {
-    soundLabel = "提示音已關閉";
-    soundTone = "warn";
-    soundTag = "sound_off";
-  } else if (audioBlocked) {
-    soundLabel = "瀏覽器已封鎖音效";
-    soundTone = "danger";
-    soundTag = "sound_blocked";
-  }
-
-  // Play periodic alert sound using Web Audio API beep synthesizer if pending alert exists and sound is on
-  useEffect(() => {
-    if (!pendingAlert || soundOff || audioBlocked) return;
-
-    function playBeep() {
-      try {
-        const AudioCtx =
-          window.AudioContext || (window as any).webkitAudioContext;
-        if (!AudioCtx) return;
-        const audioCtx = new AudioCtx();
-
-        if (audioCtx.state === "suspended") {
-          setAudioBlocked(true);
-          audioCtx.close();
-          return;
-        }
-
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.25); // beep for 250ms
-
-        setTimeout(() => {
-          try {
-            audioCtx.close();
-          } catch {
-            // Ignore potential close errors
-          }
-        }, 300);
-      } catch (e) {
-        console.error("Audio Context playback blocked or failed:", e);
-        setAudioBlocked(true);
-      }
-    }
-
-    playBeep();
-    const alertInterval = setInterval(playBeep, 4000);
-    return () => clearInterval(alertInterval);
-  }, [pendingAlert, soundOff, audioBlocked]);
-
-  const resumeAudio = async () => {
-    try {
-      const AudioCtx =
-        window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const tempCtx = new AudioCtx();
-        if (tempCtx.state === "suspended") {
-          await tempCtx.resume();
-        }
-        if (tempCtx.state === "running") {
-          setAudioBlocked(false);
-        }
-        tempCtx.close();
-      }
-    } catch (e) {
-      console.error("Failed to resume audio context:", e);
-    }
-  };
-
-  const toggleSound = async () => {
-    const nextVal = !soundOff;
-    setSoundOff(nextVal);
-    localStorage.setItem("drts-sos-sound-off", String(nextVal));
-    if (!nextVal) {
-      await resumeAudio();
-    }
-  };
-
-  const handleEnableSound = async () => {
-    setSoundOff(false);
-    localStorage.setItem("drts-sos-sound-off", "false");
-    await resumeAudio();
-  };
-
   const handleAcknowledge = async (incidentId: string) => {
     try {
       const client = getOpsClient();
       // First check if it's already assigned
-      const current = incidents.find((i) => i.incidentId === incidentId);
+      const current = incidents.find((i: IncidentRecord) => i.incidentId === incidentId);
       if (current?.assignedTo) {
         alert(
           `確認失敗：已由 ${current.assignedTo} 先行接手！ (First-Writer-Wins)`,
@@ -624,7 +444,7 @@ export default function SosQueuePage() {
                   ).toLocaleTimeString("zh-TW"),
                   mono: true,
                 },
-                { k: "附件", v: "照片 2 · 語音 1" },
+                { k: "附件", v: formatAttachmentsSummary(pendingAlert.originalRecord) },
               ]}
             />
 

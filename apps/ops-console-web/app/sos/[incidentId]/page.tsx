@@ -16,6 +16,7 @@ import {
 import type { IncidentRecord, IncidentTimelineEntry } from "@drts/contracts";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 import { ExternalLink, Play } from "lucide-react";
+import { useSosSound } from "@/components/sos-sound-context";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -35,6 +36,7 @@ interface TimelineEvent {
 export default function SosDetailPage() {
   const { incidentId } = useParams() as { incidentId: string };
   const router = useRouter();
+  const { soundOff, audioBlocked, handleEnableSound } = useSosSound();
 
   const [incident, setIncident] = useState<IncidentRecord | null>(null);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
@@ -339,7 +341,7 @@ export default function SosDetailPage() {
             )}
           </div>
         }
-        subtitle={`${categoryLabel} · ${severityLabel} · ${incident.relatedDriverId || "吳明翰"} · ${incident.relatedVehicleId || "BKR-2208"} · ${incident.relatedOrderId || "ZX-240720-0186"}`}
+        subtitle={`${categoryLabel} · ${severityLabel} · ${incident.relatedDriverId || "—"} · ${incident.relatedVehicleId || "—"} · ${incident.relatedOrderId || "—"}`}
         actions={
           <div style={{ display: "flex", gap: 8 }}>
             <Btn
@@ -377,6 +379,32 @@ export default function SosDetailPage() {
           </div>
         }
       />
+
+      {(soundOff || audioBlocked) && (
+        <div style={{ padding: "0 24px 14px 24px" }}>
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title="SOS 提示音尚未啟用"
+            body={
+              audioBlocked
+                ? "瀏覽器已封鎖自動播放音效。請點此或與頁面互動以啟用提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
+                : "請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
+            }
+            actions={
+              <Btn
+                theme={theme}
+                size="xs"
+                variant="primary"
+                onClick={handleEnableSound}
+              >
+                啟用提示音
+              </Btn>
+            }
+          />
+        </div>
+      )}
 
       <div
         style={{
@@ -447,7 +475,7 @@ export default function SosDetailPage() {
                   boxShadow: theme.shadowSm,
                 }}
               >
-                {incident.location || "信義區松仁路 100 號附近"} · 精度 12m ·{" "}
+                {incident.location || "—"} · 精度 12m ·{" "}
                 {new Date(
                   incident.occurredAt || incident.createdAt,
                 ).toLocaleTimeString("zh-TW")}
@@ -602,15 +630,15 @@ export default function SosDetailPage() {
               items={[
                 {
                   k: "行程編號",
-                  v: incident.relatedOrderId || "ZX-240720-0186",
+                  v: incident.relatedOrderId || "—",
                   mono: true,
                 },
                 {
                   k: "車牌",
-                  v: incident.relatedVehicleId || "BKR-2208",
+                  v: incident.relatedVehicleId || "—",
                   mono: true,
                 },
-                { k: "駕駛", v: incident.relatedDriverId || "吳明翰" },
+                { k: "駕駛", v: incident.relatedDriverId || "—" },
                 {
                   k: "原始觸發時間",
                   v: new Date(
@@ -634,51 +662,82 @@ export default function SosDetailPage() {
                     { k: "事件類型", v: `${categoryLabel} · ${severityLabel}` },
                     {
                       k: "說明",
-                      v:
-                        incident.description ||
-                        "與後方車輛擦撞，人員無明顯外傷。",
+                      v: incident.description || "無說明",
                     },
                   ]}
                 />
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                  {["照片 1", "照片 2"].map((p) => (
-                    <div
-                      key={p}
-                      style={{
-                        width: 74,
-                        height: 74,
-                        borderRadius: 9,
-                        background: theme.surfaceLo,
-                        border: `1px solid ${theme.border}`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 11,
-                        color: theme.textMuted,
-                      }}
-                    >
-                      {p}
+                {(() => {
+                  const attachments = (incident as any).attachments || [];
+                  if (!Array.isArray(attachments) || attachments.length === 0) {
+                    return (
+                      <div
+                        style={{
+                          padding: "16px 8px",
+                          textAlign: "center",
+                          border: `1px dashed ${theme.border}`,
+                          borderRadius: 8,
+                          background: theme.surfaceLo,
+                          color: theme.textDim,
+                          fontSize: 12,
+                          marginTop: 12,
+                        }}
+                      >
+                        無附件
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                      {attachments.map((a: any, i: number) => {
+                        const isAudio = a.type === "audio" || a.type === "voice";
+                        if (isAudio) {
+                          return (
+                            <div
+                              key={i}
+                              style={{
+                                flex: 1,
+                                minWidth: 100,
+                                borderRadius: 9,
+                                background: theme.surfaceLo,
+                                border: `1px solid ${theme.border}`,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 6,
+                                fontSize: 11.5,
+                                color: theme.textMuted,
+                                cursor: "pointer",
+                                padding: "8px 12px",
+                              }}
+                            >
+                              <Play size={13} fill="currentColor" />
+                              <span>{a.label || `語音 ${i + 1}`}</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div
+                            key={i}
+                            style={{
+                              width: 74,
+                              height: 74,
+                              borderRadius: 9,
+                              background: theme.surfaceLo,
+                              border: `1px solid ${theme.border}`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 11,
+                              color: theme.textMuted,
+                            }}
+                          >
+                            {a.label || `照片 ${i + 1}`}
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
-                  <div
-                    style={{
-                      flex: 1,
-                      borderRadius: 9,
-                      background: theme.surfaceLo,
-                      border: `1px solid ${theme.border}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                      fontSize: 11.5,
-                      color: theme.textMuted,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Play size={13} fill="currentColor" />
-                    <span>語音 0:42</span>
-                  </div>
-                </div>
+                  );
+                })()}
               </>
             ) : (
               <div

@@ -1,15 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode } from "react";
 import {
   CanvasShell,
   buildCanvasTheme,
   type CanvasShellNavItem,
 } from "@drts/ui-web";
-import type { IncidentRecord } from "@drts/contracts";
 import { OpsHealthFooter } from "@/components/ops-health-footer";
-import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
+
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -45,6 +44,8 @@ function deriveBreadcrumb(
   return matched?.label ? [matched.label] : [];
 }
 
+import { useSosSound } from "@/components/sos-sound-context";
+
 export function OpsShell({
   nav,
   brandLabel,
@@ -56,60 +57,7 @@ export function OpsShell({
   children,
 }: OpsShellProps) {
   const pathname = usePathname() ?? "";
-  const [sosBadgeCount, setSosBadgeCount] = useState<number>(0);
-
-  useEffect(() => {
-    let active = true;
-    const client = getOpsClient();
-
-    async function fetchBadgeCount() {
-      try {
-        const res = await client.get<any>("/api/incidents");
-        const items: IncidentRecord[] = Array.isArray(res) ? res : res?.items || [];
-        const pendingCount = items.filter(
-          (incident) =>
-            incident.status === "open" &&
-            incident.assignedTo === null &&
-            (incident.category === "safety" ||
-              incident.category === "traffic" ||
-              incident.category === "passenger_injury" ||
-              (incident.title && incident.title.includes("SOS")))
-        ).length;
-        if (active) {
-          setSosBadgeCount(pendingCount);
-        }
-      } catch (err) {
-        console.error("Failed to fetch pending SOS badge count", err);
-      }
-    }
-
-    void fetchBadgeCount();
-    const interval = setInterval(fetchBadgeCount, 10000);
-
-    let sse: EventSource | null = null;
-    try {
-      sse = createOpsDispatchEventSource();
-      sse.addEventListener("message", () => {
-        void fetchBadgeCount();
-      });
-      sse.addEventListener("driver_location_updated", () => {
-        void fetchBadgeCount();
-      });
-      sse.addEventListener("order_updated", () => {
-        void fetchBadgeCount();
-      });
-    } catch (e) {
-      console.error("Failed to initialize SSE in OpsShell", e);
-    }
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-      if (sse) {
-        sse.close();
-      }
-    };
-  }, []);
+  const { pendingCount } = useSosSound();
 
   let currentNav = nav;
   if (pathname.startsWith("/sos")) {
@@ -126,7 +74,7 @@ export function OpsShell({
         href: "/sos",
         icon: "incidents",
         label: "SOS 緊急事件",
-        badge: sosBadgeCount > 0 ? String(sosBadgeCount) : undefined,
+        badge: pendingCount > 0 ? String(pendingCount) : undefined,
         badgeTone: "danger",
       },
       {
@@ -143,6 +91,7 @@ export function OpsShell({
       },
     ];
   }
+
 
   const breadcrumb = deriveBreadcrumb(currentNav, pathname);
 
