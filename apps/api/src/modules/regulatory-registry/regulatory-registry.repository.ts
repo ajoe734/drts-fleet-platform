@@ -1091,7 +1091,7 @@ export class RegulatoryRegistryRepository {
       SELECT 
         d.driver_id,
         dp.taxi_registration_no,
-        CASE WHEN dp.taxi_registration_no IS NOT NULL THEN 'TPE' ELSE NULL END,
+        NULL,
         NULL,
         dp.taxi_registration_expiry,
         CASE WHEN dp.taxi_registration_no IS NOT NULL THEN 'unverified' ELSE 'missing' END,
@@ -1133,7 +1133,9 @@ export class RegulatoryRegistryRepository {
       status: row.status as VehiclePassengerDisclosureProfile["status"],
       missingFieldCodes: this.toStringArray(row.missing_field_codes),
       verifiedByActorId: row.verified_by_actor_id,
-      verifiedAt: row.verified_at ? new Date(row.verified_at).toISOString() : null,
+      verifiedAt: row.verified_at
+        ? new Date(row.verified_at).toISOString()
+        : null,
       sourceSubmissionId: row.source_submission_id,
       version: Number(row.version),
       updatedAt: new Date(row.updated_at).toISOString(),
@@ -1147,12 +1149,18 @@ export class RegulatoryRegistryRepository {
       driverId: row.driver_id,
       registrationNo: row.registration_no,
       registrationArea: row.registration_area,
-      effectiveFrom: row.effective_from ? new Date(row.effective_from).toISOString().slice(0, 10) : null,
-      effectiveUntil: row.effective_until ? new Date(row.effective_until).toISOString().slice(0, 10) : null,
+      effectiveFrom: row.effective_from
+        ? new Date(row.effective_from).toISOString().slice(0, 10)
+        : null,
+      effectiveUntil: row.effective_until
+        ? new Date(row.effective_until).toISOString().slice(0, 10)
+        : null,
       status: row.status as DriverPublicRegistrationCredential["status"],
       maskedDisplay: row.masked_display,
       verifiedByActorId: row.verified_by_actor_id,
-      verifiedAt: row.verified_at ? new Date(row.verified_at).toISOString() : null,
+      verifiedAt: row.verified_at
+        ? new Date(row.verified_at).toISOString()
+        : null,
       sourceSubmissionId: row.source_submission_id,
       version: Number(row.version),
       updatedAt: new Date(row.updated_at).toISOString(),

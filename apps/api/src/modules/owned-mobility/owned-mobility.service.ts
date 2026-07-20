@@ -378,7 +378,11 @@ export class OwnedMobilityService implements OnModuleInit {
     requestId?: string,
     runtimeProfileCodeHeader?: string,
   ) {
-    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, false);
+    this.assertRuntimeProfileAllowances(
+      command,
+      runtimeProfileCodeHeader,
+      false,
+    );
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
 
@@ -519,7 +523,11 @@ export class OwnedMobilityService implements OnModuleInit {
     requestId?: string,
     runtimeProfileCodeHeader?: string,
   ) {
-    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, false);
+    this.assertRuntimeProfileAllowances(
+      command,
+      runtimeProfileCodeHeader,
+      false,
+    );
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
     if (!command.callId?.trim()) {
@@ -699,7 +707,11 @@ export class OwnedMobilityService implements OnModuleInit {
     requestId?: string,
     runtimeProfileCodeHeader?: string,
   ): MaybePromise<TenantBookingResult> {
-    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, true);
+    this.assertRuntimeProfileAllowances(
+      command,
+      runtimeProfileCodeHeader,
+      true,
+    );
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
     this.assertBookingRules(
@@ -4241,7 +4253,7 @@ export class OwnedMobilityService implements OnModuleInit {
     runtimeProfileCodeHeader?: string,
     isBooking = false,
   ) {
-    const profileCode = command.runtimeProfileCode || runtimeProfileCodeHeader;
+    const profileCode = runtimeProfileCodeHeader || command.runtimeProfileCode;
     if (profileCode === "multi_taxi_direct") {
       if (!isBooking) {
         throw new ApiRequestError(
