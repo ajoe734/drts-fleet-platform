@@ -66,9 +66,28 @@ function useApiHealth() {
 
 export function OpsHealthFooter() {
   const { locale, setLocale, t } = useTranslation();
-  const { status, lastCheckedAt } = useApiHealth();
+  const { status: apiStatus, lastCheckedAt } = useApiHealth();
   const pathname = usePathname() ?? "";
-  const { toggleSound, soundTone, soundLabel, soundTag } = useSosSound();
+  const {
+    toggleSound,
+    soundTone,
+    soundLabel,
+    soundTag,
+    soundOff,
+    audioBlocked,
+    audioError,
+  } = useSosSound();
+
+  // Combine API health with sound health. If sound alerts are disabled, the workstation is Degraded.
+  // If there's an initialization error for sound, it is Down.
+  let status = apiStatus;
+  if (apiStatus === "healthy") {
+    if (soundOff || audioBlocked) {
+      status = "degraded";
+    } else if (audioError) {
+      status = "down";
+    }
+  }
 
   const copy: Record<
     ApiHealthStatus,
@@ -128,9 +147,19 @@ export function OpsHealthFooter() {
             gap: 7,
             padding: "8px 9px",
             borderRadius: 10,
-            background: soundTone === "success" ? theme.successBg : soundTone === "warn" ? theme.warnBg : theme.dangerBg,
+            background:
+              soundTone === "success"
+                ? theme.successBg
+                : soundTone === "warn"
+                  ? theme.warnBg
+                  : theme.dangerBg,
             border: `1px solid ${soundTone === "success" ? theme.successBorder : soundTone === "warn" ? theme.warnBorder : theme.dangerBorder}`,
-            color: soundTone === "success" ? theme.success : soundTone === "warn" ? theme.warn : theme.danger,
+            color:
+              soundTone === "success"
+                ? theme.success
+                : soundTone === "warn"
+                  ? theme.warn
+                  : theme.danger,
             fontSize: 12.5,
             fontWeight: 600,
             cursor: "pointer",
@@ -138,7 +167,11 @@ export function OpsHealthFooter() {
             transition: "all 0.15s ease",
           }}
         >
-          {soundTone === "success" ? <Volume2 size={13} /> : <VolumeX size={13} />}
+          {soundTone === "success" ? (
+            <Volume2 size={13} />
+          ) : (
+            <VolumeX size={13} />
+          )}
           <span style={{ flex: 1, textAlign: "left" }}>{soundLabel}</span>
           <span
             style={{

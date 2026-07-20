@@ -14,7 +14,11 @@ import {
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
-import type { IncidentRecord, IncidentTimelineEntry, GeoPoint } from "@drts/contracts";
+import type {
+  IncidentRecord,
+  IncidentTimelineEntry,
+  GeoPoint,
+} from "@drts/contracts";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 import { ExternalLink, Play } from "lucide-react";
 
@@ -39,14 +43,15 @@ export default function SosDetailPage() {
   const { incidentId } = useParams() as { incidentId: string };
   const router = useRouter();
 
-
   const [incident, setIncident] = useState<IncidentRecord | null>(null);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState<GeoPoint | null>(null);
 
-  const parseCoordinates = (locStr: string | null): { lat: number; lng: number } | null => {
+  const parseCoordinates = (
+    locStr: string | null,
+  ): { lat: number; lng: number } | null => {
     if (!locStr) return null;
     const match = locStr.match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
     if (match && match[1] !== undefined && match[2] !== undefined) {
@@ -64,15 +69,18 @@ export default function SosDetailPage() {
     try {
       const client = getOpsClient();
       const incRes = await client.get<any>(`/api/incidents/${incidentId}`);
-      setIncident(incRes);
+      const record = incRes?.item || incRes;
+      setIncident(record);
 
       // Resolve map center: try parsing coordinates from location string first
-      let resolvedCenter = parseCoordinates(incRes.location);
+      let resolvedCenter = parseCoordinates(record?.location);
 
       // If not parsed, try to fetch order and get its pickup coordinates
-      if (!resolvedCenter && incRes.relatedOrderId) {
+      if (!resolvedCenter && record?.relatedOrderId) {
         try {
-          const orderRes = await client.get<any>(`/api/orders/${incRes.relatedOrderId}`);
+          const orderRes = await client.get<any>(
+            `/api/orders/${record.relatedOrderId}`,
+          );
           if (
             orderRes &&
             orderRes.pickup &&
@@ -81,7 +89,10 @@ export default function SosDetailPage() {
             Number.isFinite(orderRes.pickup.lat) &&
             Number.isFinite(orderRes.pickup.lng)
           ) {
-            resolvedCenter = { lat: orderRes.pickup.lat, lng: orderRes.pickup.lng };
+            resolvedCenter = {
+              lat: orderRes.pickup.lat,
+              lng: orderRes.pickup.lng,
+            };
           }
         } catch (err) {
           console.error("Failed to fetch order for map coordinates:", err);
@@ -196,12 +207,11 @@ export default function SosDetailPage() {
   const handleAcknowledge = async () => {
     try {
       const client = getOpsClient();
-      const freshInc = await client.get<IncidentRecord>(
-        `/api/incidents/${incidentId}`,
-      );
-      if (freshInc.assignedTo) {
+      const freshInc = await client.get<any>(`/api/incidents/${incidentId}`);
+      const freshIncident = freshInc?.item || freshInc;
+      if (freshIncident.assignedTo) {
         alert(
-          `確認失敗：已由 ${freshInc.assignedTo} 先行接手！ (First-Writer-Wins)`,
+          `確認失敗：已由 ${freshIncident.assignedTo} 先行接手！ (First-Writer-Wins)`,
         );
         void fetchData();
         return;
@@ -420,8 +430,6 @@ export default function SosDetailPage() {
         }
       />
 
-
-
       <div
         style={{
           padding: 24,
@@ -455,40 +463,18 @@ export default function SosDetailPage() {
               ) : (
                 <div
                   style={{
-                    position: "absolute",
-                    inset: 0,
-                    background: `linear-gradient(135deg, ${theme.accentBg}, ${theme.surfaceLo})`,
+                    padding: 16,
+                    height: "100%",
+                    boxSizing: "border-box",
                   }}
                 >
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      backgroundImage: `radial-gradient(${theme.borderStrong} 1px, transparent 1px)`,
-                      backgroundSize: "24px 24px",
-                      opacity: 0.35,
-                    }}
+                  <CanvasEmptyState
+                    theme={theme}
+                    tone="neutral"
+                    title="無位置座標"
+                    body="此事件無有效的座標資料，無法載入地圖。"
+                    style={{ height: "100%", justifyContent: "center" }}
                   />
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: "46%",
-                      top: "40%",
-                      transform: "translate(-50%, -50%)",
-                    }}
-                  >
-                    <span
-                      style={{
-                        display: "block",
-                        width: 16,
-                        height: 16,
-                        borderRadius: 8,
-                        background: theme.danger,
-                        border: `3px solid ${theme.surface}`,
-                        boxShadow: `0 0 0 6px ${theme.danger}33`,
-                      }}
-                    />
-                  </div>
                 </div>
               )}
               {/* Location Tag */}
@@ -712,9 +698,17 @@ export default function SosDetailPage() {
                     );
                   }
                   return (
-                    <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        marginTop: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
                       {attachments.map((a: any, i: number) => {
-                        const isAudio = a.type === "audio" || a.type === "voice";
+                        const isAudio =
+                          a.type === "audio" || a.type === "voice";
                         if (isAudio) {
                           return (
                             <div

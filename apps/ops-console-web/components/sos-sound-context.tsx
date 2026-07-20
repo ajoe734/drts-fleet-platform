@@ -1,6 +1,12 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import type { IncidentRecord } from "@drts/contracts";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 import { type CanvasTone } from "@drts/ui-web";
@@ -20,7 +26,22 @@ export interface SosSoundContextType {
   audioError: string | null;
 }
 
-const SosSoundContext = createContext<SosSoundContextType | undefined>(undefined);
+let globalAudioCtx: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (!globalAudioCtx) {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtx) {
+      globalAudioCtx = new AudioCtx();
+    }
+  }
+  return globalAudioCtx;
+}
+
+const SosSoundContext = createContext<SosSoundContextType | undefined>(
+  undefined,
+);
 
 export function SosSoundProvider({ children }: { children: ReactNode }) {
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
@@ -28,7 +49,6 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
   const [audioBlocked, setAudioBlocked] = useState<boolean>(true);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [nowTime, setNowTime] = useState<number>(Date.now());
-  const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null);
 
   // Fetch incidents from API
   const fetchIncidents = async () => {
@@ -78,35 +98,28 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
       setSoundOff(true);
     }
 
-    // Initialize persistent AudioContext
-    let localCtx: AudioContext | null = null;
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        localCtx = new AudioCtx();
-        setAudioCtx(localCtx);
-        if (localCtx.state === "running") {
-          setAudioBlocked(false);
-        } else {
-          setAudioBlocked(true);
-        }
+    // Initialize persistent AudioContext singleton
+    const localCtx = getSharedAudioContext();
+    if (localCtx) {
+      if (localCtx.state === "running") {
+        setAudioBlocked(false);
       } else {
         setAudioBlocked(true);
-        setAudioError("瀏覽器不支援 AudioContext");
       }
-    } catch (err: any) {
+    } else {
       setAudioBlocked(true);
-      setAudioError(err?.message || "無法初始化 AudioContext");
+      setAudioError("瀏覽器不支援 AudioContext");
     }
 
     // Listen to user interaction to detect if browser unblocks audio
     const handleInteraction = async () => {
       try {
-        if (localCtx) {
-          if (localCtx.state === "suspended") {
-            await localCtx.resume();
+        const activeCtx = getSharedAudioContext();
+        if (activeCtx) {
+          if (activeCtx.state === "suspended") {
+            await activeCtx.resume();
           }
-          if (localCtx.state === "running") {
+          if (activeCtx.state === "running") {
             setAudioBlocked(false);
             setAudioError(null);
             document.removeEventListener("click", handleInteraction);
@@ -118,17 +131,16 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    document.addEventListener("click", handleInteraction);
-    document.addEventListener("keydown", handleInteraction);
+    if (localCtx && localCtx.state !== "running") {
+      document.addEventListener("click", handleInteraction);
+      document.addEventListener("keydown", handleInteraction);
+    }
 
     return () => {
       clearInterval(timeTimer);
       if (sse) sse.close();
       document.removeEventListener("click", handleInteraction);
       document.removeEventListener("keydown", handleInteraction);
-      if (localCtx) {
-        localCtx.close().catch(() => {});
-      }
     };
   }, []);
 
@@ -138,7 +150,7 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
       inc.category === "safety" ||
       inc.category === "traffic" ||
       inc.category === "passenger_injury" ||
-      (inc.title && inc.title.includes("SOS"))
+      (inc.title && inc.title.includes("SOS")),
   );
 
   // Map to detailed rows
@@ -169,8 +181,13 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
     let waitText = "—";
     if (incident.status === "open" && !incident.assignedTo) {
       const occurred = new Date(incident.occurredAt || incident.createdAt);
-      const diff = Math.max(0, Math.floor((nowTime - occurred.getTime()) / 1000));
-      const mins = Math.floor(diff / 60).toString().padStart(2, "0");
+      const diff = Math.max(
+        0,
+        Math.floor((nowTime - occurred.getTime()) / 1000),
+      );
+      const mins = Math.floor(diff / 60)
+        .toString()
+        .padStart(2, "0");
       const secs = (diff % 60).toString().padStart(2, "0");
       waitText = `${mins}:${secs}`;
     }
@@ -202,10 +219,10 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
     if (a.hl && !b.hl) return -1;
     if (!a.hl && b.hl) return 1;
     const aTime = new Date(
-      a.originalRecord.occurredAt || a.originalRecord.createdAt
+      a.originalRecord.occurredAt || a.originalRecord.createdAt,
     ).getTime();
     const bTime = new Date(
-      b.originalRecord.occurredAt || b.originalRecord.createdAt
+      b.originalRecord.occurredAt || b.originalRecord.createdAt,
     ).getTime();
     return bTime - aTime;
   });
@@ -230,28 +247,29 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
 
   // Play beep periodically if there's a pending alert
   useEffect(() => {
-    if (!pendingAlert || soundOff || audioBlocked || !audioCtx) return;
+    if (!pendingAlert || soundOff || audioBlocked) return;
 
     function playBeep() {
       try {
-        if (!audioCtx) return;
-        if (audioCtx.state === "suspended") {
+        const activeCtx = getSharedAudioContext();
+        if (!activeCtx) return;
+        if (activeCtx.state === "suspended") {
           setAudioBlocked(true);
           return;
         }
 
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
+        const osc = activeCtx.createOscillator();
+        const gain = activeCtx.createGain();
 
         osc.connect(gain);
-        gain.connect(audioCtx.destination);
+        gain.connect(activeCtx.destination);
 
         osc.type = "sine";
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(880, activeCtx.currentTime); // A5 note
+        gain.gain.setValueAtTime(0.3, activeCtx.currentTime);
 
         osc.start();
-        osc.stop(audioCtx.currentTime + 0.25); // beep for 250ms
+        osc.stop(activeCtx.currentTime + 0.25); // beep for 250ms
       } catch (e: any) {
         console.error("Audio Context playback blocked or failed:", e);
         setAudioBlocked(true);
@@ -262,15 +280,16 @@ export function SosSoundProvider({ children }: { children: ReactNode }) {
     playBeep();
     const alertInterval = setInterval(playBeep, 4000);
     return () => clearInterval(alertInterval);
-  }, [pendingAlert, soundOff, audioBlocked, audioCtx]);
+  }, [pendingAlert, soundOff, audioBlocked]);
 
   const resumeAudio = async () => {
     try {
-      if (audioCtx) {
-        if (audioCtx.state === "suspended") {
-          await audioCtx.resume();
+      const activeCtx = getSharedAudioContext();
+      if (activeCtx) {
+        if (activeCtx.state === "suspended") {
+          await activeCtx.resume();
         }
-        if (audioCtx.state === "running") {
+        if (activeCtx.state === "running") {
           setAudioBlocked(false);
           setAudioError(null);
         }
