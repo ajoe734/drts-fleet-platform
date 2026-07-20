@@ -10,6 +10,7 @@ import {
 import type { IncidentRecord } from "@drts/contracts";
 import { OpsHealthFooter } from "@/components/ops-health-footer";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
+import { isSosIncident, unwrapListItems } from "@/lib/sos-view-model";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -65,15 +66,12 @@ export function OpsShell({
     async function fetchBadgeCount() {
       try {
         const res = await client.get<any>("/api/incidents");
-        const items: IncidentRecord[] = Array.isArray(res) ? res : res?.items || [];
+        const items: IncidentRecord[] = unwrapListItems(res);
         const pendingCount = items.filter(
           (incident) =>
+            isSosIncident(incident) &&
             incident.status === "open" &&
-            incident.assignedTo === null &&
-            (incident.category === "safety" ||
-              incident.category === "traffic" ||
-              incident.category === "passenger_injury" ||
-              (incident.title && incident.title.includes("SOS")))
+            incident.assignedTo === null,
         ).length;
         if (active) {
           setSosBadgeCount(pendingCount);
@@ -96,6 +94,12 @@ export function OpsShell({
         void fetchBadgeCount();
       });
       sse.addEventListener("order_updated", () => {
+        void fetchBadgeCount();
+      });
+      sse.addEventListener("incident_created", () => {
+        void fetchBadgeCount();
+      });
+      sse.addEventListener("incident_updated", () => {
         void fetchBadgeCount();
       });
     } catch (e) {
@@ -165,4 +169,3 @@ export function OpsShell({
     </CanvasShell>
   );
 }
-

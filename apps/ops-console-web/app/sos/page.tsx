@@ -3,6 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ApiClientError } from "@drts/api-client";
+import type {
+  DriverRegistryRecord,
+  IdentityContext,
+  IncidentRecord,
+  VehicleRegistryRecord,
+} from "@drts/contracts";
 import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
@@ -14,8 +21,21 @@ import {
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
-import type { IncidentRecord } from "@drts/contracts";
-import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
+import {
+  DEFAULT_OPS_ACTOR_ID,
+  createOpsDispatchEventSource,
+  getOpsClient,
+} from "@/lib/api-client";
+import {
+  buildDriverNameMap,
+  buildSosQueueRows,
+  buildVehiclePlateMap,
+  formatSosActorLabel,
+  isSosIncident,
+  unwrapListItems,
+  type SosPillTone,
+  type SosQueueRow,
+} from "@/lib/sos-view-model";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -23,241 +43,269 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-interface SosRow {
-  id: string;
-  no: string;
-  status: string;
-  tone: CanvasTone;
-  wait: string;
-  driver: string;
-  plate: string;
-  order: string;
-  loc: string;
-  type: string;
-  ack: string;
-  hl: boolean;
-  originalRecord: IncidentRecord;
+type NoticeState = {
+  tone: SosPillTone;
+  title: string;
+  body: string;
+} | null;
+
+async function playAlertBeep(): Promise<boolean> {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const audioCtor =
+    window.AudioContext ??
+    (window as Window & { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!audioCtor) {
+    return false;
+  }
+
+  const audioContext = new audioCtor();
+
+  try {
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    await new Promise<void>((resolve) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      gain.gain.setValueAtTime(0.28, audioContext.currentTime);
+
+      oscillator.onended = () => resolve();
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.22);
+    });
+
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
 }
 
 export default function SosQueuePage() {
   const router = useRouter();
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
+  const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
+  const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
+  const [identity, setIdentity] = useState<IdentityContext | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
   const [soundOff, setSoundOff] = useState<boolean>(false);
-  const [nowTime, setNowTime] = useState<number>(Date.now());
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [soundBlocked, setSoundBlocked] = useState<boolean>(false);
+  const [nowMs, setNowMs] = useState<number>(Date.now());
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeState>(null);
 
-  // Fetch incidents
-  const fetchIncidents = async () => {
+  const driverNamesById = buildDriverNameMap(drivers);
+  const platesByVehicleId = buildVehiclePlateMap(vehicles);
+  const rows = buildSosQueueRows(incidents, {
+    nowMs,
+    driverNamesById,
+    platesByVehicleId,
+  });
+  const pendingCount = rows.filter((row) => row.isPending).length;
+  const pendingAlert = rows.find((row) => row.isCriticalAlert);
+  const currentActorId = identity?.actorId?.trim() || DEFAULT_OPS_ACTOR_ID;
+  const currentActorLabel = formatSosActorLabel(currentActorId);
+
+  const fetchRuntime = async () => {
     try {
       const client = getOpsClient();
-      const res = await client.get<any>("/api/incidents");
-      const items: IncidentRecord[] = Array.isArray(res)
-        ? res
-        : res?.items || [];
-      setIncidents(items);
-      setErrorMsg(null);
-    } catch (err: any) {
-      console.error("Failed to fetch incidents:", err);
-      setErrorMsg("無法載入事故資料，請檢查後端連線。");
+      const [incidentRes, driverRes, vehicleRes, identityRes] =
+        await Promise.all([
+          client.get<any>("/api/incidents"),
+          client.get<any>("/api/regulatory-registry/drivers").catch(() => []),
+          client.get<any>("/api/regulatory-registry/vehicles").catch(() => []),
+          client
+            .get<IdentityContext>("/api/identity/context")
+            .catch(() => null as IdentityContext | null),
+        ]);
+
+      setIncidents(
+        unwrapListItems<IncidentRecord>(incidentRes).filter((incident) =>
+          isSosIncident(incident),
+        ),
+      );
+      setDrivers(unwrapListItems<DriverRegistryRecord>(driverRes));
+      setVehicles(unwrapListItems<VehicleRegistryRecord>(vehicleRes));
+      setIdentity(identityRes);
+      setLoadError(null);
+    } catch (error) {
+      console.error("Failed to load SOS incidents", error);
+      setLoadError("無法載入 SOS 事件佇列，請檢查後端連線。");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    void fetchIncidents();
-    // Poll every 5s for elapsed timer update
+    void fetchRuntime();
+
     const timer = setInterval(() => {
-      setNowTime(Date.now());
+      setNowMs(Date.now());
     }, 5000);
 
-    // Wire SSE stream for live updates
-    let sse: EventSource | null = null;
-    try {
-      sse = createOpsDispatchEventSource();
-      sse.addEventListener("message", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("driver_location_updated", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("order_updated", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("incident_created", () => {
-        void fetchIncidents();
-      });
-      sse.addEventListener("incident_updated", () => {
-        void fetchIncidents();
-      });
-    } catch (e) {
-      console.error("SSE connection error:", e);
-    }
-
-    // Read sound settings from localStorage
     const savedSound = localStorage.getItem("drts-sos-sound-off");
     if (savedSound === "true") {
       setSoundOff(true);
     }
 
+    let sse: EventSource | null = null;
+    try {
+      sse = createOpsDispatchEventSource();
+      sse.addEventListener("message", () => {
+        void fetchRuntime();
+      });
+      sse.addEventListener("driver_location_updated", () => {
+        void fetchRuntime();
+      });
+      sse.addEventListener("order_updated", () => {
+        void fetchRuntime();
+      });
+      sse.addEventListener("incident_created", () => {
+        void fetchRuntime();
+      });
+      sse.addEventListener("incident_updated", () => {
+        void fetchRuntime();
+      });
+    } catch (error) {
+      console.error("Failed to initialize SOS SSE", error);
+    }
+
     return () => {
       clearInterval(timer);
-      if (sse) sse.close();
+      if (sse) {
+        sse.close();
+      }
     };
   }, []);
 
-  // Filter for SOS incidents
-  const sosIncidents = incidents.filter(
-    (inc) =>
-      inc.category === "safety" ||
-      inc.category === "traffic" ||
-      inc.category === "passenger_injury" ||
-      (inc.title && inc.title.includes("SOS")),
-  );
-
-  // Map to SosRow
-  const rows: SosRow[] = sosIncidents.map((incident) => {
-    const title = incident.title || "";
-    let eventNo = incident.incidentId;
-    const match = title.match(/SOS-\d+-\w+/);
-    if (match) {
-      eventNo = match[0];
-    }
-
-    let statusText = "待確認";
-    let tone: CanvasTone = "danger";
-    if (incident.status === "open" && incident.assignedTo) {
-      statusText = "已確認";
-      tone = "accent";
-    } else if (incident.status === "investigating") {
-      statusText = "調查中";
-      tone = "warn";
-    } else if (incident.status === "resolved") {
-      statusText = "駕駛回報誤觸";
-      tone = "neutral";
-    } else if (incident.status === "closed") {
-      statusText = "已結案";
-      tone = "success";
-    }
-
-    // Elapsed wait time: if status === "open" and assignedTo === null
-    let waitText = "—";
-    if (incident.status === "open" && !incident.assignedTo) {
-      const occurred = new Date(incident.occurredAt || incident.createdAt);
-      const diff = Math.max(
-        0,
-        Math.floor((nowTime - occurred.getTime()) / 1000),
-      );
-      const mins = Math.floor(diff / 60)
-        .toString()
-        .padStart(2, "0");
-      const secs = (diff % 60).toString().padStart(2, "0");
-      waitText = `${mins}:${secs}`;
-    }
-
-    let typeText = "其他";
-    if (incident.category === "traffic") typeText = "交通事故";
-    else if (incident.category === "passenger_injury") typeText = "乘客急病";
-    else if (incident.category === "safety") typeText = "治安事件";
-
-    return {
-      id: incident.incidentId,
-      no: eventNo,
-      status: statusText,
-      tone,
-      wait: waitText,
-      driver: incident.relatedDriverId || "—",
-      plate: incident.relatedVehicleId || "—",
-      order: incident.relatedOrderId || "—",
-      loc: incident.location || "—",
-      type: typeText,
-      ack: incident.assignedTo || "—",
-      hl: incident.status === "open" && !incident.assignedTo,
-      originalRecord: incident,
-    };
-  });
-
-  // Sort rows: active unacknowledged first, then by trigger time
-  rows.sort((a, b) => {
-    if (a.hl && !b.hl) return -1;
-    if (!a.hl && b.hl) return 1;
-    const aTime = new Date(
-      a.originalRecord.occurredAt || a.originalRecord.createdAt,
-    ).getTime();
-    const bTime = new Date(
-      b.originalRecord.occurredAt || b.originalRecord.createdAt,
-    ).getTime();
-    return bTime - aTime;
-  });
-
-  // Top unacknowledged event for overlay
-  const pendingAlert = rows.find((r) => r.hl);
-
-  // Play periodic alert sound using Web Audio API beep synthesizer if pending alert exists and sound is on
   useEffect(() => {
-    if (!pendingAlert || soundOff) return;
-
-    function playBeep() {
-      try {
-        const audioCtx = new (
-          window.AudioContext || (window as any).webkitAudioContext
-        )();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.25); // beep for 250ms
-      } catch (e) {
-        console.error("Audio Context playback blocked or failed:", e);
-      }
+    if (!pendingAlert || soundOff) {
+      return;
     }
 
-    playBeep();
-    const alertInterval = setInterval(playBeep, 4000);
-    return () => clearInterval(alertInterval);
+    let active = true;
+    const runBeep = async () => {
+      const success = await playAlertBeep();
+      if (!active) {
+        return;
+      }
+      setSoundBlocked(!success);
+    };
+
+    void runBeep();
+    const timer = setInterval(() => {
+      void runBeep();
+    }, 4000);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, [pendingAlert, soundOff]);
 
-  const toggleSound = () => {
-    const nextVal = !soundOff;
-    setSoundOff(nextVal);
-    localStorage.setItem("drts-sos-sound-off", String(nextVal));
+  const toggleSound = async () => {
+    const nextSoundOff = !soundOff;
+    setSoundOff(nextSoundOff);
+    localStorage.setItem("drts-sos-sound-off", String(nextSoundOff));
+
+    if (!nextSoundOff) {
+      const success = await playAlertBeep();
+      setSoundBlocked(!success);
+    } else {
+      setSoundBlocked(false);
+    }
   };
 
   const handleAcknowledge = async (incidentId: string) => {
+    setNotice(null);
+
     try {
       const client = getOpsClient();
-      // First check if it's already assigned
-      const current = incidents.find((i) => i.incidentId === incidentId);
-      if (current?.assignedTo) {
-        alert(
-          `確認失敗：已由 ${current.assignedTo} 先行接手！ (First-Writer-Wins)`,
-        );
-        void fetchIncidents();
+      await client.patch(`/api/incidents/${incidentId}`, {
+        body: {
+          assignedTo: currentActorId,
+        },
+      });
+
+      setNotice({
+        tone: "success",
+        title: "已確認接手",
+        body: `${currentActorLabel} 已取得此 SOS 事件的處理權。`,
+      });
+      await fetchRuntime();
+    } catch (error) {
+      if (
+        error instanceof ApiClientError &&
+        error.code === "INCIDENT_ASSIGNMENT_CONFLICT"
+      ) {
+        const winner =
+          typeof error.details?.existingAssignment === "string"
+            ? error.details.existingAssignment
+            : "其他值班人員";
+        setNotice({
+          tone: "warn",
+          title: "First-writer-wins",
+          body: `${winner} 已先確認此事件，畫面已同步最新處理權。`,
+        });
+        await fetchRuntime();
         return;
       }
 
-      await client.patch(`/api/incidents/${incidentId}`, {
-        body: {
-          assignedTo: "王小明", // S3O_ACTOR display name
-        },
+      console.error("Failed to acknowledge SOS incident", error);
+      setNotice({
+        tone: "danger",
+        title: "確認接手失敗",
+        body: "系統未能完成處理權寫入，請稍後再試。",
       });
-      void fetchIncidents();
-    } catch (err: any) {
-      console.error("Failed to acknowledge incident:", err);
-      alert("確認接手失敗，請重新整理頁面。");
     }
   };
+
+  const soundTone: CanvasTone = soundBlocked
+    ? "warn"
+    : soundOff
+      ? "warn"
+      : "success";
+  const soundLabel = soundBlocked
+    ? "提示音受阻"
+    : soundOff
+      ? "提示音未啟用"
+      : "提示音已啟用";
+  const soundCode = soundBlocked
+    ? "sound_blocked"
+    : soundOff
+      ? "sound_off"
+      : "sound_on";
+
+  const soundNotice: NoticeState = soundBlocked
+    ? {
+        tone: "warn",
+        title: "瀏覽器尚未允許 SOS 提示音",
+        body: "視覺警示仍會持續顯示；請點一次提示音晶片啟用瀏覽器音訊。",
+      }
+    : soundOff
+      ? {
+          tone: "warn",
+          title: "SOS 提示音尚未啟用",
+          body: "啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。",
+        }
+      : null;
 
   return (
     <div
       style={{ position: "relative", minHeight: "100%", background: theme.bg }}
     >
-      {/* Background Page Body */}
       <div
         style={{
           opacity: pendingAlert ? 0.35 : 1,
@@ -270,17 +318,15 @@ export default function SosQueuePage() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span>SOS 緊急事件</span>
               <Pill theme={theme} tone="danger" dot>
-                {rows.filter((r) => r.hl).length} 件待確認
+                {pendingCount} 件待確認
               </Pill>
             </div>
           }
-          subtitle="線上通報 p95 ≤ 5 秒送達值班端 · 先確認者取得處理權"
+          subtitle="線上通報 p95 ≤ 5 秒送達值班端 · 重大事件以持續警示顯示 · 先確認者取得處理權"
           actions={
-            <div style={{ display: "flex", gap: 8 }}>
-              <Btn theme={theme} icon="filter">
-                篩選
-              </Btn>
-            </div>
+            <Btn theme={theme} icon="filter">
+              篩選
+            </Btn>
           }
         />
 
@@ -292,13 +338,13 @@ export default function SosQueuePage() {
             gap: 14,
           }}
         >
-          {soundOff && (
+          {soundNotice ? (
             <Banner
               theme={theme}
-              tone="warn"
+              tone={soundNotice.tone}
               icon="warn"
-              title="SOS 提示音尚未啟用"
-              body="請點此啟用瀏覽器提示音。啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。"
+              title={soundNotice.title}
+              body={soundNotice.body}
               actions={
                 <Btn
                   theme={theme}
@@ -306,51 +352,63 @@ export default function SosQueuePage() {
                   variant="primary"
                   onClick={toggleSound}
                 >
-                  啟用提示音
+                  {soundOff ? "啟用提示音" : "重新檢查提示音"}
                 </Btn>
               }
             />
-          )}
+          ) : null}
 
-          {errorMsg && (
+          {loadError ? (
             <Banner
               theme={theme}
               tone="danger"
               icon="warn"
               title="系統錯誤"
-              body={errorMsg}
+              body={loadError}
             />
-          )}
+          ) : null}
+
+          {notice ? (
+            <Banner
+              theme={theme}
+              tone={notice.tone}
+              icon={notice.tone === "success" ? "check" : "warn"}
+              title={notice.title}
+              body={notice.body}
+            />
+          ) : null}
 
           <Card
             theme={theme}
             padding={0}
-            title="SOS 佇列"
+            title={loading ? "載入中..." : "SOS 佇列"}
             actions={
-              <div
+              <button
+                type="button"
+                onClick={() => {
+                  void toggleSound();
+                }}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  paddingRight: 12,
+                  border: 0,
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 12,
                 }}
               >
-                <div onClick={toggleSound} style={{ cursor: "pointer" }}>
-                  <Pill theme={theme} tone={!soundOff ? "success" : "warn"} dot>
-                    {!soundOff ? "提示音已啟用" : "提示音未啟用"}
-                    <span
-                      style={{
-                        marginLeft: 4,
-                        opacity: 0.6,
-                        fontFamily: theme.monoFamily,
-                        fontSize: 9,
-                      }}
-                    >
-                      {!soundOff ? "sound_on" : "sound_off"}
-                    </span>
-                  </Pill>
-                </div>
-              </div>
+                <Pill theme={theme} tone={soundTone} dot>
+                  {soundLabel}
+                  <span
+                    style={{
+                      marginLeft: 4,
+                      opacity: 0.6,
+                      fontFamily: theme.monoFamily,
+                      fontSize: 9,
+                    }}
+                  >
+                    {soundCode}
+                  </span>
+                </Pill>
+              </button>
             }
           >
             <Table
@@ -360,53 +418,61 @@ export default function SosQueuePage() {
                   h: "事件編號",
                   w: 170,
                   mono: true,
-                  r: (r: SosRow) => (
+                  r: (row: SosQueueRow) => (
                     <Link
-                      href={`/sos/${r.id}`}
+                      href={`/sos/${row.id}`}
                       style={{ textDecoration: "none" }}
                     >
                       <span
                         style={{
-                          color: r.hl ? theme.danger : theme.accent,
+                          color: row.highlight ? theme.danger : theme.accent,
                           fontWeight: 700,
-                          cursor: "pointer",
                         }}
                       >
-                        {r.no}
+                        {row.eventNo}
                       </span>
                     </Link>
                   ),
                 },
                 {
                   h: "狀態",
-                  w: 120,
-                  r: (r: SosRow) => (
-                    <Pill theme={theme} tone={r.tone} dot>
-                      {r.status}
+                  w: 110,
+                  r: (row: SosQueueRow) => (
+                    <Pill theme={theme} tone={row.statusTone} dot>
+                      {row.statusLabel}
                     </Pill>
                   ),
                 },
                 {
                   h: "等待",
-                  w: 70,
+                  w: 92,
                   mono: true,
-                  r: (r: SosRow) => (
+                  r: (row: SosQueueRow) => (
                     <span
                       style={{
-                        color: r.hl ? theme.danger : theme.text,
-                        fontWeight: r.hl ? 700 : 400,
+                        color: row.highlight ? theme.danger : theme.text,
+                        fontWeight: row.highlight ? 700 : 400,
                       }}
                     >
-                      {r.wait}
+                      {row.waitLabel}
                     </span>
                   ),
                 },
-                { h: "駕駛", k: "driver", w: 100 },
-                { h: "車牌", k: "plate", w: 110, mono: true },
-                { h: "行程", k: "order", w: 160, mono: true },
-                { h: "位置", k: "loc", w: 220 },
-                { h: "事件類型", k: "type", w: 100 },
-                { h: "值班確認人", k: "ack", w: 110 },
+                { h: "駕駛", k: "driverLabel", w: 110 },
+                { h: "車牌", k: "plateLabel", w: 108, mono: true },
+                { h: "行程", k: "orderLabel", w: 158, mono: true },
+                { h: "位置", k: "locationLabel", w: 220 },
+                { h: "事件類型", k: "typeLabel", w: 110 },
+                {
+                  h: "嚴重度",
+                  w: 92,
+                  r: (row: SosQueueRow) => (
+                    <Pill theme={theme} tone={row.severityTone}>
+                      {row.severityLabel}
+                    </Pill>
+                  ),
+                },
+                { h: "值班確認人", k: "ackLabel", w: 124 },
               ]}
               rows={rows}
             />
@@ -414,8 +480,7 @@ export default function SosQueuePage() {
         </div>
       </div>
 
-      {/* O01 · Critical Alert Overlay */}
-      {pendingAlert && (
+      {pendingAlert ? (
         <div
           style={{
             position: "absolute",
@@ -431,20 +496,19 @@ export default function SosQueuePage() {
             zIndex: 9999,
           }}
         >
-          {/* Header */}
           <div
             style={{
               background: theme.danger,
-              color: "#ffffff",
+              color: theme.invert,
               padding: "10px 16px",
               display: "flex",
               alignItems: "center",
               gap: 10,
             }}
           >
-            <span style={{ fontSize: 16, display: "inline-flex" }}>⚠️</span>
+            <span style={{ fontSize: 16 }}>⚠️</span>
             <span style={{ fontSize: 14.5, fontWeight: 800, flex: 1 }}>
-              SOS 緊急通報 · 待確認
+              SOS 緊急通報 · 重大事件待確認
             </span>
             <span
               style={{
@@ -453,11 +517,10 @@ export default function SosQueuePage() {
                 fontWeight: 700,
               }}
             >
-              已等待 {pendingAlert.wait}
+              已等待 {pendingAlert.waitLabel}
             </span>
           </div>
 
-          {/* Body */}
           <div style={{ padding: 16 }}>
             <div
               style={{
@@ -475,40 +538,43 @@ export default function SosQueuePage() {
                   color: theme.danger,
                 }}
               >
-                {pendingAlert.no}
+                {pendingAlert.eventNo}
               </span>
               <Pill theme={theme} tone="danger" dot>
-                {pendingAlert.type} · 重大
+                {pendingAlert.typeLabel} · {pendingAlert.severityLabel}
               </Pill>
               <span style={{ flex: 1 }} />
-              <div onClick={toggleSound} style={{ cursor: "pointer" }}>
-                <Pill theme={theme} tone={!soundOff ? "success" : "warn"} dot>
-                  {!soundOff ? "提示音已啟用" : "提示音未啟用"}
+              <button
+                type="button"
+                onClick={() => {
+                  void toggleSound();
+                }}
+                style={{
+                  border: 0,
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                <Pill theme={theme} tone={soundTone} dot>
+                  {soundLabel}
                 </Pill>
-              </div>
+              </button>
             </div>
 
             <DL
               theme={theme}
               cols={3}
               items={[
-                { k: "駕駛", v: pendingAlert.driver },
-                { k: "車牌", v: pendingAlert.plate, mono: true },
-                { k: "行程", v: pendingAlert.order, mono: true },
-                { k: "位置", v: pendingAlert.loc },
-                {
-                  k: "觸發時間",
-                  v: new Date(
-                    pendingAlert.originalRecord.occurredAt ||
-                      pendingAlert.originalRecord.createdAt,
-                  ).toLocaleTimeString("zh-TW"),
-                  mono: true,
-                },
-                { k: "附件", v: "照片 2 · 語音 1" },
+                { k: "駕駛", v: pendingAlert.driverLabel },
+                { k: "車牌", v: pendingAlert.plateLabel, mono: true },
+                { k: "行程", v: pendingAlert.orderLabel, mono: true },
+                { k: "位置", v: pendingAlert.locationLabel },
+                { k: "嚴重度", v: pendingAlert.severityLabel },
+                { k: "觸發時間", v: pendingAlert.occurredAtLabel, mono: true },
               ]}
             />
 
-            {/* Actions */}
             <div
               style={{
                 display: "flex",
@@ -520,9 +586,10 @@ export default function SosQueuePage() {
               <Btn
                 theme={theme}
                 variant="primary"
+                icon="check"
                 onClick={() => void handleAcknowledge(pendingAlert.id)}
               >
-                確認接手 · Acknowledge
+                確認接手
               </Btn>
               <Btn
                 theme={theme}
@@ -531,13 +598,13 @@ export default function SosQueuePage() {
                 開啟詳情
               </Btn>
               <span style={{ flex: 1 }} />
-              <span style={{ fontSize: 11, color: theme.textDim }}>
-                此警示不會自動消失
+              <span style={{ fontSize: 10.5, color: theme.textDim }}>
+                此警示不會自動消失，直到重大事件被值班人員確認。
               </span>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
