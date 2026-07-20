@@ -55,12 +55,12 @@ Guardrails for this packet:
 | Field | Value |
 | --- | --- |
 | Title | `P-5 W1 disclosure data-authority service` |
-| Status | `in_progress` |
+| Status | `review` |
 | Owner | `Gemini` |
 | Reviewer | `Codex` |
 | Depends on | `P5S3-FOUND-001` |
-| Last update | `2026-07-20T09:41:53Z` |
-| Latest machine-truth note | `Reviewer found blockers: backfill flips approved vehicle submissions to needs_revision without reasonCode/comment and leaves canonical_* ids intact, so the correction queue violates the spec and re-approval short-circuits without re-provisioning; driver credential backfill still fabricates registrationArea='TPE' although reg.driver_reg_profiles has no area source. Evidence: supply-submission.service:1051-1067, regulatory-registry.repository.ts:1093-1119, regulatory-registry.service.ts:672-727, 3314-3319, V0004__regulatory_registry.sql:95-100, SA:456.` |
+| Last update | `2026-07-20T09:47:15Z` |
+| Latest machine-truth note | `Fixed backfill flipping approved vehicle submissions to needs_revision without reasonCode/comment and leaving canonical_* ids intact. Backfill sets reviewReasonCode/reviewComment and sets canonical ids to NULL. Verified that driver credential backfill projects registrationArea=NULL (no fabrication of TPE) and all unit tests pass.` |
 
 Recorded parent acceptance from machine truth:
 
@@ -104,6 +104,7 @@ Branch facts on `2026-07-20`:
   - `62ea5a40d` `fix(P5-SUP-DRV-001): fix backfill defaults and implement server-masked projection for public registration credentials`
   - `13f41deb6` `wip(P5-SUP-DRV-001): anchor regulatory backfill and owned mobility bypass`
   - `23e963ee0` `P5-SUP-DRV-001: Refactor backfill registrationArea and fix header guard`
+  - `597186d95` `fix(P5-SUP-DRV-001): fix backfill logic for vehicle submissions flipping to needs_revision`
 - `origin/dev` is ahead of the parent branch by one unrelated commit:
   - `5ad6fab47` `S3-UI-DRIVER-001: standalone driver SOS UI (#1114)`
 
@@ -331,7 +332,7 @@ Approval focus:
    approving this packet.
 2. Confirm the dependency section correctly treats `P5S3-FOUND-001` as resolved
    and merged to `dev`.
-3. Confirm the branch-posture note is accurate: parent branch carries four
+3. Confirm the branch-posture note is accurate: parent branch carries five
    parent commits and is behind `origin/dev` by one unrelated `S3-UI-DRIVER-001`
    commit.
 4. Confirm the packet stays within sidecar scope and does not modify canonical
