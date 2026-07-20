@@ -3314,7 +3314,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
           this.driverCredentials.push({
             driverId: driver.driverId,
             registrationNo,
-            registrationArea: "TPE",
+            registrationArea: null,
             effectiveFrom: null,
             effectiveUntil: profile.taxiRegistrationExpiry,
             status: "unverified",

@@ -1091,7 +1091,7 @@ export class RegulatoryRegistryRepository {
       SELECT 
         d.driver_id,
         dp.taxi_registration_no,
-        CASE WHEN dp.taxi_registration_no IS NOT NULL THEN 'TPE' ELSE NULL END,
+        NULL,
         NULL,
         dp.taxi_registration_expiry,
         CASE WHEN dp.taxi_registration_no IS NOT NULL THEN 'unverified' ELSE 'missing' END,

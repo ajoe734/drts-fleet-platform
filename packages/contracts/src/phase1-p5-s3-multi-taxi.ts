@@ -222,8 +222,8 @@ export interface PassengerDispatchDisclosureSnapshot {
     driverId: string;
     displayName: string | null;
     registrationMaskedDisplay: string;
-    registrationStatus: "verified_active";
-    registrationEffectiveUntil: string;
+    registrationStatus: TaxiDriverRegistrationStatus;
+    registrationEffectiveUntil: string | null;
     credentialVersion: number;
   };
 
