@@ -1,7 +1,9 @@
-# Phase 1 · P-5 / S-3 · 多元計程車 (multi_taxi_direct) Spec Pack
+# Phase 1 · P-5 / S-3 · 智行叫車 (multi_taxi_direct) Spec Pack
 
 **Archived:** 2026-07-20
-**Runtime profile introduced:** `multi_taxi_direct`（產品名：**智行叫車** / 多元計程車，預約制）
+**Runtime profile introduced:** `multi_taxi_direct` · **產品名（canonical）：智行叫車**（多元計程車類，預約制）
+> Product identity is `智行叫車` per the source spec §2 (`displayName: 智行叫車`).
+> `多元計程車` is the service *category*, not the product name.
 **Repo / Branch:** `drts-fleet-platform` / `dev`
 
 This pack captures the Phase-1 requirement set for two net-new domains and the
@@ -30,21 +32,27 @@ passenger read model and the S-3 SOS projection. See §1.3 of the UI brief and
 
 | File | Role |
 |---|---|
-| `00_source_specs_index.md` | Catalogue of the three inbound handoff docs + the normative enums/DDL/WP codes they define (verbatim ASCII). |
-| `03_gap_closure_implementation_plan.md` | **Primary deliverable** — current-state audit vs spec, reconciliation with the live schema, and a sequenced, work-package-mapped implementation plan for P-5 and S-3. |
-| `manifest.json` | Machine-readable index. |
+| **`source_specs/`** | **Canonical source of truth** — full byte-for-byte UTF-8 originals of the three handoff docs + `source_manifest.json` (SHA-256). Defer to these for anything. |
+| `00_source_specs_index.md` | **DERIVED** navigation index (summaries + verbatim ASCII code blocks). Not authoritative. |
+| `03_gap_closure_implementation_plan.md` | Current-state audit vs spec, schema reconciliation, and the sequenced, WP-mapped implementation plan. |
+| `manifest.json` | Machine-readable pack index. |
 
-## Source documents (inbound handoffs)
+## Source documents (inbound handoffs) — canonical
 
-1. `01_system_development_team_spec_20260720.md` (v2.0) — system dev requirements.
-2. `02_ui_visual_design_team_brief_20260720.md` (v2.0) — UI/UX visual brief.
-3. `03_cross_team_handoff_matrix_20260720.md` — ownership + field/state/error mapping + gates.
+The full clean UTF-8 originals are archived under [`source_specs/`](source_specs/):
 
-> The raw source docs were received as UTF-8-over-Latin-1 (mojibake) attachments;
-> their **normative ASCII content** (TypeScript types, SQL DDL, enum values, API
-> routes, work-package codes) is reproduced faithfully in `00_source_specs_index.md`
-> and in the plan. The Chinese prose originals should be dropped into this folder
-> in clean UTF-8 by the spec owner to complete the archive.
+1. `source_specs/01_system_development_team_spec_20260720.md` (v2.0) — system dev requirements.
+2. `source_specs/02_ui_visual_design_team_brief_20260720.md` (v2.0) — UI/UX visual brief.
+3. `source_specs/03_cross_team_handoff_matrix_20260720.md` — ownership + field/state/error mapping + gates.
+
+> **Provenance note.** The initial ingest (PR #1107) received these as
+> UTF-8-over-Latin-1 (mojibake) attachments and — incorrectly — archived only a
+> derived summary, deferring the originals. The byte-for-byte clean originals
+> (verified against the visual team's export; SHA-256 in
+> `source_specs/source_manifest.json`) were recovered and are now the canonical
+> archive. The `Spec source archive` CI gate (`scripts/check_spec_source_archive.py`)
+> enforces their presence, strict-UTF-8 decoding, and hash integrity so a derived
+> summary can never again stand in for the source.
 
 ## UI ownership
 

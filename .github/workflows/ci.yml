@@ -64,6 +64,14 @@ jobs:
         if: steps.ctx.outputs.skip == 'true'
         run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered dev.)"
 
+  spec-source-archive:
+    name: Spec source archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify archived source specs are full UTF-8 originals (not derived summaries)
+        run: python3 scripts/check_spec_source_archive.py
+
   bff-only-imports:
     name: BFF-only imports
     runs-on: ubuntu-latest
