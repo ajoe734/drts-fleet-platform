@@ -3906,7 +3906,7 @@ export class ApiClient {
   ) {
     return this.post<SubmitDriverSosEventResult>("/api/driver/sos-events", {
       body: command,
-      headers: options?.headers,
+      ...(options?.headers ? { headers: options.headers } : {}),
     });
   }
 
