@@ -14,6 +14,7 @@ const PA_NAV = [
   { key: 'sandbox',      icon: 'governance',  label: 'FSD 沙盒治理 · Sandbox', badge: '1', badgeTone: 'warn' },
   { divider: '服務網治理 · Service Network' },
   { key: 'service-area', icon: 'tracking',    label: '服務區治理 · Service Areas' },
+  { key: 'p5-disclosure',icon: 'vehicles',    label: '智行叫車 · P-5 揭露', badge: '3', badgeTone: 'warn' },
   { divider: '人員與車隊 · People & Fleet' },
   { key: 'users',        icon: 'users',       label: '平台人員 · Users' },
   { key: 'fleet',        icon: 'fleet',       label: '車隊與法遵 · Fleet & Compliance' },
