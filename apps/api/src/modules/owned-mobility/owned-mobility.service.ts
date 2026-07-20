@@ -4253,8 +4253,26 @@ export class OwnedMobilityService implements OnModuleInit {
     runtimeProfileCodeHeader?: string,
     isBooking = false,
   ) {
-    const profileCode = runtimeProfileCodeHeader || command.runtimeProfileCode;
+    if (
+      runtimeProfileCodeHeader &&
+      command &&
+      command.runtimeProfileCode &&
+      runtimeProfileCodeHeader !== command.runtimeProfileCode
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "RUNTIME_PROFILE_CONFLICT",
+        "Conflicting runtime profile code in header and body.",
+      );
+    }
+
+    const profileCode =
+      runtimeProfileCodeHeader || (command && command.runtimeProfileCode);
     if (profileCode === "multi_taxi_direct") {
+      if (command) {
+        command.runtimeProfileCode = "multi_taxi_direct";
+      }
+
       if (!isBooking) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,

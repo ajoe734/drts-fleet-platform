@@ -1,13 +1,10 @@
 {
-  "generatedAt": "2026-07-20T08:46:12.436Z",
-  "branchSha": "gemini/p5-sup-drv-001@e9b2676f176d",
+  "generatedAt": "2026-07-20T09:26:51.591Z",
+  "branchSha": "gemini/p5-sup-drv-001@13f41deb62cc",
   "closeoutTask": "FLEETS-CLOSEOUT-004",
   "scope": "repo-local Ops map model evidence; final E2E-MAP-006 promotion composes this model with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, backend/API readbacks, and MAP-OBS-001 final evidence.",
   "command": "pnpm exec vitest run tests/unit/map-geofence-ops-visibility-proof.test.ts --reporter=verbose",
-  "sameOrderIdsAsCallcenterProof": [
-    "ORD-SMOKE-001",
-    "ORD-MAP-MANUAL-001"
-  ],
+  "sameOrderIdsAsCallcenterProof": ["ORD-SMOKE-001", "ORD-MAP-MANUAL-001"],
   "opsBoard": {
     "providerStatus": "degraded_projection",
     "fallbackReason": "missing_coordinates",
@@ -19,9 +16,7 @@
       "ordersMissingPickupCoordinates": 0
     },
     "overlays": {
-      "serviceAreaCodes": [
-        "TAIPEI_CORE"
-      ],
+      "serviceAreaCodes": ["TAIPEI_CORE"],
       "policyCodes": [
         "PICKUP_ZONE_A",
         "DROPOFF_ZONE_B",
@@ -31,13 +26,8 @@
         "service_area:TAIPEI_CORE@1",
         "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
       ],
-      "reasonCodes": [
-        "STOP_REQUIRES_MANUAL_REVIEW"
-      ],
-      "decisions": [
-        "serviceable",
-        "manual_review"
-      ]
+      "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+      "decisions": ["serviceable", "manual_review"]
     },
     "points": [
       {

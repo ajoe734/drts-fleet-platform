@@ -1632,4 +1632,60 @@ describe("owned mobility service", () => {
       }),
     );
   });
+
+  it("enforces multi_taxi_direct guard on conflicting header/body and body-only inputs", async () => {
+    const { ownedMobilityService } = createService();
+
+    // 1. Conflicting body and header should throw 409 Conflict (RUNTIME_PROFILE_CONFLICT)
+    const conflictingCommand = {
+      pickup: { address: "Pickup St" },
+      dropoff: { address: "Dropoff St" },
+      passenger: { name: "Test" },
+      runtimeProfileCode: "taxi_direct",
+    } as any;
+
+    await expect(async () => {
+      ownedMobilityService.createPassengerOrder(
+        conflictingCommand,
+        null,
+        "req-123",
+        "multi_taxi_direct",
+      );
+    }).rejects.toThrowError(
+      expect.objectContaining({
+        status: 409,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "RUNTIME_PROFILE_CONFLICT",
+          }),
+        }),
+      }),
+    );
+
+    // 2. Body-only multi_taxi_direct should still trigger reservation-only guard and fail with 409 RESERVATION_ONLY_PROFILE
+    const bodyOnlyCommand = {
+      pickup: { address: "Pickup St" },
+      dropoff: { address: "Dropoff St" },
+      passenger: { name: "Test" },
+      runtimeProfileCode: "multi_taxi_direct",
+    } as any;
+
+    await expect(async () => {
+      ownedMobilityService.createPassengerOrder(
+        bodyOnlyCommand,
+        null,
+        "req-123",
+        undefined,
+      );
+    }).rejects.toThrowError(
+      expect.objectContaining({
+        status: 409,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "RESERVATION_ONLY_PROFILE",
+          }),
+        }),
+      }),
+    );
+  });
 });

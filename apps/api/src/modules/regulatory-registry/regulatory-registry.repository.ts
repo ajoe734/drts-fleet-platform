@@ -1110,6 +1110,12 @@ export class RegulatoryRegistryRepository {
     `);
 
     await this.databaseService!.query(`
+      UPDATE reg.driver_public_registration_credentials
+      SET registration_area = NULL
+      WHERE registration_area = 'TPE' AND source_submission_id IS NULL;
+    `);
+
+    await this.databaseService!.query(`
       UPDATE fleet.supply_submissions s
       SET status = 'needs_revision',
           updated_at = now()

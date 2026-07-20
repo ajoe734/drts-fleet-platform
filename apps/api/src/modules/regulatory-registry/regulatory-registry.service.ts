@@ -3322,6 +3322,12 @@ export class RegulatoryRegistryService implements OnModuleInit {
   }
 
   private runInMemoryIdempotentBackfill() {
+    for (const cred of this.driverCredentials) {
+      if (cred.sourceSubmissionId === null && cred.registrationArea === "TPE") {
+        cred.registrationArea = null;
+      }
+    }
+
     const regProfiles = [
       {
         driverId: "drv-demo-001",

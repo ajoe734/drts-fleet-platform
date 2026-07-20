@@ -61,14 +61,11 @@
         "selectedAt": "2026-07-08T12:01:00.000Z",
         "surface": "callcenter"
       },
-      "complianceFlags": [
-        "recording_bound",
-        "service_area_serviceable"
-      ],
+      "complianceFlags": ["recording_bound", "service_area_serviceable"],
       "spatialAudit": {
         "snapshotId": "snapshot-map-qa-shared-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-20T08:47:49.312Z",
+        "capturedAt": "2026-07-20T09:28:31.994Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-MAP-QA-001",
         "actorType": "ops_user",
@@ -128,7 +125,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-20T08:47:49.311Z",
+          "evaluatedAt": "2026-07-20T09:28:31.993Z",
           "stops": [
             {
               "kind": "pickup",
@@ -136,13 +133,9 @@
                 "lat": 25.0375,
                 "lng": 121.5637
               },
-              "serviceAreaCodes": [
-                "TAIPEI_CORE"
-              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
               "policyCodes": [],
-              "geometryVersionRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
@@ -153,33 +146,21 @@
                 "lat": 25.0438,
                 "lng": 121.5601
               },
-              "serviceAreaCodes": [
-                "TAIPEI_CORE"
-              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
               "policyCodes": [],
-              "geometryVersionRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
             }
           ],
-          "serviceAreaCodes": [
-            "TAIPEI_CORE"
-          ],
-          "geometryVersionRefs": [
-            "service_area:TAIPEI_CORE@1"
-          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
+          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
           "reasonCodes": [],
           "reasonMessages": []
         },
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
-        "geometryVersionRefs": [
-          "service_area:TAIPEI_CORE@1"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
         "reasonCodes": [],
         "reasonMessages": [],
         "missingItems": [],
@@ -200,9 +181,7 @@
         "required": true,
         "blocking": false,
         "evidenceState": "verified",
-        "evidenceRefs": [
-          "service_area:TAIPEI_CORE@1"
-        ],
+        "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
         "missingItems": [],
         "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
         "reviewerLabel": null,
@@ -277,7 +256,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-07-20T08:47:49.289Z"
+            "calculatedAt": "2026-07-20T09:28:31.954Z"
           },
           "callId": "CALL-MAP-QA-SHARED-001",
           "recordingId": "REC-MAP-QA-SHARED-001",
@@ -309,10 +288,7 @@
           },
           "approvalState": "not_required",
           "approvalRequestIds": [],
-          "complianceFlags": [
-            "recording_bound",
-            "service_area_serviceable"
-          ],
+          "complianceFlags": ["recording_bound", "service_area_serviceable"],
           "cancelledAt": null,
           "cancelReason": null,
           "mapFallbackReview": null,
@@ -323,12 +299,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-20T08:47:49.289Z",
-          "updatedAt": "2026-07-20T08:47:49.289Z",
+          "createdAt": "2026-07-20T09:28:31.954Z",
+          "updatedAt": "2026-07-20T09:28:31.954Z",
           "spatialAudit": {
             "snapshotId": "snapshot-map-qa-shared-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-20T08:47:49.312Z",
+            "capturedAt": "2026-07-20T09:28:31.994Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-MAP-QA-001",
             "actorType": "ops_user",
@@ -388,7 +364,7 @@
             "serviceAreaEvaluation": {
               "decision": "serviceable",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-07-20T08:47:49.311Z",
+              "evaluatedAt": "2026-07-20T09:28:31.993Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -396,13 +372,9 @@
                     "lat": 25.0375,
                     "lng": 121.5637
                   },
-                  "serviceAreaCodes": [
-                    "TAIPEI_CORE"
-                  ],
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
                   "policyCodes": [],
-                  "geometryVersionRefs": [
-                    "service_area:TAIPEI_CORE@1"
-                  ],
+                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
                   "decision": "serviceable",
                   "reasonCodes": [],
                   "reasonMessages": []
@@ -413,33 +385,21 @@
                     "lat": 25.0438,
                     "lng": 121.5601
                   },
-                  "serviceAreaCodes": [
-                    "TAIPEI_CORE"
-                  ],
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
                   "policyCodes": [],
-                  "geometryVersionRefs": [
-                    "service_area:TAIPEI_CORE@1"
-                  ],
+                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
                   "decision": "serviceable",
                   "reasonCodes": [],
                   "reasonMessages": []
                 }
               ],
-              "serviceAreaCodes": [
-                "TAIPEI_CORE"
-              ],
-              "geometryVersionRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
               "reasonCodes": [],
               "reasonMessages": []
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
-            "geometryVersionRefs": [
-              "service_area:TAIPEI_CORE@1"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
             "reasonCodes": [],
             "reasonMessages": [],
             "missingItems": [],
@@ -461,9 +421,7 @@
               "required": true,
               "blocking": false,
               "evidenceState": "verified",
-              "evidenceRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
               "missingItems": [],
               "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
               "reviewerLabel": null,
@@ -494,9 +452,7 @@
               "required": true,
               "blocking": false,
               "evidenceState": "verified",
-              "evidenceRefs": [
-                "REC-MAP-QA-SHARED-001"
-              ],
+              "evidenceRefs": ["REC-MAP-QA-SHARED-001"],
               "missingItems": [],
               "nextAction": "Recording has been bound to the phone order.",
               "reviewerLabel": "callcenter / ops compliance",
@@ -531,7 +487,7 @@
           "orderId": "ORD-MAP-QA-SHARED-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-20T08:47:49.315Z",
+          "createdAt": "2026-07-20T09:28:31.997Z",
           "details": {
             "callId": "CALL-MAP-QA-SHARED-001",
             "recordingId": "REC-MAP-QA-SHARED-001",
@@ -557,12 +513,8 @@
         "decision": "serviceable",
         "surface": "callcenter",
         "serviceProductType": "taxi_realtime",
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
-        "geometryVersionRefs": [
-          "service_area:TAIPEI_CORE@1"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
         "reasonCodes": [],
         "missingItems": [],
         "provenanceComplete": true
@@ -615,18 +567,12 @@
         "required": true,
         "blocking": false,
         "evidenceState": "submitted",
-        "evidenceRefs": [
-          "map_provider_unavailable",
-          "request_failed"
-        ],
+        "evidenceRefs": ["map_provider_unavailable", "request_failed"],
         "missingItems": [],
         "nextAction": "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
         "reviewerLabel": "callcenter / dispatch mapping",
         "overrideAllowed": true,
-        "overrideActors": [
-          "ops_user",
-          "platform_admin"
-        ],
+        "overrideActors": ["ops_user", "platform_admin"],
         "impacts": [
           {
             "stage": "dispatch",
@@ -648,7 +594,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-map-qa-outage-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-20T08:47:49.322Z",
+        "capturedAt": "2026-07-20T09:28:32.006Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-MAP-QA-001",
         "actorType": "ops_user",
@@ -682,7 +628,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-20T08:47:49.321Z",
+          "evaluatedAt": "2026-07-20T09:28:32.005Z",
           "stops": [
             {
               "kind": "pickup",
@@ -690,13 +636,9 @@
                 "lat": 25.0375,
                 "lng": 121.5637
               },
-              "serviceAreaCodes": [
-                "TAIPEI_CORE"
-              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
               "policyCodes": [],
-              "geometryVersionRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
@@ -707,33 +649,21 @@
                 "lat": 25.0438,
                 "lng": 121.5601
               },
-              "serviceAreaCodes": [
-                "TAIPEI_CORE"
-              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
               "policyCodes": [],
-              "geometryVersionRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
             }
           ],
-          "serviceAreaCodes": [
-            "TAIPEI_CORE"
-          ],
-          "geometryVersionRefs": [
-            "service_area:TAIPEI_CORE@1"
-          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
+          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
           "reasonCodes": [],
           "reasonMessages": []
         },
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
-        "geometryVersionRefs": [
-          "service_area:TAIPEI_CORE@1"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
         "reasonCodes": [],
         "reasonMessages": [],
         "missingItems": [],
@@ -784,7 +714,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-07-20T08:47:49.320Z"
+            "calculatedAt": "2026-07-20T09:28:32.005Z"
           },
           "callId": "CALL-MAP-QA-OUTAGE-001",
           "recordingId": "REC-MAP-QA-OUTAGE-001",
@@ -816,10 +746,7 @@
           },
           "approvalState": "not_required",
           "approvalRequestIds": [],
-          "complianceFlags": [
-            "recording_bound",
-            "service_area_serviceable"
-          ],
+          "complianceFlags": ["recording_bound", "service_area_serviceable"],
           "cancelledAt": null,
           "cancelReason": null,
           "mapFallbackReview": {
@@ -835,12 +762,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-20T08:47:49.320Z",
-          "updatedAt": "2026-07-20T08:47:49.320Z",
+          "createdAt": "2026-07-20T09:28:32.005Z",
+          "updatedAt": "2026-07-20T09:28:32.005Z",
           "spatialAudit": {
             "snapshotId": "snapshot-map-qa-outage-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-20T08:47:49.322Z",
+            "capturedAt": "2026-07-20T09:28:32.006Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-MAP-QA-001",
             "actorType": "ops_user",
@@ -874,7 +801,7 @@
             "serviceAreaEvaluation": {
               "decision": "serviceable",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-07-20T08:47:49.321Z",
+              "evaluatedAt": "2026-07-20T09:28:32.005Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -882,13 +809,9 @@
                     "lat": 25.0375,
                     "lng": 121.5637
                   },
-                  "serviceAreaCodes": [
-                    "TAIPEI_CORE"
-                  ],
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
                   "policyCodes": [],
-                  "geometryVersionRefs": [
-                    "service_area:TAIPEI_CORE@1"
-                  ],
+                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
                   "decision": "serviceable",
                   "reasonCodes": [],
                   "reasonMessages": []
@@ -899,33 +822,21 @@
                     "lat": 25.0438,
                     "lng": 121.5601
                   },
-                  "serviceAreaCodes": [
-                    "TAIPEI_CORE"
-                  ],
+                  "serviceAreaCodes": ["TAIPEI_CORE"],
                   "policyCodes": [],
-                  "geometryVersionRefs": [
-                    "service_area:TAIPEI_CORE@1"
-                  ],
+                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
                   "decision": "serviceable",
                   "reasonCodes": [],
                   "reasonMessages": []
                 }
               ],
-              "serviceAreaCodes": [
-                "TAIPEI_CORE"
-              ],
-              "geometryVersionRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
               "reasonCodes": [],
               "reasonMessages": []
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
-            "geometryVersionRefs": [
-              "service_area:TAIPEI_CORE@1"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
             "reasonCodes": [],
             "reasonMessages": [],
             "missingItems": [],
@@ -947,9 +858,7 @@
               "required": true,
               "blocking": false,
               "evidenceState": "verified",
-              "evidenceRefs": [
-                "service_area:TAIPEI_CORE@1"
-              ],
+              "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
               "missingItems": [],
               "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
               "reviewerLabel": null,
@@ -980,18 +889,12 @@
               "required": true,
               "blocking": false,
               "evidenceState": "submitted",
-              "evidenceRefs": [
-                "map_provider_unavailable",
-                "request_failed"
-              ],
+              "evidenceRefs": ["map_provider_unavailable", "request_failed"],
               "missingItems": [],
               "nextAction": "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
               "reviewerLabel": "callcenter / dispatch mapping",
               "overrideAllowed": true,
-              "overrideActors": [
-                "ops_user",
-                "platform_admin"
-              ],
+              "overrideActors": ["ops_user", "platform_admin"],
               "impacts": [
                 {
                   "stage": "dispatch",
@@ -1017,9 +920,7 @@
               "required": true,
               "blocking": false,
               "evidenceState": "verified",
-              "evidenceRefs": [
-                "REC-MAP-QA-OUTAGE-001"
-              ],
+              "evidenceRefs": ["REC-MAP-QA-OUTAGE-001"],
               "missingItems": [],
               "nextAction": "Recording has been bound to the phone order.",
               "reviewerLabel": "callcenter / ops compliance",
@@ -1054,7 +955,7 @@
           "orderId": "ORD-MAP-QA-OUTAGE-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-20T08:47:49.322Z",
+          "createdAt": "2026-07-20T09:28:32.007Z",
           "details": {
             "callId": "CALL-MAP-QA-OUTAGE-001",
             "recordingId": "REC-MAP-QA-OUTAGE-001",
@@ -1070,13 +971,8 @@
           "message": "Order requires manual review before dispatch.",
           "details": {
             "orderId": "ORD-MAP-QA-OUTAGE-001",
-            "gateTypes": [
-              "address_capture"
-            ],
-            "reasonCodes": [
-              "map_provider_unavailable",
-              "request_failed"
-            ],
+            "gateTypes": ["address_capture"],
+            "reasonCodes": ["map_provider_unavailable", "request_failed"],
             "missingItems": []
           },
           "retryable": false,
@@ -1093,13 +989,11 @@
       "status": "ready_for_dispatch",
       "queueFamily": "manual_review_queue",
       "queueEntryReason": "dispatch_manual_review_required",
-      "complianceFlags": [
-        "service_area_legacy_text_manual_review"
-      ],
+      "complianceFlags": ["service_area_legacy_text_manual_review"],
       "spatialAudit": {
         "snapshotId": "snapshot-map-qa-legacy-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-20T08:47:49.327Z",
+        "capturedAt": "2026-07-20T09:28:32.012Z",
         "capturedReason": "booking_creation",
         "actorId": null,
         "actorType": "referral_passenger",
@@ -1126,9 +1020,7 @@
               "surface": "passenger_entry"
             },
             "provenanceComplete": false,
-            "missingItems": [
-              "pickup_coordinates"
-            ]
+            "missingItems": ["pickup_coordinates"]
           },
           {
             "kind": "dropoff",
@@ -1149,9 +1041,7 @@
               "surface": "passenger_entry"
             },
             "provenanceComplete": false,
-            "missingItems": [
-              "dropoff_coordinates"
-            ]
+            "missingItems": ["dropoff_coordinates"]
           }
         ],
         "serviceAreaEvaluation": null,
@@ -1159,10 +1049,7 @@
         "geometryVersionRefs": [],
         "reasonCodes": [],
         "reasonMessages": [],
-        "missingItems": [
-          "pickup_coordinates",
-          "dropoff_coordinates"
-        ],
+        "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
         "auditEvents": [
           {
             "auditId": "audit-005",
@@ -1181,17 +1068,11 @@
         "blocking": false,
         "evidenceState": "missing",
         "evidenceRefs": [],
-        "missingItems": [
-          "pickup_coordinates",
-          "dropoff_coordinates"
-        ],
+        "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
         "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
         "reviewerLabel": "ops dispatch / service area",
         "overrideAllowed": true,
-        "overrideActors": [
-          "ops_user",
-          "platform_admin"
-        ],
+        "overrideActors": ["ops_user", "platform_admin"],
         "impacts": [
           {
             "stage": "dispatch",
@@ -1243,7 +1124,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 8,
-            "calculatedAt": "2026-07-20T08:47:49.326Z"
+            "calculatedAt": "2026-07-20T09:28:32.011Z"
           },
           "callId": null,
           "recordingId": null,
@@ -1275,9 +1156,7 @@
           },
           "approvalState": "not_required",
           "approvalRequestIds": [],
-          "complianceFlags": [
-            "service_area_legacy_text_manual_review"
-          ],
+          "complianceFlags": ["service_area_legacy_text_manual_review"],
           "cancelledAt": null,
           "cancelReason": null,
           "reservationHoldStatus": "none",
@@ -1287,12 +1166,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-20T08:47:49.326Z",
-          "updatedAt": "2026-07-20T08:47:49.326Z",
+          "createdAt": "2026-07-20T09:28:32.011Z",
+          "updatedAt": "2026-07-20T09:28:32.011Z",
           "spatialAudit": {
             "snapshotId": "snapshot-map-qa-legacy-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-20T08:47:49.327Z",
+            "capturedAt": "2026-07-20T09:28:32.012Z",
             "capturedReason": "booking_creation",
             "actorId": null,
             "actorType": "referral_passenger",
@@ -1319,9 +1198,7 @@
                   "surface": "passenger_entry"
                 },
                 "provenanceComplete": false,
-                "missingItems": [
-                  "pickup_coordinates"
-                ]
+                "missingItems": ["pickup_coordinates"]
               },
               {
                 "kind": "dropoff",
@@ -1342,9 +1219,7 @@
                   "surface": "passenger_entry"
                 },
                 "provenanceComplete": false,
-                "missingItems": [
-                  "dropoff_coordinates"
-                ]
+                "missingItems": ["dropoff_coordinates"]
               }
             ],
             "serviceAreaEvaluation": null,
@@ -1352,10 +1227,7 @@
             "geometryVersionRefs": [],
             "reasonCodes": [],
             "reasonMessages": [],
-            "missingItems": [
-              "pickup_coordinates",
-              "dropoff_coordinates"
-            ],
+            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
             "auditEvents": [
               {
                 "auditId": "audit-005",
@@ -1375,17 +1247,11 @@
               "blocking": false,
               "evidenceState": "missing",
               "evidenceRefs": [],
-              "missingItems": [
-                "pickup_coordinates",
-                "dropoff_coordinates"
-              ],
+              "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
               "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
               "reviewerLabel": "ops dispatch / service area",
               "overrideAllowed": true,
-              "overrideActors": [
-                "ops_user",
-                "platform_admin"
-              ],
+              "overrideActors": ["ops_user", "platform_admin"],
               "impacts": [
                 {
                   "stage": "dispatch",
@@ -1416,7 +1282,7 @@
           "orderId": "ORD-MAP-QA-LEGACY-001",
           "eventType": "order.ready_for_dispatch",
           "message": "order.ready_for_dispatch",
-          "createdAt": "2026-07-20T08:47:49.327Z",
+          "createdAt": "2026-07-20T09:28:32.013Z",
           "details": {
             "serviceBucket": "standard_taxi",
             "dispatchSemantics": "realtime"
@@ -1431,14 +1297,9 @@
           "message": "Order requires manual review before dispatch.",
           "details": {
             "orderId": "ORD-MAP-QA-LEGACY-001",
-            "gateTypes": [
-              "service_area"
-            ],
+            "gateTypes": ["service_area"],
             "reasonCodes": [],
-            "missingItems": [
-              "pickup_coordinates",
-              "dropoff_coordinates"
-            ]
+            "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
           },
           "retryable": false,
           "traceId": "misc-map-qa-2"
@@ -1453,7 +1314,7 @@
       "evaluation": {
         "decision": "not_serviceable",
         "serviceProductType": "taxi_realtime",
-        "evaluatedAt": "2026-07-20T08:47:49.329Z",
+        "evaluatedAt": "2026-07-20T09:28:32.017Z",
         "stops": [
           {
             "kind": "pickup",
@@ -1461,23 +1322,15 @@
               "lat": 25.0478,
               "lng": 121.517
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
-            "policyCodes": [
-              "TPE_STATION_PICKUP_BLOCK"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "policyCodes": ["TPE_STATION_PICKUP_BLOCK"],
             "geometryVersionRefs": [
               "service_area:TAIPEI_CORE@1",
               "stop_policy:TPE_STATION_PICKUP_BLOCK@1"
             ],
             "decision": "not_serviceable",
-            "reasonCodes": [
-              "PICKUP_NOT_ALLOWED"
-            ],
-            "reasonMessages": [
-              "Pickup is not allowed at this curb zone."
-            ]
+            "reasonCodes": ["PICKUP_NOT_ALLOWED"],
+            "reasonMessages": ["Pickup is not allowed at this curb zone."]
           },
           {
             "kind": "dropoff",
@@ -1485,31 +1338,21 @@
               "lat": 25.06,
               "lng": 121.58
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
             "policyCodes": [],
-            "geometryVersionRefs": [
-              "service_area:TAIPEI_CORE@1"
-            ],
+            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
             "decision": "serviceable",
             "reasonCodes": [],
             "reasonMessages": []
           }
         ],
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
         "geometryVersionRefs": [
           "service_area:TAIPEI_CORE@1",
           "stop_policy:TPE_STATION_PICKUP_BLOCK@1"
         ],
-        "reasonCodes": [
-          "PICKUP_NOT_ALLOWED"
-        ],
-        "reasonMessages": [
-          "Pickup is not allowed at this curb zone."
-        ]
+        "reasonCodes": ["PICKUP_NOT_ALLOWED"],
+        "reasonMessages": ["Pickup is not allowed at this curb zone."]
       },
       "auditEvent": {
         "auditId": "audit-001",
@@ -1526,18 +1369,10 @@
         "newValuesSummary": {
           "decision": "not_serviceable",
           "serviceProductType": "taxi_realtime",
-          "reasonCodes": [
-            "PICKUP_NOT_ALLOWED"
-          ],
-          "reasonMessages": [
-            "Pickup is not allowed at this curb zone."
-          ],
-          "serviceAreaCodes": [
-            "TAIPEI_CORE"
-          ],
-          "policyCodes": [
-            "TPE_STATION_PICKUP_BLOCK"
-          ],
+          "reasonCodes": ["PICKUP_NOT_ALLOWED"],
+          "reasonMessages": ["Pickup is not allowed at this curb zone."],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
+          "policyCodes": ["TPE_STATION_PICKUP_BLOCK"],
           "geometryVersionRefs": [
             "service_area:TAIPEI_CORE@1",
             "stop_policy:TPE_STATION_PICKUP_BLOCK@1"
@@ -1574,9 +1409,7 @@
         "newValuesSummary": {
           "decision": "coordinate_less_attempt",
           "serviceProductType": "taxi_realtime",
-          "reasonCodes": [
-            "COORDINATE_LESS_ATTEMPT"
-          ],
+          "reasonCodes": ["COORDINATE_LESS_ATTEMPT"],
           "reasonMessages": [
             "Service-area evaluation requires pickup/dropoff coordinates."
           ],
@@ -1652,7 +1485,7 @@
         "stopPolicyRetiredCount": 0,
         "manualOverrideCount": 0
       },
-      "lastEventAt": "2026-07-20T08:47:49.329Z"
+      "lastEventAt": "2026-07-20T09:28:32.017Z"
     }
   },
   "geoSignals": {
@@ -1708,7 +1541,7 @@
         "provider": "mock",
         "mode": "mock",
         "failClosed": false,
-        "lastCheckedAt": "2026-07-20T08:47:49.338Z",
+        "lastCheckedAt": "2026-07-20T09:28:32.024Z",
         "quota": {
           "dailyLimit": null,
           "minuteLimit": null,
@@ -1769,7 +1602,7 @@
         "stopPolicyRetiredCount": 0,
         "manualOverrideCount": 0
       },
-      "lastEventAt": "2026-07-20T08:47:49.338Z"
+      "lastEventAt": "2026-07-20T09:28:32.024Z"
     }
   }
 }

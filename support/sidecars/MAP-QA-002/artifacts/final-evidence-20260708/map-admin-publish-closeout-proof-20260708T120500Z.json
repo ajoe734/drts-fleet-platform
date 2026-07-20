@@ -3,7 +3,7 @@
     "beforePublishDecision": {
       "decision": "not_serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-20T08:47:54.684Z",
+      "evaluatedAt": "2026-07-20T09:28:36.177Z",
       "stops": [
         {
           "kind": "pickup",
@@ -15,26 +15,18 @@
           "policyCodes": [],
           "geometryVersionRefs": [],
           "decision": "not_serviceable",
-          "reasonCodes": [
-            "PICKUP_AREA_NOT_SERVICEABLE"
-          ],
-          "reasonMessages": [
-            "pickup is outside the service area."
-          ]
+          "reasonCodes": ["PICKUP_AREA_NOT_SERVICEABLE"],
+          "reasonMessages": ["pickup is outside the service area."]
         }
       ],
       "serviceAreaCodes": [],
       "geometryVersionRefs": [],
-      "reasonCodes": [
-        "PICKUP_AREA_NOT_SERVICEABLE"
-      ],
-      "reasonMessages": [
-        "pickup is outside the service area."
-      ]
+      "reasonCodes": ["PICKUP_AREA_NOT_SERVICEABLE"],
+      "reasonMessages": ["pickup is outside the service area."]
     },
     "createdArea": {
       "record": {
-        "serviceAreaId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+        "serviceAreaId": "51a50116-8cce-49a5-9607-05504b2f348b",
         "areaCode": "KHH_CORE",
         "displayName": "Kaohsiung core operating area",
         "status": "draft",
@@ -59,17 +51,15 @@
             }
           ]
         },
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceProductTypes": ["taxi_realtime"],
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
         "effectiveUntil": null,
         "version": 1,
         "metadata": {
           "governanceDomain": "taxi_service_area"
         },
-        "createdAt": "2026-07-20T08:47:54.685Z",
-        "updatedAt": "2026-07-20T08:47:54.685Z"
+        "createdAt": "2026-07-20T09:28:36.178Z",
+        "updatedAt": "2026-07-20T09:28:36.178Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -78,7 +68,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.created",
         "resourceType": "service_area_boundary",
-        "resourceId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+        "resourceId": "51a50116-8cce-49a5-9607-05504b2f348b",
         "newValuesSummary": {
           "areaCode": "KHH_CORE",
           "status": "draft",
@@ -91,7 +81,7 @@
     },
     "reviewArea": {
       "record": {
-        "serviceAreaId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+        "serviceAreaId": "51a50116-8cce-49a5-9607-05504b2f348b",
         "areaCode": "KHH_CORE",
         "displayName": "Kaohsiung core operating area",
         "status": "review",
@@ -116,17 +106,15 @@
             }
           ]
         },
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceProductTypes": ["taxi_realtime"],
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
         "effectiveUntil": null,
         "version": 1,
         "metadata": {
           "governanceDomain": "taxi_service_area"
         },
-        "createdAt": "2026-07-20T08:47:54.685Z",
-        "updatedAt": "2026-07-20T08:47:54.687Z"
+        "createdAt": "2026-07-20T09:28:36.178Z",
+        "updatedAt": "2026-07-20T09:28:36.180Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -135,7 +123,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.submitted_for_review",
         "resourceType": "service_area_boundary",
-        "resourceId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+        "resourceId": "51a50116-8cce-49a5-9607-05504b2f348b",
         "newValuesSummary": {
           "areaCode": "KHH_CORE",
           "status": "review",
@@ -148,7 +136,7 @@
     },
     "publishedArea": {
       "record": {
-        "serviceAreaId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+        "serviceAreaId": "51a50116-8cce-49a5-9607-05504b2f348b",
         "areaCode": "KHH_CORE",
         "displayName": "Kaohsiung core operating area",
         "status": "active",
@@ -173,21 +161,19 @@
             }
           ]
         },
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceProductTypes": ["taxi_realtime"],
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
         "effectiveUntil": null,
         "version": 1,
         "metadata": {
           "governanceDomain": "taxi_service_area",
           "lifecycle": {
-            "publishedAt": "2026-07-20T08:47:54.688Z",
+            "publishedAt": "2026-07-20T09:28:36.181Z",
             "publishReason": "launch kaohsiung pilot"
           }
         },
-        "createdAt": "2026-07-20T08:47:54.685Z",
-        "updatedAt": "2026-07-20T08:47:54.688Z"
+        "createdAt": "2026-07-20T09:28:36.178Z",
+        "updatedAt": "2026-07-20T09:28:36.181Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -196,7 +182,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.published",
         "resourceType": "service_area_boundary",
-        "resourceId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+        "resourceId": "51a50116-8cce-49a5-9607-05504b2f348b",
         "newValuesSummary": {
           "areaCode": "KHH_CORE",
           "status": "active",
@@ -212,7 +198,7 @@
     "afterPublishDecision": {
       "decision": "serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-20T08:47:54.692Z",
+      "evaluatedAt": "2026-07-20T09:28:36.181Z",
       "stops": [
         {
           "kind": "pickup",
@@ -220,24 +206,16 @@
             "lat": 22.6273,
             "lng": 120.3014
           },
-          "serviceAreaCodes": [
-            "KHH_CORE"
-          ],
+          "serviceAreaCodes": ["KHH_CORE"],
           "policyCodes": [],
-          "geometryVersionRefs": [
-            "service_area:KHH_CORE@1"
-          ],
+          "geometryVersionRefs": ["service_area:KHH_CORE@1"],
           "decision": "serviceable",
           "reasonCodes": [],
           "reasonMessages": []
         }
       ],
-      "serviceAreaCodes": [
-        "KHH_CORE"
-      ],
-      "geometryVersionRefs": [
-        "service_area:KHH_CORE@1"
-      ],
+      "serviceAreaCodes": ["KHH_CORE"],
+      "geometryVersionRefs": ["service_area:KHH_CORE@1"],
       "reasonCodes": [],
       "reasonMessages": []
     },
@@ -248,7 +226,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.boundary.published",
       "resourceType": "service_area_boundary",
-      "resourceId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+      "resourceId": "51a50116-8cce-49a5-9607-05504b2f348b",
       "newValuesSummary": {
         "areaCode": "KHH_CORE",
         "status": "active",
@@ -264,7 +242,7 @@
   "effectiveWindowProof": {
     "futurePublishedArea": {
       "record": {
-        "serviceAreaId": "8eb6b2b8-05cc-4819-a98e-409dff277491",
+        "serviceAreaId": "93301e5a-0e1e-4c45-a8a8-befc3499d7a3",
         "areaCode": "CYI_CORE",
         "displayName": "Chiayi future operating area",
         "status": "active",
@@ -276,20 +254,18 @@
           },
           "radiusMeters": 2200
         },
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceProductTypes": ["taxi_realtime"],
         "effectiveFrom": "2026-08-01T00:00:00.000Z",
         "effectiveUntil": null,
         "version": 1,
         "metadata": {
           "lifecycle": {
-            "publishedAt": "2026-07-20T08:47:54.692Z",
+            "publishedAt": "2026-07-20T09:28:36.182Z",
             "publishReason": "scheduled launch"
           }
         },
-        "createdAt": "2026-07-20T08:47:54.692Z",
-        "updatedAt": "2026-07-20T08:47:54.692Z"
+        "createdAt": "2026-07-20T09:28:36.181Z",
+        "updatedAt": "2026-07-20T09:28:36.182Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -298,7 +274,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.published",
         "resourceType": "service_area_boundary",
-        "resourceId": "8eb6b2b8-05cc-4819-a98e-409dff277491",
+        "resourceId": "93301e5a-0e1e-4c45-a8a8-befc3499d7a3",
         "newValuesSummary": {
           "areaCode": "CYI_CORE",
           "status": "active",
@@ -314,7 +290,7 @@
     "beforeEffectiveDecision": {
       "decision": "not_serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-20T08:47:54.692Z",
+      "evaluatedAt": "2026-07-20T09:28:36.182Z",
       "stops": [
         {
           "kind": "pickup",
@@ -326,27 +302,19 @@
           "policyCodes": [],
           "geometryVersionRefs": [],
           "decision": "not_serviceable",
-          "reasonCodes": [
-            "PICKUP_AREA_NOT_SERVICEABLE"
-          ],
-          "reasonMessages": [
-            "pickup is outside the service area."
-          ]
+          "reasonCodes": ["PICKUP_AREA_NOT_SERVICEABLE"],
+          "reasonMessages": ["pickup is outside the service area."]
         }
       ],
       "serviceAreaCodes": [],
       "geometryVersionRefs": [],
-      "reasonCodes": [
-        "PICKUP_AREA_NOT_SERVICEABLE"
-      ],
-      "reasonMessages": [
-        "pickup is outside the service area."
-      ]
+      "reasonCodes": ["PICKUP_AREA_NOT_SERVICEABLE"],
+      "reasonMessages": ["pickup is outside the service area."]
     },
     "afterEffectiveDecision": {
       "decision": "serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-20T08:47:54.693Z",
+      "evaluatedAt": "2026-07-20T09:28:36.182Z",
       "stops": [
         {
           "kind": "pickup",
@@ -354,24 +322,16 @@
             "lat": 23.48,
             "lng": 120.45
           },
-          "serviceAreaCodes": [
-            "CYI_CORE"
-          ],
+          "serviceAreaCodes": ["CYI_CORE"],
           "policyCodes": [],
-          "geometryVersionRefs": [
-            "service_area:CYI_CORE@1"
-          ],
+          "geometryVersionRefs": ["service_area:CYI_CORE@1"],
           "decision": "serviceable",
           "reasonCodes": [],
           "reasonMessages": []
         }
       ],
-      "serviceAreaCodes": [
-        "CYI_CORE"
-      ],
-      "geometryVersionRefs": [
-        "service_area:CYI_CORE@1"
-      ],
+      "serviceAreaCodes": ["CYI_CORE"],
+      "geometryVersionRefs": ["service_area:CYI_CORE@1"],
       "reasonCodes": [],
       "reasonMessages": []
     }
@@ -379,7 +339,7 @@
   "versionOverlapRejection": {
     "firstVersion": {
       "record": {
-        "serviceAreaId": "3cecceb3-22fc-4f3e-8f15-b69089d7d7d6",
+        "serviceAreaId": "1109a9aa-053e-4638-a872-d3ed4eb7ec54",
         "areaCode": "VERSIONED_CORE",
         "displayName": "Versioned core first window",
         "status": "draft",
@@ -391,15 +351,13 @@
           },
           "radiusMeters": 1800
         },
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceProductTypes": ["taxi_realtime"],
         "effectiveFrom": "2026-01-01T00:00:00.000Z",
         "effectiveUntil": "2026-12-31T00:00:00.000Z",
         "version": 1,
         "metadata": {},
-        "createdAt": "2026-07-20T08:47:54.693Z",
-        "updatedAt": "2026-07-20T08:47:54.693Z"
+        "createdAt": "2026-07-20T09:28:36.182Z",
+        "updatedAt": "2026-07-20T09:28:36.182Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -408,7 +366,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.created",
         "resourceType": "service_area_boundary",
-        "resourceId": "3cecceb3-22fc-4f3e-8f15-b69089d7d7d6",
+        "resourceId": "1109a9aa-053e-4638-a872-d3ed4eb7ec54",
         "newValuesSummary": {
           "areaCode": "VERSIONED_CORE",
           "status": "draft",
@@ -421,7 +379,7 @@
     },
     "overlappingVersion": {
       "record": {
-        "serviceAreaId": "66f8f540-2c86-4c83-b71f-cde26468715f",
+        "serviceAreaId": "1c9d80c6-0157-4036-800c-1c135561dc0d",
         "areaCode": "VERSIONED_CORE",
         "displayName": "Versioned core overlapping window",
         "status": "draft",
@@ -433,15 +391,13 @@
           },
           "radiusMeters": 2000
         },
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceProductTypes": ["taxi_realtime"],
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
         "effectiveUntil": "2026-07-01T00:00:00.000Z",
         "version": 2,
         "metadata": {},
-        "createdAt": "2026-07-20T08:47:54.693Z",
-        "updatedAt": "2026-07-20T08:47:54.693Z"
+        "createdAt": "2026-07-20T09:28:36.183Z",
+        "updatedAt": "2026-07-20T09:28:36.183Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -450,7 +406,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.boundary.created",
         "resourceType": "service_area_boundary",
-        "resourceId": "66f8f540-2c86-4c83-b71f-cde26468715f",
+        "resourceId": "1c9d80c6-0157-4036-800c-1c135561dc0d",
         "newValuesSummary": {
           "areaCode": "VERSIONED_CORE",
           "status": "draft",
@@ -467,17 +423,17 @@
         "message": "Published service-area versions for the same area code cannot overlap.",
         "details": {
           "areaCode": "VERSIONED_CORE",
-          "overlappingServiceAreaId": "3cecceb3-22fc-4f3e-8f15-b69089d7d7d6"
+          "overlappingServiceAreaId": "1109a9aa-053e-4638-a872-d3ed4eb7ec54"
         },
         "retryable": false,
-        "traceId": "b0a039d1-bf5b-4c77-8837-65c67362e19e"
+        "traceId": "bdf569e0-c3e0-49ad-85cb-0c3044c3fe52"
       }
     }
   },
   "stopPolicyLifecycle": {
     "stopPolicy": {
       "record": {
-        "stopPolicyId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "stopPolicyId": "62583205-7709-4aef-98d4-c315b4176bad",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "draft",
@@ -491,12 +447,8 @@
           },
           "radiusMeters": 120
         },
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "serviceProductTypes": ["taxi_realtime"],
         "reasonCode": "PICKUP_NOT_ALLOWED",
         "reasonMessage": "Pickup requires the signed city-hall curb lane.",
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
@@ -505,8 +457,8 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy"
         },
-        "createdAt": "2026-07-20T08:47:54.695Z",
-        "updatedAt": "2026-07-20T08:47:54.695Z"
+        "createdAt": "2026-07-20T09:28:36.184Z",
+        "updatedAt": "2026-07-20T09:28:36.184Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -515,7 +467,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.created",
         "resourceType": "stop_policy",
-        "resourceId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "resourceId": "62583205-7709-4aef-98d4-c315b4176bad",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "draft",
@@ -530,7 +482,7 @@
     },
     "reviewPolicy": {
       "record": {
-        "stopPolicyId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "stopPolicyId": "62583205-7709-4aef-98d4-c315b4176bad",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "review",
@@ -544,12 +496,8 @@
           },
           "radiusMeters": 120
         },
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "serviceProductTypes": ["taxi_realtime"],
         "reasonCode": "PICKUP_NOT_ALLOWED",
         "reasonMessage": "Pickup requires the signed city-hall curb lane.",
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
@@ -558,8 +506,8 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy"
         },
-        "createdAt": "2026-07-20T08:47:54.695Z",
-        "updatedAt": "2026-07-20T08:47:54.699Z"
+        "createdAt": "2026-07-20T09:28:36.184Z",
+        "updatedAt": "2026-07-20T09:28:36.185Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -568,7 +516,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.submitted_for_review",
         "resourceType": "stop_policy",
-        "resourceId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "resourceId": "62583205-7709-4aef-98d4-c315b4176bad",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "review",
@@ -584,213 +532,66 @@
       "features": [
         {
           "type": "Feature",
-          "id": "66f8f540-2c86-4c83-b71f-cde26468715f",
+          "id": "1c9d80c6-0157-4036-800c-1c135561dc0d",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.69328914331224,
-                  24.1477
-                ],
-                [
-                  120.69312069996178,
-                  24.150045062742006
-                ],
-                [
-                  120.69261825202281,
-                  24.152350000810323
-                ],
-                [
-                  120.69179039651887,
-                  24.15457537607555
-                ],
-                [
-                  120.69065129828715,
-                  24.15668311174991
-                ],
-                [
-                  120.68922044761425,
-                  24.158637143891642
-                ],
-                [
-                  120.68752232675185,
-                  24.160404038469036
-                ],
-                [
-                  120.68558599101871,
-                  24.161953563426003
-                ],
-                [
-                  120.68344457165612,
-                  24.163259205960912
-                ],
-                [
-                  120.68113470894305,
-                  24.16429862616801
-                ],
-                [
-                  120.67869592527096,
-                  24.165054039279358
-                ],
-                [
-                  120.67616994890462,
-                  24.16551251996719
-                ],
-                [
-                  120.6736,
-                  24.16566622349982
-                ],
-                [
-                  120.67103005109537,
-                  24.16551251996719
-                ],
-                [
-                  120.66850407472903,
-                  24.165054039279358
-                ],
-                [
-                  120.66606529105694,
-                  24.16429862616801
-                ],
-                [
-                  120.66375542834386,
-                  24.163259205960912
-                ],
-                [
-                  120.66161400898127,
-                  24.161953563426003
-                ],
-                [
-                  120.65967767324814,
-                  24.160404038469036
-                ],
-                [
-                  120.65797955238574,
-                  24.158637143891642
-                ],
-                [
-                  120.65654870171284,
-                  24.15668311174991
-                ],
-                [
-                  120.65540960348112,
-                  24.15457537607555
-                ],
-                [
-                  120.65458174797718,
-                  24.152350000810323
-                ],
-                [
-                  120.6540793000382,
-                  24.150045062742006
-                ],
-                [
-                  120.65391085668774,
-                  24.1477
-                ],
-                [
-                  120.6540793000382,
-                  24.145354937257995
-                ],
-                [
-                  120.65458174797718,
-                  24.143049999189678
-                ],
-                [
-                  120.65540960348112,
-                  24.140824623924452
-                ],
-                [
-                  120.65654870171284,
-                  24.13871688825009
-                ],
-                [
-                  120.65797955238574,
-                  24.13676285610836
-                ],
-                [
-                  120.65967767324814,
-                  24.134995961530965
-                ],
-                [
-                  120.66161400898127,
-                  24.133446436573998
-                ],
-                [
-                  120.66375542834386,
-                  24.13214079403909
-                ],
-                [
-                  120.66606529105694,
-                  24.131101373831992
-                ],
-                [
-                  120.66850407472903,
-                  24.130345960720643
-                ],
-                [
-                  120.67103005109537,
-                  24.12988748003281
-                ],
-                [
-                  120.6736,
-                  24.12973377650018
-                ],
-                [
-                  120.67616994890462,
-                  24.12988748003281
-                ],
-                [
-                  120.67869592527096,
-                  24.130345960720643
-                ],
-                [
-                  120.68113470894305,
-                  24.131101373831992
-                ],
-                [
-                  120.68344457165612,
-                  24.13214079403909
-                ],
-                [
-                  120.68558599101871,
-                  24.133446436573998
-                ],
-                [
-                  120.68752232675185,
-                  24.134995961530965
-                ],
-                [
-                  120.68922044761425,
-                  24.13676285610836
-                ],
-                [
-                  120.69065129828715,
-                  24.13871688825009
-                ],
-                [
-                  120.69179039651887,
-                  24.140824623924452
-                ],
-                [
-                  120.69261825202281,
-                  24.143049999189678
-                ],
-                [
-                  120.69312069996178,
-                  24.145354937257995
-                ],
-                [
-                  120.69328914331224,
-                  24.1477
-                ]
+                [120.69328914331224, 24.1477],
+                [120.69312069996178, 24.150045062742006],
+                [120.69261825202281, 24.152350000810323],
+                [120.69179039651887, 24.15457537607555],
+                [120.69065129828715, 24.15668311174991],
+                [120.68922044761425, 24.158637143891642],
+                [120.68752232675185, 24.160404038469036],
+                [120.68558599101871, 24.161953563426003],
+                [120.68344457165612, 24.163259205960912],
+                [120.68113470894305, 24.16429862616801],
+                [120.67869592527096, 24.165054039279358],
+                [120.67616994890462, 24.16551251996719],
+                [120.6736, 24.16566622349982],
+                [120.67103005109537, 24.16551251996719],
+                [120.66850407472903, 24.165054039279358],
+                [120.66606529105694, 24.16429862616801],
+                [120.66375542834386, 24.163259205960912],
+                [120.66161400898127, 24.161953563426003],
+                [120.65967767324814, 24.160404038469036],
+                [120.65797955238574, 24.158637143891642],
+                [120.65654870171284, 24.15668311174991],
+                [120.65540960348112, 24.15457537607555],
+                [120.65458174797718, 24.152350000810323],
+                [120.6540793000382, 24.150045062742006],
+                [120.65391085668774, 24.1477],
+                [120.6540793000382, 24.145354937257995],
+                [120.65458174797718, 24.143049999189678],
+                [120.65540960348112, 24.140824623924452],
+                [120.65654870171284, 24.13871688825009],
+                [120.65797955238574, 24.13676285610836],
+                [120.65967767324814, 24.134995961530965],
+                [120.66161400898127, 24.133446436573998],
+                [120.66375542834386, 24.13214079403909],
+                [120.66606529105694, 24.131101373831992],
+                [120.66850407472903, 24.130345960720643],
+                [120.67103005109537, 24.12988748003281],
+                [120.6736, 24.12973377650018],
+                [120.67616994890462, 24.12988748003281],
+                [120.67869592527096, 24.130345960720643],
+                [120.68113470894305, 24.131101373831992],
+                [120.68344457165612, 24.13214079403909],
+                [120.68558599101871, 24.133446436573998],
+                [120.68752232675185, 24.134995961530965],
+                [120.68922044761425, 24.13676285610836],
+                [120.69065129828715, 24.13871688825009],
+                [120.69179039651887, 24.140824623924452],
+                [120.69261825202281, 24.143049999189678],
+                [120.69312069996178, 24.145354937257995],
+                [120.69328914331224, 24.1477]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "66f8f540-2c86-4c83-b71f-cde26468715f",
+            "serviceAreaId": "1c9d80c6-0157-4036-800c-1c135561dc0d",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core overlapping window",
             "status": "draft",
@@ -802,9 +603,7 @@
               },
               "radiusMeters": 2000
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-06-01T00:00:00.000Z",
             "effectiveUntil": "2026-07-01T00:00:00.000Z",
             "version": 2,
@@ -814,213 +613,66 @@
         },
         {
           "type": "Feature",
-          "id": "3cecceb3-22fc-4f3e-8f15-b69089d7d7d6",
+          "id": "1109a9aa-053e-4638-a872-d3ed4eb7ec54",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.69132022898103,
-                  24.1477
-                ],
-                [
-                  120.6911686299656,
-                  24.149810556467806
-                ],
-                [
-                  120.69071642682053,
-                  24.15188500072929
-                ],
-                [
-                  120.68997135686698,
-                  24.153887838467995
-                ],
-                [
-                  120.68894616845844,
-                  24.15578480057492
-                ],
-                [
-                  120.68765840285282,
-                  24.15754342950248
-                ],
-                [
-                  120.68613009407666,
-                  24.159133634622133
-                ],
-                [
-                  120.68438739191684,
-                  24.160528207083402
-                ],
-                [
-                  120.68246011449051,
-                  24.161703285364823
-                ],
-                [
-                  120.68038123804875,
-                  24.162638763551207
-                ],
-                [
-                  120.67818633274386,
-                  24.163318635351423
-                ],
-                [
-                  120.67591295401415,
-                  24.163731267970473
-                ],
-                [
-                  120.6736,
-                  24.163869601149838
-                ],
-                [
-                  120.67128704598584,
-                  24.163731267970473
-                ],
-                [
-                  120.66901366725612,
-                  24.163318635351423
-                ],
-                [
-                  120.66681876195123,
-                  24.162638763551207
-                ],
-                [
-                  120.66473988550948,
-                  24.161703285364823
-                ],
-                [
-                  120.66281260808314,
-                  24.160528207083402
-                ],
-                [
-                  120.66106990592333,
-                  24.159133634622133
-                ],
-                [
-                  120.65954159714717,
-                  24.15754342950248
-                ],
-                [
-                  120.65825383154154,
-                  24.15578480057492
-                ],
-                [
-                  120.65722864313301,
-                  24.153887838467995
-                ],
-                [
-                  120.65648357317946,
-                  24.15188500072929
-                ],
-                [
-                  120.65603137003438,
-                  24.149810556467806
-                ],
-                [
-                  120.65587977101896,
-                  24.1477
-                ],
-                [
-                  120.65603137003438,
-                  24.145589443532195
-                ],
-                [
-                  120.65648357317946,
-                  24.14351499927071
-                ],
-                [
-                  120.65722864313301,
-                  24.141512161532006
-                ],
-                [
-                  120.65825383154154,
-                  24.13961519942508
-                ],
-                [
-                  120.65954159714717,
-                  24.137856570497522
-                ],
-                [
-                  120.66106990592333,
-                  24.136266365377868
-                ],
-                [
-                  120.66281260808314,
-                  24.1348717929166
-                ],
-                [
-                  120.66473988550948,
-                  24.133696714635178
-                ],
-                [
-                  120.66681876195123,
-                  24.132761236448793
-                ],
-                [
-                  120.66901366725612,
-                  24.132081364648577
-                ],
-                [
-                  120.67128704598584,
-                  24.131668732029528
-                ],
-                [
-                  120.6736,
-                  24.131530398850163
-                ],
-                [
-                  120.67591295401415,
-                  24.131668732029528
-                ],
-                [
-                  120.67818633274386,
-                  24.132081364648577
-                ],
-                [
-                  120.68038123804875,
-                  24.132761236448793
-                ],
-                [
-                  120.68246011449051,
-                  24.133696714635178
-                ],
-                [
-                  120.68438739191684,
-                  24.1348717929166
-                ],
-                [
-                  120.68613009407666,
-                  24.136266365377868
-                ],
-                [
-                  120.68765840285282,
-                  24.137856570497522
-                ],
-                [
-                  120.68894616845844,
-                  24.13961519942508
-                ],
-                [
-                  120.68997135686698,
-                  24.141512161532006
-                ],
-                [
-                  120.69071642682053,
-                  24.14351499927071
-                ],
-                [
-                  120.6911686299656,
-                  24.145589443532195
-                ],
-                [
-                  120.69132022898103,
-                  24.1477
-                ]
+                [120.69132022898103, 24.1477],
+                [120.6911686299656, 24.149810556467806],
+                [120.69071642682053, 24.15188500072929],
+                [120.68997135686698, 24.153887838467995],
+                [120.68894616845844, 24.15578480057492],
+                [120.68765840285282, 24.15754342950248],
+                [120.68613009407666, 24.159133634622133],
+                [120.68438739191684, 24.160528207083402],
+                [120.68246011449051, 24.161703285364823],
+                [120.68038123804875, 24.162638763551207],
+                [120.67818633274386, 24.163318635351423],
+                [120.67591295401415, 24.163731267970473],
+                [120.6736, 24.163869601149838],
+                [120.67128704598584, 24.163731267970473],
+                [120.66901366725612, 24.163318635351423],
+                [120.66681876195123, 24.162638763551207],
+                [120.66473988550948, 24.161703285364823],
+                [120.66281260808314, 24.160528207083402],
+                [120.66106990592333, 24.159133634622133],
+                [120.65954159714717, 24.15754342950248],
+                [120.65825383154154, 24.15578480057492],
+                [120.65722864313301, 24.153887838467995],
+                [120.65648357317946, 24.15188500072929],
+                [120.65603137003438, 24.149810556467806],
+                [120.65587977101896, 24.1477],
+                [120.65603137003438, 24.145589443532195],
+                [120.65648357317946, 24.14351499927071],
+                [120.65722864313301, 24.141512161532006],
+                [120.65825383154154, 24.13961519942508],
+                [120.65954159714717, 24.137856570497522],
+                [120.66106990592333, 24.136266365377868],
+                [120.66281260808314, 24.1348717929166],
+                [120.66473988550948, 24.133696714635178],
+                [120.66681876195123, 24.132761236448793],
+                [120.66901366725612, 24.132081364648577],
+                [120.67128704598584, 24.131668732029528],
+                [120.6736, 24.131530398850163],
+                [120.67591295401415, 24.131668732029528],
+                [120.67818633274386, 24.132081364648577],
+                [120.68038123804875, 24.132761236448793],
+                [120.68246011449051, 24.133696714635178],
+                [120.68438739191684, 24.1348717929166],
+                [120.68613009407666, 24.136266365377868],
+                [120.68765840285282, 24.137856570497522],
+                [120.68894616845844, 24.13961519942508],
+                [120.68997135686698, 24.141512161532006],
+                [120.69071642682053, 24.14351499927071],
+                [120.6911686299656, 24.145589443532195],
+                [120.69132022898103, 24.1477]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "3cecceb3-22fc-4f3e-8f15-b69089d7d7d6",
+            "serviceAreaId": "1109a9aa-053e-4638-a872-d3ed4eb7ec54",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core first window",
             "status": "active",
@@ -1032,16 +684,14 @@
               },
               "radiusMeters": 1800
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-01-01T00:00:00.000Z",
             "effectiveUntil": "2026-12-31T00:00:00.000Z",
             "version": 1,
             "geometryVersionRef": "service_area:VERSIONED_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-20T08:47:54.693Z",
+                "publishedAt": "2026-07-20T09:28:36.183Z",
                 "publishReason": "initial version"
               }
             }
@@ -1049,213 +699,66 @@
         },
         {
           "type": "Feature",
-          "id": "8eb6b2b8-05cc-4819-a98e-409dff277491",
+          "id": "93301e5a-0e1e-4c45-a8a8-befc3499d7a3",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.47154695040427,
-                  23.48
-                ],
-                [
-                  120.47136261325659,
-                  23.482579569016206
-                ],
-                [
-                  120.47081275587325,
-                  23.485115000891355
-                ],
-                [
-                  120.46990678646654,
-                  23.487562913683107
-                ],
-                [
-                  120.46866020642418,
-                  23.489881422924903
-                ],
-                [
-                  120.46709434507632,
-                  23.492030858280806
-                ],
-                [
-                  120.46523599474475,
-                  23.493974442315942
-                ],
-                [
-                  120.46311695231888,
-                  23.4956789197686
-                ],
-                [
-                  120.46077347520213,
-                  23.497115126557006
-                ],
-                [
-                  120.4582456609377,
-                  23.49825848878481
-                ],
-                [
-                  120.45557676112851,
-                  23.499089443207293
-                ],
-                [
-                  120.45281244139022,
-                  23.49959377196391
-                ],
-                [
-                  120.45,
-                  23.4997628458498
-                ],
-                [
-                  120.44718755860978,
-                  23.49959377196391
-                ],
-                [
-                  120.4444232388715,
-                  23.499089443207293
-                ],
-                [
-                  120.4417543390623,
-                  23.49825848878481
-                ],
-                [
-                  120.43922652479787,
-                  23.497115126557006
-                ],
-                [
-                  120.43688304768112,
-                  23.4956789197686
-                ],
-                [
-                  120.43476400525526,
-                  23.493974442315942
-                ],
-                [
-                  120.43290565492369,
-                  23.492030858280806
-                ],
-                [
-                  120.43133979357583,
-                  23.489881422924903
-                ],
-                [
-                  120.43009321353347,
-                  23.487562913683107
-                ],
-                [
-                  120.42918724412675,
-                  23.485115000891355
-                ],
-                [
-                  120.42863738674342,
-                  23.482579569016206
-                ],
-                [
-                  120.42845304959573,
-                  23.48
-                ],
-                [
-                  120.42863738674342,
-                  23.477420430983795
-                ],
-                [
-                  120.42918724412675,
-                  23.474884999108646
-                ],
-                [
-                  120.43009321353347,
-                  23.472437086316894
-                ],
-                [
-                  120.43133979357583,
-                  23.470118577075098
-                ],
-                [
-                  120.43290565492369,
-                  23.467969141719195
-                ],
-                [
-                  120.43476400525526,
-                  23.46602555768406
-                ],
-                [
-                  120.43688304768112,
-                  23.4643210802314
-                ],
-                [
-                  120.43922652479787,
-                  23.462884873442995
-                ],
-                [
-                  120.4417543390623,
-                  23.46174151121519
-                ],
-                [
-                  120.4444232388715,
-                  23.460910556792708
-                ],
-                [
-                  120.44718755860978,
-                  23.460406228036092
-                ],
-                [
-                  120.45,
-                  23.4602371541502
-                ],
-                [
-                  120.45281244139022,
-                  23.460406228036092
-                ],
-                [
-                  120.45557676112851,
-                  23.460910556792708
-                ],
-                [
-                  120.4582456609377,
-                  23.46174151121519
-                ],
-                [
-                  120.46077347520213,
-                  23.462884873442995
-                ],
-                [
-                  120.46311695231888,
-                  23.4643210802314
-                ],
-                [
-                  120.46523599474475,
-                  23.46602555768406
-                ],
-                [
-                  120.46709434507632,
-                  23.467969141719195
-                ],
-                [
-                  120.46866020642418,
-                  23.470118577075098
-                ],
-                [
-                  120.46990678646654,
-                  23.472437086316894
-                ],
-                [
-                  120.47081275587325,
-                  23.474884999108646
-                ],
-                [
-                  120.47136261325659,
-                  23.477420430983795
-                ],
-                [
-                  120.47154695040427,
-                  23.48
-                ]
+                [120.47154695040427, 23.48],
+                [120.47136261325659, 23.482579569016206],
+                [120.47081275587325, 23.485115000891355],
+                [120.46990678646654, 23.487562913683107],
+                [120.46866020642418, 23.489881422924903],
+                [120.46709434507632, 23.492030858280806],
+                [120.46523599474475, 23.493974442315942],
+                [120.46311695231888, 23.4956789197686],
+                [120.46077347520213, 23.497115126557006],
+                [120.4582456609377, 23.49825848878481],
+                [120.45557676112851, 23.499089443207293],
+                [120.45281244139022, 23.49959377196391],
+                [120.45, 23.4997628458498],
+                [120.44718755860978, 23.49959377196391],
+                [120.4444232388715, 23.499089443207293],
+                [120.4417543390623, 23.49825848878481],
+                [120.43922652479787, 23.497115126557006],
+                [120.43688304768112, 23.4956789197686],
+                [120.43476400525526, 23.493974442315942],
+                [120.43290565492369, 23.492030858280806],
+                [120.43133979357583, 23.489881422924903],
+                [120.43009321353347, 23.487562913683107],
+                [120.42918724412675, 23.485115000891355],
+                [120.42863738674342, 23.482579569016206],
+                [120.42845304959573, 23.48],
+                [120.42863738674342, 23.477420430983795],
+                [120.42918724412675, 23.474884999108646],
+                [120.43009321353347, 23.472437086316894],
+                [120.43133979357583, 23.470118577075098],
+                [120.43290565492369, 23.467969141719195],
+                [120.43476400525526, 23.46602555768406],
+                [120.43688304768112, 23.4643210802314],
+                [120.43922652479787, 23.462884873442995],
+                [120.4417543390623, 23.46174151121519],
+                [120.4444232388715, 23.460910556792708],
+                [120.44718755860978, 23.460406228036092],
+                [120.45, 23.4602371541502],
+                [120.45281244139022, 23.460406228036092],
+                [120.45557676112851, 23.460910556792708],
+                [120.4582456609377, 23.46174151121519],
+                [120.46077347520213, 23.462884873442995],
+                [120.46311695231888, 23.4643210802314],
+                [120.46523599474475, 23.46602555768406],
+                [120.46709434507632, 23.467969141719195],
+                [120.46866020642418, 23.470118577075098],
+                [120.46990678646654, 23.472437086316894],
+                [120.47081275587325, 23.474884999108646],
+                [120.47136261325659, 23.477420430983795],
+                [120.47154695040427, 23.48]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "8eb6b2b8-05cc-4819-a98e-409dff277491",
+            "serviceAreaId": "93301e5a-0e1e-4c45-a8a8-befc3499d7a3",
             "areaCode": "CYI_CORE",
             "displayName": "Chiayi future operating area",
             "status": "active",
@@ -1267,16 +770,14 @@
               },
               "radiusMeters": 2200
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-08-01T00:00:00.000Z",
             "effectiveUntil": null,
             "version": 1,
             "geometryVersionRef": "service_area:CYI_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-20T08:47:54.692Z",
+                "publishedAt": "2026-07-20T09:28:36.182Z",
                 "publishReason": "scheduled launch"
               }
             }
@@ -1284,37 +785,22 @@
         },
         {
           "type": "Feature",
-          "id": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+          "id": "51a50116-8cce-49a5-9607-05504b2f348b",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.25,
-                  22.58
-                ],
-                [
-                  120.36,
-                  22.58
-                ],
-                [
-                  120.36,
-                  22.68
-                ],
-                [
-                  120.25,
-                  22.68
-                ],
-                [
-                  120.25,
-                  22.58
-                ]
+                [120.25, 22.58],
+                [120.36, 22.58],
+                [120.36, 22.68],
+                [120.25, 22.68],
+                [120.25, 22.58]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+            "serviceAreaId": "51a50116-8cce-49a5-9607-05504b2f348b",
             "areaCode": "KHH_CORE",
             "displayName": "Kaohsiung core operating area",
             "status": "active",
@@ -1339,9 +825,7 @@
                 }
               ]
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-06-01T00:00:00.000Z",
             "effectiveUntil": null,
             "version": 1,
@@ -1349,7 +833,7 @@
             "metadata": {
               "governanceDomain": "taxi_service_area",
               "lifecycle": {
-                "publishedAt": "2026-07-20T08:47:54.688Z",
+                "publishedAt": "2026-07-20T09:28:36.181Z",
                 "publishReason": "launch kaohsiung pilot"
               }
             }
@@ -1362,26 +846,11 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.4505,
-                  25.0005
-                ],
-                [
-                  121.625,
-                  25.0005
-                ],
-                [
-                  121.625,
-                  25.125
-                ],
-                [
-                  121.4505,
-                  25.125
-                ],
-                [
-                  121.4505,
-                  25.0005
-                ]
+                [121.4505, 25.0005],
+                [121.625, 25.0005],
+                [121.625, 25.125],
+                [121.4505, 25.125],
+                [121.4505, 25.0005]
               ]
             ]
           },
@@ -1433,202 +902,55 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.2986683660182,
-                  25.0797
-                ],
-                [
-                  121.2981168302099,
-                  25.087321453911517
-                ],
-                [
-                  121.29647165971564,
-                  25.094812502633545
-                ],
-                [
-                  121.29376100385866,
-                  25.102044972245537
-                ],
-                [
-                  121.29003124271223,
-                  25.108895113187206
-                ],
-                [
-                  121.28534619352367,
-                  25.11524571764783
-                ],
-                [
-                  121.27978601878348,
-                  25.120988125024365
-                ],
-                [
-                  121.2734458546231,
-                  25.126024081134503
-                ],
-                [
-                  121.2664341830091,
-                  25.130267419372966
-                ],
-                [
-                  121.25887097558682,
-                  25.13364553504602
-                ],
-                [
-                  121.25088564093215,
-                  25.136100627657914
-                ],
-                [
-                  121.242614810335,
-                  25.13759068989337
-                ],
-                [
-                  121.2342,
-                  25.138090226374416
-                ],
-                [
-                  121.225785189665,
-                  25.13759068989337
-                ],
-                [
-                  121.21751435906785,
-                  25.136100627657914
-                ],
-                [
-                  121.20952902441319,
-                  25.13364553504602
-                ],
-                [
-                  121.2019658169909,
-                  25.130267419372966
-                ],
-                [
-                  121.1949541453769,
-                  25.126024081134503
-                ],
-                [
-                  121.18861398121652,
-                  25.120988125024365
-                ],
-                [
-                  121.18305380647634,
-                  25.11524571764783
-                ],
-                [
-                  121.17836875728777,
-                  25.108895113187206
-                ],
-                [
-                  121.17463899614134,
-                  25.102044972245537
-                ],
-                [
-                  121.17192834028437,
-                  25.094812502633545
-                ],
-                [
-                  121.1702831697901,
-                  25.087321453911517
-                ],
-                [
-                  121.1697316339818,
-                  25.0797
-                ],
-                [
-                  121.1702831697901,
-                  25.07207854608848
-                ],
-                [
-                  121.17192834028437,
-                  25.064587497366453
-                ],
-                [
-                  121.17463899614134,
-                  25.05735502775446
-                ],
-                [
-                  121.17836875728777,
-                  25.050504886812792
-                ],
-                [
-                  121.18305380647634,
-                  25.044154282352167
-                ],
-                [
-                  121.18861398121652,
-                  25.038411874975633
-                ],
-                [
-                  121.1949541453769,
-                  25.033375918865495
-                ],
-                [
-                  121.2019658169909,
-                  25.02913258062703
-                ],
-                [
-                  121.20952902441319,
-                  25.025754464953977
-                ],
-                [
-                  121.21751435906785,
-                  25.023299372342084
-                ],
-                [
-                  121.225785189665,
-                  25.02180931010663
-                ],
-                [
-                  121.2342,
-                  25.021309773625582
-                ],
-                [
-                  121.242614810335,
-                  25.02180931010663
-                ],
-                [
-                  121.25088564093215,
-                  25.023299372342084
-                ],
-                [
-                  121.25887097558682,
-                  25.025754464953977
-                ],
-                [
-                  121.2664341830091,
-                  25.02913258062703
-                ],
-                [
-                  121.2734458546231,
-                  25.033375918865495
-                ],
-                [
-                  121.27978601878348,
-                  25.038411874975633
-                ],
-                [
-                  121.28534619352367,
-                  25.044154282352167
-                ],
-                [
-                  121.29003124271223,
-                  25.050504886812792
-                ],
-                [
-                  121.29376100385866,
-                  25.05735502775446
-                ],
-                [
-                  121.29647165971564,
-                  25.064587497366453
-                ],
-                [
-                  121.2981168302099,
-                  25.07207854608848
-                ],
-                [
-                  121.2986683660182,
-                  25.0797
-                ]
+                [121.2986683660182, 25.0797],
+                [121.2981168302099, 25.087321453911517],
+                [121.29647165971564, 25.094812502633545],
+                [121.29376100385866, 25.102044972245537],
+                [121.29003124271223, 25.108895113187206],
+                [121.28534619352367, 25.11524571764783],
+                [121.27978601878348, 25.120988125024365],
+                [121.2734458546231, 25.126024081134503],
+                [121.2664341830091, 25.130267419372966],
+                [121.25887097558682, 25.13364553504602],
+                [121.25088564093215, 25.136100627657914],
+                [121.242614810335, 25.13759068989337],
+                [121.2342, 25.138090226374416],
+                [121.225785189665, 25.13759068989337],
+                [121.21751435906785, 25.136100627657914],
+                [121.20952902441319, 25.13364553504602],
+                [121.2019658169909, 25.130267419372966],
+                [121.1949541453769, 25.126024081134503],
+                [121.18861398121652, 25.120988125024365],
+                [121.18305380647634, 25.11524571764783],
+                [121.17836875728777, 25.108895113187206],
+                [121.17463899614134, 25.102044972245537],
+                [121.17192834028437, 25.094812502633545],
+                [121.1702831697901, 25.087321453911517],
+                [121.1697316339818, 25.0797],
+                [121.1702831697901, 25.07207854608848],
+                [121.17192834028437, 25.064587497366453],
+                [121.17463899614134, 25.05735502775446],
+                [121.17836875728777, 25.050504886812792],
+                [121.18305380647634, 25.044154282352167],
+                [121.18861398121652, 25.038411874975633],
+                [121.1949541453769, 25.033375918865495],
+                [121.2019658169909, 25.02913258062703],
+                [121.20952902441319, 25.025754464953977],
+                [121.21751435906785, 25.023299372342084],
+                [121.225785189665, 25.02180931010663],
+                [121.2342, 25.021309773625582],
+                [121.242614810335, 25.02180931010663],
+                [121.25088564093215, 25.023299372342084],
+                [121.25887097558682, 25.025754464953977],
+                [121.2664341830091, 25.02913258062703],
+                [121.2734458546231, 25.033375918865495],
+                [121.27978601878348, 25.038411874975633],
+                [121.28534619352367, 25.044154282352167],
+                [121.29003124271223, 25.050504886812792],
+                [121.29376100385866, 25.05735502775446],
+                [121.29647165971564, 25.064587497366453],
+                [121.2981168302099, 25.07207854608848],
+                [121.2986683660182, 25.0797]
               ]
             ]
           },
@@ -1646,9 +968,7 @@
               },
               "radiusMeters": 6500
             },
-            "serviceProductTypes": [
-              "credit_card_airport_transfer"
-            ],
+            "serviceProductTypes": ["credit_card_airport_transfer"],
             "effectiveFrom": "2026-01-01T00:00:00.000Z",
             "effectiveUntil": null,
             "version": 1,
@@ -1660,213 +980,66 @@
         },
         {
           "type": "Feature",
-          "id": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+          "id": "62583205-7709-4aef-98d4-c315b4176bad",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.56488977542928,
-                  25.0375
-                ],
-                [
-                  121.56487959673555,
-                  25.03764070376452
-                ],
-                [
-                  121.56484923481462,
-                  25.03777900004862
-                ],
-                [
-                  121.56479920916739,
-                  25.037912522564536
-                ],
-                [
-                  121.56473037574655,
-                  25.038038986704997
-                ],
-                [
-                  121.56464391231101,
-                  25.0381562286335
-                ],
-                [
-                  121.56454129827414,
-                  25.038262242308143
-                ],
-                [
-                  121.56442428939053,
-                  25.038355213805563
-                ],
-                [
-                  121.56429488771464,
-                  25.038433552357656
-                ],
-                [
-                  121.56415530734502,
-                  25.03849591757008
-                ],
-                [
-                  121.56400793654049,
-                  25.038541242356764
-                ],
-                [
-                  121.56385529685637,
-                  25.03856875119803
-                ],
-                [
-                  121.5637,
-                  25.03857797340999
-                ],
-                [
-                  121.56354470314362,
-                  25.03856875119803
-                ],
-                [
-                  121.5633920634595,
-                  25.038541242356764
-                ],
-                [
-                  121.56324469265498,
-                  25.03849591757008
-                ],
-                [
-                  121.56310511228536,
-                  25.038433552357656
-                ],
-                [
-                  121.56297571060946,
-                  25.038355213805563
-                ],
-                [
-                  121.56285870172586,
-                  25.038262242308143
-                ],
-                [
-                  121.56275608768898,
-                  25.0381562286335
-                ],
-                [
-                  121.56266962425345,
-                  25.038038986704997
-                ],
-                [
-                  121.5626007908326,
-                  25.037912522564536
-                ],
-                [
-                  121.56255076518538,
-                  25.03777900004862
-                ],
-                [
-                  121.56252040326444,
-                  25.03764070376452
-                ],
-                [
-                  121.56251022457072,
-                  25.0375
-                ],
-                [
-                  121.56252040326444,
-                  25.037359296235483
-                ],
-                [
-                  121.56255076518538,
-                  25.037220999951384
-                ],
-                [
-                  121.5626007908326,
-                  25.037087477435467
-                ],
-                [
-                  121.56266962425345,
-                  25.036961013295006
-                ],
-                [
-                  121.56275608768898,
-                  25.036843771366502
-                ],
-                [
-                  121.56285870172586,
-                  25.03673775769186
-                ],
-                [
-                  121.56297571060946,
-                  25.03664478619444
-                ],
-                [
-                  121.56310511228536,
-                  25.036566447642347
-                ],
-                [
-                  121.56324469265498,
-                  25.03650408242992
-                ],
-                [
-                  121.5633920634595,
-                  25.03645875764324
-                ],
-                [
-                  121.56354470314362,
-                  25.03643124880197
-                ],
-                [
-                  121.5637,
-                  25.036422026590014
-                ],
-                [
-                  121.56385529685637,
-                  25.03643124880197
-                ],
-                [
-                  121.56400793654049,
-                  25.03645875764324
-                ],
-                [
-                  121.56415530734502,
-                  25.03650408242992
-                ],
-                [
-                  121.56429488771464,
-                  25.036566447642347
-                ],
-                [
-                  121.56442428939053,
-                  25.03664478619444
-                ],
-                [
-                  121.56454129827414,
-                  25.03673775769186
-                ],
-                [
-                  121.56464391231101,
-                  25.036843771366502
-                ],
-                [
-                  121.56473037574655,
-                  25.036961013295006
-                ],
-                [
-                  121.56479920916739,
-                  25.037087477435467
-                ],
-                [
-                  121.56484923481462,
-                  25.037220999951384
-                ],
-                [
-                  121.56487959673555,
-                  25.037359296235483
-                ],
-                [
-                  121.56488977542928,
-                  25.0375
-                ]
+                [121.56488977542928, 25.0375],
+                [121.56487959673555, 25.03764070376452],
+                [121.56484923481462, 25.03777900004862],
+                [121.56479920916739, 25.037912522564536],
+                [121.56473037574655, 25.038038986704997],
+                [121.56464391231101, 25.0381562286335],
+                [121.56454129827414, 25.038262242308143],
+                [121.56442428939053, 25.038355213805563],
+                [121.56429488771464, 25.038433552357656],
+                [121.56415530734502, 25.03849591757008],
+                [121.56400793654049, 25.038541242356764],
+                [121.56385529685637, 25.03856875119803],
+                [121.5637, 25.03857797340999],
+                [121.56354470314362, 25.03856875119803],
+                [121.5633920634595, 25.038541242356764],
+                [121.56324469265498, 25.03849591757008],
+                [121.56310511228536, 25.038433552357656],
+                [121.56297571060946, 25.038355213805563],
+                [121.56285870172586, 25.038262242308143],
+                [121.56275608768898, 25.0381562286335],
+                [121.56266962425345, 25.038038986704997],
+                [121.5626007908326, 25.037912522564536],
+                [121.56255076518538, 25.03777900004862],
+                [121.56252040326444, 25.03764070376452],
+                [121.56251022457072, 25.0375],
+                [121.56252040326444, 25.037359296235483],
+                [121.56255076518538, 25.037220999951384],
+                [121.5626007908326, 25.037087477435467],
+                [121.56266962425345, 25.036961013295006],
+                [121.56275608768898, 25.036843771366502],
+                [121.56285870172586, 25.03673775769186],
+                [121.56297571060946, 25.03664478619444],
+                [121.56310511228536, 25.036566447642347],
+                [121.56324469265498, 25.03650408242992],
+                [121.5633920634595, 25.03645875764324],
+                [121.56354470314362, 25.03643124880197],
+                [121.5637, 25.036422026590014],
+                [121.56385529685637, 25.03643124880197],
+                [121.56400793654049, 25.03645875764324],
+                [121.56415530734502, 25.03650408242992],
+                [121.56429488771464, 25.036566447642347],
+                [121.56442428939053, 25.03664478619444],
+                [121.56454129827414, 25.03673775769186],
+                [121.56464391231101, 25.036843771366502],
+                [121.56473037574655, 25.036961013295006],
+                [121.56479920916739, 25.037087477435467],
+                [121.56484923481462, 25.037220999951384],
+                [121.56487959673555, 25.037359296235483],
+                [121.56488977542928, 25.0375]
               ]
             ]
           },
           "properties": {
             "recordKind": "stop_policy",
-            "stopPolicyId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+            "stopPolicyId": "62583205-7709-4aef-98d4-c315b4176bad",
             "policyCode": "CITY_HALL_PICKUP_BLOCK",
             "displayName": "City Hall pickup access block",
             "status": "review",
@@ -1880,12 +1053,8 @@
               },
               "radiusMeters": 120
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "serviceProductTypes": ["taxi_realtime"],
             "reasonCode": "PICKUP_NOT_ALLOWED",
             "reasonMessage": "Pickup requires the signed city-hall curb lane.",
             "effectiveFrom": "2026-06-01T00:00:00.000Z",
@@ -1904,202 +1073,55 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.51918143816626,
-                  25.0478
-                ],
-                [
-                  121.51916277566035,
-                  25.04805795690162
-                ],
-                [
-                  121.51910710746324,
-                  25.048311500089135
-                ],
-                [
-                  121.51901538607325,
-                  25.04855629136831
-                ],
-                [
-                  121.51888918086877,
-                  25.048788142292487
-                ],
-                [
-                  121.51873065125584,
-                  25.04900308582808
-                ],
-                [
-                  121.5185425097201,
-                  25.04919744423159
-                ],
-                [
-                  121.51832797541539,
-                  25.04936789197686
-                ],
-                [
-                  121.51809071908313,
-                  25.049511512655698
-                ],
-                [
-                  121.51783480024496,
-                  25.04962584887848
-                ],
-                [
-                  121.51756459774315,
-                  25.049708944320727
-                ],
-                [
-                  121.51728473481741,
-                  25.04975937719639
-                ],
-                [
-                  121.517,
-                  25.04977628458498
-                ],
-                [
-                  121.51671526518258,
-                  25.04975937719639
-                ],
-                [
-                  121.51643540225685,
-                  25.049708944320727
-                ],
-                [
-                  121.51616519975504,
-                  25.04962584887848
-                ],
-                [
-                  121.51590928091686,
-                  25.049511512655698
-                ],
-                [
-                  121.5156720245846,
-                  25.04936789197686
-                ],
-                [
-                  121.51545749027989,
-                  25.04919744423159
-                ],
-                [
-                  121.51526934874416,
-                  25.04900308582808
-                ],
-                [
-                  121.51511081913122,
-                  25.048788142292487
-                ],
-                [
-                  121.51498461392674,
-                  25.04855629136831
-                ],
-                [
-                  121.51489289253675,
-                  25.048311500089135
-                ],
-                [
-                  121.51483722433964,
-                  25.04805795690162
-                ],
-                [
-                  121.51481856183374,
-                  25.0478
-                ],
-                [
-                  121.51483722433964,
-                  25.047542043098378
-                ],
-                [
-                  121.51489289253675,
-                  25.047288499910863
-                ],
-                [
-                  121.51498461392674,
-                  25.047043708631687
-                ],
-                [
-                  121.51511081913122,
-                  25.04681185770751
-                ],
-                [
-                  121.51526934874416,
-                  25.046596914171918
-                ],
-                [
-                  121.51545749027989,
-                  25.046402555768406
-                ],
-                [
-                  121.5156720245846,
-                  25.046232108023137
-                ],
-                [
-                  121.51590928091686,
-                  25.0460884873443
-                ],
-                [
-                  121.51616519975504,
-                  25.045974151121516
-                ],
-                [
-                  121.51643540225685,
-                  25.04589105567927
-                ],
-                [
-                  121.51671526518258,
-                  25.045840622803606
-                ],
-                [
-                  121.517,
-                  25.04582371541502
-                ],
-                [
-                  121.51728473481741,
-                  25.045840622803606
-                ],
-                [
-                  121.51756459774315,
-                  25.04589105567927
-                ],
-                [
-                  121.51783480024496,
-                  25.045974151121516
-                ],
-                [
-                  121.51809071908313,
-                  25.0460884873443
-                ],
-                [
-                  121.51832797541539,
-                  25.046232108023137
-                ],
-                [
-                  121.5185425097201,
-                  25.046402555768406
-                ],
-                [
-                  121.51873065125584,
-                  25.046596914171918
-                ],
-                [
-                  121.51888918086877,
-                  25.04681185770751
-                ],
-                [
-                  121.51901538607325,
-                  25.047043708631687
-                ],
-                [
-                  121.51910710746324,
-                  25.047288499910863
-                ],
-                [
-                  121.51916277566035,
-                  25.047542043098378
-                ],
-                [
-                  121.51918143816626,
-                  25.0478
-                ]
+                [121.51918143816626, 25.0478],
+                [121.51916277566035, 25.04805795690162],
+                [121.51910710746324, 25.048311500089135],
+                [121.51901538607325, 25.04855629136831],
+                [121.51888918086877, 25.048788142292487],
+                [121.51873065125584, 25.04900308582808],
+                [121.5185425097201, 25.04919744423159],
+                [121.51832797541539, 25.04936789197686],
+                [121.51809071908313, 25.049511512655698],
+                [121.51783480024496, 25.04962584887848],
+                [121.51756459774315, 25.049708944320727],
+                [121.51728473481741, 25.04975937719639],
+                [121.517, 25.04977628458498],
+                [121.51671526518258, 25.04975937719639],
+                [121.51643540225685, 25.049708944320727],
+                [121.51616519975504, 25.04962584887848],
+                [121.51590928091686, 25.049511512655698],
+                [121.5156720245846, 25.04936789197686],
+                [121.51545749027989, 25.04919744423159],
+                [121.51526934874416, 25.04900308582808],
+                [121.51511081913122, 25.048788142292487],
+                [121.51498461392674, 25.04855629136831],
+                [121.51489289253675, 25.048311500089135],
+                [121.51483722433964, 25.04805795690162],
+                [121.51481856183374, 25.0478],
+                [121.51483722433964, 25.047542043098378],
+                [121.51489289253675, 25.047288499910863],
+                [121.51498461392674, 25.047043708631687],
+                [121.51511081913122, 25.04681185770751],
+                [121.51526934874416, 25.046596914171918],
+                [121.51545749027989, 25.046402555768406],
+                [121.5156720245846, 25.046232108023137],
+                [121.51590928091686, 25.0460884873443],
+                [121.51616519975504, 25.045974151121516],
+                [121.51643540225685, 25.04589105567927],
+                [121.51671526518258, 25.045840622803606],
+                [121.517, 25.04582371541502],
+                [121.51728473481741, 25.045840622803606],
+                [121.51756459774315, 25.04589105567927],
+                [121.51783480024496, 25.045974151121516],
+                [121.51809071908313, 25.0460884873443],
+                [121.51832797541539, 25.046232108023137],
+                [121.5185425097201, 25.046402555768406],
+                [121.51873065125584, 25.046596914171918],
+                [121.51888918086877, 25.04681185770751],
+                [121.51901538607325, 25.047043708631687],
+                [121.51910710746324, 25.047288499910863],
+                [121.51916277566035, 25.047542043098378],
+                [121.51918143816626, 25.0478]
               ]
             ]
           },
@@ -2119,9 +1141,7 @@
               },
               "radiusMeters": 220
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
             "serviceProductTypes": [
               "taxi_realtime",
               "taxi_reservation",
@@ -2145,202 +1165,55 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.56628460931613,
-                  25.0338
-                ],
-                [
-                  121.56626934173605,
-                  25.03401105564678
-                ],
-                [
-                  121.56622380022829,
-                  25.034218500072928
-                ],
-                [
-                  121.56614876402071,
-                  25.0344187838468
-                ],
-                [
-                  121.5660455170036,
-                  25.034608480057493
-                ],
-                [
-                  121.56591582576206,
-                  25.034784342950246
-                ],
-                [
-                  121.5657619093492,
-                  25.03494336346221
-                ],
-                [
-                  121.5655864013175,
-                  25.03508282070834
-                ],
-                [
-                  121.56539230465806,
-                  25.035200328536483
-                ],
-                [
-                  121.56518294041852,
-                  25.03529387635512
-                ],
-                [
-                  121.56496189087908,
-                  25.03536186353514
-                ],
-                [
-                  121.56473293825863,
-                  25.035403126797046
-                ],
-                [
-                  121.5645,
-                  25.035416960114983
-                ],
-                [
-                  121.56426706174136,
-                  25.035403126797046
-                ],
-                [
-                  121.56403810912092,
-                  25.03536186353514
-                ],
-                [
-                  121.56381705958147,
-                  25.03529387635512
-                ],
-                [
-                  121.56360769534193,
-                  25.035200328536483
-                ],
-                [
-                  121.56341359868249,
-                  25.03508282070834
-                ],
-                [
-                  121.56323809065078,
-                  25.03494336346221
-                ],
-                [
-                  121.56308417423793,
-                  25.034784342950246
-                ],
-                [
-                  121.56295448299639,
-                  25.034608480057493
-                ],
-                [
-                  121.56285123597928,
-                  25.0344187838468
-                ],
-                [
-                  121.5627761997717,
-                  25.034218500072928
-                ],
-                [
-                  121.56273065826394,
-                  25.03401105564678
-                ],
-                [
-                  121.56271539068386,
-                  25.0338
-                ],
-                [
-                  121.56273065826394,
-                  25.03358894435322
-                ],
-                [
-                  121.5627761997717,
-                  25.03338149992707
-                ],
-                [
-                  121.56285123597928,
-                  25.0331812161532
-                ],
-                [
-                  121.56295448299639,
-                  25.032991519942506
-                ],
-                [
-                  121.56308417423793,
-                  25.032815657049753
-                ],
-                [
-                  121.56323809065078,
-                  25.032656636537787
-                ],
-                [
-                  121.56341359868249,
-                  25.03251717929166
-                ],
-                [
-                  121.56360769534193,
-                  25.032399671463516
-                ],
-                [
-                  121.56381705958147,
-                  25.03230612364488
-                ],
-                [
-                  121.56403810912092,
-                  25.03223813646486
-                ],
-                [
-                  121.56426706174136,
-                  25.032196873202953
-                ],
-                [
-                  121.5645,
-                  25.032183039885016
-                ],
-                [
-                  121.56473293825863,
-                  25.032196873202953
-                ],
-                [
-                  121.56496189087908,
-                  25.03223813646486
-                ],
-                [
-                  121.56518294041852,
-                  25.03230612364488
-                ],
-                [
-                  121.56539230465806,
-                  25.032399671463516
-                ],
-                [
-                  121.5655864013175,
-                  25.03251717929166
-                ],
-                [
-                  121.5657619093492,
-                  25.032656636537787
-                ],
-                [
-                  121.56591582576206,
-                  25.032815657049753
-                ],
-                [
-                  121.5660455170036,
-                  25.032991519942506
-                ],
-                [
-                  121.56614876402071,
-                  25.0331812161532
-                ],
-                [
-                  121.56622380022829,
-                  25.03338149992707
-                ],
-                [
-                  121.56626934173605,
-                  25.03358894435322
-                ],
-                [
-                  121.56628460931613,
-                  25.0338
-                ]
+                [121.56628460931613, 25.0338],
+                [121.56626934173605, 25.03401105564678],
+                [121.56622380022829, 25.034218500072928],
+                [121.56614876402071, 25.0344187838468],
+                [121.5660455170036, 25.034608480057493],
+                [121.56591582576206, 25.034784342950246],
+                [121.5657619093492, 25.03494336346221],
+                [121.5655864013175, 25.03508282070834],
+                [121.56539230465806, 25.035200328536483],
+                [121.56518294041852, 25.03529387635512],
+                [121.56496189087908, 25.03536186353514],
+                [121.56473293825863, 25.035403126797046],
+                [121.5645, 25.035416960114983],
+                [121.56426706174136, 25.035403126797046],
+                [121.56403810912092, 25.03536186353514],
+                [121.56381705958147, 25.03529387635512],
+                [121.56360769534193, 25.035200328536483],
+                [121.56341359868249, 25.03508282070834],
+                [121.56323809065078, 25.03494336346221],
+                [121.56308417423793, 25.034784342950246],
+                [121.56295448299639, 25.034608480057493],
+                [121.56285123597928, 25.0344187838468],
+                [121.5627761997717, 25.034218500072928],
+                [121.56273065826394, 25.03401105564678],
+                [121.56271539068386, 25.0338],
+                [121.56273065826394, 25.03358894435322],
+                [121.5627761997717, 25.03338149992707],
+                [121.56285123597928, 25.0331812161532],
+                [121.56295448299639, 25.032991519942506],
+                [121.56308417423793, 25.032815657049753],
+                [121.56323809065078, 25.032656636537787],
+                [121.56341359868249, 25.03251717929166],
+                [121.56360769534193, 25.032399671463516],
+                [121.56381705958147, 25.03230612364488],
+                [121.56403810912092, 25.03223813646486],
+                [121.56426706174136, 25.032196873202953],
+                [121.5645, 25.032183039885016],
+                [121.56473293825863, 25.032196873202953],
+                [121.56496189087908, 25.03223813646486],
+                [121.56518294041852, 25.03230612364488],
+                [121.56539230465806, 25.032399671463516],
+                [121.5655864013175, 25.03251717929166],
+                [121.5657619093492, 25.032656636537787],
+                [121.56591582576206, 25.032815657049753],
+                [121.5660455170036, 25.032991519942506],
+                [121.56614876402071, 25.0331812161532],
+                [121.56622380022829, 25.03338149992707],
+                [121.56626934173605, 25.03358894435322],
+                [121.56628460931613, 25.0338]
               ]
             ]
           },
@@ -2360,13 +1233,8 @@
               },
               "radiusMeters": 180
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
-            "serviceProductTypes": [
-              "taxi_realtime",
-              "taxi_reservation"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "serviceProductTypes": ["taxi_realtime", "taxi_reservation"],
             "reasonCode": "STOP_REQUIRES_MANUAL_REVIEW",
             "reasonMessage": "This stop requires ops review before dispatch.",
             "effectiveFrom": "2026-01-01T00:00:00.000Z",
@@ -2379,11 +1247,11 @@
           }
         }
       ],
-      "generatedAt": "2026-07-20T08:47:54.701Z"
+      "generatedAt": "2026-07-20T09:28:36.186Z"
     },
     "publishedPolicy": {
       "record": {
-        "stopPolicyId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "stopPolicyId": "62583205-7709-4aef-98d4-c315b4176bad",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "active",
@@ -2397,12 +1265,8 @@
           },
           "radiusMeters": 120
         },
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "serviceProductTypes": ["taxi_realtime"],
         "reasonCode": "PICKUP_NOT_ALLOWED",
         "reasonMessage": "Pickup requires the signed city-hall curb lane.",
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
@@ -2411,12 +1275,12 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy",
           "lifecycle": {
-            "publishedAt": "2026-07-20T08:47:54.703Z",
+            "publishedAt": "2026-07-20T09:28:36.186Z",
             "publishReason": "temporary city hall curb works"
           }
         },
-        "createdAt": "2026-07-20T08:47:54.695Z",
-        "updatedAt": "2026-07-20T08:47:54.703Z"
+        "createdAt": "2026-07-20T09:28:36.184Z",
+        "updatedAt": "2026-07-20T09:28:36.186Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -2425,7 +1289,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.published",
         "resourceType": "stop_policy",
-        "resourceId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "resourceId": "62583205-7709-4aef-98d4-c315b4176bad",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "active",
@@ -2441,7 +1305,7 @@
     "publishedPolicyDecision": {
       "decision": "not_serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-20T08:47:54.703Z",
+      "evaluatedAt": "2026-07-20T09:28:36.186Z",
       "stops": [
         {
           "kind": "pickup",
@@ -2449,23 +1313,15 @@
             "lat": 25.0375,
             "lng": 121.5637
           },
-          "serviceAreaCodes": [
-            "TAIPEI_CORE"
-          ],
-          "policyCodes": [
-            "CITY_HALL_PICKUP_BLOCK"
-          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
+          "policyCodes": ["CITY_HALL_PICKUP_BLOCK"],
           "geometryVersionRefs": [
             "service_area:TAIPEI_CORE@1",
             "stop_policy:CITY_HALL_PICKUP_BLOCK@1"
           ],
           "decision": "not_serviceable",
-          "reasonCodes": [
-            "PICKUP_NOT_ALLOWED"
-          ],
-          "reasonMessages": [
-            "Pickup requires the signed city-hall curb lane."
-          ]
+          "reasonCodes": ["PICKUP_NOT_ALLOWED"],
+          "reasonMessages": ["Pickup requires the signed city-hall curb lane."]
         },
         {
           "kind": "dropoff",
@@ -2473,35 +1329,25 @@
             "lat": 25.041,
             "lng": 121.55
           },
-          "serviceAreaCodes": [
-            "TAIPEI_CORE"
-          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
           "policyCodes": [],
-          "geometryVersionRefs": [
-            "service_area:TAIPEI_CORE@1"
-          ],
+          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
           "decision": "serviceable",
           "reasonCodes": [],
           "reasonMessages": []
         }
       ],
-      "serviceAreaCodes": [
-        "TAIPEI_CORE"
-      ],
+      "serviceAreaCodes": ["TAIPEI_CORE"],
       "geometryVersionRefs": [
         "service_area:TAIPEI_CORE@1",
         "stop_policy:CITY_HALL_PICKUP_BLOCK@1"
       ],
-      "reasonCodes": [
-        "PICKUP_NOT_ALLOWED"
-      ],
-      "reasonMessages": [
-        "Pickup requires the signed city-hall curb lane."
-      ]
+      "reasonCodes": ["PICKUP_NOT_ALLOWED"],
+      "reasonMessages": ["Pickup requires the signed city-hall curb lane."]
     },
     "retiredPolicy": {
       "record": {
-        "stopPolicyId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "stopPolicyId": "62583205-7709-4aef-98d4-c315b4176bad",
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "displayName": "City Hall pickup access block",
         "status": "retired",
@@ -2515,12 +1361,8 @@
           },
           "radiusMeters": 120
         },
-        "serviceAreaCodes": [
-          "TAIPEI_CORE"
-        ],
-        "serviceProductTypes": [
-          "taxi_realtime"
-        ],
+        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "serviceProductTypes": ["taxi_realtime"],
         "reasonCode": "PICKUP_NOT_ALLOWED",
         "reasonMessage": "Pickup requires the signed city-hall curb lane.",
         "effectiveFrom": "2026-06-01T00:00:00.000Z",
@@ -2529,14 +1371,14 @@
         "metadata": {
           "governanceDomain": "taxi_stop_policy",
           "lifecycle": {
-            "publishedAt": "2026-07-20T08:47:54.703Z",
+            "publishedAt": "2026-07-20T09:28:36.186Z",
             "publishReason": "temporary city hall curb works",
-            "retiredAt": "2026-07-20T08:47:54.703Z",
+            "retiredAt": "2026-07-20T09:28:36.187Z",
             "retireReason": "curb works completed"
           }
         },
-        "createdAt": "2026-07-20T08:47:54.695Z",
-        "updatedAt": "2026-07-20T08:47:54.703Z"
+        "createdAt": "2026-07-20T09:28:36.184Z",
+        "updatedAt": "2026-07-20T09:28:36.187Z"
       },
       "audit": {
         "actorId": "platform-admin-geo-001",
@@ -2545,7 +1387,7 @@
         "moduleName": "service-area",
         "actionName": "service_area.stop_policy.retired",
         "resourceType": "stop_policy",
-        "resourceId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+        "resourceId": "62583205-7709-4aef-98d4-c315b4176bad",
         "newValuesSummary": {
           "policyCode": "CITY_HALL_PICKUP_BLOCK",
           "status": "retired",
@@ -2563,213 +1405,66 @@
       "features": [
         {
           "type": "Feature",
-          "id": "66f8f540-2c86-4c83-b71f-cde26468715f",
+          "id": "1c9d80c6-0157-4036-800c-1c135561dc0d",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.69328914331224,
-                  24.1477
-                ],
-                [
-                  120.69312069996178,
-                  24.150045062742006
-                ],
-                [
-                  120.69261825202281,
-                  24.152350000810323
-                ],
-                [
-                  120.69179039651887,
-                  24.15457537607555
-                ],
-                [
-                  120.69065129828715,
-                  24.15668311174991
-                ],
-                [
-                  120.68922044761425,
-                  24.158637143891642
-                ],
-                [
-                  120.68752232675185,
-                  24.160404038469036
-                ],
-                [
-                  120.68558599101871,
-                  24.161953563426003
-                ],
-                [
-                  120.68344457165612,
-                  24.163259205960912
-                ],
-                [
-                  120.68113470894305,
-                  24.16429862616801
-                ],
-                [
-                  120.67869592527096,
-                  24.165054039279358
-                ],
-                [
-                  120.67616994890462,
-                  24.16551251996719
-                ],
-                [
-                  120.6736,
-                  24.16566622349982
-                ],
-                [
-                  120.67103005109537,
-                  24.16551251996719
-                ],
-                [
-                  120.66850407472903,
-                  24.165054039279358
-                ],
-                [
-                  120.66606529105694,
-                  24.16429862616801
-                ],
-                [
-                  120.66375542834386,
-                  24.163259205960912
-                ],
-                [
-                  120.66161400898127,
-                  24.161953563426003
-                ],
-                [
-                  120.65967767324814,
-                  24.160404038469036
-                ],
-                [
-                  120.65797955238574,
-                  24.158637143891642
-                ],
-                [
-                  120.65654870171284,
-                  24.15668311174991
-                ],
-                [
-                  120.65540960348112,
-                  24.15457537607555
-                ],
-                [
-                  120.65458174797718,
-                  24.152350000810323
-                ],
-                [
-                  120.6540793000382,
-                  24.150045062742006
-                ],
-                [
-                  120.65391085668774,
-                  24.1477
-                ],
-                [
-                  120.6540793000382,
-                  24.145354937257995
-                ],
-                [
-                  120.65458174797718,
-                  24.143049999189678
-                ],
-                [
-                  120.65540960348112,
-                  24.140824623924452
-                ],
-                [
-                  120.65654870171284,
-                  24.13871688825009
-                ],
-                [
-                  120.65797955238574,
-                  24.13676285610836
-                ],
-                [
-                  120.65967767324814,
-                  24.134995961530965
-                ],
-                [
-                  120.66161400898127,
-                  24.133446436573998
-                ],
-                [
-                  120.66375542834386,
-                  24.13214079403909
-                ],
-                [
-                  120.66606529105694,
-                  24.131101373831992
-                ],
-                [
-                  120.66850407472903,
-                  24.130345960720643
-                ],
-                [
-                  120.67103005109537,
-                  24.12988748003281
-                ],
-                [
-                  120.6736,
-                  24.12973377650018
-                ],
-                [
-                  120.67616994890462,
-                  24.12988748003281
-                ],
-                [
-                  120.67869592527096,
-                  24.130345960720643
-                ],
-                [
-                  120.68113470894305,
-                  24.131101373831992
-                ],
-                [
-                  120.68344457165612,
-                  24.13214079403909
-                ],
-                [
-                  120.68558599101871,
-                  24.133446436573998
-                ],
-                [
-                  120.68752232675185,
-                  24.134995961530965
-                ],
-                [
-                  120.68922044761425,
-                  24.13676285610836
-                ],
-                [
-                  120.69065129828715,
-                  24.13871688825009
-                ],
-                [
-                  120.69179039651887,
-                  24.140824623924452
-                ],
-                [
-                  120.69261825202281,
-                  24.143049999189678
-                ],
-                [
-                  120.69312069996178,
-                  24.145354937257995
-                ],
-                [
-                  120.69328914331224,
-                  24.1477
-                ]
+                [120.69328914331224, 24.1477],
+                [120.69312069996178, 24.150045062742006],
+                [120.69261825202281, 24.152350000810323],
+                [120.69179039651887, 24.15457537607555],
+                [120.69065129828715, 24.15668311174991],
+                [120.68922044761425, 24.158637143891642],
+                [120.68752232675185, 24.160404038469036],
+                [120.68558599101871, 24.161953563426003],
+                [120.68344457165612, 24.163259205960912],
+                [120.68113470894305, 24.16429862616801],
+                [120.67869592527096, 24.165054039279358],
+                [120.67616994890462, 24.16551251996719],
+                [120.6736, 24.16566622349982],
+                [120.67103005109537, 24.16551251996719],
+                [120.66850407472903, 24.165054039279358],
+                [120.66606529105694, 24.16429862616801],
+                [120.66375542834386, 24.163259205960912],
+                [120.66161400898127, 24.161953563426003],
+                [120.65967767324814, 24.160404038469036],
+                [120.65797955238574, 24.158637143891642],
+                [120.65654870171284, 24.15668311174991],
+                [120.65540960348112, 24.15457537607555],
+                [120.65458174797718, 24.152350000810323],
+                [120.6540793000382, 24.150045062742006],
+                [120.65391085668774, 24.1477],
+                [120.6540793000382, 24.145354937257995],
+                [120.65458174797718, 24.143049999189678],
+                [120.65540960348112, 24.140824623924452],
+                [120.65654870171284, 24.13871688825009],
+                [120.65797955238574, 24.13676285610836],
+                [120.65967767324814, 24.134995961530965],
+                [120.66161400898127, 24.133446436573998],
+                [120.66375542834386, 24.13214079403909],
+                [120.66606529105694, 24.131101373831992],
+                [120.66850407472903, 24.130345960720643],
+                [120.67103005109537, 24.12988748003281],
+                [120.6736, 24.12973377650018],
+                [120.67616994890462, 24.12988748003281],
+                [120.67869592527096, 24.130345960720643],
+                [120.68113470894305, 24.131101373831992],
+                [120.68344457165612, 24.13214079403909],
+                [120.68558599101871, 24.133446436573998],
+                [120.68752232675185, 24.134995961530965],
+                [120.68922044761425, 24.13676285610836],
+                [120.69065129828715, 24.13871688825009],
+                [120.69179039651887, 24.140824623924452],
+                [120.69261825202281, 24.143049999189678],
+                [120.69312069996178, 24.145354937257995],
+                [120.69328914331224, 24.1477]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "66f8f540-2c86-4c83-b71f-cde26468715f",
+            "serviceAreaId": "1c9d80c6-0157-4036-800c-1c135561dc0d",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core overlapping window",
             "status": "draft",
@@ -2781,9 +1476,7 @@
               },
               "radiusMeters": 2000
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-06-01T00:00:00.000Z",
             "effectiveUntil": "2026-07-01T00:00:00.000Z",
             "version": 2,
@@ -2793,213 +1486,66 @@
         },
         {
           "type": "Feature",
-          "id": "3cecceb3-22fc-4f3e-8f15-b69089d7d7d6",
+          "id": "1109a9aa-053e-4638-a872-d3ed4eb7ec54",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.69132022898103,
-                  24.1477
-                ],
-                [
-                  120.6911686299656,
-                  24.149810556467806
-                ],
-                [
-                  120.69071642682053,
-                  24.15188500072929
-                ],
-                [
-                  120.68997135686698,
-                  24.153887838467995
-                ],
-                [
-                  120.68894616845844,
-                  24.15578480057492
-                ],
-                [
-                  120.68765840285282,
-                  24.15754342950248
-                ],
-                [
-                  120.68613009407666,
-                  24.159133634622133
-                ],
-                [
-                  120.68438739191684,
-                  24.160528207083402
-                ],
-                [
-                  120.68246011449051,
-                  24.161703285364823
-                ],
-                [
-                  120.68038123804875,
-                  24.162638763551207
-                ],
-                [
-                  120.67818633274386,
-                  24.163318635351423
-                ],
-                [
-                  120.67591295401415,
-                  24.163731267970473
-                ],
-                [
-                  120.6736,
-                  24.163869601149838
-                ],
-                [
-                  120.67128704598584,
-                  24.163731267970473
-                ],
-                [
-                  120.66901366725612,
-                  24.163318635351423
-                ],
-                [
-                  120.66681876195123,
-                  24.162638763551207
-                ],
-                [
-                  120.66473988550948,
-                  24.161703285364823
-                ],
-                [
-                  120.66281260808314,
-                  24.160528207083402
-                ],
-                [
-                  120.66106990592333,
-                  24.159133634622133
-                ],
-                [
-                  120.65954159714717,
-                  24.15754342950248
-                ],
-                [
-                  120.65825383154154,
-                  24.15578480057492
-                ],
-                [
-                  120.65722864313301,
-                  24.153887838467995
-                ],
-                [
-                  120.65648357317946,
-                  24.15188500072929
-                ],
-                [
-                  120.65603137003438,
-                  24.149810556467806
-                ],
-                [
-                  120.65587977101896,
-                  24.1477
-                ],
-                [
-                  120.65603137003438,
-                  24.145589443532195
-                ],
-                [
-                  120.65648357317946,
-                  24.14351499927071
-                ],
-                [
-                  120.65722864313301,
-                  24.141512161532006
-                ],
-                [
-                  120.65825383154154,
-                  24.13961519942508
-                ],
-                [
-                  120.65954159714717,
-                  24.137856570497522
-                ],
-                [
-                  120.66106990592333,
-                  24.136266365377868
-                ],
-                [
-                  120.66281260808314,
-                  24.1348717929166
-                ],
-                [
-                  120.66473988550948,
-                  24.133696714635178
-                ],
-                [
-                  120.66681876195123,
-                  24.132761236448793
-                ],
-                [
-                  120.66901366725612,
-                  24.132081364648577
-                ],
-                [
-                  120.67128704598584,
-                  24.131668732029528
-                ],
-                [
-                  120.6736,
-                  24.131530398850163
-                ],
-                [
-                  120.67591295401415,
-                  24.131668732029528
-                ],
-                [
-                  120.67818633274386,
-                  24.132081364648577
-                ],
-                [
-                  120.68038123804875,
-                  24.132761236448793
-                ],
-                [
-                  120.68246011449051,
-                  24.133696714635178
-                ],
-                [
-                  120.68438739191684,
-                  24.1348717929166
-                ],
-                [
-                  120.68613009407666,
-                  24.136266365377868
-                ],
-                [
-                  120.68765840285282,
-                  24.137856570497522
-                ],
-                [
-                  120.68894616845844,
-                  24.13961519942508
-                ],
-                [
-                  120.68997135686698,
-                  24.141512161532006
-                ],
-                [
-                  120.69071642682053,
-                  24.14351499927071
-                ],
-                [
-                  120.6911686299656,
-                  24.145589443532195
-                ],
-                [
-                  120.69132022898103,
-                  24.1477
-                ]
+                [120.69132022898103, 24.1477],
+                [120.6911686299656, 24.149810556467806],
+                [120.69071642682053, 24.15188500072929],
+                [120.68997135686698, 24.153887838467995],
+                [120.68894616845844, 24.15578480057492],
+                [120.68765840285282, 24.15754342950248],
+                [120.68613009407666, 24.159133634622133],
+                [120.68438739191684, 24.160528207083402],
+                [120.68246011449051, 24.161703285364823],
+                [120.68038123804875, 24.162638763551207],
+                [120.67818633274386, 24.163318635351423],
+                [120.67591295401415, 24.163731267970473],
+                [120.6736, 24.163869601149838],
+                [120.67128704598584, 24.163731267970473],
+                [120.66901366725612, 24.163318635351423],
+                [120.66681876195123, 24.162638763551207],
+                [120.66473988550948, 24.161703285364823],
+                [120.66281260808314, 24.160528207083402],
+                [120.66106990592333, 24.159133634622133],
+                [120.65954159714717, 24.15754342950248],
+                [120.65825383154154, 24.15578480057492],
+                [120.65722864313301, 24.153887838467995],
+                [120.65648357317946, 24.15188500072929],
+                [120.65603137003438, 24.149810556467806],
+                [120.65587977101896, 24.1477],
+                [120.65603137003438, 24.145589443532195],
+                [120.65648357317946, 24.14351499927071],
+                [120.65722864313301, 24.141512161532006],
+                [120.65825383154154, 24.13961519942508],
+                [120.65954159714717, 24.137856570497522],
+                [120.66106990592333, 24.136266365377868],
+                [120.66281260808314, 24.1348717929166],
+                [120.66473988550948, 24.133696714635178],
+                [120.66681876195123, 24.132761236448793],
+                [120.66901366725612, 24.132081364648577],
+                [120.67128704598584, 24.131668732029528],
+                [120.6736, 24.131530398850163],
+                [120.67591295401415, 24.131668732029528],
+                [120.67818633274386, 24.132081364648577],
+                [120.68038123804875, 24.132761236448793],
+                [120.68246011449051, 24.133696714635178],
+                [120.68438739191684, 24.1348717929166],
+                [120.68613009407666, 24.136266365377868],
+                [120.68765840285282, 24.137856570497522],
+                [120.68894616845844, 24.13961519942508],
+                [120.68997135686698, 24.141512161532006],
+                [120.69071642682053, 24.14351499927071],
+                [120.6911686299656, 24.145589443532195],
+                [120.69132022898103, 24.1477]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "3cecceb3-22fc-4f3e-8f15-b69089d7d7d6",
+            "serviceAreaId": "1109a9aa-053e-4638-a872-d3ed4eb7ec54",
             "areaCode": "VERSIONED_CORE",
             "displayName": "Versioned core first window",
             "status": "active",
@@ -3011,16 +1557,14 @@
               },
               "radiusMeters": 1800
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-01-01T00:00:00.000Z",
             "effectiveUntil": "2026-12-31T00:00:00.000Z",
             "version": 1,
             "geometryVersionRef": "service_area:VERSIONED_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-20T08:47:54.693Z",
+                "publishedAt": "2026-07-20T09:28:36.183Z",
                 "publishReason": "initial version"
               }
             }
@@ -3028,213 +1572,66 @@
         },
         {
           "type": "Feature",
-          "id": "8eb6b2b8-05cc-4819-a98e-409dff277491",
+          "id": "93301e5a-0e1e-4c45-a8a8-befc3499d7a3",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.47154695040427,
-                  23.48
-                ],
-                [
-                  120.47136261325659,
-                  23.482579569016206
-                ],
-                [
-                  120.47081275587325,
-                  23.485115000891355
-                ],
-                [
-                  120.46990678646654,
-                  23.487562913683107
-                ],
-                [
-                  120.46866020642418,
-                  23.489881422924903
-                ],
-                [
-                  120.46709434507632,
-                  23.492030858280806
-                ],
-                [
-                  120.46523599474475,
-                  23.493974442315942
-                ],
-                [
-                  120.46311695231888,
-                  23.4956789197686
-                ],
-                [
-                  120.46077347520213,
-                  23.497115126557006
-                ],
-                [
-                  120.4582456609377,
-                  23.49825848878481
-                ],
-                [
-                  120.45557676112851,
-                  23.499089443207293
-                ],
-                [
-                  120.45281244139022,
-                  23.49959377196391
-                ],
-                [
-                  120.45,
-                  23.4997628458498
-                ],
-                [
-                  120.44718755860978,
-                  23.49959377196391
-                ],
-                [
-                  120.4444232388715,
-                  23.499089443207293
-                ],
-                [
-                  120.4417543390623,
-                  23.49825848878481
-                ],
-                [
-                  120.43922652479787,
-                  23.497115126557006
-                ],
-                [
-                  120.43688304768112,
-                  23.4956789197686
-                ],
-                [
-                  120.43476400525526,
-                  23.493974442315942
-                ],
-                [
-                  120.43290565492369,
-                  23.492030858280806
-                ],
-                [
-                  120.43133979357583,
-                  23.489881422924903
-                ],
-                [
-                  120.43009321353347,
-                  23.487562913683107
-                ],
-                [
-                  120.42918724412675,
-                  23.485115000891355
-                ],
-                [
-                  120.42863738674342,
-                  23.482579569016206
-                ],
-                [
-                  120.42845304959573,
-                  23.48
-                ],
-                [
-                  120.42863738674342,
-                  23.477420430983795
-                ],
-                [
-                  120.42918724412675,
-                  23.474884999108646
-                ],
-                [
-                  120.43009321353347,
-                  23.472437086316894
-                ],
-                [
-                  120.43133979357583,
-                  23.470118577075098
-                ],
-                [
-                  120.43290565492369,
-                  23.467969141719195
-                ],
-                [
-                  120.43476400525526,
-                  23.46602555768406
-                ],
-                [
-                  120.43688304768112,
-                  23.4643210802314
-                ],
-                [
-                  120.43922652479787,
-                  23.462884873442995
-                ],
-                [
-                  120.4417543390623,
-                  23.46174151121519
-                ],
-                [
-                  120.4444232388715,
-                  23.460910556792708
-                ],
-                [
-                  120.44718755860978,
-                  23.460406228036092
-                ],
-                [
-                  120.45,
-                  23.4602371541502
-                ],
-                [
-                  120.45281244139022,
-                  23.460406228036092
-                ],
-                [
-                  120.45557676112851,
-                  23.460910556792708
-                ],
-                [
-                  120.4582456609377,
-                  23.46174151121519
-                ],
-                [
-                  120.46077347520213,
-                  23.462884873442995
-                ],
-                [
-                  120.46311695231888,
-                  23.4643210802314
-                ],
-                [
-                  120.46523599474475,
-                  23.46602555768406
-                ],
-                [
-                  120.46709434507632,
-                  23.467969141719195
-                ],
-                [
-                  120.46866020642418,
-                  23.470118577075098
-                ],
-                [
-                  120.46990678646654,
-                  23.472437086316894
-                ],
-                [
-                  120.47081275587325,
-                  23.474884999108646
-                ],
-                [
-                  120.47136261325659,
-                  23.477420430983795
-                ],
-                [
-                  120.47154695040427,
-                  23.48
-                ]
+                [120.47154695040427, 23.48],
+                [120.47136261325659, 23.482579569016206],
+                [120.47081275587325, 23.485115000891355],
+                [120.46990678646654, 23.487562913683107],
+                [120.46866020642418, 23.489881422924903],
+                [120.46709434507632, 23.492030858280806],
+                [120.46523599474475, 23.493974442315942],
+                [120.46311695231888, 23.4956789197686],
+                [120.46077347520213, 23.497115126557006],
+                [120.4582456609377, 23.49825848878481],
+                [120.45557676112851, 23.499089443207293],
+                [120.45281244139022, 23.49959377196391],
+                [120.45, 23.4997628458498],
+                [120.44718755860978, 23.49959377196391],
+                [120.4444232388715, 23.499089443207293],
+                [120.4417543390623, 23.49825848878481],
+                [120.43922652479787, 23.497115126557006],
+                [120.43688304768112, 23.4956789197686],
+                [120.43476400525526, 23.493974442315942],
+                [120.43290565492369, 23.492030858280806],
+                [120.43133979357583, 23.489881422924903],
+                [120.43009321353347, 23.487562913683107],
+                [120.42918724412675, 23.485115000891355],
+                [120.42863738674342, 23.482579569016206],
+                [120.42845304959573, 23.48],
+                [120.42863738674342, 23.477420430983795],
+                [120.42918724412675, 23.474884999108646],
+                [120.43009321353347, 23.472437086316894],
+                [120.43133979357583, 23.470118577075098],
+                [120.43290565492369, 23.467969141719195],
+                [120.43476400525526, 23.46602555768406],
+                [120.43688304768112, 23.4643210802314],
+                [120.43922652479787, 23.462884873442995],
+                [120.4417543390623, 23.46174151121519],
+                [120.4444232388715, 23.460910556792708],
+                [120.44718755860978, 23.460406228036092],
+                [120.45, 23.4602371541502],
+                [120.45281244139022, 23.460406228036092],
+                [120.45557676112851, 23.460910556792708],
+                [120.4582456609377, 23.46174151121519],
+                [120.46077347520213, 23.462884873442995],
+                [120.46311695231888, 23.4643210802314],
+                [120.46523599474475, 23.46602555768406],
+                [120.46709434507632, 23.467969141719195],
+                [120.46866020642418, 23.470118577075098],
+                [120.46990678646654, 23.472437086316894],
+                [120.47081275587325, 23.474884999108646],
+                [120.47136261325659, 23.477420430983795],
+                [120.47154695040427, 23.48]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "8eb6b2b8-05cc-4819-a98e-409dff277491",
+            "serviceAreaId": "93301e5a-0e1e-4c45-a8a8-befc3499d7a3",
             "areaCode": "CYI_CORE",
             "displayName": "Chiayi future operating area",
             "status": "active",
@@ -3246,16 +1643,14 @@
               },
               "radiusMeters": 2200
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-08-01T00:00:00.000Z",
             "effectiveUntil": null,
             "version": 1,
             "geometryVersionRef": "service_area:CYI_CORE@1",
             "metadata": {
               "lifecycle": {
-                "publishedAt": "2026-07-20T08:47:54.692Z",
+                "publishedAt": "2026-07-20T09:28:36.182Z",
                 "publishReason": "scheduled launch"
               }
             }
@@ -3263,37 +1658,22 @@
         },
         {
           "type": "Feature",
-          "id": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+          "id": "51a50116-8cce-49a5-9607-05504b2f348b",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  120.25,
-                  22.58
-                ],
-                [
-                  120.36,
-                  22.58
-                ],
-                [
-                  120.36,
-                  22.68
-                ],
-                [
-                  120.25,
-                  22.68
-                ],
-                [
-                  120.25,
-                  22.58
-                ]
+                [120.25, 22.58],
+                [120.36, 22.58],
+                [120.36, 22.68],
+                [120.25, 22.68],
+                [120.25, 22.58]
               ]
             ]
           },
           "properties": {
             "recordKind": "service_area",
-            "serviceAreaId": "f0544a02-dc5e-4a92-9bce-52f8394b0b8a",
+            "serviceAreaId": "51a50116-8cce-49a5-9607-05504b2f348b",
             "areaCode": "KHH_CORE",
             "displayName": "Kaohsiung core operating area",
             "status": "active",
@@ -3318,9 +1698,7 @@
                 }
               ]
             },
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceProductTypes": ["taxi_realtime"],
             "effectiveFrom": "2026-06-01T00:00:00.000Z",
             "effectiveUntil": null,
             "version": 1,
@@ -3328,7 +1706,7 @@
             "metadata": {
               "governanceDomain": "taxi_service_area",
               "lifecycle": {
-                "publishedAt": "2026-07-20T08:47:54.688Z",
+                "publishedAt": "2026-07-20T09:28:36.181Z",
                 "publishReason": "launch kaohsiung pilot"
               }
             }
@@ -3341,26 +1719,11 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.4505,
-                  25.0005
-                ],
-                [
-                  121.625,
-                  25.0005
-                ],
-                [
-                  121.625,
-                  25.125
-                ],
-                [
-                  121.4505,
-                  25.125
-                ],
-                [
-                  121.4505,
-                  25.0005
-                ]
+                [121.4505, 25.0005],
+                [121.625, 25.0005],
+                [121.625, 25.125],
+                [121.4505, 25.125],
+                [121.4505, 25.0005]
               ]
             ]
           },
@@ -3412,202 +1775,55 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.2986683660182,
-                  25.0797
-                ],
-                [
-                  121.2981168302099,
-                  25.087321453911517
-                ],
-                [
-                  121.29647165971564,
-                  25.094812502633545
-                ],
-                [
-                  121.29376100385866,
-                  25.102044972245537
-                ],
-                [
-                  121.29003124271223,
-                  25.108895113187206
-                ],
-                [
-                  121.28534619352367,
-                  25.11524571764783
-                ],
-                [
-                  121.27978601878348,
-                  25.120988125024365
-                ],
-                [
-                  121.2734458546231,
-                  25.126024081134503
-                ],
-                [
-                  121.2664341830091,
-                  25.130267419372966
-                ],
-                [
-                  121.25887097558682,
-                  25.13364553504602
-                ],
-                [
-                  121.25088564093215,
-                  25.136100627657914
-                ],
-                [
-                  121.242614810335,
-                  25.13759068989337
-                ],
-                [
-                  121.2342,
-                  25.138090226374416
-                ],
-                [
-                  121.225785189665,
-                  25.13759068989337
-                ],
-                [
-                  121.21751435906785,
-                  25.136100627657914
-                ],
-                [
-                  121.20952902441319,
-                  25.13364553504602
-                ],
-                [
-                  121.2019658169909,
-                  25.130267419372966
-                ],
-                [
-                  121.1949541453769,
-                  25.126024081134503
-                ],
-                [
-                  121.18861398121652,
-                  25.120988125024365
-                ],
-                [
-                  121.18305380647634,
-                  25.11524571764783
-                ],
-                [
-                  121.17836875728777,
-                  25.108895113187206
-                ],
-                [
-                  121.17463899614134,
-                  25.102044972245537
-                ],
-                [
-                  121.17192834028437,
-                  25.094812502633545
-                ],
-                [
-                  121.1702831697901,
-                  25.087321453911517
-                ],
-                [
-                  121.1697316339818,
-                  25.0797
-                ],
-                [
-                  121.1702831697901,
-                  25.07207854608848
-                ],
-                [
-                  121.17192834028437,
-                  25.064587497366453
-                ],
-                [
-                  121.17463899614134,
-                  25.05735502775446
-                ],
-                [
-                  121.17836875728777,
-                  25.050504886812792
-                ],
-                [
-                  121.18305380647634,
-                  25.044154282352167
-                ],
-                [
-                  121.18861398121652,
-                  25.038411874975633
-                ],
-                [
-                  121.1949541453769,
-                  25.033375918865495
-                ],
-                [
-                  121.2019658169909,
-                  25.02913258062703
-                ],
-                [
-                  121.20952902441319,
-                  25.025754464953977
-                ],
-                [
-                  121.21751435906785,
-                  25.023299372342084
-                ],
-                [
-                  121.225785189665,
-                  25.02180931010663
-                ],
-                [
-                  121.2342,
-                  25.021309773625582
-                ],
-                [
-                  121.242614810335,
-                  25.02180931010663
-                ],
-                [
-                  121.25088564093215,
-                  25.023299372342084
-                ],
-                [
-                  121.25887097558682,
-                  25.025754464953977
-                ],
-                [
-                  121.2664341830091,
-                  25.02913258062703
-                ],
-                [
-                  121.2734458546231,
-                  25.033375918865495
-                ],
-                [
-                  121.27978601878348,
-                  25.038411874975633
-                ],
-                [
-                  121.28534619352367,
-                  25.044154282352167
-                ],
-                [
-                  121.29003124271223,
-                  25.050504886812792
-                ],
-                [
-                  121.29376100385866,
-                  25.05735502775446
-                ],
-                [
-                  121.29647165971564,
-                  25.064587497366453
-                ],
-                [
-                  121.2981168302099,
-                  25.07207854608848
-                ],
-                [
-                  121.2986683660182,
-                  25.0797
-                ]
+                [121.2986683660182, 25.0797],
+                [121.2981168302099, 25.087321453911517],
+                [121.29647165971564, 25.094812502633545],
+                [121.29376100385866, 25.102044972245537],
+                [121.29003124271223, 25.108895113187206],
+                [121.28534619352367, 25.11524571764783],
+                [121.27978601878348, 25.120988125024365],
+                [121.2734458546231, 25.126024081134503],
+                [121.2664341830091, 25.130267419372966],
+                [121.25887097558682, 25.13364553504602],
+                [121.25088564093215, 25.136100627657914],
+                [121.242614810335, 25.13759068989337],
+                [121.2342, 25.138090226374416],
+                [121.225785189665, 25.13759068989337],
+                [121.21751435906785, 25.136100627657914],
+                [121.20952902441319, 25.13364553504602],
+                [121.2019658169909, 25.130267419372966],
+                [121.1949541453769, 25.126024081134503],
+                [121.18861398121652, 25.120988125024365],
+                [121.18305380647634, 25.11524571764783],
+                [121.17836875728777, 25.108895113187206],
+                [121.17463899614134, 25.102044972245537],
+                [121.17192834028437, 25.094812502633545],
+                [121.1702831697901, 25.087321453911517],
+                [121.1697316339818, 25.0797],
+                [121.1702831697901, 25.07207854608848],
+                [121.17192834028437, 25.064587497366453],
+                [121.17463899614134, 25.05735502775446],
+                [121.17836875728777, 25.050504886812792],
+                [121.18305380647634, 25.044154282352167],
+                [121.18861398121652, 25.038411874975633],
+                [121.1949541453769, 25.033375918865495],
+                [121.2019658169909, 25.02913258062703],
+                [121.20952902441319, 25.025754464953977],
+                [121.21751435906785, 25.023299372342084],
+                [121.225785189665, 25.02180931010663],
+                [121.2342, 25.021309773625582],
+                [121.242614810335, 25.02180931010663],
+                [121.25088564093215, 25.023299372342084],
+                [121.25887097558682, 25.025754464953977],
+                [121.2664341830091, 25.02913258062703],
+                [121.2734458546231, 25.033375918865495],
+                [121.27978601878348, 25.038411874975633],
+                [121.28534619352367, 25.044154282352167],
+                [121.29003124271223, 25.050504886812792],
+                [121.29376100385866, 25.05735502775446],
+                [121.29647165971564, 25.064587497366453],
+                [121.2981168302099, 25.07207854608848],
+                [121.2986683660182, 25.0797]
               ]
             ]
           },
@@ -3625,9 +1841,7 @@
               },
               "radiusMeters": 6500
             },
-            "serviceProductTypes": [
-              "credit_card_airport_transfer"
-            ],
+            "serviceProductTypes": ["credit_card_airport_transfer"],
             "effectiveFrom": "2026-01-01T00:00:00.000Z",
             "effectiveUntil": null,
             "version": 1,
@@ -3639,213 +1853,66 @@
         },
         {
           "type": "Feature",
-          "id": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+          "id": "62583205-7709-4aef-98d4-c315b4176bad",
           "geometry": {
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.56488977542928,
-                  25.0375
-                ],
-                [
-                  121.56487959673555,
-                  25.03764070376452
-                ],
-                [
-                  121.56484923481462,
-                  25.03777900004862
-                ],
-                [
-                  121.56479920916739,
-                  25.037912522564536
-                ],
-                [
-                  121.56473037574655,
-                  25.038038986704997
-                ],
-                [
-                  121.56464391231101,
-                  25.0381562286335
-                ],
-                [
-                  121.56454129827414,
-                  25.038262242308143
-                ],
-                [
-                  121.56442428939053,
-                  25.038355213805563
-                ],
-                [
-                  121.56429488771464,
-                  25.038433552357656
-                ],
-                [
-                  121.56415530734502,
-                  25.03849591757008
-                ],
-                [
-                  121.56400793654049,
-                  25.038541242356764
-                ],
-                [
-                  121.56385529685637,
-                  25.03856875119803
-                ],
-                [
-                  121.5637,
-                  25.03857797340999
-                ],
-                [
-                  121.56354470314362,
-                  25.03856875119803
-                ],
-                [
-                  121.5633920634595,
-                  25.038541242356764
-                ],
-                [
-                  121.56324469265498,
-                  25.03849591757008
-                ],
-                [
-                  121.56310511228536,
-                  25.038433552357656
-                ],
-                [
-                  121.56297571060946,
-                  25.038355213805563
-                ],
-                [
-                  121.56285870172586,
-                  25.038262242308143
-                ],
-                [
-                  121.56275608768898,
-                  25.0381562286335
-                ],
-                [
-                  121.56266962425345,
-                  25.038038986704997
-                ],
-                [
-                  121.5626007908326,
-                  25.037912522564536
-                ],
-                [
-                  121.56255076518538,
-                  25.03777900004862
-                ],
-                [
-                  121.56252040326444,
-                  25.03764070376452
-                ],
-                [
-                  121.56251022457072,
-                  25.0375
-                ],
-                [
-                  121.56252040326444,
-                  25.037359296235483
-                ],
-                [
-                  121.56255076518538,
-                  25.037220999951384
-                ],
-                [
-                  121.5626007908326,
-                  25.037087477435467
-                ],
-                [
-                  121.56266962425345,
-                  25.036961013295006
-                ],
-                [
-                  121.56275608768898,
-                  25.036843771366502
-                ],
-                [
-                  121.56285870172586,
-                  25.03673775769186
-                ],
-                [
-                  121.56297571060946,
-                  25.03664478619444
-                ],
-                [
-                  121.56310511228536,
-                  25.036566447642347
-                ],
-                [
-                  121.56324469265498,
-                  25.03650408242992
-                ],
-                [
-                  121.5633920634595,
-                  25.03645875764324
-                ],
-                [
-                  121.56354470314362,
-                  25.03643124880197
-                ],
-                [
-                  121.5637,
-                  25.036422026590014
-                ],
-                [
-                  121.56385529685637,
-                  25.03643124880197
-                ],
-                [
-                  121.56400793654049,
-                  25.03645875764324
-                ],
-                [
-                  121.56415530734502,
-                  25.03650408242992
-                ],
-                [
-                  121.56429488771464,
-                  25.036566447642347
-                ],
-                [
-                  121.56442428939053,
-                  25.03664478619444
-                ],
-                [
-                  121.56454129827414,
-                  25.03673775769186
-                ],
-                [
-                  121.56464391231101,
-                  25.036843771366502
-                ],
-                [
-                  121.56473037574655,
-                  25.036961013295006
-                ],
-                [
-                  121.56479920916739,
-                  25.037087477435467
-                ],
-                [
-                  121.56484923481462,
-                  25.037220999951384
-                ],
-                [
-                  121.56487959673555,
-                  25.037359296235483
-                ],
-                [
-                  121.56488977542928,
-                  25.0375
-                ]
+                [121.56488977542928, 25.0375],
+                [121.56487959673555, 25.03764070376452],
+                [121.56484923481462, 25.03777900004862],
+                [121.56479920916739, 25.037912522564536],
+                [121.56473037574655, 25.038038986704997],
+                [121.56464391231101, 25.0381562286335],
+                [121.56454129827414, 25.038262242308143],
+                [121.56442428939053, 25.038355213805563],
+                [121.56429488771464, 25.038433552357656],
+                [121.56415530734502, 25.03849591757008],
+                [121.56400793654049, 25.038541242356764],
+                [121.56385529685637, 25.03856875119803],
+                [121.5637, 25.03857797340999],
+                [121.56354470314362, 25.03856875119803],
+                [121.5633920634595, 25.038541242356764],
+                [121.56324469265498, 25.03849591757008],
+                [121.56310511228536, 25.038433552357656],
+                [121.56297571060946, 25.038355213805563],
+                [121.56285870172586, 25.038262242308143],
+                [121.56275608768898, 25.0381562286335],
+                [121.56266962425345, 25.038038986704997],
+                [121.5626007908326, 25.037912522564536],
+                [121.56255076518538, 25.03777900004862],
+                [121.56252040326444, 25.03764070376452],
+                [121.56251022457072, 25.0375],
+                [121.56252040326444, 25.037359296235483],
+                [121.56255076518538, 25.037220999951384],
+                [121.5626007908326, 25.037087477435467],
+                [121.56266962425345, 25.036961013295006],
+                [121.56275608768898, 25.036843771366502],
+                [121.56285870172586, 25.03673775769186],
+                [121.56297571060946, 25.03664478619444],
+                [121.56310511228536, 25.036566447642347],
+                [121.56324469265498, 25.03650408242992],
+                [121.5633920634595, 25.03645875764324],
+                [121.56354470314362, 25.03643124880197],
+                [121.5637, 25.036422026590014],
+                [121.56385529685637, 25.03643124880197],
+                [121.56400793654049, 25.03645875764324],
+                [121.56415530734502, 25.03650408242992],
+                [121.56429488771464, 25.036566447642347],
+                [121.56442428939053, 25.03664478619444],
+                [121.56454129827414, 25.03673775769186],
+                [121.56464391231101, 25.036843771366502],
+                [121.56473037574655, 25.036961013295006],
+                [121.56479920916739, 25.037087477435467],
+                [121.56484923481462, 25.037220999951384],
+                [121.56487959673555, 25.037359296235483],
+                [121.56488977542928, 25.0375]
               ]
             ]
           },
           "properties": {
             "recordKind": "stop_policy",
-            "stopPolicyId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+            "stopPolicyId": "62583205-7709-4aef-98d4-c315b4176bad",
             "policyCode": "CITY_HALL_PICKUP_BLOCK",
             "displayName": "City Hall pickup access block",
             "status": "retired",
@@ -3859,12 +1926,8 @@
               },
               "radiusMeters": 120
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
-            "serviceProductTypes": [
-              "taxi_realtime"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "serviceProductTypes": ["taxi_realtime"],
             "reasonCode": "PICKUP_NOT_ALLOWED",
             "reasonMessage": "Pickup requires the signed city-hall curb lane.",
             "effectiveFrom": "2026-06-01T00:00:00.000Z",
@@ -3874,9 +1937,9 @@
             "metadata": {
               "governanceDomain": "taxi_stop_policy",
               "lifecycle": {
-                "publishedAt": "2026-07-20T08:47:54.703Z",
+                "publishedAt": "2026-07-20T09:28:36.186Z",
                 "publishReason": "temporary city hall curb works",
-                "retiredAt": "2026-07-20T08:47:54.703Z",
+                "retiredAt": "2026-07-20T09:28:36.187Z",
                 "retireReason": "curb works completed"
               }
             }
@@ -3889,202 +1952,55 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.51918143816626,
-                  25.0478
-                ],
-                [
-                  121.51916277566035,
-                  25.04805795690162
-                ],
-                [
-                  121.51910710746324,
-                  25.048311500089135
-                ],
-                [
-                  121.51901538607325,
-                  25.04855629136831
-                ],
-                [
-                  121.51888918086877,
-                  25.048788142292487
-                ],
-                [
-                  121.51873065125584,
-                  25.04900308582808
-                ],
-                [
-                  121.5185425097201,
-                  25.04919744423159
-                ],
-                [
-                  121.51832797541539,
-                  25.04936789197686
-                ],
-                [
-                  121.51809071908313,
-                  25.049511512655698
-                ],
-                [
-                  121.51783480024496,
-                  25.04962584887848
-                ],
-                [
-                  121.51756459774315,
-                  25.049708944320727
-                ],
-                [
-                  121.51728473481741,
-                  25.04975937719639
-                ],
-                [
-                  121.517,
-                  25.04977628458498
-                ],
-                [
-                  121.51671526518258,
-                  25.04975937719639
-                ],
-                [
-                  121.51643540225685,
-                  25.049708944320727
-                ],
-                [
-                  121.51616519975504,
-                  25.04962584887848
-                ],
-                [
-                  121.51590928091686,
-                  25.049511512655698
-                ],
-                [
-                  121.5156720245846,
-                  25.04936789197686
-                ],
-                [
-                  121.51545749027989,
-                  25.04919744423159
-                ],
-                [
-                  121.51526934874416,
-                  25.04900308582808
-                ],
-                [
-                  121.51511081913122,
-                  25.048788142292487
-                ],
-                [
-                  121.51498461392674,
-                  25.04855629136831
-                ],
-                [
-                  121.51489289253675,
-                  25.048311500089135
-                ],
-                [
-                  121.51483722433964,
-                  25.04805795690162
-                ],
-                [
-                  121.51481856183374,
-                  25.0478
-                ],
-                [
-                  121.51483722433964,
-                  25.047542043098378
-                ],
-                [
-                  121.51489289253675,
-                  25.047288499910863
-                ],
-                [
-                  121.51498461392674,
-                  25.047043708631687
-                ],
-                [
-                  121.51511081913122,
-                  25.04681185770751
-                ],
-                [
-                  121.51526934874416,
-                  25.046596914171918
-                ],
-                [
-                  121.51545749027989,
-                  25.046402555768406
-                ],
-                [
-                  121.5156720245846,
-                  25.046232108023137
-                ],
-                [
-                  121.51590928091686,
-                  25.0460884873443
-                ],
-                [
-                  121.51616519975504,
-                  25.045974151121516
-                ],
-                [
-                  121.51643540225685,
-                  25.04589105567927
-                ],
-                [
-                  121.51671526518258,
-                  25.045840622803606
-                ],
-                [
-                  121.517,
-                  25.04582371541502
-                ],
-                [
-                  121.51728473481741,
-                  25.045840622803606
-                ],
-                [
-                  121.51756459774315,
-                  25.04589105567927
-                ],
-                [
-                  121.51783480024496,
-                  25.045974151121516
-                ],
-                [
-                  121.51809071908313,
-                  25.0460884873443
-                ],
-                [
-                  121.51832797541539,
-                  25.046232108023137
-                ],
-                [
-                  121.5185425097201,
-                  25.046402555768406
-                ],
-                [
-                  121.51873065125584,
-                  25.046596914171918
-                ],
-                [
-                  121.51888918086877,
-                  25.04681185770751
-                ],
-                [
-                  121.51901538607325,
-                  25.047043708631687
-                ],
-                [
-                  121.51910710746324,
-                  25.047288499910863
-                ],
-                [
-                  121.51916277566035,
-                  25.047542043098378
-                ],
-                [
-                  121.51918143816626,
-                  25.0478
-                ]
+                [121.51918143816626, 25.0478],
+                [121.51916277566035, 25.04805795690162],
+                [121.51910710746324, 25.048311500089135],
+                [121.51901538607325, 25.04855629136831],
+                [121.51888918086877, 25.048788142292487],
+                [121.51873065125584, 25.04900308582808],
+                [121.5185425097201, 25.04919744423159],
+                [121.51832797541539, 25.04936789197686],
+                [121.51809071908313, 25.049511512655698],
+                [121.51783480024496, 25.04962584887848],
+                [121.51756459774315, 25.049708944320727],
+                [121.51728473481741, 25.04975937719639],
+                [121.517, 25.04977628458498],
+                [121.51671526518258, 25.04975937719639],
+                [121.51643540225685, 25.049708944320727],
+                [121.51616519975504, 25.04962584887848],
+                [121.51590928091686, 25.049511512655698],
+                [121.5156720245846, 25.04936789197686],
+                [121.51545749027989, 25.04919744423159],
+                [121.51526934874416, 25.04900308582808],
+                [121.51511081913122, 25.048788142292487],
+                [121.51498461392674, 25.04855629136831],
+                [121.51489289253675, 25.048311500089135],
+                [121.51483722433964, 25.04805795690162],
+                [121.51481856183374, 25.0478],
+                [121.51483722433964, 25.047542043098378],
+                [121.51489289253675, 25.047288499910863],
+                [121.51498461392674, 25.047043708631687],
+                [121.51511081913122, 25.04681185770751],
+                [121.51526934874416, 25.046596914171918],
+                [121.51545749027989, 25.046402555768406],
+                [121.5156720245846, 25.046232108023137],
+                [121.51590928091686, 25.0460884873443],
+                [121.51616519975504, 25.045974151121516],
+                [121.51643540225685, 25.04589105567927],
+                [121.51671526518258, 25.045840622803606],
+                [121.517, 25.04582371541502],
+                [121.51728473481741, 25.045840622803606],
+                [121.51756459774315, 25.04589105567927],
+                [121.51783480024496, 25.045974151121516],
+                [121.51809071908313, 25.0460884873443],
+                [121.51832797541539, 25.046232108023137],
+                [121.5185425097201, 25.046402555768406],
+                [121.51873065125584, 25.046596914171918],
+                [121.51888918086877, 25.04681185770751],
+                [121.51901538607325, 25.047043708631687],
+                [121.51910710746324, 25.047288499910863],
+                [121.51916277566035, 25.047542043098378],
+                [121.51918143816626, 25.0478]
               ]
             ]
           },
@@ -4104,9 +2020,7 @@
               },
               "radiusMeters": 220
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
             "serviceProductTypes": [
               "taxi_realtime",
               "taxi_reservation",
@@ -4130,202 +2044,55 @@
             "type": "Polygon",
             "coordinates": [
               [
-                [
-                  121.56628460931613,
-                  25.0338
-                ],
-                [
-                  121.56626934173605,
-                  25.03401105564678
-                ],
-                [
-                  121.56622380022829,
-                  25.034218500072928
-                ],
-                [
-                  121.56614876402071,
-                  25.0344187838468
-                ],
-                [
-                  121.5660455170036,
-                  25.034608480057493
-                ],
-                [
-                  121.56591582576206,
-                  25.034784342950246
-                ],
-                [
-                  121.5657619093492,
-                  25.03494336346221
-                ],
-                [
-                  121.5655864013175,
-                  25.03508282070834
-                ],
-                [
-                  121.56539230465806,
-                  25.035200328536483
-                ],
-                [
-                  121.56518294041852,
-                  25.03529387635512
-                ],
-                [
-                  121.56496189087908,
-                  25.03536186353514
-                ],
-                [
-                  121.56473293825863,
-                  25.035403126797046
-                ],
-                [
-                  121.5645,
-                  25.035416960114983
-                ],
-                [
-                  121.56426706174136,
-                  25.035403126797046
-                ],
-                [
-                  121.56403810912092,
-                  25.03536186353514
-                ],
-                [
-                  121.56381705958147,
-                  25.03529387635512
-                ],
-                [
-                  121.56360769534193,
-                  25.035200328536483
-                ],
-                [
-                  121.56341359868249,
-                  25.03508282070834
-                ],
-                [
-                  121.56323809065078,
-                  25.03494336346221
-                ],
-                [
-                  121.56308417423793,
-                  25.034784342950246
-                ],
-                [
-                  121.56295448299639,
-                  25.034608480057493
-                ],
-                [
-                  121.56285123597928,
-                  25.0344187838468
-                ],
-                [
-                  121.5627761997717,
-                  25.034218500072928
-                ],
-                [
-                  121.56273065826394,
-                  25.03401105564678
-                ],
-                [
-                  121.56271539068386,
-                  25.0338
-                ],
-                [
-                  121.56273065826394,
-                  25.03358894435322
-                ],
-                [
-                  121.5627761997717,
-                  25.03338149992707
-                ],
-                [
-                  121.56285123597928,
-                  25.0331812161532
-                ],
-                [
-                  121.56295448299639,
-                  25.032991519942506
-                ],
-                [
-                  121.56308417423793,
-                  25.032815657049753
-                ],
-                [
-                  121.56323809065078,
-                  25.032656636537787
-                ],
-                [
-                  121.56341359868249,
-                  25.03251717929166
-                ],
-                [
-                  121.56360769534193,
-                  25.032399671463516
-                ],
-                [
-                  121.56381705958147,
-                  25.03230612364488
-                ],
-                [
-                  121.56403810912092,
-                  25.03223813646486
-                ],
-                [
-                  121.56426706174136,
-                  25.032196873202953
-                ],
-                [
-                  121.5645,
-                  25.032183039885016
-                ],
-                [
-                  121.56473293825863,
-                  25.032196873202953
-                ],
-                [
-                  121.56496189087908,
-                  25.03223813646486
-                ],
-                [
-                  121.56518294041852,
-                  25.03230612364488
-                ],
-                [
-                  121.56539230465806,
-                  25.032399671463516
-                ],
-                [
-                  121.5655864013175,
-                  25.03251717929166
-                ],
-                [
-                  121.5657619093492,
-                  25.032656636537787
-                ],
-                [
-                  121.56591582576206,
-                  25.032815657049753
-                ],
-                [
-                  121.5660455170036,
-                  25.032991519942506
-                ],
-                [
-                  121.56614876402071,
-                  25.0331812161532
-                ],
-                [
-                  121.56622380022829,
-                  25.03338149992707
-                ],
-                [
-                  121.56626934173605,
-                  25.03358894435322
-                ],
-                [
-                  121.56628460931613,
-                  25.0338
-                ]
+                [121.56628460931613, 25.0338],
+                [121.56626934173605, 25.03401105564678],
+                [121.56622380022829, 25.034218500072928],
+                [121.56614876402071, 25.0344187838468],
+                [121.5660455170036, 25.034608480057493],
+                [121.56591582576206, 25.034784342950246],
+                [121.5657619093492, 25.03494336346221],
+                [121.5655864013175, 25.03508282070834],
+                [121.56539230465806, 25.035200328536483],
+                [121.56518294041852, 25.03529387635512],
+                [121.56496189087908, 25.03536186353514],
+                [121.56473293825863, 25.035403126797046],
+                [121.5645, 25.035416960114983],
+                [121.56426706174136, 25.035403126797046],
+                [121.56403810912092, 25.03536186353514],
+                [121.56381705958147, 25.03529387635512],
+                [121.56360769534193, 25.035200328536483],
+                [121.56341359868249, 25.03508282070834],
+                [121.56323809065078, 25.03494336346221],
+                [121.56308417423793, 25.034784342950246],
+                [121.56295448299639, 25.034608480057493],
+                [121.56285123597928, 25.0344187838468],
+                [121.5627761997717, 25.034218500072928],
+                [121.56273065826394, 25.03401105564678],
+                [121.56271539068386, 25.0338],
+                [121.56273065826394, 25.03358894435322],
+                [121.5627761997717, 25.03338149992707],
+                [121.56285123597928, 25.0331812161532],
+                [121.56295448299639, 25.032991519942506],
+                [121.56308417423793, 25.032815657049753],
+                [121.56323809065078, 25.032656636537787],
+                [121.56341359868249, 25.03251717929166],
+                [121.56360769534193, 25.032399671463516],
+                [121.56381705958147, 25.03230612364488],
+                [121.56403810912092, 25.03223813646486],
+                [121.56426706174136, 25.032196873202953],
+                [121.5645, 25.032183039885016],
+                [121.56473293825863, 25.032196873202953],
+                [121.56496189087908, 25.03223813646486],
+                [121.56518294041852, 25.03230612364488],
+                [121.56539230465806, 25.032399671463516],
+                [121.5655864013175, 25.03251717929166],
+                [121.5657619093492, 25.032656636537787],
+                [121.56591582576206, 25.032815657049753],
+                [121.5660455170036, 25.032991519942506],
+                [121.56614876402071, 25.0331812161532],
+                [121.56622380022829, 25.03338149992707],
+                [121.56626934173605, 25.03358894435322],
+                [121.56628460931613, 25.0338]
               ]
             ]
           },
@@ -4345,13 +2112,8 @@
               },
               "radiusMeters": 180
             },
-            "serviceAreaCodes": [
-              "TAIPEI_CORE"
-            ],
-            "serviceProductTypes": [
-              "taxi_realtime",
-              "taxi_reservation"
-            ],
+            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "serviceProductTypes": ["taxi_realtime", "taxi_reservation"],
             "reasonCode": "STOP_REQUIRES_MANUAL_REVIEW",
             "reasonMessage": "This stop requires ops review before dispatch.",
             "effectiveFrom": "2026-01-01T00:00:00.000Z",
@@ -4364,12 +2126,12 @@
           }
         }
       ],
-      "generatedAt": "2026-07-20T08:47:54.708Z"
+      "generatedAt": "2026-07-20T09:28:36.187Z"
     },
     "postRetireDecision": {
       "decision": "serviceable",
       "serviceProductType": "taxi_realtime",
-      "evaluatedAt": "2026-07-20T08:47:54.708Z",
+      "evaluatedAt": "2026-07-20T09:28:36.187Z",
       "stops": [
         {
           "kind": "pickup",
@@ -4377,13 +2139,9 @@
             "lat": 25.0375,
             "lng": 121.5637
           },
-          "serviceAreaCodes": [
-            "TAIPEI_CORE"
-          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
           "policyCodes": [],
-          "geometryVersionRefs": [
-            "service_area:TAIPEI_CORE@1"
-          ],
+          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
           "decision": "serviceable",
           "reasonCodes": [],
           "reasonMessages": []
@@ -4394,24 +2152,16 @@
             "lat": 25.041,
             "lng": 121.55
           },
-          "serviceAreaCodes": [
-            "TAIPEI_CORE"
-          ],
+          "serviceAreaCodes": ["TAIPEI_CORE"],
           "policyCodes": [],
-          "geometryVersionRefs": [
-            "service_area:TAIPEI_CORE@1"
-          ],
+          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
           "decision": "serviceable",
           "reasonCodes": [],
           "reasonMessages": []
         }
       ],
-      "serviceAreaCodes": [
-        "TAIPEI_CORE"
-      ],
-      "geometryVersionRefs": [
-        "service_area:TAIPEI_CORE@1"
-      ],
+      "serviceAreaCodes": ["TAIPEI_CORE"],
+      "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
       "reasonCodes": [],
       "reasonMessages": []
     },
@@ -4422,7 +2172,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.stop_policy.submitted_for_review",
       "resourceType": "stop_policy",
-      "resourceId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+      "resourceId": "62583205-7709-4aef-98d4-c315b4176bad",
       "newValuesSummary": {
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "status": "review",
@@ -4439,7 +2189,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.stop_policy.published",
       "resourceType": "stop_policy",
-      "resourceId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+      "resourceId": "62583205-7709-4aef-98d4-c315b4176bad",
       "newValuesSummary": {
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "status": "active",
@@ -4458,7 +2208,7 @@
       "moduleName": "service-area",
       "actionName": "service_area.stop_policy.retired",
       "resourceType": "stop_policy",
-      "resourceId": "3250ea54-f23a-4c2d-b186-e41dd7b0b5da",
+      "resourceId": "62583205-7709-4aef-98d4-c315b4176bad",
       "newValuesSummary": {
         "policyCode": "CITY_HALL_PICKUP_BLOCK",
         "status": "retired",
@@ -4480,7 +2230,7 @@
           "field": "geometry.coordinates"
         },
         "retryable": false,
-        "traceId": "a04993df-38a2-4927-a385-5a439fc35774"
+        "traceId": "0a256616-a248-4985-8cf5-88fab81400ca"
       }
     },
     "persistServiceAreaCallCount": 8
@@ -4552,6 +2302,6 @@
       "stopPolicyRetiredCount": 1,
       "manualOverrideCount": 0
     },
-    "lastEventAt": "2026-07-20T08:47:54.708Z"
+    "lastEventAt": "2026-07-20T09:28:36.187Z"
   }
 }
