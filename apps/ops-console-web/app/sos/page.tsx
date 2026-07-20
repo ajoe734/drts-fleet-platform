@@ -86,6 +86,12 @@ export default function SosQueuePage() {
       sse.addEventListener("order_updated", () => {
         void fetchIncidents();
       });
+      sse.addEventListener("incident_created", () => {
+        void fetchIncidents();
+      });
+      sse.addEventListener("incident_updated", () => {
+        void fetchIncidents();
+      });
     } catch (e) {
       console.error("SSE connection error:", e);
     }

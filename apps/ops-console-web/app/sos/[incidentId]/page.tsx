@@ -14,7 +14,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 import type { IncidentRecord, IncidentTimelineEntry } from "@drts/contracts";
-import { getOpsClient } from "@/lib/api-client";
+import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { MapPin, ShieldAlert, ArrowLeft, ExternalLink, Play } from "lucide-react";
 
@@ -68,7 +68,28 @@ export default function SosDetailPage() {
     const timer = setInterval(() => {
       setNowTime(Date.now());
     }, 5000);
-    return () => clearInterval(timer);
+
+    // Wire SSE stream for live updates
+    let sse: EventSource | null = null;
+    try {
+      sse = createOpsDispatchEventSource();
+      sse.addEventListener("message", () => {
+        void fetchData();
+      });
+      sse.addEventListener("incident_created", () => {
+        void fetchData();
+      });
+      sse.addEventListener("incident_updated", () => {
+        void fetchData();
+      });
+    } catch (e) {
+      console.error("SSE connection error:", e);
+    }
+
+    return () => {
+      clearInterval(timer);
+      if (sse) sse.close();
+    };
   }, [incidentId]);
 
   if (loading) {
