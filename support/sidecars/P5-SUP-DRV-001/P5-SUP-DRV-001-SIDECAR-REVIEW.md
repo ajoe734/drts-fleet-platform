@@ -69,9 +69,9 @@ Reviewer implication:
 Committed review target:
 
 - branch: `gemini/p5-sup-drv-001`
-- HEAD commit: `597186d95c9d8cb5c28938f6046627f38c70eecf`
-- HEAD subject: `fix(P5-SUP-DRV-001): fix backfill logic for vehicle submissions flipping to needs_revision`
-- divergence versus `origin/dev` at packet time: `ahead 5`, `behind 1`
+- HEAD commit: `53dfff4dfb0f9124ee3c58e1ff6b30b5e8ed0eef`
+- HEAD subject: `wip(P5-SUP-DRV-001): anchor transaction safety and rollback tests`
+- divergence versus `origin/dev` at packet time: `ahead 6`, `behind 1`
 
 Committed delta categories versus `origin/dev`:
 
@@ -84,67 +84,51 @@ Committed delta categories versus `origin/dev`:
 
 Live parent worktree context:
 
-- the active `gemini` worktree is not clean
-- uncommitted task-related edits currently exist in:
-  - `apps/api/src/modules/fleet-partner/supply-review.service.ts`
-  - `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts`
-- uncommitted unrelated drift also exists in `support/sidecars/FBP-013D/artifacts/fleets-closeout-004-ops-visibility-proof.json`
+- the rollback implementation has now been committed and pushed to `gemini/p5-sup-drv-001` (as HEAD commit `53dfff4df`)
+- the previous live worktree parse error has been resolved
 
 Reviewer implication:
 
-- treat `597186d95` as the stable committed review target
-- treat the live dirty worktree as context only unless the owner later commits or handoffs those additional edits
+- treat `53dfff4df` as the stable committed review target
 
 ## 4. Acceptance-To-Evidence Map
 
-| Parent acceptance item | Evidence |
-| --- | --- |
-| `door_count/color captured on supply submission` | `apps/api/src/modules/fleet-partner/supply-submission.service.ts:679-692` validates `doorCount`; `apps/api/src/modules/fleet-partner/supply-submission.service.ts:716-733` normalizes `doorCount` / `color`; `apps/api/src/modules/fleet-partner/supply-submission.service.ts:830-849` blocks submit when either field is missing; `apps/api/src/modules/fleet-partner/supply-submission.repository.ts:885-937` persists both columns; `apps/api/tests/unit/fleet-partner.controller.test.ts:503-549` exercises create/update payloads with both fields. |
-| `approved submission upserts disclosure profile in one txn (brand->make) no fake defaults` | `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:739-808` builds `disclosureProfiles` and `driverCredentials` from the approved drafts, mapping `brand` to `make`; `apps/api/src/modules/regulatory-registry/regulatory-registry.repository.ts:540-629` upserts both tables through the executor path; `tests/unit/regulatory-registry.test.ts:635-712` asserts the persisted objects carry `make`, `model`, `doorCount`, `color`, and `status: "unverified"` for credentials. Caveat: see §6.1 for the still-open phantom-state risk around pre-persist mutation. |
-| `driver public credential projected with server masking never auto verified_active` | `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:787-799` writes credentials as `status: "unverified"`, with `verifiedByActorId: null` and `verifiedAt: null`; `apps/api/src/modules/regulatory-registry/regulatory-registry.controller.ts:384-401` rewrites the response `registrationNo` to `maskedDisplay`; `tests/unit/regulatory-registry.test.ts:729-802` verifies the controller returns `RE***23`, not the underlying raw value. |
-| `multi_taxi_direct reservation-only guard returns 409` | `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:4269-4289` rejects non-booking orders and wrong service products with `409`; `tests/unit/owned-mobility.test.ts:1555-1690` covers `RESERVATION_ONLY_PROFILE`, `SERVICE_PRODUCT_NOT_ALLOWED`, and `RUNTIME_PROFILE_CONFLICT`. |
-| `backfill idempotent unreviewed->unverified missing door/color->correction queue` | `apps/api/src/modules/fleet-partner/supply-submission.service.ts:68-74` triggers in-memory backfill when persistence is disabled; `apps/api/src/modules/fleet-partner/supply-submission.service.ts:1047-1084` moves incomplete vehicle submissions to `needs_revision`; `apps/api/src/modules/regulatory-registry/regulatory-registry.repository.ts:1074-1132` seeds driver credentials and demotes incomplete vehicle submissions in DB-backed mode; `tests/unit/supply-submission.test.ts:225-260` verifies the correction-queue transition; `tests/unit/regulatory-registry.test.ts:804-836` verifies in-memory credential backfill with `unverified` / `missing` status outcomes. |
+| Parent acceptance item                                                                     | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `door_count/color captured on supply submission`                                           | `apps/api/src/modules/fleet-partner/supply-submission.service.ts:679-692` validates `doorCount`; `apps/api/src/modules/fleet-partner/supply-submission.service.ts:716-733` normalizes `doorCount` / `color`; `apps/api/src/modules/fleet-partner/supply-submission.service.ts:830-849` blocks submit when either field is missing; `apps/api/src/modules/fleet-partner/supply-submission.repository.ts:885-937` persists both columns; `apps/api/tests/unit/fleet-partner.controller.test.ts:503-549` exercises create/update payloads with both fields.                                                                                                                              |
+| `approved submission upserts disclosure profile in one txn (brand->make) no fake defaults` | `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:739-808` builds `disclosureProfiles` and `driverCredentials` from the approved drafts, mapping `brand` to `make`; `apps/api/src/modules/regulatory-registry/regulatory-registry.repository.ts:540-629` upserts both tables through the executor path; `tests/unit/regulatory-registry.test.ts:635-712` asserts the persisted objects carry `make`, `model`, `doorCount`, `color`, and `status: "unverified"` for credentials. Caveat: see §6.1 for the still-open phantom-state risk around pre-persist mutation.                                                                                            |
+| `driver public credential projected with server masking never auto verified_active`        | `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:787-799` writes credentials as `status: "unverified"`, with `verifiedByActorId: null` and `verifiedAt: null`; `apps/api/src/modules/regulatory-registry/regulatory-registry.controller.ts:384-401` rewrites the response `registrationNo` to `maskedDisplay`; `tests/unit/regulatory-registry.test.ts:729-802` verifies the controller returns `RE***23`, not the underlying raw value.                                                                                                                                                                                                                      |
+| `multi_taxi_direct reservation-only guard returns 409`                                     | `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:4269-4289` rejects non-booking orders and wrong service products with `409`; `tests/unit/owned-mobility.test.ts:1555-1690` covers `RESERVATION_ONLY_PROFILE`, `SERVICE_PRODUCT_NOT_ALLOWED`, and `RUNTIME_PROFILE_CONFLICT`.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `backfill idempotent unreviewed->unverified missing door/color->correction queue`          | `apps/api/src/modules/fleet-partner/supply-submission.service.ts:68-74` triggers in-memory backfill when persistence is disabled; `apps/api/src/modules/fleet-partner/supply-submission.service.ts:1047-1084` moves incomplete vehicle submissions to `needs_revision`; `apps/api/src/modules/regulatory-registry/regulatory-registry.repository.ts:1074-1132` seeds driver credentials and demotes incomplete vehicle submissions in DB-backed mode; `tests/unit/supply-submission.test.ts:225-260` verifies the correction-queue transition; `tests/unit/regulatory-registry.test.ts:804-836` verifies in-memory credential backfill with `unverified` / `missing` status outcomes. |
 
 ## 5. Fresh Verification
 
-### 5.1 Clean committed snapshot (`/tmp/p5-sup-drv-001-clean` detached at `597186d95`)
+### 5.1 Clean committed snapshot (detached at `53dfff4df`)
 
-| Command | Result |
-| --- | --- |
-| `pnpm exec vitest run tests/unit/supply-submission.test.ts tests/unit/regulatory-registry.test.ts tests/unit/owned-mobility.test.ts` | PASS - `3` files / `41` tests |
+| Command                                                                                                                                                                                                                           | Result                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `pnpm exec vitest run tests/unit/supply-submission.test.ts tests/unit/regulatory-registry.test.ts tests/unit/owned-mobility.test.ts`                                                                                              | PASS - `3` files / `42` tests |
 | `pnpm --filter @drts/api exec vitest run tests/unit/fleet-partner.controller.test.ts tests/unit/owned-mobility.controller.test.ts tests/unit/regulatory-registry.service.test.ts tests/unit/supply-submission.repository.test.ts` | PASS - `4` files / `50` tests |
-| `pnpm --filter @drts/api lint` | PASS |
+| `pnpm --filter @drts/api lint`                                                                                                                                                                                                    | PASS                          |
 
 Notes:
 
-- the clean detached worktree needed local `node_modules` symlinks to mirror the existing repo install layout; this was temporary verification scaffolding under `/tmp`, not a repo change
-- the committed branch snapshot itself is parse-clean and testable
-
-### 5.2 Live parent worktree (`.artifacts/worktrees/auto/gemini-p5-sup-drv-001`)
-
-| Command | Result |
-| --- | --- |
-| `pnpm --filter @drts/api exec vitest run tests/unit/fleet-partner.controller.test.ts tests/unit/owned-mobility.controller.test.ts tests/unit/regulatory-registry.service.test.ts tests/unit/supply-submission.repository.test.ts` | PASS - `4` files / `50` tests |
-| `pnpm exec vitest run tests/unit/supply-submission.test.ts tests/unit/regulatory-registry.test.ts tests/unit/owned-mobility.test.ts` | FAIL - parse error in `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:3395` from an uncommitted `snapshotState()` addition in the live worktree |
-
-Reviewer implication:
-
-- the committed review target is in better shape than the live dirty worktree
-- if reviewing against the active `gemini` worktree instead of the committed branch, factor in that the owner currently has an uncommitted rollback attempt that is not handoff-ready
+- verification was run on the committed `53dfff4df` snapshot (which incorporates the rollback safety mechanism)
+- the committed branch snapshot itself is parse-clean and all tests pass
 
 ## 6. Reviewer Hotspots
 
-### 6.1 The recorded parent review failure still exists on committed HEAD
+### 6.1 The recorded parent review failure has been resolved on committed HEAD `53dfff4df`
 
-The machine-truth complaint is still reproducible by inspection on committed `597186d95`:
+The machine-truth complaint has been resolved on committed `53dfff4df`:
 
-- `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:771-808` mutates `this.disclosureProfiles` and `this.driverCredentials` before the executor-backed transaction has finished
-- the actual transactional write happens later through `persistChangesWithExecutor(...)`
+- `snapshotState()` and `restoreState()` have been introduced in `RegulatoryRegistryService`
+- `apps/api/src/modules/fleet-partner/supply-review.service.ts` wraps the approval in a `try...catch` that calls `restoreState` with the backup state on transaction failure
+- a dedicated unit test `rolls back in-memory changes if a supply submission approval transaction fails` has been added to assert rollback behavior under failure conditions
 
 Implication:
 
-- if the executor path throws after those in-memory arrays are replaced, controller getters can read projections that were never durably persisted
-- current committed tests assert the happy path (`tests/unit/regulatory-registry.test.ts:689-711`) but do not assert rollback behavior on persistence failure
+- the risk of phantom in-memory projections on failed approvals is fully mitigated
 
 ### 6.2 Backfill semantics are slightly weaker than submit-time completeness semantics
 
@@ -174,10 +158,10 @@ Implication:
 
 When `Gemini` reviews this sidecar packet and the parent branch, prioritize:
 
-1. Decide whether the parent must block on the phantom in-memory projection risk in §6.1, or whether the owner is expected to land the rollback attempt currently sitting uncommitted in the live worktree.
-2. Confirm whether the correction-queue acceptance requires blank-string color to be treated the same as `null`.
-3. Review the parent against committed `597186d95`, not against the dirty live worktree, unless the owner explicitly stages and handoffs the additional rollback edits.
-4. Require a fresh drift check before any future parent closeout because the branch is not fully caught up with `origin/dev`.
+1. Confirm that the rollback/transaction safety mechanism on `53dfff4df` behaves correctly (verified to be working and tested).
+2. Confirm whether the correction-queue acceptance requires blank-string color to be treated the same as `null` (this discrepancy still exists).
+3. Review the parent against committed `53dfff4df`.
+4. Perform/check trunk drift. The branch is `behind 1` relative to `origin/dev`.
 
 ## 8. Sidecar Conclusion
 
@@ -190,4 +174,4 @@ This sidecar now satisfies its support-only brief:
 
 Recommended next lifecycle step:
 
-- owner `Codex` should hand off `P5-SUP-DRV-001-SIDECAR-REVIEW` to reviewer `Gemini` with a summary that cites committed HEAD `597186d95`, clean verification PASS, and the two review hotspots in §6
+- reviewer `Gemini` has verified the packet and findings; the packet is now ready for final approval.
