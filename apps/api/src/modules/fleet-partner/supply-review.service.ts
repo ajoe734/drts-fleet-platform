@@ -273,138 +273,217 @@ export class SupplyReviewService implements OnModuleInit {
     reviewerActorId: string,
     config: SubmissionTransitionConfig,
   ) {
-    const normalizedCommand = this.normalizeActionCommand(command);
-    const reviewerId = this.requireActorId(reviewerActorId);
+    const backupState = this.regulatoryRegistryService?.snapshotState?.();
+    try {
+      const normalizedCommand = this.normalizeActionCommand(command);
+      const reviewerId = this.requireActorId(reviewerActorId);
 
-    if (this.supplySubmissionRepository?.isEnabled()) {
-      // DB-backed path only: submission_id is a uuid column, so a non-UUID id
-      // makes "WHERE submission_id = $1" throw a Postgres type error -> 500.
-      // Reject it as 404 up front (a non-UUID submission can never exist). The
-      // in-memory path below tolerates arbitrary string ids (used by tests).
-      this.assertDbSubmissionIdFormat(submissionId);
-      const result = await this.supplySubmissionRepository.withTransaction(
-        async (executor) => {
-          const current = await this.supplySubmissionRepository!.lockSubmission(
-            executor,
-            submissionId,
-          );
-          this.assertExpectedRevision(
-            current,
-            normalizedCommand.expectedRevisionNo,
-          );
-          this.assertAllowedStatus(current, config);
-          if (config.nextStatus === "approved") {
-            this.assertReviewerNotSubmitter(current, reviewerId);
-          }
-
-          const approvalArtifacts =
-            config.nextStatus === "approved"
-              ? await this.supplySubmissionRepository!.loadApprovalArtifacts(
-                  executor,
-                  current.submissionId,
-                )
-              : null;
-          const approvedDocuments =
-            config.nextStatus === "approved"
-              ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
-              : [];
-          const canonical =
-            config.nextStatus === "approved"
-              ? await this.provisionCanonicalRecords(
-                  executor,
-                  current,
-                  approvalArtifacts,
-                  reviewerId,
-                )
-              : null;
-          const transitionCanonical = canonical
-            ? {
-                canonicalDriverId: canonical.canonicalDriverId,
-                canonicalVehicleId: canonical.canonicalVehicleId,
-                canonicalContractId: canonical.canonicalContractId,
-                canonicalPolicyId: canonical.canonicalPolicyId,
-              }
-            : null;
-
-          const now = new Date().toISOString();
-          const transitionParams = {
-            submissionId: current.submissionId,
-            fleetPartnerId: current.fleetPartnerId,
-            expectedRevisionNo: normalizedCommand.expectedRevisionNo,
-            nextStatus: config.nextStatus,
-            allowedCurrentStatuses: config.allowedCurrentStatuses,
-            reviewReasonCode: normalizedCommand.reasonCode,
-            reviewComment: normalizedCommand.comment,
-            ...(config.eventType === "review_started"
-              ? {
-                  reviewStartedBy: reviewerId,
-                  reviewStartedAt: now,
-                }
-              : {
-                  reviewedBy: reviewerId,
-                  reviewedAt: now,
-                }),
-            ...(transitionCanonical ?? {}),
-          };
-          const updated =
-            await this.supplySubmissionRepository!.transitionSubmissionStatus(
+      if (this.supplySubmissionRepository?.isEnabled()) {
+        // DB-backed path only: submission_id is a uuid column, so a non-UUID id
+        // makes "WHERE submission_id = $1" throw a Postgres type error -> 500.
+        // Reject it as 404 up front (a non-UUID submission can never exist). The
+        // in-memory path below tolerates arbitrary string ids (used by tests).
+        this.assertDbSubmissionIdFormat(submissionId);
+        const result = await this.supplySubmissionRepository.withTransaction(
+          async (executor) => {
+            const current = await this.supplySubmissionRepository!.lockSubmission(
               executor,
-              transitionParams,
+              submissionId,
             );
+            this.assertExpectedRevision(
+              current,
+              normalizedCommand.expectedRevisionNo,
+            );
+            this.assertAllowedStatus(current, config);
+            if (config.nextStatus === "approved") {
+              this.assertReviewerNotSubmitter(current, reviewerId);
+            }
 
-          await this.supplySubmissionRepository!.persistSubmissionWorkflow(
-            executor,
-            {
-              reviewEvents: [
-                this.createReviewEvent(
-                  updated,
-                  config.eventType,
-                  reviewerId,
-                  normalizedCommand.reasonCode,
-                  normalizedCommand.comment,
-                  now,
-                ),
-              ],
-              ...(approvedDocuments.length > 0
-                ? { documents: approvedDocuments }
-                : {}),
-              ...(canonical?.vehicleAffiliation
+            const approvalArtifacts =
+              config.nextStatus === "approved"
+                ? await this.supplySubmissionRepository!.loadApprovalArtifacts(
+                    executor,
+                    current.submissionId,
+                  )
+                : null;
+            const approvedDocuments =
+              config.nextStatus === "approved"
+                ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
+                : [];
+            const canonical =
+              config.nextStatus === "approved"
+                ? await this.provisionCanonicalRecords(
+                    executor,
+                    current,
+                    approvalArtifacts,
+                    reviewerId,
+                  )
+                : null;
+            const transitionCanonical = canonical
+              ? {
+                  canonicalDriverId: canonical.canonicalDriverId,
+                  canonicalVehicleId: canonical.canonicalVehicleId,
+                  canonicalContractId: canonical.canonicalContractId,
+                  canonicalPolicyId: canonical.canonicalPolicyId,
+                }
+              : null;
+
+            const now = new Date().toISOString();
+            const transitionParams = {
+              submissionId: current.submissionId,
+              fleetPartnerId: current.fleetPartnerId,
+              expectedRevisionNo: normalizedCommand.expectedRevisionNo,
+              nextStatus: config.nextStatus,
+              allowedCurrentStatuses: config.allowedCurrentStatuses,
+              reviewReasonCode: normalizedCommand.reasonCode,
+              reviewComment: normalizedCommand.comment,
+              ...(config.eventType === "review_started"
                 ? {
-                    vehicleAffiliations: [canonical.vehicleAffiliation],
+                    reviewStartedBy: reviewerId,
+                    reviewStartedAt: now,
                   }
-                : {}),
-            },
+                : {
+                    reviewedBy: reviewerId,
+                    reviewedAt: now,
+                  }),
+              ...(transitionCanonical ?? {}),
+            };
+            const updated =
+              await this.supplySubmissionRepository!.transitionSubmissionStatus(
+                executor,
+                transitionParams,
+              );
+
+            await this.supplySubmissionRepository!.persistSubmissionWorkflow(
+              executor,
+              {
+                reviewEvents: [
+                  this.createReviewEvent(
+                    updated,
+                    config.eventType,
+                    reviewerId,
+                    normalizedCommand.reasonCode,
+                    normalizedCommand.comment,
+                    now,
+                  ),
+                ],
+                ...(approvedDocuments.length > 0
+                  ? { documents: approvedDocuments }
+                  : {}),
+                ...(canonical?.vehicleAffiliation
+                  ? {
+                      vehicleAffiliations: [canonical.vehicleAffiliation],
+                    }
+                  : {}),
+              },
+            );
+            return {
+              updated,
+              vehicleAffiliation: canonical?.vehicleAffiliation ?? null,
+            };
+          },
+        );
+        if (result.vehicleAffiliation) {
+          this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
+            result.vehicleAffiliation,
+            reviewerId,
           );
-          return {
-            updated,
-            vehicleAffiliation: canonical?.vehicleAffiliation ?? null,
-          };
-        },
-      );
-      if (result.vehicleAffiliation) {
-        this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
-          result.vehicleAffiliation,
+        }
+
+        return result.updated;
+      }
+
+      if (this.supplySubmissionRepository) {
+        const state = await this.supplySubmissionRepository.loadState();
+        const current = state.submissions.find(
+          (item) => item.submissionId === submissionId,
+        );
+        if (!current) {
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            "Supply submission was not found.",
+            { submissionId },
+          );
+        }
+
+        this.assertExpectedRevision(current, normalizedCommand.expectedRevisionNo);
+        this.assertAllowedStatus(current, config);
+        if (config.nextStatus === "approved") {
+          this.assertReviewerNotSubmitter(current, reviewerId);
+        }
+
+        const now = new Date().toISOString();
+        const approvalArtifacts =
+          config.nextStatus === "approved"
+            ? this.loadApprovalArtifactsFromState(state, current.submissionId)
+            : null;
+        const approvedDocuments =
+          config.nextStatus === "approved"
+            ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
+            : [];
+        const canonical =
+          config.nextStatus === "approved"
+            ? await this.provisionCanonicalRecords(
+                null,
+                current,
+                approvalArtifacts,
+                reviewerId,
+              )
+            : null;
+        const transitionCanonical = canonical
+          ? {
+              canonicalDriverId: canonical.canonicalDriverId,
+              canonicalVehicleId: canonical.canonicalVehicleId,
+              canonicalContractId: canonical.canonicalContractId,
+              canonicalPolicyId: canonical.canonicalPolicyId,
+            }
+          : null;
+        const updated: SupplySubmissionRecord = {
+          ...current,
+          status: config.nextStatus,
+          revisionNo: current.revisionNo + 1,
+          reviewReasonCode: normalizedCommand.reasonCode,
+          reviewComment: normalizedCommand.comment,
+          updatedAt: now,
+          ...(transitionCanonical ?? {}),
+        };
+        if (config.eventType === "review_started") {
+          updated.reviewStartedBy = reviewerId;
+          updated.reviewStartedAt = now;
+        } else {
+          updated.reviewedBy = reviewerId;
+          updated.reviewedAt = now;
+        }
+
+        const reviewEvent = this.createReviewEvent(
+          updated,
+          config.eventType,
           reviewerId,
+          normalizedCommand.reasonCode,
+          normalizedCommand.comment,
+          now,
         );
+
+        await this.supplySubmissionRepository.persistChanges({
+          submissions: [updated],
+          reviewEvents: [reviewEvent],
+          ...(approvedDocuments.length > 0 ? { documents: approvedDocuments } : {}),
+          ...(canonical?.vehicleAffiliation
+            ? { vehicleAffiliations: [canonical.vehicleAffiliation] }
+            : {}),
+        });
+        if (canonical?.vehicleAffiliation) {
+          this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
+            canonical.vehicleAffiliation,
+            reviewerId,
+          );
+        }
+
+        return updated;
       }
 
-      return result.updated;
-    }
-
-    if (this.supplySubmissionRepository) {
-      const state = await this.supplySubmissionRepository.loadState();
-      const current = state.submissions.find(
-        (item) => item.submissionId === submissionId,
-      );
-      if (!current) {
-        throw new ApiRequestError(
-          HttpStatus.NOT_FOUND,
-          "NOT_FOUND",
-          "Supply submission was not found.",
-          { submissionId },
-        );
-      }
-
+      const current = await this.findSubmission(submissionId);
       this.assertExpectedRevision(current, normalizedCommand.expectedRevisionNo);
       this.assertAllowedStatus(current, config);
       if (config.nextStatus === "approved") {
@@ -414,7 +493,7 @@ export class SupplyReviewService implements OnModuleInit {
       const now = new Date().toISOString();
       const approvalArtifacts =
         config.nextStatus === "approved"
-          ? this.loadApprovalArtifactsFromState(state, current.submissionId)
+          ? this.loadInMemoryApprovalArtifacts(current.submissionId)
           : null;
       const approvedDocuments =
         config.nextStatus === "approved"
@@ -454,120 +533,49 @@ export class SupplyReviewService implements OnModuleInit {
         updated.reviewedAt = now;
       }
 
-      const reviewEvent = this.createReviewEvent(
-        updated,
-        config.eventType,
-        reviewerId,
-        normalizedCommand.reasonCode,
-        normalizedCommand.comment,
-        now,
+      this.submissions = this.submissions.map((submission) =>
+        submission.submissionId === submissionId ? updated : submission,
       );
-
-      await this.supplySubmissionRepository.persistChanges({
-        submissions: [updated],
-        reviewEvents: [reviewEvent],
-        ...(approvedDocuments.length > 0 ? { documents: approvedDocuments } : {}),
-        ...(canonical?.vehicleAffiliation
-          ? { vehicleAffiliations: [canonical.vehicleAffiliation] }
-          : {}),
-      });
+      this.reviewEvents = [
+        this.createReviewEvent(
+          updated,
+          config.eventType,
+          reviewerId,
+          normalizedCommand.reasonCode,
+          normalizedCommand.comment,
+          now,
+        ),
+        ...this.reviewEvents,
+      ];
+      if (approvedDocuments.length > 0) {
+        const approvedDocumentIds = new Set(
+          approvedDocuments.map((document) => document.documentId),
+        );
+        this.documents = [
+          ...approvedDocuments.map((document) => ({ ...document })),
+          ...this.documents.filter(
+            (document) => !approvedDocumentIds.has(document.documentId),
+          ),
+        ];
+      }
       if (canonical?.vehicleAffiliation) {
+        this.vehicleAffiliations = [
+          { ...canonical.vehicleAffiliation },
+          ...this.vehicleAffiliations,
+        ];
         this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
           canonical.vehicleAffiliation,
           reviewerId,
         );
       }
 
-      return updated;
+      return { ...updated };
+    } catch (error) {
+      if (backupState) {
+        this.regulatoryRegistryService?.restoreState?.(backupState);
+      }
+      throw error;
     }
-
-    const current = await this.findSubmission(submissionId);
-    this.assertExpectedRevision(current, normalizedCommand.expectedRevisionNo);
-    this.assertAllowedStatus(current, config);
-    if (config.nextStatus === "approved") {
-      this.assertReviewerNotSubmitter(current, reviewerId);
-    }
-
-    const now = new Date().toISOString();
-    const approvalArtifacts =
-      config.nextStatus === "approved"
-        ? this.loadInMemoryApprovalArtifacts(current.submissionId)
-        : null;
-    const approvedDocuments =
-      config.nextStatus === "approved"
-        ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
-        : [];
-    const canonical =
-      config.nextStatus === "approved"
-        ? await this.provisionCanonicalRecords(
-            null,
-            current,
-            approvalArtifacts,
-            reviewerId,
-          )
-        : null;
-    const transitionCanonical = canonical
-      ? {
-          canonicalDriverId: canonical.canonicalDriverId,
-          canonicalVehicleId: canonical.canonicalVehicleId,
-          canonicalContractId: canonical.canonicalContractId,
-          canonicalPolicyId: canonical.canonicalPolicyId,
-        }
-      : null;
-    const updated: SupplySubmissionRecord = {
-      ...current,
-      status: config.nextStatus,
-      revisionNo: current.revisionNo + 1,
-      reviewReasonCode: normalizedCommand.reasonCode,
-      reviewComment: normalizedCommand.comment,
-      updatedAt: now,
-      ...(transitionCanonical ?? {}),
-    };
-    if (config.eventType === "review_started") {
-      updated.reviewStartedBy = reviewerId;
-      updated.reviewStartedAt = now;
-    } else {
-      updated.reviewedBy = reviewerId;
-      updated.reviewedAt = now;
-    }
-
-    this.submissions = this.submissions.map((submission) =>
-      submission.submissionId === submissionId ? updated : submission,
-    );
-    this.reviewEvents = [
-      this.createReviewEvent(
-        updated,
-        config.eventType,
-        reviewerId,
-        normalizedCommand.reasonCode,
-        normalizedCommand.comment,
-        now,
-      ),
-      ...this.reviewEvents,
-    ];
-    if (approvedDocuments.length > 0) {
-      const approvedDocumentIds = new Set(
-        approvedDocuments.map((document) => document.documentId),
-      );
-      this.documents = [
-        ...approvedDocuments.map((document) => ({ ...document })),
-        ...this.documents.filter(
-          (document) => !approvedDocumentIds.has(document.documentId),
-        ),
-      ];
-    }
-    if (canonical?.vehicleAffiliation) {
-      this.vehicleAffiliations = [
-        { ...canonical.vehicleAffiliation },
-        ...this.vehicleAffiliations,
-      ];
-      this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
-        canonical.vehicleAffiliation,
-        reviewerId,
-      );
-    }
-
-    return { ...updated };
   }
 
   private loadInMemoryApprovalArtifacts(

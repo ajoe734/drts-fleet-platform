@@ -8,6 +8,7 @@ import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/
 import { RegulatoryRegistryController } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
 import { RegulatoryRegistryRepository } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { SupplyReviewService } from "../../apps/api/src/modules/fleet-partner/supply-review.service";
 
 function createRegulatoryRegistryService(
   repository?: RegulatoryRegistryRepository,
@@ -833,5 +834,98 @@ describe("regulatory registry controller", () => {
     expect(missingCred!.status).toBe("missing");
     expect(missingCred!.maskedDisplay).toBe("***");
     expect(missingCred!.registrationArea).toBeNull();
+  });
+
+  it("rolls back in-memory changes if a supply submission approval transaction fails", async () => {
+    const persistChanges = vi.fn(async () => undefined);
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      loadState: vi.fn(async () => ({
+        vehicles: [],
+        drivers: [],
+        supplyPairs: [],
+        contracts: [],
+        policies: [],
+        exclusivities: [],
+        disclosureProfiles: [],
+        driverCredentials: [],
+      })),
+      persistChanges,
+      reportPersistenceFailure: vi.fn(),
+      withTransaction: vi.fn(async (work) => {
+        const executor = {
+          query: vi.fn(async () => ({ rows: [] })),
+        };
+        await work(executor);
+        throw new Error("Simulated database failure during transaction");
+      }),
+      persistChangesWithExecutor: vi.fn(async () => undefined),
+    } as any;
+
+    const auditService = new AuditNotificationService();
+    const service = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
+      repository,
+    );
+    await service.onModuleInit();
+
+    const reviewService = new SupplyReviewService(service, repository);
+
+    const submission = {
+      submissionId: "99999999-9999-9999-9999-999999999999",
+      fleetPartnerId: "fleet-123",
+      submissionType: "vehicle_onboarding",
+      status: "in_review",
+      revisionNo: 1,
+      subjectDriverId: "88888888-8888-8888-8888-888888888888",
+      subjectVehicleId: "77777777-7777-7777-7777-777777777777",
+      submittedBy: "user-123",
+      submittedAt: "2026-07-20T08:00:00Z",
+    } as any;
+
+    repository.loadApprovalArtifacts = vi.fn(async () => ({
+      driverDraft: {
+        name: "Test Driver",
+        taxiDriverRegistrationNo: "REG999",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_reservation"],
+      },
+      vehicleDraft: {
+        plateNo: "XYZ-9999",
+        licenseType: "taxi",
+        businessArea: "TPE",
+        brand: "Tesla",
+        model: "Model 3",
+        modelYear: 2023,
+        doorCount: 4,
+        color: "red",
+        supportedServiceProductCodes: ["taxi_reservation"],
+      },
+      documents: [],
+    }));
+
+    repository.lockSubmission = vi.fn(async () => submission);
+    repository.transitionSubmissionStatus = vi.fn(async () => ({
+      ...submission,
+      status: "approved",
+    }));
+    repository.persistSubmissionWorkflow = vi.fn(async () => undefined);
+
+    expect(service.getVehiclePassengerDisclosureProfile("77777777-7777-7777-7777-777777777777")).toBeNull();
+    expect(service.getDriverPublicRegistrationCredential("88888888-8888-8888-8888-888888888888")).toBeNull();
+
+    await expect(
+      reviewService.approveSubmission("99999999-9999-9999-9999-999999999999", {
+        expectedRevisionNo: 1,
+        reasonCode: "APPROVED",
+        comment: "Approve it",
+      }, "actor-123")
+    ).rejects.toThrow("Simulated database failure during transaction");
+
+    expect(service.getVehiclePassengerDisclosureProfile("77777777-7777-7777-7777-777777777777")).toBeNull();
+    expect(service.getDriverPublicRegistrationCredential("88888888-8888-8888-8888-888888888888")).toBeNull();
   });
 });

@@ -3391,4 +3391,32 @@ export class RegulatoryRegistryService implements OnModuleInit {
       }
     }
   }
+
+  snapshotState() {
+    return {
+      vehicles: this.vehicles.map((v) => this.cloneVehicle(v)),
+      drivers: this.drivers.map((d) => this.cloneDriver(d)),
+      contracts: this.contracts.map((c) => this.cloneContract(c)),
+      policies: this.policies.map((p) => this.clonePolicy(p)),
+      disclosureProfiles: this.disclosureProfiles.map((dp) => ({ ...dp })),
+      driverCredentials: this.driverCredentials.map((dc) => ({ ...dc })),
+    };
+  }
+
+  restoreState(state: {
+    vehicles: any[];
+    drivers: any[];
+    contracts: any[];
+    policies: any[];
+    disclosureProfiles: any[];
+    driverCredentials: any[];
+  }) {
+    this.vehicles = state.vehicles;
+    this.drivers = state.drivers;
+    this.contracts = state.contracts;
+    this.policies = state.policies;
+    this.disclosureProfiles = state.disclosureProfiles;
+    this.driverCredentials = state.driverCredentials;
+  }
 }
+
