@@ -64,6 +64,7 @@ type WorkspaceRoute =
   | "/platform-presence"
   | "/earnings"
   | "/shift"
+  | "/sos"
   | "/incident"
   | "/settings";
 
@@ -362,7 +363,7 @@ function getNotificationRoute(
     .trim()
     .toLowerCase();
   if (isSosNotification(notification)) {
-    return "/incident";
+    return "/sos";
   }
 
   if (haystack.includes("授權") || haystack.includes("reauth")) {
@@ -377,7 +378,7 @@ function getNotificationRoute(
     return "/jobs";
   }
 
-  return "/incident";
+  return "/sos";
 }
 
 function getNotificationTone(
@@ -2521,7 +2522,7 @@ export default function WorkspaceIndex() {
               iconName="warning-outline"
               label="開啟 SOS"
               danger
-              onPress={navigate("/incident")}
+              onPress={navigate("/sos")}
             />
           </View>
         }

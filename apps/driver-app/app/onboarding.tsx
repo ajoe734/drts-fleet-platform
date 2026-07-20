@@ -50,6 +50,7 @@ type WorkspaceRoute =
   | "/platform-presence"
   | "/earnings"
   | "/shift"
+  | "/sos"
   | "/incident"
   | "/settings";
 
@@ -1322,7 +1323,7 @@ export default function OnboardingScreen() {
         <Pressable
           accessibilityLabel="安全事件"
           accessibilityRole="button"
-          onPress={navigate("/incident")}
+          onPress={navigate("/sos")}
           style={({ pressed }) => [
             styles.cockpitBellButton,
             pressed ? styles.cockpitBellButtonPressed : null,
@@ -1568,7 +1569,7 @@ export default function OnboardingScreen() {
       <View style={styles.footerLinks}>
         <Pressable
           accessibilityRole="button"
-          onPress={navigate("/incident")}
+          onPress={navigate("/sos")}
           style={({ pressed }) => [
             styles.footerLink,
             pressed ? styles.footerLinkPressed : null,

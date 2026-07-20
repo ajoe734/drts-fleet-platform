@@ -261,6 +261,8 @@ import type {
   EscalateComplaintToIncidentCommand,
   LinkComplaintToIncidentCommand,
   SubmitExclusivityReviewCommand,
+  SubmitDriverSosEventCommand,
+  SubmitDriverSosEventResult,
   SubmitRegulatoryReportCommand,
   SandboxControlledEvidenceExportRecord,
   SandboxEvidenceManifestView,
@@ -3894,6 +3896,18 @@ export class ApiClient {
 
   async updateIncident(incidentId: string, command: UpdateIncidentCommand) {
     return this.patch(`/api/incidents/${incidentId}`, { body: command });
+  }
+
+  async submitDriverSosEvent(
+    command: SubmitDriverSosEventCommand,
+    options?: {
+      headers?: Record<string, string>;
+    },
+  ) {
+    return this.post<SubmitDriverSosEventResult>("/api/driver/sos-events", {
+      body: command,
+      headers: options?.headers,
+    });
   }
 
   async linkIncidentToComplaint(incidentId: string, complaintCaseNo: string) {

@@ -119,6 +119,7 @@ export default function RootLayout() {
           name="incident"
           options={{ title: driverRouteTitles.incident }}
         />
+        <Stack.Screen name="sos" options={{ title: driverRouteTitles.sos }} />
         <Stack.Screen
           name="earnings"
           options={{ title: driverRouteTitles.earnings }}
