@@ -1,9 +1,16 @@
-# Source Specs — Normative Index (P-5 / S-3)
+# Source Specs — DERIVED Navigation Index (P-5 / S-3)
 
-Catalogue of the three inbound handoff documents and the **normative machine
-artifacts** they define. Code/DDL/enum/route/WP blocks below are reproduced
-verbatim from the source ASCII (which arrived uncorrupted); Chinese prose is
-summarized, not reproduced.
+> ⚠️ **This file is a DERIVED navigation index, NOT the source of truth.**
+> The canonical, byte-for-byte originals live in
+> [`source_specs/`](source_specs/) (full UTF-8, hashes in
+> `source_specs/source_manifest.json`). This index summarizes Chinese prose and
+> may contain summarization drift — **always defer to `source_specs/` for
+> product identity, forbidden vocabulary, copy, states, error mapping, DoD, and
+> any regulatory wording.** Do not treat the summaries below as authoritative.
+
+Catalogue of the three inbound handoff documents. The machine artifacts
+(TypeScript/DDL/enum/route/WP) are reproduced from the source ASCII; Chinese
+prose is summarized only — see `source_specs/` for the real text.
 
 ---
 
@@ -20,7 +27,7 @@ export type PassengerServiceRuntimeProfileCode = "multi_taxi_direct";
 ```
 ```yaml
 code: multi_taxi_direct
-displayName: 多元計程車
+displayName: 智行叫車
 orderDomains: [owned]
 allowedServiceProducts: [taxi_reservation]
 reservationOnly: true
