@@ -5,7 +5,9 @@ This document is the support-only acceptance packet for
 It does not change canonical truth, runtime code, or the parent backlog item.
 It consolidates the current machine-truth posture, the true parent review
 surface, and the dependency/reviewer map for `P5-SUP-DRV-001` as of
-`2026-07-20T09:56:04Z` (UTC).
+`2026-07-20T09:56:04Z` (UTC). Section 9 records the later reviewer approval and
+owner closeout context captured between `2026-07-20T09:58:37Z` and
+`2026-07-20T09:59:43Z`.
 
 Anchors used here:
 
@@ -43,6 +45,10 @@ This refresh supersedes the earlier `review_approved` packet. The prior approval
 became stale when the parent task was reopened at `2026-07-20T09:54:16Z`; the
 machine-truth snapshot below now reflects the parent back in `in_progress`
 while the acceptance packet is refreshed for a later reviewer pass.
+
+The tables in this section intentionally preserve the pre-handoff snapshot that
+was sent for review. The post-review `review_approved` state is captured later
+in Section 9 so the original review surface stays explicit.
 
 ### 2.1 Sidecar row: `P5-SUP-DRV-001-SIDECAR-ACCEPTANCE`
 
@@ -407,3 +413,26 @@ Approval focus:
 
 If the parent branch tip or task status changes again after this refresh, update
 the affected snapshot/checklist sections before reusing this packet.
+
+## 9. Reviewer Approval and Owner Closeout
+
+Reviewer approval for this refreshed packet was recorded in machine truth at
+`2026-07-20T09:58:37Z`.
+
+| Field | Value |
+| --- | --- |
+| Sidecar status after review | `review_approved` |
+| Reviewer | `Gemini` |
+| Review note 1 | `審查通過` |
+| Review note 2 | `Sidecar 驗證包內容完整且與 machine truth 完全一致` |
+| Parent task status at closeout | `P5-SUP-DRV-001 = review` |
+| Parent last update sampled at closeout | `2026-07-20T09:59:43Z` |
+
+Owner closeout implications:
+
+- This approval closes the support-packet refresh only; it does not close or
+  certify the parent runtime implementation.
+- The snapshot tables above intentionally remain anchored to the
+  `2026-07-20T09:56:04Z` pre-handoff posture that `Gemini` reviewed.
+- Final task closeout should use branch-level evidence only; no claim is made
+  here that the parent branch is merged to `dev` or deployed.
