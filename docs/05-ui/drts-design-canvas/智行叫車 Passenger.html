@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>智行叫車 · P-5 乘客端 · Design Canvas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700;900&display=swap" rel="stylesheet" />
+<style>html,body{margin:0;padding:0;background:#f0eee9;font-family:"Inter","Noto Sans TC",system-ui,sans-serif}*{box-sizing:border-box}button{font-family:inherit;cursor:pointer}a{color:#0B5CAB}a:hover{color:#07437E}</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#07437E"/><rect x="30" y="14" width="40" height="72" rx="8" fill="none" stroke="#8FC1EE" stroke-width="3"/><path d="M38 44l4-9h16l4 9M38 44h24v9h-4M38 53h4M44 53h12" stroke="#8FC1EE" stroke-width="2.6" fill="none" stroke-linecap="round"/><rect x="40" y="64" width="20" height="5" rx="2.5" fill="#3D82C4"/></svg>
+</template>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="p5-ui.jsx"></script>
+<script type="text/babel" src="p5-screens.jsx"></script>
+<script type="text/babel">
+function App(){
+  const W=390+28, H=844+28;
+  const F=({children})=><div style={{width:W,height:H,padding:14,display:'flex',alignItems:'flex-start',justifyContent:'center'}}>{children}</div>;
+  return (
+    <DesignCanvas projectName="智行叫車 · P-5 乘客端" subtitle="multi_taxi_direct · 390×844 mobile web · 法定派車揭露 + 評價 + 乘車證明 · 樣本資料均為虛構 · fail-closed 狀態完整" accent="#0B5CAB">
+      <DCSection id="main" title="01 · 派車主流程 P5-01 ~ 07" subtitle="等待指派 → 指派（評價/新進駕駛）→ 改派中/完成 → 抵達 → 行程中（安全帶提醒）">
+        <DCArtboard id="p5-01" label="P5-01 · 正在安排車輛 · 指派前取消不收費" width={W} height={H}><F><P5_S01/></F></DCArtboard>
+        <DCArtboard id="p5-02" label="P5-02 · 已指派 · 評價駕駛 4.9★/328 · 位置 fresh" width={W} height={H}><F><P5_S02/></F></DCArtboard>
+        <DCArtboard id="p5-03" label="P5-03 · 已指派 · 新進駕駛（誠實揭露，無假星等）" width={W} height={H}><F><P5_S03/></F></DCArtboard>
+        <DCArtboard id="p5-04" label="P5-04 · 改派中 · 舊車卡進入已取消指派" width={W} height={H}><F><P5_S04/></F></DCArtboard>
+        <DCArtboard id="p5-05" label="P5-05 · 改派完成 · 車牌變更高亮 + 14:31 活動紀錄" width={W} height={H}><F><P5_S05/></F></DCArtboard>
+        <DCArtboard id="p5-06" label="P5-06 · 司機已抵達 · 收費取消窗口 + 安全帶提醒" width={W} height={H}><F><P5_S06/></F></DCArtboard>
+        <DCArtboard id="p5-07" label="P5-07 · 行程進行中 · 位置 stale 提示" width={W} height={H}><F><P5_S07/></F></DCArtboard>
+      </DCSection>
+      <DCSection id="post" title="02 · 行程後 P5-08 ~ 10" subtitle="評價（星等 ≥44px + 文字標籤 + tags）→ 送出 → 電子乘車證明">
+        <DCArtboard id="p5-08" label="P5-08 · 行程完成 + 評價提示" width={W} height={H}><F><P5_S08/></F></DCArtboard>
+        <DCArtboard id="p5-09" label="P5-09 · 評價已送出" width={W} height={H}><F><P5_S09/></F></DCArtboard>
+        <DCArtboard id="p5-10" label="P5-10 · 電子乘車證明 · PDF/分享 · 遮碼" width={W} height={H}><F><P5_S10/></F></DCArtboard>
+      </DCSection>
+      <DCSection id="degraded" title="03 · 失效 / 降級 P5-11 ~ 12 + A04" subtitle="fail-closed：不顯示半套 assigned card · 不顯示 raw 電話 · 報價異常不可確認">
+        <DCArtboard id="p5-11" label="P5-11 · 派車資訊尚未完整（fail closed）" width={W} height={H}><F><P5_S11/></F></DCArtboard>
+        <DCArtboard id="p5-12" label="P5-12 · 無法直接聯絡司機 → 客服" width={W} height={H}><F><P5_S12/></F></DCArtboard>
+        <DCArtboard id="p5-a04" label="P5-A04 · 暫時無法取得正式報價" width={W} height={H}><F><P5_A04/></F></DCArtboard>
+      </DCSection>
+      <DCSection id="public" title="04 · 公開頁 P5-A03" subtitle="公開車資版本（active）· 生效日 · 備查文號 · 車資變更規則">
+        <DCArtboard id="p5-a03" label="P5-A03 · 公開計費說明頁 /fares" width={W} height={H}><F><P5_A03/></F></DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
