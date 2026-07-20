@@ -56,7 +56,10 @@
     "apiOrder": {
       "orderId": "ORD-SMOKE-001",
       "status": "ready_for_dispatch",
-      "complianceFlags": ["recording_bound", "service_area_serviceable"],
+      "complianceFlags": [
+        "recording_bound",
+        "service_area_serviceable"
+      ],
       "pickup": {
         "address": "No. 1, City Hall Road, Xinyi District, Taipei",
         "lat": 25.037519,
@@ -102,7 +105,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-serviceable-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-10T15:17:09.029Z",
+        "capturedAt": "2026-07-20T08:47:48.507Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-OPS-001",
         "actorType": "ops_user",
@@ -152,7 +155,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-10T15:17:09.027Z",
+          "evaluatedAt": "2026-07-20T08:47:48.506Z",
           "stops": [
             {
               "kind": "pickup",
@@ -160,9 +163,13 @@
                 "lat": 25.037519,
                 "lng": 121.56368
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
@@ -173,21 +180,33 @@
                 "lat": 25.033879,
                 "lng": 121.568743
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
             }
           ],
-          "serviceAreaCodes": ["TAIPEI_CORE"],
-          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "reasonCodes": [],
           "reasonMessages": []
         },
-        "serviceAreaCodes": ["TAIPEI_CORE"],
-        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "serviceAreaCodes": [
+          "TAIPEI_CORE"
+        ],
+        "geometryVersionRefs": [
+          "service_area:TAIPEI_CORE@1"
+        ],
         "reasonCodes": [],
         "reasonMessages": [],
         "missingItems": [],
@@ -208,7 +227,9 @@
         "required": true,
         "blocking": false,
         "evidenceState": "verified",
-        "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+        "evidenceRefs": [
+          "service_area:TAIPEI_CORE@1"
+        ],
         "missingItems": [],
         "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
         "reviewerLabel": null,
@@ -301,7 +322,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-07-10T15:17:09.000Z"
+            "calculatedAt": "2026-07-20T08:47:48.487Z"
           },
           "callId": "CALL-SMOKE-001",
           "recordingId": "REC-SMOKE-001",
@@ -333,7 +354,10 @@
           },
           "approvalState": "not_required",
           "approvalRequestIds": [],
-          "complianceFlags": ["recording_bound", "service_area_serviceable"],
+          "complianceFlags": [
+            "recording_bound",
+            "service_area_serviceable"
+          ],
           "cancelledAt": null,
           "cancelReason": null,
           "mapFallbackReview": null,
@@ -344,12 +368,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-10T15:17:09.000Z",
-          "updatedAt": "2026-07-10T15:17:09.000Z",
+          "createdAt": "2026-07-20T08:47:48.487Z",
+          "updatedAt": "2026-07-20T08:47:48.487Z",
           "spatialAudit": {
             "snapshotId": "snapshot-serviceable-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-10T15:17:09.029Z",
+            "capturedAt": "2026-07-20T08:47:48.507Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-OPS-001",
             "actorType": "ops_user",
@@ -399,7 +423,7 @@
             "serviceAreaEvaluation": {
               "decision": "serviceable",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-07-10T15:17:09.027Z",
+              "evaluatedAt": "2026-07-20T08:47:48.506Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -407,9 +431,13 @@
                     "lat": 25.037519,
                     "lng": 121.56368
                   },
-                  "serviceAreaCodes": ["TAIPEI_CORE"],
+                  "serviceAreaCodes": [
+                    "TAIPEI_CORE"
+                  ],
                   "policyCodes": [],
-                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "geometryVersionRefs": [
+                    "service_area:TAIPEI_CORE@1"
+                  ],
                   "decision": "serviceable",
                   "reasonCodes": [],
                   "reasonMessages": []
@@ -420,21 +448,33 @@
                     "lat": 25.033879,
                     "lng": 121.568743
                   },
-                  "serviceAreaCodes": ["TAIPEI_CORE"],
+                  "serviceAreaCodes": [
+                    "TAIPEI_CORE"
+                  ],
                   "policyCodes": [],
-                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "geometryVersionRefs": [
+                    "service_area:TAIPEI_CORE@1"
+                  ],
                   "decision": "serviceable",
                   "reasonCodes": [],
                   "reasonMessages": []
                 }
               ],
-              "serviceAreaCodes": ["TAIPEI_CORE"],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "reasonCodes": [],
               "reasonMessages": []
             },
-            "serviceAreaCodes": ["TAIPEI_CORE"],
-            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+            "serviceAreaCodes": [
+              "TAIPEI_CORE"
+            ],
+            "geometryVersionRefs": [
+              "service_area:TAIPEI_CORE@1"
+            ],
             "reasonCodes": [],
             "reasonMessages": [],
             "missingItems": [],
@@ -456,7 +496,9 @@
               "required": true,
               "blocking": false,
               "evidenceState": "verified",
-              "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+              "evidenceRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "missingItems": [],
               "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
               "reviewerLabel": null,
@@ -487,7 +529,9 @@
               "required": true,
               "blocking": false,
               "evidenceState": "verified",
-              "evidenceRefs": ["REC-SMOKE-001"],
+              "evidenceRefs": [
+                "REC-SMOKE-001"
+              ],
               "missingItems": [],
               "nextAction": "Recording has been bound to the phone order.",
               "reviewerLabel": "callcenter / ops compliance",
@@ -522,7 +566,7 @@
           "orderId": "ORD-SMOKE-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-10T15:17:09.030Z",
+          "createdAt": "2026-07-20T08:47:48.509Z",
           "details": {
             "callId": "CALL-SMOKE-001",
             "recordingId": "REC-SMOKE-001",
@@ -548,8 +592,12 @@
         "decision": "serviceable",
         "surface": "callcenter",
         "serviceProductType": "taxi_realtime",
-        "serviceAreaCodes": ["TAIPEI_CORE"],
-        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "serviceAreaCodes": [
+          "TAIPEI_CORE"
+        ],
+        "geometryVersionRefs": [
+          "service_area:TAIPEI_CORE@1"
+        ],
         "reasonCodes": [],
         "missingItems": [],
         "provenanceComplete": true
@@ -557,7 +605,9 @@
       "metadata": null
     },
     "immutableSnapshotCheck": {
-      "mutatedReasonCodes": ["MUTATED_REASON"],
+      "mutatedReasonCodes": [
+        "MUTATED_REASON"
+      ],
       "freshReasonCodes": [],
       "freshPickupLocation": {
         "lat": 25.037519,
@@ -603,11 +653,17 @@
         }
       ],
       "overlays": {
-        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "serviceAreaCodes": [
+          "TAIPEI_CORE"
+        ],
         "policyCodes": [],
-        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "geometryVersionRefs": [
+          "service_area:TAIPEI_CORE@1"
+        ],
         "reasonCodes": [],
-        "decisions": ["serviceable"]
+        "decisions": [
+          "serviceable"
+        ]
       }
     }
   },
@@ -655,7 +711,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-manual-review-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-10T15:17:09.059Z",
+        "capturedAt": "2026-07-20T08:47:48.523Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-OPS-001",
         "actorType": "ops_user",
@@ -715,7 +771,7 @@
         "serviceAreaEvaluation": {
           "decision": "manual_review",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-10T15:17:09.059Z",
+          "evaluatedAt": "2026-07-20T08:47:48.521Z",
           "stops": [
             {
               "kind": "pickup",
@@ -723,14 +779,20 @@
                 "lat": 25.0338,
                 "lng": 121.5645
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
-              "policyCodes": ["XINYI_HOSPITAL_MANUAL_REVIEW"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
+              "policyCodes": [
+                "XINYI_HOSPITAL_MANUAL_REVIEW"
+              ],
               "geometryVersionRefs": [
                 "service_area:TAIPEI_CORE@1",
                 "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
               ],
               "decision": "manual_review",
-              "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+              "reasonCodes": [
+                "STOP_REQUIRES_MANUAL_REVIEW"
+              ],
               "reasonMessages": [
                 "This stop requires ops review before dispatch."
               ]
@@ -741,29 +803,45 @@
                 "lat": 25.041,
                 "lng": 121.55
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
             }
           ],
-          "serviceAreaCodes": ["TAIPEI_CORE"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
           "geometryVersionRefs": [
             "service_area:TAIPEI_CORE@1",
             "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
           ],
-          "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
-          "reasonMessages": ["This stop requires ops review before dispatch."]
+          "reasonCodes": [
+            "STOP_REQUIRES_MANUAL_REVIEW"
+          ],
+          "reasonMessages": [
+            "This stop requires ops review before dispatch."
+          ]
         },
-        "serviceAreaCodes": ["TAIPEI_CORE"],
+        "serviceAreaCodes": [
+          "TAIPEI_CORE"
+        ],
         "geometryVersionRefs": [
           "service_area:TAIPEI_CORE@1",
           "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
         ],
-        "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
-        "reasonMessages": ["This stop requires ops review before dispatch."],
+        "reasonCodes": [
+          "STOP_REQUIRES_MANUAL_REVIEW"
+        ],
+        "reasonMessages": [
+          "This stop requires ops review before dispatch."
+        ],
         "missingItems": [],
         "auditEvents": [
           {
@@ -791,7 +869,10 @@
         "nextAction": "This stop requires ops review before dispatch.",
         "reviewerLabel": "ops dispatch / service area",
         "overrideAllowed": true,
-        "overrideActors": ["ops_user", "platform_admin"],
+        "overrideActors": [
+          "ops_user",
+          "platform_admin"
+        ],
         "impacts": [
           {
             "stage": "dispatch",
@@ -861,7 +942,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-07-10T15:17:09.058Z"
+            "calculatedAt": "2026-07-20T08:47:48.521Z"
           },
           "callId": "CALL-MANUAL-001",
           "recordingId": "REC-MANUAL-001",
@@ -893,7 +974,10 @@
           },
           "approvalState": "not_required",
           "approvalRequestIds": [],
-          "complianceFlags": ["recording_bound", "service_area_manual_review"],
+          "complianceFlags": [
+            "recording_bound",
+            "service_area_manual_review"
+          ],
           "cancelledAt": null,
           "cancelReason": null,
           "mapFallbackReview": null,
@@ -904,12 +988,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-10T15:17:09.058Z",
-          "updatedAt": "2026-07-10T15:17:09.058Z",
+          "createdAt": "2026-07-20T08:47:48.521Z",
+          "updatedAt": "2026-07-20T08:47:48.521Z",
           "spatialAudit": {
             "snapshotId": "snapshot-manual-review-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-10T15:17:09.059Z",
+            "capturedAt": "2026-07-20T08:47:48.523Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-OPS-001",
             "actorType": "ops_user",
@@ -969,7 +1053,7 @@
             "serviceAreaEvaluation": {
               "decision": "manual_review",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-07-10T15:17:09.059Z",
+              "evaluatedAt": "2026-07-20T08:47:48.521Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -977,14 +1061,20 @@
                     "lat": 25.0338,
                     "lng": 121.5645
                   },
-                  "serviceAreaCodes": ["TAIPEI_CORE"],
-                  "policyCodes": ["XINYI_HOSPITAL_MANUAL_REVIEW"],
+                  "serviceAreaCodes": [
+                    "TAIPEI_CORE"
+                  ],
+                  "policyCodes": [
+                    "XINYI_HOSPITAL_MANUAL_REVIEW"
+                  ],
                   "geometryVersionRefs": [
                     "service_area:TAIPEI_CORE@1",
                     "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
                   ],
                   "decision": "manual_review",
-                  "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+                  "reasonCodes": [
+                    "STOP_REQUIRES_MANUAL_REVIEW"
+                  ],
                   "reasonMessages": [
                     "This stop requires ops review before dispatch."
                   ]
@@ -995,30 +1085,42 @@
                     "lat": 25.041,
                     "lng": 121.55
                   },
-                  "serviceAreaCodes": ["TAIPEI_CORE"],
+                  "serviceAreaCodes": [
+                    "TAIPEI_CORE"
+                  ],
                   "policyCodes": [],
-                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "geometryVersionRefs": [
+                    "service_area:TAIPEI_CORE@1"
+                  ],
                   "decision": "serviceable",
                   "reasonCodes": [],
                   "reasonMessages": []
                 }
               ],
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "geometryVersionRefs": [
                 "service_area:TAIPEI_CORE@1",
                 "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
               ],
-              "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+              "reasonCodes": [
+                "STOP_REQUIRES_MANUAL_REVIEW"
+              ],
               "reasonMessages": [
                 "This stop requires ops review before dispatch."
               ]
             },
-            "serviceAreaCodes": ["TAIPEI_CORE"],
+            "serviceAreaCodes": [
+              "TAIPEI_CORE"
+            ],
             "geometryVersionRefs": [
               "service_area:TAIPEI_CORE@1",
               "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1"
             ],
-            "reasonCodes": ["STOP_REQUIRES_MANUAL_REVIEW"],
+            "reasonCodes": [
+              "STOP_REQUIRES_MANUAL_REVIEW"
+            ],
             "reasonMessages": [
               "This stop requires ops review before dispatch."
             ],
@@ -1050,7 +1152,10 @@
               "nextAction": "This stop requires ops review before dispatch.",
               "reviewerLabel": "ops dispatch / service area",
               "overrideAllowed": true,
-              "overrideActors": ["ops_user", "platform_admin"],
+              "overrideActors": [
+                "ops_user",
+                "platform_admin"
+              ],
               "impacts": [
                 {
                   "stage": "dispatch",
@@ -1076,7 +1181,9 @@
               "required": true,
               "blocking": false,
               "evidenceState": "verified",
-              "evidenceRefs": ["REC-MANUAL-001"],
+              "evidenceRefs": [
+                "REC-MANUAL-001"
+              ],
               "missingItems": [],
               "nextAction": "Recording has been bound to the phone order.",
               "reviewerLabel": "callcenter / ops compliance",
@@ -1111,7 +1218,7 @@
           "orderId": "ORD-MAP-MANUAL-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-10T15:17:09.060Z",
+          "createdAt": "2026-07-20T08:47:48.523Z",
           "details": {
             "callId": "CALL-MANUAL-001",
             "recordingId": "REC-MANUAL-001",
@@ -1127,7 +1234,9 @@
           "message": "Order requires manual review before dispatch.",
           "details": {
             "orderId": "ORD-MAP-MANUAL-001",
-            "gateTypes": ["service_area"],
+            "gateTypes": [
+              "service_area"
+            ],
             "reasonCodes": [
               "service_area:TAIPEI_CORE@1",
               "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1",

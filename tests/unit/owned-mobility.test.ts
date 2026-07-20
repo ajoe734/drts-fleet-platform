@@ -1551,4 +1551,85 @@ describe("owned mobility service", () => {
       }),
     );
   });
+
+  it("enforces multi_taxi_direct reservation-only guard on order creation and tenant booking", async () => {
+    const { ownedMobilityService } = createService();
+
+    // 1. Immediate order with multi_taxi_direct profile should fail with 409 Conflict
+    const immediateCommand = {
+      pickup: { address: "Pickup St" },
+      dropoff: { address: "Dropoff St" },
+      passenger: { name: "Test" },
+    } as any;
+
+    await expect(async () => {
+      ownedMobilityService.createPassengerOrder(
+        immediateCommand,
+        null,
+        "req-123",
+        "multi_taxi_direct",
+      );
+    }).rejects.toThrowError(
+      expect.objectContaining({
+        status: 409,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "RESERVATION_ONLY_PROFILE",
+          }),
+        }),
+      }),
+    );
+
+    // 2. Call center immediate order with multi_taxi_direct profile should fail with 409 Conflict
+    const callCenterCommand = {
+      callId: "call-123",
+      pickup: { address: "Pickup St" },
+      dropoff: { address: "Dropoff St" },
+      passenger: { name: "Test" },
+    } as any;
+
+    await expect(async () => {
+      ownedMobilityService.createCallCenterOrder(
+        callCenterCommand,
+        "req-123",
+        "multi_taxi_direct",
+      );
+    }).rejects.toThrowError(
+      expect.objectContaining({
+        status: 409,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "RESERVATION_ONLY_PROFILE",
+          }),
+        }),
+      }),
+    );
+
+    // 3. Tenant booking with multi_taxi_direct profile and wrong service product (not taxi_reservation) should fail with 409
+    const wrongProductBookingCommand = {
+      businessDispatchSubtype: "enterprise_dispatch",
+      pickup: { address: "Pickup St" },
+      dropoff: { address: "Dropoff St" },
+      reservationWindowStart: "2026-07-20T10:00:00Z",
+    } as any;
+
+    await expect(async () => {
+      await ownedMobilityService.createTenantBooking(
+        wrongProductBookingCommand,
+        "tenant-123",
+        null,
+        "req-123",
+        "multi_taxi_direct",
+      );
+    }).rejects.toThrowError(
+      expect.objectContaining({
+        status: 409,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "SERVICE_PRODUCT_NOT_ALLOWED",
+          }),
+        }),
+      }),
+    );
+  });
 });

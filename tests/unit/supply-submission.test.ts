@@ -8,7 +8,10 @@ import type { RegulatoryRegistryService } from "../../apps/api/src/modules/regul
 
 function createService() {
   const repository = new SupplySubmissionRepository();
-  const regulatoryRegistryService = {} as RegulatoryRegistryService;
+  const regulatoryRegistryService = {
+    listVehicles: () => [],
+    listDrivers: () => [],
+  } as unknown as RegulatoryRegistryService;
   const auditNotificationService = new AuditNotificationService();
   const service = new SupplySubmissionService(
     repository,
@@ -112,5 +115,137 @@ describe("SupplySubmissionService", () => {
     expect(updated.submission.revisionNo).toBe(2);
     expect(updated.driverDraft?.name).toBe("Test Driver Updated");
     expect(updated.driverDraft?.mobile).toBe("+886900111223");
+  });
+
+  it("enforces doorCount and color on submission completeness check", async () => {
+    const { service } = createService();
+
+    // Create a vehicle submission draft without doorCount / color
+    const created = await service.createVehicleDraft(
+      "fleet-demo-001",
+      "actor-demo-001",
+      {
+        plateNo: "ABC-9999",
+        licenseType: "taxi",
+        brand: "Toyota",
+        model: "Camry",
+        modelYear: 2024,
+        seatCount: 4,
+        luggageCapacity: 2,
+        businessArea: "TPE",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        currentDriverSubmissionId: null,
+        doorCount: null, // missing
+        color: null, // missing
+      },
+    );
+
+    const submissionId = created.submission.submissionId;
+
+    // Submitting it should throw a conflict because doorCount/color are missing
+    await expect(
+      service.submitSupplySubmission("fleet-demo-001", submissionId, "actor-demo-001", {
+        expectedRevisionNo: 1,
+      }),
+    ).rejects.toThrowError(ApiRequestError);
+
+    // Update draft to have doorCount and color
+    await service.updateVehicleDraft(
+      "fleet-demo-001",
+      submissionId,
+      "actor-demo-001",
+      {
+        expectedRevisionNo: 1,
+        plateNo: "ABC-9999",
+        licenseType: "taxi",
+        brand: "Toyota",
+        model: "Camry",
+        modelYear: 2024,
+        seatCount: 4,
+        luggageCapacity: 2,
+        businessArea: "TPE",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        currentDriverSubmissionId: null,
+        doorCount: 4,
+        color: "yellow",
+      },
+    );
+
+    // Now it should proceed past draft validation (though it might fail on missing documents, which is a different error code)
+    await expect(
+      service.submitSupplySubmission("fleet-demo-001", submissionId, "actor-demo-001", {
+        expectedRevisionNo: 2,
+      }),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "DOCUMENT_REQUIRED", // It failed on documents, meaning doorCount/color checks passed!
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("performs idempotent in-memory backfill of incomplete vehicle submissions to needs_revision", async () => {
+    const { service, repository } = createService();
+
+    // Mock repository isEnabled to return false (in-memory mode)
+    vi.spyOn(repository, "isEnabled").mockReturnValue(false);
+
+    // Seed repository state directly with a submitted submission that lacks doorCount/color
+    const submissionId = "sub-seeded-123";
+    const seedSubmission = {
+      submissionId,
+      fleetPartnerId: "fleet-demo-001",
+      submissionType: "vehicle_onboarding" as const,
+      status: "submitted" as const,
+      revisionNo: 1,
+      subjectDriverId: null,
+      subjectVehicleId: "veh-123",
+      submittedBy: "actor-1",
+      submittedAt: "2026-07-20T08:00:00Z",
+      reviewStartedBy: null,
+      reviewStartedAt: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewReasonCode: null,
+      reviewComment: null,
+      canonicalDriverId: null,
+      canonicalVehicleId: null,
+      canonicalContractId: null,
+      canonicalPolicyId: null,
+      createdAt: "2026-07-20T08:00:00Z",
+      updatedAt: "2026-07-20T08:00:00Z",
+    };
+    const seedDraft = {
+      submissionId,
+      plateNo: "ABC-1234",
+      licenseType: "taxi",
+      brand: "Toyota",
+      model: "Camry",
+      modelYear: 2024,
+      seatCount: 4,
+      luggageCapacity: 2,
+      businessArea: "TPE",
+      supportedServiceProductCodes: ["taxi_realtime"],
+      airportTransferEligible: false,
+      fixedFareAllowed: true,
+      currentDriverSubmissionId: null,
+      doorCount: null, // missing!
+      color: null, // missing!
+    };
+
+    await repository.persistChanges({
+      submissions: [seedSubmission],
+      vehicleDrafts: [seedDraft],
+    });
+
+    // Run onModuleInit, which triggers backfill
+    await service.onModuleInit();
+
+    // Verify submission status was backfilled to needs_revision
+    const detail = await service.getSupplySubmissionDetail("fleet-demo-001", submissionId);
+    expect(detail.submission.status).toBe("needs_revision");
   });
 });

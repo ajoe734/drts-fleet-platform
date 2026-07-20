@@ -516,6 +516,8 @@ describe("FleetPartnerController portal routes", () => {
         airportTransferEligible: false,
         fixedFareAllowed: false,
         currentDriverSubmissionId: driverSubmissionId,
+        doorCount: 4,
+        color: "yellow",
       },
       "req-supply-create-vehicle",
     );
@@ -539,6 +541,8 @@ describe("FleetPartnerController portal routes", () => {
         airportTransferEligible: false,
         fixedFareAllowed: false,
         currentDriverSubmissionId: driverSubmissionId,
+        doorCount: 4,
+        color: "yellow",
       },
       "req-supply-update-vehicle",
     );

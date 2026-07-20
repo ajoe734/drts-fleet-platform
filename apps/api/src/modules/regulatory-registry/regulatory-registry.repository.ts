@@ -10,6 +10,8 @@ import type {
   VehicleLicenseType,
   VehicleContractRecord,
   VehicleRegistryRecord,
+  VehiclePassengerDisclosureProfile,
+  DriverPublicRegistrationCredential,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -38,6 +40,8 @@ export type RegulatoryRegistryState = {
   contracts: VehicleContractRecord[];
   policies: InsurancePolicyRecord[];
   exclusivities: DispatchExclusivityRecord[];
+  disclosureProfiles: VehiclePassengerDisclosureProfile[];
+  driverCredentials: DriverPublicRegistrationCredential[];
 };
 
 export type PersistRegulatoryRegistryChanges = {
@@ -47,6 +51,8 @@ export type PersistRegulatoryRegistryChanges = {
   contracts?: readonly VehicleContractRecord[];
   policies?: readonly InsurancePolicyRecord[];
   exclusivities?: readonly DispatchExclusivityRecord[];
+  disclosureProfiles?: readonly VehiclePassengerDisclosureProfile[];
+  driverCredentials?: readonly DriverPublicRegistrationCredential[];
 };
 
 type DriverLocationRow = {
@@ -105,6 +111,37 @@ export type DriverHeartbeatEventSnapshot = {
   networkType: DriverLocationHeartbeatEnvelope["networkType"];
 };
 
+type VehiclePassengerDisclosureProfileRow = {
+  vehicle_id: string;
+  make: string;
+  model: string;
+  model_year: number | string;
+  door_count: number | string;
+  color: string | null;
+  status: string;
+  missing_field_codes: unknown;
+  verified_by_actor_id: string | null;
+  verified_at: string | Date | null;
+  source_submission_id: string | null;
+  version: number | string;
+  updated_at: string | Date;
+};
+
+type DriverPublicRegistrationCredentialRow = {
+  driver_id: string;
+  registration_no: string;
+  registration_area: string;
+  effective_from: string | Date | null;
+  effective_until: string | Date;
+  status: string;
+  masked_display: string;
+  verified_by_actor_id: string | null;
+  verified_at: string | Date | null;
+  source_submission_id: string | null;
+  version: number | string;
+  updated_at: string | Date;
+};
+
 @Injectable()
 export class RegulatoryRegistryRepository {
   private readonly logger = new Logger(RegulatoryRegistryRepository.name);
@@ -124,6 +161,8 @@ export class RegulatoryRegistryRepository {
         contracts: [],
         policies: [],
         exclusivities: [],
+        disclosureProfiles: [],
+        driverCredentials: [],
       };
     }
 
@@ -135,6 +174,8 @@ export class RegulatoryRegistryRepository {
       policiesResult,
       exclusivitiesResult,
       vehicleLicenseClassResult,
+      disclosureProfilesResult,
+      driverCredentialsResult,
     ] = await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `
@@ -182,6 +223,20 @@ export class RegulatoryRegistryRepository {
         `
           SELECT vehicle_id, license_class
           FROM reg.vehicles
+        `,
+      ),
+      this.databaseService!.query<VehiclePassengerDisclosureProfileRow>(
+        `
+          SELECT *
+          FROM reg.vehicle_passenger_disclosure_profiles
+          ORDER BY updated_at DESC, vehicle_id
+        `,
+      ),
+      this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
+        `
+          SELECT *
+          FROM reg.driver_public_registration_credentials
+          ORDER BY updated_at DESC, driver_id
         `,
       ),
     ]);
@@ -242,6 +297,12 @@ export class RegulatoryRegistryRepository {
           row.record,
           "reg.phase1_registry_exclusivities",
         ),
+      ),
+      disclosureProfiles: disclosureProfilesResult.rows.map((row) =>
+        this.mapDisclosureProfileRow(row),
+      ),
+      driverCredentials: driverCredentialsResult.rows.map((row) =>
+        this.mapDriverCredentialRow(row),
       ),
     };
   }
@@ -457,6 +518,109 @@ export class RegulatoryRegistryRepository {
             exclusivity.reviewStatus,
             exclusivity.updatedAt,
             JSON.stringify(exclusivity),
+          ],
+        ),
+      );
+    }
+
+    for (const profile of changes.disclosureProfiles ?? []) {
+      writes.push(
+        executor.query(
+          `
+            INSERT INTO reg.vehicle_passenger_disclosure_profiles (
+              vehicle_id,
+              make,
+              model,
+              model_year,
+              door_count,
+              color,
+              status,
+              missing_field_codes,
+              verified_by_actor_id,
+              verified_at,
+              source_submission_id,
+              version,
+              updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, now()
+            )
+            ON CONFLICT (vehicle_id) DO UPDATE SET
+              make = EXCLUDED.make,
+              model = EXCLUDED.model,
+              model_year = EXCLUDED.model_year,
+              door_count = EXCLUDED.door_count,
+              color = EXCLUDED.color,
+              status = EXCLUDED.status,
+              missing_field_codes = EXCLUDED.missing_field_codes,
+              verified_by_actor_id = EXCLUDED.verified_by_actor_id,
+              verified_at = EXCLUDED.verified_at,
+              source_submission_id = EXCLUDED.source_submission_id,
+              version = EXCLUDED.version,
+              updated_at = now()
+          `,
+          [
+            profile.vehicleId,
+            profile.make,
+            profile.model,
+            profile.modelYear,
+            profile.doorCount,
+            profile.color,
+            profile.status,
+            JSON.stringify(profile.missingFieldCodes),
+            profile.verifiedByActorId,
+            profile.verifiedAt,
+            profile.sourceSubmissionId,
+            profile.version,
+          ],
+        ),
+      );
+    }
+
+    for (const cred of changes.driverCredentials ?? []) {
+      writes.push(
+        executor.query(
+          `
+            INSERT INTO reg.driver_public_registration_credentials (
+              driver_id,
+              registration_no,
+              registration_area,
+              effective_from,
+              effective_until,
+              status,
+              masked_display,
+              verified_by_actor_id,
+              verified_at,
+              source_submission_id,
+              version,
+              updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now()
+            )
+            ON CONFLICT (driver_id) DO UPDATE SET
+              registration_no = EXCLUDED.registration_no,
+              registration_area = EXCLUDED.registration_area,
+              effective_from = EXCLUDED.effective_from,
+              effective_until = EXCLUDED.effective_until,
+              status = EXCLUDED.status,
+              masked_display = EXCLUDED.masked_display,
+              verified_by_actor_id = EXCLUDED.verified_by_actor_id,
+              verified_at = EXCLUDED.verified_at,
+              source_submission_id = EXCLUDED.source_submission_id,
+              version = EXCLUDED.version,
+              updated_at = now()
+          `,
+          [
+            cred.driverId,
+            cred.registrationNo,
+            cred.registrationArea,
+            cred.effectiveFrom,
+            cred.effectiveUntil,
+            cred.status,
+            cred.maskedDisplay,
+            cred.verifiedByActorId,
+            cred.verifiedAt,
+            cred.sourceSubmissionId,
+            cred.version,
           ],
         ),
       );
@@ -905,5 +1069,109 @@ export class RegulatoryRegistryRepository {
     );
 
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async runIdempotentBackfill(): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(`
+      INSERT INTO reg.driver_public_registration_credentials (
+        driver_id,
+        registration_no,
+        registration_area,
+        effective_from,
+        effective_until,
+        status,
+        masked_display,
+        version,
+        updated_at
+      )
+      SELECT 
+        d.driver_id,
+        COALESCE(dp.taxi_registration_no, 'UNKNOWN'),
+        'TPE',
+        NULL,
+        COALESCE(dp.taxi_registration_expiry, '2027-12-31'::date),
+        'unverified',
+        CASE 
+          WHEN dp.taxi_registration_no IS NULL OR length(dp.taxi_registration_no) <= 4 THEN '***'
+          ELSE concat(left(dp.taxi_registration_no, 2), '***', right(dp.taxi_registration_no, 2))
+        END,
+        1,
+        now()
+      FROM reg.drivers d
+      LEFT JOIN reg.driver_reg_profiles dp ON d.driver_id = dp.driver_id
+      LEFT JOIN reg.driver_public_registration_credentials dc ON d.driver_id = dc.driver_id
+      WHERE dc.driver_id IS NULL
+      ON CONFLICT (driver_id) DO NOTHING;
+    `);
+
+    await this.databaseService!.query(`
+      UPDATE fleet.supply_submissions s
+      SET status = 'needs_revision',
+          updated_at = now()
+      FROM fleet.vehicle_supply_drafts d
+      WHERE s.submission_id = d.submission_id
+        AND s.status IN ('submitted', 'in_review', 'approved')
+        AND (d.door_count IS NULL OR d.color IS NULL);
+    `);
+  }
+
+  private mapDisclosureProfileRow(
+    row: VehiclePassengerDisclosureProfileRow,
+  ): VehiclePassengerDisclosureProfile {
+    return {
+      vehicleId: row.vehicle_id,
+      make: row.make,
+      model: row.model,
+      modelYear: Number(row.model_year),
+      doorCount: Number(row.door_count),
+      color: row.color,
+      status: row.status as VehiclePassengerDisclosureProfile["status"],
+      missingFieldCodes: this.toStringArray(row.missing_field_codes),
+      verifiedByActorId: row.verified_by_actor_id,
+      verifiedAt: row.verified_at ? new Date(row.verified_at).toISOString() : null,
+      sourceSubmissionId: row.source_submission_id,
+      version: Number(row.version),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  private mapDriverCredentialRow(
+    row: DriverPublicRegistrationCredentialRow,
+  ): DriverPublicRegistrationCredential {
+    return {
+      driverId: row.driver_id,
+      registrationNo: row.registration_no,
+      registrationArea: row.registration_area,
+      effectiveFrom: row.effective_from ? new Date(row.effective_from).toISOString().slice(0, 10) : null,
+      effectiveUntil: new Date(row.effective_until).toISOString().slice(0, 10),
+      status: row.status as DriverPublicRegistrationCredential["status"],
+      maskedDisplay: row.masked_display,
+      verifiedByActorId: row.verified_by_actor_id,
+      verifiedAt: row.verified_at ? new Date(row.verified_at).toISOString() : null,
+      sourceSubmissionId: row.source_submission_id,
+      version: Number(row.version),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  private toStringArray(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value.map(String);
+    }
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.map(String);
+        }
+      } catch {
+        // Ignore JSON parsing errors
+      }
+    }
+    return [];
   }
 }
