@@ -27,10 +27,14 @@ type CorrectionQueueRow = Record<string, unknown> & {
   id: string;
   fleet: string;
   subject: string;
+  subjectType: "vehicle" | "driver";
   missing: string;
   status: "pending" | "reviewing" | "returned" | "approved";
   submittedAt: string;
   updatedAt: string;
+  vehiclePlate: string;
+  driverName: string;
+  queueNote: string;
 };
 
 type FareVersionRow = Record<string, unknown> & {
@@ -39,6 +43,13 @@ type FareVersionRow = Record<string, unknown> & {
   status: "draft" | "filed" | "active" | "retired";
   effectiveFrom: string;
   filingRef: string;
+  preview: {
+    startingFare: string;
+    distanceFare: string;
+    waitingFare: string;
+    nightSurcharge: string;
+    note: string;
+  };
 };
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
@@ -75,42 +86,67 @@ const actionRowStyle: CSSProperties = {
   gap: 6,
 };
 
+const queueDetailListStyle: CSSProperties = {
+  margin: 0,
+  paddingLeft: 18,
+  color: theme.textMuted,
+  display: "grid",
+  gap: 6,
+  fontSize: 12,
+};
+
 const queueSeed: CorrectionQueueRow[] = [
   {
     id: "cq-001",
     fleet: "大都會車隊",
     subject: "BKR-2208 · 車輛",
+    subjectType: "vehicle",
     missing: "車門數 · 車身顏色",
     status: "pending",
     submittedAt: "2026-07-14",
     updatedAt: "2026-07-18",
+    vehiclePlate: "BKR-2208",
+    driverName: "吳明翰",
+    queueNote: "缺漏欄位需補齊後才能寫入 passenger disclosure profile。",
   },
   {
     id: "cq-002",
     fleet: "大都會車隊",
     subject: "吳明翰 · 駕駛",
+    subjectType: "driver",
     missing: "執登效期證明",
     status: "reviewing",
     submittedAt: "2026-07-15",
     updatedAt: "2026-07-19",
+    vehiclePlate: "BKR-2208",
+    driverName: "吳明翰",
+    queueNote: "人工審核與效期需共同通過，不得沿用既有駕照旗標。",
   },
   {
     id: "cq-003",
     fleet: "海線車隊",
     subject: "TXG-1180 · 車輛",
+    subjectType: "vehicle",
     missing: "出廠年份",
     status: "returned",
     submittedAt: "2026-07-10",
     updatedAt: "2026-07-16",
+    vehiclePlate: "TXG-1180",
+    driverName: "林佩蓉",
+    queueNote: "已退件補正，待車隊重新送審後才可恢復審核。",
   },
   {
     id: "cq-004",
     fleet: "蘭陽小客車",
     subject: "游志豪 · 駕駛",
+    subjectType: "driver",
     missing: "—",
     status: "approved",
     submittedAt: "2026-07-08",
     updatedAt: "2026-07-12",
+    vehiclePlate: "YLN-5201",
+    driverName: "游志豪",
+    queueNote: "資料已核准，可進入派車資格評估。",
   },
 ];
 
@@ -121,6 +157,13 @@ const fareSeed: FareVersionRow[] = [
     status: "filed",
     effectiveFrom: "2026-10-01",
     filingRef: "北市交運字第1130077號",
+    preview: {
+      startingFare: "NT$ 90",
+      distanceFare: "NT$ 5 / 200m",
+      waitingFare: "NT$ 5 / 80s",
+      nightSurcharge: "+20% · 23:00–06:00",
+      note: "已備查版本可先公開預覽；生效前訂單仍沿用 active 版本。",
+    },
   },
   {
     id: "F-2026-03",
@@ -128,6 +171,13 @@ const fareSeed: FareVersionRow[] = [
     status: "active",
     effectiveFrom: "2026-07-01",
     filingRef: "北市交運字第1130042號",
+    preview: {
+      startingFare: "NT$ 85",
+      distanceFare: "NT$ 5 / 200m",
+      waitingFare: "NT$ 5 / 80s",
+      nightSurcharge: "+20% · 23:00–06:00",
+      note: "現行 active 版本供乘客公開查閱，正式訂單一律使用此版本計費。",
+    },
   },
   {
     id: "F-2026-05",
@@ -135,6 +185,13 @@ const fareSeed: FareVersionRow[] = [
     status: "draft",
     effectiveFrom: "—",
     filingRef: "—",
+    preview: {
+      startingFare: "NT$ 85",
+      distanceFare: "NT$ 5 / 200m",
+      waitingFare: "NT$ 5 / 80s",
+      nightSurcharge: "+25% · 23:00–06:00",
+      note: "草稿版本僅供內部檢視，尚未送備查，不可套用到任何訂單。",
+    },
   },
   {
     id: "F-2025-11",
@@ -142,6 +199,13 @@ const fareSeed: FareVersionRow[] = [
     status: "retired",
     effectiveFrom: "2025-11-01",
     filingRef: "北市交運字第1120198號",
+    preview: {
+      startingFare: "NT$ 80",
+      distanceFare: "NT$ 5 / 250m",
+      waitingFare: "NT$ 5 / 100s",
+      nightSurcharge: "+15% · 23:00–06:00",
+      note: "停用版本僅保留對照，不可再次啟用到現行公開頁。",
+    },
   },
 ];
 
@@ -224,7 +288,17 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     useState<DriverPublicRegistrationCredential>(fallbackDriver);
   const [loading, setLoading] = useState(view === "disclosure");
   const [queueRows, setQueueRows] = useState(queueSeed);
+  const [selectedQueueId, setSelectedQueueId] = useState(queueSeed[0]?.id ?? "");
+  const [selectedFareId, setSelectedFareId] = useState(
+    fareSeed.find((row) => row.status === "active")?.id ?? fareSeed[0]?.id ?? "",
+  );
   const maskedRegistrationDisplay = getMaskedRegistrationDisplay(driver);
+  const selectedQueueRow =
+    queueRows.find((row) => row.id === selectedQueueId) ?? queueRows[0] ?? null;
+  const selectedFare =
+    fareSeed.find((row) => row.id === selectedFareId) ??
+    fareSeed.find((row) => row.status === "active") ??
+    fareSeed[0];
 
   useEffect(() => {
     if (view !== "disclosure" || !canReadRegistry) {
@@ -283,6 +357,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
           : row,
       ),
     );
+    setSelectedQueueId(id);
   }
 
   if (!canReadRegistry) {
@@ -500,7 +575,13 @@ export function P5AdminConsole({ view }: { view: P5View }) {
         w: 220,
         r: (row) => (
           <div style={actionRowStyle}>
-            <CanvasBtn theme={theme} size="xs" variant="ghost" icon="eye">
+            <CanvasBtn
+              theme={theme}
+              size="xs"
+              variant="ghost"
+              icon="eye"
+              onClick={() => setSelectedQueueId(row.id)}
+            >
               {t("p5.action.view")}
             </CanvasBtn>
             <CanvasBtn
@@ -547,9 +628,98 @@ export function P5AdminConsole({ view }: { view: P5View }) {
             body={t("p5.scope.reviewOnly")}
           />
         ) : null}
-        <CanvasCard theme={theme} padding={0}>
-          <CanvasTable theme={theme} columns={columns} rows={queueRows} />
-        </CanvasCard>
+        <div style={splitStyle}>
+          <CanvasCard theme={theme} padding={0}>
+            <CanvasTable theme={theme} columns={columns} rows={queueRows} />
+          </CanvasCard>
+          <CanvasCard
+            theme={theme}
+            title={t("p5.queue.detailCard")}
+            subtitle={
+              selectedQueueRow
+                ? `${selectedQueueRow.subject} · ${selectedQueueRow.fleet}`
+                : t("p5.loading")
+            }
+          >
+            {selectedQueueRow ? (
+              <>
+                <CanvasDL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      k: t("p5.queue.detail.subjectType"),
+                      v: t(`p5.queue.subjectType.${selectedQueueRow.subjectType}`),
+                    },
+                    {
+                      k: t("p5.queue.detail.plate"),
+                      v: selectedQueueRow.vehiclePlate,
+                      mono: true,
+                    },
+                    {
+                      k: t("p5.queue.detail.driver"),
+                      v: selectedQueueRow.driverName,
+                    },
+                    {
+                      k: t("p5.queue.detail.status"),
+                      v: (
+                        <CanvasPill
+                          theme={theme}
+                          tone={statusTone(selectedQueueRow.status)}
+                          dot
+                        >
+                          {t(`p5.status.${selectedQueueRow.status}`)}
+                        </CanvasPill>
+                      ),
+                    },
+                  ]}
+                />
+                <div style={{ marginTop: 12 }}>
+                  <strong style={{ display: "block", marginBottom: 8 }}>
+                    {t("p5.queue.detail.missingTitle")}
+                  </strong>
+                  {selectedQueueRow.missing === "—" ? (
+                    <div style={{ color: theme.textMuted, fontSize: 12 }}>—</div>
+                  ) : (
+                    <ul style={queueDetailListStyle}>
+                      {selectedQueueRow.missing
+                        .split(" · ")
+                        .map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                    </ul>
+                  )}
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <CanvasBanner
+                    theme={theme}
+                    tone={statusTone(selectedQueueRow.status)}
+                    icon="info"
+                    body={selectedQueueRow.queueNote}
+                  />
+                </div>
+                <div style={{ ...actionRowStyle, marginTop: 12 }}>
+                  <CanvasBtn
+                    theme={theme}
+                    disabled={!canReviewRegistry}
+                    onClick={() => actOnQueue(selectedQueueRow.id, "return")}
+                  >
+                    {t("p5.action.return")}
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    icon="check"
+                    disabled={!canReviewRegistry}
+                    onClick={() => actOnQueue(selectedQueueRow.id, "approve")}
+                  >
+                    {t("p5.action.approve")}
+                  </CanvasBtn>
+                </div>
+              </>
+            ) : null}
+          </CanvasCard>
+        </div>
       </div>
     );
   }
@@ -581,6 +751,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
           theme={theme}
           size="xs"
           variant={row.status === "filed" ? "primary" : "ghost"}
+          onClick={() => setSelectedFareId(row.id)}
         >
           {row.status === "filed"
             ? t("p5.fares.schedule")
@@ -609,18 +780,30 @@ export function P5AdminConsole({ view }: { view: P5View }) {
         <CanvasCard
           theme={theme}
           title={t("p5.fares.previewCard")}
-          subtitle={`F-2026-03 · ${t("p5.status.active")}`}
+          subtitle={`${selectedFare.id} · ${t(`p5.status.${selectedFare.status}`)}`}
         >
           <CanvasDL
             theme={theme}
             cols={1}
             items={[
-              { k: t("p5.fares.startingFare"), v: "NT$ 85", mono: true },
-              { k: t("p5.fares.distanceFare"), v: "NT$ 5 / 200m", mono: true },
-              { k: t("p5.fares.waitingFare"), v: "NT$ 5 / 80s", mono: true },
+              {
+                k: t("p5.fares.startingFare"),
+                v: selectedFare.preview.startingFare,
+                mono: true,
+              },
+              {
+                k: t("p5.fares.distanceFare"),
+                v: selectedFare.preview.distanceFare,
+                mono: true,
+              },
+              {
+                k: t("p5.fares.waitingFare"),
+                v: selectedFare.preview.waitingFare,
+                mono: true,
+              },
               {
                 k: t("p5.fares.nightSurcharge"),
-                v: "+20% · 23:00–06:00",
+                v: selectedFare.preview.nightSurcharge,
                 mono: true,
               },
             ]}
@@ -630,7 +813,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
               theme={theme}
               tone="info"
               icon="info"
-              body={t("p5.fares.previewNote")}
+              body={selectedFare.preview.note}
             />
           </div>
         </CanvasCard>
