@@ -3363,7 +3363,9 @@ export type OpsDispatchStreamEventType =
   | "order_updated"
   | "dispatch_job_updated"
   | "driver_location_updated"
-  | "supply_lifecycle_updated";
+  | "supply_lifecycle_updated"
+  | "incident_created"
+  | "incident_updated";
 
 export interface OpsDispatchOrderCreatedEventData {
   order: OwnedOrderRecord;
@@ -3392,12 +3394,22 @@ export interface OpsDispatchSupplyLifecycleUpdatedEventData {
   lifecycle: VehicleSupplyLifecycleRecord;
 }
 
+export interface OpsDispatchIncidentCreatedEventData {
+  incident: IncidentRecord;
+}
+
+export interface OpsDispatchIncidentUpdatedEventData {
+  incident: IncidentRecord;
+}
+
 export type OpsDispatchStreamEventData =
   | OpsDispatchOrderCreatedEventData
   | OpsDispatchOrderUpdatedEventData
   | OpsDispatchJobUpdatedEventData
   | OpsDispatchDriverLocationUpdatedEventData
-  | OpsDispatchSupplyLifecycleUpdatedEventData;
+  | OpsDispatchSupplyLifecycleUpdatedEventData
+  | OpsDispatchIncidentCreatedEventData
+  | OpsDispatchIncidentUpdatedEventData;
 
 export interface OpsDispatchStreamEventEnvelope extends DomainEventEnvelope<OpsDispatchStreamEventData> {
   eventType: OpsDispatchStreamEventType;

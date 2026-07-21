@@ -193,4 +193,25 @@ describe("OpsDispatchEventsService", () => {
       }),
     );
   });
+
+  it("publishes incident events", () => {
+    const { service, databaseService } = createService();
+    const incident = {
+      incidentId: "INC-9999",
+      serviceRecoveryActions: [],
+      matchingSuppression: null,
+    } as any;
+
+    service.publishIncidentCreated(incident);
+    expect(databaseService.query).toHaveBeenLastCalledWith(
+      expect.stringContaining("pg_notify"),
+      expect.arrayContaining([expect.stringContaining("INC-9999")]),
+    );
+
+    service.publishIncidentUpdated(incident);
+    expect(databaseService.query).toHaveBeenLastCalledWith(
+      expect.stringContaining("pg_notify"),
+      expect.arrayContaining([expect.stringContaining("INC-9999")]),
+    );
+  });
 });
