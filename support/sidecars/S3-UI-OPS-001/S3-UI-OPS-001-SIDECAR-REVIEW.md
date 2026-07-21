@@ -2,8 +2,8 @@
 
 **Sidecar Kind:** `review_packet`  
 **Parent Task:** `S3-UI-OPS-001`  
-**Sidecar Owner:** `Gemini`  
-**Sidecar Reviewer:** `Codex`  
+**Sidecar Owner:** `Codex`  
+**Sidecar Reviewer:** `Claude`  
 **Generated:** `2026-07-21` (UTC)  
 **Scope:** support-only artifact; no canonical truth or runtime code changes
 
@@ -14,7 +14,7 @@ This packet is a reviewer-support artifact for `S3-UI-OPS-001`. It is limited to
 ### In scope
 - Record the parent task's current machine-truth state and dependency status.
 - Summarize citation-backed evidence from the implemented SOS UI on `origin/gemini/s3-ui-ops-001`.
-- Provide reviewer disposition commands for this sidecar row only.
+- Provide owner closeout notes for this sidecar row only.
 
 ### Out of scope
 - Editing L1/L2 product truth, parent task status, or acceptance semantics.
@@ -24,9 +24,9 @@ This packet is a reviewer-support artifact for `S3-UI-OPS-001`. It is limited to
 ## 2. Machine-Truth Snapshot
 
 ### Sidecar: `S3-UI-OPS-001-SIDECAR-REVIEW`
-- `status`: `review`
-- `owner`: `Gemini`
-- `reviewer`: `Codex`
+- `status`: `review_approved`
+- `owner`: `Codex`
+- `reviewer`: `Claude`
 - `depends_on`: `S3-BE-001`
 - `artifact`: `support/sidecars/S3-UI-OPS-001/S3-UI-OPS-001-SIDECAR-REVIEW.md`
 
@@ -91,23 +91,23 @@ All implementation citations below were spot-checked against `origin/gemini/s3-u
 - Incidents are fetched from `/api/incidents`.
 - The provider subscribes to the ops dispatch EventSource, including `incident_created` and `incident_updated`, and refetches on updates.
 
-## 4. Reviewer Disposition
+## 4. Owner Closeout Notes
 
-Reviewer checklist:
-- Confirm this file remains the only sidecar artifact changed on this review branch.
-- Confirm the packet matches current machine truth, especially the parent's `done` state on `origin/dev`.
+Closeout checklist:
+- Confirm this file remains the only task-owned artifact on the branch.
+- Confirm the packet matches current machine truth, especially sidecar `review_approved` and parent `done` on `origin/dev`.
 - Confirm the evidence summary stays support-only and does not claim canonical changes.
+- Record a task-scoped commit with `LLM-Agent`, `Task-ID`, `Reviewer`, and `Verification` trailers.
+- Push the branch with a normal non-force push before marking the task `done`.
 
-Approve:
-
-```bash
-AI_NAME=Codex ./scripts/ai-status.sh approve S3-UI-OPS-001-SIDECAR-REVIEW \
-  "Review packet reconciled to current machine truth: parent S3-UI-OPS-001 is done on origin/dev@d098afd5dc37c2f2fe4107669f486dfce664d1e1 after prior review_approved state; dependency S3-BE-001 remains satisfied; evidence summary spot-checks persistent SOS overlay, mapped queue/detail fields, audio-disabled visual fallback, workstation health degradation, first-writer-wins UI/backend enforcement, realm-token styling, and live API+SSE wiring; sidecar remains support-only and does not mutate canonical truth."
-```
-
-Reopen:
+Machine-truth closeout target:
 
 ```bash
-AI_NAME=Codex ./scripts/ai-status.sh reopen S3-UI-OPS-001-SIDECAR-REVIEW \
-  "packet needs revision: [describe the inaccurate machine-truth reference or evidence mismatch]"
+AI_NAME=Codex ./scripts/ai-status.sh done S3-UI-OPS-001-SIDECAR-REVIEW \
+  "Support-only review packet reconciled to current machine truth; parent S3-UI-OPS-001 remains done on origin/dev@d098afd5dc37c2f2fe4107669f486dfce664d1e1, dependency S3-BE-001 remains satisfied at origin/dev@7a03bd3aa6dcd2726b1f6bb68e7a2325579a7767, and the evidence summary remains limited to reviewer support for persistent SOS overlay, mapped queue/detail fields, audio-disabled visual fallback, first-writer-wins enforcement, realm-token styling, and live API+SSE wiring." \
+  --commit <COMMIT_HASH> \
+  --commit-subject "<COMMIT_SUBJECT>" \
+  --push-remote origin \
+  --push-branch codex/s3-ui-ops-001-sidecar-review \
+  --integration-status branch_pushed
 ```
