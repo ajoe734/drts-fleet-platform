@@ -2,10 +2,10 @@
 
 - Sidecar Task: `P5-UI-PASSENGER-001-SIDECAR-BFF-HANDOFF`
 - Parent Task: `P5-UI-PASSENGER-001` (P-5 passenger ride surface / 智行叫車)
-- Parent Owner: `Claude` (reassigned by Chairman from Gemini)
-- Parent Reviewer: `Codex`
+- Parent Owner: `Codex`
+- Parent Reviewer: `Copilot`
 - Sidecar Owner: `Gemini`
-- Sidecar Reviewer: `Claude`
+- Sidecar Reviewer: `Codex`
 - Date: 2026-07-21
 - Class: support / sidecar — does not mutate canonical truth
 
@@ -15,7 +15,7 @@
 
 This handoff packet prepares the complete BFF query gap inventory, passenger journey map, UI component topology, and contract guardrails for **`P5-UI-PASSENGER-001`** (`apps/passenger-web`).
 
-The goal of this packet is to allow the parent owner (`Claude`) to build `apps/passenger-web` without re-deriving domain contracts, route boundaries, SSE event mappings, or `@drts/ui-tokens` styling rules.
+The goal of this packet is to allow the parent owner (`Codex`) to build `apps/passenger-web` without re-deriving domain contracts, route boundaries, SSE event mappings, or `@drts/ui-tokens` styling rules.
 
 ### Core Objectives for `P5-UI-PASSENGER-001`
 1. Scaffold `apps/passenger-web` (Next.js / App Router) supporting `/ride/[token]` and `/fares` / `/ride/[token]/fares`.
@@ -27,7 +27,7 @@ The goal of this packet is to allow the parent owner (`Claude`) to build `apps/p
 
 ## 2. Canonical Anchors
 
-- **Contract Truth**: [`packages/contracts/src/phase1-p5-s3-multi-taxi.ts`](file:///home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-p5-ui-passenger-001-sidecar-bff-handoff/packages/contracts/src/phase1-p5-s3-multi-taxi.ts)
+- **Contract Truth**: [`packages/contracts/src/phase1-p5-s3-multi-taxi.ts`](file:///home/edna/workspace/drts-fleet-platform/packages/contracts/src/phase1-p5-s3-multi-taxi.ts)
   - `PassengerDispatchDisclosureSnapshot` (§6)
   - `RouteFareDisclosureSnapshot` (§7)
   - `VehiclePassengerDisclosureProfile` (§3.1)
@@ -35,13 +35,13 @@ The goal of this packet is to allow the parent owner (`Claude`) to build `apps/p
   - `DriverRatingSummary` (§4.2) & `PassengerTripRatingRecord` (§4.1)
   - `PassengerRideAccessToken` & `PassengerRideSseEvent` (§8)
 - **UI Design Canvas**:
-  - [`docs/05-ui/drts-design-canvas/p5-screens.jsx`](file:///home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-p5-ui-passenger-001-sidecar-bff-handoff/docs/05-ui/drts-design-canvas/p5-screens.jsx) (Screen definitions for P5-01..12 + A03/A04)
-  - [`docs/05-ui/drts-design-canvas/p5-ui.jsx`](file:///home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-p5-ui-passenger-001-sidecar-bff-handoff/docs/05-ui/drts-design-canvas/p5-ui.jsx) (UI Kit components, icons, and layout parameters)
+  - [`docs/05-ui/drts-design-canvas/p5-screens.jsx`](file:///home/edna/workspace/drts-fleet-platform/docs/05-ui/drts-design-canvas/p5-screens.jsx) (Screen definitions for P5-01..12 + A03/A04)
+  - [`docs/05-ui/drts-design-canvas/p5-ui.jsx`](file:///home/edna/workspace/drts-fleet-platform/docs/05-ui/drts-design-canvas/p5-ui.jsx) (UI Kit components, icons, and layout parameters)
 - **Design Tokens**:
-  - [`packages/ui-tokens/src/realms.ts`](file:///home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-p5-ui-passenger-001-sidecar-bff-handoff/packages/ui-tokens/src/realms.ts) (`REALM_COLORS` for driver/tenant/ops badges)
-  - [`packages/ui-tokens/src/brands.ts`](file:///home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-p5-ui-passenger-001-sidecar-bff-handoff/packages/ui-tokens/src/brands.ts) (Brand color ramps)
+  - [`packages/ui-tokens/src/realms.ts`](file:///home/edna/workspace/drts-fleet-platform/packages/ui-tokens/src/realms.ts) (`REALM_COLORS` for driver/tenant/ops badges)
+  - [`packages/ui-tokens/src/brands.ts`](file:///home/edna/workspace/drts-fleet-platform/packages/ui-tokens/src/brands.ts) (Brand color ramps)
 - **Architecture Specification**:
-  - [`docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/00_source_specs_index.md`](file:///home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-p5-ui-passenger-001-sidecar-bff-handoff/docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/00_source_specs_index.md)
+  - [`docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/00_source_specs_index.md`](file:///home/edna/workspace/drts-fleet-platform/docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/00_source_specs_index.md)
   - `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/03_gap_closure_implementation_plan.md`
 
 ---
@@ -157,47 +157,60 @@ Below is the complete 15-screen mapping corresponding to `docs/05-ui/drts-design
 
 ## 7. Design System & Token Integration
 
-`apps/passenger-web` MUST consume styling tokens from `@drts/ui-tokens` and match `p5-ui.jsx`:
+`apps/passenger-web` MUST consume styling tokens from `@drts/ui-tokens` and match `p5-ui.jsx` layouts dynamically. **Do NOT hardcode raw hex values in CSS or components.**
 
-### Color Tokens
+### Token Resolution Strategy
+The passenger application supports dynamic white-labeling across different partner brands/tenants. The UI must resolve the active brand theme from `@drts/ui-tokens` using the brand/tenant identifier from the dispatch token or hostname context (e.g. via `getPartnerBrandTemplateBySlug(slug)` or `BRAND_TEMPLATES[code]`).
 
-```ts
-export const P5_TOKENS = {
-  bg: '#F3F5F8',
-  surface: '#FFFFFF',
-  ink: '#16212C',
-  mut: '#5A6A7B',
-  dim: '#93A0AE',
-  line: '#E3E8EE',
-  lineSoft: '#EDF1F5',
+### UI Design Token Mapping Table
 
-  // Primary Brand Colors (Navy Theme for Passenger Realm)
-  brand: '#0B5CAB',
-  brandDark: '#07437E',
-  brandBg: '#EAF2FB',
+Below is the required mapping from the design canvas elements to `@drts/ui-tokens` semantic variables:
 
-  // Status Colors
-  ok: '#1B7F4D',
-  okBg: '#E9F5EF',
-  okBd: '#BFE3D0',
-  warn: '#A86407',
-  warnBg: '#FBF2DF',
-  warnBd: '#EAD3A4',
-  danger: '#C03A2E',
-  dangerBg: '#FBECEA',
-  dangerBd: '#EFC8C2',
+| Design Canvas Property | Mapping to `@drts/ui-tokens` | Example (CTBC Brand, Light Mode) |
+| :--- | :--- | :--- |
+| **Shell Background** (`P5.bg`) | `brandTheme.theme.pageBackground` | `#F4F7FC` |
+| **Card Surface** (`P5.surface`) | `brandTheme.theme.panel` | `#FFFFFF` |
+| **Primary Text/Ink** (`P5.ink`) | `brandTheme.tokens[mode].ink` or `theme.pageForeground` | `#14202C` |
+| **Muted Text** (`P5.mut`) | `brandTheme.tokens[mode].text.muted` or `theme.pageMuted` | `#5C6778` |
+| **Divider Line** (`P5.line`) | `brandTheme.theme.panelBorder` | `rgba(20, 32, 44, 0.12)` |
+| **Soft Line** (`P5.lineSoft`) | Derived soft border or `brandTheme.theme.panelBorder` | `rgba(20, 32, 44, 0.12)` |
+| **Primary Brand Accent** (`P5.brand`) | `brandTheme.primary` | `#13478F` |
+| **Dark Brand Accent** (`P5.brandDark`) | `brandTheme.primaryDark` | `#0B2D5C` |
+| **Brand Soft Bg** (`P5.brandBg`) | `brandTheme.surface.bg` or `theme.accentSoft` | `#EBF2FB` |
 
-  mono: '"JetBrains Mono", ui-monospace, monospace',
-};
-```
+### Status Colors (Global Light Mode)
+Status indicators (e.g. validation alerts, eta, seatbelt notice) must map to the global status tones defined in `packages/ui-tokens/src/colors.ts`:
+
+| Semantic State | Tone Type | `@drts/ui-tokens` Mapping | Color Value |
+| :--- | :--- | :--- | :--- |
+| **Ok / Success** | FG | `STATUS_TONES.success.light.fg` | `#0F7B5A` |
+| | BG | `STATUS_TONES.success.light.bg` | `#E5F4ED` |
+| | Border | `STATUS_TONES.success.light.border` | `#A7D7C2` |
+| **Warning / Alert** | FG | `STATUS_TONES.warning.light.fg` | `#A8590B` |
+| | BG | `STATUS_TONES.warning.light.bg` | `#FCEED6` |
+| | Border | `STATUS_TONES.warning.light.border` | `#F0CC95` |
+| **Danger / Error** | FG | `STATUS_TONES.danger.light.fg` | `#B42318` |
+| | BG | `STATUS_TONES.danger.light.bg` | `#FEE4E2` |
+| | Border | `STATUS_TONES.danger.light.border` | `#F8B3AC` |
+
+### Actor Realm Color Badges
+Actor-specific chips or verification status badges (e.g. driver status, regulatory chips) must consume the global `REALM_COLORS` defined in `packages/ui-tokens/src/realms.ts`:
+
+- **Driver Badge** (`"執登有效"`): Uses `REALM_COLORS.driver.light`
+  - FG: `REALM_COLORS.driver.light.fg` (`#A8590B`)
+  - BG: `REALM_COLORS.driver.light.bg` (`#FCEED6`)
+  - Border: `REALM_COLORS.driver.light.border` (`#F0CC95`)
+- **System / Platform Badge**: Uses `REALM_COLORS.system.light` or `REALM_COLORS.platform.light` respectively.
 
 ### Layout Specs & Responsive Container
 - Mobile-first web shell viewport: `390px` width (max-width `440px` centered on desktop screens).
 - Outer phone container border radius: `38px` with top bar (status time `14:29`, URL `ride.zhixing.tw/r/••••K2`, signal `5G`).
+- Typography Font: `"Inter", "Noto Sans TC", system-ui, sans-serif`
+- Monospace Data Font: `"JetBrains Mono", ui-monospace, monospace`
 
 ---
 
-## 8. Carry-Forward Checklist for Parent Owner (`Claude`)
+## 8. Carry-Forward Checklist for Parent Owner (`Codex`)
 
 When implementing task `P5-UI-PASSENGER-001`, complete the following steps:
 
@@ -228,4 +241,4 @@ When implementing task `P5-UI-PASSENGER-001`, complete the following steps:
 - [x] Comprehensive BFF query gap inventory & SSE events enumerated
 - [x] Complete 15-screen operator journey mapped with design canvas anchors
 - [x] Statutory disclosure rules and forbidden vocabulary documented
-- [x] Packet handed off to reviewer `Claude` via `scripts/ai-status.sh handoff`
+- [x] Packet handed off to reviewer `Codex` via `scripts/ai-status.sh handoff`
