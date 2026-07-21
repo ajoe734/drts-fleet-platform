@@ -116,13 +116,6 @@ const queueSeed: CorrectionQueueRow[] = [
 
 const fareSeed: FareVersionRow[] = [
   {
-    id: "F-2026-05",
-    name: "夜間費率研議",
-    status: "draft",
-    effectiveFrom: "—",
-    filingRef: "—",
-  },
-  {
     id: "F-2026-04",
     name: "2026 Q4 調整版",
     status: "filed",
@@ -135,6 +128,13 @@ const fareSeed: FareVersionRow[] = [
     status: "active",
     effectiveFrom: "2026-07-01",
     filingRef: "北市交運字第1130042號",
+  },
+  {
+    id: "F-2026-05",
+    name: "夜間費率研議",
+    status: "draft",
+    effectiveFrom: "—",
+    filingRef: "—",
   },
   {
     id: "F-2025-11",
@@ -176,6 +176,13 @@ const fallbackDriver: DriverPublicRegistrationCredential = {
   updatedAt: "2026-07-18T09:20:00.000Z",
 };
 
+function getMaskedRegistrationDisplay(
+  credential: DriverPublicRegistrationCredential,
+) {
+  const masked = credential.maskedDisplay.trim();
+  return masked.length > 0 ? masked : "—";
+}
+
 function statusTone(
   status: CorrectionQueueRow["status"] | FareVersionRow["status"],
 ): CanvasTone {
@@ -214,6 +221,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     useState<DriverPublicRegistrationCredential>(fallbackDriver);
   const [loading, setLoading] = useState(view === "disclosure");
   const [queueRows, setQueueRows] = useState(queueSeed);
+  const maskedRegistrationDisplay = getMaskedRegistrationDisplay(driver);
 
   useEffect(() => {
     if (view !== "disclosure" || !canReadRegistry) {
@@ -238,8 +246,8 @@ export function P5AdminConsole({ view }: { view: P5View }) {
         setVehicle(vehicleProfile);
         setDriver({
           ...driverCredential,
-          registrationNo:
-            driverCredential.maskedDisplay ?? driverCredential.registrationNo,
+          registrationNo: null,
+          maskedDisplay: getMaskedRegistrationDisplay(driverCredential),
         });
       } catch {
         if (!active) {
@@ -377,7 +385,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                   items={[
                     {
                       k: t("p5.field.registrationMasked"),
-                      v: driver.maskedDisplay,
+                      v: maskedRegistrationDisplay,
                       mono: true,
                     },
                     { k: t("p5.field.registrationArea"), v: driver.registrationArea ?? "—" },
@@ -427,7 +435,10 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                 </CanvasPill>
               </div>
               <div style={{ ...monoStyle, color: theme.textMuted, fontSize: 11 }}>
-                {driver.maskedDisplay} · {t("p5.disclosure.validUntil", { date: driver.effectiveUntil ?? "—" })}
+                {maskedRegistrationDisplay} ·{" "}
+                {t("p5.disclosure.validUntil", {
+                  date: driver.effectiveUntil ?? "—",
+                })}
               </div>
               <CanvasBanner
                 theme={theme}
@@ -497,7 +508,8 @@ export function P5AdminConsole({ view }: { view: P5View }) {
           subtitle={t("p5.queue.subtitle")}
           meta={
             <CanvasPill theme={theme} tone="warn">
-              {queueRows.filter((row) => row.status === "pending").length} {t("p5.queue.pending")}
+              {queueRows.filter((row) => row.status !== "approved").length}{" "}
+              {t("p5.queue.pending")}
             </CanvasPill>
           }
         />
@@ -560,7 +572,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
         <CanvasCard
           theme={theme}
           title={t("p5.fares.previewCard")}
-          subtitle="F-2026-03 · active"
+          subtitle={`F-2026-03 · ${t("p5.status.active")}`}
         >
           <CanvasDL
             theme={theme}
