@@ -3,7 +3,7 @@
 **Sidecar Kind:** `acceptance_packet`
 **Parent Task:** `S3-UI-OPS-001` - S-3 ops SOS UI
 **Parent Owner / Reviewer:** `Copilot` / `Gemini`
-**Sidecar Owner / Reviewer:** `Codex` / `Claude`
+**Sidecar Owner / Reviewer:** `Codex` / `Gemini`
 **Generated:** `2026-07-21` (UTC)
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT`
 
