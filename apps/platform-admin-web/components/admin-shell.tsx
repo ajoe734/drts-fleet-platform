@@ -206,6 +206,24 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.sandboxRegulatoryReports",
   },
   {
+    key: "p5-disclosure",
+    icon: ShieldCheck,
+    section: "fleet",
+    labelKey: "adminShell.route.p5Disclosure",
+  },
+  {
+    key: "p5-corrections",
+    icon: ClipboardList,
+    section: "fleet",
+    labelKey: "adminShell.route.p5Corrections",
+  },
+  {
+    key: "p5-fares",
+    icon: DollarSign,
+    section: "commerce",
+    labelKey: "adminShell.route.p5Fares",
+  },
+  {
     key: "switchboard",
     icon: Radio,
     section: "commerce",
