@@ -19,7 +19,7 @@ The goal of this packet is to allow the parent owner (`Codex`) to build `apps/pa
 
 ### Core Objectives for `P5-UI-PASSENGER-001`
 1. Scaffold `apps/passenger-web` (Next.js / App Router) supporting `/ride/[token]` and `/fares` / `/ride/[token]/fares`.
-2. Implement all 15 passenger surfaces defined in `docs/05-ui/drts-design-canvas/p5-screens.jsx` (`P5-01` through `P5-12` plus `P5-A03` and `P5-A04`).
+2. Implement all 14 passenger surfaces defined in `docs/05-ui/drts-design-canvas/p5-screens.jsx` (`P5-01` through `P5-12` plus `P5-A03` and `P5-A04`).
 3. Wire API client and SSE stream hooks (`/api/passenger-rides/{token}/disclosure`, `/api/passenger-rides/{token}/events`) with fixture fallback support (`[FIXTURE]` markers).
 4. Strictly adhere to statutory disclosure rules, forbidden vocabulary constraints, and realm color tokens (`@drts/ui-tokens`).
 
@@ -106,7 +106,7 @@ The passenger frontend interacts with the API through token-scoped endpoints. Ac
 
 1. **Fixture vs. Live Mocking Strategy**:
    - *Gap*: The backend modules under `apps/api/src/modules/` are being implemented in parallel waves.
-   - *Mitigation*: Scaffold `apps/passenger-web/lib/fixtures/` containing predefined JSON mock responses matching all 15 screens. Add a header/URL flag (`?fixture=true`) or environment setting (`NEXT_PUBLIC_USE_FIXTURES=true`) so frontend developer testing can run cleanly offline, while seamlessly switching to `/api/passenger-rides/{token}/*` when live backend routes are present.
+   - *Mitigation*: Scaffold `apps/passenger-web/lib/fixtures/` containing predefined JSON mock responses matching all 14 screens. Add a header/URL flag (`?fixture=true`) or environment setting (`NEXT_PUBLIC_USE_FIXTURES=true`) so frontend developer testing can run cleanly offline, while seamlessly switching to `/api/passenger-rides/{token}/*` when live backend routes are present.
 2. **SSE Connection Loss & Polling Fallback**:
    - *Gap*: SSE streams can drop or encounter network degradation during active rides.
    - *Mitigation*: Implement automatic reconnection with exponential backoff. If SSE remains disconnected for > 15s, set `locationFreshness: "stale"` and display banner `"司機位置更新稍有延遲"`.
@@ -118,7 +118,7 @@ The passenger frontend interacts with the API through token-scoped endpoints. Ac
 
 ## 6. Screen-by-Screen Operator & Passenger Journey Map
 
-Below is the complete 15-screen mapping corresponding to `docs/05-ui/drts-design-canvas/p5-screens.jsx`:
+Below is the complete 14-screen mapping corresponding to `docs/05-ui/drts-design-canvas/p5-screens.jsx`:
 
 ```
  [ P5-01: Awaiting Assignment ] ────► [ P5-02 / P5-03: Driver En Route ] ────► [ P5-06: Driver Arrived ]
@@ -239,6 +239,6 @@ When implementing task `P5-UI-PASSENGER-001`, complete the following steps:
 - [x] Handoff packet created at `support/sidecars/P5-UI-PASSENGER-001/P5-UI-PASSENGER-001-SIDECAR-BFF-HANDOFF.md`
 - [x] No canonical truth files modified by this sidecar slice
 - [x] Comprehensive BFF query gap inventory & SSE events enumerated
-- [x] Complete 15-screen operator journey mapped with design canvas anchors
+- [x] Complete 14-screen operator journey mapped with design canvas anchors
 - [x] Statutory disclosure rules and forbidden vocabulary documented
 - [x] Packet handed off to reviewer `Codex` via `scripts/ai-status.sh handoff`
