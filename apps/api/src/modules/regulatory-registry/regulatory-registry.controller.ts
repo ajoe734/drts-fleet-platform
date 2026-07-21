@@ -25,6 +25,7 @@ import type {
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
+  PassengerServiceRuntimeProfile,
 } from "@drts/contracts";
 
 import {
@@ -60,6 +61,41 @@ export class RegulatoryRegistryController {
     };
 
     return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("passenger-runtime-profiles/:code")
+  getPassengerRuntimeProfile(
+    @Param("code") code: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (code !== "multi_taxi_direct") {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "RUNTIME_PROFILE_NOT_FOUND",
+        `Passenger service runtime profile '${code}' not found.`,
+      );
+    }
+
+    const profile: PassengerServiceRuntimeProfile = {
+      code: "multi_taxi_direct",
+      displayName: "Multi-Taxi Direct",
+      orderDomains: ["owned"],
+      allowedServiceProducts: ["taxi_reservation"],
+      reservationOnly: true,
+      passengerSurface: "direct_ride",
+      driverSurface: "multi_taxi_driver",
+      opsSurface: "multi_taxi_ops",
+      forbiddenCapabilities: [
+        "forwarded_order_ui",
+        "external_platform_badge",
+        "sandbox_disclosure",
+        "av_fulfillment",
+        "safety_operator",
+        "remote_takeover",
+      ],
+    };
+
+    return toApiSuccessEnvelope(profile, requestId);
   }
 
   @Get("vehicles")
@@ -327,6 +363,42 @@ export class RegulatoryRegistryController {
       this.regulatoryRegistryService.rejectExclusivity(vehicleId, command),
       requestId,
     );
+  }
+
+  @Get("vehicles/:vehicleId/disclosure-profile")
+  getVehiclePassengerDisclosureProfile(
+    @Param("vehicleId") vehicleId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const profile = this.regulatoryRegistryService.getVehiclePassengerDisclosureProfile(vehicleId);
+    if (!profile) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DISCLOSURE_PROFILE_NOT_FOUND",
+        `Vehicle passenger disclosure profile for '${vehicleId}' not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(profile, requestId);
+  }
+
+  @Get("drivers/:driverId/registration-credential")
+  getDriverPublicRegistrationCredential(
+    @Param("driverId") driverId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const credential = this.regulatoryRegistryService.getDriverPublicRegistrationCredential(driverId);
+    if (!credential) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CREDENTIAL_NOT_FOUND",
+        `Driver public registration credential for '${driverId}' not found.`,
+      );
+    }
+    const projected = {
+      ...credential,
+      registrationNo: credential.maskedDisplay,
+    };
+    return toApiSuccessEnvelope(projected, requestId);
   }
 
   private parseFiniteQueryNumber(

@@ -104,11 +104,13 @@ export class OwnedMobilityController {
     @Body() command: CreateOwnedOrderCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
+    @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
   ) {
     const order = this.ownedMobilityService.createPassengerOrder(
       command,
       identity,
       requestId,
+      runtimeProfileCode,
     );
     return toApiSuccessEnvelope(
       {
@@ -165,10 +167,12 @@ export class OwnedMobilityController {
   createCallCenterOrder(
     @Body() command: CreateCallCenterOrderCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
   ) {
     const order = this.ownedMobilityService.createCallCenterOrder(
       command,
       requestId,
+      runtimeProfileCode,
     );
     return toApiSuccessEnvelope(
       {
@@ -188,12 +192,14 @@ export class OwnedMobilityController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
   ) {
     const result = await this.ownedMobilityService.createTenantBooking(
       command,
       this.requireTenantId(tenantId),
       identity,
       requestId,
+      runtimeProfileCode,
     );
     return toApiSuccessEnvelope(result, requestId);
   }

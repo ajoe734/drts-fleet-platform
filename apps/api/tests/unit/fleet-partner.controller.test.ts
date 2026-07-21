@@ -303,7 +303,7 @@ describe("FleetPartnerController portal routes", () => {
   });
 
   it("supports the fleet-partner write flow through approval and readiness", async () => {
-    const { controller } = createFixture();
+    const { controller, regulatoryRegistryService } = createFixture();
 
     const driverCreated = await controller.createDriverSupplySubmission(
       "fleet-demo-001",
@@ -516,6 +516,8 @@ describe("FleetPartnerController portal routes", () => {
         airportTransferEligible: false,
         fixedFareAllowed: false,
         currentDriverSubmissionId: driverSubmissionId,
+        doorCount: 4,
+        color: "yellow",
       },
       "req-supply-create-vehicle",
     );
@@ -539,6 +541,8 @@ describe("FleetPartnerController portal routes", () => {
         airportTransferEligible: false,
         fixedFareAllowed: false,
         currentDriverSubmissionId: driverSubmissionId,
+        doorCount: 4,
+        color: "yellow",
       },
       "req-supply-update-vehicle",
     );
@@ -632,6 +636,36 @@ describe("FleetPartnerController portal routes", () => {
     });
 
     const canonicalVehicleId = approvedVehicle.data.canonicalVehicleId!;
+    expect(
+      regulatoryRegistryService.getVehiclePassengerDisclosureProfile(
+        canonicalVehicleId,
+      ),
+    ).toMatchObject({
+      vehicleId: canonicalVehicleId,
+      make: "Toyota",
+      model: "Sienta Hybrid",
+      modelYear: 2024,
+      doorCount: 4,
+      color: "yellow",
+      status: "complete",
+      verifiedByActorId: "platform-reviewer-011",
+      sourceSubmissionId: vehicleSubmissionId,
+    });
+    expect(
+      regulatoryRegistryService.getDriverPublicRegistrationCredential(
+        canonicalDriverId,
+      ),
+    ).toMatchObject({
+      driverId: canonicalDriverId,
+      registrationNo: "TX-9988",
+      registrationArea: "TPE",
+      effectiveUntil: "2027-12-31",
+      status: "unverified",
+      maskedDisplay: "TX***88",
+      verifiedByActorId: null,
+      verifiedAt: null,
+      sourceSubmissionId: driverSubmissionId,
+    });
     const driverReadiness = await controller.getPortalDriverReadiness(
       "fleet-demo-001",
       canonicalDriverId,

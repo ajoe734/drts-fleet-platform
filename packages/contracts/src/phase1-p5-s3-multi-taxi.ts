@@ -91,10 +91,10 @@ export type TaxiDriverRegistrationStatus =
 
 export interface DriverPublicRegistrationCredential {
   driverId: string;
-  registrationNo: string;
-  registrationArea: string;
+  registrationNo: string | null;
+  registrationArea: string | null;
   effectiveFrom: string | null;
-  effectiveUntil: string;
+  effectiveUntil: string | null;
   status: TaxiDriverRegistrationStatus;
   maskedDisplay: string;
 
@@ -222,6 +222,10 @@ export interface PassengerDispatchDisclosureSnapshot {
     driverId: string;
     displayName: string | null;
     registrationMaskedDisplay: string;
+    // Pinned to the literal per source spec §6: a disclosure snapshot is only
+    // created inside the assignment transaction, which the §5 hard gate lets
+    // through only for a verified_active credential. Widening this would let a
+    // snapshot record an expired/unverified driver and break DoD #3.
     registrationStatus: "verified_active";
     registrationEffectiveUntil: string;
     credentialVersion: number;

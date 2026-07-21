@@ -34,6 +34,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       "tenant-e2e-001",
       null,
       "req-e2e-create",
+      undefined,
     );
   });
 

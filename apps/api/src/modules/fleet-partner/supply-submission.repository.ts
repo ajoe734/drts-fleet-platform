@@ -64,6 +64,8 @@ type VehicleSupplyDraftRow = {
   airport_transfer_eligible: boolean;
   fixed_fare_allowed: boolean;
   current_driver_submission_id: string | null;
+  door_count: number | string | null;
+  color: string | null;
 };
 
 type SupplyDocumentRow = {
@@ -893,9 +895,11 @@ export class SupplySubmissionRepository {
             airport_transfer_eligible,
             fixed_fare_allowed,
             current_driver_submission_id,
+            door_count,
+            color,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, now()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14, $15, now()
           )
           ON CONFLICT (submission_id) DO UPDATE SET
             plate_no = EXCLUDED.plate_no,
@@ -910,6 +914,8 @@ export class SupplySubmissionRepository {
             airport_transfer_eligible = EXCLUDED.airport_transfer_eligible,
             fixed_fare_allowed = EXCLUDED.fixed_fare_allowed,
             current_driver_submission_id = EXCLUDED.current_driver_submission_id,
+            door_count = EXCLUDED.door_count,
+            color = EXCLUDED.color,
             updated_at = now()
         `,
         [
@@ -926,6 +932,8 @@ export class SupplySubmissionRepository {
           draft.airportTransferEligible,
           draft.fixedFareAllowed,
           draft.currentDriverSubmissionId,
+          draft.doorCount,
+          draft.color,
         ],
       );
     }
@@ -1149,6 +1157,8 @@ export class SupplySubmissionRepository {
       airportTransferEligible: row.airport_transfer_eligible,
       fixedFareAllowed: row.fixed_fare_allowed,
       currentDriverSubmissionId: row.current_driver_submission_id,
+      doorCount: row.door_count === null || row.door_count === undefined ? null : Number(row.door_count),
+      color: row.color,
     };
   }
 
