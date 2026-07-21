@@ -9,6 +9,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -26,6 +27,7 @@ interface AuditLogRow {
 }
 
 export default function SosRecordsPage() {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<AuditLogRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -80,9 +82,9 @@ export default function SosRecordsPage() {
         theme={theme}
         title={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span>營運紀錄</span>
+            <span>{t("sos.records.title")}</span>
             <Pill theme={theme} tone="accent">
-              稽核追蹤
+              {t("sos.records.badge")}
             </Pill>
           </div>
         }

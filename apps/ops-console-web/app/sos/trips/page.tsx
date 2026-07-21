@@ -9,6 +9,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -27,6 +28,7 @@ interface TripRow {
 }
 
 export default function SosTripsPage() {
+  const { t } = useTranslation();
   const [trips, setTrips] = useState<TripRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -85,9 +87,9 @@ export default function SosTripsPage() {
         theme={theme}
         title={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span>行程</span>
+            <span>{t("sos.trips.title")}</span>
             <Pill theme={theme} tone="accent">
-              行程管理
+              {t("sos.trips.badge")}
             </Pill>
           </div>
         }

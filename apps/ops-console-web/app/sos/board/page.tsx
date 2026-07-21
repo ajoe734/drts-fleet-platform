@@ -9,6 +9,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -28,6 +29,7 @@ interface DispatchJobRow {
 }
 
 export default function SosBoardPage() {
+  const { t } = useTranslation();
   const [jobs, setJobs] = useState<DispatchJobRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -103,9 +105,9 @@ export default function SosBoardPage() {
         theme={theme}
         title={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span>派車看板</span>
+            <span>{t("sos.board.title")}</span>
             <Pill theme={theme} tone="accent">
-              多元計程車專用
+              {t("sos.board.badge")}
             </Pill>
           </div>
         }

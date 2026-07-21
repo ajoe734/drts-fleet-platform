@@ -27,6 +27,7 @@ import {
   getOpsClient,
 } from "@/lib/api-client";
 import {
+import { useTranslation } from "@/lib/i18n";
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
@@ -86,6 +87,7 @@ function ActorChip({ realm }: { realm: TimelineView["actorRealm"] }) {
 }
 
 export default function SosDetailPage() {
+  const { t } = useTranslation();
   const { incidentId } = useParams() as { incidentId: string };
   const router = useRouter();
   const [incident, setIncident] = useState<IncidentRecord | null>(null);
@@ -280,7 +282,7 @@ export default function SosDetailPage() {
           padding: 24,
         }}
       >
-        正在載入 SOS 詳情...
+        {t("sos.detail.loading")}
       </div>
     );
   }
@@ -292,12 +294,12 @@ export default function SosDetailPage() {
           theme={theme}
           tone="danger"
           icon="warn"
-          title="載入錯誤"
+          title={t("sos.detail.loadErrorTitle")}
           body={errorMsg || "找不到該 SOS 事件。"}
         />
         <div style={{ marginTop: 14 }}>
           <Btn theme={theme} onClick={() => router.push("/sos")}>
-            返回 SOS 佇列
+            {t("sos.detail.backToQueue")}
           </Btn>
         </div>
       </div>
@@ -311,18 +313,18 @@ export default function SosDetailPage() {
           theme={theme}
           tone="warn"
           icon="warn"
-          title="非 SOS 事件"
+          title={t("sos.detail.notSosTitle")}
           body="此案件不屬於 SOS 值班佇列，請返回事故中心或 SOS 佇列。"
         />
         <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
           <Btn theme={theme} onClick={() => router.push("/sos")}>
-            返回 SOS 佇列
+            {t("sos.detail.backToQueue")}
           </Btn>
           <Btn
             theme={theme}
             onClick={() => router.push(`/incidents/${incident.incidentId}`)}
           >
-            開啟事故中心案件
+            {t("sos.detail.openIncident")}
           </Btn>
         </div>
       </div>
@@ -382,7 +384,7 @@ export default function SosDetailPage() {
             </Pill>
             {incident.assignedTo ? (
               <Pill theme={theme} tone="success">
-                已由 {formatSosActorLabel(incident.assignedTo)} 確認
+                {t("sos.detail.ackBy", { actor: formatSosActorLabel(incident.assignedTo) })}
               </Pill>
             ) : null}
           </div>
@@ -395,11 +397,11 @@ export default function SosDetailPage() {
               icon="arrow-left"
               onClick={() => router.push("/sos")}
             >
-              返回佇列
+              {t("sos.detail.backToQueueShort")}
             </Btn>
             {!isAcked && !isClosed ? (
               <Btn theme={theme} variant="primary" onClick={handleAcknowledge}>
-                確認接手
+                {t("sos.action.acknowledge")}
               </Btn>
             ) : null}
             {isAcked && !isInvestigating && !isClosed ? (
@@ -408,19 +410,19 @@ export default function SosDetailPage() {
                 variant="primary"
                 onClick={handleStartInvestigation}
               >
-                開始調查
+                {t("sos.action.investigate")}
               </Btn>
             ) : null}
             {isInvestigating ? (
               <Btn theme={theme} variant="primary" onClick={handleClose}>
-                結案
+                {t("sos.action.close")}
               </Btn>
             ) : null}
             <Btn
               theme={theme}
               onClick={() => router.push(`/incidents/${incidentId}`)}
             >
-              開啟事故中心案件
+              {t("sos.detail.openIncident")}
             </Btn>
           </div>
         }
@@ -453,7 +455,7 @@ export default function SosDetailPage() {
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <Card theme={theme} padding={0} title="地圖 · 通報當下位置">
+            <Card theme={theme} padding={0} title={t("sos.detail.mapTitle")}>
               <div
                 style={{
                   height: 210,
@@ -518,7 +520,7 @@ export default function SosDetailPage() {
 
             <Card
               theme={theme}
-              title="時間軸"
+              title={t("sos.detail.timelineTitle")}
               subtitle="SSE 驅動更新；事件、處理權與狀態變更全部保留在同一路徑"
             >
               <ol
@@ -647,7 +649,7 @@ export default function SosDetailPage() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <Card theme={theme} title="摘要">
+            <Card theme={theme} title={t("sos.detail.summaryTitle")}>
               <DL
                 theme={theme}
                 cols={1}
@@ -662,7 +664,7 @@ export default function SosDetailPage() {
               />
             </Card>
 
-            <Card theme={theme} title="上下文">
+            <Card theme={theme} title={t("sos.detail.contextTitle")}>
               <DL
                 theme={theme}
                 cols={1}
@@ -677,7 +679,7 @@ export default function SosDetailPage() {
               />
             </Card>
 
-            <Card theme={theme} title="補充資訊">
+            <Card theme={theme} title={t("sos.detail.supplementTitle")}>
               {supplementText ? (
                 <div
                   style={{
@@ -690,21 +692,18 @@ export default function SosDetailPage() {
                 </div>
               ) : (
                 <div style={{ color: theme.textMuted, lineHeight: 1.6 }}>
-                  駕駛尚未補充文字說明；值班端仍可依現有 incident context
-                  先行處置。
+                  {t("sos.detail.noSupplement")}
                 </div>
               )}
             </Card>
 
-            <Card theme={theme} title="附件">
+            <Card theme={theme} title={t("sos.detail.attachmentsTitle")}>
               <div style={{ color: theme.textMuted, lineHeight: 1.6 }}>
-                目前尚未收到照片或語音附件 read
-                model。若後端後續補上附件路徑，這個區塊可直接改成 live
-                attachment list。
+                {t("sos.detail.noAttachments")}
               </div>
             </Card>
 
-            <Card theme={theme} title="關聯案件">
+            <Card theme={theme} title={t("sos.detail.linkedIncidentTitle")}>
               <DL
                 theme={theme}
                 cols={1}

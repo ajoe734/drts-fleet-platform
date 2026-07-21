@@ -27,6 +27,7 @@ import {
   getOpsClient,
 } from "@/lib/api-client";
 import {
+import { useTranslation } from "@/lib/i18n";
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
@@ -94,6 +95,7 @@ async function playAlertBeep(): Promise<boolean> {
 }
 
 export default function SosQueuePage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
@@ -316,16 +318,16 @@ export default function SosQueuePage() {
           theme={theme}
           title={
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span>SOS 緊急事件</span>
+              <span>{t("sos.queue.title")}</span>
               <Pill theme={theme} tone="danger" dot>
-                {pendingCount} 件待確認
+                {t("sos.queue.pendingCount", { count: pendingCount })}
               </Pill>
             </div>
           }
           subtitle="線上通報 p95 ≤ 5 秒送達值班端 · 重大事件以持續警示顯示 · 先確認者取得處理權"
           actions={
             <Btn theme={theme} icon="filter">
-              篩選
+              {t("sos.queue.filter")}
             </Btn>
           }
         />
@@ -363,7 +365,7 @@ export default function SosQueuePage() {
               theme={theme}
               tone="danger"
               icon="warn"
-              title="系統錯誤"
+              title={t("sos.queue.systemErrorTitle")}
               body={loadError}
             />
           ) : null}
@@ -508,7 +510,7 @@ export default function SosQueuePage() {
           >
             <span style={{ fontSize: 16 }}>⚠️</span>
             <span style={{ fontSize: 14.5, fontWeight: 800, flex: 1 }}>
-              SOS 緊急通報 · 重大事件待確認
+              {t("sos.alert.banner")}
             </span>
             <span
               style={{
@@ -517,7 +519,7 @@ export default function SosQueuePage() {
                 fontWeight: 700,
               }}
             >
-              已等待 {pendingAlert.waitLabel}
+              {t("sos.alert.waited")} {pendingAlert.waitLabel}
             </span>
           </div>
 
@@ -589,17 +591,17 @@ export default function SosQueuePage() {
                 icon="check"
                 onClick={() => void handleAcknowledge(pendingAlert.id)}
               >
-                確認接手
+                {t("sos.action.acknowledge")}
               </Btn>
               <Btn
                 theme={theme}
                 onClick={() => router.push(`/sos/${pendingAlert.id}`)}
               >
-                開啟詳情
+                {t("sos.action.openDetail")}
               </Btn>
               <span style={{ flex: 1 }} />
               <span style={{ fontSize: 10.5, color: theme.textDim }}>
-                此警示不會自動消失，直到重大事件被值班人員確認。
+                {t("sos.alert.persistentNote")}
               </span>
             </div>
           </div>
