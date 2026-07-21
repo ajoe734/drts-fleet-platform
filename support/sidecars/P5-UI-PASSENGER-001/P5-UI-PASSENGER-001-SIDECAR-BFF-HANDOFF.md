@@ -3,7 +3,7 @@
 - Sidecar Task: `P5-UI-PASSENGER-001-SIDECAR-BFF-HANDOFF`
 - Parent Task: `P5-UI-PASSENGER-001` (P-5 passenger ride surface / 智行叫車)
 - Parent Owner: `Codex`
-- Parent Reviewer: `Copilot`
+- Parent Reviewer: `Gemini`
 - Sidecar Owner: `Gemini`
 - Sidecar Reviewer: `Codex`
 - Date: 2026-07-21
