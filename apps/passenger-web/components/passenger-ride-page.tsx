@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   getPassengerFixtureSourceLabel,
   getPassengerSourceCallout,
@@ -15,6 +15,10 @@ import {
 function readQueryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
+
+const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
+const shellInset = 14;
+const starTone = passengerChrome.driverRealm.fg;
 
 function Shell({
   token,
@@ -78,8 +82,6 @@ function Shell({
   );
 }
 
-const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
-
 function TopChrome({
   token,
   status,
@@ -116,18 +118,22 @@ function TopChrome({
           background: passengerChrome.shellDark,
           color: passengerChrome.invert,
           padding: "10px 18px 14px",
+          flexShrink: 0,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span
+            aria-hidden="true"
             style={{
               width: 24,
               height: 24,
               borderRadius: 6,
-              background: passengerChrome.info.bg,
+              background: "rgba(255,255,255,.16)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              fontSize: 13,
+              fontWeight: 700,
               flexShrink: 0,
             }}
           >
@@ -139,7 +145,14 @@ function TopChrome({
             {order}
           </span>
         </div>
-        <div style={{ fontSize: 19, fontWeight: 800, marginTop: 8 }}>
+        <div
+          style={{
+            fontSize: 19,
+            fontWeight: 800,
+            marginTop: 8,
+            letterSpacing: 0.2,
+          }}
+        >
           {status}
         </div>
       </div>
@@ -149,12 +162,16 @@ function TopChrome({
 
 function Card({
   title,
-  children,
   tag,
+  children,
+  dimmed,
+  style,
 }: {
   title?: string;
-  children: ReactNode;
   tag?: ReactNode;
+  children: ReactNode;
+  dimmed?: boolean;
+  style?: CSSProperties;
 }) {
   return (
     <section
@@ -162,8 +179,10 @@ function Card({
         background: passengerChrome.card,
         border: `1px solid ${passengerChrome.border}`,
         borderRadius: 14,
-        margin: "0 14px 12px",
+        margin: `0 ${shellInset}px 12px`,
         overflow: "hidden",
+        opacity: dimmed ? 0.55 : 1,
+        ...style,
       }}
     >
       {title ? (
@@ -186,39 +205,129 @@ function Card({
   );
 }
 
-function Banner({ fixture }: { fixture: PassengerRideFixture }) {
+function EmptyState({
+  tone,
+  title,
+  detail,
+}: {
+  tone: ReturnType<typeof getToneRamp>;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+        padding: "0 28px",
+        textAlign: "center",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          background: tone.bg,
+          color: tone.fg,
+          border: `1px solid ${tone.border}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 24,
+          fontWeight: 700,
+        }}
+      >
+        !
+      </span>
+      <div style={{ fontSize: 17, fontWeight: 800 }}>{title}</div>
+      <div
+        style={{
+          fontSize: 12.5,
+          color: passengerChrome.muted,
+          lineHeight: 1.6,
+        }}
+      >
+        {detail}
+      </div>
+    </div>
+  );
+}
+
+function ProgressCard({
+  title,
+  detail,
+}: {
+  title: string;
+  detail: string;
+}) {
+  return (
+    <Card>
+      <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            border: `3px solid ${passengerChrome.info.bg}`,
+            borderTopColor: passengerChrome.shell,
+            flexShrink: 0,
+          }}
+        />
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>{title}</div>
+          <div
+            style={{
+              fontSize: 11.5,
+              color: passengerChrome.muted,
+              marginTop: 2,
+            }}
+          >
+            {detail}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
   if (!fixture.banner) return null;
   const tone = getToneRamp(fixture.banner.tone);
+  const bordered = fixture.banner.tone !== "warning";
 
   return (
     <div
       style={{
         margin: "12px 14px 0",
         display: "flex",
-        gap: 10,
-        alignItems: "flex-start",
+        gap: 9,
+        alignItems: "center",
         background: tone.bg,
-        border: `1px solid ${tone.border}`,
+        border: bordered ? `1px solid ${tone.border}` : `1px solid ${tone.border}`,
         borderRadius: 12,
         padding: "10px 14px",
       }}
     >
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 800, color: tone.fg }}>
-          {fixture.banner.title}
-        </div>
-        {fixture.banner.detail ? (
-          <div
-            style={{
-              marginTop: 2,
-              fontSize: 11.5,
-              lineHeight: 1.55,
-              color: passengerChrome.muted,
-            }}
-          >
-            {fixture.banner.detail}
-          </div>
-        ) : null}
+      <span
+        aria-hidden="true"
+        style={{
+          color: tone.fg,
+          fontSize: 15,
+          fontWeight: 800,
+          flexShrink: 0,
+        }}
+      >
+        {fixture.banner.tone === "success" ? "✓" : "!"}
+      </span>
+      <div style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: tone.fg }}>
+        {fixture.banner.title}
       </div>
       {fixture.banner.meta ? (
         <span
@@ -236,19 +345,6 @@ function Banner({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
-  const note =
-    fixture.mapState === "missing"
-      ? "正在取得司機位置"
-      : fixture.mapState === "stale"
-        ? "司機位置更新稍有延遲"
-        : "位置更新於 5 秒前";
-  const noteTone =
-    fixture.mapState === "stale"
-      ? passengerChrome.warning
-      : fixture.mapState === "missing"
-        ? passengerChrome.neutral
-        : passengerChrome.success;
-
   return (
     <div
       style={{
@@ -259,41 +355,57 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
         background: `linear-gradient(140deg, ${passengerChrome.info.bg}, ${passengerChrome.card})`,
         height: 150,
         position: "relative",
+        flexShrink: 0,
       }}
     >
       {fixture.mapState !== "missing" ? (
         <>
+          <svg
+            aria-hidden="true"
+            width="100%"
+            height="100%"
+            viewBox="0 0 320 150"
+            style={{ position: "absolute", inset: 0 }}
+          >
+            <path
+              d="M50 120 C 120 90, 200 100, 310 44"
+              fill="none"
+              stroke={passengerChrome.shell}
+              strokeWidth="3"
+              strokeDasharray="1 7"
+              strokeLinecap="round"
+            />
+          </svg>
           <div
             style={{
               position: "absolute",
-              left: 40,
-              top: 98,
-              width: 24,
-              height: 24,
-              borderRadius: 12,
+              left: 38,
+              top: 108,
+              width: 26,
+              height: 26,
+              borderRadius: 13,
               background: passengerChrome.shell,
               border: `3px solid ${passengerChrome.invert}`,
+              boxShadow: `0 2px 8px ${passengerChrome.info.border}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: passengerChrome.invert,
+              fontSize: 12,
+              fontWeight: 700,
             }}
-          />
+          >
+            車
+          </div>
           <div
+            aria-hidden="true"
             style={{
               position: "absolute",
-              left: 54,
-              top: 112,
-              width: 220,
-              borderTop: `3px dashed ${passengerChrome.shell}`,
-              transform: "rotate(-18deg)",
-              transformOrigin: "left center",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              right: 62,
+              right: 64,
               top: 30,
-              width: 18,
-              height: 18,
-              borderRadius: 9,
+              width: 22,
+              height: 22,
+              borderRadius: 11,
               background: passengerChrome.danger.fg,
             }}
           />
@@ -304,13 +416,18 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             position: "absolute",
             inset: 0,
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
+            gap: 6,
             color: passengerChrome.muted,
             fontSize: 12.5,
           }}
         >
-          {note}
+          <span aria-hidden="true" style={{ fontSize: 18 }}>
+            ⌖
+          </span>
+          正在取得司機位置
         </div>
       )}
       <div
@@ -327,22 +444,41 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
       >
         上車：{fixture.pickupLabel}
       </div>
-      <div
-        style={{
-          position: "absolute",
-          right: 10,
-          top: 10,
-          fontSize: 10.5,
-          background: noteTone.bg,
-          border: `1px solid ${noteTone.border}`,
-          padding: "3px 8px",
-          borderRadius: 6,
-          color: noteTone.fg,
-          fontWeight: 700,
-        }}
-      >
-        {note}
-      </div>
+      {fixture.mapState === "fresh" ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 10,
+            fontSize: 10,
+            background: passengerChrome.invert,
+            padding: "3px 8px",
+            borderRadius: 6,
+            color: passengerChrome.success.fg,
+            fontWeight: 700,
+          }}
+        >
+          位置更新於 5 秒前
+        </div>
+      ) : null}
+      {fixture.mapState === "stale" ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 10,
+            fontSize: 10.5,
+            background: passengerChrome.warning.bg,
+            border: `1px solid ${passengerChrome.warning.border}`,
+            padding: "3px 8px",
+            borderRadius: 6,
+            color: passengerChrome.warning.fg,
+            fontWeight: 700,
+          }}
+        >
+          司機位置更新稍有延遲
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -353,14 +489,32 @@ function EtaBlock({ fixture }: { fixture: PassengerRideFixture }) {
     fixture.etaTone === "success"
       ? passengerChrome.success.fg
       : passengerChrome.shell;
+
   return (
-    <div style={{ margin: "0 14px 12px", textAlign: "center" }}>
-      <div style={{ fontSize: 24, fontWeight: 800, color: tone }}>
+    <div
+      style={{
+        margin: "0 14px 12px",
+        textAlign: "center",
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 24,
+          fontWeight: 800,
+          color: tone,
+          letterSpacing: -0.3,
+        }}
+      >
         {fixture.etaMain}
       </div>
       {fixture.etaSub ? (
         <div
-          style={{ fontSize: 12.5, color: passengerChrome.muted, marginTop: 2 }}
+          style={{
+            fontSize: 12.5,
+            color: passengerChrome.muted,
+            marginTop: 2,
+          }}
         >
           {fixture.etaSub}
         </div>
@@ -369,13 +523,38 @@ function EtaBlock({ fixture }: { fixture: PassengerRideFixture }) {
   );
 }
 
-function VehicleCard({ fixture }: { fixture: PassengerRideFixture }) {
-  if (!fixture.assignment) {
-    return null;
-  }
-  const rated = fixture.driver.ratingState === "rated";
+function StatusSubline({ fixture }: { fixture: PassengerRideFixture }) {
+  if (!fixture.statusSubline) return null;
   return (
-    <Card title="您的車輛與駕駛">
+    <div
+      style={{
+        margin: "0 14px 12px",
+        textAlign: "center",
+        fontSize: 12.5,
+        color: passengerChrome.muted,
+      }}
+    >
+      {fixture.statusSubline}
+    </div>
+  );
+}
+
+function VehicleCard({
+  fixture,
+  dimmed,
+  tag,
+  plateChanged,
+}: {
+  fixture: PassengerRideFixture;
+  dimmed?: boolean;
+  tag?: ReactNode;
+  plateChanged?: boolean;
+}) {
+  if (!fixture.assignment) return null;
+  const rated = fixture.driver.ratingState === "rated";
+
+  return (
+    <Card title="您的車輛與駕駛" dimmed={dimmed} tag={tag}>
       <div
         style={{
           display: "flex",
@@ -415,9 +594,16 @@ function VehicleCard({ fixture }: { fixture: PassengerRideFixture }) {
             {fixture.driver.plateNo}
           </div>
           <div
-            style={{ fontSize: 10, color: passengerChrome.dim, marginTop: 3 }}
+            style={{
+              fontSize: 10,
+              color: plateChanged
+                ? passengerChrome.warning.fg
+                : passengerChrome.dim,
+              fontWeight: plateChanged ? 700 : 400,
+              marginTop: 3,
+            }}
           >
-            上車前請核對車牌
+            {plateChanged ? "車牌已更新，請重新核對" : "上車前請核對車牌"}
           </div>
         </div>
       </div>
@@ -435,8 +621,8 @@ function VehicleCard({ fixture }: { fixture: PassengerRideFixture }) {
             width: 38,
             height: 38,
             borderRadius: 19,
-            background: passengerChrome.driverRealm.bg,
-            color: passengerChrome.driverRealm.fg,
+            background: passengerChrome.info.bg,
+            color: passengerChrome.shell,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -447,7 +633,7 @@ function VehicleCard({ fixture }: { fixture: PassengerRideFixture }) {
         >
           {fixture.driver.name.slice(0, 1)}
         </div>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
               display: "flex",
@@ -487,14 +673,53 @@ function VehicleCard({ fixture }: { fixture: PassengerRideFixture }) {
             {fixture.driver.registrationMaskedDisplay} · 有效至{" "}
             {fixture.driver.registrationEffectiveUntil}
           </div>
-          <div style={{ marginTop: 6, fontSize: 11.5 }}>
+          <div style={{ marginTop: 6 }}>
             {rated ? (
-              <span style={{ color: passengerChrome.text }}>
-                <strong>4.9</strong> · 328 則評價
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "baseline",
+                  gap: 6,
+                }}
+              >
+                <span
+                  style={{
+                    color: starTone,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                  }}
+                >
+                  <span aria-hidden="true">★</span>
+                  <b style={{ fontSize: 15, color: passengerChrome.text }}>4.9</b>
+                </span>
+                <span style={{ fontSize: 11, color: passengerChrome.muted }}>
+                  328 則評價
+                </span>
               </span>
             ) : (
-              <span style={{ color: passengerChrome.muted }}>
-                新進駕駛 · 尚無乘車評價
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: passengerChrome.shell,
+                    background: passengerChrome.info.bg,
+                    padding: "2px 9px",
+                    borderRadius: 999,
+                  }}
+                >
+                  新進駕駛
+                </span>
+                <span style={{ fontSize: 11, color: passengerChrome.muted }}>
+                  尚無乘車評價
+                </span>
               </span>
             )}
           </div>
@@ -504,16 +729,34 @@ function VehicleCard({ fixture }: { fixture: PassengerRideFixture }) {
   );
 }
 
-function FareCard({ fixture }: { fixture: PassengerRideFixture }) {
-  if (fixture.screenId === "P5-10" || fixture.screenId === "P5-09") {
-    return null;
-  }
-
-  const isAnomaly = fixture.routeFareMode === "anomaly";
-  return (
-    <Card title={fixture.screenId === "A03" ? "現行計費表" : "預估路線與車資"}>
-      {fixture.screenId === "A03" && fixture.fareVersion ? (
-        <>
+function FareCard({
+  fixture,
+  publicMode,
+}: {
+  fixture: PassengerRideFixture;
+  publicMode?: boolean;
+}) {
+  if (publicMode && fixture.fareVersion) {
+    return (
+      <>
+        <Card
+          title="現行計費表"
+          tag={
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: passengerChrome.success.fg,
+                background: passengerChrome.success.bg,
+                border: `1px solid ${passengerChrome.success.border}`,
+                padding: "2px 8px",
+                borderRadius: 999,
+              }}
+            >
+              已生效
+            </span>
+          }
+        >
           <div
             style={{
               fontSize: 11,
@@ -521,7 +764,7 @@ function FareCard({ fixture }: { fixture: PassengerRideFixture }) {
               marginBottom: 6,
             }}
           >
-            版本 {fixture.fareVersion.displayName} · 生效日 2026/07/01 · 備查{" "}
+            版本 F-2026-03 · 生效日 2026/07/01 · 備查{" "}
             {fixture.fareVersion.authorityFilingRef}
           </div>
           {[
@@ -542,330 +785,153 @@ function FareCard({ fixture }: { fixture: PassengerRideFixture }) {
               }}
             >
               <span style={{ color: passengerChrome.muted }}>{label}</span>
-              <strong style={{ fontFamily: monoFont }}>{value}</strong>
+              <b style={{ fontFamily: monoFont }}>{value}</b>
             </div>
           ))}
-        </>
-      ) : (
-        <>
-          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        </Card>
+        <Card title="車資變更規則">
+          <div
+            style={{
+              fontSize: 12,
+              color: passengerChrome.muted,
+              lineHeight: 1.65,
+            }}
+          >
+            若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。
+          </div>
+        </Card>
+      </>
+    );
+  }
+
+  const isAnomaly = fixture.routeFareMode === "anomaly";
+  return (
+    <Card title="預估路線與車資">
+      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            paddingTop: 4,
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              border: `2px solid ${passengerChrome.shell}`,
+            }}
+          />
+          <span
+            style={{
+              flex: 1,
+              width: 2,
+              background: passengerChrome.border,
+              margin: "3px 0",
+              minHeight: 14,
+            }}
+          />
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 2,
+              background: passengerChrome.shell,
+            }}
+          />
+        </div>
+        <div style={{ flex: 1, fontSize: 12.5 }}>
+          <div style={{ fontWeight: 600, marginBottom: 12 }}>
+            {fixture.pickupLabel}
+          </div>
+          <div style={{ fontWeight: 600 }}>{fixture.dropoffLabel}</div>
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: passengerChrome.muted,
+            textAlign: "right",
+          }}
+        >
+          {fixture.routeDistanceKm}
+          <br />
+          {fixture.routeDurationMinutes}
+        </div>
+      </div>
+      <div
+        style={{
+          borderTop: `1px solid ${passengerChrome.border}`,
+          paddingTop: 10,
+        }}
+      >
+        {isAnomaly ? (
+          <div
+            style={{
+              background: passengerChrome.warning.bg,
+              border: `1px solid ${passengerChrome.warning.border}`,
+              borderRadius: 9,
+              padding: "9px 12px",
+            }}
+          >
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                paddingTop: 4,
+                fontSize: 12.5,
+                fontWeight: 700,
+                color: passengerChrome.warning.fg,
               }}
             >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  border: `2px solid ${passengerChrome.shell}`,
-                }}
-              />
-              <span
-                style={{
-                  flex: 1,
-                  width: 2,
-                  background: passengerChrome.border,
-                  margin: "3px 0",
-                  minHeight: 14,
-                }}
-              />
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 2,
-                  background: passengerChrome.shell,
-                }}
-              />
-            </div>
-            <div style={{ flex: 1, fontSize: 12.5 }}>
-              <div style={{ fontWeight: 600, marginBottom: 12 }}>
-                {fixture.pickupLabel}
-              </div>
-              {fixture.dropoffLabel ? (
-                <div style={{ fontWeight: 600 }}>{fixture.dropoffLabel}</div>
-              ) : null}
+              {fixture.routeFareText}
             </div>
             <div
               style={{
                 fontSize: 11,
                 color: passengerChrome.muted,
-                textAlign: "right",
+                marginTop: 2,
               }}
             >
-              {fixture.routeDistanceKm}
-              <br />
-              {fixture.routeDurationMinutes}
+              請稍後重試或聯絡客服
             </div>
           </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 16.5, fontWeight: 800 }}>
+              {fixture.routeFareText}
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: passengerChrome.muted,
+                marginTop: 2,
+              }}
+            >
+              {fixture.routeFareHint}
+            </div>
+          </>
+        )}
+        {!isAnomaly ? (
           <div
             style={{
-              borderTop: `1px solid ${passengerChrome.border}`,
-              paddingTop: 10,
+              fontSize: 10.5,
+              color: passengerChrome.dim,
+              marginTop: 8,
+              lineHeight: 1.55,
             }}
           >
-            {isAnomaly ? (
-              <div
-                style={{
-                  background: passengerChrome.warning.bg,
-                  border: `1px solid ${passengerChrome.warning.border}`,
-                  borderRadius: 9,
-                  padding: "9px 12px",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    color: passengerChrome.warning.fg,
-                  }}
-                >
-                  {fixture.routeFareText}
-                </div>
-                {fixture.routeFareHint ? (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: passengerChrome.muted,
-                      marginTop: 2,
-                    }}
-                  >
-                    {fixture.routeFareHint}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <>
-                <div style={{ fontSize: 16.5, fontWeight: 800 }}>
-                  {fixture.routeFareText}
-                </div>
-                {fixture.routeFareHint ? (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: passengerChrome.muted,
-                      marginTop: 2,
-                    }}
-                  >
-                    {fixture.routeFareHint}
-                  </div>
-                ) : null}
-                <div
-                  style={{
-                    fontSize: 10.5,
-                    color: passengerChrome.dim,
-                    marginTop: 8,
-                    lineHeight: 1.55,
-                  }}
-                >
-                  若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。
-                </div>
-              </>
-            )}
+            若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。
           </div>
-        </>
-      )}
+        ) : null}
+      </div>
     </Card>
   );
 }
 
-function Actions({
-  fixture,
-  token,
-}: {
-  fixture: PassengerRideFixture;
-  token: string;
-}) {
-  const secondaryButton = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    minHeight: 46,
-    borderRadius: 12,
-    fontSize: 14,
-    fontWeight: 700,
-    border: `1px solid ${passengerChrome.border}`,
-    background: passengerChrome.card,
-    color: passengerChrome.text,
-  } as const;
-  const primaryButton = {
-    ...secondaryButton,
-    background: passengerChrome.shell,
-    color: passengerChrome.invert,
-    border: "1px solid transparent",
-  };
-
-  if (fixture.screenId === "P5-09") {
-    return (
-      <div
-        style={{
-          margin: "0 14px 10px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        <Link href={`/ride/${token}?screen=P5-10`} style={secondaryButton}>
-          查看電子乘車證明
-        </Link>
-        <Link
-          href="/"
-          style={{
-            ...secondaryButton,
-            color: passengerChrome.muted,
-            border: "1px solid transparent",
-          }}
-        >
-          回到首頁
-        </Link>
-      </div>
-    );
-  }
-
-  if (fixture.screenId === "P5-10") {
-    return (
-      <div
-        style={{
-          margin: "0 14px 12px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        <button type="button" style={primaryButton}>
-          下載 PDF
-        </button>
-        <button type="button" style={secondaryButton}>
-          分享
-        </button>
-        <Link
-          href={`/ride/${token}?screen=P5-09`}
-          style={{
-            ...secondaryButton,
-            color: passengerChrome.muted,
-            border: "1px solid transparent",
-          }}
-        >
-          返回行程
-        </Link>
-      </div>
-    );
-  }
-
-  if (fixture.screenId === "P5-08") {
-    return (
-      <div style={{ margin: "0 14px 10px" }}>
-        <button type="button" style={primaryButton}>
-          送出評價
-        </button>
-      </div>
-    );
-  }
-
-  if (fixture.actionMode === "support_only") {
-    return (
-      <div
-        style={{
-          margin: "0 14px 12px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        <button type="button" style={primaryButton}>
-          {fixture.screenId === "A04" || fixture.screenId === "P5-11"
-            ? "重新取得報價"
-            : "聯絡客服"}
-        </button>
-        <button type="button" style={secondaryButton}>
-          聯絡客服
-        </button>
-        {fixture.screenId === "P5-12" ? (
-          <button
-            type="button"
-            style={{ ...secondaryButton, color: passengerChrome.danger.fg }}
-          >
-            取消行程
-          </button>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        margin: "0 14px 12px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
-    >
-      <button type="button" style={primaryButton}>
-        聯絡司機
-      </button>
-      <button
-        type="button"
-        style={{ ...secondaryButton, color: passengerChrome.danger.fg }}
-      >
-        {fixture.actionLabel || "取消行程"}
-      </button>
-      {fixture.cancelNote ? (
-        <div
-          style={{
-            textAlign: "center",
-            fontSize: 11,
-            color: passengerChrome.muted,
-          }}
-        >
-          {fixture.cancelNote}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function SeatbeltNotice() {
-  return (
-    <div
-      role="status"
-      style={{
-        margin: "0 14px 12px",
-        display: "flex",
-        gap: 11,
-        alignItems: "flex-start",
-        background: passengerChrome.warning.bg,
-        border: `1px solid ${passengerChrome.warning.border}`,
-        borderRadius: 12,
-        padding: "11px 14px",
-      }}
-    >
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 700 }}>
-          上車後請全程繫妥安全帶
-        </div>
-        <div
-          style={{ fontSize: 11.5, color: passengerChrome.muted, marginTop: 2 }}
-        >
-          前後座乘客都需要繫安全帶。
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ReceiptCard({ fixture }: { fixture: PassengerRideFixture }) {
-  const receiptRows = fixture.receiptRows;
-  if (!receiptRows) return null;
+  if (!fixture.receiptRows) return null;
   return (
     <Card>
-      {receiptRows.map((row, index) => (
+      {fixture.receiptRows.map((row, index) => (
         <div
           key={`${row.label}-${index}`}
           style={{
@@ -874,7 +940,7 @@ function ReceiptCard({ fixture }: { fixture: PassengerRideFixture }) {
             gap: 12,
             padding: "8px 0",
             borderBottom:
-              index < receiptRows.length - 1
+              index < fixture.receiptRows!.length - 1
                 ? `1px solid ${passengerChrome.border}`
                 : undefined,
             fontSize: 12.5,
@@ -899,6 +965,32 @@ function ReceiptCard({ fixture }: { fixture: PassengerRideFixture }) {
   );
 }
 
+function RatingStars() {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+      {[1, 2, 3, 4, 5].map((value) => (
+        <span
+          key={value}
+          role="button"
+          aria-label={`${value} 星`}
+          style={{
+            width: 46,
+            height: 46,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: starTone,
+            fontSize: 32,
+            lineHeight: 1,
+          }}
+        >
+          ★
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function RatingCard({ fixture }: { fixture: PassengerRideFixture }) {
   if (!fixture.ratingSummary) return null;
   return (
@@ -911,16 +1003,14 @@ function RatingCard({ fixture }: { fixture: PassengerRideFixture }) {
           {fixture.ratingSummary.countText}
         </div>
       </div>
-      <div style={{ margin: "12px 0 4px", textAlign: "center" }}>
-        <div style={{ fontSize: 34, color: passengerChrome.driverRealm.fg }}>
-          ★★★★★
-        </div>
+      <div style={{ margin: "12px 0 4px" }}>
+        <RatingStars />
         <div
           style={{
             textAlign: "center",
             fontSize: 12.5,
             fontWeight: 700,
-            color: passengerChrome.driverRealm.fg,
+            color: starTone,
             marginTop: 4,
           }}
         >
@@ -958,20 +1048,69 @@ function RatingCard({ fixture }: { fixture: PassengerRideFixture }) {
   );
 }
 
-function SafetyInfo({ fixture }: { fixture: PassengerRideFixture }) {
-  if (!fixture.contactSafetyNote && !fixture.disclosureBlockReason) return null;
+function CompletedThanks() {
   return (
     <div
       style={{
-        margin: "0 14px 12px",
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+        padding: "0 30px",
+        textAlign: "center",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          background: passengerChrome.success.bg,
+          color: passengerChrome.success.fg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 26,
+          fontWeight: 800,
+        }}
+      >
+        ✓
+      </span>
+      <div style={{ fontSize: 18, fontWeight: 800 }}>感謝您的評價</div>
+      <div style={{ fontSize: 12.5, color: passengerChrome.muted }}>
+        您的意見會協助我們維持服務品質。
+      </div>
+    </div>
+  );
+}
+
+function ContactUnavailableCard({ fixture }: { fixture: PassengerRideFixture }) {
+  if (!fixture.contactSafetyNote) return null;
+  return (
+    <div
+      style={{
+        margin: `0 ${shellInset}px 12px`,
         background: passengerChrome.card,
         border: `1px solid ${passengerChrome.border}`,
         borderRadius: 12,
         padding: "12px 14px",
       }}
     >
-      {fixture.contactSafetyNote ? (
-        <>
+      <div style={{ display: "flex", gap: 9 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            color: passengerChrome.shell,
+            marginTop: 1,
+            fontWeight: 800,
+          }}
+        >
+          i
+        </span>
+        <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>
             目前無法直接聯絡司機
           </div>
@@ -982,27 +1121,62 @@ function SafetyInfo({ fixture }: { fixture: PassengerRideFixture }) {
               marginTop: 2,
             }}
           >
-            {fixture.contactSafetyNote}
+            請改聯絡客服，我們會協助轉達。
           </div>
-        </>
-      ) : null}
-      {fixture.disclosureBlockReason ? (
-        <div
-          style={{
-            fontSize: 11,
-            color: passengerChrome.dim,
-            marginTop: fixture.contactSafetyNote ? 10 : 0,
-            fontFamily: monoFont,
-          }}
-        >
-          fail-closed: {fixture.disclosureBlockReason}
         </div>
-      ) : null}
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <button type="button" style={buttonStyle("primary")}>
+          聯絡客服 0800-090-000
+        </button>
+      </div>
     </div>
   );
 }
 
-function TimelineFooter({ fixture }: { fixture: PassengerRideFixture }) {
+function SeatbeltNotice() {
+  return (
+    <div
+      role="status"
+      style={{
+        margin: `0 ${shellInset}px 12px`,
+        display: "flex",
+        gap: 11,
+        alignItems: "flex-start",
+        background: passengerChrome.warning.bg,
+        border: `1px solid ${passengerChrome.warning.border}`,
+        borderRadius: 12,
+        padding: "11px 14px",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          color: passengerChrome.warning.fg,
+          marginTop: 1,
+          fontWeight: 800,
+        }}
+      >
+        !
+      </span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>
+          上車後請全程繫妥安全帶
+        </div>
+        <div
+          style={{ fontSize: 11.5, color: passengerChrome.muted, marginTop: 2 }}
+        >
+          前後座乘客都需要繫安全帶。
+        </div>
+      </div>
+      <span aria-hidden="true" style={{ color: passengerChrome.dim }}>
+        ×
+      </span>
+    </div>
+  );
+}
+
+function FooterNotice() {
   return (
     <div
       style={{
@@ -1011,81 +1185,423 @@ function TimelineFooter({ fixture }: { fixture: PassengerRideFixture }) {
         fontSize: 10.5,
         color: passengerChrome.dim,
         textAlign: "center",
+        flexShrink: 0,
       }}
     >
       客服 0800-090-000 · 主管機關申訴 1999
       <br />
-      本服務僅提供預約叫車 · 事件{" "}
-      {fixture.timeline
-        .map((event) => `${event.happenedAt} ${event.summary}`)
-        .join(" / ")}
+      本服務僅提供預約叫車
     </div>
   );
 }
 
-function ScreenRail({
-  token,
-  active,
-}: {
-  token: string;
-  active: PassengerRideFixture["screenId"];
-}) {
-  const screens = [
-    "P5-01",
-    "P5-02",
-    "P5-03",
-    "P5-04",
-    "P5-05",
-    "P5-06",
-    "P5-07",
-    "P5-08",
-    "P5-09",
-    "P5-10",
-    "P5-11",
-    "P5-12",
-    "A03",
-    "A04",
-  ] as const;
+function buttonStyle(kind: "primary" | "secondary" | "ghost", danger = false) {
+  const base: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    width: "100%",
+    minHeight: 46,
+    borderRadius: 12,
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: "pointer",
+    border: "1px solid transparent",
+    fontFamily: "inherit",
+  };
+
+  if (kind === "primary") {
+    return {
+      ...base,
+      background: danger ? passengerChrome.danger.fg : passengerChrome.shell,
+      color: passengerChrome.invert,
+    } satisfies CSSProperties;
+  }
+
+  if (kind === "ghost") {
+    return {
+      ...base,
+      background: "transparent",
+      color: danger ? passengerChrome.danger.fg : passengerChrome.muted,
+    } satisfies CSSProperties;
+  }
+
+  return {
+    ...base,
+    background: passengerChrome.card,
+    color: danger ? passengerChrome.danger.fg : passengerChrome.text,
+    borderColor: danger ? passengerChrome.danger.border : passengerChrome.border,
+  } satisfies CSSProperties;
+}
+
+function ActionGroup({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        margin: "0 14px 12px",
+        margin: `0 ${shellInset}px 12px`,
         display: "flex",
-        gap: 6,
-        overflowX: "auto",
-        paddingBottom: 2,
+        flexDirection: "column",
+        gap: 8,
       }}
     >
-      {screens.map((screenId) => (
-        <Link
-          key={screenId}
-          href={
-            screenId === "A03"
-              ? `/ride/${token}/fares?screen=A03`
-              : `/ride/${token}?screen=${screenId}`
-          }
+      {children}
+    </div>
+  );
+}
+
+function Actions({
+  fixture,
+  token,
+}: {
+  fixture: PassengerRideFixture;
+  token: string;
+}) {
+  if (fixture.screenId === "P5-01") {
+    return (
+      <ActionGroup>
+        <button type="button" style={buttonStyle("secondary", true)}>
+          取消行程
+        </button>
+        <div
           style={{
-            flexShrink: 0,
-            borderRadius: 999,
-            padding: "6px 10px",
-            border: `1px solid ${active === screenId ? passengerChrome.info.border : passengerChrome.border}`,
-            background:
-              active === screenId
-                ? passengerChrome.info.bg
-                : passengerChrome.card,
-            color:
-              active === screenId
-                ? passengerChrome.shell
-                : passengerChrome.muted,
+            textAlign: "center",
             fontSize: 11,
-            fontWeight: 700,
-            fontFamily: monoFont,
+            color: passengerChrome.muted,
           }}
         >
-          {screenId}
+          指派前取消不收費
+        </div>
+      </ActionGroup>
+    );
+  }
+
+  if (fixture.screenId === "P5-04") {
+    return (
+      <ActionGroup>
+        <button type="button" style={buttonStyle("secondary", true)}>
+          取消行程
+        </button>
+        <div
+          style={{
+            textAlign: "center",
+            fontSize: 11,
+            color: passengerChrome.muted,
+          }}
+        >
+          改派期間取消不收費
+        </div>
+      </ActionGroup>
+    );
+  }
+
+  if (fixture.screenId === "P5-08") {
+    return (
+      <div style={{ margin: `0 ${shellInset}px 10px` }}>
+        <button type="button" style={buttonStyle("primary")}>
+          送出評價
+        </button>
+      </div>
+    );
+  }
+
+  if (fixture.screenId === "P5-09") {
+    return (
+      <ActionGroup>
+        <Link href={`/ride/${token}?screen=P5-10`} style={buttonStyle("secondary")}>
+          查看電子乘車證明
         </Link>
-      ))}
-    </div>
+        <Link href="/" style={buttonStyle("ghost")}>
+          回到首頁
+        </Link>
+      </ActionGroup>
+    );
+  }
+
+  if (fixture.screenId === "P5-10") {
+    return (
+      <ActionGroup>
+        <button type="button" style={buttonStyle("primary")}>
+          下載 PDF
+        </button>
+        <button type="button" style={buttonStyle("secondary")}>
+          分享
+        </button>
+        <Link href={`/ride/${token}?screen=P5-09`} style={buttonStyle("ghost")}>
+          返回行程
+        </Link>
+      </ActionGroup>
+    );
+  }
+
+  if (fixture.screenId === "P5-11") {
+    return (
+      <ActionGroup>
+        <button type="button" style={buttonStyle("primary")}>
+          重新整理
+        </button>
+        <button type="button" style={buttonStyle("secondary")}>
+          聯絡客服
+        </button>
+      </ActionGroup>
+    );
+  }
+
+  if (fixture.screenId === "P5-12") {
+    return (
+      <div style={{ margin: `0 ${shellInset}px 12px` }}>
+        <button type="button" style={buttonStyle("secondary", true)}>
+          取消行程
+        </button>
+      </div>
+    );
+  }
+
+  if (fixture.screenId === "A04") {
+    return (
+      <>
+        <ActionGroup>
+          <button type="button" style={buttonStyle("primary")}>
+            重新取得報價
+          </button>
+          <button type="button" style={buttonStyle("secondary")}>
+            聯絡客服
+          </button>
+        </ActionGroup>
+        <div
+          style={{
+            margin: "0 14px",
+            fontSize: 10.5,
+            color: passengerChrome.dim,
+            textAlign: "center",
+          }}
+        >
+          正式報價完成前不會為您確認訂單
+        </div>
+      </>
+    );
+  }
+
+  const contactLabel =
+    fixture.actionMode === "support_only" ? "聯絡客服" : "聯絡司機";
+
+  return (
+    <ActionGroup>
+      <button type="button" style={buttonStyle("primary")}>
+        {contactLabel}
+      </button>
+      <button type="button" style={buttonStyle("secondary", true)}>
+        {fixture.actionLabel || "取消行程"}
+      </button>
+      {fixture.cancelNote ? (
+        <div
+          style={{
+            textAlign: "center",
+            fontSize: 11,
+            color: passengerChrome.muted,
+          }}
+        >
+          {fixture.cancelNote}
+        </div>
+      ) : null}
+    </ActionGroup>
+  );
+}
+
+function RideContent({
+  fixture,
+  token,
+}: {
+  fixture: PassengerRideFixture;
+  token: string;
+}) {
+  if (fixture.screenId === "P5-11") {
+    return (
+      <>
+        <EmptyState
+          tone={passengerChrome.warning}
+          title="派車資訊尚未完整"
+          detail="系統正在重新確認車輛與駕駛資料，尚未完成指派。完成後會立即通知您。"
+        />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-09") {
+    return (
+      <>
+        <CompletedThanks />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-10") {
+    return (
+      <>
+        <ReceiptCard fixture={fixture} />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "A03") {
+    return (
+      <>
+        <FareCard fixture={fixture} publicMode />
+        <div
+          style={{
+            margin: "0 14px",
+            fontSize: 10.5,
+            color: passengerChrome.dim,
+            textAlign: "center",
+          }}
+        >
+          本頁依主管機關備查之現行版本公告
+        </div>
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-01") {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        <ProgressCard
+          title="正在為您安排合適的車輛"
+          detail="預約時間 今日 14:45 · 通常 1–3 分鐘完成指派"
+        />
+        <FareCard fixture={fixture} />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-04") {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        <ProgressCard
+          title="正在為您安排另一輛車"
+          detail="原車輛無法完成本趟服務，車資與行程不受影響"
+        />
+        <VehicleCard
+          fixture={fixture}
+          dimmed
+          tag={
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: passengerChrome.muted,
+                background: passengerChrome.background,
+                border: `1px solid ${passengerChrome.border}`,
+                padding: "2px 8px",
+                borderRadius: 999,
+              }}
+            >
+              已取消指派
+            </span>
+          }
+        />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "A04") {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        <FareCard fixture={fixture} />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-08") {
+    return (
+      <>
+        <RatingCard fixture={fixture} />
+        <div style={{ margin: `0 ${shellInset}px 10px` }}>
+          <button type="button" style={buttonStyle("primary")}>
+            送出評價
+          </button>
+        </div>
+        <Card>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: 13,
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>本趟車資</span>
+            <b>NT$ 355</b>
+          </div>
+        </Card>
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-05") {
+    return (
+      <>
+        <InlineBanner fixture={fixture} />
+        <MapCard fixture={fixture} />
+        <EtaBlock fixture={fixture} />
+        <VehicleCard fixture={fixture} plateChanged />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-06") {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        <EtaBlock fixture={fixture} />
+        <VehicleCard fixture={fixture} />
+        <SeatbeltNotice />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-07") {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        <EtaBlock fixture={fixture} />
+        <SeatbeltNotice />
+        <VehicleCard fixture={fixture} />
+        <FareCard fixture={fixture} />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-12") {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        <EtaBlock fixture={fixture} />
+        <VehicleCard fixture={fixture} />
+        <ContactUnavailableCard fixture={fixture} />
+        <Actions fixture={fixture} token={token} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <MapCard fixture={fixture} />
+      <EtaBlock fixture={fixture} />
+      <StatusSubline fixture={fixture} />
+      <VehicleCard fixture={fixture} />
+      <FareCard fixture={fixture} />
+      <Actions fixture={fixture} token={token} />
+    </>
   );
 }
 
@@ -1112,20 +1628,8 @@ function PassengerScreen({
           flexDirection: "column",
         }}
       >
-        <Banner fixture={fixture} />
-        <ScreenRail token={token} active={fixture.screenId} />
-        {!["P5-09", "P5-10", "A03"].includes(fixture.screenId) ? (
-          <MapCard fixture={fixture} />
-        ) : null}
-        <EtaBlock fixture={fixture} />
-        <RatingCard fixture={fixture} />
-        <VehicleCard fixture={fixture} />
-        {fixture.seatbeltNotice ? <SeatbeltNotice /> : null}
-        <SafetyInfo fixture={fixture} />
-        <FareCard fixture={fixture} />
-        <ReceiptCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} />
-        <TimelineFooter fixture={fixture} />
+        <RideContent fixture={fixture} token={token} />
+        <FooterNotice />
       </div>
     </>
   );
