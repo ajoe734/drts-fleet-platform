@@ -5,7 +5,7 @@
 import { ApiClient } from "@drts/api-client";
 import { getRuntimeApiBaseUrl } from "./runtime-config";
 
-const DEMO_ACTOR_ID = "demo-ops-user";
+export const DEFAULT_OPS_ACTOR_ID = "demo-ops-user";
 
 const clientCache = new Map<string, ApiClient>();
 
@@ -22,7 +22,7 @@ function createOpsBootstrapClient(apiUrl: string): ApiClient {
     baseUrl: apiUrl,
     defaultHeaders: {
       "x-actor-type": "ops_user",
-      "x-actor-id": DEMO_ACTOR_ID,
+      "x-actor-id": DEFAULT_OPS_ACTOR_ID,
       "x-realm": "ops",
     },
     pathTransform: (path) => rewriteControlPlaneProxyPath(apiUrl, path),
@@ -63,7 +63,7 @@ export function createOpsDispatchEventSource(): EventSource {
       );
   if (!apiUrl.startsWith("/control-plane-proxy")) {
     url.searchParams.set("actorType", "ops_user");
-    url.searchParams.set("actorId", DEMO_ACTOR_ID);
+    url.searchParams.set("actorId", DEFAULT_OPS_ACTOR_ID);
     url.searchParams.set("realm", "ops");
   }
   return new EventSource(url.toString());
