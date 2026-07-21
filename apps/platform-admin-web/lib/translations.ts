@@ -1349,6 +1349,8 @@ const en = {
     "Masked registration only; full registration remains backend-only.",
   "p5.disclosure.previewCard": "Passenger preview",
   "p5.disclosure.previewSubtitle": "Rendered after approval",
+  "p5.disclosure.previewVehicleMeta":
+    "{year} model year · {doors} doors · {color}",
   "p5.disclosure.backendOnly": "Stored backend-only, never exposed in passenger APIs.",
   "p5.disclosure.validBadge": "Registration valid",
   "p5.disclosure.validUntil": "Valid until {date}",
@@ -4166,6 +4168,8 @@ const zh: typeof en = {
   "p5.disclosure.driverSubtitle": "只顯示遮碼證號；完整證號僅留後端。",
   "p5.disclosure.previewCard": "乘客顯示預覽",
   "p5.disclosure.previewSubtitle": "核准後乘客端呈現",
+  "p5.disclosure.previewVehicleMeta":
+    "{year} 年出廠 · {doors} 門 · {color}",
   "p5.disclosure.backendOnly": "僅存後端，不進乘客 API。",
   "p5.disclosure.validBadge": "執登有效",
   "p5.disclosure.validUntil": "有效至 {date}",

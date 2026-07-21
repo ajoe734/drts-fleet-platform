@@ -314,6 +314,8 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     fareSeed.find((row) => row.id === selectedFareId) ??
     fareSeed.find((row) => row.status === "active") ??
     fareSeed[0]!;
+  const disclosureVehiclePlate = queueSeed[0]?.vehiclePlate ?? "—";
+  const disclosureDriverName = queueSeed[0]?.driverName ?? "—";
 
   useEffect(() => {
     if (view !== "disclosure" || !canReadRegistry) {
@@ -529,8 +531,11 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                 {vehicle.make} {vehicle.model}
               </div>
               <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
-                {vehicle.modelYear} 年出廠 · {vehicle.doorCount} 門 ·{" "}
-                {vehicle.color ?? "—"}
+                {t("p5.disclosure.previewVehicleMeta", {
+                  year: vehicle.modelYear,
+                  doors: vehicle.doorCount,
+                  color: vehicle.color ?? "—",
+                })}
               </div>
               <div
                 style={{
@@ -540,10 +545,10 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                   color: theme.text,
                 }}
               >
-                BKR-2208
+                {disclosureVehiclePlate}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <strong>吳明翰</strong>
+                <strong>{disclosureDriverName}</strong>
                 <CanvasPill theme={theme} tone="success">
                   {t("p5.disclosure.validBadge")}
                 </CanvasPill>
