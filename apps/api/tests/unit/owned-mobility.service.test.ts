@@ -3965,6 +3965,90 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ),
     ).toThrowError(ApiRequestError);
   });
+
+  it("returns 409 when multi_taxi_direct is used on non-reservation owned orders", () => {
+    const { service } = createOwnedMobilityService();
+
+    expect(() =>
+      service.createPassengerOrder(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+        },
+        null,
+        undefined,
+        "multi_taxi_direct",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createPassengerOrder(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+        },
+        null,
+        undefined,
+        "multi_taxi_direct",
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "RESERVATION_ONLY_PROFILE",
+        },
+      });
+    }
+  });
+
+  it("returns 409 when multi_taxi_direct booking requests a non-reservation service product", () => {
+    const { service } = createOwnedMobilityService();
+
+    expect(() =>
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          reservationWindowStart: "2026-06-05T10:00:00.000Z",
+          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          pickup: { address: "台中市西屯區台灣大道 1 號" },
+          dropoff: { address: "桃園機場第一航廈" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          direction: "dropoff",
+        },
+        "tenant-demo-001",
+        null,
+        undefined,
+        "multi_taxi_direct",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          reservationWindowStart: "2026-06-05T10:00:00.000Z",
+          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          pickup: { address: "台中市西屯區台灣大道 1 號" },
+          dropoff: { address: "桃園機場第一航廈" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          direction: "dropoff",
+        },
+        "tenant-demo-001",
+        null,
+        undefined,
+        "multi_taxi_direct",
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "SERVICE_PRODUCT_NOT_ALLOWED",
+        },
+      });
+    }
+  });
 });
 
 describe("Queue-entry policy and dispatch semantics contracts", () => {

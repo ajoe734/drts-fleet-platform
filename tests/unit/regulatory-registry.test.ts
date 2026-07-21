@@ -595,4 +595,219 @@ describe("regulatory registry controller", () => {
     });
     expect(getDriverEta).not.toHaveBeenCalled();
   });
+
+  it("provisions vehicle passenger disclosure profile and driver public credentials on approval", async () => {
+    const persistChanges = vi.fn(async () => undefined);
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      loadState: vi.fn(async () => ({
+        vehicles: [],
+        drivers: [],
+        supplyPairs: [],
+        contracts: [],
+        policies: [],
+        exclusivities: [],
+        disclosureProfiles: [],
+        driverCredentials: [],
+      })),
+      persistChanges,
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as RegulatoryRegistryRepository;
+    const service = createRegulatoryRegistryService(repository);
+    await service.onModuleInit();
+
+    const submission = {
+      submissionId: "sub-123",
+      fleetPartnerId: "fleet-123",
+      submissionType: "vehicle_onboarding",
+      status: "approved",
+      revisionNo: 1,
+      subjectDriverId: "drv-123",
+      subjectVehicleId: "veh-123",
+      submittedBy: "user-123",
+      submittedAt: "2026-07-20T08:00:00Z",
+      reviewStartedBy: null,
+      reviewStartedAt: null,
+    } as any;
+
+    const approvedAt = "2026-07-20T08:25:00Z";
+
+    await expect(
+      service.provisionFromSubmission(null, {
+        submission,
+        driverDraft: {
+          name: "Driver Name",
+          taxiDriverRegistrationNo: "REG12345",
+          taxiDriverRegistrationArea: "TPE",
+          taxiDriverRegistrationExpiry: "2027-12-31",
+          supportedServiceProductCodes: ["taxi_reservation"],
+        } as any,
+        vehicleDraft: {
+          plateNo: "ABC-1234",
+          licenseType: "taxi",
+          businessArea: "TPE",
+          brand: "Toyota",
+          model: "",
+          modelYear: 2022,
+          doorCount: 4,
+          color: "yellow",
+          supportedServiceProductCodes: ["taxi_reservation"],
+        } as any,
+        documents: [],
+        approvedAt,
+        reviewerId: "reviewer-123",
+      }),
+    ).rejects.toThrow();
+
+    const result = await service.provisionFromSubmission(null, {
+      submission,
+      driverDraft: {
+        name: "Driver Name",
+        taxiDriverRegistrationNo: "REG12345",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_reservation"],
+      } as any,
+      vehicleDraft: {
+        plateNo: "ABC-1234",
+        licenseType: "taxi",
+        businessArea: "TPE",
+        brand: "Toyota",
+        model: "Camry",
+        modelYear: 2022,
+        doorCount: 4,
+        color: "yellow",
+        supportedServiceProductCodes: ["taxi_reservation"],
+      } as any,
+      documents: [],
+      approvedAt,
+      reviewerId: "reviewer-123",
+    });
+
+    expect(result.canonicalDriverId).toMatch(/^drv_/);
+    expect(result.canonicalVehicleId).toMatch(/^veh_/);
+    expect(persistChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        disclosureProfiles: [
+          expect.objectContaining({
+            vehicleId: result.canonicalVehicleId,
+            make: "Toyota",
+            model: "Camry",
+            modelYear: 2022,
+            doorCount: 4,
+            color: "yellow",
+            status: "complete",
+          }),
+        ],
+        driverCredentials: [
+          expect.objectContaining({
+            driverId: result.canonicalDriverId,
+            registrationNo: "REG12345",
+            status: "unverified",
+            maskedDisplay: "RE***45",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("gets passenger runtime profile by code", async () => {
+    const controller = new RegulatoryRegistryController({} as any);
+    const result = controller.getPassengerRuntimeProfile("multi_taxi_direct", "req-123");
+    expect(result).toBeDefined();
+    expect(result.data.code).toBe("multi_taxi_direct");
+    expect(result.data.reservationOnly).toBe(true);
+
+    expect(() => controller.getPassengerRuntimeProfile("other_code", "req-123")).toThrow();
+  });
+
+  it("exposes endpoints to query passenger disclosure profiles and driver credentials on controller", async () => {
+    const service = {
+      getVehiclePassengerDisclosureProfile: vi.fn((vehicleId) => {
+        if (vehicleId === "veh-123") {
+          return {
+            vehicleId,
+            make: "Toyota",
+            model: "Camry",
+            modelYear: 2022,
+            doorCount: 4,
+            color: "yellow",
+            status: "complete",
+            missingFieldCodes: [],
+            verifiedByActorId: "reviewer-1",
+            verifiedAt: "2026-07-20T08:00:00Z",
+            sourceSubmissionId: "sub-1",
+            version: 1,
+            updatedAt: "2026-07-20T08:00:00Z",
+          };
+        }
+        return null;
+      }),
+      getDriverPublicRegistrationCredential: vi.fn((driverId) => {
+        if (driverId === "drv-123") {
+          return {
+            driverId,
+            registrationNo: "REG-123",
+            registrationArea: "TPE",
+            effectiveFrom: null,
+            effectiveUntil: "2027-12-31",
+            status: "unverified",
+            maskedDisplay: "RE***23",
+            verifiedByActorId: null,
+            verifiedAt: null,
+            sourceSubmissionId: "sub-1",
+            version: 1,
+            updatedAt: "2026-07-20T08:00:00Z",
+          };
+        }
+        return null;
+      }),
+    } as any;
+
+    const controller = new RegulatoryRegistryController(service);
+
+    const profileRes = controller.getVehiclePassengerDisclosureProfile("veh-123", "req-123");
+    expect(profileRes.data.make).toBe("Toyota");
+    expect(service.getVehiclePassengerDisclosureProfile).toHaveBeenCalledWith("veh-123");
+
+    expect(() => controller.getVehiclePassengerDisclosureProfile("veh-unknown", "req-123")).toThrow();
+
+    const credRes = controller.getDriverPublicRegistrationCredential("drv-123", "req-123");
+    expect(credRes.data.registrationNo).toBe("RE***23");
+    expect(service.getDriverPublicRegistrationCredential).toHaveBeenCalledWith("drv-123");
+
+    expect(() => controller.getDriverPublicRegistrationCredential("drv-unknown", "req-123")).toThrow();
+  });
+
+  it("performs idempotent in-memory backfill of driver credentials", async () => {
+    const mockRepo = {
+      isEnabled: () => false,
+      loadState: async () => ({
+        vehicles: [],
+        drivers: [],
+        supplyPairs: [],
+        contracts: [],
+        policies: [],
+        exclusivities: [],
+        disclosureProfiles: [],
+        driverCredentials: [],
+      }),
+      listLatestDriverLocations: async () => [],
+    } as any;
+    const service = createRegulatoryRegistryService(mockRepo);
+    expect(service.listDriverPublicRegistrationCredentials().length).toBe(0);
+
+    await service.onModuleInit();
+    const credentials = service.listDriverPublicRegistrationCredentials();
+    expect(credentials.length).toBeGreaterThan(0);
+    const firstCred = credentials[0];
+    expect(firstCred).toBeDefined();
+    expect(firstCred!.status).toBe("unverified");
+    expect(firstCred!.maskedDisplay).toBe("RE***01");
+    // drv-demo-004 has no registration profile and should be backfilled with 'missing' status and default maskedDisplay '***'
+    const missingCred = credentials.find(c => c.driverId === "drv-demo-004");
+    expect(missingCred).toBeDefined();
+    expect(missingCred!.status).toBe("missing");
+    expect(missingCred!.maskedDisplay).toBe("***");
+  });
 });
