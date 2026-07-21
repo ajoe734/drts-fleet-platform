@@ -4162,7 +4162,7 @@ const zh: typeof en = {
     "P5-A01 乘客法定揭露資料審核；通過後才可開放派車資格。",
   "p5.disclosure.vehicleCard": "車輛揭露欄位",
   "p5.disclosure.vehicleSubtitle": "乘客可見的車輛揭露資料",
-  "p5.disclosure.driverCard": "駕駛執登 credential",
+  "p5.disclosure.driverCard": "駕駛執登憑證",
   "p5.disclosure.driverSubtitle": "只顯示遮碼證號；完整證號僅留後端。",
   "p5.disclosure.previewCard": "乘客顯示預覽",
   "p5.disclosure.previewSubtitle": "核准後乘客端呈現",
@@ -4188,7 +4188,7 @@ const zh: typeof en = {
   "p5.queue.detail.status": "審核狀態",
   "p5.queue.detail.missingTitle": "缺漏揭露欄位",
   "p5.queue.subjectType.vehicle": "車輛揭露",
-  "p5.queue.subjectType.driver": "駕駛 credential",
+  "p5.queue.subjectType.driver": "駕駛執登憑證",
   "p5.fares.title": "公開車資版本",
   "p5.fares.subtitle":
     "公開車資版本草稿、已備查、已生效、已停用與公開預覽。",

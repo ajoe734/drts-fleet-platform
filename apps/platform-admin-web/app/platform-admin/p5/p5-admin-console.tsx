@@ -107,7 +107,7 @@ const queueSeed: CorrectionQueueRow[] = [
     updatedAt: "2026-07-18",
     vehiclePlate: "BKR-2208",
     driverName: "吳明翰",
-    queueNote: "缺漏欄位需補齊後才能寫入 passenger disclosure profile。",
+    queueNote: "缺漏欄位需補齊後才能寫入乘客揭露檔案。",
   },
   {
     id: "cq-002",
@@ -162,7 +162,7 @@ const fareSeed: FareVersionRow[] = [
       distanceFare: "NT$ 5 / 200m",
       waitingFare: "NT$ 5 / 80s",
       nightSurcharge: "+20% · 23:00–06:00",
-      note: "已備查版本可先公開預覽；生效前訂單仍沿用 active 版本。",
+      note: "已備查版本可先公開預覽；生效前訂單仍沿用已生效版本。",
     },
   },
   {
@@ -176,7 +176,7 @@ const fareSeed: FareVersionRow[] = [
       distanceFare: "NT$ 5 / 200m",
       waitingFare: "NT$ 5 / 80s",
       nightSurcharge: "+20% · 23:00–06:00",
-      note: "現行 active 版本供乘客公開查閱，正式訂單一律使用此版本計費。",
+      note: "現行已生效版本供乘客公開查閱，正式訂單一律使用此版本計費。",
     },
   },
   {
@@ -268,6 +268,21 @@ function statusTone(
   }
 }
 
+function queueDetailTone(
+  status: CorrectionQueueRow["status"],
+): Exclude<CanvasTone, "neutral"> {
+  switch (status) {
+    case "approved":
+      return "success";
+    case "pending":
+      return "warn";
+    case "reviewing":
+      return "info";
+    case "returned":
+      return "danger";
+  }
+}
+
 function requiresAnyScope(scopeSet: Set<string>, scopes: string[]) {
   return scopes.some((scope) => scopeSet.has(scope));
 }
@@ -298,7 +313,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
   const selectedFare =
     fareSeed.find((row) => row.id === selectedFareId) ??
     fareSeed.find((row) => row.status === "active") ??
-    fareSeed[0];
+    fareSeed[0]!;
 
   useEffect(() => {
     if (view !== "disclosure" || !canReadRegistry) {
@@ -693,7 +708,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                 <div style={{ marginTop: 12 }}>
                   <CanvasBanner
                     theme={theme}
-                    tone={statusTone(selectedQueueRow.status)}
+                    tone={queueDetailTone(selectedQueueRow.status)}
                     icon="info"
                     body={selectedQueueRow.queueNote}
                   />
