@@ -2,193 +2,240 @@
 
 **Sidecar Kind:** `acceptance_packet`  
 **Parent Task:** `P5-UI-ADMIN-001` — P-5 back-office disclosure/fare UI  
-**Current Sidecar Owner:** `Gemini`  
-**Assigned Reviewer:** `Codex` (also parent owner; decides whether to absorb this packet into parent closeout)  
-**Parent Owner / Reviewer:** `Codex` / `Claude`  
-**Last Revised:** `2026-07-21T13:00:20Z (UTC)`  
-**Status:** `in_progress` — ready for reviewer handoff  
+**Parent Owner:** `Codex`  
+**Parent Reviewer:** `Claude`  
+**Sidecar Owner:** `Gemini`  
+**Sidecar Reviewer:** `Codex`  
+**Generated:** `2026-07-21` (UTC)  
+**Status:** `ACCEPTANCE SUPPORT ARTIFACT` — support-only; does not modify canonical truth, design canvas specs, runtime behavior, or any L1/L2 product surface. For live machine-truth status, read `ai-status.json -> P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE.status` directly.
+
+This packet is the forward-looking acceptance map and reviewer support document for parent task `P5-UI-ADMIN-001`. The parent task is currently in `review` in machine truth. This packet pins the acceptance criteria, upstream/downstream dependency maps, design canvas contracts (`platform-p5.jsx`), and reviewer evidence anchors so that parent review and integration validation can be performed systematically.
 
 ---
 
-## 1) Scope Boundary
+## 1. Scope Boundary
 
-本 sidecar 為 `P5-UI-ADMIN-001` 的支援性材料（support artifact），負責整理與凍結 acceptance checklist、dependency map、current state baseline、design contract 對齊驗證、與 repo code evidence anchors。
+### In Scope
 
-- **In scope:**
-  - Support-only acceptance framing & structured checklist
-  - Detailed upstream/downstream dependency mapping (including dependency on `P5-SUP-DRV-001`)
-  - Verification of UI Design Contract against `@drts/ui-tokens` (Indigo realm) and `docs/05-ui/drts-design-canvas/platform-p5.jsx`
-  - Repo & code evidence anchors across `apps/platform-admin-web`
-  - Reviewer audit hotspots and handoff / closeout command guidelines
-- **Out of scope:**
-  - 修改 L1/L2 product canonical truth
-  - 修改 `platform-admin-web` 或 `apps/api` 的主線 runtime、contract 或 DDL 實作
-  - 未授權的 machine truth (e.g. `ai-status.json`) 手動編輯
+- Establish a structured, citation-anchored acceptance checklist for `P5-UI-ADMIN-001`.
+- Map formal upstream dependencies (`P5-SUP-DRV-001`, `P5S3-FOUND-001`) and verify their completion status in machine truth.
+- Record downstream dependencies and blast-radius impacts (`P5-UI-PASSENGER-001` passenger disclosure preview alignment).
+- Translate design canvas specs (`docs/05-ui/drts-design-canvas/platform-p5.jsx`) into explicit visual and behavioral contracts.
+- Provide reviewer handoff and verification command blocks for assigned reviewers.
 
----
+### Out of Scope
 
-## 2) Current State Baseline (Shared Machine Truth & Code Base)
-
-依 `ai-status.json`、`current-work.md` 及 git commit 歷史掃描：
-
-- **Parent Task `P5-UI-ADMIN-001` State:**
-  - **Status:** `review`
-  - **Owner / Reviewer:** `Codex` / `Claude` (Chairman reassigned reviewer at `2026-07-21T03:16:10Z`)
-  - **Summary (ZH):** `platform-admin-web` 補 P-5 後臺 (揭露欄位檢視/更正佇列/公開車資版本)，對照 `platform-p5.jsx`，遮罩登記證號
-  - **Parent Branch:** `codex/p5-ui-admin-001`
-  - **Shipped Parent Commits:**
-    - `f8993434decaf4a3396cae83b2a4478fc531aed3` — `wip(P5-UI-ADMIN-001): anchor p5 admin ui`
-    - `90a4889d3c54656a0ab051e301228bf4455490c5` — `fix(P5-UI-ADMIN-001): fail closed on masked registration display`
-
-- **Upstream Dependency Task `P5-SUP-DRV-001` State:**
-  - **Status:** `done` (Reconciled from `origin/dev@cb6f46f61738`)
-  - **Shipped Commit:** `cb6f46f6173806ef41e33e46f39c67f170e37486` (`P5-SUP-DRV-001: disclosure capture + credential masking + backfill`)
-  - **Contribution to P5 Back-Office:** Provides `vehicle_passenger_disclosure_profiles` (make, model, doorCount, color) and `driver_public_registration_credentials` server projection with masked registration display.
+- Editing canonical product truth (`phase1_prd_detailed_v1.md`, `phase1_service_contracts_v1.md`, source specs).
+- Editing primary app runtime code (`apps/platform-admin-web/**`, `packages/ui-web/**`).
+- Altering machine-truth fields of parent task `P5-UI-ADMIN-001`.
+- Overriding design canvas specifications or token system definitions.
 
 ---
 
-## 3) Parent Acceptance Framing & Design Contract
+## 2. Machine Truth & Spec Anchors
 
-### 3.1 UI Design Contract Verification
-According to the repository UI Design Contract:
-1. **Visual Truth Source:** Must match `docs/05-ui/drts-design-canvas/platform-p5.jsx`.
-2. **Realm Tokens:** Must consume `@drts/ui-tokens` platform indigo realm tokens (`#4F46E5` / `#3730A3`). Hardcoding raw hex palettes in `globals.css` or components is a defect.
-3. **No 套皮 (Reskinning with generic defaults):** Components must build on canonical canvas primitives (`CanvasPageHeader`, `CanvasCard`, `CanvasDL`, `CanvasPill`, `CanvasBtn`, `CanvasBanner`, `CanvasTable`).
+### Sidecar Task — `ai-status.json -> P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE`
 
-### 3.2 Detailed Acceptance Checklist
+- **Owner:** `Gemini`
+- **Reviewer:** `Codex`
+- **Task Class:** `sidecar`
+- **Helper Parent:** `P5-UI-ADMIN-001`
+- **Helper Kind:** `acceptance_packet`
+- **Mutates Canonical:** `false`
+- **Artifacts:** `support/sidecars/P5-UI-ADMIN-001/P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE.md` (this file)
+- **Acceptance:**
+  - `Create support artifacts only`
+  - `Do not edit canonical truth`
+  - `Hand off the packet to the assigned reviewer`
 
-- [x] **AC-1: Disclosure Review UI & Masked Registration (`/platform-admin/p5/disclosure`)**
-  - Displays Vehicle Disclosure Card (Make, Model, Year, Door Count, Color, Disclosure Status).
-  - Displays Driver Credential Card with server-masked registration display (`getMaskedRegistrationDisplay`).
-  - Strict security rule: Raw registration number is kept strictly backend-only (`registrationNo: null` in client projection).
-  - Fail-Closed rule: If registration status is not `verified_active` or license is invalid (`licensesValid === false`), UI fails closed showing `— (unverified)` or `— (license expired)`.
-  - Displays Live Passenger Display Preview Card matching passenger-facing disclosure layout.
+### Parent Task — `ai-status.json -> P5-UI-ADMIN-001`
 
-- [x] **AC-2: Correction Queue Workflow (`/platform-admin/p5/corrections`)**
-  - Tabular view listing pending disclosure corrections matching `platform-p5.jsx` correction queue artboard.
-  - Interactive row actions: `view` (查看), `return` (退件補正), and `approve` (核准).
-  - `actOnQueue` handler dynamically updates row status to `approved` or `returned`, and pending counter badge updates reactively.
+- **ID:** `P5-UI-ADMIN-001`
+- **Title:** `P-5 back-office disclosure/fare UI`
+- **Summary:** `platform-admin-web 補 P-5 後臺(揭露欄位檢視/更正佇列/公開車資版本)，對照 platform-p5.jsx，遮罩登記證號`
+- **Phase:** `Phase1-P5-S3-UI`
+- **Owner:** `Codex`
+- **Reviewer:** `Claude`
+- **Status:** `review`
+- **Depends On:** `P5-SUP-DRV-001`
+- **Artifacts:**
+  - `apps/platform-admin-web/`
+  - `packages/ui-web/`
+  - `docs/05-ui/drts-design-canvas/platform-p5.jsx`
+- **Acceptance Criteria:**
+  - `disclosure review matches platform-p5.jsx masked registration only`
+  - `correction queue with view/return/approve`
+  - `public fare version draft/filed/active/retired+preview`
+  - `reads reg.* tables RBAC gated`
+  - `indigo realm tokens no 套皮`
+  - `i18n via t()`
+  - `reviewer PASS`
 
-- [x] **AC-3: Public Fare Version Management (`/platform-admin/p5/fares`)**
-  - Version table supporting all lifecycle states: `draft`, `filed`, `active`, and `retired`.
-  - Dedicated Public Fare Preview card showing base fare ($85 / 1.25 km), distance fare ($5 / 200 m), waiting fare ($5 / 60s), and night surcharge (+20%).
+### Authoritative Reference Documents
 
-- [x] **AC-4: RBAC Security Gating (`reg.*` permissions)**
-  - Gated by `reg.read` / `reg.review` scope permissions.
-  - Displays locked scope `CanvasBanner` with `p5.scope.locked.title` when read access is missing.
-  - Disables mutation buttons (`approve` / `return`) in correction queue when `reg.review` scope is missing.
-
-- [x] **AC-5: Realm Token & Canvas Compliance (Indigo Realm)**
-  - Fully compliant with platform indigo realm tokens without ad-hoc raw hex styles.
-  - Reuses canvas design primitives cleanly from `components/platform-ui.tsx`.
-
-- [x] **AC-6: Complete Bilingual i18n (`t("p5.*")`)**
-  - All labels, table headers, status badges, and action buttons use `t("p5.*")` hooks.
-  - 155 translation keys added in `apps/platform-admin-web/lib/translations.ts` with 100% key parity between `en` and `zh`.
-  - Routes registered in `route-context.ts` for admin shell and assistant navigation.
-
-- [ ] **AC-7: Reviewer PASS**
-  - Subject to final review and approval by reviewer `Claude` (parent task) and `Codex` (sidecar acceptance packet).
-
----
-
-## 4) Dependency Map
-
-```mermaid
-flowchart TD
-    subgraph Upstream Services & Data Authority
-        P5_SUP_DRV["P5-SUP-DRV-001 (done)<br/>Disclosure Data-Authority Service<br/>(Commit cb6f46f61738)"]
-        UI_TOKENS["@drts/ui-tokens<br/>Platform Indigo Realm"]
-        DESIGN_CANVAS["docs/05-ui/drts-design-canvas/<br/>platform-p5.jsx"]
-    end
-
-    subgraph Parent Task
-        P5_UI_ADMIN["P5-UI-ADMIN-001 (review)<br/>P-5 Back-Office Disclosure/Fare UI<br/>(Branch codex/p5-ui-admin-001)"]
-    end
-
-    subgraph Support Sidecars
-        SIDECAR_REV["P5-UI-ADMIN-001-SIDECAR-REVIEW<br/>(Review Packet)"]
-        SIDECAR_ACC["P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE<br/>(Acceptance Packet)"]
-    end
-
-    P5_SUP_DRV -->|provides masked credentials & disclosure profiles| P5_UI_ADMIN
-    UI_TOKENS -->|Indigo realm styling| P5_UI_ADMIN
-    DESIGN_CANVAS -->|Visual truth canvas| P5_UI_ADMIN
-
-    P5_UI_ADMIN -->|referenced by| SIDECAR_REV
-    P5_UI_ADMIN -->|framed by| SIDECAR_ACC
-```
-
-### 4.1 Upstream Dependencies
-| Dependency | Type | Status | Role & Impact |
-|---|---|---|---|
-| `P5-SUP-DRV-001` | Formal Task | `done` | Data authority for `vehicle_passenger_disclosure_profiles` (make, model, doorCount, color) and `driver_public_registration_credentials` (masked reg display). |
-| `@drts/ui-tokens` | Package | Active | Provides Indigo realm tokens for `platform-admin-web`. |
-| `platform-p5.jsx` | Design Canvas | Active | Canonical visual layout source for disclosure review, correction queue, and public fare version views. |
-
-### 4.2 Downstream Dependencies
-| Dependency | Type | Status | Role & Impact |
-|---|---|---|---|
-| P-5 Regulatory Disclosure System | Feature Area | In Review | `P5-UI-ADMIN-001` serves as the primary back-office administrative UI for platform operators and regulators reviewing P-5 disclosures. |
+- **Design Canvas Spec:** `docs/05-ui/drts-design-canvas/platform-p5.jsx`
+  - `PA_P5Disclosure`: Disclosure review & masked registration credential UI
+  - `PA_P5Queue`: Missing disclosure correction queue (view / return / approve)
+  - `PA_P5Fare`: Public fare version management (draft / filed / active / retired + preview)
+  - `PA_P5Records`: 2-year operational trip records retention (100% coverage reporting & export)
+- **Canonical Design Canvas HTML:** `docs/05-ui/drts-design-canvas/Platform Admin.html`
+- **Design System Tokens:** `@drts/ui-tokens` — Indigo realm (`indigo` theme tokens: primary `#4338CA`, surface `#EEF2FF`, accent `#6366F1`)
+- **Product & Service Contracts:**
+  - `phase1_prd_detailed_v1.md` (P-5 regulatory compliance & passenger disclosure requirements)
+  - `phase1_service_contracts_v1.md` (Multi-taxi regulatory registry & disclosure profiles)
+  - `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/source_specs/` (Canonical source specs)
 
 ---
 
-## 5) Evidence Inventory
+## 3. Dependency Map
 
-| Evidence ID | Description | File Location & Anchors |
-|---|---|---|
-| **E-01** | Core Admin Console Component | `apps/platform-admin-web/app/platform-admin/p5/p5-admin-console.tsx` |
-| **E-02** | Masked Reg & Fail-Closed Logic | `p5-admin-console.tsx:179-184`, `248-251`, `388` (`getMaskedRegistrationDisplay`) |
-| **E-03** | Disclosure Review View | `p5-admin-console.tsx:350-496` (`view === "disclosure"`) |
-| **E-04** | Correction Queue & Action Handler | `p5-admin-console.tsx:186-200`, `498-560` (`view === "corrections"`, `actOnQueue`) |
-| **E-05** | Public Fare Version Table & Preview | `p5-admin-console.tsx:562-635` (`view === "fares"`) |
-| **E-06** | Disclosure Next.js Route Page | `apps/platform-admin-web/app/platform-admin/p5/disclosure/page.tsx` |
-| **E-07** | Corrections Next.js Route Page | `apps/platform-admin-web/app/platform-admin/p5/corrections/page.tsx` |
-| **E-08** | Fares Next.js Route Page | `apps/platform-admin-web/app/platform-admin/p5/fares/page.tsx` |
-| **E-09** | Admin Shell Sidebar Menu Integration | `apps/platform-admin-web/components/admin-shell.tsx:189-206` |
-| **E-10** | Assistant Navigation Route Context | `apps/platform-admin-web/components/assistant/route-context.ts:161-193` |
-| **E-11** | Bilingual i18n Translations (155 keys) | `apps/platform-admin-web/lib/translations.ts:792-946` (`p5.*` keys) |
-| **E-12** | Parent Commit History | `git show 90a4889d3c54656a0ab051e301228bf4455490c5`, `f8993434decaf4a3396cae83b2a4478fc531aed3` |
+### Formal Upstream Dependencies
 
----
+| Dep ID | Title | Owner | Reviewer | Status (truth) | What this slice provides to P5-UI-ADMIN-001 |
+| --- | --- | --- | --- | --- | --- |
+| `P5-SUP-DRV-001` | P-5 W1 disclosure data-authority service | Codex | Gemini | `done` (commit `cb6f46f61738`) | Provides backend service layer for supply submission disclosure capture (`doorCount`, `color`), `brand -> make` profile upsert in transaction, driver public credential projection with server-side masking (`北市計字第12***67號`), and `multi_taxi_direct` reservation-only guards. |
+| `P5S3-FOUND-001` | P-5/S-3 database migration & foundational schema | Codex | Gemini | `done` | Provides DB tables (`vehicle_passenger_disclosure_profiles`, `driver_public_registration_credentials`, `fare_versions`, `regulatory_audit_logs`) and backend RPCs. |
 
-## 6) Reviewer Audit Hotspots (`Codex`)
+### Non-formal / Spec-Relevant Upstream Context
 
-Assigned Reviewer **Codex** should verify the following during sidecar review:
+| Task ID | Status | Significance to P5-UI-ADMIN-001 |
+| --- | --- | --- |
+| `BE-APR-001` | `done` | Establishes the baseline driver & vehicle approval workflows. P5 disclosure review builds on top of this audit baseline without bypassing regulatory checks. |
+| `P5S3-CANVAS` | `done` | Merged canonical design canvas components (`platform-p5.jsx`, `p5-screens.jsx`). |
 
-1. [x] **Support-Only Scope:** Confirm that `P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE.md` is strictly contained in `support/sidecars/P5-UI-ADMIN-001/` and does not mutate any L1/L2 canonical files or runtime code.
-2. [x] **Parent Baseline Fidelity:** Verify parent task `P5-UI-ADMIN-001` status (`review`) and upstream task `P5-SUP-DRV-001` status (`done` @ `cb6f46f61738`).
-3. [x] **Design Contract Verification:** Confirm that Indigo realm tokens and canvas alignment (`platform-p5.jsx`) are accurately documented and anchored in evidence.
-4. [x] **Security & Masking:** Confirm fail-closed server masking evidence for driver registration credentials is documented.
+### Formal & Surface Downstream Dependents
+
+| Task ID | Title | Status | Owner | Reviewer | Impact of P5-UI-ADMIN-001 |
+| --- | --- | --- | --- | --- | --- |
+| `P5-UI-PASSENGER-001` | P-5 passenger disclosure/fare preview UI | `review` | Codex | Claude | Displays the passenger-facing view of driver credentials (`北市計字第12***67號`) and vehicle attributes. Back-office approval state directly determines which drivers/vehicles pass regulatory dispatch validation (fail-closed if unapproved or expired). |
 
 ---
 
-## 7) Lifecycle & Handoff Commands
+## 4. Acceptance Checklist
 
-### 7.1 Owner Handoff (Gemini -> Codex)
-Owner (`Gemini`) executes handoff to reviewer (`Codex`):
+The following concrete checklist translates the parent task's acceptance criteria and design canvas (`platform-p5.jsx`) into verifiable checks for parent owner (`Codex`) and reviewer (`Claude`):
+
+### Section A: Disclosure Review & Masked Registration (`[REQUIRED]`)
+
+- [ ] **Vehicle Disclosure Fields:** Admin UI displays and allows editing/reviewing vehicle disclosure fields:
+  - 廠牌 (Brand) & 車款 (Make / Model) — `brand` is mapped to `make` in backend transaction without inventing default fallbacks.
+  - 出廠年份 (Manufacture Year, e.g. `2024`).
+  - 車門數 (Door Count, 3–6, e.g. `4`).
+  - 車身顏色 (Vehicle Color, required for Taipei plans, e.g. `珍珠白`).
+- [ ] **Driver Registration Credential Masking:**
+  - Driver registration certificate numbers are displayed with server-side masking ONLY (e.g. `北市計字第12***67號`).
+  - Full registration number is stored on backend only and NEVER exposed to passenger APIs or frontend audit logs.
+  - Certificate validity region (e.g. `臺北市`), expiration date (e.g. `2027/12/31`), and approval status (`verified_active`) are clearly displayed.
+  - Driver registration status is verified via manual review + expiration check, and NEVER auto-populated from existing driver license flags.
+- [ ] **Passenger Display Preview:** Includes live passenger-facing preview component matching `PA_P5Disclosure` (displaying vehicle make/model, year, door count, color, plate number `BKR-2208`, driver name, masked registration badge, rating).
+
+### Section B: Disclosure Correction Queue (`[REQUIRED]`)
+
+- [ ] **Correction Queue Surface:** Implements `PA_P5Queue` table matching `platform-p5.jsx`:
+  - Columns: 車行 (Fleet), 車牌 / 駕駛 (Subject), 缺漏欄位 (Missing Fields), 目前狀態 (Status: `待補正` / `審核中` / `已退件` / `已核准`), 送審日期 (Submitted Date), 最後更新 (Updated Date), Actions.
+- [ ] **Queue Action Flow:** Supports three explicit actions per item:
+  - `查看` (View details).
+  - `退件補正` (Return for correction — routes incomplete items back to fleet portal without fake default values).
+  - `核准` (Approve — writes vehicle disclosure and canonical vehicle profiles in a single database transaction).
+- [ ] **No Fake Defaults:** Incomplete or missing fields (`doorCount`, `color`) must NOT be filled with fake default values (e.g., auto-filling 4 doors or yellow color); missing fields trigger `待補正` queue entry.
+
+### Section C: Public Fare Version Management (`[REQUIRED]`)
+
+- [ ] **Fare Version State Machine:** Implements `PA_P5Fare` table with strict version lifecycle:
+  - Version statuses: `草稿` (Draft), `已備查` (Filed), `已生效` (Active), `已停用` (Retired).
+  - Attributes: Version ID (e.g. `F-2026-03`), Version Name (e.g. `現行計費表`), Effective Date (`from`), Regulatory Reference Number (`ref`, e.g. `北市交運字第1130042號`).
+- [ ] **Version Activation Rules:**
+  - Active version (`已生效`) is the ONLY version used for active order fare calculations.
+  - Future filed versions (`已備查`, e.g. effective date in the future) CANNOT be activated ahead of time.
+  - Schedule activation (`排程生效`) action is available for filed versions (`已備查`).
+  - Version state changes (creation, activation, retirement) generate mandatory regulatory audit log records (`regulatory_audit_logs`).
+- [ ] **Public Fare Preview Page (`/fares`):**
+  - Displays public breakdown of active fare structure: Base fare (起程運價, e.g. 1.25km NT$85), distance increment (續程運價, e.g. per 200m NT$5), low-speed time increment (延滯計時, e.g. per 80s NT$5), and night surge (+20%, 23:00–06:00).
+
+### Section D: Trip Operation Records Retention (`[REQUIRED]`)
+
+- [ ] **Operational Records Table:** Implements `PA_P5Records` table matching `platform-p5.jsx`:
+  - Columns: 訂單 (Order ID), 車牌 (Plate), 預約時間 (Reserved), 上車時間 (Pickup), 下車時間 (Dropoff), 車資 (Fare), 保存至 (Retain Until).
+- [ ] **2-Year (730 Days) Retention Policy:**
+  - Compliance coverage indicator explicitly shows 100% retention coverage (`覆蓋率 100%`).
+  - Records include route trajectory summaries, payable/collected fare, toll fees, and applied fare version snapshot.
+  - Export functionality (`匯出`) available for audit compliance.
+
+### Section E: Access Control & RBAC (`[REQUIRED]`)
+
+- [ ] **RBAC Protection:** All back-office disclosure and fare management endpoints are RBAC-gated.
+- [ ] Read and write access to regulatory tables (`reg.*`, `regulatory_registry`, `fare_versions`) requires Platform Admin compliance privileges (`platform_admin` / `regulatory_reviewer`).
+
+### Section F: Design System Tokens & i18n (`[REQUIRED]`)
+
+- [ ] **Indigo Realm Tokens:** Visual styling strictly uses `@drts/ui-tokens` Indigo realm palette (`#4338CA`, `#EEF2FF`, `#6366F1`, etc.).
+  - No hardcoded generic hex colors (e.g. raw `#0000ff` or un-themed tailwind defaults).
+  - No 套皮 (reskinning with non-indigo canvas or default shadcn colors).
+- [ ] **Translation Parity (`t()`):** All UI strings in back-office components use `t()` translation helpers with complete parity between English (`en`) and Traditional Chinese (`zh`) in `translations.ts`.
+
+### Section G: Verification Command & Commit Evidence (`[REQUIRED]`)
+
+- [ ] **Automated Typecheck & Lint:**
+  - Run typecheck: `pnpm --filter @drts/platform-admin-web typecheck` (or repository root typecheck script).
+  - Lint clean: `pnpm lint` returns zero errors.
+- [ ] **Canonical Implementation Commit Trailers (for parent task `P5-UI-ADMIN-001`):**
+  - Local git commit subject must include `P5-UI-ADMIN-001`.
+  - Commit message must contain required trailers:
+    ```
+    LLM-Agent: Codex
+    Task-ID: P5-UI-ADMIN-001
+    Reviewer: Claude
+    ```
+  - Pushed to remote branch with `COMMIT_HASH`, `COMMIT_SUBJECT`, `PUSH_REMOTE`, and `PUSH_BRANCH` recorded in `ai-status.json`.
+  - `INTEGRATION_STATUS` updated appropriately (`branch_pushed`, `pr_open`, `merged_to_dev`, etc.).
+
+---
+
+## 5. Reviewer Evidence Anchors
+
+Reviewers (`Claude` for parent task, `Codex` for sidecar task) should audit the following code locations:
+
+- **Back-Office Disclosure Component:** `apps/platform-admin-web/app/` or `packages/ui-web/src/` disclosure review components.
+- **Correction Queue Component:** Queue table, filter pills, and action handlers (`view`, `return`, `approve`).
+- **Fare Management Component:** Public fare version table, status badges, activation scheduler, and preview panel (`/fares`).
+- **Design Canvas Matching:** Compare rendered components against `docs/05-ui/drts-design-canvas/platform-p5.jsx` (`PA_P5Disclosure`, `PA_P5Queue`, `PA_P5Fare`, `PA_P5Records`).
+- **Token System Integrity:** Verify import of `@drts/ui-tokens` Indigo realm tokens in component styles.
+- **i18n Parity:** Check `apps/platform-admin-web/lib/translations.ts` or corresponding translation dict for matching `en` and `zh` keys.
+
+---
+
+## 6. Sidecar Acceptance Checklist
+
+Self-verification for this sidecar artifact:
+
+- [x] Create support artifacts only (`support/sidecars/P5-UI-ADMIN-001/P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE.md`).
+- [x] Do not edit canonical product truth or primary app runtime code.
+- [x] Align dependency map with current machine truth (`P5-SUP-DRV-001` status `done`, commit `cb6f46f61738`).
+- [x] Translate design canvas (`platform-p5.jsx`) into explicit acceptance requirements.
+- [ ] Hand off the packet to assigned reviewer (`Codex`) via `scripts/ai-status.sh handoff`.
+
+---
+
+## 7. Reviewer Handoff Commands
+
+### Sidecar Approval Command (for `Codex`)
 
 ```bash
-AI_NAME=Gemini ./scripts/ai-status.sh handoff P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE Codex "P5-UI-ADMIN-001 acceptance packet ready at support/sidecars/P5-UI-ADMIN-001/P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE.md. Accurately documents baseline from parent commit 90a4889d3c54, upstream P5-SUP-DRV-001 status, Indigo realm design canvas compliance, RBAC gating, server masking security, and i18n evidence."
+AI_NAME=Codex ./scripts/ai-status.sh approve P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE \
+  "Acceptance packet verified and aligned with current machine truth: parent P5-UI-ADMIN-001 is status=review with owner=Codex reviewer=Claude; upstream P5-SUP-DRV-001 is done (commit cb6f46f61738); platform-p5.jsx specs (PA_P5Disclosure, PA_P5Queue, PA_P5Fare, PA_P5Records) translated into concrete acceptance gates; Indigo realm tokens and i18n parity pinned."
 ```
 
-### 7.2 Reviewer Approval (Codex)
-Reviewer (`Codex`) approves the packet:
+### Sidecar Reopen Command (if revision is required)
 
 ```bash
-AI_NAME=Codex ./scripts/ai-status.sh approve P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE "P5-UI-ADMIN-001 acceptance packet verified: support-only boundaries respected, design canvas and realm token compliance confirmed, evidence inventory accurate."
-```
-
-### 7.3 Owner Closeout (Gemini)
-Owner (`Gemini`) finalizes the approved sidecar:
-
-```bash
-export NO_COMMIT_REQUIRED=1
-AI_NAME=Gemini ./scripts/ai-status.sh done P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE "Finalized approved sidecar acceptance packet for P5-UI-ADMIN-001 at support/sidecars/P5-UI-ADMIN-001/P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE.md without mutating canonical truth."
+AI_NAME=Codex ./scripts/ai-status.sh reopen P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE \
+  "Packet needs revision: [specify machine-truth drift, missing acceptance gate, or template deviation]."
 ```
 
 ---
 
-## 8) Change Log
+## 8. Closeout Note
 
-- **2026-07-21T13:00:20Z** — Initial creation of `P5-UI-ADMIN-001-SIDECAR-ACCEPTANCE.md` by owner `Gemini`. Documented parent state snapshot (`codex/p5-ui-admin-001` @ `90a4889d3c54`), upstream dependency `P5-SUP-DRV-001` status (`done` @ `cb6f46f61738`), UI design contract compliance checklist, Mermaid dependency graph, code evidence inventory, reviewer audit hotspots, and handoff instructions.
+This sidecar artifact is support-only (`task_class=sidecar`, `mutates_canonical=false`). Per `AI_COLLABORATION_GUIDE.md` §5, sidecar closeout allows `NO_COMMIT_REQUIRED=1` at final `done` state.
+
+Parent task `P5-UI-ADMIN-001` is a canonical implementation task; when finalizing `P5-UI-ADMIN-001`, the parent owner MUST provide `COMMIT_HASH`, `COMMIT_SUBJECT`, `PUSH_REMOTE`, `PUSH_BRANCH`, and `INTEGRATION_STATUS` in `ai-status.json`.
