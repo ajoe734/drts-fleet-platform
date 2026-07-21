@@ -213,7 +213,10 @@ export function P5AdminConsole({ view }: { view: P5View }) {
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
   const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
-  const canReadRegistry = requiresAnyScope(scopeSet, ["reg.read", "reg.review"]);
+  const canReadRegistry = requiresAnyScope(scopeSet, [
+    "reg.read",
+    "reg.review",
+  ]);
   const canReviewRegistry = requiresAnyScope(scopeSet, ["reg.review"]);
   const [vehicle, setVehicle] =
     useState<VehiclePassengerDisclosureProfile>(fallbackVehicle);
@@ -388,7 +391,10 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                       v: maskedRegistrationDisplay,
                       mono: true,
                     },
-                    { k: t("p5.field.registrationArea"), v: driver.registrationArea ?? "—" },
+                    {
+                      k: t("p5.field.registrationArea"),
+                      v: driver.registrationArea ?? "—",
+                    },
                     {
                       k: t("p5.field.registrationUntil"),
                       v: driver.effectiveUntil ?? "—",
@@ -399,15 +405,25 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                       v: (
                         <CanvasPill
                           theme={theme}
-                          tone={driver.status === "verified_active" ? "success" : "warn"}
+                          tone={
+                            driver.status === "verified_active"
+                              ? "success"
+                              : "warn"
+                          }
                           dot
                         >
                           {driver.status}
                         </CanvasPill>
                       ),
                     },
-                    { k: t("p5.field.reviewer"), v: driver.verifiedByActorId ?? "—" },
-                    { k: t("p5.field.fullRegistrationStored"), v: t("p5.disclosure.backendOnly") },
+                    {
+                      k: t("p5.field.reviewer"),
+                      v: driver.verifiedByActorId ?? "—",
+                    },
+                    {
+                      k: t("p5.field.fullRegistrationStored"),
+                      v: t("p5.disclosure.backendOnly"),
+                    },
                   ]}
                 />
               )}
@@ -423,9 +439,17 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                 {vehicle.make} {vehicle.model}
               </div>
               <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
-                {vehicle.modelYear} 年出廠 · {vehicle.doorCount} 門 · {vehicle.color ?? "—"}
+                {vehicle.modelYear} 年出廠 · {vehicle.doorCount} 門 ·{" "}
+                {vehicle.color ?? "—"}
               </div>
-              <div style={{ ...monoStyle, fontSize: 22, fontWeight: 700, color: theme.text }}>
+              <div
+                style={{
+                  ...monoStyle,
+                  fontSize: 22,
+                  fontWeight: 700,
+                  color: theme.text,
+                }}
+              >
                 BKR-2208
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -434,7 +458,9 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                   {t("p5.disclosure.validBadge")}
                 </CanvasPill>
               </div>
-              <div style={{ ...monoStyle, color: theme.textMuted, fontSize: 11 }}>
+              <div
+                style={{ ...monoStyle, color: theme.textMuted, fontSize: 11 }}
+              >
                 {maskedRegistrationDisplay} ·{" "}
                 {t("p5.disclosure.validUntil", {
                   date: driver.effectiveUntil ?? "—",
@@ -442,7 +468,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
               </div>
               <CanvasBanner
                 theme={theme}
-                tone="neutral"
+                tone="info"
                 icon="lock"
                 body={t("p5.disclosure.maskedNote")}
               />
@@ -504,14 +530,16 @@ export function P5AdminConsole({ view }: { view: P5View }) {
       <div style={pageBodyStyle}>
         <CanvasPageHeader
           theme={theme}
-          title={t("p5.queue.title")}
-          subtitle={t("p5.queue.subtitle")}
-          meta={
-            <CanvasPill theme={theme} tone="warn">
-              {queueRows.filter((row) => row.status !== "approved").length}{" "}
-              {t("p5.queue.pending")}
-            </CanvasPill>
+          title={
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span>{t("p5.queue.title")}</span>
+              <CanvasPill theme={theme} tone="warn">
+                {queueRows.filter((row) => row.status !== "approved").length}{" "}
+                {t("p5.queue.pending")}
+              </CanvasPill>
+            </div>
           }
+          subtitle={t("p5.queue.subtitle")}
         />
         {!canReviewRegistry ? (
           <CanvasBanner
@@ -540,14 +568,25 @@ export function P5AdminConsole({ view }: { view: P5View }) {
         </CanvasPill>
       ),
     },
-    { h: t("p5.fares.col.effectiveFrom"), k: "effectiveFrom", w: 120, mono: true },
+    {
+      h: t("p5.fares.col.effectiveFrom"),
+      k: "effectiveFrom",
+      w: 120,
+      mono: true,
+    },
     { h: t("p5.fares.col.filingRef"), k: "filingRef", w: 220, mono: true },
     {
       h: "",
       w: 120,
       r: (row) => (
-        <CanvasBtn theme={theme} size="xs" variant={row.status === "filed" ? "primary" : "ghost"}>
-          {row.status === "filed" ? t("p5.fares.schedule") : t("p5.fares.preview")}
+        <CanvasBtn
+          theme={theme}
+          size="xs"
+          variant={row.status === "filed" ? "primary" : "ghost"}
+        >
+          {row.status === "filed"
+            ? t("p5.fares.schedule")
+            : t("p5.fares.preview")}
         </CanvasBtn>
       ),
     },
@@ -581,13 +620,17 @@ export function P5AdminConsole({ view }: { view: P5View }) {
               { k: t("p5.fares.startingFare"), v: "NT$ 85", mono: true },
               { k: t("p5.fares.distanceFare"), v: "NT$ 5 / 200m", mono: true },
               { k: t("p5.fares.waitingFare"), v: "NT$ 5 / 80s", mono: true },
-              { k: t("p5.fares.nightSurcharge"), v: "+20% · 23:00–06:00", mono: true },
+              {
+                k: t("p5.fares.nightSurcharge"),
+                v: "+20% · 23:00–06:00",
+                mono: true,
+              },
             ]}
           />
           <div style={{ marginTop: 10 }}>
             <CanvasBanner
               theme={theme}
-              tone="neutral"
+              tone="info"
               icon="info"
               body={t("p5.fares.previewNote")}
             />
