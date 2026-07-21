@@ -19,7 +19,7 @@ The goal of this packet is to allow the parent owner (`Codex`) to build `apps/pa
 
 ### Core Objectives for `P5-UI-PASSENGER-001`
 1. Scaffold `apps/passenger-web` (Next.js / App Router) supporting `/ride/[token]` and `/fares` / `/ride/[token]/fares`.
-2. Implement all 15 passenger surfaces defined in `docs/05-ui/drts-design-canvas/p5-screens.jsx` (`P5-01` through `P5-12` plus `P5-A03` and `P5-A04`).
+2. Implement all 14 passenger surfaces defined in `docs/05-ui/drts-design-canvas/p5-screens.jsx` (`P5-01` through `P5-12` plus `P5-A03` and `P5-A04`).
 3. Wire API client and SSE stream hooks (`/api/passenger-rides/{token}/disclosure`, `/api/passenger-rides/{token}/events`) with fixture fallback support (`[FIXTURE]` markers).
 4. Strictly adhere to statutory disclosure rules, forbidden vocabulary constraints, and realm color tokens (`@drts/ui-tokens`).
 
@@ -34,6 +34,8 @@ The goal of this packet is to allow the parent owner (`Codex`) to build `apps/pa
   - `DriverPublicRegistrationCredential` (§3.2)
   - `DriverRatingSummary` (§4.2) & `PassengerTripRatingRecord` (§4.1)
   - `PassengerRideAccessToken` & `PassengerRideSseEvent` (§8)
+- **Receipt Contract Anchor**:
+  - `ElectronicRideCertificate` currently lives in `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/source_specs/01_system_development_team_spec_20260720.md` §13 and is not yet exported from `packages/contracts/src/phase1-p5-s3-multi-taxi.ts`.
 - **UI Design Canvas**:
   - [`docs/05-ui/drts-design-canvas/p5-screens.jsx`](file:///home/edna/workspace/drts-fleet-platform/docs/05-ui/drts-design-canvas/p5-screens.jsx) (Screen definitions for P5-01..12 + A03/A04)
   - [`docs/05-ui/drts-design-canvas/p5-ui.jsx`](file:///home/edna/workspace/drts-fleet-platform/docs/05-ui/drts-design-canvas/p5-ui.jsx) (UI Kit components, icons, and layout parameters)
@@ -84,7 +86,7 @@ The passenger frontend interacts with the API through token-scoped endpoints. Ac
 | **Stream Real-time Events** | `GET` | `/api/passenger-rides/{token}/events` | Header: Accept: text/event-stream | Event Stream (`PassengerRideSseEvent`) |
 | **Cancel Ride** | `POST` | `/api/passenger-rides/{token}/cancel` | `{ reason?: string }` | `{ cancelled: boolean, cancelFeeMinor: number }` |
 | **Submit Rating** | `POST` | `/api/passenger-rides/{token}/ratings` | `{ score: 1..5, tags: string[], comment?: string }` | `PassengerTripRatingRecord` |
-| **Get Ride Receipt** | `GET` | `/api/passenger-rides/{token}/receipt` | Header: Bearer Token | `ElectronicRideCertificate` |
+| **Get Ride Receipt** | `GET` | `/api/passenger-rides/{token}/receipt` | Header: Bearer Token | `ElectronicRideCertificate` (source spec §13) |
 | **Contact Driver Session** | `POST` | `/api/passenger-rides/{token}/driver-contact-session` | Empty body | `{ status: "ready" \| "not_provisioned", virtualPhone?: string, fallbackPhone: "0800-090-000" }` |
 | **Get Public Fare Version** | `GET` | `/api/public/fares` | Query: `?status=active` | `MultiTaxiPublicFareVersion` |
 
@@ -106,7 +108,7 @@ The passenger frontend interacts with the API through token-scoped endpoints. Ac
 
 1. **Fixture vs. Live Mocking Strategy**:
    - *Gap*: The backend modules under `apps/api/src/modules/` are being implemented in parallel waves.
-   - *Mitigation*: Scaffold `apps/passenger-web/lib/fixtures/` containing predefined JSON mock responses matching all 15 screens. Add a header/URL flag (`?fixture=true`) or environment setting (`NEXT_PUBLIC_USE_FIXTURES=true`) so frontend developer testing can run cleanly offline, while seamlessly switching to `/api/passenger-rides/{token}/*` when live backend routes are present.
+   - *Mitigation*: Scaffold `apps/passenger-web/lib/fixtures/` containing predefined JSON mock responses matching all 14 screens. Add a header/URL flag (`?fixture=true`) or environment setting (`NEXT_PUBLIC_USE_FIXTURES=true`) so frontend developer testing can run cleanly offline, while seamlessly switching to `/api/passenger-rides/{token}/*` when live backend routes are present.
 2. **SSE Connection Loss & Polling Fallback**:
    - *Gap*: SSE streams can drop or encounter network degradation during active rides.
    - *Mitigation*: Implement automatic reconnection with exponential backoff. If SSE remains disconnected for > 15s, set `locationFreshness: "stale"` and display banner `"司機位置更新稍有延遲"`.
@@ -118,7 +120,7 @@ The passenger frontend interacts with the API through token-scoped endpoints. Ac
 
 ## 6. Screen-by-Screen Operator & Passenger Journey Map
 
-Below is the complete 15-screen mapping corresponding to `docs/05-ui/drts-design-canvas/p5-screens.jsx`:
+Below is the complete 14-screen mapping corresponding to `docs/05-ui/drts-design-canvas/p5-screens.jsx`:
 
 ```
  [ P5-01: Awaiting Assignment ] ────► [ P5-02 / P5-03: Driver En Route ] ────► [ P5-06: Driver Arrived ]
@@ -147,7 +149,7 @@ Below is the complete 15-screen mapping corresponding to `docs/05-ui/drts-design
 | **P5-07** | Trip In Progress | `/ride/[token]` | `P5Header("行程進行中")`, `P5Map`, `P5Eta("約 XX 抵達目的地")`, `P5Seatbelt`, `P5VehicleCard` | Passenger on board. Route and distance remaining displayed. |
 | **P5-08** | Trip Completed & Rating | `/ride/[token]` | `P5Header("行程已完成")`, `RatingCard(P5Stars)`, `TagPicker`, `SubmitRatingBtn` | Trip ended. Interactive 1-5 star selection and feedback tags. |
 | **P5-09** | Rating Submitted | `/ride/[token]` | `P5Header`, `CheckIconHero`, `ViewReceiptBtn`, `BackHomeBtn` | Rating submitted. Action buttons to view receipt or return. |
-| **P5-10** | Electronic Receipt | `/ride/[token]/receipt` | `P5Header("電子乘車證明")`, `ReceiptDetailsTable`, `DownloadPdfBtn`, `ShareBtn` | Statutory fare breakdown, distance, mileage, tax ID, legal complaint hotlines. |
+| **P5-10** | Electronic Receipt | `/ride/[token]/receipt` | `P5Header("電子乘車證明")`, `ReceiptDetailsTable`, `DownloadPdfBtn`, `ShareBtn` | Statutory fare breakdown, distance, mileage, and customer-service / complaint hotlines. |
 | **P5-11** | Disclosure Unavailable | `/ride/[token]` | `P5Header("正在安排車輛")`, `WarnHero("派車資訊尚未完整")`, `RefreshBtn`, `ContactSupportBtn` | Fail-closed state when disclosure criteria fail verification. |
 | **P5-12** | Contact Not Provisioned | `/ride/[token]` | `P5Header`, `P5Map`, `P5VehicleCard`, `ContactSupportCard("目前無法直接聯絡司機")` | Virtual phone session unavailable. Fallback to Customer Service `0800-090-000`. |
 | **P5-A04** | Fare Quote Anomaly | `/ride/[token]` | `P5Header("正在確認預約")`, `P5RouteFare(mode=anomaly)`, `RefreshQuoteBtn`, `SupportBtn` | Anomaly code (`quote_provider_unavailable`, etc.). Order pending confirmation. |
@@ -239,6 +241,6 @@ When implementing task `P5-UI-PASSENGER-001`, complete the following steps:
 - [x] Handoff packet created at `support/sidecars/P5-UI-PASSENGER-001/P5-UI-PASSENGER-001-SIDECAR-BFF-HANDOFF.md`
 - [x] No canonical truth files modified by this sidecar slice
 - [x] Comprehensive BFF query gap inventory & SSE events enumerated
-- [x] Complete 15-screen operator journey mapped with design canvas anchors
+- [x] Complete 14-screen operator journey mapped with design canvas anchors
 - [x] Statutory disclosure rules and forbidden vocabulary documented
 - [x] Packet handed off to reviewer `Codex` via `scripts/ai-status.sh handoff`
