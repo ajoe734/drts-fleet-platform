@@ -27,7 +27,6 @@ import {
   getOpsClient,
 } from "@/lib/api-client";
 import {
-import { useTranslation } from "@/lib/i18n";
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
@@ -37,6 +36,7 @@ import { useTranslation } from "@/lib/i18n";
   type SosPillTone,
   type SosQueueRow,
 } from "@/lib/sos-view-model";
+import { useTranslation } from "@/lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
