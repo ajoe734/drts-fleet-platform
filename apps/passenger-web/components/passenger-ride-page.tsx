@@ -167,11 +167,11 @@ function Card({
   dimmed,
   style,
 }: {
-  title?: string;
-  tag?: ReactNode;
+  title?: string | undefined;
+  tag?: ReactNode | undefined;
   children: ReactNode;
-  dimmed?: boolean;
-  style?: CSSProperties;
+  dimmed?: boolean | undefined;
+  style?: CSSProperties | undefined;
 }) {
   return (
     <section
@@ -259,13 +259,7 @@ function EmptyState({
   );
 }
 
-function ProgressCard({
-  title,
-  detail,
-}: {
-  title: string;
-  detail: string;
-}) {
+function ProgressCard({ title, detail }: { title: string; detail: string }) {
   return (
     <Card>
       <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
@@ -310,7 +304,9 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
         gap: 9,
         alignItems: "center",
         background: tone.bg,
-        border: bordered ? `1px solid ${tone.border}` : `1px solid ${tone.border}`,
+        border: bordered
+          ? `1px solid ${tone.border}`
+          : `1px solid ${tone.border}`,
         borderRadius: 12,
         padding: "10px 14px",
       }}
@@ -691,7 +687,9 @@ function VehicleCard({
                   }}
                 >
                   <span aria-hidden="true">★</span>
-                  <b style={{ fontSize: 15, color: passengerChrome.text }}>4.9</b>
+                  <b style={{ fontSize: 15, color: passengerChrome.text }}>
+                    4.9
+                  </b>
                 </span>
                 <span style={{ fontSize: 11, color: passengerChrome.muted }}>
                   328 則評價
@@ -1087,7 +1085,11 @@ function CompletedThanks() {
   );
 }
 
-function ContactUnavailableCard({ fixture }: { fixture: PassengerRideFixture }) {
+function ContactUnavailableCard({
+  fixture,
+}: {
+  fixture: PassengerRideFixture;
+}) {
   if (!fixture.contactSafetyNote) return null;
   return (
     <div
@@ -1231,7 +1233,9 @@ function buttonStyle(kind: "primary" | "secondary" | "ghost", danger = false) {
     ...base,
     background: passengerChrome.card,
     color: danger ? passengerChrome.danger.fg : passengerChrome.text,
-    borderColor: danger ? passengerChrome.danger.border : passengerChrome.border,
+    borderColor: danger
+      ? passengerChrome.danger.border
+      : passengerChrome.border,
   } satisfies CSSProperties;
 }
 
@@ -1308,7 +1312,10 @@ function Actions({
   if (fixture.screenId === "P5-09") {
     return (
       <ActionGroup>
-        <Link href={`/ride/${token}?screen=P5-10`} style={buttonStyle("secondary")}>
+        <Link
+          href={`/ride/${token}?screen=P5-10`}
+          style={buttonStyle("secondary")}
+        >
           查看電子乘車證明
         </Link>
         <Link href="/" style={buttonStyle("ghost")}>
