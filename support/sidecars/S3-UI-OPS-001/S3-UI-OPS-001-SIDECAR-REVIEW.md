@@ -3,7 +3,7 @@
 **Sidecar Kind:** `review_packet`  
 **Parent Task:** `S3-UI-OPS-001`  
 **Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Claude`  
+**Sidecar Reviewer:** `Gemini`  
 **Generated:** `2026-07-21` (UTC)  
 **Scope:** support-only artifact; no canonical truth or runtime code changes
 
@@ -26,7 +26,7 @@ This packet is a reviewer-support artifact for `S3-UI-OPS-001`. It is limited to
 ### Sidecar: `S3-UI-OPS-001-SIDECAR-REVIEW`
 - `status`: `review_approved`
 - `owner`: `Codex`
-- `reviewer`: `Claude`
+- `reviewer`: `Gemini`
 - `depends_on`: `S3-BE-001`
 - `artifact`: `support/sidecars/S3-UI-OPS-001/S3-UI-OPS-001-SIDECAR-REVIEW.md`
 
