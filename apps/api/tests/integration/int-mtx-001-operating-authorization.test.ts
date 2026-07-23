@@ -19,6 +19,7 @@ describe("MTX-AUTH-001 Operating Authorization Controller & Service Integration"
       undefined,
       undefined,
       auditNotificationService,
+      regulatoryRegistryService,
     );
 
     const controller = new MultiTaxiController(multiTaxiService);
@@ -112,28 +113,177 @@ describe("MTX-AUTH-001 Operating Authorization Controller & Service Integration"
     expect(actionNames).toContain("suspend_operating_authorization");
   });
 
-  it("Hard Gate validation on RegulatoryRegistryService and MultiTaxiService", () => {
-    const { regulatoryRegistryService } = setupIntegrationHarness();
+  it("Hard Gate validation on RegulatoryRegistryService reads live state from MultiTaxiService", () => {
+    const { controller, regulatoryRegistryService } = setupIntegrationHarness();
 
     // Default demo authorization passes
-    const validated =
+    const validatedDemo =
       regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
         "auth-demo-001",
         "veh-demo-001",
         "TAIPEI-MAIN",
         "fare-v1",
       );
-    expect(validated.authorizationId).toBe("auth-demo-001");
+    expect(validatedDemo.authorizationId).toBe("auth-demo-001");
 
     // Missing authorization ID throws P5_OPERATING_AUTHORIZATION_MISSING
-    try {
+    expect(() =>
       regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
         null,
         "veh-demo-001",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "P5_OPERATING_AUTHORIZATION_MISSING",
+          }),
+        }),
+      }),
+    );
+
+    // 1. Create a new draft authorization via MultiTaxiController
+    const createRes = controller.createAuthorization({
+      operatorId: "op-live-001",
+      authorityCode: "AUTH-LIVE-001",
+      businessPlanVersion: "v1.0",
+      serviceAreaCodes: ["TAIPEI-NORTH"],
+      activeFareVersionId: "fare-live-v1",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+    });
+    const authId = createRes.data.authorizationId;
+
+    // Validation fails because authorization is still in draft state
+    expect(() =>
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+        authId,
+        "veh-live-001",
+        "TAIPEI-NORTH",
+        "fare-live-v1",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "P5_OPERATING_AUTHORIZATION_INACTIVE",
+          }),
+        }),
+      }),
+    );
+
+    // 2. Activate authorization
+    controller.activateAuthorization(authId);
+
+    // Validation fails because vehicle membership has not been added yet
+    expect(() =>
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+        authId,
+        "veh-live-001",
+        "TAIPEI-NORTH",
+        "fare-live-v1",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "P5_VEHICLE_NOT_IN_AUTHORIZATION",
+          }),
+        }),
+      }),
+    );
+
+    // 3. Add vehicle membership
+    controller.addAuthorizedVehicle(authId, {
+      vehicleId: "veh-live-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+    });
+
+    // Validation now PASSES for newly created & activated authorization + vehicle!
+    const validatedNew =
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+        authId,
+        "veh-live-001",
+        "TAIPEI-NORTH",
+        "fare-live-v1",
       );
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      expect(err.response?.error?.code).toBe("P5_OPERATING_AUTHORIZATION_MISSING");
-    }
+    expect(validatedNew.authorizationId).toBe(authId);
+
+    // 4. Mismatched service area throws P5_AUTHORIZATION_SERVICE_AREA_MISMATCH
+    expect(() =>
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+        authId,
+        "veh-live-001",
+        "TAIPEI-SOUTH",
+        "fare-live-v1",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "P5_AUTHORIZATION_SERVICE_AREA_MISMATCH",
+          }),
+        }),
+      }),
+    );
+
+    // 5. Inactive/mismatched fare version throws P5_FARE_VERSION_NOT_ACTIVE
+    expect(() =>
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+        authId,
+        "veh-live-001",
+        "TAIPEI-NORTH",
+        "fare-wrong",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "P5_FARE_VERSION_NOT_ACTIVE",
+          }),
+        }),
+      }),
+    );
+
+    // 6. Removing authorized vehicle causes validation to fail with P5_VEHICLE_NOT_IN_AUTHORIZATION
+    controller.removeAuthorizedVehicle(authId, "veh-live-001");
+    expect(() =>
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+        authId,
+        "veh-live-001",
+        "TAIPEI-NORTH",
+        "fare-live-v1",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "P5_VEHICLE_NOT_IN_AUTHORIZATION",
+          }),
+        }),
+      }),
+    );
+
+    // 7. Suspending authorization causes validation to fail with P5_OPERATING_AUTHORIZATION_INACTIVE
+    controller.addAuthorizedVehicle(authId, {
+      vehicleId: "veh-live-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+    });
+    controller.suspendAuthorization(authId);
+    expect(() =>
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+        authId,
+        "veh-live-001",
+        "TAIPEI-NORTH",
+        "fare-live-v1",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "P5_OPERATING_AUTHORIZATION_INACTIVE",
+          }),
+        }),
+      }),
+    );
   });
 });

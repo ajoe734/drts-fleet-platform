@@ -2,10 +2,12 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import {
   HttpStatus,
+  Inject,
   Injectable,
   type MessageEvent,
   OnModuleInit,
   Optional,
+  forwardRef,
 } from "@nestjs/common";
 import {
   distinctUntilChanged,
@@ -43,6 +45,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
+import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ServiceProductService } from "../service-product/service-product.service";
 import { MultiTaxiRepository } from "./multi-taxi.repository";
 
@@ -65,7 +68,31 @@ export class MultiTaxiService implements OnModuleInit {
     @Optional() private readonly serviceProductService?: ServiceProductService,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
-  ) {}
+    @Optional()
+    @Inject(forwardRef(() => RegulatoryRegistryService))
+    private readonly regulatoryRegistryService?: RegulatoryRegistryService,
+  ) {
+    if (this.regulatoryRegistryService) {
+      this.regulatoryRegistryService.setMultiTaxiService(this);
+    }
+  }
+
+  getAuthorizationRecord(
+    authorizationId: string,
+  ): MultiTaxiOperatingAuthorizationRecord | undefined {
+    const record = this.authorizations.find(
+      (r) => r.authorizationId === authorizationId,
+    );
+    return record ? this.cloneAuthorization(record) : undefined;
+  }
+
+  listAuthorizedVehicleRecords(
+    authorizationId: string,
+  ): MultiTaxiAuthorizedVehicleRecord[] {
+    return this.vehicles
+      .filter((vehicle) => vehicle.authorizationId === authorizationId)
+      .map((vehicle) => ({ ...vehicle }));
+  }
 
   async onModuleInit() {
     if (!this.repository) {

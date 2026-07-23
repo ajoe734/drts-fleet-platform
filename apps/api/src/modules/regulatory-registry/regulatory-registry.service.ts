@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import type { MultiTaxiService } from "../multi-taxi/multi-taxi.service";
 
 import type {
   ActivateInsurancePolicyCommand,
@@ -529,6 +530,12 @@ export class RegulatoryRegistryService implements OnModuleInit {
   private disclosureProfiles: VehiclePassengerDisclosureProfile[] = [];
 
   private driverCredentials: DriverPublicRegistrationCredential[] = [];
+
+  private multiTaxiService?: MultiTaxiService;
+
+  public setMultiTaxiService(service: MultiTaxiService) {
+    this.multiTaxiService = service;
+  }
 
   constructor(
     private readonly opsDispatchEventsService: OpsDispatchEventsService,
@@ -3310,9 +3317,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
         "An operating authorization ID is required before multi-taxi assignment.",
       );
     }
-    const authorization = this.multiTaxiOperatingAuthorizations.find(
-      (r) => r.authorizationId === authorizationId,
-    );
+    const authorization =
+      this.multiTaxiService?.getAuthorizationRecord(authorizationId) ??
+      this.multiTaxiOperatingAuthorizations.find(
+        (r) => r.authorizationId === authorizationId,
+      );
     const now = Date.now();
     if (
       !authorization ||
@@ -3329,7 +3338,16 @@ export class RegulatoryRegistryService implements OnModuleInit {
       );
     }
 
-    const membership = this.multiTaxiAuthorizedVehicles.find(
+    const isFromLiveService = Boolean(
+      this.multiTaxiService?.getAuthorizationRecord(authorizationId),
+    );
+    const vehicles = isFromLiveService
+      ? (this.multiTaxiService?.listAuthorizedVehicleRecords(authorizationId) ?? [])
+      : this.multiTaxiAuthorizedVehicles.filter(
+          (v) => v.authorizationId === authorizationId,
+        );
+
+    const membership = vehicles.find(
       (v) =>
         v.authorizationId === authorizationId &&
         v.vehicleId === vehicleId &&
