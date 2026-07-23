@@ -28,5 +28,6 @@ Task: Fleet C queue semantics (runtime)
 
 - Defined `ProfileQueuePolicyMap` and `DEFAULT_PROFILE_QUEUE_POLICY_MAP` contract definitions in `packages/contracts/src/phase1-p5-s3-multi-taxi.ts`.
 - Implemented `setProfileQueuePolicy` and `getProfileQueuePolicy` in `OwnedMobilityService` for independent profile-queue configuration.
-- Enforced configurable queue policies in `assertQueuePolicy` for non-multi-taxi profiles without loosening `multi_taxi_direct`'s virtual-matching restriction.
-- Added comprehensive unit tests in `owned-mobility.service.test.ts`.
+- Enforced configurable queue policies in `assertQueuePolicy` for non-multi-taxi profile check-ins without loosening `multi_taxi_direct`'s virtual-matching restriction.
+- Scoped queue policy assertions strictly to `queueCheckIn` so existing checked-in vehicles can complete `queueCheckOut` even if profile policies are subsequently changed.
+- Added comprehensive unit tests in `owned-mobility.service.test.ts` covering both check-in enforcement and checkout-after-policy-change.

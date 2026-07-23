@@ -3547,7 +3547,6 @@ export class OwnedMobilityService implements OnModuleInit {
     };
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
-    this.assertQueuePolicy(context);
 
     const queueEntry = this.queueEntries.find(
       (entry) =>

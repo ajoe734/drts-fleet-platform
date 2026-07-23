@@ -4368,6 +4368,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "taxi_stand",
     ]);
 
+    // Check-in ordinary_taxi under virtual_matching before policy change
+    const priorVirtualCheckIn = service.queueCheckIn({
+      vehicleId: "veh-demo-002",
+      siteId: "virtual-site-02",
+      queueMode: "virtual_matching",
+    });
+    expect(priorVirtualCheckIn.status).toBe("checked_in");
+
     // Reconfigure ordinary_taxi to disallow virtual_matching
     service.setProfileQueuePolicy("ordinary_taxi", ["physical_rank", "taxi_stand"]);
     expect(service.getProfileQueuePolicy("ordinary_taxi")).toEqual([
@@ -4375,7 +4383,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "taxi_stand",
     ]);
 
-    // Check-in for ordinary_taxi with virtual_matching should now be denied
+    // New check-in for ordinary_taxi with virtual_matching should now be denied
     expect(() =>
       service.queueCheckIn({
         vehicleId: "veh-demo-001",
@@ -4383,6 +4391,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         queueMode: "virtual_matching",
       }),
     ).toThrowError(ApiRequestError);
+
+    // Existing entry checked in under virtual_matching can still check out successfully
+    const virtualCheckOut = service.queueCheckOut({
+      vehicleId: "veh-demo-002",
+      siteId: "virtual-site-02",
+      queueMode: "virtual_matching",
+    });
+    expect(virtualCheckOut.status).toBe("checked_out");
 
     // Check-in for ordinary_taxi with physical_rank should still work
     const ordinaryCheckIn = service.queueCheckIn({

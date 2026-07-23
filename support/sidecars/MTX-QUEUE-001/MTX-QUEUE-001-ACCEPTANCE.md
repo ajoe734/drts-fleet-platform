@@ -13,7 +13,7 @@ Reviewer: Copilot
 | 1 | `multi_taxi_direct` + `virtual_matching` passes | `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` | `verified` | Unit test in `owned-mobility.service.test.ts` passes (`queueCheckInMultiTaxi` returns `virtual_matching`) |
 | 2 | `physical_rank` denied | `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` | `verified` | `assertQueuePolicy` throws `MULTI_TAXI_QUEUE_MODE_FORBIDDEN` |
 | 3 | `taxi_stand` denied | `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` | `verified` | `assertQueuePolicy` throws `MULTI_TAXI_QUEUE_MODE_FORBIDDEN` |
-| 4 | `ordinary_taxi` policy independently configurable | `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` | `verified` | `setProfileQueuePolicy` / `getProfileQueuePolicy` configures ordinary_taxi queue modes independently |
+| 4 | `ordinary_taxi` policy independently configurable | `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` | `verified` | `setProfileQueuePolicy` / `getProfileQueuePolicy` configures ordinary_taxi queue modes independently; check-in enforces policy while check-out remains allowed for existing entries after policy change |
 
 ## Contract Updates
 
