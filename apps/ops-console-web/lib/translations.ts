@@ -1564,12 +1564,15 @@ const en = {
   "dispatch.queue.serviceTypeLabel": "Service Type",
   "dispatch.queue.acquisitionModeLabel": "Matching Mode",
   "dispatch.queue.multiTaxiDirectService": "Multi-taxi (Platform Reserved)",
-  "dispatch.queue.platformReservedAcquisition": "Platform Reserved (Virtual Matching)",
+  "dispatch.queue.platformReservedAcquisition":
+    "Platform Reserved (Virtual Matching)",
   "dispatch.queue.virtualMatchingText": "Virtual Matching",
   "dispatch.queue.physicalRankText": "Physical Rank",
   "dispatch.queue.taxiStandText": "Taxi Stand",
-  "dispatch.denial.multiTaxiRefusalCopy": "此訂單為多元化計程車平台預約，不能進入實體排班或招呼站候客。",
-  "dispatch.denial.statutoryRefusalTitle": "Statutory Refusal State (Multi-Taxi)",
+  "dispatch.denial.multiTaxiRefusalCopy":
+    "This order is a multi-taxi platform reservation and cannot enter physical ranks or taxi stands.",
+  "dispatch.denial.statutoryRefusalTitle":
+    "Statutory Refusal State (Multi-Taxi)",
   "dispatch.denial.noOverrideAllowed": "No override or force check-in allowed",
   "dispatch.empty.noData.title": "No work items yet",
   "dispatch.empty.noData.description":
@@ -4474,9 +4477,11 @@ const en = {
   "sos.queue.pendingCount": "{count} pending",
   "sos.queue.filter": "Filter",
   "sos.queue.systemErrorTitle": "System error",
-  "sos.alert.banner": "SOS emergency report · major event pending acknowledgement",
+  "sos.alert.banner":
+    "SOS emergency report · major event pending acknowledgement",
   "sos.alert.waited": "Waited",
-  "sos.alert.persistentNote": "This alert will not dismiss automatically until a duty operator acknowledges the major event.",
+  "sos.alert.persistentNote":
+    "This alert will not dismiss automatically until a duty operator acknowledges the major event.",
   "sos.action.acknowledge": "Acknowledge",
   "sos.action.openDetail": "Open detail",
   "sos.action.investigate": "Start investigation",
@@ -4499,9 +4504,11 @@ const en = {
   "sos.detail.summaryTitle": "Summary",
   "sos.detail.contextTitle": "Context",
   "sos.detail.supplementTitle": "Supplementary info",
-  "sos.detail.noSupplement": "The driver has not added a written description yet; duty staff can still act on the existing incident context.",
+  "sos.detail.noSupplement":
+    "The driver has not added a written description yet; duty staff can still act on the existing incident context.",
   "sos.detail.attachmentsTitle": "Attachments",
-  "sos.detail.noAttachments": "No photo or voice attachment read model has been received yet. Once the backend supplies attachment paths, this section can switch to a live attachment list.",
+  "sos.detail.noAttachments":
+    "No photo or voice attachment read model has been received yet. Once the backend supplies attachment paths, this section can switch to a live attachment list.",
   "sos.detail.linkedIncidentTitle": "Linked case",
 };
 
@@ -8345,7 +8352,8 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.queue.virtualMatchingText": "虛擬媒合",
   "dispatch.queue.physicalRankText": "實體排班",
   "dispatch.queue.taxiStandText": "招呼站候客",
-  "dispatch.denial.multiTaxiRefusalCopy": "此訂單為多元化計程車平台預約，不能進入實體排班或招呼站候客。",
+  "dispatch.denial.multiTaxiRefusalCopy":
+    "此訂單為多元化計程車平台預約，不能進入實體排班或招呼站候客。",
   "dispatch.denial.statutoryRefusalTitle": "多元化計程車法定拒絕態",
   "dispatch.denial.noOverrideAllowed": "依法禁止人工 Override 或強行排班",
   "opsCode.accept_pending": "等待平台接受",
@@ -8711,7 +8719,8 @@ const zh: Record<keyof typeof en, string> = {
   "sos.queue.systemErrorTitle": "系統錯誤",
   "sos.alert.banner": "SOS 緊急通報 · 重大事件待確認",
   "sos.alert.waited": "已等待",
-  "sos.alert.persistentNote": "此警示不會自動消失，直到重大事件被值班人員確認。",
+  "sos.alert.persistentNote":
+    "此警示不會自動消失，直到重大事件被值班人員確認。",
   "sos.action.acknowledge": "確認接手",
   "sos.action.openDetail": "開啟詳情",
   "sos.action.investigate": "開始調查",
@@ -8734,9 +8743,11 @@ const zh: Record<keyof typeof en, string> = {
   "sos.detail.summaryTitle": "摘要",
   "sos.detail.contextTitle": "上下文",
   "sos.detail.supplementTitle": "補充資訊",
-  "sos.detail.noSupplement": "駕駛尚未補充文字說明；值班端仍可依現有 incident context 先行處置。",
+  "sos.detail.noSupplement":
+    "駕駛尚未補充文字說明；值班端仍可依現有 incident context 先行處置。",
   "sos.detail.attachmentsTitle": "附件",
-  "sos.detail.noAttachments": "目前尚未收到照片或語音附件 read model。若後端後續補上附件路徑，這個區塊可直接改成 live attachment list。",
+  "sos.detail.noAttachments":
+    "目前尚未收到照片或語音附件 read model。若後端後續補上附件路徑，這個區塊可直接改成 live attachment list。",
   "sos.detail.linkedIncidentTitle": "關聯案件",
 };
 
