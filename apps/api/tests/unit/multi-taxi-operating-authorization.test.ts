@@ -263,7 +263,19 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       }),
     );
 
-    // 2. Activate authorization
+    // 2. Update authorization
+    service.updateAuthorization(auth.authorizationId, {
+      authorityCode: "AUTH-AUDIT-001-UPDATED",
+    });
+    expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "update_operating_authorization",
+        resourceType: "multi_taxi_operating_authorization",
+        resourceId: auth.authorizationId,
+      }),
+    );
+
+    // 3. Activate authorization
     service.activateAuthorization(auth.authorizationId);
     expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -272,7 +284,7 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       }),
     );
 
-    // 3. Add authorized vehicle
+    // 4. Add authorized vehicle
     const vehicle = service.addAuthorizedVehicle(auth.authorizationId, {
       vehicleId: "veh-audit-1",
       effectiveFrom: "2026-01-01T00:00:00.000Z",
@@ -285,7 +297,7 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       }),
     );
 
-    // 4. Suspend authorization
+    // 5. Suspend authorization
     service.suspendAuthorization(auth.authorizationId);
     expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -294,7 +306,7 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       }),
     );
 
-    // 5. Remove authorized vehicle
+    // 6. Remove authorized vehicle
     service.removeAuthorizedVehicle(auth.authorizationId, "veh-audit-1");
     expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -303,7 +315,7 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       }),
     );
 
-    // 6. Expire authorization
+    // 7. Expire authorization
     service.expireAuthorization(auth.authorizationId);
     expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -312,7 +324,7 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       }),
     );
 
-    // 7. Revoke authorization
+    // 8. Revoke authorization
     service.revokeAuthorization(auth.authorizationId);
     expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
