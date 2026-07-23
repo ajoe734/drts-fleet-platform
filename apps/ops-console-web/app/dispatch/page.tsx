@@ -25,6 +25,7 @@ import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
+import { resolveQueueSemantics } from "@/lib/queue-semantics";
 import type { Locale } from "@/lib/translations";
 import { t } from "@/lib/translations";
 import {
@@ -1338,7 +1339,22 @@ function buildActionContexts(
   selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ): BoardActionContext[] {
-  return normalizeActions(record).map((action) => {
+  const semantics = resolveQueueSemantics(record, locale);
+  return normalizeActions(record)
+    .filter((action) => {
+      if (semantics.isStatutoryRefusal) {
+        if (
+          action.action === "request_override" ||
+          action.action === "approve_override" ||
+          action.action === "force_checkin" ||
+          action.action === "fare_override"
+        ) {
+          return false;
+        }
+      }
+      return true;
+    })
+    .map((action) => {
     const href = buildActionHref(
       board,
       record,
@@ -3553,6 +3569,7 @@ export default async function DispatchPage({
       const candidates = job
         ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
         : [];
+      const queueSemantics = resolveQueueSemantics(order, locale);
       return {
         actions: renderInlineActionPills(
           buildActionContexts(
@@ -3597,6 +3614,34 @@ export default async function DispatchPage({
         ),
         window: formatWindow(order, locale),
         service: formatDispatchCode(locale, getServiceProductValue(order)),
+        queueModeCell: (
+          <div style={{ display: "grid", gap: 2 }}>
+            <Pill
+              theme={theme}
+              tone={
+                queueSemantics.isStatutoryRefusal
+                  ? "danger"
+                  : queueSemantics.queueMode === "virtual_matching"
+                    ? "accent"
+                    : "info"
+              }
+              dot
+            >
+              {queueSemantics.queueModeText}
+            </Pill>
+            {queueSemantics.isStatutoryRefusal ? (
+              <span
+                style={{
+                  fontSize: 10.5,
+                  color: theme.danger,
+                  fontWeight: 700,
+                }}
+              >
+                {queueSemantics.refusalCopy}
+              </span>
+            ) : null}
+          </div>
+        ),
         eta:
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== null &&
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== undefined
@@ -3643,6 +3688,11 @@ export default async function DispatchPage({
         k: "service",
         w: 130,
         mono: true,
+      },
+      {
+        h: t("dispatch.table.ready.queueMode", locale),
+        k: "queueModeCell",
+        w: 170,
       },
       {
         h: t("dispatch.table.shared.eta", locale),
@@ -4280,6 +4330,31 @@ export default async function DispatchPage({
                               {`${getTenantLabel(selectedRecord)} · ${getApprovalLabel(selectedRecord.approvalState, locale)} · ${getEligibilityReasonLabel(selectedRecord, locale)}`}
                             </span>
                           </div>
+                        )}
+                        {"mirrorOrderId" in selectedRecord ? null : (
+                          (() => {
+                            const sem = resolveQueueSemantics(selectedRecord, locale);
+                            return (
+                              <div style={selectedMetaCellStyle}>
+                                <span style={{ fontSize: 11, color: theme.textDim }}>
+                                  {t("dispatch.queue.overviewTitle", locale)}
+                                </span>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                  <Pill theme={theme} tone={sem.isStatutoryRefusal ? "danger" : "accent"} dot>
+                                    {sem.queueModeText}
+                                  </Pill>
+                                  <span style={{ fontSize: 11, color: theme.textMuted }}>
+                                    {`${sem.serviceTypeText} · ${sem.matchingModeText} · ${sem.siteDisplay}`}
+                                  </span>
+                                </div>
+                                {sem.isStatutoryRefusal ? (
+                                  <span style={{ fontSize: 11, color: theme.danger, fontWeight: 700, marginTop: 2 }}>
+                                    {sem.refusalCopy} ({t("dispatch.denial.noOverrideAllowed", locale)})
+                                  </span>
+                                ) : null}
+                              </div>
+                            );
+                          })()
                         )}
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
