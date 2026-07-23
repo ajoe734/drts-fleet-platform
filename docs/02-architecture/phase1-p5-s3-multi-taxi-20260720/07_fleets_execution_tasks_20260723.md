@@ -21,7 +21,8 @@ Fleets must use these sources in this order:
 4. `04_standard_taxi_vs_multi_taxi_dispatch_compliance_review_20260721.md`
 5. `05_external_review_reconciliation_20260722.md`
 6. `06_multi_taxi_runtime_execution_register_20260723.md`
-7. This execution packet
+7. `08_multi_taxi_operations_ui_design_requirements_20260723.md`
+8. This execution packet
 
 The system architecture is frozen for execution:
 
@@ -86,6 +87,9 @@ Implementation.
 
 Existing canvases are visual source and must be reused. Missing operational
 screens must not be invented independently by implementation Fleets.
+The screen inventory, field definitions, state matrices, RBAC behavior, copy,
+prototype flows, and Design Definition of Done are specified in
+`08_multi_taxi_operations_ui_design_requirements_20260723.md`.
 
 ## Wave 0: Design Fleet Tasks
 
@@ -93,6 +97,8 @@ screens must not be invented independently by implementation Fleets.
 
 **Owner:** Product Design / Platform Admin Design  
 **Depends on:** approved system spec  
+**Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
+
 **Blocks:** `MTX-AUTH-UI-001`
 
 Design:
@@ -112,6 +118,8 @@ a11y annotations, prototype flow, and implementation handoff are all present.
 
 **Owner:** Product Design / Ops Console Design  
 **Depends on:** approved queue decision  
+**Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
+
 **Blocks:** `MTX-QUEUE-003`
 
 Design:
@@ -129,6 +137,8 @@ reading raw reason codes.
 
 **Owner:** Product Design / Platform Admin Design  
 **Depends on:** rating authority contract  
+**Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
+
 **Blocks:** `P5-RATE-003`
 
 Design:
@@ -146,6 +156,8 @@ non-happy states are specified.
 
 **Owner:** Product Design / Platform Admin and Passenger Design  
 **Depends on:** fare/payment/retention system contracts  
+**Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
+
 **Blocks:** operational UI portions of `P5-FARE-ANOM-001`, `P5-PAY-001`,
 `P5-RCT-001`, and `P5-RET-003`
 

@@ -75,6 +75,12 @@
       "role": "Fleets execution packet",
       "reviewedCommit": "b8f1f56b20a77c8abeabf0ac3c51b8443d5616af",
       "status": "current"
+    },
+    {
+      "path": "08_multi_taxi_operations_ui_design_requirements_20260723.md",
+      "role": "operations UI design requirements",
+      "reviewedCommit": "b8f1f56b20a77c8abeabf0ac3c51b8443d5616af",
+      "status": "ready_for_design"
     }
   ],
   "deliverables": [
@@ -85,6 +91,7 @@
     "05_external_review_reconciliation_20260722.md",
     "06_multi_taxi_runtime_execution_register_20260723.md",
     "07_fleets_execution_tasks_20260723.md",
+    "08_multi_taxi_operations_ui_design_requirements_20260723.md",
     "manifest.json"
   ],
   "mergedMigrations": [
@@ -122,7 +129,8 @@
       "fare_payment_receipt_retention_operations",
       "figma_accessibility_screenshot_design_qa_handoff"
     ],
-    "executionPacket": "07_fleets_execution_tasks_20260723.md"
+    "executionPacket": "07_fleets_execution_tasks_20260723.md",
+    "requirementsDocument": "08_multi_taxi_operations_ui_design_requirements_20260723.md"
   },
   "implementationStatus": {
     "landed": [
