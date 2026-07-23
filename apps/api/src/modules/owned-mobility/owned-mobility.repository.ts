@@ -7,7 +7,9 @@ import type {
   DispatchJobRecord,
   DispatchTraceLogRecord,
   DriverTaskRecord,
+  ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
+  PassengerDispatchDisclosureSnapshot,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -30,6 +32,8 @@ type OwnedMobilityState = {
   dispatchAssignments: DispatchAssignmentRecord[];
   driverTasks: DriverTaskRecord[];
   dispatchTraceLogs: DispatchTraceLogRecord[];
+  passengerDisclosureSnapshots: PassengerDispatchDisclosureSnapshot[];
+  consumerNotificationOutbox: ConsumerNotificationOutboxRecord[];
 };
 
 type PersistOwnedMobilityChanges = {
@@ -39,6 +43,8 @@ type PersistOwnedMobilityChanges = {
   dispatchAssignments?: readonly DispatchAssignmentRecord[];
   driverTasks?: readonly DriverTaskRecord[];
   dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
+  passengerDisclosureSnapshots?: readonly PassengerDispatchDisclosureSnapshot[];
+  consumerNotificationOutbox?: readonly ConsumerNotificationOutboxRecord[];
 };
 
 @Injectable()
@@ -60,6 +66,8 @@ export class OwnedMobilityRepository {
         dispatchAssignments: [],
         driverTasks: [],
         dispatchTraceLogs: [],
+        passengerDisclosureSnapshots: [],
+        consumerNotificationOutbox: [],
       };
     }
 
@@ -70,6 +78,8 @@ export class OwnedMobilityRepository {
       dispatchAssignmentsResult,
       driverTasksResult,
       dispatchTraceLogsResult,
+      passengerDisclosureSnapshotsResult,
+      consumerNotificationOutboxResult,
     ] = await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `
@@ -113,6 +123,32 @@ export class OwnedMobilityRepository {
           ORDER BY created_at DESC
         `,
       ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM ops.passenger_dispatch_disclosure_snapshots
+          ORDER BY assignment_version DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT jsonb_build_object(
+            'outboxId', outbox_id,
+            'orderId', order_id,
+            'passengerSubjectRef', passenger_subject_ref,
+            'eventType', event_type,
+            'assignmentVersion', assignment_version,
+            'payload', payload,
+            'status', status,
+            'attemptCount', attempt_count,
+            'nextAttemptAt', next_attempt_at,
+            'createdAt', created_at,
+            'deliveredAt', delivered_at
+          ) AS record
+          FROM ops.consumer_notification_outbox
+          ORDER BY created_at DESC
+        `,
+      ),
     ]);
 
     return {
@@ -151,6 +187,20 @@ export class OwnedMobilityRepository {
           row.record,
           "ops.phase1_dispatch_trace_logs",
         ),
+      ),
+      passengerDisclosureSnapshots: passengerDisclosureSnapshotsResult.rows.map(
+        (row) =>
+          this.parseRecord<PassengerDispatchDisclosureSnapshot>(
+            row.record,
+            "ops.passenger_dispatch_disclosure_snapshots",
+          ),
+      ),
+      consumerNotificationOutbox: consumerNotificationOutboxResult.rows.map(
+        (row) =>
+          this.parseRecord<ConsumerNotificationOutboxRecord>(
+            row.record,
+            "ops.consumer_notification_outbox",
+          ),
       ),
     };
   }
@@ -197,6 +247,28 @@ export class OwnedMobilityRepository {
     changes: PersistOwnedMobilityChanges,
   ) {
     await this.persistChangesWithExecutor(executor, changes);
+  }
+
+  async isActiveMultiTaxiAuthorizedVehicle(
+    executor: OwnedMobilityQueryExecutor,
+    authorizationId: string,
+    vehicleId: string,
+  ) {
+    const result = await executor.query<{ allowed: boolean }>(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM reg.multi_taxi_authorized_vehicles
+          WHERE authorization_id = $1
+            AND vehicle_id = $2
+            AND status = 'active'
+            AND effective_from <= now()
+            AND (effective_until IS NULL OR effective_until > now())
+        ) AS allowed
+      `,
+      [authorizationId, vehicleId],
+    );
+    return result.rows[0]?.allowed === true;
   }
 
   private async persistChangesWithExecutor(
@@ -438,6 +510,86 @@ export class OwnedMobilityRepository {
             traceLog.eventType,
             traceLog.createdAt,
             JSON.stringify(traceLog),
+          ],
+        ),
+      );
+    }
+
+    for (const snapshot of changes.passengerDisclosureSnapshots ?? []) {
+      writes.push(
+        executor.query(
+          `
+            WITH superseded AS (
+              UPDATE ops.passenger_dispatch_disclosure_snapshots
+              SET
+                superseded_at = $7,
+                record = jsonb_set(
+                  record,
+                  '{supersededAt}',
+                  to_jsonb($7::text),
+                  true
+                )
+              WHERE order_id = $2
+                AND superseded_at IS NULL
+                AND assignment_version < $5
+            )
+            INSERT INTO ops.passenger_dispatch_disclosure_snapshots (
+              snapshot_id,
+              order_id,
+              dispatch_job_id,
+              assignment_id,
+              assignment_version,
+              record,
+              created_at,
+              superseded_at
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+            ON CONFLICT (assignment_id, assignment_version) DO NOTHING
+          `,
+          [
+            snapshot.snapshotId,
+            snapshot.orderId,
+            snapshot.dispatchJobId,
+            snapshot.assignmentId,
+            snapshot.assignmentVersion,
+            JSON.stringify(snapshot),
+            snapshot.createdAt,
+            snapshot.supersededAt,
+          ],
+        ),
+      );
+    }
+
+    for (const outbox of changes.consumerNotificationOutbox ?? []) {
+      writes.push(
+        executor.query(
+          `
+            INSERT INTO ops.consumer_notification_outbox (
+              outbox_id,
+              order_id,
+              passenger_subject_ref,
+              event_type,
+              assignment_version,
+              payload,
+              status,
+              attempt_count,
+              next_attempt_at,
+              created_at,
+              delivered_at
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+            ON CONFLICT (outbox_id) DO NOTHING
+          `,
+          [
+            outbox.outboxId,
+            outbox.orderId,
+            outbox.passengerSubjectRef,
+            outbox.eventType,
+            outbox.assignmentVersion,
+            JSON.stringify(outbox.payload),
+            outbox.status,
+            outbox.attemptCount,
+            outbox.nextAttemptAt,
+            outbox.createdAt,
+            outbox.deliveredAt,
           ],
         ),
       );

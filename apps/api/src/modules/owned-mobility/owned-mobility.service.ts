@@ -19,6 +19,7 @@ import type {
   ComplianceGateRecord,
   ComplianceGateState,
   CompletionProofBundle,
+  ConsumerNotificationOutboxRecord,
   AssignDispatchCommand,
   BookingRecord,
   CancelOwnedOrderCommand,
@@ -59,6 +60,7 @@ import type {
   RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
+  PassengerDispatchDisclosureSnapshot,
   PassengerProfile,
   QueueCheckInCommand,
   QueueCheckOutCommand,
@@ -178,6 +180,8 @@ type DispatchAssignmentBundle = {
   task: DriverTaskRecord;
   dispatchAttempt: DispatchAttemptRecord;
   traceLogs: DispatchTraceLogRecord[];
+  passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
+  consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
 };
 
 type DispatchAssignmentResult = {
@@ -286,6 +290,11 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private dispatchTraceLogs: DispatchTraceLogRecord[] = [];
 
+  private passengerDisclosureSnapshots: PassengerDispatchDisclosureSnapshot[] =
+    [];
+
+  private consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
+
   private queueEntries: QueueEntryRecord[] = [];
 
   /** Maps forwarded mirror order IDs to their source platform codes. */
@@ -373,6 +382,15 @@ export class OwnedMobilityService implements OnModuleInit {
       this.dispatchTraceLogs = persistedState.dispatchTraceLogs.map(
         (traceLog) => this.cloneTraceLog(traceLog),
       );
+      this.passengerDisclosureSnapshots =
+        persistedState.passengerDisclosureSnapshots.map((snapshot) =>
+          this.clonePassengerDisclosureSnapshot(snapshot),
+        );
+      this.consumerNotificationOutbox =
+        persistedState.consumerNotificationOutbox.map((outbox) => ({
+          ...outbox,
+          payload: { ...outbox.payload },
+        }));
       this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(
         this.dispatchTraceLogs,
       );
@@ -1317,6 +1335,22 @@ export class OwnedMobilityService implements OnModuleInit {
 
   getOrder(orderId: string) {
     return this.cloneOrder(this.requireOrder(orderId));
+  }
+
+  getPassengerAssignmentDisclosure(orderId: string) {
+    const snapshot = this.passengerDisclosureSnapshots.find(
+      (candidate) =>
+        candidate.orderId === orderId && candidate.supersededAt === null,
+    );
+    if (!snapshot) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_DISCLOSURE_NOT_READY",
+        "Passenger assignment disclosure is not ready.",
+        { orderId },
+      );
+    }
+    return this.clonePassengerDisclosureSnapshot(snapshot);
   }
 
   listTenantBookings(tenantId: string) {
@@ -3040,6 +3074,28 @@ export class OwnedMobilityService implements OnModuleInit {
     if (this.ownedMobilityRepository?.isEnabled()) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
+          if (
+            order.runtimeProfileCode === "multi_taxi_direct" &&
+            order.operatingAuthorizationId
+          ) {
+            const authorized =
+              await this.ownedMobilityRepository!.isActiveMultiTaxiAuthorizedVehicle(
+                tx,
+                order.operatingAuthorizationId,
+                vehicleId,
+              );
+            if (!authorized) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "MULTI_TAXI_VEHICLE_NOT_AUTHORIZED",
+                "The vehicle is not active on the order operating authorization.",
+                {
+                  authorizationId: order.operatingAuthorizationId,
+                  vehicleId,
+                },
+              );
+            }
+          }
           const bundle = this.buildDispatchAssignmentBundle(
             dispatchJob,
             order,
@@ -3071,6 +3127,27 @@ export class OwnedMobilityService implements OnModuleInit {
             dispatchTraceLogs: bundle.traceLogs.map((traceLog) =>
               this.cloneTraceLog(traceLog),
             ),
+            ...(bundle.passengerDisclosureSnapshot
+              ? {
+                  passengerDisclosureSnapshots: [
+                    this.clonePassengerDisclosureSnapshot(
+                      bundle.passengerDisclosureSnapshot,
+                    ),
+                  ],
+                }
+              : {}),
+            ...(bundle.consumerNotificationOutbox
+              ? {
+                  consumerNotificationOutbox: [
+                    {
+                      ...bundle.consumerNotificationOutbox,
+                      payload: {
+                        ...bundle.consumerNotificationOutbox.payload,
+                      },
+                    },
+                  ],
+                }
+              : {}),
           });
           return bundle;
         })
@@ -5425,6 +5502,15 @@ export class OwnedMobilityService implements OnModuleInit {
       }),
     );
 
+    const passengerAuthority = this.buildPassengerAssignmentAuthority(
+      nextOrder,
+      nextDispatchJob,
+      assignment,
+      vehicleId,
+      driverId,
+      now,
+    );
+
     return {
       order: nextOrder,
       dispatchJob: nextDispatchJob,
@@ -5432,7 +5518,210 @@ export class OwnedMobilityService implements OnModuleInit {
       task,
       dispatchAttempt,
       traceLogs,
+      passengerDisclosureSnapshot:
+        passengerAuthority.passengerDisclosureSnapshot,
+      consumerNotificationOutbox: passengerAuthority.consumerNotificationOutbox,
     };
+  }
+
+  private buildPassengerAssignmentAuthority(
+    order: OwnedOrderRecord,
+    dispatchJob: DispatchJobRecord,
+    assignment: DispatchAssignmentRecord,
+    vehicleId: string,
+    driverId: string,
+    now: string,
+  ): {
+    passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
+    consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
+  } {
+    if (order.runtimeProfileCode !== "multi_taxi_direct") {
+      return {
+        passengerDisclosureSnapshot: null,
+        consumerNotificationOutbox: null,
+      };
+    }
+
+    const disclosure =
+      this.regulatoryRegistryService.getVehiclePassengerDisclosureProfile(
+        vehicleId,
+      );
+    if (!disclosure || disclosure.status !== "complete") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_VEHICLE_DISCLOSURE_INCOMPLETE",
+        "A complete vehicle passenger disclosure profile is required before assignment.",
+        { vehicleId, missingFieldCodes: disclosure?.missingFieldCodes ?? [] },
+      );
+    }
+
+    const credential =
+      this.regulatoryRegistryService.getDriverPublicRegistrationCredential(
+        driverId,
+      );
+    if (
+      !credential ||
+      credential.status !== "verified_active" ||
+      !credential.effectiveUntil ||
+      Date.parse(credential.effectiveUntil) <= Date.parse(now)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_DRIVER_REGISTRATION_NOT_ACTIVE",
+        "A verified and effective public driver registration is required before assignment.",
+        { driverId, status: credential?.status ?? "missing" },
+      );
+    }
+
+    const vehicle = this.regulatoryRegistryService
+      .listVehicles()
+      .find((record) => record.vehicleId === vehicleId);
+    const driver = this.regulatoryRegistryService
+      .listDrivers()
+      .find((record) => record.driverId === driverId);
+    if (!vehicle) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_VEHICLE_REGISTRY_MISSING",
+        "The assigned vehicle is missing from the canonical registry.",
+        { vehicleId },
+      );
+    }
+    if (
+      !Number.isFinite(order.pickup.lat) ||
+      !Number.isFinite(order.pickup.lng) ||
+      !Number.isFinite(order.dropoff.lat) ||
+      !Number.isFinite(order.dropoff.lng)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_ROUTE_SNAPSHOT_UNRESOLVED",
+        "Resolved pickup and dropoff coordinates are required before multi-taxi assignment.",
+        { orderId: order.orderId },
+      );
+    }
+
+    const assignmentVersion =
+      this.passengerDisclosureSnapshots.filter(
+        (snapshot) => snapshot.orderId === order.orderId,
+      ).length + 1;
+    const routeSnapshotId = randomUUID();
+    const quoteSnapshotId = randomUUID();
+    const fareMinor = order.quotedFare?.amountMinor ?? null;
+    const snapshot: PassengerDispatchDisclosureSnapshot = {
+      snapshotId: randomUUID(),
+      runtimeProfileCode: "multi_taxi_direct",
+      orderId: order.orderId,
+      bookingId: order.bookingId,
+      dispatchJobId: dispatchJob.dispatchJobId,
+      assignmentId: assignment.assignmentId,
+      assignmentVersion,
+      vehicle: {
+        vehicleId,
+        make: disclosure.make,
+        model: disclosure.model,
+        plateNo: vehicle.plateNo,
+        modelYear: disclosure.modelYear,
+        doorCount: disclosure.doorCount,
+        color: disclosure.color,
+        profileVersion: disclosure.version,
+      },
+      driver: {
+        driverId,
+        displayName: driver?.name ?? null,
+        registrationMaskedDisplay: credential.maskedDisplay,
+        registrationStatus: "verified_active",
+        registrationEffectiveUntil: credential.effectiveUntil,
+        credentialVersion: credential.version,
+      },
+      rating: {
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+        aggregateVersion: 1,
+      },
+      eta: {
+        minutes: order.etaSnapshot?.etaMinutes ?? null,
+        calculatedAt: order.etaSnapshot?.calculatedAt ?? null,
+        locationFreshness: "missing",
+      },
+      routeFare: {
+        routeSnapshotId,
+        quoteSnapshotId,
+        orderId: order.orderId,
+        pickup: {
+          ...order.pickup,
+          lat: order.pickup.lat!,
+          lng: order.pickup.lng!,
+          coordinateSource:
+            order.pickup.coordinateProvenance?.coordinateSource ??
+            "legacy_text",
+          geocodeConfidence:
+            order.pickup.coordinateProvenance?.geocodeConfidence ?? "unknown",
+          resolvedAt: now,
+        },
+        dropoff: {
+          ...order.dropoff,
+          lat: order.dropoff.lat!,
+          lng: order.dropoff.lng!,
+          coordinateSource:
+            order.dropoff.coordinateProvenance?.coordinateSource ??
+            "legacy_text",
+          geocodeConfidence:
+            order.dropoff.coordinateProvenance?.geocodeConfidence ?? "unknown",
+          resolvedAt: now,
+        },
+        estimatedDistanceMeters: null,
+        estimatedDurationSeconds: null,
+        encodedPolyline: null,
+        chargingMode: order.fixedPrice ? "fixed_quote" : "meter_estimate",
+        estimatedFareMinor: fareMinor,
+        payableFareMinor: fareMinor,
+        currency: "NTD",
+        farePolicyId: order.operatingAuthorizationId!,
+        farePolicyVersion:
+          order.quotedFareRuleVersion ?? "active_authorization_fare",
+        fareChangeRuleId: "multi_taxi_passenger_confirmation",
+        fareChangeRuleVersion: "1",
+        fareChangeRuleDisplayText:
+          "Fare changes require passenger disclosure and confirmation.",
+        passengerConfirmedAt: null,
+        generatedAt: now,
+      },
+      createdAt: now,
+      supersededAt: null,
+    };
+    const passengerSubjectRef =
+      order.passenger.passengerId?.trim() || order.passenger.phone.trim();
+    const outbox: ConsumerNotificationOutboxRecord = {
+      outboxId: randomUUID(),
+      orderId: order.orderId,
+      passengerSubjectRef,
+      eventType:
+        assignmentVersion > 1
+          ? "assignment_replaced"
+          : "assignment_disclosure_ready",
+      assignmentVersion,
+      payload: {
+        snapshotId: snapshot.snapshotId,
+        assignmentId: assignment.assignmentId,
+      },
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: now,
+      createdAt: now,
+      deliveredAt: null,
+    };
+    return {
+      passengerDisclosureSnapshot: snapshot,
+      consumerNotificationOutbox: outbox,
+    };
+  }
+
+  private clonePassengerDisclosureSnapshot(
+    snapshot: PassengerDispatchDisclosureSnapshot,
+  ): PassengerDispatchDisclosureSnapshot {
+    return structuredClone(snapshot);
   }
 
   private applyDispatchAssignmentBundle(
@@ -5456,6 +5745,26 @@ export class OwnedMobilityService implements OnModuleInit {
     this.dispatchAttempts = [bundle.dispatchAttempt, ...this.dispatchAttempts];
     for (const traceLog of bundle.traceLogs) {
       this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+    }
+    if (bundle.passengerDisclosureSnapshot) {
+      this.passengerDisclosureSnapshots = [
+        bundle.passengerDisclosureSnapshot,
+        ...this.passengerDisclosureSnapshots.map((snapshot) =>
+          snapshot.orderId === bundle.order.orderId &&
+          snapshot.supersededAt === null
+            ? {
+                ...snapshot,
+                supersededAt: bundle.passengerDisclosureSnapshot!.createdAt,
+              }
+            : snapshot,
+        ),
+      ];
+    }
+    if (bundle.consumerNotificationOutbox) {
+      this.consumerNotificationOutbox = [
+        bundle.consumerNotificationOutbox,
+        ...this.consumerNotificationOutbox,
+      ];
     }
 
     this.auditNotificationService.recordNotification({
@@ -5491,6 +5800,18 @@ export class OwnedMobilityService implements OnModuleInit {
           driverTasks: [bundle.task],
           dispatchAttempts: [bundle.dispatchAttempt],
           dispatchTraceLogs: bundle.traceLogs,
+          ...(bundle.passengerDisclosureSnapshot
+            ? {
+                passengerDisclosureSnapshots: [
+                  bundle.passengerDisclosureSnapshot,
+                ],
+              }
+            : {}),
+          ...(bundle.consumerNotificationOutbox
+            ? {
+                consumerNotificationOutbox: [bundle.consumerNotificationOutbox],
+              }
+            : {}),
         },
         "assign_dispatch",
       );
