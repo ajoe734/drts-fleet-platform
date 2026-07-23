@@ -5,7 +5,7 @@
 - Task: `S3-VERIFY-001`
 - Owner: `Codex`
 - Reviewer: `Copilot`
-- Inspected commit: `6defb0e11f45578c5382532b319123c4550cf53b`
+- Inspected commit: `ccc563844c12a986c4f933496665286f318980b8`
 - Inspection date: `2026-07-23`
 
 ## Current-Head Inventory
@@ -19,7 +19,7 @@
 | Ops incident event stream publish | `verified` | `apps/api/tests/unit/ops-dispatch-events.service.test.ts:59-216` |
 | Screenshot evidence with runtime source label | `partial` | `support/sidecars/DRV-UI-010/DRV-UI-010-VERIFICATION-PACKET.md:71-72,91-94`, `support/sidecars/DRV-UI-010/ui-text-snapshots.md:83-95` |
 | Android / iOS physical offline replay | `blocked_ext` | No emulator / device execution in this worker; task brief forbids replacing device evidence with local mock. |
-| Attachment security scan | `missing_evidence` | `apps/driver-app/app/sos.tsx:334-361,672-761,1086-1196` and `apps/driver-app/lib/driver-sos-outbox.ts:131-218,348-364` show attachment drafts stay in local state / durable outbox, while `buildDriverSosSubmitCommand` at `apps/driver-app/lib/driver-sos-outbox.ts:208-220` sends no attachment metadata. No S-3-specific upload / presign / malware-scan path was found under `apps/api/src/modules/driver-sos`, `apps/api/src/modules/incident`, or related tests during repo scan. |
+| Attachment security scan | `missing_evidence` | `apps/driver-app/app/sos.tsx:334-361,672-761,1086-1196` and `apps/driver-app/lib/driver-sos-outbox.ts:131-218,348-364` show attachment drafts stay in local state / durable outbox, while `buildDriverSosSubmitCommand` at `apps/driver-app/lib/driver-sos-outbox.ts:208-220` sends no attachment metadata. The repo does contain attachment upload / checksum flows for other domains such as Fleet Partner supply onboarding, but no S-3-specific upload / presign / malware-scan path was found under `apps/api/src/modules/driver-sos`, `apps/api/src/modules/incident`, or related tests during this repo scan. |
 | Alert p95 measured in production | `blocked_ext` | No production observability access in this worker; local unit/integration timings are not acceptable production proof. |
 | Forbidden-vocabulary scan | `verified_with_gap` | Android incident text snapshot is clean for the forbidden list, but mirrored/forwarded wording still exists outside the incident surface. |
 
@@ -52,6 +52,8 @@ pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-sc
 Executed in: `apps/driver-app`
 
 Result: `PASS` (`2` files, `6` tests)
+
+Note: the driver-app run emitted `react-test-renderer` deprecation plus `act(...)` environment warnings, but the process still exited `0` and all assertions passed.
 
 ## Remaining Delta
 
