@@ -5,7 +5,7 @@
 - Task: `S3-VERIFY-001-UNBLOCK-PLANNING-DECISION`
 - Parent: `S3-VERIFY-001`
 - Owner: `Codex`
-- Reviewer: `Copilot`
+- Reviewer: `Gemini`
 - Decision date: `2026-07-23`
 
 ## Diagnosis
