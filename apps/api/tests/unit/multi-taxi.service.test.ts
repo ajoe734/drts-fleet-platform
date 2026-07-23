@@ -183,6 +183,70 @@ describe("MultiTaxiService operating authority", () => {
       undefined,
     );
   });
+
+  it("enforces service area checks on queue check-in and check-out", () => {
+    const { service, ownedMobilityService } = createService();
+    const authorization = createAndActivateAuthorization(service);
+    service.addAuthorizedVehicle(authorization.authorizationId, {
+      vehicleId: "veh-demo-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+    });
+
+    const mismatchCheckInCommand = {
+      vehicleId: "veh-demo-001",
+      siteId: "virtual-tpe",
+      serviceAreaCode: "taichung-port",
+      queueMode: "virtual_matching" as const,
+    };
+    let checkInError: any;
+    try {
+      service.queueCheckIn(mismatchCheckInCommand);
+    } catch (err) {
+      checkInError = err;
+    }
+    expect(checkInError?.response?.error?.code).toBe("P5_AUTHORIZATION_SERVICE_AREA_MISMATCH");
+
+    const validCheckInCommand = {
+      ...mismatchCheckInCommand,
+      serviceAreaCode: "TPE",
+    };
+    service.queueCheckIn(validCheckInCommand);
+    expect(ownedMobilityService.queueCheckInMultiTaxi).toHaveBeenCalledWith(
+      validCheckInCommand,
+      expect.objectContaining({
+        authorizationId: authorization.authorizationId,
+      }),
+      undefined,
+    );
+
+    const mismatchCheckOutCommand = {
+      vehicleId: "veh-demo-001",
+      siteId: "virtual-tpe",
+      serviceAreaCode: "taichung-port",
+      queueMode: "virtual_matching" as const,
+    };
+    let checkOutError: any;
+    try {
+      service.queueCheckOut(mismatchCheckOutCommand);
+    } catch (err) {
+      checkOutError = err;
+    }
+    expect(checkOutError?.response?.error?.code).toBe("P5_AUTHORIZATION_SERVICE_AREA_MISMATCH");
+
+    const validCheckOutCommand = {
+      ...mismatchCheckOutCommand,
+      serviceAreaCode: "TPE",
+    };
+    service.queueCheckOut(validCheckOutCommand);
+    expect(ownedMobilityService.queueCheckOutMultiTaxi).toHaveBeenCalledWith(
+      validCheckOutCommand,
+      expect.objectContaining({
+        authorizationId: authorization.authorizationId,
+      }),
+      undefined,
+    );
+  });
 });
 
 describe("MultiTaxiService passenger ride authority", () => {

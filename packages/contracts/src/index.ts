@@ -2893,12 +2893,14 @@ export interface CancelOwnedOrderCommand {
 export interface QueueCheckInCommand {
   vehicleId: string;
   siteId: string;
+  serviceAreaCode?: string;
   queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
 }
 
 export interface QueueCheckOutCommand {
   vehicleId: string;
   siteId: string;
+  serviceAreaCode?: string;
   queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
 }
 

@@ -5591,7 +5591,7 @@ export class OwnedMobilityService implements OnModuleInit {
     const serviceAreaCode =
       this.resolveCanonicalServiceAreaCodeForOrder(order);
     this.regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
-      order.operatingAuthorizationId,
+      order.operatingAuthorizationId ?? null,
       vehicleId,
       serviceAreaCode,
       order.quotedFareRuleVersion,
@@ -6976,14 +6976,14 @@ export class OwnedMobilityService implements OnModuleInit {
       order.spatialAudit?.serviceAreaCodes &&
       order.spatialAudit.serviceAreaCodes.length > 0
     ) {
-      return order.spatialAudit.serviceAreaCodes[0];
+      return order.spatialAudit.serviceAreaCodes[0] ?? null;
     }
     const resolution = this.resolveServiceAreaGate(order);
     if (
       resolution?.evaluation?.serviceAreaCodes &&
       resolution.evaluation.serviceAreaCodes.length > 0
     ) {
-      return resolution.evaluation.serviceAreaCodes[0];
+      return resolution.evaluation.serviceAreaCodes[0] ?? null;
     }
     return null;
   }

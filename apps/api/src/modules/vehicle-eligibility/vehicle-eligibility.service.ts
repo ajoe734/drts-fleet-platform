@@ -428,6 +428,10 @@ export class VehicleEligibilityService implements OnModuleInit {
     const serviceBucket =
       context?.serviceBucketOverride ?? definition.serviceBucket;
 
+    if (!this.regulatoryRegistryService) {
+      return [];
+    }
+
     return this.regulatoryRegistryService
       .getEligibleCandidates(serviceBucket, context?.destination ?? null)
       .filter((candidate) =>
@@ -522,7 +526,7 @@ export class VehicleEligibilityService implements OnModuleInit {
     const capability = this.requireVehicleCapability(vehicleId);
 
     if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
+      !this.registry.getVehicleDispatchability(
         vehicleId,
         definition.serviceBucket,
       )
@@ -539,7 +543,7 @@ export class VehicleEligibilityService implements OnModuleInit {
     }
 
     if (
-      !this.regulatoryRegistryService.getDriverAvailability(
+      !this.registry.getDriverAvailability(
         driverId,
         definition.serviceBucket,
       )
@@ -700,11 +704,22 @@ export class VehicleEligibilityService implements OnModuleInit {
     return definition;
   }
 
+  private get registry(): RegulatoryRegistryService {
+    if (!this.regulatoryRegistryService) {
+      throw new ApiRequestError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        "REGULATORY_REGISTRY_UNAVAILABLE",
+        "RegulatoryRegistryService is not available.",
+      );
+    }
+    return this.regulatoryRegistryService;
+  }
+
   private requireVehicleCapability(
     vehicleId: string,
   ): RuntimeVehicleCapability {
     const licenseType =
-      this.regulatoryRegistryService.getVehicleLicenseType(vehicleId);
+      this.registry.getVehicleLicenseType(vehicleId);
     if (!licenseType) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,

@@ -621,7 +621,7 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
   queueCheckIn(command: QueueCheckInCommand, requestId?: string) {
-    const serviceAreaCode = (command as { serviceAreaCode?: string }).serviceAreaCode ?? null;
+    const serviceAreaCode = command.serviceAreaCode ?? null;
     const authorization = this.resolveActiveAuthorization(serviceAreaCode);
     this.assertAuthorizedVehicle(
       authorization.authorizationId,
@@ -638,7 +638,7 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
   queueCheckOut(command: QueueCheckOutCommand, requestId?: string) {
-    const serviceAreaCode = (command as { serviceAreaCode?: string }).serviceAreaCode ?? null;
+    const serviceAreaCode = command.serviceAreaCode ?? null;
     const authorization = this.resolveActiveAuthorization(serviceAreaCode);
     this.assertAuthorizedVehicle(
       authorization.authorizationId,
@@ -1234,9 +1234,9 @@ export class MultiTaxiService implements OnModuleInit {
       actionName,
       resourceType,
       resourceId,
-      newValuesSummary: newValuesSummary ?? null,
-      previousValuesSummary: previousValuesSummary ?? null,
-      requestId,
+      ...(newValuesSummary ? { newValuesSummary } : {}),
+      ...(previousValuesSummary ? { oldValuesSummary: previousValuesSummary } : {}),
+      ...(requestId ? { requestId } : {}),
     });
   }
 }
