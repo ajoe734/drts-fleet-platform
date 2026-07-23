@@ -21,12 +21,12 @@ Reviewer: Codex
 
 - Realm Colors: Ops shell + Coral realm tokens from `@drts/ui-web/canvas-tokens` (`CANVAS_REALM_LIGHT.ops` / `CANVAS_REALM_DARK.ops` / `CANVAS_SURFACE_ACCENTS.ops`).
 
-## Production Fallback Masking Removal & Port Alignment (3202)
+## Production Fallback Masking Removal & Port Alignment (3003)
 
 - Removed `DEMO_FALLBACK_ORDERS` synthetic order fabrication in `apps/ops-console-web/app/dispatch/page.tsx:loadListRuntime`.
 - Removed `DEMO_REFUSAL_ORDER` fallback injection in `apps/ops-console-web/app/dispatch/[dispatchId]/page.tsx`.
 - Runtime fetch failures now accurately present degraded/error state (`failed: true` with error envelope) or 404 notFound state rather than injecting fabricated fallback order items.
-- Aligned Playwright E2E test server (`playwright.ops-queue-semantics.config.ts`) and spec (`tests/e2e/ops-queue-semantics.spec.ts`) to default port **3202**, matching `playwright.config.ts` ops-console port standard.
+- Aligned Playwright E2E test server (`playwright.ops-queue-semantics.config.ts`) and spec (`tests/e2e/ops-queue-semantics.spec.ts`) to default port **3003**, matching standalone `ops-console-web` dev port standard.
 - Updated `scripts/run-map-geofence-ops-ui-dev.mjs` to execute `@drts/contracts` and `@drts/ui-tokens` prebuild before launching services to prevent TypeScript dependency load failures.
 
 ## Test Commands Executed & Verified

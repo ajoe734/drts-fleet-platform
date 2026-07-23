@@ -1,13 +1,13 @@
 import { defineConfig } from "@playwright/test";
 
-const localOpsConsoleBaseURL = "http://127.0.0.1:3202";
+const localOpsConsoleBaseURL = "http://127.0.0.1:3003";
 const opsConsoleBaseURL =
   process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
   process.env.OPS_CONSOLE_BASE_URL ??
   localOpsConsoleBaseURL;
 
 const parsedUrl = new URL(opsConsoleBaseURL);
-const targetPort = parsedUrl.port || "3202";
+const targetPort = parsedUrl.port || "3003";
 
 export default defineConfig({
   testDir: "./tests/e2e",

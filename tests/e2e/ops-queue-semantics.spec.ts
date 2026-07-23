@@ -5,7 +5,7 @@ function getTargetBaseUrl(baseURL?: string): string {
     baseURL ??
     process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
     process.env.OPS_CONSOLE_BASE_URL ??
-    "http://127.0.0.1:3202"
+    "http://127.0.0.1:3003"
   );
 }
 
