@@ -101,6 +101,47 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
     } catch (err: any) {
       expect(err.response?.error?.code).toBe("P5_OPERATING_AUTHORIZATION_INACTIVE");
     }
+
+    // Expired status denied
+    const internalAuth = (service as any).authorizations.find(
+      (a: any) => a.authorizationId === auth.authorizationId,
+    );
+    internalAuth.status = "expired";
+    try {
+      service.validateOperatingAuthorizationForAssignment(
+        auth.authorizationId,
+        "veh-test-2",
+      );
+      expect.fail("Should have thrown");
+    } catch (err: any) {
+      expect(err.response?.error?.code).toBe("P5_OPERATING_AUTHORIZATION_INACTIVE");
+    }
+
+    // Past effectiveUntil window denied
+    internalAuth.status = "approved";
+    internalAuth.effectiveUntil = "2020-01-01T00:00:00.000Z";
+    try {
+      service.validateOperatingAuthorizationForAssignment(
+        auth.authorizationId,
+        "veh-test-2",
+      );
+      expect.fail("Should have thrown");
+    } catch (err: any) {
+      expect(err.response?.error?.code).toBe("P5_OPERATING_AUTHORIZATION_INACTIVE");
+    }
+
+    // Revoked status denied
+    internalAuth.effectiveUntil = null;
+    internalAuth.status = "revoked";
+    try {
+      service.validateOperatingAuthorizationForAssignment(
+        auth.authorizationId,
+        "veh-test-2",
+      );
+      expect.fail("Should have thrown");
+    } catch (err: any) {
+      expect(err.response?.error?.code).toBe("P5_OPERATING_AUTHORIZATION_INACTIVE");
+    }
   });
 
   it("3. missing membership denied", () => {
