@@ -41,6 +41,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../service-product/service-product.service";
 import { MultiTaxiRepository } from "./multi-taxi.repository";
@@ -62,6 +63,8 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly ownedMobilityService: OwnedMobilityService,
     @Optional() private readonly repository?: MultiTaxiRepository,
     @Optional() private readonly serviceProductService?: ServiceProductService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   async onModuleInit() {
@@ -121,6 +124,12 @@ export class MultiTaxiService implements OnModuleInit {
     };
     this.authorizations = [authorization, ...this.authorizations];
     this.persistAuthorization(authorization, "create authorization");
+    this.recordAuditLog(
+      "create_operating_authorization",
+      "multi_taxi_operating_authorization",
+      authorization.authorizationId,
+      authorization as unknown as Record<string, unknown>,
+    );
     return this.cloneAuthorization(authorization);
   }
 
@@ -136,6 +145,7 @@ export class MultiTaxiService implements OnModuleInit {
         "Only a draft operating authorization can be edited.",
       );
     }
+    const previous = this.cloneAuthorization(authorization);
 
     authorization.authorityCode =
       command.authorityCode === undefined
@@ -167,6 +177,13 @@ export class MultiTaxiService implements OnModuleInit {
     );
     authorization.updatedAt = new Date().toISOString();
     this.persistAuthorization(authorization, "update authorization");
+    this.recordAuditLog(
+      "update_operating_authorization",
+      "multi_taxi_operating_authorization",
+      authorization.authorizationId,
+      this.cloneAuthorization(authorization) as unknown as Record<string, unknown>,
+      previous as unknown as Record<string, unknown>,
+    );
     return this.cloneAuthorization(authorization);
   }
 
@@ -180,9 +197,17 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
     this.assertAuthorizationWindow(authorization);
+    const previousStatus = authorization.status;
     authorization.status = "approved";
     authorization.updatedAt = new Date().toISOString();
     this.persistAuthorization(authorization, "activate authorization");
+    this.recordAuditLog(
+      "activate_operating_authorization",
+      "multi_taxi_operating_authorization",
+      authorization.authorizationId,
+      { status: authorization.status, updatedAt: authorization.updatedAt },
+      { status: previousStatus },
+    );
     return this.cloneAuthorization(authorization);
   }
 
@@ -195,10 +220,25 @@ export class MultiTaxiService implements OnModuleInit {
         "Only an approved authorization can be suspended.",
       );
     }
+    const previousStatus = authorization.status;
     authorization.status = "suspended";
     authorization.updatedAt = new Date().toISOString();
     this.persistAuthorization(authorization, "suspend authorization");
+    this.recordAuditLog(
+      "suspend_operating_authorization",
+      "multi_taxi_operating_authorization",
+      authorization.authorizationId,
+      { status: authorization.status, updatedAt: authorization.updatedAt },
+      { status: previousStatus },
+    );
     return this.cloneAuthorization(authorization);
+  }
+
+  listAuthorizedVehicles(authorizationId: string) {
+    this.requireAuthorization(authorizationId);
+    return this.vehicles
+      .filter((vehicle) => vehicle.authorizationId === authorizationId)
+      .map((vehicle) => ({ ...vehicle }));
   }
 
   addAuthorizedVehicle(
@@ -221,6 +261,7 @@ export class MultiTaxiService implements OnModuleInit {
         vehicle.authorizationId === authorizationId &&
         vehicle.vehicleId === command.vehicleId,
     );
+    const previous = existing ? { ...existing } : null;
     const vehicle: MultiTaxiAuthorizedVehicleRecord = existing ?? {
       authorizationVehicleId: randomUUID(),
       authorizationId,
@@ -236,7 +277,43 @@ export class MultiTaxiService implements OnModuleInit {
       this.vehicles = [vehicle, ...this.vehicles];
     }
     this.persistVehicle(vehicle, "authorize vehicle");
+    this.recordAuditLog(
+      "add_authorized_vehicle",
+      "multi_taxi_authorized_vehicle",
+      vehicle.authorizationVehicleId,
+      { ...vehicle } as unknown as Record<string, unknown>,
+      previous ? ({ ...previous } as unknown as Record<string, unknown>) : null,
+    );
     return { ...vehicle };
+  }
+
+  removeAuthorizedVehicle(authorizationId: string, vehicleId: string) {
+    this.requireAuthorization(authorizationId);
+    const existing = this.vehicles.find(
+      (vehicle) =>
+        vehicle.authorizationId === authorizationId &&
+        vehicle.vehicleId === vehicleId,
+    );
+    if (!existing) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "MULTI_TAXI_AUTHORIZED_VEHICLE_NOT_FOUND",
+        "The vehicle is not associated with this operating authorization.",
+        { authorizationId, vehicleId },
+      );
+    }
+    const previous = { ...existing };
+    existing.status = "removed";
+    existing.effectiveUntil = new Date().toISOString();
+    this.persistVehicle(existing, "remove authorized vehicle");
+    this.recordAuditLog(
+      "remove_authorized_vehicle",
+      "multi_taxi_authorized_vehicle",
+      existing.authorizationVehicleId,
+      { status: existing.status, effectiveUntil: existing.effectiveUntil },
+      previous as unknown as Record<string, unknown>,
+    );
+    return { ...existing };
   }
 
   async createRide(
@@ -529,7 +606,7 @@ export class MultiTaxiService implements OnModuleInit {
     );
   }
 
-  private resolveActiveAuthorization() {
+  private resolveActiveAuthorization(serviceAreaCode?: string | null) {
     const now = Date.now();
     const defaultAuthorizationId =
       process.env.MULTI_TAXI_DEFAULT_AUTHORIZATION_ID?.trim() || null;
@@ -554,13 +631,117 @@ export class MultiTaxiService implements OnModuleInit {
         HttpStatus.CONFLICT,
         active.length > 1
           ? "MULTI_TAXI_AUTHORIZATION_AMBIGUOUS"
-          : "MULTI_TAXI_AUTHORIZATION_UNAVAILABLE",
+          : "P5_OPERATING_AUTHORIZATION_INACTIVE",
         active.length > 1
           ? "Multiple active authorizations require a server-side channel mapping."
           : "No approved and effective multi-taxi operating authorization is available.",
       );
     }
+    this.assertAuthorizationActiveFareVersion(resolved);
+    if (serviceAreaCode) {
+      this.assertAuthorizationServiceArea(resolved, serviceAreaCode);
+    }
     return this.cloneAuthorization(resolved);
+  }
+
+  assertAuthorizationServiceArea(
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    serviceAreaCode?: string | null,
+  ) {
+    if (!serviceAreaCode || serviceAreaCode === "*") {
+      return;
+    }
+    const codes = authorization.serviceAreaCodes;
+    if (codes.includes("*")) {
+      return;
+    }
+    if (!codes.includes(serviceAreaCode)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_AUTHORIZATION_SERVICE_AREA_MISMATCH",
+        `Service area '${serviceAreaCode}' is not permitted by operating authorization ${authorization.authorizationId}.`,
+        {
+          authorizationId: authorization.authorizationId,
+          serviceAreaCode,
+          allowedAreaCodes: codes,
+        },
+      );
+    }
+  }
+
+  assertAuthorizationActiveFareVersion(
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+  ) {
+    if (
+      !authorization.activeFareVersionId ||
+      authorization.activeFareVersionId.trim() === "" ||
+      authorization.activeFareVersionId === "inactive"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_FARE_VERSION_NOT_ACTIVE",
+        `Active fare version '${authorization.activeFareVersionId}' on operating authorization ${authorization.authorizationId} is inactive.`,
+        {
+          authorizationId: authorization.authorizationId,
+          activeFareVersionId: authorization.activeFareVersionId,
+        },
+      );
+    }
+  }
+
+  validateOperatingAuthorizationForAssignment(
+    authorizationId: string | null,
+    vehicleId: string,
+    serviceAreaCode?: string | null,
+    fareVersionId?: string | null,
+  ) {
+    if (!authorizationId) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_OPERATING_AUTHORIZATION_MISSING",
+        "An operating authorization ID is required before multi-taxi assignment.",
+      );
+    }
+    const authorization = this.authorizations.find(
+      (record) => record.authorizationId === authorizationId,
+    );
+    const now = Date.now();
+    if (
+      !authorization ||
+      authorization.status !== "approved" ||
+      Date.parse(authorization.effectiveFrom) > now ||
+      (authorization.effectiveUntil !== null &&
+        Date.parse(authorization.effectiveUntil) <= now)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_OPERATING_AUTHORIZATION_INACTIVE",
+        "An approved and effective operating authorization is required before assignment.",
+        { authorizationId, status: authorization?.status ?? "missing" },
+      );
+    }
+    this.assertAuthorizedVehicle(authorizationId, vehicleId);
+    if (serviceAreaCode) {
+      this.assertAuthorizationServiceArea(authorization, serviceAreaCode);
+    }
+    this.assertAuthorizationActiveFareVersion(authorization);
+    if (
+      fareVersionId &&
+      authorization.activeFareVersionId !== fareVersionId &&
+      authorization.activeFareVersionId !== "*"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_FARE_VERSION_NOT_ACTIVE",
+        "The fare version does not match the active fare version on the operating authorization.",
+        {
+          authorizationId,
+          activeFareVersionId: authorization.activeFareVersionId,
+          fareVersionId,
+        },
+      );
+    }
+    return this.cloneAuthorization(authorization);
   }
 
   private assertServiceProductPolicy() {
@@ -584,7 +765,7 @@ export class MultiTaxiService implements OnModuleInit {
     if (!membership) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
-        "MULTI_TAXI_VEHICLE_NOT_AUTHORIZED",
+        "P5_VEHICLE_NOT_IN_AUTHORIZATION",
         "The vehicle is not active on the resolved operating authorization.",
         { authorizationId, vehicleId },
       );
@@ -987,5 +1168,27 @@ export class MultiTaxiService implements OnModuleInit {
       ...authorization,
       serviceAreaCodes: [...authorization.serviceAreaCodes],
     };
+  }
+
+  private recordAuditLog(
+    actionName: string,
+    resourceType: string,
+    resourceId: string | null,
+    newValuesSummary?: Record<string, unknown> | null,
+    previousValuesSummary?: Record<string, unknown> | null,
+    requestId?: string,
+  ) {
+    this.auditNotificationService?.recordAuditLog({
+      actorId: null,
+      actorType: "system",
+      tenantId: null,
+      moduleName: "multi-taxi",
+      actionName,
+      resourceType,
+      resourceId,
+      newValuesSummary: newValuesSummary ?? null,
+      previousValuesSummary: previousValuesSummary ?? null,
+      requestId,
+    });
   }
 }

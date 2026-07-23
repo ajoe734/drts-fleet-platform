@@ -5587,6 +5587,12 @@ export class OwnedMobilityService implements OnModuleInit {
         consumerNotificationOutbox: null,
       };
     }
+    this.regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
+      order.operatingAuthorizationId,
+      vehicleId,
+      order.pickup?.serviceAreaId || order.pickup?.address,
+      order.quotedFareRuleVersion,
+    );
     if (
       ratingSummary.displayState === "unavailable" ||
       (ratingSummary.displayState === "rated" &&

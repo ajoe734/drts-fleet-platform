@@ -50,6 +50,8 @@ import type {
   DriverSupplyDraft,
   VehiclePassengerDisclosureProfile,
   DriverPublicRegistrationCredential,
+  MultiTaxiOperatingAuthorizationRecord,
+  MultiTaxiAuthorizedVehicleRecord,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -3294,6 +3296,139 @@ export class RegulatoryRegistryService implements OnModuleInit {
   listDriverPublicRegistrationCredentials(): DriverPublicRegistrationCredential[] {
     return this.driverCredentials.map((c) => ({ ...c }));
   }
+
+  validateMultiTaxiOperatingAuthorizationForAssignment(
+    authorizationId: string | null,
+    vehicleId: string,
+    serviceAreaCode?: string | null,
+    fareVersionId?: string | null,
+  ) {
+    if (!authorizationId) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_OPERATING_AUTHORIZATION_MISSING",
+        "An operating authorization ID is required before multi-taxi assignment.",
+      );
+    }
+    const authorization = this.multiTaxiOperatingAuthorizations.find(
+      (r) => r.authorizationId === authorizationId,
+    );
+    const now = Date.now();
+    if (
+      !authorization ||
+      authorization.status !== "approved" ||
+      Date.parse(authorization.effectiveFrom) > now ||
+      (authorization.effectiveUntil !== null &&
+        Date.parse(authorization.effectiveUntil) <= now)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_OPERATING_AUTHORIZATION_INACTIVE",
+        "An approved and effective operating authorization is required before assignment.",
+        { authorizationId, status: authorization?.status ?? "missing" },
+      );
+    }
+
+    const membership = this.multiTaxiAuthorizedVehicles.find(
+      (v) =>
+        v.authorizationId === authorizationId &&
+        v.vehicleId === vehicleId &&
+        v.status === "active" &&
+        Date.parse(v.effectiveFrom) <= now &&
+        (v.effectiveUntil === null || Date.parse(v.effectiveUntil) > now),
+    );
+    if (!membership) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_VEHICLE_NOT_IN_AUTHORIZATION",
+        "The vehicle is not authorized under this operating authorization.",
+        { authorizationId, vehicleId },
+      );
+    }
+
+    if (
+      serviceAreaCode &&
+      serviceAreaCode !== "*" &&
+      !authorization.serviceAreaCodes.includes("*") &&
+      !authorization.serviceAreaCodes.includes(serviceAreaCode)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_AUTHORIZATION_SERVICE_AREA_MISMATCH",
+        `Service area '${serviceAreaCode}' is not permitted by operating authorization ${authorizationId}.`,
+        {
+          authorizationId,
+          serviceAreaCode,
+          allowedAreaCodes: authorization.serviceAreaCodes,
+        },
+      );
+    }
+
+    if (
+      !authorization.activeFareVersionId ||
+      authorization.activeFareVersionId.trim() === "" ||
+      authorization.activeFareVersionId === "inactive" ||
+      (fareVersionId &&
+        authorization.activeFareVersionId !== fareVersionId &&
+        authorization.activeFareVersionId !== "*")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_FARE_VERSION_NOT_ACTIVE",
+        `Active fare version '${authorization.activeFareVersionId}' on operating authorization ${authorizationId} is inactive.`,
+        {
+          authorizationId,
+          activeFareVersionId: authorization.activeFareVersionId,
+          fareVersionId,
+        },
+      );
+    }
+
+    return { ...authorization };
+  }
+
+  private multiTaxiOperatingAuthorizations: MultiTaxiOperatingAuthorizationRecord[] = [
+    {
+      authorizationId: "auth-demo-001",
+      operatorId: "operator-demo-001",
+      authorityCode: "AUTH-TP-001",
+      businessPlanVersion: "v1.0",
+      status: "approved",
+      serviceAreaCodes: ["TAIPEI-MAIN", "taichung-port", "*"],
+      activeFareVersionId: "fare-v1",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: null,
+      createdAt: SEED_TIMESTAMP,
+      updatedAt: SEED_TIMESTAMP,
+    },
+  ];
+
+  private multiTaxiAuthorizedVehicles: MultiTaxiAuthorizedVehicleRecord[] = [
+    {
+      authorizationVehicleId: "auth-veh-demo-001",
+      authorizationId: "auth-demo-001",
+      vehicleId: "veh-demo-001",
+      status: "active",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: null,
+    },
+    {
+      authorizationVehicleId: "auth-veh-demo-002",
+      authorizationId: "auth-demo-001",
+      vehicleId: "veh-demo-002",
+      status: "active",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: null,
+    },
+    {
+      authorizationVehicleId: "auth-veh-demo-003",
+      authorizationId: "auth-demo-001",
+      vehicleId: "veh-demo-003",
+      status: "active",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: null,
+    },
+  ];
 
   private runInMemoryIdempotentBackfill() {
     const regProfiles = [

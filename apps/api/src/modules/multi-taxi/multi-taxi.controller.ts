@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -230,6 +231,25 @@ export class MultiTaxiController {
     );
   }
 
+  @Get("platform-admin/multi-taxi/authorizations/:authorizationId/vehicles")
+  @RequireRealms("platform")
+  listAuthorizedVehicles(
+    @Param("authorizationId") authorizationId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items =
+      this.multiTaxiService.listAuthorizedVehicles(authorizationId);
+    return toApiSuccessEnvelope(
+      toApiListData(items, {
+        page: 1,
+        pageSize: items.length,
+        totalItems: items.length,
+        totalPages: items.length === 0 ? 0 : 1,
+      }),
+      requestId,
+    );
+  }
+
   @Post("platform-admin/multi-taxi/authorizations/:authorizationId/vehicles")
   @RequireRealms("platform")
   addAuthorizedVehicle(
@@ -239,6 +259,24 @@ export class MultiTaxiController {
   ) {
     return toApiSuccessEnvelope(
       this.multiTaxiService.addAuthorizedVehicle(authorizationId, command),
+      requestId,
+    );
+  }
+
+  @Delete(
+    "platform-admin/multi-taxi/authorizations/:authorizationId/vehicles/:vehicleId",
+  )
+  @RequireRealms("platform")
+  removeAuthorizedVehicle(
+    @Param("authorizationId") authorizationId: string,
+    @Param("vehicleId") vehicleId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.multiTaxiService.removeAuthorizedVehicle(
+        authorizationId,
+        vehicleId,
+      ),
       requestId,
     );
   }
