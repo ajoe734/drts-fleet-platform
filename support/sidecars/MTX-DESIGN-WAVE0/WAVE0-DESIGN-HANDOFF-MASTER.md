@@ -5,7 +5,7 @@
 **Owner:** Gemini  
 **Reviewer:** Codex  
 **Status:** Ready for Review Handoff  
-**Execution Baseline:** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`  
+**Execution Baseline:** `dev@725317b16c14b1e9b8d9448687a4aa9daf92d246`  
 **Canonical Requirement:** `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md` §3 & `08_multi_taxi_operations_ui_design_requirements_20260723.md`
 
 ---
@@ -36,7 +36,7 @@ The visual design and operational UI handoff for Phase 1 Multi-Taxi (Wave 0 Desi
 
 5. **`P5-S3-DESIGN-QA-001` Handoff Completion & Design QA:**
    - **Deliverable:** `support/sidecars/P5-S3-DESIGN-QA-001/DESIGN-QA-HANDOFF-CHECKLIST.md`.
-   - **Editable Figma Source Tree:** `docs/05-ui/drts-design-canvas/figma-source-tree.json` (10 Figma pages `00_Cover`..`10_Handoff`, auto-layout specs, token mappings).
+   - **Editable Figma Source Tree:** `docs/05-ui/drts-design-canvas/figma-source-tree.json` (11 Figma pages `00_Cover`..`10_Handoff`, auto-layout specs, token mappings).
    - **Preflight Record:** `support/sidecars/MTX-DESIGN-WAVE0/CURRENT-HEAD-PREFLIGHT.md`.
    - **PNG Screenshots:** All 11 required PNG files generated under `support/sidecars/P5-S3-DESIGN-QA-001/screenshots/` and `docs/05-ui/drts-design-canvas/screenshots/`.
 
@@ -46,7 +46,7 @@ The visual design and operational UI handoff for Phase 1 Multi-Taxi (Wave 0 Desi
 
 - [x] State matrix + frames + frozen copy + a11y + prototype + handoff for all four design packets (`MTX-DESIGN-001`, `MTX-DESIGN-002`, `P5-DESIGN-001`, `P5-DESIGN-002`).
 - [x] Design QA handoff complete (`P5-S3-DESIGN-QA-001`).
-- [x] Editable Figma source tree JSON (`docs/05-ui/drts-design-canvas/figma-source-tree.json`) and 10 Figma page layer specifications.
+- [x] Editable Figma source tree JSON (`docs/05-ui/drts-design-canvas/figma-source-tree.json`) and 11 Figma page layer specifications.
 - [x] Mounted in design canvas HTML shells (`Platform Admin.html` Sections 08-10 & `Ops Console.html` Section 08) with explicit Desktop 1440px and Narrow 390px viewports for all packets including `P5-DESIGN-002`.
 - [x] All 11 PNG screenshot evidence files generated and verified against requirements §20.
 - [x] Explicit narrow viewport frames (390px), ARIA dialog/alert/live-region hooks, skeletal loading, and interactive prototype transitions implemented.

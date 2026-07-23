@@ -47,6 +47,7 @@
 <script type="text/babel" src="platform-sandbox.jsx"></script>
 <script type="text/babel" src="platform-regulator.jsx"></script>
 <script type="text/babel" src="platform-service-area.jsx"></script>
+<script type="text/babel" src="platform-p5.jsx"></script>
 <script type="text/babel" src="mtx-operations-screens.jsx"></script>
 
 <script type="text/babel">
@@ -99,6 +100,7 @@ function App() {
           <DCArtboard id="p5-records-query" label="P5-COM-UI-04 · 730 天營運紀錄完整查詢 (1440px)" width={W} height={H}><Hero url="/multi-taxi-records"><PA_P5_RecordsQuery theme={th} /></Hero></DCArtboard>
           <DCArtboard id="p5-records-query-narrow" label="P5-COM-UI-04 · 730 天營運紀錄完整查詢 (Narrow 390px)" width={NW} height={NH}><Hero url="/multi-taxi-records" width={NW} height={NH}><PA_P5_RecordsQuery theme={th} isNarrow /></Hero></DCArtboard>
           <DCArtboard id="p5-export-retention" label="P5-COM-UI-05 · 受控匯出與 Legal Hold 法律保留" width={W} height={H}><Bare><PA_P5_ExportRetention theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="p5-disclosure" label="P5_dispatch_disclosure · 揭露欄位審核" width={W} height={H}><Hero url="/p5-disclosure"><PA_P5Disclosure theme={th} /></Hero></DCArtboard>
         </DCSection>
 
         <DCSection id="tenants" title="02 · 租戶治理" subtitle="Q-ADM01 /tenants 與 /tenant-governance 保留兩個 route">

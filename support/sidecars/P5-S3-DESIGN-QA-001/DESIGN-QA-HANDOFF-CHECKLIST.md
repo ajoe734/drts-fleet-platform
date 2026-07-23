@@ -18,7 +18,7 @@
 
 - [x] **Editable Figma Source & Design System Tree:**
   - Figma source tree JSON: `docs/05-ui/drts-design-canvas/figma-source-tree.json`.
-  - 10 Figma Pages (`00_Cover` .. `10_Handoff`) detailing frames, auto-layout, component variants, and token bindings (@drts/ui-tokens).
+  - 11 Figma Pages (`00_Cover` .. `10_Handoff`) detailing frames, auto-layout, component variants, and token bindings (@drts/ui-tokens).
 
 - [x] **Prototype Interaction Links & Flow Connections:**
   - Interactive state machine hooks implemented in `mtx-operations-screens.jsx`:

@@ -1,7 +1,7 @@
 # MTX-DESIGN-WAVE0 Preflight Report
 
 **Task ID:** `MTX-DESIGN-WAVE0`  
-**Execution Baseline:** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`  
+**Execution Baseline:** `dev@725317b16c14b1e9b8d9448687a4aa9daf92d246`  
 **Inspected Date:** 2026-07-23  
 **Owner:** Gemini  
 **Reviewer:** Codex  

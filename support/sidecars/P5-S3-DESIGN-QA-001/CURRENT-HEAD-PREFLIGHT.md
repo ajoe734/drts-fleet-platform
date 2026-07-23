@@ -2,7 +2,7 @@
 
 **Task ID:** `P5-S3-DESIGN-QA-001`  
 **Task Name:** Handoff Completion & Design QA  
-**Execution Baseline:** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`  
+**Execution Baseline:** `dev@725317b16c14b1e9b8d9448687a4aa9daf92d246`  
 **Inspected Date:** 2026-07-23  
 **Owner:** Gemini  
 **Reviewer:** Codex  
@@ -29,7 +29,7 @@
 
 ## 3. Acceptance Criteria Verification
 
-- [x] Editable Figma/component source tree JSON (`docs/05-ui/drts-design-canvas/figma-source-tree.json`) with 10 pages (`00_Cover`..`10_Handoff`).
+- [x] Editable Figma/component source tree JSON (`docs/05-ui/drts-design-canvas/figma-source-tree.json`) with 11 pages (`00_Cover`..`10_Handoff`).
 - [x] All required PNG screenshots present (`P5_dispatch_disclosure.png`, `S3_sos_fullscreen.png`, MTX & P5 operational screens).
 - [x] Design QA checklist and forbidden-word scan complete.
 - [x] Every requirement in UI brief sections 30 & 31 verified.
