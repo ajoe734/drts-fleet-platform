@@ -95,6 +95,9 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    if (this.regulatoryRegistryService) {
+      this.regulatoryRegistryService.setMultiTaxiService(this);
+    }
     if (!this.repository) {
       return;
     }

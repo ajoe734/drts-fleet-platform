@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import {
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   OnModuleInit,
   Optional,
+  forwardRef,
 } from "@nestjs/common";
 
 import type {
@@ -72,6 +74,7 @@ export class TeslaIntegrationService implements OnModuleInit {
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional()
+    @Inject(forwardRef(() => RegulatoryRegistryService))
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
     @Optional()
     private readonly repository?: TeslaIntegrationRepository,

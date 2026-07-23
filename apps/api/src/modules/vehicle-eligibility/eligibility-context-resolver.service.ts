@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, forwardRef } from "@nestjs/common";
 
 import type {
   DriverDeviceBindingSummary,
@@ -75,6 +75,7 @@ export type ResolvedRuntimeEligibilityContext = {
 @Injectable()
 export class EligibilityContextResolver {
   constructor(
+    @Inject(forwardRef(() => RegulatoryRegistryService))
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly serviceProductService: ServiceProductService,
     private readonly vehicleEligibilityService: VehicleEligibilityService,

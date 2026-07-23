@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
-import type { MultiTaxiService } from "../multi-taxi/multi-taxi.service";
+import { HttpStatus, Inject, Injectable, OnModuleInit, Optional, forwardRef } from "@nestjs/common";
+import { MultiTaxiService } from "../multi-taxi/multi-taxi.service";
 
 import type {
   ActivateInsurancePolicyCommand,
@@ -543,7 +543,13 @@ export class RegulatoryRegistryService implements OnModuleInit {
     private readonly driverProfileService: DriverProfileService,
     @Optional()
     private readonly regulatoryRegistryRepository?: RegulatoryRegistryRepository,
+    @Optional()
+    @Inject(forwardRef(() => MultiTaxiService))
+    private readonly injectedMultiTaxiService?: MultiTaxiService,
   ) {
+    if (this.injectedMultiTaxiService) {
+      this.multiTaxiService = this.injectedMultiTaxiService;
+    }
     this.reconcileSupplyLifecycleForAll({
       emitEvent: false,
       persistContext: null,

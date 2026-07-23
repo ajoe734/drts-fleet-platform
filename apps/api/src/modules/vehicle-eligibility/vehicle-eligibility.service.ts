@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, OnModuleInit, Optional, forwardRef } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
@@ -318,7 +318,9 @@ export class VehicleEligibilityService implements OnModuleInit {
   );
 
   constructor(
-    private readonly regulatoryRegistryService: RegulatoryRegistryService,
+    @Optional()
+    @Inject(forwardRef(() => RegulatoryRegistryService))
+    private readonly regulatoryRegistryService?: RegulatoryRegistryService,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional() private readonly repository?: VehicleEligibilityRepository,

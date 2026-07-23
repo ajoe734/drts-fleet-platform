@@ -302,6 +302,7 @@ export class OwnedMobilityService implements OnModuleInit {
   private forwarderSourceMap = new Map<string, string>();
 
   constructor(
+    @Inject(forwardRef(() => RegulatoryRegistryService))
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly auditNotificationService: AuditNotificationService,
     private readonly callcenterService: CallcenterService,
