@@ -1,0 +1,225 @@
+
+> @drts/driver-app@0.1.0 test /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-s3-verify-001/apps/driver-app
+> vitest run --passWithNoTests
+
+
+ RUN  v4.1.4 /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-s3-verify-001/apps/driver-app
+
+stdout | tests/unit/driver-location-heartbeat.test.ts > driver location heartbeat transport > keeps foreground updates for trip metrics while background transport owns heartbeats
+[driver-location-heartbeat] tracking active {
+  workState: 'on_trip',
+  transportMode: 'background',
+  taskId: 'task-001',
+  intervalMs: 15000,
+  distanceM: 25
+}
+
+ ✓ tests/unit/driver-online-gate.test.ts (10 tests) 195ms
+stdout | tests/unit/driver-location-heartbeat.test.ts > driver location heartbeat transport > keeps active trip heartbeat running after external navigation handoff
+[driver-location-heartbeat] tracking active {
+  workState: 'on_trip',
+  transportMode: 'background',
+  taskId: 'task-001',
+  intervalMs: 15000,
+  distanceM: 25
+}
+
+stdout | tests/unit/driver-location-heartbeat.test.ts > driver location heartbeat transport > uses a throttled foreground fallback when background permission is unavailable
+[driver-location-heartbeat] tracking active {
+  workState: 'on_trip',
+  transportMode: 'foreground',
+  taskId: 'task-001',
+  intervalMs: 15000,
+  distanceM: 25
+}
+
+stdout | tests/unit/driver-location-heartbeat.test.ts > driver online_available continuous tracking > emits background heartbeats at the 30s / 100m online_available cadence
+[driver-location-heartbeat] tracking active {
+  workState: 'available',
+  transportMode: 'background',
+  taskId: null,
+  intervalMs: 30000,
+  distanceM: 100
+}
+
+stderr | tests/unit/driver-location-heartbeat.test.ts > driver online_available continuous tracking > blocks online_available when background permission is denied
+[driver-location-heartbeat] tracking blocked BACKGROUND_LOCATION_REQUIRED
+
+ ✓ tests/unit/driver-navigation.test.ts (7 tests) 15ms
+ ✓ tests/unit/safety-operator-handover-draft.test.ts (9 tests) 28ms
+ ✓ tests/unit/driver-location-heartbeat.test.ts (5 tests) 239ms
+ ✓ tests/unit/driver-trip-map.test.ts (2 tests) 23ms
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > reaches the success path even after submittingAction rerenders the hook
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > reaches the success path even after submittingAction rerenders the hook
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > reaches the success path even after submittingAction rerenders the hook
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > reaches the success path even after submittingAction rerenders the hook
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > routes auth failures to onboarding instead of surfacing a generic replay error
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > routes auth failures to onboarding instead of surfacing a generic replay error
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > routes auth failures to onboarding instead of surfacing a generic replay error
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > routes auth failures to onboarding instead of surfacing a generic replay error
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > can retry the same pending request after a transient replay error settles
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > can retry the same pending request after a transient replay error settles
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > can retry the same pending request after a transient replay error settles
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > can retry the same pending request after a transient replay error settles
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > can retry the same pending request after a transient replay error settles
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/use-pending-completion-replay.test.ts > usePendingCompletionReplay > can retry the same pending request after a transient replay error settles
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/shift-screen-gate.test.ts > ShiftScreen pre-online gate (unprovisioned) > surfaces the IDENTITY_INVALID reason and re-bind action when identity is invalidated
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+ ✓ tests/unit/use-pending-completion-replay.test.ts (3 tests) 41ms
+stderr | tests/unit/shift-screen-gate.test.ts > ShiftScreen pre-online gate (unprovisioned) > surfaces the IDENTITY_INVALID reason and re-bind action when identity is invalidated
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/shift-screen-gate.test.ts > ShiftScreen pre-online gate (unprovisioned) > surfaces the IDENTITY_INVALID reason and re-bind action when identity is invalidated
+The current testing environment is not configured to support act(...)
+
+ ✓ tests/unit/safety-operator-offline-queue.test.ts (3 tests) 31ms
+stderr | tests/unit/shift-screen-gate.test.ts > ShiftScreen pre-online gate (unprovisioned) > surfaces the DEVICE_NOT_BOUND reason when the device is unbound and identity is clean
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/shift-screen-gate.test.ts > ShiftScreen pre-online gate (unprovisioned) > surfaces the DEVICE_NOT_BOUND reason when the device is unbound and identity is clean
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/shift-screen-gate.test.ts > ShiftScreen pre-online gate (unprovisioned) > surfaces the DEVICE_NOT_BOUND reason when the device is unbound and identity is clean
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/safety-operator-screen.test.ts > SafetyOperatorScreen > renders the safety-operator route chrome and unprovisioned queue notice
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+ ✓ tests/unit/shift-screen-gate.test.ts (2 tests) 52ms
+ ✓ tests/unit/safety-operator-screen.test.ts (1 test) 79ms
+ ✓ tests/unit/driver-tracking-recovery.test.ts (13 tests) 35ms
+ ✓ tests/unit/completion-proof.test.ts (7 tests) 16ms
+ ✓ tests/unit/driver-identity-bootstrap.test.ts (7 tests) 48ms
+ ✓ tests/unit/driver-sos-outbox.test.ts (3 tests) 31ms
+ ✓ tests/unit/driver-location-offline-queue.test.ts (3 tests) 855ms
+     ✓ compresses oversized queues while preserving key state changes and minute samples  668ms
+ ✓ tests/unit/driver-identity-routing.test.ts (4 tests) 16ms
+ ✓ tests/unit/platform-presence-view.test.ts (4 tests) 19ms
+ ✓ tests/unit/safety-operator-takeover-draft.test.ts (6 tests) 9ms
+ ✓ tests/unit/driver-workspace-cockpit.test.ts (2 tests) 7ms
+ ✓ tests/unit/trip-workflow.test.ts (8 tests) 8ms
+ ✓ tests/unit/operational-labels.test.ts (3 tests) 6ms
+ ✓ tests/unit/pending-completion-replay.test.ts (4 tests) 8ms
+ ✓ tests/unit/route-display.test.ts (2 tests) 12ms
+ ✓ tests/unit/ui-rn-theme.test.ts (4 tests) 8ms
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > requires a 2-second long press before creating a critical SOS incident
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > renders a distinct driver_not_eligible empty state
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > renders a distinct driver_not_eligible empty state
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > preserves forwarded task context in the SOS incident payload
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > preserves forwarded task context in the SOS incident payload
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > preserves forwarded task context in the SOS incident payload
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > preserves forwarded task context in the SOS incident payload
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > preserves forwarded task context in the SOS incident payload
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > preserves forwarded task context in the SOS incident payload
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/unit/incident-screen.test.ts > IncidentScreen > preserves forwarded task context in the SOS incident payload
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+ ✓ tests/unit/incident-screen.test.ts (3 tests) 61ms
+
+ Test Files  24 passed (24)
+      Tests  115 passed (115)
+   Start at  15:02:10
+   Duration  1.74s (transform 5.54s, setup 0ms, import 7.61s, tests 1.84s, environment 4ms)
+

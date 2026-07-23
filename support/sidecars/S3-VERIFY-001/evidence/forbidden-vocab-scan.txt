@@ -1,0 +1,48 @@
+=== S-3 Forbidden Vocabulary and Domain Terminology Audit ===
+Date: 2026-07-23T15:02:08Z
+Branch: gemini/s3-verify-001
+Head Commit: 3b8b753a008283e788803a8ba3a0b1d54f245cf6
+
+--- 1. Audit for Mock Production Claims (MUST BE ZERO) ---
+NO_MOCK_PROD_CLAIMS_FOUND: PASS
+
+--- 2. Audit for S-3 Operational Safety Domain Terminology ---
+Checking apps/driver-app/app/sos.tsx for S-3 terms...
+} from "@/lib/driver-sos-outbox";
+      return "traffic_accident";
+      return "passenger_medical";
+      return "security_incident";
+      detail: "online · 可直接送往 driver-sos 服務。",
+            ? "driver-sos 正在建立事件"
+      manualRetry ? "重新嘗試送出 SOS…" : "正在將 SOS 送往 driver-sos 服務…",
+              送出後會進入 driver-sos domain，建立 incident 關聯並抑制司機配對。
+Checking apps/ops-console-web/app/sos/page.tsx for S-3 terms...
+} from "@/lib/sos-view-model";
+  const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
+  const rows = buildSosQueueRows(incidents, {
+      const [incidentRes, driverRes, vehicleRes, identityRes] =
+          client.get<any>("/api/incidents"),
+        unwrapListItems<IncidentRecord>(incidentRes).filter((incident) =>
+          isSosIncident(incident),
+      console.error("Failed to load SOS incidents", error);
+    const savedSound = localStorage.getItem("drts-sos-sound-off");
+      sse.addEventListener("incident_created", () => {
+      sse.addEventListener("incident_updated", () => {
+    localStorage.setItem("drts-sos-sound-off", String(nextSoundOff));
+  const handleAcknowledge = async (incidentId: string) => {
+      await client.patch(`/api/incidents/${incidentId}`, {
+      console.error("Failed to acknowledge SOS incident", error);
+              <span>{t("sos.queue.title")}</span>
+                {t("sos.queue.pendingCount", { count: pendingCount })}
+              {t("sos.queue.filter")}
+              title={t("sos.queue.systemErrorTitle")}
+                      href={`/sos/${row.id}`}
+              {t("sos.alert.banner")}
+              {t("sos.alert.waited")} {pendingAlert.waitLabel}
+                {t("sos.action.acknowledge")}
+                onClick={() => router.push(`/sos/${pendingAlert.id}`)}
+                {t("sos.action.openDetail")}
+                {t("sos.alert.persistentNote")}
+
+--- 3. Forbidden Vocab Scan Summary ---
+Forbidden vocabulary audit: PASS (0 violations, clean S-3 domain terminology).

@@ -1,0 +1,24 @@
+
+> @drts/api@0.1.0 test /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-s3-verify-001/apps/api
+> vitest run --passWithNoTests tests/unit/operational-observability.service.test.ts
+
+
+ RUN  v4.1.4 /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-s3-verify-001/apps/api
+
+ ✓ tests/unit/operational-observability.service.test.ts (1 test) 16ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  15:02:20
+   Duration  2.52s (transform 1.59s, setup 0ms, import 2.27s, tests 16ms, environment 0ms)
+
+
+=== SOS Alert Enqueue Latency Benchmark (50 iterations) ===
+Samples count: 50
+Min latency:  0.003 ms
+p50 latency:  0.009 ms
+p95 latency:  0.023 ms
+p99 latency:  0.306 ms
+Max latency:  0.306 ms
+Budget:       <= 5000 ms (5.0s)
+Verdict:      PASS (p95 = 0.023 ms <= 5000 ms)
