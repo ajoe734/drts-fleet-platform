@@ -25,7 +25,10 @@ import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
-import { resolveQueueSemantics } from "@/lib/queue-semantics";
+import {
+  resolveQueueSemantics,
+  isForbiddenStatutoryOverrideAction,
+} from "@/lib/queue-semantics";
 import type { Locale } from "@/lib/translations";
 import { t } from "@/lib/translations";
 import {
@@ -1343,12 +1346,7 @@ function buildActionContexts(
   return normalizeActions(record)
     .filter((action) => {
       if (semantics.isStatutoryRefusal) {
-        if (
-          action.action === "request_override" ||
-          action.action === "approve_override" ||
-          action.action === "force_checkin" ||
-          action.action === "fare_override"
-        ) {
+        if (isForbiddenStatutoryOverrideAction(action.action)) {
           return false;
         }
       }

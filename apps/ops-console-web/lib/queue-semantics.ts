@@ -109,3 +109,27 @@ export function getOpsCoralRealmTokens(dark = true) {
     accent: CANVAS_SURFACE_ACCENTS.ops[dark ? "dark" : "light"],
   };
 }
+
+/**
+ * Checks if an action descriptor or action name represents an override, fare-override, or force-checkin action
+ * that must be forbidden during multi-taxi statutory refusal state (doc08 §7.3).
+ * Canonical & legacy actions:
+ * - request_exception_override / request_override / request_fare_override
+ * - approve_exception_override / approve_override
+ * - reject_exception_override / reject_override
+ * - manual_fare_override / fare_override
+ * - force_checkin / force_checkin_rank / force_check_in
+ */
+export function isForbiddenStatutoryOverrideAction(action: string): boolean {
+  if (!action || typeof action !== "string") {
+    return false;
+  }
+  const normalized = action.toLowerCase().trim();
+  return (
+    normalized.includes("override") ||
+    normalized.includes("force_checkin") ||
+    normalized.includes("force_check_in") ||
+    normalized.includes("manual_fare")
+  );
+}
+
