@@ -2,7 +2,7 @@
 
 ## Summary
 
-Current head already contains substantial S-3 implementation. This pass verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker, and recorded the external blockers that remain for full Fleet G closure.
+Current head `ccc563844c12a986c4f933496665286f318980b8` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-23`, and recorded the external blockers that remain for full Fleet G closure.
 
 ## Verified Locally
 
@@ -97,6 +97,8 @@ Repo scan did not find S-3-specific proof for:
 - malware scan
 - per-file retry audit
 
+The repo does contain attachment upload / checksum enforcement for other domains such as Fleet Partner supply onboarding, but no equivalent current-head path was found for Driver SOS under `apps/api/src/modules/driver-sos`, `apps/api/src/modules/incident`, or related tests. That negative result matters here because it distinguishes "not yet cited" from "not present in the S-3 implementation slice."
+
 Current-head evidence instead shows only local attachment handling:
 
 - `apps/driver-app/app/sos.tsx:334-361`
@@ -128,3 +130,5 @@ pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-sc
 ```
 
 Executed in `apps/driver-app` on `2026-07-23`: all passed.
+
+The driver-app run emitted `react-test-renderer` deprecation and `act(...)` environment warnings, but still exited `0` with all six assertions passing. Those warnings are pre-existing test-environment noise, not S-3 acceptance failures.
