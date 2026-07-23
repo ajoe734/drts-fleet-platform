@@ -17,6 +17,8 @@
 
 import type {
   AddressPayload,
+  MoneyAmount,
+  OwnedOrderStatus,
   PassengerProfile,
   ResolvedAddressPayload,
   ServicePreferences,
@@ -386,6 +388,50 @@ export interface PassengerRideAccessToken {
   revokedAt: string | null;
 }
 
+export interface PassengerRideAccessGrant extends PassengerRideAccessToken {
+  accessToken: string;
+}
+
+export interface PassengerRideAuthorityView {
+  order: {
+    orderId: string;
+    orderNo: string;
+    status: OwnedOrderStatus;
+    timingMode: RideTimingMode;
+    requestedPickupAt: string;
+    pickup: AddressPayload;
+    dropoff: AddressPayload;
+    cancelableUntil: string | null;
+    cancelledAt: string | null;
+    completedAt: string | null;
+  };
+  assignment: PassengerDispatchDisclosureSnapshot | null;
+  rating: PassengerTripRatingRecord | null;
+  payment: {
+    status: PassengerPaymentStatus;
+    amount: MoneyAmount | null;
+  } | null;
+  receipt: MultiTaxiElectronicReceipt | null;
+  actions: {
+    canCancel: boolean;
+    canRate: boolean;
+    canContact: boolean;
+    canReadReceipt: boolean;
+  };
+}
+
+export interface SubmitPassengerTripRatingCommand {
+  score: 1 | 2 | 3 | 4 | 5;
+  tags?: string[];
+  comment?: string | null;
+}
+
+export interface PassengerRideContactOption {
+  mode: "masked_call" | "support_fallback" | "unavailable";
+  contactUri: string | null;
+  expiresAt: string | null;
+}
+
 export const PASSENGER_RIDE_SSE_EVENTS = [
   "assignment_disclosure_ready",
   "assignment_replaced",
@@ -398,6 +444,15 @@ export const PASSENGER_RIDE_SSE_EVENTS = [
   "receipt_ready",
 ] as const;
 export type PassengerRideSseEvent = (typeof PASSENGER_RIDE_SSE_EVENTS)[number];
+
+export interface PassengerRideSseEventEnvelope {
+  eventId: string;
+  eventType: PassengerRideSseEvent;
+  eventVersion: number;
+  orderId: string;
+  occurredAt: string;
+  data: PassengerRideAuthorityView;
+}
 
 // ===========================================================================
 // §9 Consumer notification outbox
@@ -433,6 +488,16 @@ export type PassengerPaymentStatus =
   | "failed"
   | "refunded"
   | "manual_recovery";
+
+export interface MultiTaxiElectronicReceipt {
+  receiptId: string;
+  orderId: string;
+  receiptNo: string;
+  amountMinor: number;
+  currency: "NTD";
+  issuedAt: string;
+  record: Record<string, unknown>;
+}
 
 // ===========================================================================
 // §14 Two-year multi-taxi operational record

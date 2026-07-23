@@ -40,6 +40,7 @@ import type {
   DriverArrivedPickupCommand,
   DriverCompleteTaskCommand,
   DriverDepartTaskCommand,
+  DriverRatingSummary,
   DriverRejectTaskCommand,
   DriverStartTaskCommand,
   DriverTaskRecord,
@@ -1338,10 +1339,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   getPassengerAssignmentDisclosure(orderId: string) {
-    const snapshot = this.passengerDisclosureSnapshots.find(
-      (candidate) =>
-        candidate.orderId === orderId && candidate.supersededAt === null,
-    );
+    const snapshot = this.findPassengerAssignmentDisclosure(orderId);
     if (!snapshot) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -1350,7 +1348,15 @@ export class OwnedMobilityService implements OnModuleInit {
         { orderId },
       );
     }
-    return this.clonePassengerDisclosureSnapshot(snapshot);
+    return snapshot;
+  }
+
+  findPassengerAssignmentDisclosure(orderId: string) {
+    const snapshot = this.passengerDisclosureSnapshots.find(
+      (candidate) =>
+        candidate.orderId === orderId && candidate.supersededAt === null,
+    );
+    return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
   }
 
   listTenantBookings(tenantId: string) {
@@ -3096,6 +3102,14 @@ export class OwnedMobilityService implements OnModuleInit {
               );
             }
           }
+          const ratingSummary =
+            order.runtimeProfileCode === "multi_taxi_direct"
+              ? await this.ownedMobilityRepository!.getOrInitializeDriverRatingSummary(
+                  tx,
+                  driverId,
+                  new Date().toISOString(),
+                )
+              : null;
           const bundle = this.buildDispatchAssignmentBundle(
             dispatchJob,
             order,
@@ -3103,6 +3117,7 @@ export class OwnedMobilityService implements OnModuleInit {
             driverId,
             sandboxDispatchSnapshot,
             options,
+            ratingSummary,
           );
           this.assertAssignmentEligibilityRecheck(
             bundle.order,
@@ -5415,6 +5430,7 @@ export class OwnedMobilityService implements OnModuleInit {
     driverId: string,
     _sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     options?: CreateDispatchAssignmentOptions,
+    ratingSummary?: DriverRatingSummary | null,
   ): DispatchAssignmentBundle {
     const now = new Date().toISOString();
     const nextOrder = this.cloneOrder(order);
@@ -5509,6 +5525,7 @@ export class OwnedMobilityService implements OnModuleInit {
       vehicleId,
       driverId,
       now,
+      ratingSummary ?? this.createNewDriverRatingSummary(driverId, now),
     );
 
     return {
@@ -5531,6 +5548,7 @@ export class OwnedMobilityService implements OnModuleInit {
     vehicleId: string,
     driverId: string,
     now: string,
+    ratingSummary: DriverRatingSummary,
   ): {
     passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
     consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
@@ -5540,6 +5558,26 @@ export class OwnedMobilityService implements OnModuleInit {
         passengerDisclosureSnapshot: null,
         consumerNotificationOutbox: null,
       };
+    }
+    if (
+      ratingSummary.displayState === "unavailable" ||
+      (ratingSummary.displayState === "rated" &&
+        (ratingSummary.averageRating === null ||
+          ratingSummary.ratingCount < 1)) ||
+      (ratingSummary.displayState === "new_driver" &&
+        (ratingSummary.averageRating !== null ||
+          ratingSummary.ratingCount !== 0))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_RATING_STATE_UNINITIALIZED",
+        "A canonical driver rating state is required before assignment.",
+        {
+          driverId,
+          displayState: ratingSummary.displayState,
+          ratingCount: ratingSummary.ratingCount,
+        },
+      );
     }
 
     const disclosure =
@@ -5635,10 +5673,10 @@ export class OwnedMobilityService implements OnModuleInit {
         credentialVersion: credential.version,
       },
       rating: {
-        displayState: "new_driver",
-        averageRating: null,
-        ratingCount: 0,
-        aggregateVersion: 1,
+        displayState: ratingSummary.displayState,
+        averageRating: ratingSummary.averageRating,
+        ratingCount: ratingSummary.ratingCount,
+        aggregateVersion: ratingSummary.aggregateVersion,
       },
       eta: {
         minutes: order.etaSnapshot?.etaMinutes ?? null,
@@ -5715,6 +5753,21 @@ export class OwnedMobilityService implements OnModuleInit {
     return {
       passengerDisclosureSnapshot: snapshot,
       consumerNotificationOutbox: outbox,
+    };
+  }
+
+  private createNewDriverRatingSummary(
+    driverId: string,
+    calculatedAt: string,
+  ): DriverRatingSummary {
+    return {
+      driverId,
+      displayState: "new_driver",
+      averageRating: null,
+      ratingCount: 0,
+      lastRatedAt: null,
+      aggregateVersion: 1,
+      calculatedAt,
     };
   }
 

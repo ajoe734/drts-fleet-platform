@@ -6,7 +6,10 @@ import {
   Param,
   Post,
   Put,
+  Sse,
 } from "@nestjs/common";
+import type { MessageEvent } from "@nestjs/common";
+import type { Observable } from "rxjs";
 
 import type {
   AddMultiTaxiAuthorizedVehicleCommand,
@@ -15,6 +18,7 @@ import type {
   CreateMultiTaxiRideCommand,
   QueueCheckInCommand,
   QueueCheckOutCommand,
+  SubmitPassengerTripRatingCommand,
   UpdateMultiTaxiOperatingAuthorizationCommand,
 } from "@drts/contracts";
 
@@ -29,25 +33,99 @@ export class MultiTaxiController {
 
   @Post("multi-taxi/rides")
   @OpenRoute()
-  createRide(
+  async createRide(
     @Body() command: CreateMultiTaxiRideCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.createRide(command, identity, requestId),
+      await this.multiTaxiService.createRide(command, identity, requestId),
       requestId,
     );
   }
 
   @Post("call-center/multi-taxi/rides")
   @RequireRealms("ops")
-  createCallCenterRide(
+  async createCallCenterRide(
     @Body() command: CreateCallCenterMultiTaxiRideCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.createCallCenterRide(command, requestId),
+      await this.multiTaxiService.createCallCenterRide(command, requestId),
+      requestId,
+    );
+  }
+
+  @Get("passenger-rides/:accessToken")
+  @OpenRoute()
+  async getPassengerRide(
+    @Param("accessToken") accessToken: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getPassengerRide(accessToken),
+      requestId,
+    );
+  }
+
+  @Sse("passenger-rides/:accessToken/events")
+  @OpenRoute()
+  streamPassengerRide(
+    @Param("accessToken") accessToken: string,
+  ): Observable<MessageEvent> {
+    return this.multiTaxiService.streamPassengerRide(accessToken);
+  }
+
+  @Post("passenger-rides/:accessToken/cancel")
+  @OpenRoute()
+  async cancelPassengerRide(
+    @Param("accessToken") accessToken: string,
+    @Body() command: { reason?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.cancelPassengerRide(
+        accessToken,
+        command.reason,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("passenger-rides/:accessToken/ratings")
+  @OpenRoute()
+  async submitPassengerRating(
+    @Param("accessToken") accessToken: string,
+    @Body() command: SubmitPassengerTripRatingCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.submitPassengerRating(accessToken, command),
+      requestId,
+    );
+  }
+
+  @Post("passenger-rides/:accessToken/contact")
+  @OpenRoute()
+  async getPassengerContact(
+    @Param("accessToken") accessToken: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getPassengerContact(accessToken),
+      requestId,
+    );
+  }
+
+  @Get("passenger-rides/:accessToken/receipt")
+  @OpenRoute()
+  async getPassengerReceipt(
+    @Param("accessToken") accessToken: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getPassengerReceipt(accessToken),
       requestId,
     );
   }

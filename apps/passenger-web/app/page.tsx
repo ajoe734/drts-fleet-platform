@@ -40,8 +40,8 @@ export default function PassengerRootPage() {
           Passenger ride surface
         </h1>
         <p style={{ margin: 0, color: passengerChrome.muted, lineHeight: 1.6 }}>
-          以 token 路徑瀏覽 `P5-01..12` 與公開計費頁。預設資料來源：
-          {getPassengerFixtureSourceLabel("fixture")}.
+          以安全 token 路徑瀏覽即時行程與乘車證明。正式環境資料來源：
+          {getPassengerFixtureSourceLabel("live")}。
         </p>
         <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
           <Link

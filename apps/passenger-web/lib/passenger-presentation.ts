@@ -46,13 +46,12 @@ export function getPassengerSourceCallout(mode: PassengerDataMode) {
         tone: passengerChrome.info,
         title: "Live mode",
         detail:
-          "預留 passenger-rides SSE 接口；目前未回退到假 rating 或外部平台資訊。",
+          "目前由 passenger-rides API 與版本化 SSE 提供即時權威資料，不會回退到假 rating 或外部平台資訊。",
       }
     : {
         tone: passengerChrome.warning,
         title: "Fixture preview",
-        detail:
-          "目前以 fixture 模擬 passenger-rides 契約與 SSE 事件，正式上線前切換為 live。",
+        detail: "僅供非正式環境檢視畫面；production 建置與執行均禁止 fixture。",
       };
 }
 

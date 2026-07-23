@@ -6,6 +6,7 @@ import type {
   DispatchAttemptRecord,
   DispatchJobRecord,
   DispatchTraceLogRecord,
+  DriverRatingSummary,
   DriverTaskRecord,
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
@@ -16,6 +17,16 @@ import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
+};
+
+type DriverRatingSummaryRow = QueryResultRow & {
+  driver_id: string;
+  display_state: DriverRatingSummary["displayState"];
+  average_rating: string | number | null;
+  rating_count: number;
+  last_rated_at: Date | string | null;
+  aggregate_version: number;
+  calculated_at: Date | string;
 };
 
 export type OwnedMobilityQueryExecutor = {
@@ -269,6 +280,46 @@ export class OwnedMobilityRepository {
       [authorizationId, vehicleId],
     );
     return result.rows[0]?.allowed === true;
+  }
+
+  async getOrInitializeDriverRatingSummary(
+    executor: OwnedMobilityQueryExecutor,
+    driverId: string,
+    calculatedAt: string,
+  ): Promise<DriverRatingSummary> {
+    const result = await executor.query<DriverRatingSummaryRow>(
+      `
+        INSERT INTO ops.driver_rating_summaries (
+          driver_id,
+          display_state,
+          average_rating,
+          rating_count,
+          last_rated_at,
+          aggregate_version,
+          calculated_at
+        ) VALUES ($1, 'new_driver', NULL, 0, NULL, 1, $2)
+        ON CONFLICT (driver_id) DO UPDATE SET
+          driver_id = EXCLUDED.driver_id
+        RETURNING *
+      `,
+      [driverId, calculatedAt],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error(`Driver rating authority unavailable for ${driverId}`);
+    }
+    return {
+      driverId: row.driver_id,
+      displayState: row.display_state,
+      averageRating:
+        row.average_rating === null ? null : Number(row.average_rating),
+      ratingCount: row.rating_count,
+      lastRatedAt: row.last_rated_at
+        ? new Date(row.last_rated_at).toISOString()
+        : null,
+      aggregateVersion: row.aggregate_version,
+      calculatedAt: new Date(row.calculated_at).toISOString(),
+    };
   }
 
   private async persistChangesWithExecutor(
