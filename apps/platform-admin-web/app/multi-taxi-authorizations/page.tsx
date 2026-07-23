@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type { MultiTaxiOperatingAuthorizationRecord } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -56,6 +57,7 @@ function statusTone(status: AuthorizationRow["status"]) {
 
 export default function MultiTaxiAuthorizationsPage() {
   const client = usePlatformAdminClient();
+  const { t } = useTranslation();
   const [rows, setRows] = useState<AuthorizationRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,7 +119,7 @@ export default function MultiTaxiAuthorizationsPage() {
 
   const columns: CanvasTableColumn<AuthorizationRow>[] = [
     {
-      h: "Authority",
+      h: t("multiTaxiAuth.column.authority"),
       w: 240,
       r: (row) => (
         <button
@@ -137,33 +139,41 @@ export default function MultiTaxiAuthorizationsPage() {
         </button>
       ),
     },
-    { h: "Operator", w: 180, r: (row) => row.operatorId },
     {
-      h: "Status",
+      h: t("multiTaxiAuth.column.operator"),
+      w: 180,
+      r: (row) => row.operatorId,
+    },
+    {
+      h: t("multiTaxiAuth.column.status"),
       w: 120,
       r: (row) => (
         <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
-          {row.status}
+          {t(`multiTaxiAuth.status.${row.status}`)}
         </CanvasPill>
       ),
     },
     {
-      h: "Service areas",
+      h: t("multiTaxiAuth.column.serviceAreas"),
       w: 180,
       r: (row) => row.serviceAreaCodes.join(", "),
     },
-    { h: "Fare version", w: 180, r: (row) => row.activeFareVersionId },
+    {
+      h: t("multiTaxiAuth.column.fareVersion"),
+      w: 180,
+      r: (row) => row.activeFareVersionId,
+    },
   ];
 
   return (
     <main style={pageStyle}>
       <CanvasPageHeader
         theme={theme}
-        title="Multi-Taxi Operating Authorizations"
-        subtitle="Server-authoritative permits, effective windows, fare versions, and vehicle membership."
+        title={t("multiTaxiAuth.title")}
+        subtitle={t("multiTaxiAuth.subtitle")}
         actions={
           <CanvasBtn theme={theme} onClick={() => void load()} disabled={busy}>
-            Refresh
+            {t("multiTaxiAuth.action.refresh")}
           </CanvasBtn>
         }
       />
@@ -171,29 +181,29 @@ export default function MultiTaxiAuthorizationsPage() {
         <CanvasBanner
           theme={theme}
           tone="danger"
-          title="Request failed"
+          title={t("multiTaxiAuth.error.requestFailed")}
           body={error}
         />
       ) : null}
       <div style={splitStyle}>
         <CanvasCard
           theme={theme}
-          title="Authorization registry"
-          subtitle={`${rows.length} records`}
+          title={t("multiTaxiAuth.registry.title")}
+          subtitle={t("multiTaxiAuth.registry.count", { count: rows.length })}
         >
           <CanvasTable theme={theme} columns={columns} rows={rows} />
         </CanvasCard>
         <div style={{ display: "grid", gap: 16 }}>
           <CanvasCard
             theme={theme}
-            title="Create draft authorization"
-            subtitle="Activation remains a separate controlled action."
+            title={t("multiTaxiAuth.create.title")}
+            subtitle={t("multiTaxiAuth.create.subtitle")}
           >
             <div style={formStyle}>
               {Object.entries(draft).map(([key, value]) => (
                 <label key={key} style={{ display: "grid", gap: 5 }}>
                   <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                    {key}
+                    {t(`multiTaxiAuth.field.${key}`)}
                   </span>
                   <input
                     style={inputStyle}
@@ -237,7 +247,7 @@ export default function MultiTaxiAuthorizationsPage() {
                   )
                 }
               >
-                Create draft
+                {t("multiTaxiAuth.action.createDraft")}
               </CanvasBtn>
             </div>
           </CanvasCard>
@@ -262,7 +272,7 @@ export default function MultiTaxiAuthorizationsPage() {
                         )
                       }
                     >
-                      Activate
+                      {t("multiTaxiAuth.action.activate")}
                     </CanvasBtn>
                   ) : null}
                   {selected.status === "approved" ? (
@@ -277,14 +287,14 @@ export default function MultiTaxiAuthorizationsPage() {
                         )
                       }
                     >
-                      Suspend
+                      {t("multiTaxiAuth.action.suspend")}
                     </CanvasBtn>
                   ) : null}
                 </div>
                 {Object.entries(vehicle).map(([key, value]) => (
                   <label key={key} style={{ display: "grid", gap: 5 }}>
                     <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                      vehicle.{key}
+                      {t(`multiTaxiAuth.field.${key}`)}
                     </span>
                     <input
                       style={inputStyle}
@@ -323,7 +333,7 @@ export default function MultiTaxiAuthorizationsPage() {
                     )
                   }
                 >
-                  Add authorized vehicle
+                  {t("multiTaxiAuth.action.addVehicle")}
                 </CanvasBtn>
               </div>
             </CanvasCard>
