@@ -184,8 +184,9 @@ Deliver:
 - responsive frames;
 - copy and state matrices;
 - accessibility and developer annotations;
-- `P5_dispatch_disclosure.png`;
-- `S3_sos_fullscreen.png`;
+- `docs/05-ui/screenshots/P5_dispatch_disclosure.png` (and `docs/05-ui/drts-design-canvas/screenshots/P5_dispatch_disclosure.png`);
+- `docs/05-ui/screenshots/S3_sos_fullscreen.png` (and `docs/05-ui/drts-design-canvas/screenshots/S3_sos_fullscreen.png`);
+- design QA handoff evidence packet: `docs/05-ui/multi-taxi-operations-design-wave0-handoff-20260723.md`;
 - design QA checklist and forbidden-word scan.
 
 **Acceptance:** every item in UI brief section 30 and section 31 has evidence.

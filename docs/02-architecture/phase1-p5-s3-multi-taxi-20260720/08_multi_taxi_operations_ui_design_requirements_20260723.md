@@ -1070,7 +1070,7 @@ variants, focus order, API/field mapping, and empty/error/conflict behavior.
 11. Forbidden-content scan.
 12. Open command/API dependency list.
 
-Required screenshot names:
+Required screenshot names (stored under `docs/05-ui/screenshots/` and `docs/05-ui/drts-design-canvas/screenshots/`; see handoff evidence packet `docs/05-ui/multi-taxi-operations-design-wave0-handoff-20260723.md`):
 
 ```text
 MTX_authorization_registry.png
@@ -1082,6 +1082,8 @@ P5_rating_moderation.png
 P5_fare_anomaly.png
 P5_payment_exception.png
 P5_operational_record_export.png
+P5_dispatch_disclosure.png
+S3_sos_fullscreen.png
 ```
 
 ---
