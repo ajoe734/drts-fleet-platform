@@ -29,7 +29,32 @@ Per Fleet G execution instructions (`07_fleets_execution_tasks_20260723.md` §4)
   - `tests/e2e/E2E-017-driver-sos-incident.sh` (Driver SOS event submission & self-scoped authorization).
   - `tests/e2e/E2E-018-driver-device-lifecycle.sh` (Driver device registration, heartbeat & lifecycle).
   - `tests/e2e/E2E-021-driver-heartbeat-replay.sh` (Offline queue replay, deduplication & tracking status).
-- **Results:** PASS across all target suites executed in hermetic isolation using `./tests/e2e/run-e2e-hermetic.sh 017 018 021`.
+- **Hermetic Execution Log:**
+  ```text
+  [hermetic] PASS (3): 017 018 021
+  [hermetic] FAIL (0): none
+
+  E2E-017 evidence:
+  2026-07-23T14:54:41Z | E2E-017 | driver | incidentId=INC-000001
+  2026-07-23T14:54:41Z | E2E-017 | driver | sosEventId=f5f6690d-4936-4bbb-9590-50820cf0ee5b
+  2026-07-23T14:54:41Z | E2E-017 | driver | eventNo=SOS-20260723145441-540214
+  2026-07-23T14:54:41Z | E2E-017 | driver | listForbidden=true
+
+  E2E-018 evidence:
+  2026-07-23T14:56:54Z | E2E-018 | driver_device | bindingId=drvbind_97ec6f514c6443fca513c0172c74cd48
+  2026-07-23T14:56:54Z | E2E-018 | driver_device | deviceId=e2e-device-1668112
+  2026-07-23T14:56:54Z | E2E-018 | driver_device | refreshRotated=true
+  2026-07-23T14:56:54Z | E2E-018 | driver_device | revokedAt=2026-07-23T14:56:54.513Z
+
+  E2E-021 evidence:
+  2026-07-23T14:59:08Z | E2E-021 | tracking | baselineFreshness=missing
+  2026-07-23T14:59:08Z | E2E-021 | heartbeat | replayDeduped=true
+  2026-07-23T14:59:08Z | E2E-021 | tracking | currentRecordedAt=2026-07-23T14:59:07.000Z
+  2026-07-23T14:59:08Z | E2E-021 | tracking | freshness=fresh
+  2026-07-23T14:59:08Z | E2E-021 | tracking | opsParity=true
+  2026-07-23T14:59:08Z | E2E-021 | tracking | lowAccuracyFreshness=low_accuracy
+  ```
+- **Result:** **PASS** across all target suites executed in hermetic isolation using `./tests/e2e/run-e2e-hermetic.sh 017 018 021`.
 
 ### AC-2: Offline Replay (Android & iOS)
 
