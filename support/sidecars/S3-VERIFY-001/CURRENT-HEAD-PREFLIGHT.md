@@ -19,7 +19,7 @@
 | Ops incident event stream publish | `verified` | `apps/api/tests/unit/ops-dispatch-events.service.test.ts:59-216` |
 | Screenshot evidence with runtime source label | `partial` | `support/sidecars/DRV-UI-010/DRV-UI-010-VERIFICATION-PACKET.md:71-72,91-94`, `support/sidecars/DRV-UI-010/ui-text-snapshots.md:83-95` |
 | Android / iOS physical offline replay | `blocked_ext` | No emulator / device execution in this worker; task brief forbids replacing device evidence with local mock. |
-| Attachment security scan | `missing_evidence` | No S-3-specific upload / presign / malware-scan path found under `apps/api/src/modules/driver-sos`, `apps/api/src/modules/incident`, or related tests during repo scan. |
+| Attachment security scan | `missing_evidence` | `apps/driver-app/app/sos.tsx:334-361,672-761,1086-1196` and `apps/driver-app/lib/driver-sos-outbox.ts:131-218,348-364` show attachment drafts stay in local state / durable outbox, while `buildDriverSosSubmitCommand` at `apps/driver-app/lib/driver-sos-outbox.ts:208-220` sends no attachment metadata. No S-3-specific upload / presign / malware-scan path was found under `apps/api/src/modules/driver-sos`, `apps/api/src/modules/incident`, or related tests during repo scan. |
 | Alert p95 measured in production | `blocked_ext` | No production observability access in this worker; local unit/integration timings are not acceptable production proof. |
 | Forbidden-vocabulary scan | `verified_with_gap` | Android incident text snapshot is clean for the forbidden list, but mirrored/forwarded wording still exists outside the incident surface. |
 
@@ -56,6 +56,6 @@ Result: `PASS` (`2` files, `6` tests)
 ## Remaining Delta
 
 1. `S3-VERIFY-002` physical-device offline replay evidence is still required for Android and iOS. This worker cannot produce honest device proof.
-2. `S3-VERIFY-003` attachment security verification is not yet evidenced for S-3. Current-head repo scan did not locate a driver-SOS attachment upload / presign / malware-scan verification path.
+2. `S3-VERIFY-003` attachment security verification is not yet evidenced for S-3. Current head exposes local attachment draft / supplement UX in `apps/driver-app/app/sos.tsx` and durable local persistence in `apps/driver-app/lib/driver-sos-outbox.ts`, but the submit command still omits attachment fields and the repo scan did not locate a driver-SOS upload / presign / malware-scan verification path.
 3. `S3-VERIFY-004` requires production-grade latency measurement for `fleetReportConfirmedAt -> opsAlertRenderedAt`; local test output is insufficient.
-4. `S3-VERIFY-005` is only partially satisfied here: the Android incident screenshot text is clean, but broader driver-app vocabulary still contains `forwarded` / `mirror` on non-SOS surfaces.
+4. `S3-VERIFY-005` is only partially satisfied here: the Android incident screenshot text is clean, but broader driver-app vocabulary still contains `forwarded` / `mirror` on non-SOS surfaces such as `support/sidecars/DRV-UI-010/ui-text-snapshots.md:52`.
