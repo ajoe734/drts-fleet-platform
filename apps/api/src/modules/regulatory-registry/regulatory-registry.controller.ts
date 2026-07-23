@@ -81,7 +81,8 @@ export class RegulatoryRegistryController {
       displayName: "Multi-Taxi Direct",
       orderDomains: ["owned"],
       allowedServiceProducts: ["taxi_reservation"],
-      reservationOnly: true,
+      acquisitionMode: "platform_reserved",
+      timingModes: ["on_demand", "scheduled"],
       passengerSurface: "direct_ride",
       driverSurface: "multi_taxi_driver",
       opsSurface: "multi_taxi_ops",
@@ -370,7 +371,10 @@ export class RegulatoryRegistryController {
     @Param("vehicleId") vehicleId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const profile = this.regulatoryRegistryService.getVehiclePassengerDisclosureProfile(vehicleId);
+    const profile =
+      this.regulatoryRegistryService.getVehiclePassengerDisclosureProfile(
+        vehicleId,
+      );
     if (!profile) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -386,7 +390,10 @@ export class RegulatoryRegistryController {
     @Param("driverId") driverId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const credential = this.regulatoryRegistryService.getDriverPublicRegistrationCredential(driverId);
+    const credential =
+      this.regulatoryRegistryService.getDriverPublicRegistrationCredential(
+        driverId,
+      );
     if (!credential) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,

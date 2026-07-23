@@ -36,6 +36,7 @@ import { GeoModule } from "./modules/geo/geo.module";
 import { IdentityModule } from "./modules/identity/identity.module";
 import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
+import { MultiTaxiModule } from "./modules/multi-taxi/multi-taxi.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
 import { OperationalObservabilityModule } from "./modules/operational-observability/operational-observability.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
@@ -97,6 +98,7 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     FleetPartnerModule,
     IncidentModule,
     MaintenanceModule,
+    MultiTaxiModule,
     ShiftAttendanceModule,
     DriverSettingsModule,
     PlatformPresenceModule,

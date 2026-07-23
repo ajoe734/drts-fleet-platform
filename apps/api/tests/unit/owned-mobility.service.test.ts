@@ -3966,7 +3966,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ).toThrowError(ApiRequestError);
   });
 
-  it("returns 409 when multi_taxi_direct is used on non-reservation owned orders", () => {
+  it("rejects a public runtime-profile override on owned orders", () => {
     const { service } = createOwnedMobilityService();
 
     expect(() =>
@@ -3994,16 +3994,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         "multi_taxi_direct",
       );
     } catch (error) {
-      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getStatus()).toBe(403);
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
-          code: "RESERVATION_ONLY_PROFILE",
+          code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
         },
       });
     }
   });
 
-  it("returns 409 when multi_taxi_direct booking requests a non-reservation service product", () => {
+  it("rejects a public runtime-profile override on tenant bookings", () => {
     const { service } = createOwnedMobilityService();
 
     expect(() =>
@@ -4041,13 +4041,119 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         "multi_taxi_direct",
       );
     } catch (error) {
-      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getStatus()).toBe(403);
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
-          code: "SERVICE_PRODUCT_NOT_ALLOWED",
+          code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
         },
       });
     }
+  });
+
+  it("creates on-demand and scheduled multi-taxi orders with canonical runtime context", () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const onDemand = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站" },
+        dropoff: { address: "松山機場" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: "pm-token-001",
+      },
+      authorization,
+    );
+    const scheduled = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站" },
+        dropoff: { address: "桃園機場" },
+        passenger: { name: "預約乘客", phone: "0911000000" },
+        requestedPickupAt: "2026-12-01T10:00:00.000Z",
+        timingMode: "scheduled",
+        paymentMethodTokenRef: null,
+      },
+      authorization,
+    );
+
+    expect(onDemand).toMatchObject({
+      runtimeProfileCode: "multi_taxi_direct",
+      serviceProductCode: "taxi_reservation",
+      acquisitionMode: "platform_reserved",
+      timingMode: "on_demand",
+      dispatchSemantics: "realtime",
+      operatingAuthorizationId: "auth-mtx-001",
+      queueMode: "virtual_matching",
+    });
+    expect(scheduled).toMatchObject({
+      timingMode: "scheduled",
+      dispatchSemantics: "reservation",
+      operatingAuthorizationId: "auth-mtx-001",
+    });
+  });
+
+  it("allows only virtual matching for multi-taxi queue entries", () => {
+    const { service } = createOwnedMobilityService();
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const virtualEntry = service.queueCheckInMultiTaxi(
+      {
+        vehicleId: "veh-demo-001",
+        siteId: "virtual-tpe",
+        queueMode: "virtual_matching",
+      },
+      authorization,
+    );
+    expect(virtualEntry).toMatchObject({
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: "virtual_matching",
+      operatingAuthorizationId: "auth-mtx-001",
+    });
+
+    expect(() =>
+      service.queueCheckInMultiTaxi(
+        {
+          vehicleId: "veh-demo-001",
+          siteId: "taxi-stand-tpe",
+          queueMode: "taxi_stand",
+        },
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
   });
 });
 

@@ -713,12 +713,18 @@ describe("regulatory registry controller", () => {
 
   it("gets passenger runtime profile by code", async () => {
     const controller = new RegulatoryRegistryController({} as any);
-    const result = controller.getPassengerRuntimeProfile("multi_taxi_direct", "req-123");
+    const result = controller.getPassengerRuntimeProfile(
+      "multi_taxi_direct",
+      "req-123",
+    );
     expect(result).toBeDefined();
     expect(result.data.code).toBe("multi_taxi_direct");
-    expect(result.data.reservationOnly).toBe(true);
+    expect(result.data.acquisitionMode).toBe("platform_reserved");
+    expect(result.data.timingModes).toEqual(["on_demand", "scheduled"]);
 
-    expect(() => controller.getPassengerRuntimeProfile("other_code", "req-123")).toThrow();
+    expect(() =>
+      controller.getPassengerRuntimeProfile("other_code", "req-123"),
+    ).toThrow();
   });
 
   it("exposes endpoints to query passenger disclosure profiles and driver credentials on controller", async () => {
@@ -766,17 +772,34 @@ describe("regulatory registry controller", () => {
 
     const controller = new RegulatoryRegistryController(service);
 
-    const profileRes = controller.getVehiclePassengerDisclosureProfile("veh-123", "req-123");
+    const profileRes = controller.getVehiclePassengerDisclosureProfile(
+      "veh-123",
+      "req-123",
+    );
     expect(profileRes.data.make).toBe("Toyota");
-    expect(service.getVehiclePassengerDisclosureProfile).toHaveBeenCalledWith("veh-123");
+    expect(service.getVehiclePassengerDisclosureProfile).toHaveBeenCalledWith(
+      "veh-123",
+    );
 
-    expect(() => controller.getVehiclePassengerDisclosureProfile("veh-unknown", "req-123")).toThrow();
+    expect(() =>
+      controller.getVehiclePassengerDisclosureProfile("veh-unknown", "req-123"),
+    ).toThrow();
 
-    const credRes = controller.getDriverPublicRegistrationCredential("drv-123", "req-123");
+    const credRes = controller.getDriverPublicRegistrationCredential(
+      "drv-123",
+      "req-123",
+    );
     expect(credRes.data.registrationNo).toBe("RE***23");
-    expect(service.getDriverPublicRegistrationCredential).toHaveBeenCalledWith("drv-123");
+    expect(service.getDriverPublicRegistrationCredential).toHaveBeenCalledWith(
+      "drv-123",
+    );
 
-    expect(() => controller.getDriverPublicRegistrationCredential("drv-unknown", "req-123")).toThrow();
+    expect(() =>
+      controller.getDriverPublicRegistrationCredential(
+        "drv-unknown",
+        "req-123",
+      ),
+    ).toThrow();
   });
 
   it("performs idempotent in-memory backfill of driver credentials", async () => {
@@ -805,7 +828,7 @@ describe("regulatory registry controller", () => {
     expect(firstCred!.status).toBe("unverified");
     expect(firstCred!.maskedDisplay).toBe("RE***01");
     // drv-demo-004 has no registration profile and should be backfilled with 'missing' status and default maskedDisplay '***'
-    const missingCred = credentials.find(c => c.driverId === "drv-demo-004");
+    const missingCred = credentials.find((c) => c.driverId === "drv-demo-004");
     expect(missingCred).toBeDefined();
     expect(missingCred!.status).toBe("missing");
     expect(missingCred!.maskedDisplay).toBe("***");

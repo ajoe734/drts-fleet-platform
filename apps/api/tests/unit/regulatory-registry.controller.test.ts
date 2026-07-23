@@ -43,7 +43,7 @@ describe("RegulatoryRegistryController", () => {
     expect(response.data.registrationNo).not.toBe("REG-0001");
   });
 
-  it("returns the reservation-only multi_taxi_direct runtime profile", () => {
+  it("returns the platform-reserved multi_taxi_direct runtime profile", () => {
     const controller = new RegulatoryRegistryController({} as never);
 
     const response = controller.getPassengerRuntimeProfile(
@@ -54,7 +54,8 @@ describe("RegulatoryRegistryController", () => {
     expect(response.data).toMatchObject({
       code: "multi_taxi_direct",
       allowedServiceProducts: ["taxi_reservation"],
-      reservationOnly: true,
+      acquisitionMode: "platform_reserved",
+      timingModes: ["on_demand", "scheduled"],
       passengerSurface: "direct_ride",
       driverSurface: "multi_taxi_driver",
       opsSurface: "multi_taxi_ops",

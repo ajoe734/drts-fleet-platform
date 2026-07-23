@@ -216,11 +216,18 @@ export class OwnedMobilityRepository {
               order_source,
               service_bucket,
               dispatch_semantics,
+              runtime_profile_code,
+              service_product_code,
+              acquisition_mode,
+              timing_mode,
+              operating_authorization_id,
+              queue_mode,
               created_at,
               updated_at,
               record
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+              $13, $14, $15::jsonb
             )
             ON CONFLICT (order_id) DO UPDATE SET
               order_no = EXCLUDED.order_no,
@@ -228,6 +235,12 @@ export class OwnedMobilityRepository {
               order_source = EXCLUDED.order_source,
               service_bucket = EXCLUDED.service_bucket,
               dispatch_semantics = EXCLUDED.dispatch_semantics,
+              runtime_profile_code = EXCLUDED.runtime_profile_code,
+              service_product_code = EXCLUDED.service_product_code,
+              acquisition_mode = EXCLUDED.acquisition_mode,
+              timing_mode = EXCLUDED.timing_mode,
+              operating_authorization_id = EXCLUDED.operating_authorization_id,
+              queue_mode = EXCLUDED.queue_mode,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
@@ -239,6 +252,12 @@ export class OwnedMobilityRepository {
             order.orderSource,
             order.serviceBucket,
             order.dispatchSemantics,
+            order.runtimeProfileCode ?? null,
+            order.serviceProductCode ?? null,
+            order.acquisitionMode ?? null,
+            order.timingMode ?? null,
+            order.operatingAuthorizationId ?? null,
+            order.queueMode ?? null,
             order.createdAt,
             order.updatedAt,
             JSON.stringify(order),

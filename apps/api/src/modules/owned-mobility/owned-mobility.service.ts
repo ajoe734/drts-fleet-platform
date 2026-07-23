@@ -23,6 +23,7 @@ import type {
   BookingRecord,
   CancelOwnedOrderCommand,
   CreateCallCenterOrderCommand,
+  CreateMultiTaxiRideCommand,
   CreateOwnedOrderCommand,
   CreateTenantBookingCommand,
   DispatchAssignmentRecord,
@@ -48,6 +49,7 @@ import type {
   ExceptionHoldReasonCode,
   FulfillmentSegmentRecord,
   MoneyAmount,
+  MultiTaxiOperatingAuthorizationRecord,
   OverrideRequestRecord,
   PassengerDisclosureChannel,
   PassengerDisclosureRequirementSnapshot,
@@ -78,6 +80,8 @@ import type {
   OwnedOrderSpatialAuditStopSnapshot,
   ServiceAreaEvaluationResult,
   ServiceProductType,
+  DispatchQueueMode,
+  RuntimeProfileCode,
 } from "@drts/contracts";
 
 import {
@@ -184,6 +188,18 @@ type DispatchAssignmentResult = {
 
 type CreateDispatchAssignmentOptions = {
   dispatchAttemptSequence?: number;
+};
+
+type MultiTaxiCallContext = {
+  callId: string;
+  recordingId: string | null;
+  notes: string | null;
+};
+
+type QueueRuntimeContext = {
+  runtimeProfileCode: RuntimeProfileCode;
+  queueMode: DispatchQueueMode;
+  operatingAuthorizationId: string | null;
 };
 
 type ServiceAreaGateResolution = {
@@ -378,7 +394,7 @@ export class OwnedMobilityService implements OnModuleInit {
     requestId?: string,
     runtimeProfileCodeHeader?: string,
   ) {
-    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, false);
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
 
@@ -514,12 +530,201 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.cloneOrder(order);
   }
 
+  createMultiTaxiRide(
+    command: CreateMultiTaxiRideCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    callContext?: MultiTaxiCallContext,
+  ) {
+    this.assertAddress(command.pickup?.address, "pickup.address");
+    this.assertAddress(command.dropoff?.address, "dropoff.address");
+    const requestedPickupAt = this.requireIsoTimestamp(
+      command.requestedPickupAt,
+      "requestedPickupAt",
+    );
+    if (!["on_demand", "scheduled"].includes(command.timingMode)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_TIMING_MODE_INVALID",
+        "timingMode must be on_demand or scheduled.",
+      );
+    }
+    if (
+      command.timingMode === "scheduled" &&
+      Date.parse(requestedPickupAt) <= Date.now()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SCHEDULED_PICKUP_MUST_BE_FUTURE",
+        "A scheduled multi-taxi ride must use a future pickup time.",
+      );
+    }
+    if (callContext && !callContext.callId?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "CALL_ID_REQUIRED",
+        "Call-center multi-taxi rides require callId.",
+      );
+    }
+
+    const serviceProduct =
+      this.serviceProductService?.getRuntimeServiceProductByType(
+        "taxi_reservation",
+      ) ?? null;
+    if (serviceProduct && !serviceProduct.active) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "SERVICE_PRODUCT_INACTIVE",
+        "The taxi_reservation service product is not active.",
+      );
+    }
+
+    const now = new Date().toISOString();
+    const scheduled = command.timingMode === "scheduled";
+    const reservationWindowEnd = scheduled
+      ? new Date(Date.parse(requestedPickupAt) + 30 * 60 * 1000).toISOString()
+      : null;
+    const order: OwnedOrderRecord = {
+      orderId: randomUUID(),
+      orderNo: this.nextOrderNo(),
+      orderSource: callContext ? "phone" : "app",
+      orderDomain: "owned",
+      tenantId: null,
+      partnerId: identity?.partnerId ?? null,
+      partnerProgramId: null,
+      partnerEntrySlug: identity?.partnerEntrySlug?.trim() || null,
+      eligibilityVerificationId: null,
+      issuerAuthorizationRef: null,
+      passengerDisclosure: null,
+      serviceBucket: "standard_taxi",
+      dispatchSemantics: scheduled ? "reservation" : "realtime",
+      businessDispatchSubtype: null,
+      serviceProductCode: "taxi_reservation",
+      runtimeProfileCode: "multi_taxi_direct",
+      acquisitionMode: "platform_reserved",
+      timingMode: command.timingMode,
+      operatingAuthorizationId: authorization.authorizationId,
+      queueMode: "virtual_matching",
+      paymentMethodTokenRef: command.paymentMethodTokenRef?.trim() || null,
+      status: "ready_for_dispatch",
+      pickup: { ...command.pickup },
+      dropoff: { ...command.dropoff },
+      passenger: { ...command.passenger },
+      bookingId: scheduled
+        ? `booking-${String(this.bookingSequence++).padStart(6, "0")}`
+        : null,
+      bookingType: scheduled ? "oneway" : null,
+      etaSnapshot: {
+        etaMinutes: scheduled ? 30 : 8,
+        calculatedAt: now,
+      },
+      callId: callContext?.callId.trim() ?? null,
+      recordingId: callContext?.recordingId?.trim() || null,
+      reservationWindowStart: scheduled ? requestedPickupAt : null,
+      reservationWindowEnd,
+      recurrenceRule: null,
+      modifiableUntil: scheduled
+        ? new Date(Date.parse(requestedPickupAt) - 30 * 60 * 1000).toISOString()
+        : null,
+      cancelableUntil: scheduled
+        ? new Date(Date.parse(requestedPickupAt) - 30 * 60 * 1000).toISOString()
+        : null,
+      bookedBy: null,
+      onsiteContact: null,
+      costCenter: null,
+      vehiclePreference: null,
+      benefitReference: null,
+      direction: null,
+      flightNo: null,
+      terminal: null,
+      luggageCount: null,
+      notes: callContext?.notes?.trim() || null,
+      fixedPrice: false,
+      quotedFare: null,
+      quotedFareSource: null,
+      quotedFareRuleVersion: null,
+      manualFareOverride: null,
+      exceptionHold: null,
+      proofRequirements: {
+        minPhotoCount: 0,
+        signoffRequired: false,
+        expenseProofRequired: false,
+      },
+      approvalState: "not_required",
+      approvalRequestIds: [],
+      complianceFlags: [
+        "multi_taxi_operating_authorization_verified",
+        "platform_reserved",
+      ],
+      cancelledAt: null,
+      cancelReason: null,
+      reservationHoldStatus: scheduled ? "requested" : "none",
+      reservationHoldId: scheduled ? randomUUID() : null,
+      reservationHoldExpiresAt: scheduled ? reservationWindowEnd : null,
+      dispatchAttemptCount: 0,
+      lastDispatchFailureReason: null,
+      noSupplyEscalation: null,
+      dispatchTimeout: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.applyServiceAreaCreationPolicy(
+      order,
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: callContext ? "ops_user" : "referral_passenger",
+        surface: callContext ? "callcenter" : "passenger_entry",
+      },
+      requestId,
+    );
+    this.orders = [order, ...this.orders];
+    const traceLog = this.appendTrace(
+      order.orderId,
+      "multi_taxi.order.ready_for_dispatch",
+      {
+        runtimeProfileCode: order.runtimeProfileCode,
+        serviceProductCode: order.serviceProductCode,
+        acquisitionMode: order.acquisitionMode,
+        timingMode: order.timingMode,
+        operatingAuthorizationId: order.operatingAuthorizationId,
+      },
+    );
+    this.persistChanges(
+      { orders: [order], dispatchTraceLogs: [traceLog] },
+      "create_multi_taxi_ride",
+    );
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: callContext ? "ops_user" : "system",
+        tenantId: null,
+        moduleName: "order",
+        actionName: "create_multi_taxi_direct_order",
+        resourceType: "order",
+        resourceId: order.orderId,
+        newValuesSummary: {
+          runtimeProfileCode: order.runtimeProfileCode,
+          timingMode: order.timingMode,
+          operatingAuthorizationId: order.operatingAuthorizationId,
+        },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishOrderCreated(
+      this.cloneOrder(order),
+      requestId,
+    );
+    return this.cloneOrder(order);
+  }
+
   createCallCenterOrder(
     command: CreateCallCenterOrderCommand,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
   ) {
-    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, false);
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
     if (!command.callId?.trim()) {
@@ -699,7 +904,7 @@ export class OwnedMobilityService implements OnModuleInit {
     requestId?: string,
     runtimeProfileCodeHeader?: string,
   ): MaybePromise<TenantBookingResult> {
-    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader, true);
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
     this.assertBookingRules(
@@ -3093,9 +3298,18 @@ export class OwnedMobilityService implements OnModuleInit {
     return cancelledTasks.map((t) => this.cloneTask(t));
   }
 
-  queueCheckIn(command: QueueCheckInCommand, requestId?: string) {
+  queueCheckIn(
+    command: QueueCheckInCommand,
+    requestId?: string,
+    runtimeContext: QueueRuntimeContext = {
+      runtimeProfileCode: "ordinary_taxi",
+      queueMode: "physical_rank",
+      operatingAuthorizationId: null,
+    },
+  ) {
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
+    this.assertQueuePolicy(runtimeContext);
 
     if (
       !this.regulatoryRegistryService.getVehicleDispatchability(
@@ -3128,8 +3342,15 @@ export class OwnedMobilityService implements OnModuleInit {
       queueEntryId: randomUUID(),
       vehicleId: command.vehicleId,
       siteId: command.siteId,
+      runtimeProfileCode: runtimeContext.runtimeProfileCode,
+      queueMode: runtimeContext.queueMode,
+      operatingAuthorizationId: runtimeContext.operatingAuthorizationId,
       status: "checked_in",
-      position: this.nextQueuePosition(command.siteId),
+      position: this.nextQueuePosition(
+        command.siteId,
+        runtimeContext.runtimeProfileCode,
+        runtimeContext.queueMode,
+      ),
       checkedInAt,
       checkedOutAt: null,
     };
@@ -3143,6 +3364,9 @@ export class OwnedMobilityService implements OnModuleInit {
         siteId: command.siteId,
         vehicleId: command.vehicleId,
         position: queueEntry.position,
+        runtimeProfileCode: queueEntry.runtimeProfileCode,
+        queueMode: queueEntry.queueMode,
+        operatingAuthorizationId: queueEntry.operatingAuthorizationId,
       },
     );
     this.persistChanges(
@@ -3172,14 +3396,26 @@ export class OwnedMobilityService implements OnModuleInit {
     return { ...queueEntry };
   }
 
-  queueCheckOut(command: QueueCheckOutCommand, requestId?: string) {
+  queueCheckOut(
+    command: QueueCheckOutCommand,
+    requestId?: string,
+    runtimeContext: QueueRuntimeContext = {
+      runtimeProfileCode: "ordinary_taxi",
+      queueMode: "physical_rank",
+      operatingAuthorizationId: null,
+    },
+  ) {
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
+    this.assertQueuePolicy(runtimeContext);
 
     const queueEntry = this.queueEntries.find(
       (entry) =>
         entry.vehicleId === command.vehicleId &&
         entry.siteId === command.siteId &&
+        (entry.runtimeProfileCode ?? "ordinary_taxi") ===
+          runtimeContext.runtimeProfileCode &&
+        (entry.queueMode ?? "physical_rank") === runtimeContext.queueMode &&
         entry.status === "checked_in",
     );
     if (!queueEntry) {
@@ -3232,6 +3468,30 @@ export class OwnedMobilityService implements OnModuleInit {
     );
 
     return { ...queueEntry };
+  }
+
+  queueCheckInMultiTaxi(
+    command: QueueCheckInCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    requestId?: string,
+  ) {
+    return this.queueCheckIn(command, requestId, {
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: command.queueMode ?? "virtual_matching",
+      operatingAuthorizationId: authorization.authorizationId,
+    });
+  }
+
+  queueCheckOutMultiTaxi(
+    command: QueueCheckOutCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    requestId?: string,
+  ) {
+    return this.queueCheckOut(command, requestId, {
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: command.queueMode ?? "virtual_matching",
+      operatingAuthorizationId: authorization.authorizationId,
+    });
   }
 
   listDriverTasks() {
@@ -4237,27 +4497,50 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertRuntimeProfileAllowances(
-    command: any,
+    command: object,
     runtimeProfileCodeHeader?: string,
-    isBooking = false,
   ) {
-    const profileCode = command.runtimeProfileCode || runtimeProfileCodeHeader;
-    if (profileCode === "multi_taxi_direct") {
-      if (!isBooking) {
-        throw new ApiRequestError(
-          HttpStatus.CONFLICT,
-          "RESERVATION_ONLY_PROFILE",
-          "The multi_taxi_direct runtime profile only allows reservation-only orders.",
-        );
-      }
+    const commandProfile =
+      "runtimeProfileCode" in command &&
+      typeof command.runtimeProfileCode === "string"
+        ? command.runtimeProfileCode
+        : null;
+    if (commandProfile || runtimeProfileCodeHeader?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
+        "Runtime profile is resolved by the server route and cannot be supplied by a public request.",
+      );
+    }
+  }
 
-      if (command.businessDispatchSubtype !== "taxi_reservation") {
-        throw new ApiRequestError(
-          HttpStatus.CONFLICT,
-          "SERVICE_PRODUCT_NOT_ALLOWED",
-          `The multi_taxi_direct runtime profile only allows the 'taxi_reservation' service product.`,
-        );
-      }
+  private requireIsoTimestamp(value: string, field: string) {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_TIMESTAMP",
+        `${field} must be an ISO-8601 timestamp.`,
+        { field },
+      );
+    }
+    return new Date(timestamp).toISOString();
+  }
+
+  private assertQueuePolicy(context: QueueRuntimeContext) {
+    if (
+      context.runtimeProfileCode === "multi_taxi_direct" &&
+      context.queueMode !== "virtual_matching"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+        "Multi-taxi direct may use virtual matching but may not use physical-rank or taxi-stand queues.",
+        {
+          runtimeProfileCode: context.runtimeProfileCode,
+          queueMode: context.queueMode,
+        },
+      );
     }
   }
 
@@ -4717,9 +5000,17 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
-  private nextQueuePosition(siteId: string) {
+  private nextQueuePosition(
+    siteId: string,
+    runtimeProfileCode: RuntimeProfileCode = "ordinary_taxi",
+    queueMode: DispatchQueueMode = "physical_rank",
+  ) {
     const activeEntries = this.queueEntries.filter(
-      (entry) => entry.siteId === siteId && entry.status === "checked_in",
+      (entry) =>
+        entry.siteId === siteId &&
+        entry.status === "checked_in" &&
+        (entry.runtimeProfileCode ?? "ordinary_taxi") === runtimeProfileCode &&
+        (entry.queueMode ?? "physical_rank") === queueMode,
     );
     const maxPosition = activeEntries.reduce(
       (currentMax, entry) => Math.max(currentMax, entry.position),
@@ -4762,6 +5053,20 @@ export class OwnedMobilityService implements OnModuleInit {
           queueEntryId,
           vehicleId,
           siteId,
+          runtimeProfileCode:
+            traceLog.details?.runtimeProfileCode === "multi_taxi_direct" ||
+            traceLog.details?.runtimeProfileCode === "business_dispatch"
+              ? traceLog.details.runtimeProfileCode
+              : "ordinary_taxi",
+          queueMode:
+            traceLog.details?.queueMode === "virtual_matching" ||
+            traceLog.details?.queueMode === "taxi_stand"
+              ? traceLog.details.queueMode
+              : "physical_rank",
+          operatingAuthorizationId:
+            typeof traceLog.details?.operatingAuthorizationId === "string"
+              ? traceLog.details.operatingAuthorizationId
+              : null,
           status: "checked_in",
           position:
             typeof traceLog.details?.position === "number"

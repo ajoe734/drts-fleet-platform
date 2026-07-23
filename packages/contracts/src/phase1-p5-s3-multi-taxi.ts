@@ -15,17 +15,57 @@
 //   - persistence schemas: reg.* (not registry.*), mobility.*, reporting.*,
 //     and a new safety.* schema for S-3.
 
-import type { ResolvedAddressPayload } from "./index";
+import type {
+  AddressPayload,
+  PassengerProfile,
+  ResolvedAddressPayload,
+  ServicePreferences,
+  ServiceProductType,
+} from "./index";
 
 // ===========================================================================
 // §2 Runtime profile
 // ===========================================================================
+
+export const RUNTIME_PROFILE_CODES = [
+  "ordinary_taxi",
+  "multi_taxi_direct",
+  "business_dispatch",
+] as const;
+export type RuntimeProfileCode = (typeof RUNTIME_PROFILE_CODES)[number];
 
 export const PASSENGER_SERVICE_RUNTIME_PROFILE_CODES = [
   "multi_taxi_direct",
 ] as const;
 export type PassengerServiceRuntimeProfileCode =
   (typeof PASSENGER_SERVICE_RUNTIME_PROFILE_CODES)[number];
+
+export const PASSENGER_ACQUISITION_MODES = [
+  "platform_reserved",
+  "street_hail",
+  "physical_rank",
+] as const;
+export type PassengerAcquisitionMode =
+  (typeof PASSENGER_ACQUISITION_MODES)[number];
+
+export const RIDE_TIMING_MODES = ["on_demand", "scheduled"] as const;
+export type RideTimingMode = (typeof RIDE_TIMING_MODES)[number];
+
+export const DISPATCH_QUEUE_MODES = [
+  "virtual_matching",
+  "physical_rank",
+  "taxi_stand",
+] as const;
+export type DispatchQueueMode = (typeof DISPATCH_QUEUE_MODES)[number];
+
+export interface OwnedRideRuntimeContext {
+  runtimeProfileCode: RuntimeProfileCode;
+  serviceProductCode: ServiceProductType;
+  acquisitionMode: PassengerAcquisitionMode;
+  timingMode: RideTimingMode;
+  operatingAuthorizationId: string | null;
+  queueMode: DispatchQueueMode | null;
+}
 
 export const MULTI_TAXI_FORBIDDEN_CAPABILITIES = [
   "forwarded_order_ui",
@@ -43,11 +83,84 @@ export interface PassengerServiceRuntimeProfile {
   displayName: string;
   orderDomains: Array<"owned">;
   allowedServiceProducts: Array<"taxi_reservation">;
-  reservationOnly: true;
+  acquisitionMode: "platform_reserved";
+  timingModes: RideTimingMode[];
   passengerSurface: "direct_ride";
   driverSurface: "multi_taxi_driver";
   opsSurface: "multi_taxi_ops";
   forbiddenCapabilities: MultiTaxiForbiddenCapability[];
+}
+
+export interface CreateMultiTaxiRideCommand {
+  pickup: AddressPayload;
+  dropoff: AddressPayload;
+  passenger: PassengerProfile;
+  requestedPickupAt: string;
+  timingMode: RideTimingMode;
+  paymentMethodTokenRef: string | null;
+  servicePreferences?: Partial<ServicePreferences>;
+}
+
+export interface CreateCallCenterMultiTaxiRideCommand extends CreateMultiTaxiRideCommand {
+  callId: string;
+  agentId: string;
+  recordingId?: string | null;
+  notes?: string | null;
+}
+
+export type MultiTaxiOperatingAuthorizationStatus =
+  | "draft"
+  | "approved"
+  | "suspended"
+  | "expired"
+  | "revoked";
+
+export interface MultiTaxiOperatingAuthorizationRecord {
+  authorizationId: string;
+  operatorId: string;
+  authorityCode: string;
+  businessPlanVersion: string;
+  status: MultiTaxiOperatingAuthorizationStatus;
+  serviceAreaCodes: string[];
+  activeFareVersionId: string;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MultiTaxiAuthorizedVehicleRecord {
+  authorizationVehicleId: string;
+  authorizationId: string;
+  vehicleId: string;
+  status: "active" | "suspended" | "removed";
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+}
+
+export interface CreateMultiTaxiOperatingAuthorizationCommand {
+  operatorId: string;
+  authorityCode: string;
+  businessPlanVersion: string;
+  serviceAreaCodes: string[];
+  activeFareVersionId: string;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface UpdateMultiTaxiOperatingAuthorizationCommand {
+  authorityCode?: string;
+  businessPlanVersion?: string;
+  serviceAreaCodes?: string[];
+  activeFareVersionId?: string;
+  effectiveFrom?: string;
+  effectiveUntil?: string | null;
+}
+
+export interface AddMultiTaxiAuthorizedVehicleCommand {
+  vehicleId: string;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
 }
 
 // ===========================================================================
@@ -284,8 +397,7 @@ export const PASSENGER_RIDE_SSE_EVENTS = [
   "trip_cancelled",
   "receipt_ready",
 ] as const;
-export type PassengerRideSseEvent =
-  (typeof PASSENGER_RIDE_SSE_EVENTS)[number];
+export type PassengerRideSseEvent = (typeof PASSENGER_RIDE_SSE_EVENTS)[number];
 
 // ===========================================================================
 // §9 Consumer notification outbox
