@@ -227,7 +227,7 @@ describe("owned mobility service", () => {
     expect(dispatchJob.status).toBe("matching");
     expect(candidate).toBeDefined();
 
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate!.vehicleId,
       driverId: candidate!.driverId,
@@ -350,7 +350,7 @@ describe("owned mobility service", () => {
         dispatchJob.dispatchJobId,
       )
     )[0]!;
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,
       driverId: candidate.driverId,
@@ -430,7 +430,7 @@ describe("owned mobility service", () => {
         dispatchJob.dispatchJobId,
       )
     )[0]!;
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,
       driverId: candidate.driverId,
@@ -689,7 +689,7 @@ describe("owned mobility service", () => {
         dispatchJob.dispatchJobId,
       )
     )[0]!;
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,
       driverId: candidate.driverId,
@@ -926,7 +926,7 @@ describe("owned mobility service", () => {
         dispatchJob.dispatchJobId,
       )
     )[0];
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate!.vehicleId,
       driverId: candidate!.driverId,
@@ -1099,7 +1099,7 @@ describe("owned mobility service", () => {
           dispatchJob.dispatchJobId,
         )
       )[0]!;
-      const assignment = ownedMobilityService.assignDispatch({
+      const assignment = await ownedMobilityService.assignDispatch({
         dispatchJobId: dispatchJob.dispatchJobId,
         vehicleId: candidate.vehicleId,
         driverId: candidate.driverId,
@@ -1333,7 +1333,7 @@ describe("owned mobility service", () => {
         dispatchJob.dispatchJobId,
       )
     )[0]!;
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,
       driverId: candidate.driverId,
