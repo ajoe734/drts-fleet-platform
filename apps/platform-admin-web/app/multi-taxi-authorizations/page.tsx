@@ -71,7 +71,7 @@ const actionStyle: CSSProperties = {
 const modalOverlayStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(15, 23, 42, 0.65)",
+  background: theme.mode === "dark" ? "rgba(10, 14, 22, 0.75)" : "rgba(15, 23, 42, 0.65)",
   backdropFilter: "blur(4px)",
   display: "grid",
   placeItems: "center",
@@ -88,7 +88,7 @@ const modalContentStyle: CSSProperties = {
   padding: 24,
   display: "grid",
   gap: 16,
-  boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3)",
+  boxShadow: theme.shadow,
 };
 
 function statusTone(status: MultiTaxiOperatingAuthorizationStatus) {
@@ -107,7 +107,7 @@ function vehicleStatusTone(status: VehicleRow["status"]) {
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleString(undefined, { timeZoneName: "short" });
   } catch {
     return iso;
   }
@@ -503,7 +503,7 @@ export default function MultiTaxiAuthorizationsPage() {
                     }`,
                     background:
                       statusFilter === st ? theme.accent : "transparent",
-                    color: statusFilter === st ? "#fff" : theme.text,
+                    color: statusFilter === st ? theme.invert : theme.text,
                     borderRadius: 16,
                     padding: "4px 12px",
                     fontSize: 12,
@@ -511,9 +511,7 @@ export default function MultiTaxiAuthorizationsPage() {
                     fontWeight: statusFilter === st ? 600 : 400,
                   }}
                 >
-                  {st === "all"
-                    ? "全部 (All)"
-                    : t(`multiTaxiAuth.status.${st}`)}
+                  {t(`multiTaxiAuth.status.${st}`)}
                 </button>
               ))}
             </div>
@@ -808,7 +806,7 @@ export default function MultiTaxiAuthorizationsPage() {
                           <input
                             style={inputStyle}
                             value={vehicle.vehicleId}
-                            placeholder="e.g. VEH-101"
+                            placeholder={t("multiTaxiAuth.placeholder.vehicleId")}
                             onChange={(e) =>
                               setVehicle((curr) => ({
                                 ...curr,
@@ -902,7 +900,7 @@ export default function MultiTaxiAuthorizationsPage() {
                   <input
                     style={inputStyle}
                     value={draft.operatorId}
-                    placeholder="e.g. op-fleet-taipei"
+                    placeholder={t("multiTaxiAuth.placeholder.operatorId")}
                     onChange={(e) =>
                       setDraft((c) => ({ ...c, operatorId: e.target.value }))
                     }
@@ -916,7 +914,7 @@ export default function MultiTaxiAuthorizationsPage() {
                   <input
                     style={inputStyle}
                     value={draft.authorityCode}
-                    placeholder="e.g. AUTH-TAIPEI-2026"
+                    placeholder={t("multiTaxiAuth.placeholder.authorityCode")}
                     onChange={(e) =>
                       setDraft((c) => ({ ...c, authorityCode: e.target.value }))
                     }

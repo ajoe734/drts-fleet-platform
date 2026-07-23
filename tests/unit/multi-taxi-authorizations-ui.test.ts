@@ -2,10 +2,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { MultiTaxiController } from "../../apps/api/src/modules/multi-taxi/multi-taxi.controller";
-import { MultiTaxiService } from "../../apps/api/src/modules/multi-taxi/multi-taxi.service";
-import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
-
 const pageSource = readFileSync(
   join(
     process.cwd(),
@@ -62,52 +58,11 @@ describe("MTX-AUTH-UI-001 Fleet B authorization admin UI contract", () => {
     expect(pageSource).toContain("!isReadOnly &&");
   });
 
-  it("wires listAuthorizedVehicles and lifecycle capabilities on service and controller", () => {
-    const ownedMobilityService = {} as OwnedMobilityService;
-    const service = new MultiTaxiService(ownedMobilityService);
-    const controller = new MultiTaxiController(service);
-
-    const now = new Date().toISOString();
-    const created = service.createAuthorization({
-      operatorId: "op-test-001",
-      authorityCode: "AUTH-TAIPEI-001",
-      businessPlanVersion: "v1.0",
-      serviceAreaCodes: ["TPE", "NPT"],
-      activeFareVersionId: "fare_2026_v1",
-      effectiveFrom: now,
-    });
-
-    expect(created.status).toBe("draft");
-
-    // Add authorized vehicle
-    const vehicle = service.addAuthorizedVehicle(created.authorizationId, {
-      vehicleId: "VEH-TPE-888",
-      effectiveFrom: now,
-    });
-    expect(vehicle.vehicleId).toBe("VEH-TPE-888");
-
-    // Query vehicles via service
-    const vehiclesList = service.listAuthorizedVehicles(created.authorizationId);
-    expect(vehiclesList).toHaveLength(1);
-    expect(vehiclesList[0]?.vehicleId).toBe("VEH-TPE-888");
-
-    // Query vehicles via controller envelope
-    const controllerEnvelope = controller.listAuthorizedVehicles(
-      created.authorizationId,
-      "req-001",
-    );
-    expect(controllerEnvelope.data.items).toHaveLength(1);
-
-    // Lifecycle activate
-    const activated = service.activateAuthorization(created.authorizationId);
-    expect(activated.status).toBe("approved");
-
-    // Lifecycle suspend
-    const suspended = service.suspendAuthorization(created.authorizationId);
-    expect(suspended.status).toBe("suspended");
-
-    // Re-activate
-    const reActivated = service.activateAuthorization(created.authorizationId);
-    expect(reActivated.status).toBe("approved");
+  it("formats timestamps with explicit timezone and uses localized tokens", () => {
+    expect(pageSource).toContain('timeZoneName: "short"');
+    expect(pageSource).toContain('t(`multiTaxiAuth.status.${st}`)');
+    expect(pageSource).toContain('placeholder={t("multiTaxiAuth.placeholder.operatorId")}');
+    expect(pageSource).toContain('color: statusFilter === st ? theme.invert : theme.text');
+    expect(pageSource).not.toContain('color: statusFilter === st ? "#fff" : theme.text');
   });
 });

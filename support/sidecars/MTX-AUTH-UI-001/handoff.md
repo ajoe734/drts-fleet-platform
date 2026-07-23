@@ -29,14 +29,19 @@ Implemented Fleet B authorization admin UI for `platform-admin-web` according to
 6. **Conflict & Permission Error States (`conflict-permission states`)**:
    - Catches 403 (Permission Denied), 409 (Lifecycle Conflict), 400 (Validation Error) and displays inline `CanvasBanner`.
 
-### Capability Controls (§3 & §6 Conformance)
+### Capability Controls & Review Fixes (§3 & §6 Conformance)
 - Forbidden commands (`revoke`, `restore`, `delete`, `vehicle suspend`, `legal hold`, `bulk import`) are NOT exposed.
 - Expired and revoked records are read-only.
-- i18n support via `t()` for `zh` and `en` locales in `lib/translations.ts`.
+- i18n support via `t()` for `zh` and `en` locales in `lib/translations.ts` (added `multiTaxiAuth.status.all` and `multiTaxiAuth.placeholder.*`).
+- Tokenized colors enforced across components (eliminated hardcoded non-token `#fff` in filter buttons & inline modal backgrounds).
+- Timestamps explicitly formatted with timezone information (`{ timeZoneName: "short" }`).
+- Root unit test (`tests/unit/multi-taxi-authorizations-ui.test.ts`) refactored to test pure UI contract without NestJS module resolution dependencies; backend controller/service tests co-located in `apps/api/tests/unit/multi-taxi.service.test.ts`.
 
 ### Verification Evidence
 - Unit tests:
   - `apps/platform-admin-web/tests/unit/multi-taxi-authorizations-ui.test.ts` (PASS - 3 tests)
-  - `tests/unit/multi-taxi-authorizations-ui.test.ts` (PASS - 3 tests)
+  - `tests/unit/multi-taxi-authorizations-ui.test.ts` (PASS - 4 tests)
+  - `apps/api/tests/unit/multi-taxi.service.test.ts` (PASS - 12 tests)
+- Workspace API tests: `pnpm --filter @drts/api test` (PASS - 128 test files, 858 tests)
 - Typecheck & Lint: Clean pass across workspace (`pnpm --filter @drts/platform-admin-web typecheck` & `pnpm --filter @drts/platform-admin-web test`).
 
