@@ -44,7 +44,7 @@ const pageStyle: CSSProperties = {
 
 const splitStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.3fr) minmax(360px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.3fr) minmax(380px, 0.9fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -164,14 +164,21 @@ export default function MultiTaxiAuthorizationsPage() {
   const canActivate =
     selected?.status === "draft" || selected?.status === "suspended";
   const canSuspend = selected?.status === "approved";
-  const canAddVehicle = Boolean(selected) && !isReadOnly;
+  const canAddVehicle =
+    Boolean(selected) &&
+    !isReadOnly &&
+    (selected?.status === "draft" ||
+      selected?.status === "approved" ||
+      selected?.status === "suspended");
 
   const loadVehicles = useCallback(
     async (authId: string) => {
       try {
         const payload = await client.get<{
           items?: MultiTaxiAuthorizedVehicleRecord[];
-        }>(`/api/platform-admin/multi-taxi/authorizations/${encodeURIComponent(authId)}/vehicles`);
+        }>(
+          `/api/platform-admin/multi-taxi/authorizations/${encodeURIComponent(authId)}/vehicles`,
+        );
         setVehicles((payload.items ?? []) as VehicleRow[]);
       } catch {
         setVehicles([]);
@@ -211,23 +218,38 @@ export default function MultiTaxiAuthorizationsPage() {
   const handleSelectRow = (authId: string) => {
     setSelectedId(authId);
     setError(null);
+    setDraftMode("create");
     void loadVehicles(authId);
+  };
 
-    const record = rows.find((r) => r.authorizationId === authId);
-    if (record && record.status === "draft") {
-      setDraftMode("edit");
-      setDraft({
-        operatorId: record.operatorId || "",
-        authorityCode: record.authorityCode || "",
-        businessPlanVersion: record.businessPlanVersion || "",
-        serviceAreaCodes: (record.serviceAreaCodes || []).join(", "),
-        activeFareVersionId: record.activeFareVersionId || "",
-        effectiveFrom: formatIsoForInput(record.effectiveFrom),
-        effectiveUntil: formatIsoForInput(record.effectiveUntil),
-      });
-    } else {
-      setDraftMode("create");
-    }
+  const handleNewDraft = () => {
+    setSelectedId(null);
+    setVehicles([]);
+    setError(null);
+    setDraftMode("create");
+    setDraft({
+      operatorId: "",
+      authorityCode: "",
+      businessPlanVersion: "v1.0",
+      serviceAreaCodes: "TPE, NPT",
+      activeFareVersionId: "fare_std_2026",
+      effectiveFrom: new Date().toISOString().slice(0, 16),
+      effectiveUntil: "",
+    });
+  };
+
+  const handleStartEditDraft = () => {
+    if (!selected || selected.status !== "draft") return;
+    setDraftMode("edit");
+    setDraft({
+      operatorId: selected.operatorId || "",
+      authorityCode: selected.authorityCode || "",
+      businessPlanVersion: selected.businessPlanVersion || "",
+      serviceAreaCodes: (selected.serviceAreaCodes || []).join(", "),
+      activeFareVersionId: selected.activeFareVersionId || "",
+      effectiveFrom: formatIsoForInput(selected.effectiveFrom),
+      effectiveUntil: formatIsoForInput(selected.effectiveUntil),
+    });
   };
 
   function handleApiError(err: unknown) {
@@ -403,9 +425,14 @@ export default function MultiTaxiAuthorizationsPage() {
         title={t("multiTaxiAuth.title")}
         subtitle={t("multiTaxiAuth.subtitle")}
         actions={
-          <CanvasBtn theme={theme} onClick={() => void load()} disabled={busy}>
-            {t("multiTaxiAuth.action.refresh")}
-          </CanvasBtn>
+          <div style={{ display: "flex", gap: 8 }}>
+            <CanvasBtn theme={theme} onClick={handleNewDraft} disabled={busy}>
+              + {t("multiTaxiAuth.create.title")}
+            </CanvasBtn>
+            <CanvasBtn theme={theme} onClick={() => void load()} disabled={busy}>
+              {t("multiTaxiAuth.action.refresh")}
+            </CanvasBtn>
+          </div>
         }
       />
 
@@ -413,7 +440,11 @@ export default function MultiTaxiAuthorizationsPage() {
       {error ? (
         <CanvasBanner
           theme={theme}
-          tone={error.type === "permission" || error.type === "request" ? "danger" : "warn"}
+          tone={
+            error.type === "permission" || error.type === "request"
+              ? "danger"
+              : "warn"
+          }
           title={error.title}
           body={error.message}
         />
@@ -425,17 +456,53 @@ export default function MultiTaxiAuthorizationsPage() {
           <CanvasCard
             theme={theme}
             title={t("multiTaxiAuth.registry.title")}
-            subtitle={t("multiTaxiAuth.registry.count", { count: filteredRows.length })}
+            subtitle={t("multiTaxiAuth.registry.count", {
+              count: filteredRows.length,
+            })}
+            actions={
+              <button
+                type="button"
+                onClick={handleNewDraft}
+                style={{
+                  border: `1px solid ${theme.border}`,
+                  background: theme.bgRaised,
+                  color: theme.text,
+                  borderRadius: 6,
+                  padding: "4px 10px",
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                + {t("multiTaxiAuth.action.createDraft")}
+              </button>
+            }
           >
-            <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-              {["all", "draft", "approved", "suspended", "expired", "revoked"].map((st) => (
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                marginBottom: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              {[
+                "all",
+                "draft",
+                "approved",
+                "suspended",
+                "expired",
+                "revoked",
+              ].map((st) => (
                 <button
                   key={st}
                   type="button"
                   onClick={() => setStatusFilter(st)}
                   style={{
-                    border: `1px solid ${statusFilter === st ? theme.accent : theme.border}`,
-                    background: statusFilter === st ? theme.accent : "transparent",
+                    border: `1px solid ${
+                      statusFilter === st ? theme.accent : theme.border
+                    }`,
+                    background:
+                      statusFilter === st ? theme.accent : "transparent",
                     color: statusFilter === st ? "#fff" : theme.text,
                     borderRadius: 16,
                     padding: "4px 12px",
@@ -444,313 +511,523 @@ export default function MultiTaxiAuthorizationsPage() {
                     fontWeight: statusFilter === st ? 600 : 400,
                   }}
                 >
-                  {st === "all" ? "全部 (All)" : t(`multiTaxiAuth.status.${st}`)}
+                  {st === "all"
+                    ? "全部 (All)"
+                    : t(`multiTaxiAuth.status.${st}`)}
                 </button>
               ))}
             </div>
             <CanvasTable theme={theme} columns={columns} rows={filteredRows} />
           </CanvasCard>
-
-          {/* Screen 5: Authorized Vehicles */}
-          {selected ? (
-            <CanvasCard
-              theme={theme}
-              title={t("multiTaxiAuth.vehicles.title")}
-              subtitle={t("multiTaxiAuth.vehicles.subtitle")}
-            >
-              <div style={{ display: "grid", gap: 12 }}>
-                {vehicles.length > 0 ? (
-                  <CanvasTable theme={theme} columns={vehicleColumns} rows={vehicles} />
-                ) : (
-                  <span style={{ color: theme.textMuted, fontSize: 13 }}>
-                    {t("multiTaxiAuth.vehicles.empty")}
-                  </span>
-                )}
-
-                {canAddVehicle ? (
-                  <div
-                    style={{
-                      borderTop: `1px dashed ${theme.border}`,
-                      paddingTop: 12,
-                      display: "grid",
-                      gap: 10,
-                    }}
-                  >
-                    <span style={{ color: theme.text, fontWeight: 600, fontSize: 13 }}>
-                      {t("multiTaxiAuth.action.addVehicle")}
-                    </span>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                      <label style={{ display: "grid", gap: 4 }}>
-                        <span style={{ color: theme.textMuted, fontSize: 11 }}>
-                          {t("multiTaxiAuth.field.vehicleId")}
-                        </span>
-                        <input
-                          style={inputStyle}
-                          value={vehicle.vehicleId}
-                          placeholder="e.g. VEH-101"
-                          onChange={(e) =>
-                            setVehicle((curr) => ({ ...curr, vehicleId: e.target.value }))
-                          }
-                        />
-                      </label>
-                      <label style={{ display: "grid", gap: 4 }}>
-                        <span style={{ color: theme.textMuted, fontSize: 11 }}>
-                          {t("multiTaxiAuth.field.effectiveFrom")}
-                        </span>
-                        <input
-                          style={inputStyle}
-                          type="datetime-local"
-                          value={vehicle.effectiveFrom}
-                          onChange={(e) =>
-                            setVehicle((curr) => ({ ...curr, effectiveFrom: e.target.value }))
-                          }
-                        />
-                      </label>
-                      <label style={{ display: "grid", gap: 4 }}>
-                        <span style={{ color: theme.textMuted, fontSize: 11 }}>
-                          {t("multiTaxiAuth.field.effectiveUntil")}
-                        </span>
-                        <input
-                          style={inputStyle}
-                          type="datetime-local"
-                          value={vehicle.effectiveUntil}
-                          onChange={(e) =>
-                            setVehicle((curr) => ({ ...curr, effectiveUntil: e.target.value }))
-                          }
-                        />
-                      </label>
-                    </div>
-                    <CanvasBtn
-                      theme={theme}
-                      disabled={busy || !vehicle.vehicleId || !vehicle.effectiveFrom}
-                      onClick={() =>
-                        void execute(() =>
-                          client.post(
-                            `/api/platform-admin/multi-taxi/authorizations/${encodeURIComponent(selected.authorizationId)}/vehicles`,
-                            {
-                              body: {
-                                vehicleId: vehicle.vehicleId.trim(),
-                                effectiveFrom: new Date(vehicle.effectiveFrom).toISOString(),
-                                effectiveUntil: vehicle.effectiveUntil
-                                  ? new Date(vehicle.effectiveUntil).toISOString()
-                                  : null,
-                              },
-                            },
-                          ),
-                        )
-                      }
-                    >
-                      {t("multiTaxiAuth.action.addVehicle")}
-                    </CanvasBtn>
-                  </div>
-                ) : null}
-              </div>
-            </CanvasCard>
-          ) : null}
         </div>
 
-        {/* Right Panel: Detail View & Draft Editor */}
+        {/* Right Panel: Detail View, Authorized Vehicles, or Draft Editor */}
         <div style={{ display: "grid", gap: 16 }}>
-          {/* Screen 2: Authorization Detail */}
-          {selected ? (
+          {draftMode === "edit" && selected && canEditDraft ? (
+            /* Screen 3 (Mode B): Edit Draft Editor */
             <CanvasCard
               theme={theme}
-              title={t("multiTaxiAuth.detail.title")}
+              title={t("multiTaxiAuth.edit.title")}
               subtitle={selected.authorizationId}
+              actions={
+                <CanvasBtn
+                  theme={theme}
+                  onClick={() => setDraftMode("create")}
+                >
+                  {t("multiTaxiAuth.confirm.cancel")}
+                </CanvasBtn>
+              }
             >
               <div style={formStyle}>
-                {isReadOnly ? (
-                  <CanvasBanner
-                    theme={theme}
-                    tone="info"
-                    title={t("multiTaxiAuth.detail.readOnly")}
-                    body=""
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.operatorId")}
+                  </span>
+                  <input
+                    style={{ ...inputStyle, opacity: 0.7 }}
+                    value={draft.operatorId}
+                    disabled
                   />
-                ) : null}
+                </label>
 
-                <CanvasDL theme={theme} items={detailItems} />
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.authorityCode")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.authorityCode}
+                    onChange={(e) =>
+                      setDraft((c) => ({ ...c, authorityCode: e.target.value }))
+                    }
+                  />
+                </label>
 
-                {/* Lifecycle Actions */}
-                <div style={actionStyle}>
-                  {canActivate ? (
-                    <CanvasBtn
-                      theme={theme}
-                      variant="primary"
-                      disabled={busy}
-                      onClick={() => setConfirmModal({ action: "activate", record: selected })}
-                    >
-                      {t("multiTaxiAuth.action.activate")}
-                    </CanvasBtn>
-                  ) : null}
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.businessPlanVersion")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.businessPlanVersion}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        businessPlanVersion: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
 
-                  {canSuspend ? (
-                    <CanvasBtn
-                      theme={theme}
-                      disabled={busy}
-                      onClick={() => setConfirmModal({ action: "suspend", record: selected })}
-                    >
-                      {t("multiTaxiAuth.action.suspend")}
-                    </CanvasBtn>
-                  ) : null}
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.serviceAreaCodes")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.serviceAreaCodes}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        serviceAreaCodes: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
 
-                  {canEditDraft ? (
-                    <CanvasBtn
-                      theme={theme}
-                      onClick={() => {
-                        setDraftMode("edit");
-                        setDraft({
-                          operatorId: selected.operatorId || "",
-                          authorityCode: selected.authorityCode || "",
-                          businessPlanVersion: selected.businessPlanVersion || "",
-                          serviceAreaCodes: (selected.serviceAreaCodes || []).join(", "),
-                          activeFareVersionId: selected.activeFareVersionId || "",
-                          effectiveFrom: formatIsoForInput(selected.effectiveFrom),
-                          effectiveUntil: formatIsoForInput(selected.effectiveUntil),
-                        });
-                      }}
-                    >
-                      {t("multiTaxiAuth.action.editDraft")}
-                    </CanvasBtn>
-                  ) : null}
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.activeFareVersionId")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.activeFareVersionId}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        activeFareVersionId: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.effectiveFrom")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    type="datetime-local"
+                    value={draft.effectiveFrom}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        effectiveFrom: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.effectiveUntil")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    type="datetime-local"
+                    value={draft.effectiveUntil}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        effectiveUntil: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() =>
+                      void execute(() =>
+                        client.put(
+                          `/api/platform-admin/multi-taxi/authorizations/${encodeURIComponent(selected.authorizationId)}`,
+                          {
+                            body: {
+                              authorityCode: draft.authorityCode,
+                              businessPlanVersion: draft.businessPlanVersion,
+                              serviceAreaCodes: draft.serviceAreaCodes
+                                .split(",")
+                                .map((v) => v.trim())
+                                .filter(Boolean),
+                              activeFareVersionId: draft.activeFareVersionId,
+                              effectiveFrom: new Date(
+                                draft.effectiveFrom,
+                              ).toISOString(),
+                              effectiveUntil: draft.effectiveUntil
+                                ? new Date(draft.effectiveUntil).toISOString()
+                                : null,
+                            },
+                          },
+                        ),
+                      )
+                    }
+                  >
+                    {t("multiTaxiAuth.action.saveDraft")}
+                  </CanvasBtn>
+
+                  <CanvasBtn
+                    theme={theme}
+                    disabled={busy}
+                    onClick={() => setDraftMode("create")}
+                  >
+                    {t("multiTaxiAuth.confirm.cancel")}
+                  </CanvasBtn>
                 </div>
               </div>
             </CanvasCard>
-          ) : null}
+          ) : selected ? (
+            <>
+              {/* Screen 2: Authorization Detail */}
+              <CanvasCard
+                theme={theme}
+                title={t("multiTaxiAuth.detail.title")}
+                subtitle={selected.authorizationId}
+              >
+                <div style={formStyle}>
+                  {isReadOnly ? (
+                    <CanvasBanner
+                      theme={theme}
+                      tone="warn"
+                      title={t("multiTaxiAuth.detail.readOnly")}
+                      body=""
+                    />
+                  ) : null}
 
-          {/* Screen 3: Draft Editor (Create or Edit Draft) */}
-          <CanvasCard
-            theme={theme}
-            title={
-              draftMode === "edit" && canEditDraft
-                ? t("multiTaxiAuth.edit.title")
-                : t("multiTaxiAuth.create.title")
-            }
-            subtitle={t("multiTaxiAuth.create.subtitle")}
-          >
-            <div style={formStyle}>
-              {draftMode === "edit" && canEditDraft ? (
-                <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
-                  <CanvasBtn
-                    theme={theme}
-                    onClick={() => {
-                      setDraftMode("create");
-                      setDraft({
-                        operatorId: "",
-                        authorityCode: "",
-                        businessPlanVersion: "v1.0",
-                        serviceAreaCodes: "TPE, NPT",
-                        activeFareVersionId: "fare_std_2026",
-                        effectiveFrom: new Date().toISOString().slice(0, 16),
-                        effectiveUntil: "",
-                      });
-                    }}
-                  >
-                    + {t("multiTaxiAuth.create.title")}
-                  </CanvasBtn>
+                  <CanvasDL theme={theme} items={detailItems} />
+
+                  {/* Lifecycle Actions (§3 & §6 Capability Gated) */}
+                  {!isReadOnly ? (
+                    <div style={actionStyle}>
+                      {canActivate ? (
+                        <CanvasBtn
+                          theme={theme}
+                          variant="primary"
+                          disabled={busy}
+                          onClick={() =>
+                            setConfirmModal({
+                              action: "activate",
+                              record: selected,
+                            })
+                          }
+                        >
+                          {t("multiTaxiAuth.action.activate")}
+                        </CanvasBtn>
+                      ) : null}
+
+                      {canSuspend ? (
+                        <CanvasBtn
+                          theme={theme}
+                          disabled={busy}
+                          onClick={() =>
+                            setConfirmModal({
+                              action: "suspend",
+                              record: selected,
+                            })
+                          }
+                        >
+                          {t("multiTaxiAuth.action.suspend")}
+                        </CanvasBtn>
+                      ) : null}
+
+                      {canEditDraft ? (
+                        <CanvasBtn
+                          theme={theme}
+                          disabled={busy}
+                          onClick={handleStartEditDraft}
+                        >
+                          {t("multiTaxiAuth.action.editDraft")}
+                        </CanvasBtn>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              </CanvasCard>
 
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                  {t("multiTaxiAuth.field.operatorId")}
-                </span>
-                <input
-                  style={inputStyle}
-                  value={draft.operatorId}
-                  disabled={draftMode === "edit"}
-                  onChange={(e) => setDraft((c) => ({ ...c, operatorId: e.target.value }))}
-                />
-              </label>
+              {/* Screen 5: Authorized Vehicles */}
+              <CanvasCard
+                theme={theme}
+                title={t("multiTaxiAuth.vehicles.title")}
+                subtitle={t("multiTaxiAuth.vehicles.subtitle")}
+              >
+                <div style={{ display: "grid", gap: 12 }}>
+                  {vehicles.length > 0 ? (
+                    <CanvasTable
+                      theme={theme}
+                      columns={vehicleColumns}
+                      rows={vehicles}
+                    />
+                  ) : (
+                    <span style={{ color: theme.textMuted, fontSize: 13 }}>
+                      {t("multiTaxiAuth.vehicles.empty")}
+                    </span>
+                  )}
 
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                  {t("multiTaxiAuth.field.authorityCode")}
-                </span>
-                <input
-                  style={inputStyle}
-                  value={draft.authorityCode}
-                  onChange={(e) => setDraft((c) => ({ ...c, authorityCode: e.target.value }))}
-                />
-              </label>
+                  {/* Add Vehicle Sub-Form (Strictly gated for editable records only) */}
+                  {canAddVehicle ? (
+                    <div
+                      style={{
+                        borderTop: `1px dashed ${theme.border}`,
+                        paddingTop: 12,
+                        display: "grid",
+                        gap: 10,
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: theme.text,
+                          fontWeight: 600,
+                          fontSize: 13,
+                        }}
+                      >
+                        {t("multiTaxiAuth.action.addVehicle")}
+                      </span>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr 1fr",
+                          gap: 8,
+                        }}
+                      >
+                        <label style={{ display: "grid", gap: 4 }}>
+                          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                            {t("multiTaxiAuth.field.vehicleId")}
+                          </span>
+                          <input
+                            style={inputStyle}
+                            value={vehicle.vehicleId}
+                            placeholder="e.g. VEH-101"
+                            onChange={(e) =>
+                              setVehicle((curr) => ({
+                                ...curr,
+                                vehicleId: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 4 }}>
+                          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                            {t("multiTaxiAuth.field.effectiveFrom")}
+                          </span>
+                          <input
+                            style={inputStyle}
+                            type="datetime-local"
+                            value={vehicle.effectiveFrom}
+                            onChange={(e) =>
+                              setVehicle((curr) => ({
+                                ...curr,
+                                effectiveFrom: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 4 }}>
+                          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                            {t("multiTaxiAuth.field.effectiveUntil")}
+                          </span>
+                          <input
+                            style={inputStyle}
+                            type="datetime-local"
+                            value={vehicle.effectiveUntil}
+                            onChange={(e) =>
+                              setVehicle((curr) => ({
+                                ...curr,
+                                effectiveUntil: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                      <CanvasBtn
+                        theme={theme}
+                        disabled={
+                          busy || !vehicle.vehicleId || !vehicle.effectiveFrom
+                        }
+                        onClick={() =>
+                          void execute(() =>
+                            client.post(
+                              `/api/platform-admin/multi-taxi/authorizations/${encodeURIComponent(selected.authorizationId)}/vehicles`,
+                              {
+                                body: {
+                                  vehicleId: vehicle.vehicleId.trim(),
+                                  effectiveFrom: new Date(
+                                    vehicle.effectiveFrom,
+                                  ).toISOString(),
+                                  effectiveUntil: vehicle.effectiveUntil
+                                    ? new Date(
+                                        vehicle.effectiveUntil,
+                                      ).toISOString()
+                                    : null,
+                                },
+                              },
+                            ),
+                          )
+                        }
+                      >
+                        {t("multiTaxiAuth.action.addVehicle")}
+                      </CanvasBtn>
+                    </div>
+                  ) : (
+                    <span style={{ color: theme.textMuted, fontSize: 12, fontStyle: "italic" }}>
+                      🔒 {t("multiTaxiAuth.detail.readOnly")}
+                    </span>
+                  )}
+                </div>
+              </CanvasCard>
+            </>
+          ) : (
+            /* Screen 3 (Mode A): Create Draft Authorization */
+            <CanvasCard
+              theme={theme}
+              title={t("multiTaxiAuth.create.title")}
+              subtitle={t("multiTaxiAuth.create.subtitle")}
+            >
+              <div style={formStyle}>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.operatorId")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.operatorId}
+                    placeholder="e.g. op-fleet-taipei"
+                    onChange={(e) =>
+                      setDraft((c) => ({ ...c, operatorId: e.target.value }))
+                    }
+                  />
+                </label>
 
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                  {t("multiTaxiAuth.field.businessPlanVersion")}
-                </span>
-                <input
-                  style={inputStyle}
-                  value={draft.businessPlanVersion}
-                  onChange={(e) => setDraft((c) => ({ ...c, businessPlanVersion: e.target.value }))}
-                />
-              </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.authorityCode")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.authorityCode}
+                    placeholder="e.g. AUTH-TAIPEI-2026"
+                    onChange={(e) =>
+                      setDraft((c) => ({ ...c, authorityCode: e.target.value }))
+                    }
+                  />
+                </label>
 
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                  {t("multiTaxiAuth.field.serviceAreaCodes")}
-                </span>
-                <input
-                  style={inputStyle}
-                  value={draft.serviceAreaCodes}
-                  onChange={(e) => setDraft((c) => ({ ...c, serviceAreaCodes: e.target.value }))}
-                />
-              </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.businessPlanVersion")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.businessPlanVersion}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        businessPlanVersion: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
 
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                  {t("multiTaxiAuth.field.activeFareVersionId")}
-                </span>
-                <input
-                  style={inputStyle}
-                  value={draft.activeFareVersionId}
-                  onChange={(e) =>
-                    setDraft((c) => ({ ...c, activeFareVersionId: e.target.value }))
-                  }
-                />
-              </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.serviceAreaCodes")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.serviceAreaCodes}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        serviceAreaCodes: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
 
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                  {t("multiTaxiAuth.field.effectiveFrom")}
-                </span>
-                <input
-                  style={inputStyle}
-                  type="datetime-local"
-                  value={draft.effectiveFrom}
-                  onChange={(e) => setDraft((c) => ({ ...c, effectiveFrom: e.target.value }))}
-                />
-              </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.activeFareVersionId")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    value={draft.activeFareVersionId}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        activeFareVersionId: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
 
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                  {t("multiTaxiAuth.field.effectiveUntil")}
-                </span>
-                <input
-                  style={inputStyle}
-                  type="datetime-local"
-                  value={draft.effectiveUntil}
-                  onChange={(e) => setDraft((c) => ({ ...c, effectiveUntil: e.target.value }))}
-                />
-              </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.effectiveFrom")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    type="datetime-local"
+                    value={draft.effectiveFrom}
+                    onChange={(e) =>
+                      setDraft((c) => ({ ...c, effectiveFrom: e.target.value }))
+                    }
+                  />
+                </label>
 
-              {draftMode === "edit" && selected && canEditDraft ? (
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {t("multiTaxiAuth.field.effectiveUntil")}
+                  </span>
+                  <input
+                    style={inputStyle}
+                    type="datetime-local"
+                    value={draft.effectiveUntil}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        effectiveUntil: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+
                 <CanvasBtn
                   theme={theme}
                   variant="primary"
-                  disabled={busy}
+                  disabled={
+                    busy ||
+                    !draft.operatorId ||
+                    !draft.authorityCode ||
+                    !draft.effectiveFrom
+                  }
                   onClick={() =>
                     void execute(() =>
-                      client.put(
-                        `/api/platform-admin/multi-taxi/authorizations/${encodeURIComponent(selected.authorizationId)}`,
+                      client.post(
+                        "/api/platform-admin/multi-taxi/authorizations",
                         {
                           body: {
-                            authorityCode: draft.authorityCode,
-                            businessPlanVersion: draft.businessPlanVersion,
+                            operatorId: draft.operatorId.trim(),
+                            authorityCode: draft.authorityCode.trim(),
+                            businessPlanVersion: draft.businessPlanVersion.trim(),
                             serviceAreaCodes: draft.serviceAreaCodes
                               .split(",")
                               .map((v) => v.trim())
                               .filter(Boolean),
-                            activeFareVersionId: draft.activeFareVersionId,
-                            effectiveFrom: new Date(draft.effectiveFrom).toISOString(),
+                            activeFareVersionId: draft.activeFareVersionId.trim(),
+                            effectiveFrom: new Date(
+                              draft.effectiveFrom,
+                            ).toISOString(),
                             effectiveUntil: draft.effectiveUntil
                               ? new Date(draft.effectiveUntil).toISOString()
                               : null,
@@ -760,39 +1037,11 @@ export default function MultiTaxiAuthorizationsPage() {
                     )
                   }
                 >
-                  {t("multiTaxiAuth.action.saveDraft")}
-                </CanvasBtn>
-              ) : (
-                <CanvasBtn
-                  theme={theme}
-                  variant="primary"
-                  disabled={busy || !draft.operatorId || !draft.authorityCode || !draft.effectiveFrom}
-                  onClick={() =>
-                    void execute(() =>
-                      client.post("/api/platform-admin/multi-taxi/authorizations", {
-                        body: {
-                          operatorId: draft.operatorId.trim(),
-                          authorityCode: draft.authorityCode.trim(),
-                          businessPlanVersion: draft.businessPlanVersion.trim(),
-                          serviceAreaCodes: draft.serviceAreaCodes
-                            .split(",")
-                            .map((v) => v.trim())
-                            .filter(Boolean),
-                          activeFareVersionId: draft.activeFareVersionId.trim(),
-                          effectiveFrom: new Date(draft.effectiveFrom).toISOString(),
-                          effectiveUntil: draft.effectiveUntil
-                            ? new Date(draft.effectiveUntil).toISOString()
-                            : null,
-                        },
-                      }),
-                    )
-                  }
-                >
                   {t("multiTaxiAuth.action.createDraft")}
                 </CanvasBtn>
-              )}
-            </div>
-          </CanvasCard>
+              </div>
+            </CanvasCard>
+          )}
         </div>
       </div>
 

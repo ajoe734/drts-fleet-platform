@@ -56,6 +56,12 @@ describe("MTX-AUTH-UI-001 Fleet B authorization admin UI contract", () => {
     expect(pageSource).not.toContain("bulkImport");
   });
 
+  it("gates add-vehicle form and actions when authorization status is expired or revoked", () => {
+    expect(pageSource).toContain("isReadOnly");
+    expect(pageSource).toContain("canAddVehicle");
+    expect(pageSource).toContain("!isReadOnly &&");
+  });
+
   it("wires listAuthorizedVehicles and lifecycle capabilities on service and controller", () => {
     const ownedMobilityService = {} as OwnedMobilityService;
     const service = new MultiTaxiService(ownedMobilityService);

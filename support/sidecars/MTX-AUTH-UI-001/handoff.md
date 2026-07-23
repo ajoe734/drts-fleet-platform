@@ -35,5 +35,8 @@ Implemented Fleet B authorization admin UI for `platform-admin-web` according to
 - i18n support via `t()` for `zh` and `en` locales in `lib/translations.ts`.
 
 ### Verification Evidence
-- Unit tests: `tests/unit/multi-taxi-authorizations-ui.test.ts` (PASS)
-- Typecheck & Lint: Clean pass across workspace.
+- Unit tests:
+  - `apps/platform-admin-web/tests/unit/multi-taxi-authorizations-ui.test.ts` (PASS - 3 tests)
+  - `tests/unit/multi-taxi-authorizations-ui.test.ts` (PASS - 3 tests)
+- Typecheck & Lint: Clean pass across workspace (`pnpm --filter @drts/platform-admin-web typecheck` & `pnpm --filter @drts/platform-admin-web test`).
+
