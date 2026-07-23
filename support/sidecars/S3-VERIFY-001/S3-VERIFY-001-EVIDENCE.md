@@ -97,7 +97,18 @@ Repo scan did not find S-3-specific proof for:
 - malware scan
 - per-file retry audit
 
-The only attachment behavior found in current S-3 code path is local draft/supplement storage in `apps/driver-app/lib/driver-sos-outbox.ts:28-35,160-167`, which is not security-scan evidence.
+Current-head evidence instead shows only local attachment handling:
+
+- `apps/driver-app/app/sos.tsx:334-361`
+  renders attachment rows from local draft state.
+- `apps/driver-app/app/sos.tsx:672-761`
+  converts `expo-image-picker` assets into draft/supplement attachments and stores them in component state.
+- `apps/driver-app/lib/driver-sos-outbox.ts:131-218`
+  persists attachment drafts inside the durable SOS active-case record and timeline.
+- `apps/driver-app/lib/driver-sos-outbox.ts:208-220`
+  builds the submit command without any attachment payload.
+
+That means this worker can verify local attachment drafting exists, but cannot honestly claim S-3 attachment upload, presign, checksum/content-type enforcement, malware scan, or retry-audit verification on current head.
 
 ### `blocked_ext`: Production p95
 
