@@ -31,6 +31,7 @@ function createService(options?: {
   const ownedMobilityService = {
     createMultiTaxiRide: vi.fn(() => ({ ...order })),
     getOrder: vi.fn(() => ({ ...order })),
+    listOrders: vi.fn(() => [{ ...order }]),
     findPassengerAssignmentDisclosure: vi.fn(() => options?.assignment ?? null),
     cancelOwnedOrder: vi.fn((_orderId, command) => {
       order.status = "cancelled";
@@ -482,6 +483,7 @@ describe("MultiTaxiService trip operational records", () => {
       orderStatus: "completed",
       assignment,
       repository: {
+        persistAuthorization: vi.fn().mockResolvedValue(undefined),
         findElectronicReceipt: vi.fn(async () => ({
           receiptId: "receipt-001",
           orderId: "order-001",
@@ -521,6 +523,10 @@ describe("MultiTaxiService trip operational records", () => {
         routeFare: {},
         createdAt: "2026-07-20T14:32:00.000Z",
       },
+      repository: {
+        persistAuthorization: vi.fn().mockResolvedValue(undefined),
+        findElectronicReceipt: vi.fn(async () => null),
+      },
     });
     createAndActivateAuthorization(service);
 
@@ -531,7 +537,7 @@ describe("MultiTaxiService trip operational records", () => {
     expect(exported.filename).toBe("multi-taxi-trip-records-202607.csv");
     expect(exported.rows).toEqual([
       expect.objectContaining({
-        orderNoMasked: "MTX***01",
+        orderNoMasked: "M***1",
         plateNoMasked: "BK...08",
       }),
     ]);
