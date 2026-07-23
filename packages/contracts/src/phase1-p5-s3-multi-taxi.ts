@@ -60,6 +60,26 @@ export const DISPATCH_QUEUE_MODES = [
 ] as const;
 export type DispatchQueueMode = (typeof DISPATCH_QUEUE_MODES)[number];
 
+export type ProfileQueuePolicyMap = Record<
+  RuntimeProfileCode,
+  {
+    allowedQueueModes: DispatchQueueMode[];
+  }
+>;
+
+export const DEFAULT_PROFILE_QUEUE_POLICY_MAP: ProfileQueuePolicyMap = {
+  multi_taxi_direct: {
+    allowedQueueModes: ["virtual_matching"],
+  },
+  ordinary_taxi: {
+    allowedQueueModes: ["virtual_matching", "physical_rank", "taxi_stand"],
+  },
+  business_dispatch: {
+    allowedQueueModes: ["virtual_matching", "physical_rank", "taxi_stand"],
+  },
+};
+
+
 export interface OwnedRideRuntimeContext {
   runtimeProfileCode: RuntimeProfileCode;
   serviceProductCode: ServiceProductType;
