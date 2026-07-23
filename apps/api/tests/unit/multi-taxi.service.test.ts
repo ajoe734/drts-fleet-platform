@@ -263,6 +263,67 @@ describe("MultiTaxiService passenger ride authority", () => {
     );
   });
 
+  it("reads back a persisted passenger ride token after restart", async () => {
+    const persistedByDigest = new Map<string, Record<string, unknown>>();
+    const repository = {
+      isEnabled: () => true,
+      persistAuthorization: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+      persistRideAccessToken: vi.fn(
+        async (token: Record<string, unknown>, digest: string) => {
+          const { accessToken: _accessToken, ...persisted } = token;
+          persistedByDigest.set(digest, persisted);
+        },
+      ),
+      findRideAccessTokenByDigest: vi.fn(async (digest: string) => {
+        const token = persistedByDigest.get(digest);
+        return token ? { ...token } : null;
+      }),
+      findPassengerRating: vi.fn(async () => null),
+      findPassengerPayment: vi.fn(async () => null),
+      findElectronicReceipt: vi.fn(async () => null),
+    };
+
+    const first = createService({ repository });
+    createAndActivateAuthorization(first.service);
+    const created = await first.service.createRide(
+      {
+        pickup: { address: "台北車站" },
+        dropoff: { address: "松山機場" },
+        passenger: {
+          passengerId: "passenger-001",
+          name: "測試乘客",
+          phone: "0911222333",
+        },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+      null,
+    );
+
+    const restarted = createService({ repository });
+    createAndActivateAuthorization(restarted.service);
+    const readback = await restarted.service.getPassengerRide(
+      created.passengerAccess.accessToken,
+    );
+
+    expect(repository.findRideAccessTokenByDigest).toHaveBeenCalledTimes(1);
+    expect(readback).toMatchObject({
+      order: {
+        orderId: "order-001",
+        status: "created",
+      },
+      assignment: null,
+      receipt: null,
+      actions: {
+        canCancel: true,
+        canRate: false,
+        canReadReceipt: true,
+      },
+    });
+  });
+
   it("fails closed in production when passenger tokens cannot be persisted", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { service, ownedMobilityService } = createService();

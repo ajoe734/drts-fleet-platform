@@ -4134,6 +4134,132 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
+  it("denies client-supplied street-hail and other canonical context overrides on multi-taxi intake", () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(() =>
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          acquisitionMode: "street_hail",
+        } as never,
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          acquisitionMode: "street_hail",
+        } as never,
+        authorization,
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "MULTI_TAXI_CANONICAL_CONTEXT_OVERRIDE_FORBIDDEN",
+          details: { field: "acquisitionMode" },
+        },
+      });
+    }
+  });
+
+  it("denies client-supplied physical-rank queue context on multi-taxi intake", () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(() =>
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          queueMode: "physical_rank",
+        } as never,
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          queueMode: "physical_rank",
+        } as never,
+        authorization,
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "MULTI_TAXI_CANONICAL_CONTEXT_OVERRIDE_FORBIDDEN",
+          details: { field: "queueMode" },
+        },
+      });
+    }
+  });
+
   it("allows only virtual matching for multi-taxi queue entries", () => {
     const { service } = createOwnedMobilityService();
     const authorization = {
