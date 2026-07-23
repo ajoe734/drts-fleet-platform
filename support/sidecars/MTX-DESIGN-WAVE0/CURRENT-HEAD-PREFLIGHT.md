@@ -4,7 +4,7 @@
 **Execution Baseline:** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`  
 **Inspected Date:** 2026-07-23  
 **Owner:** Gemini  
-**Reviewer:** Copilot  
+**Reviewer:** Codex  
 
 ---
 

@@ -38,7 +38,9 @@
 - [x] **Copy and State Matrices:**
   - Complete state matrices (Happy, Draft, Suspended, Expired, Loading, Empty, 403 Forbidden, 409 Stale Version, Fail-Closed, Non-Bypassable Legal Denial) defined with frozen Traditional Chinese (ZH-TW) vocabulary.
 
-- [x] **Accessibility & Developer Annotations:**
+- [x] **Accessibility & Developer Annotations & §19 Per-Frame Compliance:**
+  - §19 Frame Annotations Evidence Matrix complete for all 23 frames across `MTX-DESIGN-001` (7 frames), `MTX-DESIGN-002` (4 frames), `P5-DESIGN-001` (4 frames), and `P5-DESIGN-002` (8 frames).
+  - Each frame explicitly annotates Screen ID, Viewport, User Capability, Data State, Source Status (`live-contract`), Component Variants, Focus Order, API & Field Mapping, and Empty/Error/Conflict Behavior in both markdown handoff packets and `figma-source-tree.json`.
   - ARIA dialog hooks (`role="dialog"`, `aria-modal="true"`, `aria-labelledby`, `aria-describedby`, focus trap & Escape key handlers) on all modal windows.
   - ARIA live region & alert announcements (`role="alert"`, `aria-live="assertive"`, `aria-live="polite"`) on warnings and legal denials.
   - Skeletal loading indicators (`loading` prop with `SkeletonCard` / `SkeletonRow` rendering `aria-busy="true"`).

@@ -15,7 +15,11 @@
           "screenId": "COVER-01",
           "width": 1920,
           "height": 1080,
-          "components": ["TitleBlock", "VersionTag", "AuthorisationBadge"]
+          "components": [
+            "TitleBlock",
+            "VersionTag",
+            "AuthorisationBadge"
+          ]
         }
       ]
     },
@@ -27,13 +31,21 @@
           "name": "ColorTokens_Platform_Ops_Tenant",
           "width": 1440,
           "height": 900,
-          "components": ["ColorSwatch_Platform", "ColorSwatch_Ops", "ColorSwatch_Tenant"]
+          "components": [
+            "ColorSwatch_Platform",
+            "ColorSwatch_Ops",
+            "ColorSwatch_Tenant"
+          ]
         },
         {
           "name": "Typography_Inter_Mono",
           "width": 1440,
           "height": 900,
-          "components": ["HeaderStyles", "BodyStyles", "MonoStyles"]
+          "components": [
+            "HeaderStyles",
+            "BodyStyles",
+            "MonoStyles"
+          ]
         }
       ]
     },
@@ -48,7 +60,37 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "PageHeader", "AuthorizationRegistryTable", "StatusFilterPills"]
+          "components": [
+            "AdminShell",
+            "PageHeader",
+            "AuthorizationRegistryTable",
+            "StatusFilterPills"
+          ],
+          "userCapability": "multi_taxi_authorization:read",
+          "dataState": "happy_active",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "SidebarNav",
+            "HeaderSearch",
+            "StatusFilterPills",
+            "TableHeaderSort",
+            "RegistryTableRows",
+            "CreateDraftButton"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/multi-taxi-authorizations": [
+              "authorizationId",
+              "operatorId",
+              "authorityCode",
+              "businessPlanVersion",
+              "status",
+              "serviceAreaCodes",
+              "activeFareVersionId",
+              "effectiveFrom",
+              "effectiveUntil"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Empty: 無符合條件之營運許可 banner with reset filter action. Error: 500 alert with request trace ID. Conflict/Stale: 409 refresh banner."
         },
         {
           "name": "MTX-AUTH-UI-01_Registry_Narrow_390x844",
@@ -57,7 +99,31 @@
           "width": 390,
           "height": 844,
           "autoLayout": true,
-          "components": ["MobileShell", "PageHeader_Compact", "AuthorizationCardList"]
+          "components": [
+            "MobileShell",
+            "PageHeader_Compact",
+            "AuthorizationCardList"
+          ],
+          "userCapability": "multi_taxi_authorization:read",
+          "dataState": "happy_active_mobile",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "MobileMenuButton",
+            "CompactSearchInput",
+            "StatusFilterAccordion",
+            "AuthorizationMobileCards",
+            "CreateDraftFAB"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/multi-taxi-authorizations": [
+              "authorityCode",
+              "operatorId",
+              "status",
+              "effectiveFrom",
+              "effectiveUntil"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Single column stacked cards with touch-friendly 44px tap targets. Retains full accessibility at 200% zoom."
         },
         {
           "name": "MTX-AUTH-UI-02_Detail_Approved_1440x900",
@@ -66,7 +132,39 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "DataList", "VehicleMembershipSummary", "ActionBar"]
+          "components": [
+            "AdminShell",
+            "DataList",
+            "VehicleMembershipSummary",
+            "ActionBar"
+          ],
+          "userCapability": [
+            "multi_taxi_authorization:read",
+            "multi_taxi_authorization:activate"
+          ],
+          "dataState": "approved_active_detail",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "BackToRegistryLink",
+            "AuthorityMetadataGrid",
+            "ActiveFareVersionLink",
+            "VehicleMembershipSummary",
+            "SuspendActionButton"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/multi-taxi-authorizations/{id}": [
+              "authorizationId",
+              "operatorId",
+              "authorityCode",
+              "businessPlanVersion",
+              "status",
+              "serviceAreaCodes",
+              "activeFareVersionId",
+              "effectiveFrom",
+              "effectiveUntil"
+            ]
+          },
+          "emptyErrorConflictBehavior": "404 Not Found displays 找不到此營運許可 fallback. Suspended state displays yellow warning banner with reason. Expired/Revoked read-only lock."
         },
         {
           "name": "MTX-AUTH-UI-03_Draft_Editor_1280x800",
@@ -75,7 +173,38 @@
           "width": 1280,
           "height": 800,
           "autoLayout": true,
-          "components": ["AdminShell", "FormGrid", "EffectiveDatePicker", "FareVersionSelect"]
+          "components": [
+            "AdminShell",
+            "FormGrid",
+            "EffectiveDatePicker",
+            "FareVersionSelect"
+          ],
+          "userCapability": "multi_taxi_authorization:write",
+          "dataState": "draft_form_edit",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "AuthorityCodeInput",
+            "OperatorSelect",
+            "BusinessPlanVersionInput",
+            "ServiceAreaCodesMultiSelect",
+            "ActiveFareVersionSelect",
+            "EffectiveFromPicker",
+            "EffectiveUntilPicker",
+            "SaveDraftButton",
+            "CancelLink"
+          ],
+          "apiFieldMapping": {
+            "POST/PUT /api/v1/multi-taxi-authorizations": [
+              "operatorId",
+              "authorityCode",
+              "businessPlanVersion",
+              "serviceAreaCodes",
+              "activeFareVersionId",
+              "effectiveFrom",
+              "effectiveUntil"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Missing mandatory fields trigger inline field validation and top-level summary linking to invalid inputs. Unsaved changes prompt confirmation dialog."
         },
         {
           "name": "MTX-AUTH-UI-04_Lifecycle_Confirm_1440x900",
@@ -84,7 +213,30 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "ConfirmationModal", "ConsequenceSummary"]
+          "components": [
+            "AdminShell",
+            "ConfirmationModal",
+            "ConsequenceSummary"
+          ],
+          "userCapability": "multi_taxi_authorization:activate",
+          "dataState": "lifecycle_confirmation_modal",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "ModalDialogContainer",
+            "DialogTitleWarningCopy",
+            "AuthorizationDetailSummary",
+            "AffectedVehicleCount",
+            "CancelButton",
+            "ConfirmActionButton"
+          ],
+          "apiFieldMapping": {
+            "POST /api/v1/multi-taxi-authorizations/{id}/activate|suspend": [
+              "authorizationId",
+              "affectedVehicleCount",
+              "consequenceCopy"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Consequence summary explicitly warns of dispatch eligibility changes. Stale 409 conflict if status changed while open."
         },
         {
           "name": "MTX-AUTH-UI-05_Vehicles_1440x900",
@@ -93,7 +245,31 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "AuthorizedVehicleTable", "AddVehicleDrawer"]
+          "components": [
+            "AdminShell",
+            "AuthorizedVehicleTable",
+            "AddVehicleDrawer"
+          ],
+          "userCapability": "multi_taxi_authorization:write",
+          "dataState": "vehicle_membership_active",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "VehicleSearchInput",
+            "AddVehicleButton",
+            "VehicleMembershipTableRows",
+            "MembershipStatusBadge",
+            "RemoveMembershipAction"
+          ],
+          "apiFieldMapping": {
+            "GET/POST /api/v1/multi-taxi-authorizations/{id}/vehicles": [
+              "authorizationVehicleId",
+              "vehicleId",
+              "status",
+              "effectiveFrom",
+              "effectiveUntil"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Empty: 目前尚無授權車輛名單 notice with Add Vehicle action button. Duplicate vehicle add triggers validation error."
         },
         {
           "name": "MTX-AUTH-UI-06_Conflict_403_1440x900",
@@ -102,7 +278,29 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "ForbiddenBanner", "PermissionBoundary"]
+          "components": [
+            "AdminShell",
+            "ForbiddenBanner",
+            "PermissionBoundary"
+          ],
+          "userCapability": "multi_taxi_authorization:read",
+          "dataState": "permission_denied_stale_conflict",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "AlertBannerIconCopy",
+            "PermissionDetailsConflictDiff",
+            "ReloadRequestPermissionActionButton",
+            "NavigationReturnLink"
+          ],
+          "apiFieldMapping": {
+            "HTTP 403 / HTTP 409": [
+              "error",
+              "message",
+              "requiredCapability",
+              "backendVersion"
+            ]
+          },
+          "emptyErrorConflictBehavior": "403 hides mutation controls and displays missing capability in human terms. 409 offers data reload without overwriting backend state."
         }
       ]
     },
@@ -117,7 +315,35 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["OpsShell", "QueueModeBadge", "VirtualMatchingTable"]
+          "components": [
+            "OpsShell",
+            "QueueModeBadge",
+            "VirtualMatchingTable"
+          ],
+          "userCapability": "ops_dispatch:read",
+          "dataState": "virtual_matching_overview",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "OpsNav",
+            "QueueModeFilter",
+            "ServiceAreaFilter",
+            "DriverVehicleSearch",
+            "QueueTableRows",
+            "DetailViewAction"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/dispatch/queue": [
+              "driverId",
+              "vehicleId",
+              "runtimeProfileCode",
+              "queueMode",
+              "siteId",
+              "serviceAreaCode",
+              "operatingAuthorizationId",
+              "eligibilityDecision"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Empty: 目前無佇列資料 message. Displays explicit text badges for queueMode alongside color tokens."
         },
         {
           "name": "MTX-QUEUE-UI-01_Overview_Narrow_390x844",
@@ -126,7 +352,28 @@
           "width": 390,
           "height": 844,
           "autoLayout": true,
-          "components": ["MobileShell", "QueueCardList_Compact"]
+          "components": [
+            "MobileShell",
+            "QueueCardList_Compact"
+          ],
+          "userCapability": "ops_dispatch:read",
+          "dataState": "virtual_matching_mobile",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "FilterDrawerTrigger",
+            "CompactSearch",
+            "QueueCardList",
+            "ExpandCardDetailTrigger"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/dispatch/queue": [
+              "driverId",
+              "vehicleId",
+              "queueMode",
+              "eligibilityDecision"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Responsive single-column cards. Retains visibility of non-bypassable denial status on mobile viewports."
         },
         {
           "name": "MTX-QUEUE-UI-02_Detail_1440x900",
@@ -135,7 +382,30 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["OpsShell", "QueueEntryDetailCard"]
+          "components": [
+            "OpsShell",
+            "QueueEntryDetailCard"
+          ],
+          "userCapability": "ops_dispatch:read",
+          "dataState": "queue_entry_detail",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "BackToOverviewLink",
+            "DriverVehicleSummary",
+            "RuntimeProfileCode",
+            "OperatingAuthorizationRefLink",
+            "EligibilityDecisionSummary"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/dispatch/queue/{entryId}": [
+              "driverId",
+              "vehicleId",
+              "runtimeProfileCode",
+              "operatingAuthorizationId",
+              "checkInAt"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Stale entry displays timestamp warning and refresh option."
         },
         {
           "name": "MTX-QUEUE-UI-03_TaxiStandDenied_1440x900",
@@ -144,7 +414,27 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["OpsShell", "NonBypassableLegalDenialBanner", "SafeNextStepAction"]
+          "components": [
+            "OpsShell",
+            "NonBypassableLegalDenialBanner",
+            "SafeNextStepAction"
+          ],
+          "userCapability": "ops_dispatch:read",
+          "dataState": "non_bypassable_legal_denial",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "RedAlertBanner",
+            "NonBypassableDenialCopy",
+            "AffectedDriverVehicleInfo",
+            "SafeNextStepButton"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/dispatch/queue/{entryId}": [
+              "eligibilityDecision",
+              "denialReasonCode"
+            ]
+          },
+          "emptyErrorConflictBehavior": "NON-BYPASSABLE! Ops Console provides NO manual override or force check-in control. Guiding copy instructs operator to direct driver back to virtual matching."
         }
       ]
     },
@@ -159,7 +449,35 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "RatingReviewQueueTable"]
+          "components": [
+            "AdminShell",
+            "RatingReviewQueueTable"
+          ],
+          "userCapability": "rating:moderate",
+          "dataState": "rating_review_queue_active",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "SearchFilterBar",
+            "StatusFilterPills",
+            "RatingScoreFilter",
+            "TableHeaderSort",
+            "RatingTableRows",
+            "ModerationActionButton"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/p5-ratings": [
+              "ratingId",
+              "orderId",
+              "tripId",
+              "driverId",
+              "score",
+              "tags",
+              "comment",
+              "status",
+              "submittedAt"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Empty: 目前無待審查評價資料. Error: 500 banner with request trace ID. Sensitive passenger identity masked as passengerSubjectRef."
         },
         {
           "name": "P5-RATE-UI-01_Queue_Narrow_390x844",
@@ -168,7 +486,28 @@
           "width": 390,
           "height": 844,
           "autoLayout": true,
-          "components": ["MobileShell", "RatingReviewCardList"]
+          "components": [
+            "MobileShell",
+            "RatingReviewCardList"
+          ],
+          "userCapability": "rating:moderate",
+          "dataState": "rating_review_queue_mobile",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "FilterDrawerButton",
+            "CompactSearch",
+            "RatingMobileCards",
+            "ReviewDetailTrigger"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/p5-ratings": [
+              "ratingId",
+              "driverId",
+              "score",
+              "status"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Single column rating cards; star rating uses accessible aria-label."
         },
         {
           "name": "P5-RATE-UI-02_InvalidationConfirm_1280x800",
@@ -177,7 +516,29 @@
           "width": 1280,
           "height": 800,
           "autoLayout": true,
-          "components": ["AdminShell", "RatingDetailCard", "InvalidationConfirmModal"]
+          "components": [
+            "AdminShell",
+            "RatingDetailCard",
+            "InvalidationConfirmModal"
+          ],
+          "userCapability": "rating:moderate",
+          "dataState": "moderation_invalidation_modal",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "DialogContainer",
+            "RatingDetailSummary",
+            "InvalidationReasonDropdown",
+            "AuditNoteTextarea",
+            "CancelButton",
+            "ConfirmInvalidateButton"
+          ],
+          "apiFieldMapping": {
+            "POST /api/v1/p5-ratings/{ratingId}/invalidate": [
+              "reasonCode",
+              "auditNote"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Invalidation requires explicit reason and audit note. Server invalidates rating and excludes score from driver average."
         },
         {
           "name": "P5-RATE-UI-03_Authority_1440x900",
@@ -186,7 +547,31 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "DriverRatingAuthorityCard"]
+          "components": [
+            "AdminShell",
+            "DriverRatingAuthorityCard"
+          ],
+          "userCapability": [
+            "rating:moderate",
+            "rating:read"
+          ],
+          "dataState": "server_owned_driver_rating_authority",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "DriverSearch",
+            "AuthorityStateCard",
+            "AggregateRatingSummary",
+            "RatingHistoryTimeline",
+            "ModerationLogLink"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/drivers/{id}/rating-authority": [
+              "averageRating",
+              "ratingCount",
+              "authorityState"
+            ]
+          },
+          "emptyErrorConflictBehavior": "new_driver renders 新加入駕駛 text pill. unavailable renders 評價資料目前無法使用 fallback pill. NEVER renders dummy 5.0 or 0.0 default."
         }
       ]
     },
@@ -201,7 +586,30 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "FareAnomalyFailClosedTable"]
+          "components": [
+            "AdminShell",
+            "FareAnomalyFailClosedTable"
+          ],
+          "userCapability": "fare_publication:manage",
+          "dataState": "fare_anomaly_fail_closed_triage",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "AnomalyReasonFilter",
+            "OrderTripSearch",
+            "AnomalyTableRows",
+            "AnomalyDetailDrawer",
+            "RetryActionButton"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/p5-fares/anomalies": [
+              "quote_provider_unavailable",
+              "quote_out_of_range",
+              "route_unresolved",
+              "fare_policy_missing",
+              "calculation_mismatch"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Fail-closed triage view. High-fare discrepancies and missing quote providers block booking. No manual fare value override field present."
         },
         {
           "name": "P5-COM-UI-01_FareAnomaly_Narrow_390x844",
@@ -210,7 +618,26 @@
           "width": 390,
           "height": 844,
           "autoLayout": true,
-          "components": ["MobileShell", "FareAnomalyCardList"]
+          "components": [
+            "MobileShell",
+            "FareAnomalyCardList"
+          ],
+          "userCapability": "fare_publication:manage",
+          "dataState": "fare_anomaly_mobile_triage",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "MobileFilterToggle",
+            "AnomalyCardList",
+            "DetailActionTrigger"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/p5-fares/anomalies": [
+              "anomalyReason",
+              "orderId",
+              "status"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Stacked mobile card layout; human error copy presented clearly without raw internal error codes."
         },
         {
           "name": "P5-COM-UI-02_PaymentException_1440x900",
@@ -219,7 +646,30 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "PaymentExceptionDetailCard"]
+          "components": [
+            "AdminShell",
+            "PaymentExceptionDetailCard"
+          ],
+          "userCapability": "multi_taxi_records:read",
+          "dataState": "payment_exception_failed_manual_recovery",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "PaymentStatusFilter",
+            "ExceptionTable",
+            "ExceptionDetailCard",
+            "PSPRecoveryCommand"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/payments/exceptions": [
+              "not_selected",
+              "authorized",
+              "captured",
+              "failed",
+              "refunded",
+              "manual_recovery"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Displays explicit payment failure reason (Card Declined). NEVER presents failed or manual-recovery states as paid. Masks raw payment tokens."
         },
         {
           "name": "P5-COM-UI-02_PaymentException_Narrow_390x844",
@@ -228,7 +678,26 @@
           "width": 390,
           "height": 844,
           "autoLayout": true,
-          "components": ["MobileShell", "PaymentExceptionCard_Compact"]
+          "components": [
+            "MobileShell",
+            "PaymentExceptionCard_Compact"
+          ],
+          "userCapability": "multi_taxi_records:read",
+          "dataState": "payment_exception_mobile",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "StatusFilterDrawer",
+            "PaymentExceptionMobileCards",
+            "CardActionTrigger"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/payments/exceptions": [
+              "orderId",
+              "status",
+              "payableAmount"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Compact responsive card stack with distinct failure badges."
         },
         {
           "name": "P5-COM-UI-03_CertificateSupport_1440x900",
@@ -237,7 +706,34 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "CertificateSearchCard", "PdfDownloadButton"]
+          "components": [
+            "AdminShell",
+            "CertificateSearchCard",
+            "PdfDownloadButton"
+          ],
+          "userCapability": "multi_taxi_records:read",
+          "dataState": "certificate_available_preview",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "OrderIdSearchInput",
+            "SearchButton",
+            "RideCertificatePreviewCard",
+            "DownloadPdfActionButton",
+            "ConsumerSupportInfoBlock"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/p5-certificates/{orderId}": [
+              "certificateId",
+              "plateNo",
+              "pickupAt",
+              "dropoffAt",
+              "fareMinor",
+              "currency",
+              "issuedAt",
+              "certificateVersion"
+            ]
+          },
+          "emptyErrorConflictBehavior": "If generating: skeletal loading state. If unavailable or invalid token: clear error alert banner."
         }
       ]
     },
@@ -252,7 +748,36 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "OperationalRecordsTable", "RetentionFloorBanner"]
+          "components": [
+            "AdminShell",
+            "OperationalRecordsTable",
+            "RetentionFloorBanner"
+          ],
+          "userCapability": "multi_taxi_records:read",
+          "dataState": "operational_record_query_730_day_floor",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "DateRangePicker",
+            "VehiclePlateSearch",
+            "RetentionFilter",
+            "RecordsTable",
+            "ExportActionButton"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/multi-taxi-records": [
+              "orderId",
+              "plateNo",
+              "reservedAt",
+              "pickupAt",
+              "dropoffAt",
+              "distance",
+              "payableFare",
+              "actualFare",
+              "retainUntil",
+              "recordStatus"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Displays mandatory 730-day retention floor notice banner. Missing pickup/dropoff shows 未取得 or 未完成 text, not 0."
         },
         {
           "name": "P5-COM-UI-04_RecordsQuery_Narrow_390x844",
@@ -261,7 +786,27 @@
           "width": 390,
           "height": 844,
           "autoLayout": true,
-          "components": ["MobileShell", "RecordsCardList"]
+          "components": [
+            "MobileShell",
+            "RecordsCardList"
+          ],
+          "userCapability": "multi_taxi_records:read",
+          "dataState": "operational_record_mobile",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "MobileFilterToggle",
+            "RecordMobileCards",
+            "CardExpandAction"
+          ],
+          "apiFieldMapping": {
+            "GET /api/v1/multi-taxi-records": [
+              "orderId",
+              "plateNo",
+              "reservedAt",
+              "retainUntil"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Touch-optimised mobile list card layout; responsive at 200% zoom."
         },
         {
           "name": "P5-COM-UI-05_ControlledExport_1440x900",
@@ -270,7 +815,31 @@
           "width": 1440,
           "height": 900,
           "autoLayout": true,
-          "components": ["AdminShell", "ControlledExportModal", "LegalHoldBadge"]
+          "components": [
+            "AdminShell",
+            "ControlledExportModal",
+            "LegalHoldBadge"
+          ],
+          "userCapability": "multi_taxi_records:export",
+          "dataState": "controlled_export_modal_legal_hold_freeze",
+          "sourceStatus": "live-contract",
+          "focusOrder": [
+            "ExportModalContainer",
+            "QueryScopeRecordCountSummary",
+            "AuditExportPurposeInput",
+            "CancelButton",
+            "CreateExportJobButton",
+            "LegalHoldFreezeBadge"
+          ],
+          "apiFieldMapping": {
+            "POST /api/v1/multi-taxi-records/export": [
+              "jobId",
+              "recordCount",
+              "purpose",
+              "auditActor"
+            ]
+          },
+          "emptyErrorConflictBehavior": "Requires typed audit purpose before job creation. Browser-side raw export prohibited. Legal Hold badge indicates records frozen from automated purge."
         }
       ]
     },

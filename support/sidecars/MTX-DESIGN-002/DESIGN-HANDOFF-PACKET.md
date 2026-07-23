@@ -68,3 +68,13 @@
 - **API Seams:**
   - `GET /api/v1/dispatch/queue`
   - `GET /api/v1/dispatch/queue/{entryId}`
+---
+
+## 7. §19 Per-Frame Annotations Evidence Matrix
+
+| Frame Name | Screen ID | Viewport | User Capability | Data State | Source Status | Component Variants | Focus Order | API & Field Mapping | Empty / Error / Conflict Behavior |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `MTX-QUEUE-UI-01_Overview_1440x900` | `MTX-QUEUE-UI-01` | Desktop (1440x900) | `ops_dispatch:read` | `Virtual Matching Overview` | `live-contract` | `OpsShell`, `QueueModeChip`, `VirtualMatchingTable` | 1. Ops Nav -> 2. Queue Mode Filter -> 3. Service Area Filter -> 4. Search -> 5. Table Rows -> 6. Detail View | `GET /api/v1/dispatch/queue` -> `driverId`, `vehicleId`, `runtimeProfileCode`, `queueMode`, `eligibilityDecision` | Empty: `目前無佇列資料`. Displays explicit text badges for queueMode alongside color tokens. |
+| `MTX-QUEUE-UI-01_Overview_Narrow_390x844` | `MTX-QUEUE-UI-01_Narrow` | Narrow Mobile (390x844) | `ops_dispatch:read` | `Virtual Matching Mobile` | `live-contract` | `MobileShell`, `QueueCardList_Compact`, `QueueModeChip` | 1. Filter Drawer -> 2. Compact Search -> 3. Queue Mobile Cards -> 4. Expand Card Detail | `GET /api/v1/dispatch/queue` -> mobile compact queue card projection | Responsive single-column cards. Retains visibility of non-bypassable denial status on mobile viewports. |
+| `MTX-QUEUE-UI-02_Detail_1440x900` | `MTX-QUEUE-UI-02` | Desktop (1440x900) | `ops_dispatch:read` | `Queue Entry Detail` | `live-contract` | `OpsShell`, `QueueEntryDetailCard`, `QueueModeChip` | 1. Back Link -> 2. Driver & Vehicle Summary -> 3. Runtime Profile (`multi_taxi_direct`) -> 4. Auth Ref -> 5. Eligibility Decision | `GET /api/v1/dispatch/queue/{entryId}` -> full entry metadata and check-in history | Stale entry displays timestamp warning and refresh option. |
+| `MTX-QUEUE-UI-03_TaxiStandDenied_1440x900` | `MTX-QUEUE-UI-03` | Desktop (1440x900) | `ops_dispatch:read` | `Non-Bypassable Legal Denial` | `live-contract` | `OpsShell`, `LegalDenialBanner`, `SafeNextStepAction` | 1. Red Alert Banner (`aria-live="assertive"`) -> 2. Denial Copy -> 3. Driver & Vehicle Info -> 4. Safe Next Step Button (`引導返回虛擬媒合`) | `GET /api/v1/dispatch/queue/{entryId}` -> `eligibilityDecision: DENIED_LEGAL_PHYSICAL_RANK|TAXI_STAND` | NON-BYPASSABLE! Ops Console provides NO manual override or force check-in control. |

@@ -3,7 +3,7 @@
 
 **Parent Task ID:** `MTX-DESIGN-WAVE0`  
 **Owner:** Gemini  
-**Reviewer:** Copilot  
+**Reviewer:** Codex  
 **Status:** Ready for Review Handoff  
 **Execution Baseline:** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`  
 **Canonical Requirement:** `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md` §3 & `08_multi_taxi_operations_ui_design_requirements_20260723.md`
@@ -52,3 +52,24 @@ The visual design and operational UI handoff for Phase 1 Multi-Taxi (Wave 0 Desi
 - [x] Explicit narrow viewport frames (390px), ARIA dialog/alert/live-region hooks, skeletal loading, and interactive prototype transitions implemented.
 - [x] All visual components strictly built with `@drts/ui-tokens` realm tokens (Platform, Ops, Tenant, System, Driver). No ad-hoc hex palettes introduced.
 - [x] Unblocks implementation UI tasks in Fleets B, C, D, and F.
+---
+
+## 3. §19 Per-Frame Annotations Evidence Verification
+
+All 23 frames across the four design packets (`MTX-DESIGN-001`, `MTX-DESIGN-002`, `P5-DESIGN-001`, `P5-DESIGN-002`) and the Figma source tree (`docs/05-ui/drts-design-canvas/figma-source-tree.json`) strictly satisfy all §19 frame-annotation requirements:
+
+1. **Screen ID & Viewport:** Explicitly annotated for Desktop 1440px / 1280px and Narrow Mobile 390px viewports across all screens.
+2. **User Capabilities:** Mapped to exact backend capabilities (`multi_taxi_authorization:read`, `:write`, `:activate`, `ops_dispatch:read`, `rating:moderate`, `fare_publication:manage`, `multi_taxi_records:read`, `:export`).
+3. **Data States:** Complete representation of happy active, draft, suspended, expired/revoked, loading, empty, 403 forbidden, 409 stale conflict, non-bypassable legal denial, rated, new_driver, unavailable, fare anomaly fail-closed, payment failed, and legal hold freeze states.
+4. **Source Status:** All frames marked as `live-contract` matching canonical spec contracts.
+5. **Component Variants:** Component names from `@drts/ui-tokens` & DRTS design canvas bound to every frame.
+6. **Focus Order:** Sequential accessibility focus orders (1 -> 2 -> 3...) defined for keyboard navigation and ARIA focus trapping on modal dialogs.
+7. **API & Field Mapping:** Exact HTTP endpoints and request/response field mappings documented for developer handoff.
+8. **Empty / Error / Conflict Behavior Evidence:** Explicit evidence for empty states, error alerts, fail-closed quote issues, non-bypassable legal denials, and 409 conflict handling.
+
+Detailed per-frame evidence matrices are archived in individual design packets:
+- `support/sidecars/MTX-DESIGN-001/DESIGN-HANDOFF-PACKET.md` §7 (7 frames)
+- `support/sidecars/MTX-DESIGN-002/DESIGN-HANDOFF-PACKET.md` §7 (4 frames)
+- `support/sidecars/P5-DESIGN-001/DESIGN-HANDOFF-PACKET.md` §7 (4 frames)
+- `support/sidecars/P5-DESIGN-002/DESIGN-HANDOFF-PACKET.md` §7 (8 frames)
+- `docs/05-ui/drts-design-canvas/figma-source-tree.json` (Structured JSON machine truth)

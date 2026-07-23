@@ -69,3 +69,13 @@
   - `GET /api/v1/p5-ratings`
   - `GET /api/v1/p5-ratings/{ratingId}`
   - `POST /api/v1/p5-ratings/{ratingId}/invalidate`
+---
+
+## 7. §19 Per-Frame Annotations Evidence Matrix
+
+| Frame Name | Screen ID | Viewport | User Capability | Data State | Source Status | Component Variants | Focus Order | API & Field Mapping | Empty / Error / Conflict Behavior |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `P5-RATE-UI-01_Queue_1440x900` | `P5-RATE-UI-01` | Desktop (1440x900) | `rating:moderate` | `Rating Review Queue` | `live-contract` | `AdminShell`, `RatingReviewQueueTable`, `RatingStatusChip` | 1. Search Filter -> 2. Status Filter Pills -> 3. Score Filter -> 4. Table Header Sort -> 5. Table Rows -> 6. Moderation Action | `GET /api/v1/p5-ratings` -> `ratingId`, `orderId`, `tripId`, `driverId`, `score`, `status`, `submittedAt` | Empty: `目前無待審查評價資料`. Error: 500 banner with request trace ID. Sensitive passenger ID masked. |
+| `P5-RATE-UI-01_Queue_Narrow_390x844` | `P5-RATE-UI-01_Narrow` | Narrow Mobile (390x844) | `rating:moderate` | `Rating Review Mobile` | `live-contract` | `MobileShell`, `RatingReviewCardList`, `RatingStatusChip` | 1. Filter Drawer -> 2. Compact Search -> 3. Rating Cards -> 4. Review Detail Trigger | `GET /api/v1/p5-ratings` -> mobile rating card projection | Single column rating cards; star rating uses accessible `aria-label`. |
+| `P5-RATE-UI-02_InvalidationConfirm_1280x800` | `P5-RATE-UI-02` | Laptop (1280x800) | `rating:moderate` | `Invalidation Modal` | `live-contract` | `AdminShell`, `RatingDetailCard`, `InvalidationConfirmModal` | 1. Modal Container (Focus trapped) -> 2. Detail Summary -> 3. Reason Dropdown -> 4. Audit Note -> 5. Cancel -> 6. Confirm Invalidate | `POST /api/v1/p5-ratings/{ratingId}/invalidate` -> `reasonCode`, `auditNote` | Invalidation requires explicit reason and audit note. Server invalidates score & recalculates aggregate. |
+| `P5-RATE-UI-03_Authority_1440x900` | `P5-RATE-UI-03` | Desktop (1440x900) | `rating:moderate`, `:read` | `Driver Rating Authority` | `live-contract` | `AdminShell`, `DriverRatingAuthorityCard` | 1. Driver Search -> 2. Authority State Card -> 3. Aggregate Rating Summary -> 4. History Timeline -> 5. Moderation Log Link | `GET /api/v1/drivers/{id}/rating-authority` -> `averageRating`, `ratingCount`, `authorityState` | `new_driver` renders `新加入駕駛` pill. `unavailable` renders fallback pill. NEVER renders dummy 5.0 or 0.0. |
