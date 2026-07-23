@@ -2,7 +2,7 @@
 
 Date: 2026-07-23
 Owner: Gemini
-Reviewer: Copilot
+Reviewer: Codex
 Task: Fleet C queue semantics (runtime)
 
 ## Scope check

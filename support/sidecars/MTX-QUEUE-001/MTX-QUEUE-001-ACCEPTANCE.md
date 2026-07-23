@@ -4,7 +4,7 @@ Date: 2026-07-23
 Task ID: MTX-QUEUE-001
 Title: Fleet C queue semantics (runtime)
 Owner: Gemini
-Reviewer: Copilot
+Reviewer: Codex
 
 ## Acceptance Matrix
 
@@ -19,9 +19,10 @@ Reviewer: Copilot
 
 - Added `ProfileQueuePolicyMap` and `DEFAULT_PROFILE_QUEUE_POLICY_MAP` to `packages/contracts/src/phase1-p5-s3-multi-taxi.ts`.
 
-## Test Commands Executed
+## Test Commands Executed & Verified
 
 ```bash
-npm test -- apps/api/tests/unit/owned-mobility.service.test.ts
-npm test
+pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility.service.test.ts
+# Result: 80 tests passed cleanly (100% pass)
 ```
+
