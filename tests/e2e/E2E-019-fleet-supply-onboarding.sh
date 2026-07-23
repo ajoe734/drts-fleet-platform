@@ -280,7 +280,7 @@ log_step "LEG 3 — create/update/upload/submit/approve vehicle with self-approv
 use_partner_actor
 post_json \
   "/fleet-partner/supply-submissions/vehicles" \
-  "{\"plateNo\":\"E2E-7788\",\"licenseType\":\"taxi\",\"brand\":\"Toyota\",\"model\":\"Sienta\",\"modelYear\":2024,\"seatCount\":5,\"luggageCapacity\":3,\"businessArea\":\"TPE\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"airportTransferEligible\":false,\"fixedFareAllowed\":false,\"currentDriverSubmissionId\":\"${DRIVER_SUB}\"}"
+  "{\"plateNo\":\"E2E-7788\",\"licenseType\":\"taxi\",\"brand\":\"Toyota\",\"model\":\"Sienta\",\"modelYear\":2024,\"seatCount\":5,\"doorCount\":5,\"color\":\"Silver\",\"luggageCapacity\":3,\"businessArea\":\"TPE\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"airportTransferEligible\":false,\"fixedFareAllowed\":false,\"currentDriverSubmissionId\":\"${DRIVER_SUB}\"}"
 assert_status "200|201"
 VEHICLE_SUB=$(json_get '.data.submission.submission_id')
 [[ -n "$VEHICLE_SUB" ]] || { log_fail "Vehicle create response missing submission_id"; exit 1; }
@@ -290,7 +290,7 @@ save_evidence "$SCENARIO" "fleet-partner" "vehicle_submission_id" "$VEHICLE_SUB"
 use_partner_actor
 put_json \
   "/fleet-partner/supply-submissions/${VEHICLE_SUB}/vehicle" \
-  "{\"expectedRevisionNo\":1,\"plateNo\":\"E2E-7788\",\"licenseType\":\"taxi\",\"brand\":\"Toyota\",\"model\":\"Sienta Hybrid\",\"modelYear\":2024,\"seatCount\":5,\"luggageCapacity\":4,\"businessArea\":\"TPE\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"airportTransferEligible\":false,\"fixedFareAllowed\":false,\"currentDriverSubmissionId\":\"${DRIVER_SUB}\"}"
+  "{\"expectedRevisionNo\":1,\"plateNo\":\"E2E-7788\",\"licenseType\":\"taxi\",\"brand\":\"Toyota\",\"model\":\"Sienta Hybrid\",\"modelYear\":2024,\"seatCount\":5,\"doorCount\":5,\"color\":\"Silver\",\"luggageCapacity\":4,\"businessArea\":\"TPE\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"airportTransferEligible\":false,\"fixedFareAllowed\":false,\"currentDriverSubmissionId\":\"${DRIVER_SUB}\"}"
 assert_status "200|201"
 read_portal_submission "$VEHICLE_SUB"
 [[ "$PORTAL_SUB_REV" == "2" ]] || { log_fail "Expected vehicle revision 2 after update, got ${PORTAL_SUB_REV}"; exit 1; }
