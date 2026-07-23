@@ -40,6 +40,7 @@ export interface PassengerTimelineEvent {
 
 export interface PassengerRideFixture {
   token: string;
+  orderNo?: string;
   screenId: PassengerScreenId;
   title: string;
   status: string;
@@ -56,6 +57,8 @@ export interface PassengerRideFixture {
   dropoffLabel?: string;
   mapState: PassengerMapState;
   actionMode: PassengerActionMode;
+  canCancel?: boolean;
+  canContact?: boolean;
   cancelNote?: string;
   actionLabel?: string;
   banner?: {
@@ -495,5 +498,8 @@ export function getPassengerRideFixture(
 export function resolvePassengerDataMode(
   queryMode: string | null | undefined,
 ): PassengerDataMode {
+  if (process.env.NODE_ENV === "production") {
+    return "live";
+  }
   return queryMode === "live" ? "live" : "fixture";
 }

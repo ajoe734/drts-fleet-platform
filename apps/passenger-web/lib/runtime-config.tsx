@@ -11,9 +11,12 @@ declare global {
   }
 }
 
-const DEFAULT_SSE_PATH = "/api/passenger-rides/sse";
+const DEFAULT_SSE_PATH = "/control-plane-proxy/passenger-rides";
 
 function resolveDataMode(): PassengerDataMode {
+  if (process.env.NODE_ENV === "production") {
+    return "live";
+  }
   return process.env.NEXT_PUBLIC_PASSENGER_RIDE_DATA_MODE === "live"
     ? "live"
     : "fixture";

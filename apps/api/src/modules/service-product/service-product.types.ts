@@ -72,3 +72,26 @@ export interface UpdateServiceProductCommand {
   defaultBillingMode?: ServiceProductBillingMode;
   defaultProofRequirements?: string[];
 }
+
+export type ServiceProductRuntimeProfileCode =
+  | "ordinary_taxi"
+  | "multi_taxi_direct"
+  | "business_dispatch";
+
+export interface RuntimeProfileServiceProductPolicy {
+  runtimeProfileCode: ServiceProductRuntimeProfileCode;
+  serviceProductCode: ServiceProductType;
+  active: boolean;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertRuntimeProfileServiceProductPolicyCommand {
+  runtimeProfileCode: ServiceProductRuntimeProfileCode;
+  serviceProductCode: ServiceProductType;
+  active: boolean;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}

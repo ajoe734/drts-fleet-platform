@@ -134,4 +134,62 @@ describe("service product service", () => {
       }),
     ).toThrow(ApiRequestError);
   });
+
+  it("activates service products only inside an effective runtime policy", () => {
+    const { service } = createService();
+
+    expect(() =>
+      service.assertRuntimeProfileServiceProductActive(
+        "multi_taxi_direct",
+        "taxi_reservation",
+      ),
+    ).toThrow(ApiRequestError);
+
+    const policy = service.upsertRuntimeProfilePolicy({
+      runtimeProfileCode: "multi_taxi_direct",
+      serviceProductCode: "taxi_reservation",
+      active: true,
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+    });
+
+    expect(
+      service.assertRuntimeProfileServiceProductActive(
+        "multi_taxi_direct",
+        "taxi_reservation",
+      ),
+    ).toEqual(policy);
+    expect(service.listRuntimeProfilePolicies()).toEqual([policy]);
+  });
+
+  it("denies inactive and expired runtime policies", () => {
+    const { service } = createService();
+    service.upsertRuntimeProfilePolicy({
+      runtimeProfileCode: "multi_taxi_direct",
+      serviceProductCode: "taxi_reservation",
+      active: false,
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(() =>
+      service.assertRuntimeProfileServiceProductActive(
+        "multi_taxi_direct",
+        "taxi_reservation",
+      ),
+    ).toThrow(ApiRequestError);
+
+    service.upsertRuntimeProfilePolicy({
+      runtimeProfileCode: "multi_taxi_direct",
+      serviceProductCode: "taxi_reservation",
+      active: true,
+      effectiveFrom: "2025-01-01T00:00:00.000Z",
+      effectiveUntil: "2026-01-01T00:00:00.000Z",
+    });
+    expect(() =>
+      service.assertRuntimeProfileServiceProductActive(
+        "multi_taxi_direct",
+        "taxi_reservation",
+      ),
+    ).toThrow(ApiRequestError);
+  });
 });

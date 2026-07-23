@@ -60,6 +60,8 @@ function createOwnedMobilityService(options?: {
     evaluate: ReturnType<typeof vi.fn>;
   };
   serviceAreaService?: ServiceAreaService;
+  vehicleDisclosureProfile?: Record<string, unknown> | null;
+  driverRegistrationCredential?: Record<string, unknown> | null;
   repository?: {
     isEnabled: () => boolean;
     persistChanges: (...args: any[]) => Promise<unknown>;
@@ -96,6 +98,24 @@ function createOwnedMobilityService(options?: {
         DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ??
         null,
     ),
+    getVehiclePassengerDisclosureProfile: vi.fn(
+      () => options?.vehicleDisclosureProfile ?? null,
+    ),
+    getDriverPublicRegistrationCredential: vi.fn(
+      () => options?.driverRegistrationCredential ?? null,
+    ),
+    listVehicles: vi.fn(() => [
+      {
+        vehicleId: "veh-demo-001",
+        plateNo: "TAXI-001",
+      },
+    ]),
+    listDrivers: vi.fn(() => [
+      {
+        driverId: "drv-demo-001",
+        name: "Driver One",
+      },
+    ]),
   };
   const auditNotificationService = {
     recordNotification: vi.fn(),
@@ -3966,7 +3986,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ).toThrowError(ApiRequestError);
   });
 
-  it("returns 409 when multi_taxi_direct is used on non-reservation owned orders", () => {
+  it("rejects a public runtime-profile override on owned orders", () => {
     const { service } = createOwnedMobilityService();
 
     expect(() =>
@@ -3994,16 +4014,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         "multi_taxi_direct",
       );
     } catch (error) {
-      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getStatus()).toBe(403);
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
-          code: "RESERVATION_ONLY_PROFILE",
+          code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
         },
       });
     }
   });
 
-  it("returns 409 when multi_taxi_direct booking requests a non-reservation service product", () => {
+  it("rejects a public runtime-profile override on tenant bookings", () => {
     const { service } = createOwnedMobilityService();
 
     expect(() =>
@@ -4041,13 +4061,205 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         "multi_taxi_direct",
       );
     } catch (error) {
-      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getStatus()).toBe(403);
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
-          code: "SERVICE_PRODUCT_NOT_ALLOWED",
+          code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
         },
       });
     }
+  });
+
+  it("creates on-demand and scheduled multi-taxi orders with canonical runtime context", () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const onDemand = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站" },
+        dropoff: { address: "松山機場" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: "pm-token-001",
+      },
+      authorization,
+    );
+    const scheduled = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站" },
+        dropoff: { address: "桃園機場" },
+        passenger: { name: "預約乘客", phone: "0911000000" },
+        requestedPickupAt: "2026-12-01T10:00:00.000Z",
+        timingMode: "scheduled",
+        paymentMethodTokenRef: null,
+      },
+      authorization,
+    );
+
+    expect(onDemand).toMatchObject({
+      runtimeProfileCode: "multi_taxi_direct",
+      serviceProductCode: "taxi_reservation",
+      acquisitionMode: "platform_reserved",
+      timingMode: "on_demand",
+      dispatchSemantics: "realtime",
+      operatingAuthorizationId: "auth-mtx-001",
+      queueMode: "virtual_matching",
+    });
+    expect(scheduled).toMatchObject({
+      timingMode: "scheduled",
+      dispatchSemantics: "reservation",
+      operatingAuthorizationId: "auth-mtx-001",
+    });
+  });
+
+  it("allows only virtual matching for multi-taxi queue entries", () => {
+    const { service } = createOwnedMobilityService();
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const virtualEntry = service.queueCheckInMultiTaxi(
+      {
+        vehicleId: "veh-demo-001",
+        siteId: "virtual-tpe",
+        queueMode: "virtual_matching",
+      },
+      authorization,
+    );
+    expect(virtualEntry).toMatchObject({
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: "virtual_matching",
+      operatingAuthorizationId: "auth-mtx-001",
+    });
+
+    expect(() =>
+      service.queueCheckInMultiTaxi(
+        {
+          vehicleId: "veh-demo-001",
+          siteId: "taxi-stand-tpe",
+          queueMode: "taxi_stand",
+        },
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("builds a P-5 disclosure snapshot as part of multi-taxi assignment", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "TPE",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+      vehicleDisclosureProfile: {
+        vehicleId: "veh-demo-001",
+        make: "Toyota",
+        model: "Sienta",
+        modelYear: 2024,
+        doorCount: 5,
+        color: "Silver",
+        status: "complete",
+        missingFieldCodes: [],
+        version: 2,
+      },
+      driverRegistrationCredential: {
+        driverId: "drv-demo-001",
+        effectiveUntil: "2027-01-01",
+        status: "verified_active",
+        maskedDisplay: "RE***01",
+        version: 3,
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const order = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站", lat: 25.0478, lng: 121.517 },
+        dropoff: { address: "松山機場", lat: 25.0697, lng: 121.5525 },
+        passenger: {
+          passengerId: "passenger-001",
+          name: "測試乘客",
+          phone: "0911222333",
+        },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+      authorization,
+    );
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+    });
+    const snapshot = service.getPassengerAssignmentDisclosure(order.orderId);
+
+    expect(snapshot).toMatchObject({
+      assignmentId: assignment.assignmentId,
+      assignmentVersion: 1,
+      vehicle: { plateNo: "TAXI-001", doorCount: 5 },
+      driver: {
+        registrationMaskedDisplay: "RE***01",
+        registrationStatus: "verified_active",
+      },
+      rating: { displayState: "new_driver" },
+    });
   });
 });
 

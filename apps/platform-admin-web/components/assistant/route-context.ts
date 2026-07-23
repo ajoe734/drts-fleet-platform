@@ -76,6 +76,7 @@ export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
   users: { href: "/users" },
   fleet: { href: "/fleet" },
   "service-products": { href: "/service-products" },
+  "multi-taxi-authorizations": { href: "/multi-taxi-authorizations" },
   "vehicle-eligibility": { href: "/vehicle-eligibility" },
   "fleet-partners": { href: "/fleet-partners" },
   sandbox: { href: "/sandbox" },

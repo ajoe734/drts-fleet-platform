@@ -1,7 +1,10 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import { DatabaseService } from "../../common/db";
-import type { ServiceProductRecord } from "./service-product.types";
+import type {
+  RuntimeProfileServiceProductPolicy,
+  ServiceProductRecord,
+} from "./service-product.types";
 
 type JsonRecordRow = {
   record: unknown;
@@ -9,6 +12,7 @@ type JsonRecordRow = {
 
 type PersistServiceProductChanges = {
   records?: readonly ServiceProductRecord[];
+  runtimePolicies?: readonly RuntimeProfileServiceProductPolicy[];
 };
 
 @Injectable()
@@ -21,22 +25,36 @@ export class ServiceProductRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
-  async loadState(): Promise<{ records: ServiceProductRecord[] }> {
+  async loadState(): Promise<{
+    records: ServiceProductRecord[];
+    runtimePolicies: RuntimeProfileServiceProductPolicy[];
+  }> {
     if (!this.isEnabled()) {
-      return { records: [] };
+      return { records: [], runtimePolicies: [] };
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
-      `
+    const [productResult, policyResult] = await Promise.all([
+      this.databaseService!.query<JsonRecordRow>(`
         SELECT record
         FROM ops.phase1_service_products
         ORDER BY created_at DESC
-      `,
-    );
+      `),
+      this.databaseService!.query<JsonRecordRow>(`
+        SELECT record
+        FROM ops.runtime_profile_service_product_policies
+        ORDER BY runtime_profile_code, service_product_code
+      `),
+    ]);
 
     return {
-      records: result.rows.map((row) =>
+      records: productResult.rows.map((row) =>
         this.normalizeLoadedRecord(row.record, "ops.phase1_service_products"),
+      ),
+      runtimePolicies: policyResult.rows.map((row) =>
+        this.normalizeLoadedPolicy(
+          row.record,
+          "ops.runtime_profile_service_product_policies",
+        ),
       ),
     };
   }
@@ -91,8 +109,40 @@ export class ServiceProductRepository {
         ],
       ),
     );
+    const policyWrites = (changes.runtimePolicies ?? []).map((policy) =>
+      this.databaseService!.query(
+        `
+          INSERT INTO ops.runtime_profile_service_product_policies (
+            runtime_profile_code,
+            service_product_code,
+            active,
+            effective_from,
+            effective_until,
+            created_at,
+            updated_at,
+            record
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+          ON CONFLICT (runtime_profile_code, service_product_code) DO UPDATE SET
+            active = EXCLUDED.active,
+            effective_from = EXCLUDED.effective_from,
+            effective_until = EXCLUDED.effective_until,
+            updated_at = EXCLUDED.updated_at,
+            record = EXCLUDED.record
+        `,
+        [
+          policy.runtimeProfileCode,
+          policy.serviceProductCode,
+          policy.active,
+          policy.effectiveFrom,
+          policy.effectiveUntil,
+          policy.createdAt,
+          policy.updatedAt,
+          JSON.stringify(policy),
+        ],
+      ),
+    );
 
-    await Promise.all(writes);
+    await Promise.all([...writes, ...policyWrites]);
   }
 
   reportPersistenceFailure(error: unknown, context: string) {
@@ -118,5 +168,22 @@ export class ServiceProductRepository {
     }
 
     return candidate as unknown as ServiceProductRecord;
+  }
+
+  private normalizeLoadedPolicy(
+    record: unknown,
+    source: string,
+  ): RuntimeProfileServiceProductPolicy {
+    if (!record || typeof record !== "object") {
+      throw new Error(`Invalid persisted policy loaded from ${source}`);
+    }
+    const candidate = record as Record<string, unknown>;
+    if (
+      typeof candidate.runtimeProfileCode !== "string" ||
+      typeof candidate.serviceProductCode !== "string"
+    ) {
+      throw new Error(`Unknown runtime policy shape loaded from ${source}`);
+    }
+    return candidate as unknown as RuntimeProfileServiceProductPolicy;
   }
 }

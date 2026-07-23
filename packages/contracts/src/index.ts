@@ -2893,11 +2893,13 @@ export interface CancelOwnedOrderCommand {
 export interface QueueCheckInCommand {
   vehicleId: string;
   siteId: string;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
 }
 
 export interface QueueCheckOutCommand {
   vehicleId: string;
   siteId: string;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
 }
 
 export interface DriverAcceptTaskCommand {
@@ -2953,6 +2955,12 @@ export interface OwnedOrderRecord {
   // settlement. Optional for legacy/in-flight orders persisted before this
   // field existed; consumers fall back to deriving it from the bucket/subtype.
   serviceProductCode?: ServiceProductType | null;
+  runtimeProfileCode?: import("./phase1-p5-s3-multi-taxi").RuntimeProfileCode;
+  acquisitionMode?: import("./phase1-p5-s3-multi-taxi").PassengerAcquisitionMode;
+  timingMode?: import("./phase1-p5-s3-multi-taxi").RideTimingMode;
+  operatingAuthorizationId?: string | null;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode | null;
+  paymentMethodTokenRef?: string | null;
   status: OwnedOrderStatus;
   pickup: AddressPayload;
   dropoff: AddressPayload;
@@ -3428,6 +3436,9 @@ export interface QueueEntryRecord {
   queueEntryId: string;
   vehicleId: string;
   siteId: string;
+  runtimeProfileCode?: import("./phase1-p5-s3-multi-taxi").RuntimeProfileCode;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
+  operatingAuthorizationId?: string | null;
   status: QueueEntryStatus;
   position: number;
   checkedInAt: string;

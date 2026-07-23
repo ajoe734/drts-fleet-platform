@@ -1,5 +1,13 @@
+"use client";
+
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import {
+  startTransition,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   getPassengerFixtureSourceLabel,
   getPassengerSourceCallout,
@@ -11,6 +19,12 @@ import {
   resolvePassengerDataMode,
   type PassengerRideFixture,
 } from "@/lib/passenger-fixtures";
+import {
+  fetchPassengerRideAuthority,
+  mapPassengerRideAuthorityToFixture,
+  requestPassengerRideAction,
+  subscribePassengerRideAuthority,
+} from "@/lib/passenger-live";
 
 function readQueryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -963,14 +977,22 @@ function ReceiptCard({ fixture }: { fixture: PassengerRideFixture }) {
   );
 }
 
-function RatingStars() {
+function RatingStars({
+  selectedScore,
+  onSelect,
+}: {
+  selectedScore: number;
+  onSelect: (score: number) => void;
+}) {
   return (
     <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
       {[1, 2, 3, 4, 5].map((value) => (
-        <span
+        <button
           key={value}
-          role="button"
+          type="button"
           aria-label={`${value} 星`}
+          aria-pressed={selectedScore === value}
+          onClick={() => onSelect(value)}
           style={{
             width: 46,
             height: 46,
@@ -980,17 +1002,51 @@ function RatingStars() {
             color: starTone,
             fontSize: 32,
             lineHeight: 1,
+            border: 0,
+            background: "transparent",
+            cursor: "pointer",
+            opacity: value <= selectedScore ? 1 : 0.28,
           }}
         >
           ★
-        </span>
+        </button>
       ))}
     </div>
   );
 }
 
-function RatingCard({ fixture }: { fixture: PassengerRideFixture }) {
+function RatingCard({
+  fixture,
+  token,
+  onSubmit,
+}: {
+  fixture: PassengerRideFixture;
+  token: string;
+  onSubmit?: (score: number) => void;
+}) {
+  const [selectedScore, setSelectedScore] = useState(5);
+  const [submitting, setSubmitting] = useState(false);
   if (!fixture.ratingSummary) return null;
+  const submitRating = () => {
+    if (onSubmit) {
+      onSubmit(selectedScore);
+      return;
+    }
+    if (fixture.canCancel === undefined || submitting) {
+      return;
+    }
+    setSubmitting(true);
+    void requestPassengerRideAction(token, "ratings", {
+      score: selectedScore,
+    })
+      .then(() => window.location.reload())
+      .catch((error: unknown) => {
+        window.alert(
+          error instanceof Error ? error.message : "PASSENGER_ACTION_FAILED",
+        );
+        setSubmitting(false);
+      });
+  };
   return (
     <Card>
       <div style={{ textAlign: "center", padding: "6px 0 2px" }}>
@@ -1002,7 +1058,10 @@ function RatingCard({ fixture }: { fixture: PassengerRideFixture }) {
         </div>
       </div>
       <div style={{ margin: "12px 0 4px" }}>
-        <RatingStars />
+        <RatingStars
+          selectedScore={selectedScore}
+          onSelect={setSelectedScore}
+        />
         <div
           style={{
             textAlign: "center",
@@ -1042,6 +1101,14 @@ function RatingCard({ fixture }: { fixture: PassengerRideFixture }) {
           </span>
         ))}
       </div>
+      <button
+        type="button"
+        style={{ ...buttonStyle("primary"), marginTop: 12 }}
+        onClick={submitRating}
+        disabled={submitting}
+      >
+        {submitting ? "送出中..." : "送出評價"}
+      </button>
     </Card>
   );
 }
@@ -1257,14 +1324,68 @@ function ActionGroup({ children }: { children: ReactNode }) {
 function Actions({
   fixture,
   token,
+  onCancel,
+  onContact,
+  onRefresh,
 }: {
   fixture: PassengerRideFixture;
   token: string;
+  onCancel?: () => void;
+  onContact?: () => void;
+  onRefresh?: () => void;
 }) {
+  const [actionPending, setActionPending] = useState(false);
+  const runLiveAction = (
+    action: "cancel" | "contact",
+    callback: (() => void) | undefined,
+  ) => {
+    if (callback) {
+      callback();
+      return;
+    }
+    if (fixture.canCancel === undefined || actionPending) {
+      return;
+    }
+    if (action === "cancel" && !window.confirm("確定要取消這趟行程嗎？")) {
+      return;
+    }
+    setActionPending(true);
+    void requestPassengerRideAction<{
+      contactUri?: string | null;
+    }>(token, action)
+      .then((result) => {
+        if (action === "contact" && result.contactUri) {
+          window.location.href = result.contactUri;
+          return;
+        }
+        window.location.reload();
+      })
+      .catch((error: unknown) => {
+        window.alert(
+          error instanceof Error ? error.message : "PASSENGER_ACTION_FAILED",
+        );
+        setActionPending(false);
+      });
+  };
+  const cancel = () => runLiveAction("cancel", onCancel);
+  const contact = () => runLiveAction("contact", onContact);
+  const refresh = () => {
+    if (onRefresh) {
+      onRefresh();
+      return;
+    }
+    window.location.reload();
+  };
+
   if (fixture.screenId === "P5-01") {
     return (
       <ActionGroup>
-        <button type="button" style={buttonStyle("secondary", true)}>
+        <button
+          type="button"
+          style={buttonStyle("secondary", true)}
+          onClick={cancel}
+          disabled={fixture.canCancel === false || actionPending}
+        >
           取消行程
         </button>
         <div
@@ -1283,7 +1404,12 @@ function Actions({
   if (fixture.screenId === "P5-04") {
     return (
       <ActionGroup>
-        <button type="button" style={buttonStyle("secondary", true)}>
+        <button
+          type="button"
+          style={buttonStyle("secondary", true)}
+          onClick={cancel}
+          disabled={fixture.canCancel === false || actionPending}
+        >
           取消行程
         </button>
         <div
@@ -1299,15 +1425,7 @@ function Actions({
     );
   }
 
-  if (fixture.screenId === "P5-08") {
-    return (
-      <div style={{ margin: `0 ${shellInset}px 10px` }}>
-        <button type="button" style={buttonStyle("primary")}>
-          送出評價
-        </button>
-      </div>
-    );
-  }
+  if (fixture.screenId === "P5-08") return null;
 
   if (fixture.screenId === "P5-09") {
     return (
@@ -1328,10 +1446,15 @@ function Actions({
   if (fixture.screenId === "P5-10") {
     return (
       <ActionGroup>
-        <button type="button" style={buttonStyle("primary")}>
+        <button type="button" style={buttonStyle("primary")} onClick={refresh}>
           下載 PDF
         </button>
-        <button type="button" style={buttonStyle("secondary")}>
+        <button
+          type="button"
+          style={buttonStyle("secondary")}
+          onClick={contact}
+          disabled={fixture.canContact === false || actionPending}
+        >
           分享
         </button>
         <Link href={`/ride/${token}?screen=P5-09`} style={buttonStyle("ghost")}>
@@ -1357,7 +1480,12 @@ function Actions({
   if (fixture.screenId === "P5-12") {
     return (
       <div style={{ margin: `0 ${shellInset}px 12px` }}>
-        <button type="button" style={buttonStyle("secondary", true)}>
+        <button
+          type="button"
+          style={buttonStyle("secondary", true)}
+          onClick={cancel}
+          disabled={fixture.canCancel === false || actionPending}
+        >
           取消行程
         </button>
       </div>
@@ -1394,10 +1522,20 @@ function Actions({
 
   return (
     <ActionGroup>
-      <button type="button" style={buttonStyle("primary")}>
+      <button
+        type="button"
+        style={buttonStyle("primary")}
+        onClick={contact}
+        disabled={fixture.canContact === false || actionPending}
+      >
         {contactLabel}
       </button>
-      <button type="button" style={buttonStyle("secondary", true)}>
+      <button
+        type="button"
+        style={buttonStyle("secondary", true)}
+        onClick={cancel}
+        disabled={fixture.canCancel === false || actionPending}
+      >
         {fixture.actionLabel || "取消行程"}
       </button>
       {fixture.cancelNote ? (
@@ -1530,12 +1668,7 @@ function RideContent({
   if (fixture.screenId === "P5-08") {
     return (
       <>
-        <RatingCard fixture={fixture} />
-        <div style={{ margin: `0 ${shellInset}px 10px` }}>
-          <button type="button" style={buttonStyle("primary")}>
-            送出評價
-          </button>
-        </div>
+        <RatingCard fixture={fixture} token={token} />
         <Card>
           <div
             style={{
@@ -1624,7 +1757,11 @@ function PassengerScreen({
       <TopChrome
         token={token}
         status={fixture.status}
-        order={fixture.screenId === "A03" ? "公開資訊" : "ZX-240720-0186"}
+        order={
+          fixture.screenId === "A03"
+            ? "公開資訊"
+            : fixture.orderNo || "行程資訊"
+        }
       />
       <div
         style={{
@@ -1654,7 +1791,75 @@ export function PassengerRidePage({
   const sourceMode = resolvePassengerDataMode(
     readQueryValue(searchParams.mode),
   );
-  const fixture = resolvePassengerRideFixture(token, kind, searchParams.screen);
+  const [liveFixture, setLiveFixture] = useState<PassengerRideFixture | null>(
+    null,
+  );
+  const [authorityError, setAuthorityError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (sourceMode !== "live") {
+      return;
+    }
+    let active = true;
+    let unsubscribe: () => void = () => {};
+    void fetchPassengerRideAuthority(token)
+      .then((view) => {
+        if (!active) return;
+        startTransition(() => {
+          setLiveFixture(mapPassengerRideAuthorityToFixture(view, token));
+          setAuthorityError(null);
+        });
+        unsubscribe = subscribePassengerRideAuthority(
+          token,
+          (nextView) => {
+            if (!active) return;
+            startTransition(() => {
+              setLiveFixture(
+                mapPassengerRideAuthorityToFixture(nextView, token),
+              );
+            });
+          },
+          () => undefined,
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setAuthorityError(
+          error instanceof Error
+            ? error.message
+            : "PASSENGER_AUTHORITY_UNAVAILABLE",
+        );
+      });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [sourceMode, token]);
+
+  const fixture =
+    sourceMode === "fixture"
+      ? resolvePassengerRideFixture(token, kind, searchParams.screen)
+      : liveFixture;
+
+  if (!fixture) {
+    return (
+      <Shell token={token} sourceMode={sourceMode}>
+        <div style={{ minHeight: 760, display: "flex" }}>
+          <EmptyState
+            tone={
+              authorityError ? passengerChrome.danger : passengerChrome.info
+            }
+            title={authorityError ? "無法取得行程資料" : "正在載入行程"}
+            detail={
+              authorityError
+                ? `系統未使用展示資料替代。錯誤代碼：${authorityError}`
+                : "正在向派遣權威服務確認最新狀態。"
+            }
+          />
+        </div>
+      </Shell>
+    );
+  }
 
   return (
     <Shell token={token} sourceMode={sourceMode}>
