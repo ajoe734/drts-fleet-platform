@@ -101,6 +101,7 @@ export interface CreateMultiTaxiRideCommand {
   timingMode: RideTimingMode;
   paymentMethodTokenRef: string | null;
   servicePreferences?: Partial<ServicePreferences>;
+  serviceAreaCode?: string;
 }
 
 export interface CreateCallCenterMultiTaxiRideCommand extends CreateMultiTaxiRideCommand {

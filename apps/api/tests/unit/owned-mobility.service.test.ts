@@ -104,6 +104,9 @@ function createOwnedMobilityService(options?: {
     getDriverPublicRegistrationCredential: vi.fn(
       () => options?.driverRegistrationCredential ?? null,
     ),
+    validateMultiTaxiOperatingAuthorizationForAssignment: vi.fn(
+      () => ({ status: "approved" }),
+    ),
     listVehicles: vi.fn(() => [
       {
         vehicleId: "veh-demo-001",

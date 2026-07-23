@@ -189,7 +189,7 @@ export class MultiTaxiController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.createAuthorization(command),
+      this.multiTaxiService.createAuthorization(command, requestId),
       requestId,
     );
   }
@@ -202,7 +202,11 @@ export class MultiTaxiController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.updateAuthorization(authorizationId, command),
+      this.multiTaxiService.updateAuthorization(
+        authorizationId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -214,7 +218,7 @@ export class MultiTaxiController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.activateAuthorization(authorizationId),
+      this.multiTaxiService.activateAuthorization(authorizationId, requestId),
       requestId,
     );
   }
@@ -226,7 +230,7 @@ export class MultiTaxiController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.suspendAuthorization(authorizationId),
+      this.multiTaxiService.suspendAuthorization(authorizationId, requestId),
       requestId,
     );
   }
@@ -258,7 +262,11 @@ export class MultiTaxiController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.addAuthorizedVehicle(authorizationId, command),
+      this.multiTaxiService.addAuthorizedVehicle(
+        authorizationId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -276,6 +284,7 @@ export class MultiTaxiController {
       this.multiTaxiService.removeAuthorizedVehicle(
         authorizationId,
         vehicleId,
+        requestId,
       ),
       requestId,
     );

@@ -29,12 +29,12 @@
 
 | Acceptance Criteria | Current Status | Findings & Delta |
 | --- | --- | --- |
-| `approved+effective+authorized vehicle passes` | **Partial** | Basic active window and vehicle check present in `MultiTaxiService`; needs canonical registry integration and explicit pass verification tests. |
-| `draft/suspended/expired/revoked denied` | **Partial** | State checks present in `activateAuthorization`/`suspendAuthorization`/`resolveActiveAuthorization`; needs explicit `P5_OPERATING_AUTHORIZATION_INACTIVE` hard reason gate for assignment. |
-| `missing membership denied` | **Partial** | `assertAuthorizedVehicle` checks status and window; needs explicit `P5_VEHICLE_NOT_IN_AUTHORIZATION` hard reason gate for assignment. |
-| `wrong service area denied` | **Missing** | Needs `P5_AUTHORIZATION_SERVICE_AREA_MISMATCH` check during ride creation/assignment. |
-| `inactive fare version denied` | **Missing** | Needs `P5_FARE_VERSION_NOT_ACTIVE` check during ride creation/assignment. |
-| `all writes audited` | **Missing** | Audit log recording via `AuditNotificationService` must be wired into all authorization and vehicle membership write operations (`create`, `update`, `activate`, `suspend`, `addAuthorizedVehicle`, `removeAuthorizedVehicle`). |
+| `approved+effective+authorized vehicle passes` | **Verified** | Verified in `MultiTaxiService` and `RegulatoryRegistryService`. Tests pass in `multi-taxi-operating-authorization.test.ts`. |
+| `draft/suspended/expired/revoked denied` | **Verified** | Draft/suspended/expired/revoked operating authorizations denied with `P5_OPERATING_AUTHORIZATION_INACTIVE`. |
+| `missing membership denied` | **Verified** | Missing vehicle membership denied with `P5_VEHICLE_NOT_IN_AUTHORIZATION`. |
+| `wrong service area denied` | **Verified** | Mismatched service area codes denied with `P5_AUTHORIZATION_SERVICE_AREA_MISMATCH` during ride creation and assignment. |
+| `inactive fare version denied` | **Verified** | Inactive activeFareVersionId denied with `P5_FARE_VERSION_NOT_ACTIVE` during ride creation and assignment. |
+| `all writes audited` | **Verified** | Audit log recording via `AuditNotificationService` wired into all 6 write operations (`create`, `update`, `activate`, `suspend`, `addAuthorizedVehicle`, `removeAuthorizedVehicle`) with `requestId`. |
 
 ---
 

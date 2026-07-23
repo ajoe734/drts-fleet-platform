@@ -88,7 +88,10 @@ export class MultiTaxiService implements OnModuleInit {
     return this.cloneAuthorization(this.requireAuthorization(authorizationId));
   }
 
-  createAuthorization(command: CreateMultiTaxiOperatingAuthorizationCommand) {
+  createAuthorization(
+    command: CreateMultiTaxiOperatingAuthorizationCommand,
+    requestId?: string,
+  ) {
     const now = new Date().toISOString();
     const effectiveFrom = this.requireIso(
       command.effectiveFrom,
@@ -129,6 +132,8 @@ export class MultiTaxiService implements OnModuleInit {
       "multi_taxi_operating_authorization",
       authorization.authorizationId,
       authorization as unknown as Record<string, unknown>,
+      null,
+      requestId,
     );
     return this.cloneAuthorization(authorization);
   }
@@ -136,6 +141,7 @@ export class MultiTaxiService implements OnModuleInit {
   updateAuthorization(
     authorizationId: string,
     command: UpdateMultiTaxiOperatingAuthorizationCommand,
+    requestId?: string,
   ) {
     const authorization = this.requireAuthorization(authorizationId);
     if (authorization.status !== "draft") {
@@ -183,11 +189,12 @@ export class MultiTaxiService implements OnModuleInit {
       authorization.authorizationId,
       this.cloneAuthorization(authorization) as unknown as Record<string, unknown>,
       previous as unknown as Record<string, unknown>,
+      requestId,
     );
     return this.cloneAuthorization(authorization);
   }
 
-  activateAuthorization(authorizationId: string) {
+  activateAuthorization(authorizationId: string, requestId?: string) {
     const authorization = this.requireAuthorization(authorizationId);
     if (!["draft", "suspended"].includes(authorization.status)) {
       throw new ApiRequestError(
@@ -207,11 +214,12 @@ export class MultiTaxiService implements OnModuleInit {
       authorization.authorizationId,
       { status: authorization.status, updatedAt: authorization.updatedAt },
       { status: previousStatus },
+      requestId,
     );
     return this.cloneAuthorization(authorization);
   }
 
-  suspendAuthorization(authorizationId: string) {
+  suspendAuthorization(authorizationId: string, requestId?: string) {
     const authorization = this.requireAuthorization(authorizationId);
     if (authorization.status !== "approved") {
       throw new ApiRequestError(
@@ -230,6 +238,7 @@ export class MultiTaxiService implements OnModuleInit {
       authorization.authorizationId,
       { status: authorization.status, updatedAt: authorization.updatedAt },
       { status: previousStatus },
+      requestId,
     );
     return this.cloneAuthorization(authorization);
   }
@@ -244,6 +253,7 @@ export class MultiTaxiService implements OnModuleInit {
   addAuthorizedVehicle(
     authorizationId: string,
     command: AddMultiTaxiAuthorizedVehicleCommand,
+    requestId?: string,
   ) {
     this.requireAuthorization(authorizationId);
     const effectiveFrom = this.requireIso(
@@ -283,11 +293,16 @@ export class MultiTaxiService implements OnModuleInit {
       vehicle.authorizationVehicleId,
       { ...vehicle } as unknown as Record<string, unknown>,
       previous ? ({ ...previous } as unknown as Record<string, unknown>) : null,
+      requestId,
     );
     return { ...vehicle };
   }
 
-  removeAuthorizedVehicle(authorizationId: string, vehicleId: string) {
+  removeAuthorizedVehicle(
+    authorizationId: string,
+    vehicleId: string,
+    requestId?: string,
+  ) {
     this.requireAuthorization(authorizationId);
     const existing = this.vehicles.find(
       (vehicle) =>
@@ -312,6 +327,7 @@ export class MultiTaxiService implements OnModuleInit {
       existing.authorizationVehicleId,
       { status: existing.status, effectiveUntil: existing.effectiveUntil },
       previous as unknown as Record<string, unknown>,
+      requestId,
     );
     return { ...existing };
   }
@@ -322,7 +338,7 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ) {
     this.assertServiceProductPolicy();
-    const authorization = this.resolveActiveAuthorization();
+    const authorization = this.resolveActiveAuthorization(command.serviceAreaCode);
     const order = this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
@@ -337,7 +353,7 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ) {
     this.assertServiceProductPolicy();
-    const authorization = this.resolveActiveAuthorization();
+    const authorization = this.resolveActiveAuthorization(command.serviceAreaCode);
     const order = this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
@@ -575,7 +591,8 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
   queueCheckIn(command: QueueCheckInCommand, requestId?: string) {
-    const authorization = this.resolveActiveAuthorization();
+    const serviceAreaCode = (command as { serviceAreaCode?: string }).serviceAreaCode ?? null;
+    const authorization = this.resolveActiveAuthorization(serviceAreaCode);
     this.assertAuthorizedVehicle(
       authorization.authorizationId,
       command.vehicleId,
@@ -591,7 +608,8 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
   queueCheckOut(command: QueueCheckOutCommand, requestId?: string) {
-    const authorization = this.resolveActiveAuthorization();
+    const serviceAreaCode = (command as { serviceAreaCode?: string }).serviceAreaCode ?? null;
+    const authorization = this.resolveActiveAuthorization(serviceAreaCode);
     this.assertAuthorizedVehicle(
       authorization.authorizationId,
       command.vehicleId,
