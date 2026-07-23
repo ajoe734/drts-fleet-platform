@@ -104,6 +104,7 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
       "force_checkin",
       "force_checkin_rank",
       "force_check_in",
+      "jump_approval_request",
     ];
 
     for (const action of forbiddenActions) {
