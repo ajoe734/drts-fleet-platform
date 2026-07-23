@@ -69,6 +69,18 @@
       "role": "execution register",
       "reviewedCommit": "bf3990d9c",
       "status": "current"
+    },
+    {
+      "path": "07_fleets_execution_tasks_20260723.md",
+      "role": "Fleets execution packet",
+      "reviewedCommit": "b8f1f56b20a77c8abeabf0ac3c51b8443d5616af",
+      "status": "current"
+    },
+    {
+      "path": "08_multi_taxi_operations_ui_design_requirements_20260723.md",
+      "role": "operations UI design requirements",
+      "reviewedCommit": "b8f1f56b20a77c8abeabf0ac3c51b8443d5616af",
+      "status": "ready_for_design"
     }
   ],
   "deliverables": [
@@ -78,6 +90,8 @@
     "04_standard_taxi_vs_multi_taxi_dispatch_compliance_review_20260721.md",
     "05_external_review_reconciliation_20260722.md",
     "06_multi_taxi_runtime_execution_register_20260723.md",
+    "07_fleets_execution_tasks_20260723.md",
+    "08_multi_taxi_operations_ui_design_requirements_20260723.md",
     "manifest.json"
   ],
   "mergedMigrations": [
@@ -103,6 +117,20 @@
     "publicHeaderIsNotRuntimeAuthority": true,
     "assignmentSnapshotMustBeAtomic": true,
     "productionPassengerFixtureForbidden": true
+  },
+  "designStatus": {
+    "systemUiBriefApproved": true,
+    "canonicalCanvasAvailable": true,
+    "designReadyForImplementation": false,
+    "remainingGates": [
+      "multi_taxi_operating_authorization_console",
+      "queue_semantics_operations",
+      "rating_governance",
+      "fare_payment_receipt_retention_operations",
+      "figma_accessibility_screenshot_design_qa_handoff"
+    ],
+    "executionPacket": "07_fleets_execution_tasks_20260723.md",
+    "requirementsDocument": "08_multi_taxi_operations_ui_design_requirements_20260723.md"
   },
   "implementationStatus": {
     "landed": [

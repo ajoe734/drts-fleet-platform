@@ -60,13 +60,15 @@ external platform badge
 
 ### 3. Current implementation and design decisions
 
-| File | Role |
-|---|---|
-| `03_gap_closure_implementation_plan.md` | Current `dev` gap closure、dependency、release gates |
-| `04_standard_taxi_vs_multi_taxi_dispatch_compliance_review_20260721.md` | 一般／多元雙軌法規行為與系統架構決策 |
-| `05_external_review_reconciliation_20260722.md` | 外部審查採納／修正／branch-state verification |
-| `06_multi_taxi_runtime_execution_register_20260723.md` | 可派工 task register |
-| `manifest.json` | Machine-readable index / baseline / implementation status |
+| File                                                                    | Role                                                                    |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `03_gap_closure_implementation_plan.md`                                 | Current `dev` gap closure、dependency、release gates                    |
+| `04_standard_taxi_vs_multi_taxi_dispatch_compliance_review_20260721.md` | 一般／多元雙軌法規行為與系統架構決策                                    |
+| `05_external_review_reconciliation_20260722.md`                         | 外部審查採納／修正／branch-state verification                           |
+| `06_multi_taxi_runtime_execution_register_20260723.md`                  | 可派工 task register                                                    |
+| `07_fleets_execution_tasks_20260723.md`                                 | Fleets design gates、execution packets、dependency 與 evidence contract |
+| `08_multi_taxi_operations_ui_design_requirements_20260723.md`           | 操作 UI screen、state、RBAC、copy、prototype 與 Design DoD requirements |
+| `manifest.json`                                                         | Machine-readable index / baseline / implementation status               |
 
 ---
 
