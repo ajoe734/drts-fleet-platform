@@ -5587,10 +5587,12 @@ export class OwnedMobilityService implements OnModuleInit {
         consumerNotificationOutbox: null,
       };
     }
+    const serviceAreaCode =
+      this.resolveCanonicalServiceAreaCodeForOrder(order);
     this.regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment(
       order.operatingAuthorizationId,
       vehicleId,
-      order.pickup?.serviceAreaId || order.pickup?.address,
+      serviceAreaCode,
       order.quotedFareRuleVersion,
     );
     if (
@@ -6964,6 +6966,25 @@ export class OwnedMobilityService implements OnModuleInit {
         ? this.cloneServiceAreaEvaluation(snapshot.serviceAreaEvaluation)
         : null,
     };
+  }
+
+  private resolveCanonicalServiceAreaCodeForOrder(
+    order: OwnedOrderRecord,
+  ): string | null {
+    if (
+      order.spatialAudit?.serviceAreaCodes &&
+      order.spatialAudit.serviceAreaCodes.length > 0
+    ) {
+      return order.spatialAudit.serviceAreaCodes[0];
+    }
+    const resolution = this.resolveServiceAreaGate(order);
+    if (
+      resolution?.evaluation?.serviceAreaCodes &&
+      resolution.evaluation.serviceAreaCodes.length > 0
+    ) {
+      return resolution.evaluation.serviceAreaCodes[0];
+    }
+    return null;
   }
 
   private buildSpatialAuditSnapshot(

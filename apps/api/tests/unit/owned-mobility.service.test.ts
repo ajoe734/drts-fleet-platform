@@ -4390,6 +4390,106 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       rating: { displayState: "new_driver" },
     });
   });
+
+  it("passes canonical service area code or null instead of address fallback to validateMultiTaxiOperatingAuthorizationForAssignment (MTX-AUTH-001 regression)", () => {
+    const mockServiceAreaService = {
+      evaluate: vi.fn(() => ({
+        decision: "serviceable",
+        serviceProductType: "taxi_realtime",
+        evaluatedAt: new Date().toISOString(),
+        stops: [],
+        serviceAreaCodes: ["TAIPEI-MAIN"],
+        geometryVersionRefs: [],
+        reasonCodes: [],
+        reasonMessages: [],
+      })),
+    };
+
+    const { service, regulatoryRegistryService } = createOwnedMobilityService({
+      serviceAreaService: mockServiceAreaService as never,
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "TPE",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+      vehicleDisclosureProfile: {
+        vehicleId: "veh-demo-001",
+        make: "Toyota",
+        model: "Sienta",
+        modelYear: 2024,
+        doorCount: 5,
+        color: "Silver",
+        status: "complete",
+        missingFieldCodes: [],
+        version: 2,
+      },
+      driverRegistrationCredential: {
+        driverId: "drv-demo-001",
+        effectiveUntil: "2027-01-01",
+        status: "verified_active",
+        maskedDisplay: "RE***01",
+        version: 3,
+      },
+    });
+
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TAIPEI-MAIN"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const order = service.createMultiTaxiRide(
+      {
+        pickup: { address: "123 Street Address No Area Code", lat: 25.0375, lng: 121.5637 },
+        dropoff: { address: "456 Destination Address", lat: 25.041, lng: 121.55 },
+        passenger: {
+          passengerId: "passenger-001",
+          name: "Regression Test Passenger",
+          phone: "0911222333",
+        },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+      authorization,
+    );
+
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+    service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+    });
+
+    expect(
+      regulatoryRegistryService.validateMultiTaxiOperatingAuthorizationForAssignment,
+    ).toHaveBeenCalledWith(
+      "auth-mtx-001",
+      "veh-demo-001",
+      "TAIPEI-MAIN",
+      order.quotedFareRuleVersion,
+    );
+  });
 });
 
 describe("Queue-entry policy and dispatch semantics contracts", () => {
