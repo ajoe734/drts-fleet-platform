@@ -460,83 +460,6 @@ function defaultRefresh(generatedAt: string): UiRefreshMetadata {
   };
 }
 
-const DEMO_FALLBACK_ORDERS: OwnedOrderRecord[] = [
-  {
-    orderId: "ORD-MTX-VIRTUAL-01",
-    orderNo: "MTX-VIRT-001",
-    tenantId: "tenant-alpha",
-    partnerId: "partner-alpha",
-    orderSource: "platform_reserved",
-    runtimeProfileCode: "multi_taxi_direct",
-    acquisitionMode: "platform_reserved",
-    queueMode: "virtual_matching",
-    siteId: null,
-    status: "queued",
-    dispatchAttemptCount: 1,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    pickup: { address: "Taipei Main Station", lat: 25.0478, lng: 121.517 },
-    dropoff: { address: "Taipei 101", lat: 25.0339, lng: 121.5645 },
-    passengerCount: 1,
-    fareEstimatedNtd: 350,
-    fareFinalNtd: 350,
-    approvalRequestIds: [],
-    availableActions: ["cancel_order"],
-    complianceFlags: [],
-  },
-  {
-    orderId: "ORD-MTX-REFUSAL-02",
-    orderNo: "MTX-REF-002",
-    tenantId: "tenant-alpha",
-    partnerId: "partner-alpha",
-    orderSource: "platform_reserved",
-    runtimeProfileCode: "multi_taxi_direct",
-    acquisitionMode: "platform_reserved",
-    queueMode: "physical_rank",
-    siteId: "SITE-TAIPEI-RANK-1",
-    lastDispatchFailureReason: "QUEUE_MODE_NOT_ALLOWED",
-    status: "queued",
-    dispatchAttemptCount: 2,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    pickup: { address: "Songshan Airport Rank", lat: 25.0697, lng: 121.5524 },
-    dropoff: { address: "Neihu Tech Park", lat: 25.0797, lng: 121.5724 },
-    passengerCount: 1,
-    fareEstimatedNtd: 280,
-    fareFinalNtd: 280,
-    approvalRequestIds: [],
-    availableActions: ["cancel_order"],
-    complianceFlags: [],
-  },
-  {
-    orderId: "ORD-TAXI-BLANKSITE-03",
-    orderNo: "TAXI-RANK-003",
-    tenantId: "tenant-beta",
-    partnerId: "partner-beta",
-    orderSource: "street_hail",
-    runtimeProfileCode: "ordinary_taxi",
-    acquisitionMode: "physical_rank",
-    queueMode: "physical_rank",
-    siteId: null,
-    status: "queued",
-    dispatchAttemptCount: 1,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    pickup: { address: "Banqiao Station Rank", lat: 24.9897, lng: 121.4624 },
-    dropoff: {
-      address: "Tucheng Industrial Park",
-      lat: 24.9697,
-      lng: 121.4424,
-    },
-    passengerCount: 1,
-    fareEstimatedNtd: 200,
-    fareFinalNtd: 200,
-    approvalRequestIds: [],
-    availableActions: ["cancel_order"],
-    complianceFlags: [],
-  },
-];
-
 async function loadListRuntime<T>(
   client: Awaited<ReturnType<typeof getServerOpsClient>>,
   path: string,
@@ -563,13 +486,6 @@ async function loadListRuntime<T>(
       failed: false,
     };
   } catch (error) {
-    if (path.endsWith("/orders") || path.includes("/orders?")) {
-      return {
-        items: DEMO_FALLBACK_ORDERS as unknown as T[],
-        refresh: defaultRefresh(generatedAt),
-        failed: false,
-      };
-    }
     const status = parseApiErrorStatus(error);
     return {
       items: [],

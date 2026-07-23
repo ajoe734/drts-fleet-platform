@@ -21,6 +21,10 @@ Reviewer: Codex
 
 - Realm Colors: Ops shell + Coral realm tokens from `@drts/ui-web/canvas-tokens` (`CANVAS_REALM_LIGHT.ops` / `CANVAS_REALM_DARK.ops` / `CANVAS_SURFACE_ACCENTS.ops`).
 
+## Production Fallback Masking Removal (Reviewer Remediation)
+- Removed `DEMO_FALLBACK_ORDERS` masking in `apps/ops-console-web/app/dispatch/page.tsx:loadListRuntime`.
+- Runtime fetch failures now accurately present degraded/error state (`failed: true` with error envelope) rather than fabricating demo order items.
+
 ## Test Commands Executed & Verified
 
 ```bash
@@ -31,5 +35,5 @@ pnpm --filter ops-console-web lint
 # Result: ESLint passed cleanly with 0 warnings
 
 npx playwright test -c playwright.ops-queue-semantics.config.ts
-# Result: 3/3 E2E tests passed green (35.6s)
+# Result: 3/3 E2E tests passed green (38.8s)
 ```
