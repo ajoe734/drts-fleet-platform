@@ -1,24 +1,30 @@
 import { expect, test } from "@playwright/test";
 
-const baseUrl =
-  process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
-  process.env.OPS_CONSOLE_BASE_URL ??
-  "http://127.0.0.1:3003";
+function getTargetBaseUrl(baseURL?: string): string {
+  return (
+    baseURL ??
+    process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
+    process.env.OPS_CONSOLE_BASE_URL ??
+    "http://127.0.0.1:3003"
+  );
+}
 
 test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
   test("renders queue mode as explicit text and handles site blank without masquerading in zh", async ({
     page,
     context,
+    baseURL,
   }) => {
+    const targetUrl = getTargetBaseUrl(baseURL);
     await context.addCookies([
       {
         name: "drts-locale-v2",
         value: "zh",
-        url: baseUrl,
+        url: targetUrl,
       },
     ]);
 
-    await page.goto(`${baseUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
+    await page.goto(`${targetUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -34,16 +40,18 @@ test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
   test("renders queue mode text and handles site blank in en locale", async ({
     page,
     context,
+    baseURL,
   }) => {
+    const targetUrl = getTargetBaseUrl(baseURL);
     await context.addCookies([
       {
         name: "drts-locale-v2",
         value: "en",
-        url: baseUrl,
+        url: targetUrl,
       },
     ]);
 
-    await page.goto(`${baseUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
+    await page.goto(`${targetUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -59,17 +67,19 @@ test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
   test("renders detail page queue semantics and statutory refusal state controls correctly in zh and en", async ({
     page,
     context,
+    baseURL,
   }) => {
+    const targetUrl = getTargetBaseUrl(baseURL);
     // 1. Check Chinese detail page
     await context.addCookies([
       {
         name: "drts-locale-v2",
         value: "zh",
-        url: baseUrl,
+        url: targetUrl,
       },
     ]);
 
-    await page.goto(`${baseUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
+    await page.goto(`${targetUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -90,11 +100,11 @@ test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
       {
         name: "drts-locale-v2",
         value: "en",
-        url: baseUrl,
+        url: targetUrl,
       },
     ]);
 
-    await page.goto(`${baseUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
+    await page.goto(`${targetUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -115,16 +125,18 @@ test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
   test("prevents override/approval links for statutory refusal orders on governance board", async ({
     page,
     context,
+    baseURL,
   }) => {
+    const targetUrl = getTargetBaseUrl(baseURL);
     await context.addCookies([
       {
         name: "drts-locale-v2",
         value: "zh",
-        url: baseUrl,
+        url: targetUrl,
       },
     ]);
 
-    await page.goto(`${baseUrl}/dispatch?board=governance`, {
+    await page.goto(`${targetUrl}/dispatch?board=governance`, {
       waitUntil: "domcontentloaded",
     });
 
