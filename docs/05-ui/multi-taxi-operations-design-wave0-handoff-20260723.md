@@ -136,8 +136,8 @@ All UI screens enforce zero-variance bilingual text strings aligned with Highway
    - **Warning & Fail-Closed Alerts:** Coral `#DC2626` / `#FCA5A5`.
 2. **Contrast & Text Sizes:** All body and header text exceeds WCAG 2.1 AA 4.5:1 contrast ratio.
 3. **Keyboard & Screen Reader Support:**
-   - Interactive modals (`AccessibleDialog`, `OPS_MTX_LegalDenialState`, `PA_MTX_AuthDraftEditor`) implement explicit focus traps, `role="dialog"`, `aria-modal="true"`, and `Escape` key listeners.
-   - Non-bypassable legal denial modals disable backdrop dismissal and trap focus until explicit user acknowledgment.
+   - Interactive modals (`AccessibleDialog`, `OPS_MTX_LegalDenialState`, `PA_MTX_AuthDraftEditor`) implement explicit Tab/Shift-Tab focus traps, initial focus placement, `role="dialog"`, `aria-modal="true"`, and `Escape` key handlers.
+   - Non-bypassable legal denial modals (`preventBypass={true}`) explicitly disable backdrop click dismissal and `Escape` key closing, trapping keyboard focus until explicit user acknowledgment (`onAcknowledge` button) to guarantee Highway Law §91 compliance.
 
 ---
 
@@ -145,16 +145,25 @@ All UI screens enforce zero-variance bilingual text strings aligned with Highway
 
 | Screen ID | Target Component | Source Status | Component Props | Key UI Field to API Schema Binding | Focus & Keyboard Traps |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **MTX-AUTH-UI-01** | `PA_MTX_AuthRegistry` | `live-contract` | `theme`, `isNarrow`, `loading` | Table rows -> `GET /api/v1/mtx/authorizations` | Table row `tabIndex=0`, enter key opens detail |
-| **MTX-AUTH-UI-02** | `PA_MTX_AuthDetail` | `live-contract` | `theme`, `authId` | Summary -> `GET /api/v1/mtx/authorizations/{id}` | Accordion key handlers |
-| **MTX-AUTH-UI-03** | `PA_MTX_AuthDraftEditor` | `command-pending` | `theme`, `onClose`, `onSave` | Form -> `POST /api/v1/mtx/authorizations/draft` | Dialog focus trap, ESC closes |
-| **MTX-QUEUE-UI-01** | `OPS_MTX_QueueOverview` | `live-contract` | `theme`, `isNarrow` | Queue -> `GET /api/v1/mtx/queue/entries` | Filter dropdown keyboard nav |
-| **MTX-QUEUE-UI-03** | `OPS_MTX_LegalDenialState` | `live-contract` | `theme`, `onAcknowledge` | Warning -> `Highway Law §91 Compliance Gate` | Non-bypassable focus lock, space/enter acknowledges |
-| **P5-RATE-UI-01** | `PA_P5_RatingQueue` | `live-contract` | `theme`, `isNarrow` | Moderation -> `GET /api/v1/p5/ratings/moderation-queue` | Queue action buttons focus ring |
-| **P5-COM-UI-01** | `PA_P5_FareAnomalyQueue` | `live-contract` | `theme`, `isNarrow` | Anomaly -> `GET /api/v1/p5/fare/anomalies` | Fail-closed alert banner focus |
-| **P5-COM-UI-05** | `PA_P5_ExportRetention` | `live-contract` | `theme`, `isNarrow` | Export/Hold -> `POST /api/v1/p5/records/export` & `Legal Hold API` | Form input focus ring |
-| **P5-DISCLOSURE** | `P5_DispatchDisclosure` | `live-contract` | `theme` | Disclosure -> `GET /api/v1/p5/dispatch/disclosure` | Screen reader aria-live announcements |
-| **S3-SOS** | `S3_SOSFullscreen` / `S3O_Alert` | `live-contract` | `theme`, `locState` | Emergency -> `POST /api/v1/s3/sos/trigger` | 2s press-and-hold button aria-label, ESC disabled |
+| **MTX-AUTH-UI-01** | `PA_MTX_AuthRegistry` | `live-contract` | `theme`, `isNarrow`, `loading` | Table rows -> `GET /api/v1/mtx/authorizations` | Table row keyboard nav (`tabIndex=0`, enter/space opens detail), filter inputs focus |
+| **MTX-AUTH-UI-02** | `PA_MTX_AuthDetail` | `live-contract` | `theme`, `authId`, `isNarrow` | Summary -> `GET /api/v1/mtx/authorizations/{id}` | Monospace ID copy control, accordion/tab keyboard focus |
+| **MTX-AUTH-UI-03** | `PA_MTX_AuthDraftEditor` | `command-pending` | `theme`, `onClose`, `onSave`, `isNarrow` | Form -> `POST /api/v1/mtx/authorizations/draft` | Dialog focus trap, ESC closes modal, form error summary focus |
+| **MTX-AUTH-UI-04** | `PA_MTX_AuthLifecycleConfirm` | `command-pending` | `theme`, `authId`, `actionType`, `onConfirm`, `onCancel`, `isNarrow` | Confirmation -> `POST /api/v1/mtx/authorizations/{id}/activate` | Focus trap on primary confirm button, statutory notice checklist |
+| **MTX-AUTH-UI-05** | `PA_MTX_AuthVehicles` | `live-contract` | `theme`, `authId`, `isNarrow` | Vehicles -> `GET /api/v1/mtx/authorizations/{id}/vehicles` | Plate filter input focus ring, remove action confirmation modal |
+| **MTX-AUTH-UI-06** | `PA_MTX_AuthConflictState` | `live-contract` | `theme`, `errorType`, `isNarrow` | Error -> `403 Forbidden / 409 Version Conflict` | `role="alert"` `aria-live="assertive"`, reload data button focus |
+| **MTX-QUEUE-UI-01** | `OPS_MTX_QueueOverview` | `live-contract` | `theme`, `isNarrow` | Queue -> `GET /api/v1/mtx/queue/entries` | Filter dropdown keyboard nav, row click opens detail / denial modal |
+| **MTX-QUEUE-UI-02** | `OPS_MTX_QueueEntryDetail` | `live-contract` | `theme`, `entryId`, `isNarrow` | Entry -> `GET /api/v1/mtx/queue/entries/{id}` | Status pill aria-label, detail card keyboard navigation |
+| **MTX-QUEUE-UI-03** | `OPS_MTX_LegalDenialState` | `live-contract` | `theme`, `deniedEntry`, `onAcknowledge`, `isNarrow` | Warning -> `Highway Law §91 Compliance Gate` | Non-bypassable focus lock, ESC/backdrop disabled (`preventBypass`), space/enter acknowledges |
+| **P5-RATE-UI-01** | `PA_P5_RatingQueue` | `live-contract` | `theme`, `isNarrow` | Moderation -> `GET /api/v1/p5/ratings/moderation-queue` | Queue action buttons focus ring, star rating aria-label |
+| **P5-RATE-UI-02** | `PA_P5_RatingDetail` | `live-contract` | `theme`, `ratingId`, `onInvalidate`, `onMaintain`, `isNarrow` | Sections 1-7 -> `GET & POST /api/v1/p5/ratings/{id}/invalidate` | Focus trap on confirmation modal, reason select dropdown, aggregate rebuild notice |
+| **P5-RATE-UI-03** | `PA_P5_DriverRatingAuthority` | `live-contract` | `theme`, `driverId`, `isNarrow` | Authority -> `GET /api/v1/p5/ratings/drivers/{id}/authority` | Displays `rated`, `new_driver`, `unavailable` states (no fake numbers) |
+| **P5-COM-UI-01** | `PA_P5_FareAnomalyQueue` | `live-contract` | `theme`, `isNarrow` | Anomaly -> `GET /api/v1/p5/fare/anomalies` | Fail-closed alert banner `aria-live="assertive"`, triage button focus |
+| **P5-COM-UI-02** | `PA_P5_PaymentExceptionDetail` | `live-contract` | `theme`, `paymentId`, `isNarrow` | Exception -> `GET /api/v1/p5/payments/{id}` | Card decline alert focus, manual recovery trigger |
+| **P5-COM-UI-03** | `PA_P5_CertificateSupport` | `live-contract` | `theme`, `isNarrow` | Certificate -> `GET /api/v1/p5/certificates/{orderId}` | Search input keyboard trigger, download button focus |
+| **P5-COM-UI-04** | `PA_P5_RecordsQuery` | `live-contract` | `theme`, `isNarrow` | Retention -> `GET /api/v1/p5/records/query` | Date range selector, export modal trigger focus trap |
+| **P5-COM-UI-05** | `PA_P5_ExportRetention` | `live-contract` | `theme`, `isNarrow` | Export/Hold -> `POST /api/v1/p5/records/export` & `Legal Hold API` | Audit reason input focus ring, legal hold warning banner |
+| **P5-DISCLOSURE** | `P5_DispatchDisclosure` | `live-contract` | `theme`, `disclosureData` | Disclosure -> `GET /api/v1/p5/dispatch/disclosure` | Screen reader `aria-live` announcements, fail-closed card |
+| **S3-SOS** | `S3_SOSFullscreen` | `live-contract` | `theme`, `locState`, `onCancel`, `onTrigger` | Emergency -> `POST /api/v1/s3/sos/trigger` | 2s press-and-hold button `aria-label`, ESC disabled during active SOS |
 
 ---
 

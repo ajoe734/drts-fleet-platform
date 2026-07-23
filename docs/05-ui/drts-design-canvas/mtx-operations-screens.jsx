@@ -48,26 +48,80 @@ const FX_P5_PAYMENT_EXCEPTIONS = [
 // Accessibility & Layout Primitives (ARIA, Dialog, Skeleton, Narrow Viewport)
 // -----------------------------------------------------------------------------
 
-function AccessibleDialog({ title, onClose, children, theme: th, maxWidth = 560 }) {
+function AccessibleDialog({ title, onClose, children, theme: th, maxWidth = 560, preventBypass = false }) {
+  const dialogRef = React.useRef(null);
+
   React.useEffect(() => {
-    const handleKeyDown = (e) => { if (e.key === 'Escape' && onClose) onClose(); };
+    if (dialogRef.current) {
+      const focusable = dialogRef.current.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length > 0) {
+        focusable[0].focus();
+      } else {
+        dialogRef.current.focus();
+      }
+    }
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (!preventBypass && onClose) {
+          onClose();
+        } else {
+          e.preventDefault();
+        }
+      }
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusable = Array.from(
+          dialogRef.current.querySelectorAll(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          )
+        );
+        if (focusable.length > 0) {
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, preventBypass]);
+
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget) {
+      if (!preventBypass && onClose) {
+        onClose();
+      }
+    }
+  };
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="dialog-title"
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
+      tabIndex={-1}
+      ref={dialogRef}
+      onClick={handleBackdropClick}
       style={{
-        position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.55)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
       }}>
       <div style={{
-        background: th.surface, border: '1px solid ' + th.border, borderRadius: 12,
+        background: th.surface, border: `1px solid ${preventBypass ? th.danger : th.border}`, borderRadius: 12,
         padding: 24, width: '100%', maxWidth, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h3 id="dialog-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: th.text }}>{title}</h3>
-          {onClose && <Btn theme={th} size="xs" variant="ghost" onClick={onClose}>✕</Btn>}
+          {onClose && !preventBypass && <Btn theme={th} size="xs" variant="ghost" onClick={onClose}>✕</Btn>}
         </div>
         <div>{children}</div>
       </div>
@@ -193,8 +247,8 @@ function PA_MTX_AuthRegistry({ theme: th, isNarrow = false, loading = false }) {
   );
 }
 
-function PA_MTX_AuthDetail({ theme: th, isNarrow = false }) {
-  const auth = FX_MTX_AUTHORIZATIONS[0];
+function PA_MTX_AuthDetail({ theme: th, authId = 'AUTH-2026-TP-001', isNarrow = false }) {
+  const auth = FX_MTX_AUTHORIZATIONS.find(a => a.id === authId) || FX_MTX_AUTHORIZATIONS[0];
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '營運許可詳情']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
@@ -202,7 +256,7 @@ function PA_MTX_AuthDetail({ theme: th, isNarrow = false }) {
         actions={<><Btn theme={th} variant="secondary">編輯車輛名單</Btn><Btn theme={th} variant="warn">暫停許可</Btn></>} />
       <div style={{ padding: isNarrow ? 12 : 24, display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1.4fr 1fr', gap: 16, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Card theme={th} title="許可核心屬性" subtitle="系統唯一識別碼: AUTH-2026-TP-001">
+          <Card theme={th} title="許可核心屬性" subtitle={`系統唯一識別碼: ${auth.id}`}>
             <DL theme={th} cols={isNarrow ? 1 : 2} items={[
               { k: '許可代碼', v: auth.code, mono: true },
               { k: '業者名稱', v: auth.operator },
@@ -237,12 +291,12 @@ function PA_MTX_AuthDetail({ theme: th, isNarrow = false }) {
   );
 }
 
-function PA_MTX_AuthDraftEditor({ theme: th, isNarrow = false }) {
+function PA_MTX_AuthDraftEditor({ theme: th, onClose, onSave, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '建立許可草稿']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title="建立營運許可草稿" subtitle="MTX-AUTH-UI-03 · 填寫業者、營業計畫版本、營運區域與生效時間 (儲存為草稿後方可送審啟用)"
-        actions={<><Btn theme={th} variant="secondary">取消</Btn><Btn theme={th} variant="primary" icon="save">儲存草稿</Btn></>} />
+        actions={<><Btn theme={th} variant="secondary" onClick={onClose}>取消</Btn><Btn theme={th} variant="primary" icon="save" onClick={onSave}>儲存草稿</Btn></>} />
       <div style={{ padding: isNarrow ? 12 : 24, maxWidth: 860 }}>
         <Card theme={th} title="許可草稿欄位填寫">
           <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr', gap: 16 }}>
@@ -271,7 +325,7 @@ function PA_MTX_AuthDraftEditor({ theme: th, isNarrow = false }) {
   );
 }
 
-function PA_MTX_AuthLifecycleConfirm({ theme: th, isNarrow = false }) {
+function PA_MTX_AuthLifecycleConfirm({ theme: th, authId = 'AUTH-2026-NT-002', actionType = 'activate', onConfirm, onCancel, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '啟用許可確認']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
@@ -298,11 +352,11 @@ function PA_MTX_AuthLifecycleConfirm({ theme: th, isNarrow = false }) {
   );
 }
 
-function PA_MTX_AuthVehicles({ theme: th, isNarrow = false }) {
+function PA_MTX_AuthVehicles({ theme: th, authId = 'AUTH-2026-TP-001', isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '授權車輛名單']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
-      <PageHeader theme={th} title="授權車輛名單維護" subtitle="MTX-AUTH-UI-05 · MTA-TP-2026-01 · 台北大都會計程車"
+      <PageHeader theme={th} title="授權車輛名單維護" subtitle={`MTX-AUTH-UI-05 · ${authId} · 台北大都會計程車`}
         actions={<Btn theme={th} variant="primary" icon="plus">新增車輛至名單</Btn>} />
       <div style={{ padding: isNarrow ? 12 : 24 }}>
         <div style={{ marginBottom: 16, display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: 12 }}>
@@ -325,7 +379,7 @@ function PA_MTX_AuthVehicles({ theme: th, isNarrow = false }) {
   );
 }
 
-function PA_MTX_AuthConflictState({ theme: th, isNarrow = false }) {
+function PA_MTX_AuthConflictState({ theme: th, errorType = '403', isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '異常與權限警告']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
@@ -417,9 +471,9 @@ function OPS_MTX_QueueOverview({ theme: th, isNarrow = false }) {
       </div>
 
       {selectedDenied && (
-        <AccessibleDialog title="實體排班 · 法定拒絕進入警告 (MTX-QUEUE-UI-03)" theme={th} onClose={() => setSelectedDenied(null)}>
+        <AccessibleDialog title="實體排班 · 法定拒絕進入警告 (MTX-QUEUE-UI-03)" theme={th} preventBypass={true}>
           <div role="alert" aria-live="assertive">
-            <Banner theme={th} tone="danger" icon="alert" body={`此車輛 (${selectedDenied.plate}) 屬多元化計程車服務，不得進入實體排班或招呼站候客。`} />
+            <Banner theme={th} tone="danger" icon="alert" body={`此車輛 (${selectedDenied.plate}) 屬多元化計程車服務，依汽車運輸業管理規則第 91 條，不得進入實體排班或招呼站候客。`} />
           </div>
           <div style={{ marginTop: 12 }}>
             <DL theme={th} cols={2} items={[
@@ -430,7 +484,7 @@ function OPS_MTX_QueueOverview({ theme: th, isNarrow = false }) {
             ]} />
           </div>
           <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-            <Btn theme={th} variant="primary" onClick={() => setSelectedDenied(null)}>引導駕駛返回虛擬媒合</Btn>
+            <Btn theme={th} variant="primary" onClick={() => setSelectedDenied(null)}>確認知悉並引導駕駛返回虛擬媒合</Btn>
           </div>
         </AccessibleDialog>
       )}
@@ -438,8 +492,8 @@ function OPS_MTX_QueueOverview({ theme: th, isNarrow = false }) {
   );
 }
 
-function OPS_MTX_QueueEntryDetail({ theme: th, isNarrow = false }) {
-  const entry = FX_MTX_QUEUE_ENTRIES[0];
+function OPS_MTX_QueueEntryDetail({ theme: th, entryId = 'DRV-1029', isNarrow = false }) {
+  const entry = FX_MTX_QUEUE_ENTRIES.find(e => e.driverId === entryId) || FX_MTX_QUEUE_ENTRIES[0];
   return (
     <Shell theme={th} nav={OPS_NAV} active="dispatch-queue" breadcrumb={['派車營運', '佇列條目詳情']}
       env="production" actor={OPS_ACTOR} health={OPS_HEALTH} refreshTier="fast" dataFreshness="fresh">
@@ -570,42 +624,153 @@ function PA_P5_RatingQueue({ theme: th, isNarrow = false }) {
   );
 }
 
-function PA_P5_RatingDetail({ theme: th, isNarrow = false }) {
-  const rating = FX_P5_RATINGS[1];
+function PA_P5_RatingDetail({ theme: th, ratingId = 'RAT-80185', onInvalidate, onMaintain, isNarrow = false }) {
+  const rating = FX_P5_RATINGS.find(r => r.id === ratingId) || FX_P5_RATINGS[1];
+  const [reason, setReason] = React.useState('不當言詞 / 無關行程之惡意評價');
+  const [auditNotes, setAuditNotes] = React.useState('');
+  const [showConfirmModal, setShowConfirmModal] = React.useState(false);
+
+  const handleInvalidateConfirm = () => {
+    setShowConfirmModal(false);
+    if (onInvalidate) onInvalidate({ ratingId: rating.id, reason, auditNotes });
+  };
+
+  const handleMaintainClick = () => {
+    if (onMaintain) onMaintain({ ratingId: rating.id });
+  };
+
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-ratings" breadcrumb={['平台治理', '評價審查詳情']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
-      <PageHeader theme={th} title={`評價審查細節 · ${rating.id}`} subtitle="P5-RATE-UI-02 · 查驗乘客反饋與行程軌跡，執行評價作廢或維持有效"
-        actions={<><Btn theme={th} variant="secondary">維持有效</Btn><Btn theme={th} variant="danger" icon="x">作廢此評價</Btn></>} />
-      <div style={{ padding: isNarrow ? 12 : 24, display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1.2fr 1fr', gap: 16, alignItems: 'start' }}>
-        <Card theme={th} title="評價提交細節">
-          <DL theme={th} cols={isNarrow ? 1 : 2} items={[
-            { k: '評價識別碼', v: rating.id, mono: true },
-            { k: '評分星級', v: `★ ${rating.score} 分` },
-            { k: '對應行程', v: rating.order, mono: true },
-            { k: '被評價駕駛', v: rating.driver },
-            { k: '評價標籤', v: rating.tags },
-            { k: '提交時間', v: rating.submitted, mono: true }
-          ]} />
-          <div style={{ marginTop: 16, padding: 12, background: th.surfaceLo, borderRadius: 8, border: '1px solid ' + th.border }}>
-            <div style={{ fontSize: 11, color: th.textMuted, marginBottom: 4 }}>評價內文:</div>
-            <div style={{ fontSize: 13, color: th.text }}>{rating.comment}</div>
-          </div>
-        </Card>
-        <Card theme={th} title="審查原則說明">
-          <Banner theme={th} tone="info" icon="info" body="作廢規則：僅當評價包含公然侮辱、洗版騷擾、或查證屬同業不當競爭時，方可作廢。作廢後系統將自動重新計算駕駛平均星級。" />
-          <div style={{ marginTop: 16 }}>
-            <Field theme={th} label="作廢理由 (必填)" required>
-              <Select theme={th} value="不當言詞 / 無關行程之惡意評價" />
+      <PageHeader theme={th} title={`評價審查細節 · ${rating.id}`} subtitle="P5-RATE-UI-02 · 依據 §8.3 審查行程關聯、駕駛權威星級、歷史歷程與執行評價處置"
+        actions={
+          <>
+            <Btn theme={th} variant="secondary" onClick={handleMaintainClick}>維持有效 (Maintain Active)</Btn>
+            <Btn theme={th} variant="danger" icon="x" onClick={() => setShowConfirmModal(true)}>作廢此評價 (Invalidate Rating)</Btn>
+          </>
+        } />
+      <div style={{ padding: isNarrow ? 12 : 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Section 1: Rating Content & Section 2: Completed-Trip Reference */}
+        <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1.1fr 1fr', gap: 16 }}>
+          <Card theme={th} title="1. 評價內容 (Rating Content)">
+            <DL theme={th} cols={isNarrow ? 1 : 2} items={[
+              { k: '評價識別碼', v: rating.id, mono: true },
+              { k: '評分星級', v: <span style={{ color: rating.score <= 2 ? th.danger : th.accent, fontWeight: 800 }}>★ {rating.score} 分</span> },
+              { k: '評價標籤', v: rating.tags },
+              { k: '提交時間', v: rating.submitted, mono: true },
+              { k: '當前審查狀態', v: <Pill theme={th} tone={rating.tone} dot>{rating.statusZh}</Pill> }
+            ]} />
+            <div style={{ marginTop: 14, padding: 12, background: th.surfaceLo, borderRadius: 8, border: '1px solid ' + th.border }}>
+              <div style={{ fontSize: 11, color: th.textMuted, marginBottom: 4 }}>乘客評價內文 (Comment Excerpt):</div>
+              <div style={{ fontSize: 13, color: th.text, fontWeight: 500 }}>{rating.comment}</div>
+            </div>
+          </Card>
+
+          <Card theme={th} title="2. 關聯已完成行程 (Completed-Trip Reference)">
+            <DL theme={th} cols={isNarrow ? 1 : 2} items={[
+              { k: '關聯訂單編號', v: <span style={{ color: th.accent, fontFamily: SHELL_MONO, fontWeight: 700 }}>{rating.order}</span> },
+              { k: '行程識別碼', v: 'TRIP-2026-0720-8812', mono: true },
+              { k: '上車點名稱', v: '台北車站東三門' },
+              { k: '下車點名稱', v: '新北市板橋區縣民大道二段' },
+              { k: '行程起迄時間', v: '13:05 - 13:38 (33 分鐘)', mono: true },
+              { k: '實收車資 / PSP', v: 'NT$ 410 (PSP-CHB-8812741)', mono: true }
+            ]} />
+          </Card>
+        </div>
+
+        {/* Section 3: Driver Identity & Section 4: Current Driver Aggregate Summary */}
+        <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1.1fr', gap: 16 }}>
+          <Card theme={th} title="3. 被評價駕駛身份 (Driver Identity)">
+            <DL theme={th} cols={isNarrow ? 1 : 2} items={[
+              { k: '駕駛人員', v: rating.driver },
+              { k: '駕駛 ID', v: 'DRV-2041', mono: true },
+              { k: '執行車輛車牌', v: 'TDK-9317', mono: true },
+              { k: '所屬車隊 / 業者', v: '台北大都會計程車 / 新北分隊' },
+              { k: '綁定營運許可', v: 'MTA-TP-2026-01', mono: true }
+            ]} />
+          </Card>
+
+          <Card theme={th} title="4. 駕駛當前星級權威與彙整狀態 (Current Aggregate Summary)">
+            <DL theme={th} cols={isNarrow ? 1 : 2} items={[
+              { k: '當前平均星級', v: <span style={{ fontSize: 18, fontWeight: 800, color: th.accent }}>★ 4.85</span> },
+              { k: '有效評價總數', v: '142 則有效評價', mono: true },
+              { k: '權威顯示狀態', v: <Pill theme={th} tone="success">rated (已有評價)</Pill> },
+              { k: '彙整版本 / 時間', v: 'v14 · 2026-07-20 14:00', mono: true }
+            ]} />
+            <div style={{ marginTop: 12 }}>
+              <Banner theme={th} tone="info" icon="info" body="彙整重算說明：作廢此評價後，系統將自動從背景觸發駕駛星級重新彙整 (Rebuild Aggregate)，且禁止前端直接篡改或造假平均星級數值。" />
+            </div>
+          </Card>
+        </div>
+
+        {/* Section 5: Moderation Status/History & Section 6: Audit Actor/Time */}
+        <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr', gap: 16 }}>
+          <Card theme={th} title="5. 審查狀態與歷程 (Moderation History)">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 12, padding: '8px 12px', background: th.surfaceLo, borderRadius: 6, borderLeft: '3px solid ' + th.accent }}>
+                <div style={{ fontWeight: 700, color: th.text }}>2026-07-20 13:45:00 · 評價提交</div>
+                <div style={{ color: th.textMuted }}>乘客於行程結束後完成評分 (初始狀態: active)</div>
+              </div>
+              <div style={{ fontSize: 12, padding: '8px 12px', background: th.surfaceLo, borderRadius: 6, borderLeft: '3px solid ' + th.warn }}>
+                <div style={{ fontWeight: 700, color: th.text }}>2026-07-20 14:10:22 · 車隊申訴入佇列</div>
+                <div style={{ color: th.textMuted }}>駕駛提出審查申請 (狀態變更: under_review)</div>
+              </div>
+            </div>
+          </Card>
+
+          <Card theme={th} title="6. 稽核人員與紀錄 (Audit Actor & Time)">
+            <DL theme={th} cols={1} items={[
+              { k: '當前指派審查員', v: '黃審查員 (AUD-8802 · 平台治理組)' },
+              { k: '審查 Session ID', v: 'SESS-MOD-20260720-091', mono: true },
+              { k: '合規日誌參考號', v: 'LOG-P5-RATE-20260720-4102', mono: true },
+              { k: '最後審查調閱', v: '2026-07-23 13:40:00 (Asia/Taipei)', mono: true }
+            ]} />
+          </Card>
+        </div>
+
+        {/* Section 7: Permitted Actions */}
+        <Card theme={th} title="7. 執行審查處置 (Permitted Moderation Action)">
+          <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr', gap: 16 }}>
+            <Field theme={th} label="作廢理由選擇 (作廢時必填)" required>
+              <Select theme={th} value={reason} onChange={e => setReason(e.target.value)}>
+                <option value="不當言詞 / 無關行程之惡意評價">不當言詞 / 無關行程之惡意評價</option>
+                <option value="洗版騷擾與不實陳述">洗版騷擾與不實陳述</option>
+                <option value="同行惡意競爭攻擊">同行惡意競爭攻擊</option>
+                <option value="經查證與行程事實不符">經查證與行程事實不符</option>
+              </Select>
             </Field>
+            <Field theme={th} label="處置審查備註 (寫入合規稽核日誌)">
+              <Input theme={th} value={auditNotes} onChange={e => setAuditNotes(e.target.value)} placeholder="請輸入詳細審查判定依據..." />
+            </Field>
+          </div>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+            <Btn theme={th} variant="secondary" onClick={handleMaintainClick}>維持有效 (Maintain Active)</Btn>
+            <Btn theme={th} variant="danger" icon="x" onClick={() => setShowConfirmModal(true)}>確認作廢此評價 (Invalidate Rating)</Btn>
           </div>
         </Card>
       </div>
+
+      {showConfirmModal && (
+        <AccessibleDialog title={`確認作廢評價 · ${rating.id} (P5-RATE-UI-02)`} theme={th} onClose={() => setShowConfirmModal(false)}>
+          <Banner theme={th} tone="danger" icon="alert" body={`警告：確認將評價 ${rating.id} 標記為 invalidated (作廢)？此動作將扣除該筆評分並自動觸發駕駛星級重新彙整 (Rebuild Aggregate)。`} />
+          <div style={{ marginTop: 12 }}>
+            <DL theme={th} cols={1} items={[
+              { k: '選擇作廢原因', v: reason },
+              { k: '審查員 ID', v: 'AUD-8802 (黃審查員)' },
+              { k: '後續系統行為', v: '系統將更新狀態為 invalidated，駕駛星級平均值自動重算' }
+            ]} />
+          </div>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Btn theme={th} variant="secondary" onClick={() => setShowConfirmModal(false)}>取消返回</Btn>
+            <Btn theme={th} variant="danger" onClick={handleInvalidateConfirm}>確定執行評價作廢</Btn>
+          </div>
+        </AccessibleDialog>
+      )}
     </Shell>
   );
 }
 
-function PA_P5_DriverRatingAuthority({ theme: th, isNarrow = false }) {
+function PA_P5_DriverRatingAuthority({ theme: th, driverId = 'DRV-1029', isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-ratings" breadcrumb={['平台治理', '駕駛星級權威狀態']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
@@ -681,8 +846,8 @@ function PA_P5_FareAnomalyQueue({ theme: th, isNarrow = false }) {
   );
 }
 
-function PA_P5_PaymentExceptionDetail({ theme: th, isNarrow = false }) {
-  const pay = FX_P5_PAYMENT_EXCEPTIONS[1];
+function PA_P5_PaymentExceptionDetail({ theme: th, paymentId = 'PAY-77005', isNarrow = false }) {
+  const pay = FX_P5_PAYMENT_EXCEPTIONS.find(p => p.id === paymentId) || FX_P5_PAYMENT_EXCEPTIONS[1];
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-fares" breadcrumb={['商務與結算', '付款異常詳情']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
