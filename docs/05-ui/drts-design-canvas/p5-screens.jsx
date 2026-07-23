@@ -83,4 +83,6 @@ function P5_A03(){ // Public fare version page
     <P5Card title="車資變更規則"><div style={{ fontSize:12, color:P5.mut, lineHeight:1.65 }}>若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。</div></P5Card>
     <div style={{ margin:'0 14px', fontSize:10.5, color:P5.dim, textAlign:'center' }}>本頁依主管機關備查之現行版本公告</div><P5Notice/></P5Phone>;
 }
-Object.assign(window, { P5_S01,P5_S02,P5_S03,P5_S04,P5_S05,P5_S06,P5_S07,P5Stars,P5_S08,P5_S09,P5_S10,P5_S11,P5_S12,P5_A03,P5_A04 });
+function P5_DispatchDisclosure() { return P5_S03(); }
+Object.assign(window, { P5_S01,P5_S02,P5_S03,P5_DispatchDisclosure,P5_S04,P5_S05,P5_S06,P5_S07,P5Stars,P5_S08,P5_S09,P5_S10,P5_S11,P5_S12,P5_A03,P5_A04 });
+

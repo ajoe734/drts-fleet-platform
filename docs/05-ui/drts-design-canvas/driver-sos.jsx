@@ -234,4 +234,6 @@ function S3D_Resolved({ theme:t }) {
     </SosFrame>
   );
 }
-Object.assign(window, { SOS_RED, SosDial, SosCtx, SosFrame, S3D_ActiveTrip, S3D_Home, S3D_Sending, S3D_Submitted, S3D_Offline, S3D_Supplement, S3D_Attach, S3D_FalseAlarm, S3D_Resolved });
+function S3_SOSFullscreen({ theme: t, locState }) { return <S3D_Home theme={t} locState={locState} />; }
+Object.assign(window, { SOS_RED, SosDial, SosCtx, SosFrame, S3D_ActiveTrip, S3D_Home, S3_SOSFullscreen, S3D_Sending, S3D_Submitted, S3D_Offline, S3D_Supplement, S3D_Attach, S3D_FalseAlarm, S3D_Resolved });
+
