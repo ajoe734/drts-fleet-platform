@@ -39,6 +39,7 @@
 <script type="text/babel" src="driver-screens-3.jsx"></script>
 <script type="text/babel" src="driver-supply.jsx"></script>
 <script type="text/babel" src="driver-safety-operator.jsx"></script>
+<script type="text/babel" src="driver-sos.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -220,6 +221,20 @@ function App() {
           <DCArtboard id="so-handover" label="9 · 交班 Shift Handover" width={W} height={H}>
             {pad(<PhoneRaw tabHidden><SO_ShiftHandover theme={t} /></PhoneRaw>)}
           </DCArtboard>
+        </DCSection>
+
+        <DCSection id="sos" title="11b · SOS 緊急通報 · S-3" subtitle="智行叫車 · 獨立全螢幕 · 110/119 撥號不依賴網路 · 離線暫存 · 誤觸保留紀錄">
+          <DCArtboard id="s3-01" label="S3-01 · 行程中常駐 SOS 入口（與完成行程分離）" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_ActiveTrip theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-02" label="S3-02 · 長按 2 秒進度（放開不送出）" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_ActiveTrip theme={t} hold /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-03" label="S3-03 · 獨立 SOS 首頁 · 110/119/車隊 ≥56px" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_Home theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-04" label="S3-04 · 正在通報車隊值班" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_Sending theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-05" label="S3-05 · 車隊已收到 + 事件編號" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_Submitted theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-06" label="S3-06 · 離線暫存 · 等待補送（不誤寫已收到）" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_Offline theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-07" label="S3-07 · 補充表單 · 鎖定欄位唯讀" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_Supplement theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-08" label="S3-08 · 附件上傳 / 逐項重試 / 錄音 5 分鐘上限" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_Attach theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-09" label="S3-09 · 誤觸滑動解除 + 二次確認" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_FalseAlarm theme={t} /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-10" label="S3-10 · 已回報誤觸（紀錄保留）" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_FalseAlarm theme={t} done /></PhoneRaw>)}</DCArtboard>
+          <DCArtboard id="s3-11" label="S3-11 · 已處理 / 已結案 · 時間軸" width={W} height={H}>{pad(<PhoneRaw tabHidden><S3D_Resolved theme={t} /></PhoneRaw>)}</DCArtboard>
         </DCSection>
 
         <DCSection id="narrow" title="12 · 窄機支援 360×800" subtitle="同設計系統在 Android 入門機">

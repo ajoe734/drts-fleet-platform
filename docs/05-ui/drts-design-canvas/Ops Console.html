@@ -43,6 +43,7 @@
 <script type="text/babel" src="ops-screens-3.jsx"></script>
 <script type="text/babel" src="ops-supply.jsx"></script>
 <script type="text/babel" src="ops-av-fallback.jsx"></script>
+<script type="text/babel" src="ops-sos.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -106,6 +107,15 @@ function App() {
         <DCSection id="ops-reports" title="05b · 營運報表 Operational Reports · Packet 3B" subtitle="每日派遣紀錄 + 半年營運摘要 · 固定口徑 SA §7.4">
           <DCArtboard id="report-daily" label="每日派遣紀錄 · DispatchDailyRecord" width={W} height={H}><Hero url="/reports/daily-dispatch"><OC_OpsReports theme={th} report="daily" /></Hero></DCArtboard>
           <DCArtboard id="report-summary" label="半年營運摘要 · coverage<95% (VQ-5/6)" width={W} height={H}><Bare><OC_OpsReports theme={th} report="summary" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="sos-ops" title="05c · SOS 緊急事件 · S-3 值班端" subtitle="智行叫車 duty surface · 持續性警示不自動消失 · 先確認者取得處理權 · 提示音健康狀態">
+          <DCArtboard id="s3-o01" label="S3-O01 · Critical Alert Overlay · 事件編號+等待時間+確認" width={W} height={H}><Hero url="/sos"><S3O_Alert theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="s3-o02" label="S3-O02 · SOS 佇列 · 全欄位" width={W} height={H}><Bare><S3O_Queue theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="s3-o03" label="S3-O03 · 詳情 + 地圖 + 自動附帶 · 待確認" width={W} height={H}><Bare><S3O_Detail theme={th} phase="new" /></Bare></DCArtboard>
+          <DCArtboard id="s3-o04" label="S3-O04 · 已由 王小明 於 14:31 確認（他人無主確認鈕）" width={W} height={H}><Bare><S3O_Detail theme={th} phase="acked" /></Bare></DCArtboard>
+          <DCArtboard id="s3-o05" label="S3-O05 · 調查時間軸 · 補充/附件/結案" width={W} height={H}><Bare><S3O_Detail theme={th} phase="inv" /></Bare></DCArtboard>
+          <DCArtboard id="s3-o06" label="S3-O06 · 提示音未啟用健康警示（視覺等效不只靠聲音）" width={W} height={H}><Bare><S3O_Queue theme={th} soundOff /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="monitor" title="06 · 營運監控">
