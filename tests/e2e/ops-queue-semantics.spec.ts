@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const baseUrl =
   process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
   process.env.OPS_CONSOLE_BASE_URL ??
-  "http://127.0.0.1:3202";
+  "http://127.0.0.1:3003";
 
 test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
   test("renders queue mode as explicit text and handles site blank without masquerading in zh", async ({
