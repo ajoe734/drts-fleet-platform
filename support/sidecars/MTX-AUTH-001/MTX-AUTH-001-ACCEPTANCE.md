@@ -4,8 +4,8 @@
 - **Title:** Fleet B operating authorization (runtime)
 - **Owner:** `Gemini`
 - **Reviewer:** `Codex`
-- **Status:** `review_ready`
-- **Timestamp:** `2026-07-23T12:38:15Z`
+- **Status:** `review_approved`
+- **Timestamp:** `2026-07-23T13:02:30Z`
 
 ---
 
