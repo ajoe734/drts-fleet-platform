@@ -53,8 +53,8 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
     expect(blankSitePhysicalOrder.queueModeText).not.toBe("虛擬媒合");
   });
 
-  it("provides statutory refusal copy per doc08 §7.3 with no raw reason code primary", () => {
-    const multiTaxiPhysicalAttempt = resolveQueueSemantics(
+  it("provides statutory refusal copy per doc08 §7.3 with no raw reason code primary (zh & en)", () => {
+    const multiTaxiPhysicalAttemptZh = resolveQueueSemantics(
       {
         runtimeProfileCode: "multi_taxi_direct",
         queueMode: "physical_rank",
@@ -64,11 +64,31 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
       "zh",
     );
 
-    expect(multiTaxiPhysicalAttempt.isStatutoryRefusal).toBe(true);
-    expect(multiTaxiPhysicalAttempt.refusalCopy).toBe(
+    expect(multiTaxiPhysicalAttemptZh.isStatutoryRefusal).toBe(true);
+    expect(multiTaxiPhysicalAttemptZh.refusalCopy).toBe(
       "此訂單為多元化計程車平台預約，不能進入實體排班或招呼站候客。",
     );
-    expect(multiTaxiPhysicalAttempt.refusalCopy).not.toContain("QUEUE_MODE_NOT_ALLOWED");
+    expect(multiTaxiPhysicalAttemptZh.refusalCopy).not.toContain(
+      "QUEUE_MODE_NOT_ALLOWED",
+    );
+
+    const multiTaxiPhysicalAttemptEn = resolveQueueSemantics(
+      {
+        runtimeProfileCode: "multi_taxi_direct",
+        queueMode: "physical_rank",
+        siteId: "SITE-001",
+        lastDispatchFailureReason: "QUEUE_MODE_NOT_ALLOWED",
+      },
+      "en",
+    );
+
+    expect(multiTaxiPhysicalAttemptEn.isStatutoryRefusal).toBe(true);
+    expect(multiTaxiPhysicalAttemptEn.refusalCopy).toBe(
+      "This order is a multi-taxi platform reservation and cannot enter physical ranks or taxi stands.",
+    );
+    expect(multiTaxiPhysicalAttemptEn.refusalCopy).not.toContain(
+      "QUEUE_MODE_NOT_ALLOWED",
+    );
   });
 
   it("identifies canonical and legacy override/fare-override actions as forbidden in statutory refusal", () => {
@@ -104,7 +124,7 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
     }
   });
 
-  it("ensures i18n keys resolve via t() without missing key fallbacks", () => {
+  it("ensures i18n keys resolve via t() without missing key fallbacks in zh and en", () => {
     expect(t("dispatch.queue.overviewTitle", "zh")).toBe("佇列概覽與模式");
     expect(t("dispatch.queue.multiTaxiDirectService", "zh")).toBe(
       "多元化計程車（平台預約）",
@@ -112,11 +132,16 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
     expect(t("dispatch.denial.multiTaxiRefusalCopy", "zh")).toBe(
       "此訂單為多元化計程車平台預約，不能進入實體排班或招呼站候客。",
     );
+    expect(t("dispatch.denial.multiTaxiRefusalCopy", "en")).toBe(
+      "This order is a multi-taxi platform reservation and cannot enter physical ranks or taxi stands.",
+    );
     expect(t("dispatch.denial.statutoryRefusalTitle", "zh")).toBe(
       "多元化計程車法定拒絕態",
+    );
+    expect(t("dispatch.denial.statutoryRefusalTitle", "en")).toBe(
+      "Statutory Refusal State (Multi-Taxi)",
     );
     expect(t("opsCode.statutory_refusal", "zh")).toBe("法定拒絕態");
     expect(t("opsCode.statutory_refusal", "en")).toBe("Statutory Refusal");
   });
 });
-
