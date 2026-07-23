@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Platform Admin · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#1E1B4B"/>
+  <rect x="14" y="22" width="72" height="56" rx="6" fill="#FFFFFF" stroke="#4F46E5" stroke-width="2"/>
+  <rect x="20" y="30" width="14" height="40" rx="2" fill="#EEF2FF"/>
+  <rect x="40" y="32" width="38" height="3" rx="1.5" fill="#4F46E5"/>
+  <rect x="40" y="40" width="22" height="2.5" rx="1" fill="#A5B4FC"/>
+  <rect x="40" y="48" width="38" height="20" rx="2" fill="#EEF2FF"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="mgmt-primitives.jsx"></script>
+<script type="text/babel" src="mgmt-shell.jsx"></script>
+<script type="text/babel" src="mgmt-auth.jsx"></script>
+<script type="text/babel" src="mgmt-data.jsx"></script>
+<script type="text/babel" src="ops-screens-3.jsx"></script>
+<script type="text/babel" src="platform-screens-1.jsx"></script>
+<script type="text/babel" src="platform-screens-2.jsx"></script>
+<script type="text/babel" src="platform-screens-3.jsx"></script>
+<script type="text/babel" src="platform-referral.jsx"></script>
+<script type="text/babel" src="platform-supply-review.jsx"></script>
+<script type="text/babel" src="platform-sandbox.jsx"></script>
+<script type="text/babel" src="platform-regulator.jsx"></script>
+<script type="text/babel" src="platform-service-area.jsx"></script>
+<script type="text/babel" src="platform-p5.jsx"></script>
+<script type="text/babel" src="platform-mtx-auth.jsx"></script>
+<script type="text/babel" src="platform-mtx-commerce.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "density": "compact",
+  "showSecret": false
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const th = buildMgmtTheme({ console: 'platform', dark: tw.dark, density: tw.density });
+  const W = 1440, H = 900;
+  const Frame = ({ children, chrome, url }) => chrome
+    ? <MacWindow title="Platform Admin · DRTS" url={'https://admin.drts.io' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
+    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
+  const Bare = ({ children }) => <Frame>{children}</Frame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Platform Admin" subtitle="平台治理控制平面 · 18 routes · packet ADM-DH-PKT-002 (2026-05-25)" accent="#4F46E5">
+        <DCSection id="overview" title="01 · Workspace">
+          <DCArtboard id="home" label="平台首頁 / Home" width={W} height={H}><Hero url="/"><PA_Home theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="tenants" title="02 · 租戶治理" subtitle="Q-ADM01 /tenants 與 /tenant-governance 保留兩個 route">
+          <DCArtboard id="tenants" label="租戶清單 / Tenants" width={W} height={H}><Hero url="/tenants"><PA_Tenants theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="tenant-detail" label="租戶詳情 · Rollout state machine" width={W} height={H}><Bare><PA_TenantDetail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="tenant-gov" label="跨租戶治理 · Q-ADM01" width={W} height={H}><Bare><PA_TenantGovernance theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="partners" title="03 · 合作夥伴 + 平台人員">
+          <DCArtboard id="partners" label="合作夥伴清單" width={W} height={H}><Bare><PA_Partners theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="partner-detail" label="合作夥伴詳情 · readiness + credentials" width={W} height={H}><Hero url="/partners/ctbc-elite"><PA_PartnerDetail theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="partner-secret" label="✨ 發 credential · plaintext-once modal (Q-ADM07)" width={W} height={H}><Bare><PA_PartnerDetail theme={th} showSecretModal /></Bare></DCArtboard>
+          <DCArtboard id="users" label="平台人員 · 6 角色" width={W} height={H}><Bare><PA_Users theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="referral" title="03b · Referral 渠道管理 · CRC 群組 C" subtitle="DRTS 營運方建立/維運社區物業叫車渠道 · partnerType=referral_channel · 擴充 partner-entries">
+          <DCArtboard id="ref-channels" label="C1 · Referral 渠道清單" width={W} height={H}><Hero url="/partners?type=referral"><PA_RefChannels theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="ref-channel-edit" label="C1 · 建立/編輯 · entryHost 白名單 + 品牌" width={W} height={H}><Bare><PA_RefChannelEdit theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-rates" label="C2 · 分潤費率設定 · 寫 audit" width={W} height={H}><Bare><PA_RefRates theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-creds" label="C3 · Ingress 憑證管理" width={W} height={H}><Bare><PA_RefCredentials theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-creds-secret" label="✨ C3 · 簽發憑證 · plaintext-once" width={W} height={H}><Bare><PA_RefCredentials theme={th} showSecretModal /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="supply-review" title="03c · 供給審核 Supply Review · Packet 2" subtitle="車行送件 → 審核 → 核可 provision canonical registry · optimistic concurrency · 非自審把關">
+          <DCArtboard id="sr-queue" label="§5.1 · 審核佇列 /supply-review" width={W} height={H}><Hero url="/supply-review"><PA_SupplyReviewQueue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="sr-detail" label="§5.2 · 審核詳情 · side-by-side diff (VQ-1/2/3)" width={W} height={H}><Bare><PA_SupplyReviewDetail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="sr-approve" label="§5.2 · 核可確認 · canonical preview (VQ-4)" width={W} height={H}><Bare><PA_SupplyReviewDetail theme={th} mode="approve_confirm" /></Bare></DCArtboard>
+          <DCArtboard id="sr-conflict" label="§6 · revision conflict · 409" width={W} height={H}><Bare><PA_SupplyReviewDetail theme={th} mode="conflict" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="sandbox" title="03d · FSD 沙盒治理 Sandbox Governance · Phase 2 A3" subtitle="Experiments / 區域·路線地圖編輯 / 車輛登錄 / 安全員資格 / Tesla 整合 / 政策 / 暫停恢復">
+          <DCArtboard id="experiments" label="實驗清單 · Experiments" width={W} height={H}><Hero url="/sandbox/experiments"><PA_Experiments theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="exp-areas" label="實驗詳情 · 營運區域/路線 地圖編輯 (PostGIS)" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="areas" /></Bare></DCArtboard>
+          <DCArtboard id="exp-vehicles" label="實驗詳情 · 車輛登錄 Enrollments" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="vehicles" /></Bare></DCArtboard>
+          <DCArtboard id="exp-operators" label="實驗詳情 · 安全員資格" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="operators" /></Bare></DCArtboard>
+          <DCArtboard id="exp-tesla" label="實驗詳情 · Tesla 整合 + capability flags" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="tesla" /></Bare></DCArtboard>
+          <DCArtboard id="exp-capabilities" label="實驗詳情 · 監理能力 (policy 佔位)" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="capabilities" /></Bare></DCArtboard>
+          <DCArtboard id="exp-policies" label="實驗詳情 · 證據/保存/通報政策" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="policies" /></Bare></DCArtboard>
+          <DCArtboard id="sandbox-suspend" label="暫停 / 恢復 · Suspension/Resume" width={W} height={H}><Bare><PA_SandboxSuspend theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="regulator" title="03e · 主管機關檢視 Regulator Viewer · Phase 2 V2" subtitle="S2 裁定：沿用 governance shell（非獨立 portal）· 受控唯讀 + 遮罩 · 8 元件版位">
+          <DCArtboard id="regulator-viewer" label="Regulator Viewer · selector/manifest/bundle/notify/export/legal-hold/access-log/receipt" width={W} height={H}><Hero url="/regulator-viewer"><PRG_RegulatorViewer theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="service-area" title="03f · 服務區治理 Service-Area Governance · /service-area-governance" subtitle="一般計程車 · 界線 + stop policy · draft→review→active→retired · 後端評估為權威 · 與沙盒治理權責分離">
+          <DCArtboard id="sa-boundary" label="5.2/5.3/5.4 · 界線模式 · GeometryEditor + 版本堆疊" width={W} height={H}><Hero url="/service-area-governance"><PA_ServiceAreaGov theme={th} mode="boundary" /></Hero></DCArtboard>
+          <DCArtboard id="sa-stoppolicy" label="流程1 · stop policy 模式 · 禁上車 draft 畫幾何" width={W} height={H}><Bare><PA_ServiceAreaGov theme={th} mode="stoppolicy" /></Bare></DCArtboard>
+          <DCArtboard id="sa-publish" label="5.5 · 審核/發佈面板 · 生效日+必填理由+取代檢核+audit 收據" width={W} height={H}><Bare><PA_ServiceAreaPublish theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="sa-publish-confirm" label="✨ 發佈確認 · 高風險 + reasonField" width={W} height={H}><Bare><PA_ServiceAreaPublish theme={th} confirm /></Bare></DCArtboard>
+          <DCArtboard id="sa-preview" label="流程2 / 5.6 · 受影響樣本預覽 · 後端評估為權威" width={W} height={H}><Bare><PA_ServiceAreaPreview theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="sa-retire" label="流程3 / 5.7 · 退場/替換 + active history + audit" width={W} height={H}><Bare><PA_ServiceAreaRetire theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="sa-states" label="空 / 錯誤 / 降級 狀態 ×8" width={W} height={H}><Bare><PA_ServiceAreaStates theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-backoffice" title="03h · 智行叫車 P-5 揭露後台 · §21 + A01/A02/A05" subtitle="車輛/駕駛揭露欄位審核 · 補正佇列 · 公開車資版本 · 2 年營運紀錄">
+          <DCArtboard id="p5-a01" label="P5-A01 · 揭露欄位審核 + 乘客顯示預覽" width={W} height={H}><Hero url="/p5/disclosure"><PA_P5Disclosure theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-a02" label="P5-A02 · 補正佇列 · 查看/退件/核准" width={W} height={H}><Bare><PA_P5Queue theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="p5-a03b" label="公開車資版本 · 草稿/備查/生效/停用 + 預覽" width={W} height={H}><Bare><PA_P5Fare theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="p5-a05" label="P5-A05 · 行程營運紀錄（730 天）+ 匯出" width={W} height={H}><Bare><PA_P5Records theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="mtx-auth" title="03i · 多元計程車營運許可 · MTX-AUTH-UI-01..06" subtitle="draft→approved→suspended→expired/revoked · 能力驅動 · 智行示範車隊 MTX-TPE-2026-001">
+          <DCArtboard id="mtx-01" label="UI-01 · Registry · 篩選+到期警示" width={W} height={H}><Hero url="/multi-taxi-authorizations"><MTX_Registry theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="mtx-02" label="UI-02 · Detail approved · 8 區塊+動作矩陣" width={W} height={H}><Bare><MTX_Detail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-02b" label="UI-02 · Detail revoked · 唯讀無撤销/還原" width={W} height={H}><Bare><MTX_Detail theme={th} status="revoked" /></Bare></DCArtboard>
+          <DCArtboard id="mtx-03" label="UI-03 · Draft Editor" width={W} height={H}><Bare><MTX_Draft theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-03b" label="UI-03 · 驗證錯誤 · 欄位+摘要兩層" width={W} height={H}><Bare><MTX_Draft theme={th} error /></Bare></DCArtboard>
+          <DCArtboard id="mtx-04" label="UI-04 · 啟用確認 · 後端車輛數、不推估影響數" width={W} height={H}><Bare><MTX_Confirm theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-05" label="UI-05 · 授權車輛名單 · 暫停=design-only" width={W} height={H}><Bare><MTX_Vehicles theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-06" label="UI-06 · 衝突/權限態 ×8" width={W} height={H}><Bare><MTX_States theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-rating" title="03j · 評價治理 · P5-RATE-UI-01..03" subtitle="active/under_review/invalidated · 彙總 server-owned 不可編輯 · unavailable 不得假冒">
+          <DCArtboard id="rate-01" label="UI-01 · 審查佇列" width={W} height={H}><Hero url="/p5-ratings"><P5R_Queue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="rate-02" label="UI-02 · 審查詳情 · 治理歷程" width={W} height={H}><Bare><P5R_Detail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="rate-02b" label="UI-02 · 作廢確認 · 必填理由+彙總重建" width={W} height={H}><Bare><P5R_Detail theme={th} confirm /></Bare></DCArtboard>
+          <DCArtboard id="rate-03" label="UI-03 · 駕駛評價權威 · rated/new/unavailable" width={W} height={H}><Bare><P5R_Authority theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-commerce" title="03k · 商務與紀錄 · P5-COM-UI-01..05" subtitle="fail-closed · 無 mark-paid · 保存與法律保留分離 · 匯出伺服器端產生">
+          <DCArtboard id="com-01" label="UI-01 · 費率異常佇列 · 5 種原因" width={W} height={H}><Hero url="/p5-fare-anomalies"><P5C_Anomaly theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="com-02" label="UI-02 · 付款例外 · 6 狀態" width={W} height={H}><Bare><P5C_Payment theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-03" label="UI-03 · 乘車證明支援 · 6 支援態" width={W} height={H}><Bare><P5C_Cert theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-04" label="UI-04 · 營運紀錄查詢 · 缺值=未取得" width={W} height={H}><Bare><P5C_Records theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-05" label="UI-05 · 受控匯出 · 範圍確認" width={W} height={H}><Bare><P5C_Export theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-05b" label="UI-05 · 匯出執行中 running 64%" width={W} height={H}><Bare><P5C_Export theme={th} phase="running" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
+          <DCArtboard id="fleet-drivers" label="Drivers · license warn" width={W} height={H}><Bare><PA_Fleet theme={th} tab="drivers" /></Bare></DCArtboard>
+          <DCArtboard id="fleet-contracts" label="Contracts" width={W} height={H}><Bare><PA_Fleet theme={th} tab="contracts" /></Bare></DCArtboard>
+          <DCArtboard id="fleet-device" label="Device Binding" width={W} height={H}><Bare><PA_Fleet theme={th} tab="device" /></Bare></DCArtboard>
+          <DCArtboard id="fleet-excl" label="Exclusivity Reviews · Q-ADM08" width={W} height={H}><Bare><PA_Fleet theme={th} tab="exclusivity" /></Bare></DCArtboard>
+          <DCArtboard id="fleet-offboard" label="Offboarding state machine · Q-ADM09" width={W} height={H}><Bare><PA_Fleet theme={th} tab="offboard" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="commerce" title="05 · 平台與商務">
+          <DCArtboard id="switchboard" label="Public Info & Placards · Q-ADM04/14" width={W} height={H}><Bare><PA_Switchboard theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="pricing-passenger" label="Pricing · Passenger" width={W} height={H}><Hero url="/pricing?tab=passenger"><PA_Pricing theme={th} tab="passenger" /></Hero></DCArtboard>
+          <DCArtboard id="pricing-driver" label="Pricing · Driver Fee Plans" width={W} height={H}><Bare><PA_Pricing theme={th} tab="driver" /></Bare></DCArtboard>
+          <DCArtboard id="pricing-subsidy" label="Pricing · Subsidy" width={W} height={H}><Bare><PA_Pricing theme={th} tab="subsidy" /></Bare></DCArtboard>
+          <DCArtboard id="pricing-history" label="Pricing · Published versions" width={W} height={H}><Bare><PA_Pricing theme={th} tab="history" /></Bare></DCArtboard>
+          <DCArtboard id="adapters" label="Adapter Registry · split authority (Q-ADM17)" width={W} height={H}><Bare><PA_AdapterRegistry theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="finance" title="06 · 結算與代墊 · NEW Q-ADM12">
+          <DCArtboard id="payments" label="Payments · reconciliation" width={W} height={H}><Hero url="/payments"><PA_Payments theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="reimburse" label="Reimbursements queue · NEW" width={W} height={H}><Bare><PA_Reimbursements theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="reimburse-detail" label="Reimbursement batch · state machine" width={W} height={H}><Bare><PA_ReimbursementDetail theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="ops-risk" title="07 · 平台維運 · 含 audit hold/exception (Q-ADM16)">
+          <DCArtboard id="health" label="Platform Health" width={W} height={H}><Bare><PA_Health theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="notices" label="Notices" width={W} height={H}><Bare><PA_Notices theme={th} tab="notices" /></Bare></DCArtboard>
+          <DCArtboard id="maint" label="Maintenance Mode" width={W} height={H}><Bare><PA_Notices theme={th} tab="maint" /></Bare></DCArtboard>
+          <DCArtboard id="broadcast" label="Broadcast History" width={W} height={H}><Bare><PA_Notices theme={th} tab="history" /></Bare></DCArtboard>
+          <DCArtboard id="audit" label="Audit · legal hold + deletion exception (Q-ADM16)" width={W} height={H}><Hero url="/audit"><PA_Audit theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="flags" label="Feature Flags · WRITE authority (Q-X16)" width={W} height={H}><Bare><PA_Flags theme={th} /></Bare></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfy' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

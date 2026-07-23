@@ -68,6 +68,7 @@ external platform badge
 | `06_multi_taxi_runtime_execution_register_20260723.md`                  | 可派工 task register                                                    |
 | `07_fleets_execution_tasks_20260723.md`                                 | Fleets design gates、execution packets、dependency 與 evidence contract |
 | `08_multi_taxi_operations_ui_design_requirements_20260723.md`           | 法規／實用性優先的 4 項最小操作 UI delta 與 deferred scope              |
+| `09_uploaded_system_design_archive_execution_tasks_20260723.md`         | 上傳 ZIP 設計封存裁決、current-head gap 與 Fleets 派工 addendum          |
 | `manifest.json`                                                         | Machine-readable index / baseline / implementation status               |
 
 ---

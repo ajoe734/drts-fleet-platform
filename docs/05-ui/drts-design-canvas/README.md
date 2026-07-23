@@ -64,6 +64,20 @@ The source bundle also included three nested directories that are NOT brought ac
 - `export/` — older self-contained Driver App export artifact, superseded by the current `Driver App.html`.
 - `.scratch/` — debug screenshot from the design session.
 
+## Submitted overlay: 2026-07-23
+
+The later `driver app (15).zip` submission is preserved under
+[`archive/20260723-driver-app-15/`](./archive/20260723-driver-app-15/). It is an
+eight-file, byte-exact audit overlay rather than a replacement for this
+canonical canvas. Seven files differ from `dev@2711c366f`; the submitted
+`Driver App.html` already matches the canonical file.
+
+Only the authorization, existing-dispatch labels/denial copy, minimum records
+query/download, and S-3 verification references may be adapted. Requirement
+v1.1 and the linked Fleets execution addendum reject the overlay's dedicated
+queue pages, extra lifecycle commands, moderation/exception consoles, legal
+hold, and export-job orchestration.
+
 ## Relationship to the predecessor stub
 
 Before this PR, `docs/05-ui/drts-design-canvas/` held five orphan files (`Partner Booking.html`, `design-canvas.jsx`, `ios-frame.jsx`, `partner-screens.jsx`, `tweaks-panel.jsx`) from an earlier design iteration on a stranded branch. Those have been replaced; the relevant Partner Booking content lives under [`archive/`](./archive/) and carries an `archive/README.md` explaining the Q-TEN03 deferral.

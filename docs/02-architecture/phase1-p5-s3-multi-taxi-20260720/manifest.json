@@ -1,8 +1,9 @@
 {
   "pack": "phase1-p5-s3-multi-taxi",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "archivedDate": "2026-07-20",
   "currentDesignReconciliationDate": "2026-07-23",
+  "currentUploadedDesignArchiveDate": "2026-07-23",
   "runtimeProfile": "multi_taxi_direct",
   "productName": "智行叫車",
   "serviceCategory": "多元化計程車",
@@ -81,6 +82,12 @@
       "role": "operations UI design requirements",
       "reviewedCommit": "b8f1f56b20a77c8abeabf0ac3c51b8443d5616af",
       "status": "ready_for_design"
+    },
+    {
+      "path": "09_uploaded_system_design_archive_execution_tasks_20260723.md",
+      "role": "uploaded design archive reconciliation and Fleets execution addendum",
+      "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
+      "status": "ready_for_execution"
     }
   ],
   "deliverables": [
@@ -92,6 +99,7 @@
     "06_multi_taxi_runtime_execution_register_20260723.md",
     "07_fleets_execution_tasks_20260723.md",
     "08_multi_taxi_operations_ui_design_requirements_20260723.md",
+    "09_uploaded_system_design_archive_execution_tasks_20260723.md",
     "manifest.json"
   ],
   "mergedMigrations": [
@@ -129,7 +137,16 @@
       "two_year_record_query_download"
     ],
     "executionPacket": "07_fleets_execution_tasks_20260723.md",
-    "requirementsDocument": "08_multi_taxi_operations_ui_design_requirements_20260723.md"
+    "requirementsDocument": "08_multi_taxi_operations_ui_design_requirements_20260723.md",
+    "executionAddendum": "09_uploaded_system_design_archive_execution_tasks_20260723.md",
+    "archiveOverlay": {
+      "path": "../../05-ui/drts-design-canvas/archive/20260723-driver-app-15/",
+      "sourceZipSha256": "634f27855d141633a1c1de102a2fee1c2a03850949f43b927c5fb6dea859a915",
+      "authority": "non_canonical_visual_reference",
+      "archivedFiles": 8,
+      "filesDifferentFromReviewedCommit": 7,
+      "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c"
+    }
   },
   "implementationStatus": {
     "landed": [

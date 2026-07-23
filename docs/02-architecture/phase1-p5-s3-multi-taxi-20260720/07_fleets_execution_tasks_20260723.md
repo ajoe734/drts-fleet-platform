@@ -1,8 +1,8 @@
 # Multi-Taxi Fleets Execution Tasks
 
-**Document version:** v1.0  
+**Document version:** v1.1
 **Date:** 2026-07-23  
-**Execution baseline:** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`  
+**Execution baseline:** `dev@2711c366f2e103ae9556d5afaf4558dfd9b0bb4c`
 **Purpose:** Convert the approved Phase-1 system and UI specifications into
 collision-aware tasks that Fleets can execute.  
 **Boundary:** This document authorizes task preparation and implementation PRs
@@ -23,6 +23,8 @@ Fleets must use these sources in this order:
 6. `06_multi_taxi_runtime_execution_register_20260723.md`
 7. `08_multi_taxi_operations_ui_design_requirements_20260723.md`
 8. This execution packet
+9. `09_uploaded_system_design_archive_execution_tasks_20260723.md`, only for
+   the submitted design archive, current-head delta, and narrowed task packets
 
 The system architecture is frozen for execution:
 
@@ -44,6 +46,11 @@ forbidden for multi_taxi_direct:
 ```
 
 Fleets must not reopen these decisions in implementation PRs.
+
+The submitted `driver app (15).zip` is preserved as a non-canonical visual
+overlay. Fleets must use `09` for its per-file disposition and current dispatch
+register. Requirement `08` remains authoritative if any archived frame proposes
+additional routes, commands, consoles, or navigation.
 
 ---
 
@@ -94,6 +101,12 @@ The archived UI brief does not make Figma, PNG count, rating moderation,
 payment exception management, legal hold, or a separate Design QA process a
 legal MVP gate. This execution packet follows the later practicality decision
 captured in requirement v1.1.
+
+The 2026-07-23 submitted design overlay is archived under
+`docs/05-ui/drts-design-canvas/archive/20260723-driver-app-15/`. Its accepted
+subsets, rejected concepts, current-head observations, and directly
+dispatchable Fleet B/C/E/F/G/H packets are recorded in
+`09_uploaded_system_design_archive_execution_tasks_20260723.md`.
 
 ## Wave 0: Minimum Design Delta
 
