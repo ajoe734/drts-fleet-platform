@@ -556,6 +556,7 @@ export class OwnedMobilityService implements OnModuleInit {
     requestId?: string,
     callContext?: MultiTaxiCallContext,
   ) {
+    this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
     const requestedPickupAt = this.requireIsoTimestamp(
@@ -2926,7 +2927,10 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(command: AssignDispatchCommand, requestId?: string): any {
+  assignDispatch(
+    command: AssignDispatchCommand,
+    requestId?: string,
+  ): MaybePromise<DispatchAssignmentResult> {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2940,7 +2944,10 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  reassignDispatch(command: ReassignDispatchCommand, requestId?: string): any {
+  reassignDispatch(
+    command: ReassignDispatchCommand,
+    requestId?: string,
+  ): MaybePromise<DispatchAssignmentResult> {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -4603,6 +4610,27 @@ export class OwnedMobilityService implements OnModuleInit {
         "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
         "Runtime profile is resolved by the server route and cannot be supplied by a public request.",
       );
+    }
+  }
+
+  private assertNoCanonicalMultiTaxiContextOverrides(command: object) {
+    const forbiddenFields = [
+      "runtimeProfileCode",
+      "serviceProductCode",
+      "acquisitionMode",
+      "operatingAuthorizationId",
+      "queueMode",
+    ] as const;
+
+    for (const field of forbiddenFields) {
+      if (field in command) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "MULTI_TAXI_CANONICAL_CONTEXT_OVERRIDE_FORBIDDEN",
+          "Multi-taxi canonical runtime context is resolved by the server and may not be supplied by the client.",
+          { field },
+        );
+      }
     }
   }
 
