@@ -42,6 +42,7 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
+import { ServiceProductService } from "../service-product/service-product.service";
 import { MultiTaxiRepository } from "./multi-taxi.repository";
 
 @Injectable()
@@ -60,6 +61,7 @@ export class MultiTaxiService implements OnModuleInit {
   constructor(
     private readonly ownedMobilityService: OwnedMobilityService,
     @Optional() private readonly repository?: MultiTaxiRepository,
+    @Optional() private readonly serviceProductService?: ServiceProductService,
   ) {}
 
   async onModuleInit() {
@@ -242,6 +244,7 @@ export class MultiTaxiService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
     requestId?: string,
   ) {
+    this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
     const order = this.ownedMobilityService.createMultiTaxiRide(
       command,
@@ -256,6 +259,7 @@ export class MultiTaxiService implements OnModuleInit {
     command: CreateCallCenterMultiTaxiRideCommand,
     requestId?: string,
   ) {
+    this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
     const order = this.ownedMobilityService.createMultiTaxiRide(
       command,
@@ -557,6 +561,13 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
     return this.cloneAuthorization(resolved);
+  }
+
+  private assertServiceProductPolicy() {
+    this.serviceProductService?.assertRuntimeProfileServiceProductActive(
+      "multi_taxi_direct",
+      "taxi_reservation",
+    );
   }
 
   private assertAuthorizedVehicle(authorizationId: string, vehicleId: string) {

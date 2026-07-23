@@ -7,6 +7,7 @@ function createService(options?: {
   orderStatus?: string;
   assignment?: Record<string, unknown> | null;
   repository?: Record<string, unknown>;
+  serviceProductService?: Record<string, unknown>;
 }) {
   const order = {
     orderId: "order-001",
@@ -49,6 +50,7 @@ function createService(options?: {
     service: new MultiTaxiService(
       ownedMobilityService as never,
       options?.repository as never,
+      options?.serviceProductService as never,
     ),
     ownedMobilityService,
     order,
@@ -88,6 +90,43 @@ describe("MultiTaxiService operating authority", () => {
         null,
       ),
     ).rejects.toThrowError(ApiRequestError);
+  });
+
+  it("enforces the server-side runtime service-product policy", async () => {
+    const assertRuntimeProfileServiceProductActive = vi.fn(() => {
+      throw new ApiRequestError(
+        409,
+        "MULTI_TAXI_SERVICE_PRODUCT_NOT_ALLOWED",
+        "inactive",
+      );
+    });
+    const { service } = createService({
+      serviceProductService: {
+        assertRuntimeProfileServiceProductActive,
+      },
+    });
+
+    await expect(
+      service.createRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+        },
+        null,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "MULTI_TAXI_SERVICE_PRODUCT_NOT_ALLOWED" },
+      },
+    });
+    expect(assertRuntimeProfileServiceProductActive).toHaveBeenCalledWith(
+      "multi_taxi_direct",
+      "taxi_reservation",
+    );
   });
 
   it("resolves the runtime authority on the server and denies after suspension", async () => {
