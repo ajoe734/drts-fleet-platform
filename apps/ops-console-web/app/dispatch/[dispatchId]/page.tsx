@@ -20,7 +20,10 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
-import { resolveQueueSemantics } from "@/lib/queue-semantics";
+import {
+  resolveQueueSemantics,
+  isForbiddenStatutoryOverrideAction,
+} from "@/lib/queue-semantics";
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
@@ -1448,11 +1451,7 @@ function synthesizeOwnedActions(
   const semantics = resolveQueueSemantics(order, "en");
   if (semantics.isStatutoryRefusal) {
     return actions.filter(
-      (a) =>
-        a.action !== "fare_override" &&
-        a.action !== "request_override" &&
-        a.action !== "approve_override" &&
-        a.action !== "force_checkin",
+      (a) => !isForbiddenStatutoryOverrideAction(a.action),
     );
   }
 

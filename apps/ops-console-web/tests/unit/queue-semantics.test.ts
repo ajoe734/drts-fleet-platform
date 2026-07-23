@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveQueueSemantics } from "../../lib/queue-semantics";
+import {
+  resolveQueueSemantics,
+  isForbiddenStatutoryOverrideAction,
+} from "../../lib/queue-semantics";
 import { t } from "../../lib/translations";
 
 describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
@@ -68,6 +71,39 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
     expect(multiTaxiPhysicalAttempt.refusalCopy).not.toContain("QUEUE_MODE_NOT_ALLOWED");
   });
 
+  it("identifies canonical and legacy override/fare-override actions as forbidden in statutory refusal", () => {
+    const forbiddenActions = [
+      "request_exception_override",
+      "approve_exception_override",
+      "reject_exception_override",
+      "manual_fare_override",
+      "request_fare_override",
+      "request_override",
+      "approve_override",
+      "fare_override",
+      "force_checkin",
+      "force_checkin_rank",
+      "force_check_in",
+    ];
+
+    for (const action of forbiddenActions) {
+      expect(isForbiddenStatutoryOverrideAction(action)).toBe(true);
+    }
+
+    const allowedActions = [
+      "contact_passenger",
+      "assign_candidate",
+      "release_driver",
+      "redispatch",
+      "cancel_order",
+      "resolve_no_supply",
+    ];
+
+    for (const action of allowedActions) {
+      expect(isForbiddenStatutoryOverrideAction(action)).toBe(false);
+    }
+  });
+
   it("ensures i18n keys resolve via t() without missing key fallbacks", () => {
     expect(t("dispatch.queue.overviewTitle", "zh")).toBe("佇列概覽與模式");
     expect(t("dispatch.queue.multiTaxiDirectService", "zh")).toBe(
@@ -81,3 +117,4 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
     );
   });
 });
+
