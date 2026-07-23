@@ -4,26 +4,50 @@
 **Owner:** Design QA  
 **Depends on:** `MTX-DESIGN-001..002`, `P5-DESIGN-001..002`  
 **Blocks:** Visual implementation closeout for Fleets B, C, D, F  
-**Requirement Source:** `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md` §3 (Wave 0 & Design QA)
+**Requirement Source:** `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md` §3 & `08_multi_taxi_operations_ui_design_requirements_20260723.md` §20
 
 ---
 
 ## 1. Design Deliverables Verification Checklist
 
-- [x] **Editable Component Source & Variants:**
-  - `docs/05-ui/drts-design-canvas/mtx-operations-screens.jsx`
-  - Covers all 17 missing multi-taxi operational UI screens across Operating Authorization, Queue Semantics, Rating Governance, and Commerce/Retention.
-- [x] **Prototype Interaction Links & Flows:**
-  - Step-by-step interactive flows documented in `MTX-DESIGN-001`, `MTX-DESIGN-002`, `P5-DESIGN-001`, `P5-DESIGN-002` handoff packets.
-- [x] **Responsive Frames & Viewport Audits:**
-  - Desktop 1440px multi-column layouts & Narrow / Mobile 390px responsive viewport specs verified.
+- [x] **Mounted Canvas Surfaces & Component Source:**
+  - Codebase source: `docs/05-ui/drts-design-canvas/mtx-operations-screens.jsx`.
+  - Canvas mounting: Mounted in `docs/05-ui/drts-design-canvas/Platform Admin.html` (sections 08, 09, 10) and `docs/05-ui/drts-design-canvas/Ops Console.html` (section 08).
+  - Index integration: Indexed in `Design Index.html` and `DRTS Index.html`.
+  - Covers all 17 multi-taxi operational UI screens across Operating Authorization, Queue Semantics, Rating Governance, and Commerce/Retention.
+
+- [x] **Prototype Interaction Links & Flow Connections:**
+  - Interactive state machine hooks implemented in `mtx-operations-screens.jsx`:
+    - Operating Authorization: `MTX-AUTH-UI-01` (Registry) -> `MTX-AUTH-UI-03` (Draft Editor) -> `MTX-AUTH-UI-04` (Lifecycle Confirmation) -> `MTX-AUTH-UI-02` (Detail) -> `MTX-AUTH-UI-05` (Vehicles).
+    - Queue Semantics: `MTX-QUEUE-UI-01` (Overview) -> `MTX-QUEUE-UI-02` (Detail) -> `MTX-QUEUE-UI-03` (Non-Bypassable Legal Denial Warning).
+    - Rating Governance: `P5-RATE-UI-01` (Review Queue) -> `P5-RATE-UI-02` (Moderation & Invalidation Confirmation) -> `P5-RATE-UI-03` (Driver Rating Authority).
+    - Commerce & Records: `P5-COM-UI-01` (Fare Anomaly Fail-Closed) -> `P5-COM-UI-02` (Payment Exception) -> `P5-COM-UI-03` (Certificate Support) -> `P5-COM-UI-04` (730-day Record Query) -> `P5-COM-UI-05` (Controlled Export & Legal Hold).
+
+- [x] **Responsive & Narrow Viewport Frames:**
+  - Explicit Desktop 1440px multi-column layouts & Narrow Viewport 390px responsive frames (`MTX-AUTH-UI-01_Narrow`, `MTX-QUEUE-UI-01_Narrow`, `P5-RATE-UI-01_Narrow`) mounted in design canvases.
+  - Mobile/narrow single-column card layouts, responsive flex wraps, and 200% zoom compatibility verified.
+
 - [x] **Copy and State Matrices:**
-  - Complete state matrices (Happy, Draft, Suspended, Expired, Loading, Empty, 403 Forbidden, 409 Stale, Fail-Closed) defined with frozen ZH-TW vocabulary.
+  - Complete state matrices (Happy, Draft, Suspended, Expired, Loading, Empty, 403 Forbidden, 409 Stale Version, Fail-Closed, Non-Bypassable Legal Denial) defined with frozen Traditional Chinese (ZH-TW) vocabulary.
+
 - [x] **Accessibility & Developer Annotations:**
-  - ARIA roles (`role="status"`, `role="alert"`, `role="dialog"`), WCAG AA contrast compliance (>= 4.5:1), keyboard focus order, and API/capability mappings included.
-- [x] **P5 & S3 Reference Screenshots / Canvases:**
-  - `P5_dispatch_disclosure.png` (P5-01..12, P5-A01..A05 in `platform-p5.jsx` and `p5-screens.jsx`)
-  - `S3_sos_fullscreen.png` (S3-01..11, S3-O01..O06 in `driver-sos.jsx` and `ops-sos.jsx`)
+  - ARIA dialog hooks (`role="dialog"`, `aria-modal="true"`, `aria-labelledby`, `aria-describedby`, focus trap & Escape key handlers) on all modal windows.
+  - ARIA live region & alert announcements (`role="alert"`, `aria-live="assertive"`, `aria-live="polite"`) on warnings and legal denials.
+  - Skeletal loading indicators (`loading` prop with `SkeletonCard` / `SkeletonRow` rendering `aria-busy="true"`).
+  - WCAG 2.1 AA contrast compliance (>= 4.5:1), keyboard focus indicators, and capability permission mappings (`multi_taxi_authorization:read`, `write`, `activate`).
+
+- [x] **PNG Evidence Requirements (`08_multi_taxi_operations_ui_design_requirements_20260723.md` §20):**
+  - [x] `MTX_authorization_registry.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/MTX_authorization_registry.png` & `docs/05-ui/drts-design-canvas/screenshots/MTX_authorization_registry.png`)
+  - [x] `MTX_authorization_detail_approved.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/MTX_authorization_detail_approved.png`)
+  - [x] `MTX_authorization_vehicle_membership.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/MTX_authorization_vehicle_membership.png`)
+  - [x] `MTX_queue_virtual_matching.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/MTX_queue_virtual_matching.png`)
+  - [x] `MTX_queue_physical_rank_denied.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/MTX_queue_physical_rank_denied.png`)
+  - [x] `P5_rating_moderation.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/P5_rating_moderation.png`)
+  - [x] `P5_fare_anomaly.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/P5_fare_anomaly.png`)
+  - [x] `P5_payment_exception.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/P5_payment_exception.png`)
+  - [x] `P5_operational_record_export.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/P5_operational_record_export.png`)
+  - [x] `P5_dispatch_disclosure.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/P5_dispatch_disclosure.png`)
+  - [x] `S3_sos_fullscreen.png` (`support/sidecars/P5-S3-DESIGN-QA-001/screenshots/S3_sos_fullscreen.png`)
 
 ---
 
@@ -35,7 +59,7 @@
 - [x] **No Fake Aggregate Ratings:**
   - Verified `new_driver` and `unavailable` rendering rules; no dummy `5.0` or `0.0` defaults.
 - [x] **No Concealed PSP Payment Errors:**
-  - Verified payment failures render explicit status and failure reasons.
+  - Verified payment failures render explicit status and failure reasons (`Card Declined`).
 - [x] **No Ad-Hoc Color Palettes:**
   - Verified 100% adherence to `@drts/ui-tokens` realm color definitions (`tenant`, `ops`, `platform`, `system`, `driver`).
 

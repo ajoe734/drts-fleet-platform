@@ -47,6 +47,7 @@
 <script type="text/babel" src="platform-sandbox.jsx"></script>
 <script type="text/babel" src="platform-regulator.jsx"></script>
 <script type="text/babel" src="platform-service-area.jsx"></script>
+<script type="text/babel" src="mtx-operations-screens.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -59,17 +60,43 @@ function App() {
   const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const th = buildMgmtTheme({ console: 'platform', dark: tw.dark, density: tw.density });
   const W = 1440, H = 900;
-  const Frame = ({ children, chrome, url }) => chrome
-    ? <MacWindow title="Platform Admin · DRTS" url={'https://admin.drts.io' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
-    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
-  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
-  const Bare = ({ children }) => <Frame>{children}</Frame>;
+  const NW = 390, NH = 844;
+  const Frame = ({ children, chrome, url, width = W, height = H }) => chrome
+    ? <MacWindow title="Platform Admin · DRTS" url={'https://admin.drts.io' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={width} height={height}>{children}</MacWindow>
+    : <div style={{ width, height, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children, width, height }) => <Frame chrome url={url} width={width} height={height}>{children}</Frame>;
+  const Bare = ({ children, width, height }) => <Frame width={width} height={height}>{children}</Frame>;
 
   return (
     <>
-      <DesignCanvas projectName="Platform Admin" subtitle="平台治理控制平面 · 18 routes · packet ADM-DH-PKT-002 (2026-05-25)" accent="#4F46E5">
+      <DesignCanvas projectName="Platform Admin" subtitle="平台治理控制平面 · 29 routes · Wave 0 MTX & P5 Design Gates" accent="#4F46E5">
         <DCSection id="overview" title="01 · Workspace">
           <DCArtboard id="home" label="平台首頁 / Home" width={W} height={H}><Hero url="/"><PA_Home theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="mtx-auth" title="08 · 多元計程車營運許可 (MTX-DESIGN-001)" subtitle="MTX-AUTH-UI-01..06 · 許可註冊簿/詳情/草稿/啟用確認/授權車輛/衝突權限">
+          <DCArtboard id="mtx-auth-registry" label="MTX-AUTH-UI-01 · 營運許可註冊簿 (1440px)" width={W} height={H}><Hero url="/multi-taxi-authorizations"><PA_MTX_AuthRegistry theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="mtx-auth-registry-narrow" label="MTX-AUTH-UI-01 · 營運許可註冊簿 (Narrow 390px)" width={NW} height={NH}><Hero url="/multi-taxi-authorizations" width={NW} height={NH}><PA_MTX_AuthRegistry theme={th} isNarrow /></Hero></DCArtboard>
+          <DCArtboard id="mtx-auth-detail" label="MTX-AUTH-UI-02 · 營運許可詳情 · approved" width={W} height={H}><Bare><PA_MTX_AuthDetail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-auth-draft" label="MTX-AUTH-UI-03 · 建立/編輯許可草稿" width={W} height={H}><Bare><PA_MTX_AuthDraftEditor theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-auth-confirm" label="MTX-AUTH-UI-04 · 啟用/暫停生命週期確認" width={W} height={H}><Bare><PA_MTX_AuthLifecycleConfirm theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-auth-vehicles" label="MTX-AUTH-UI-05 · 授權車輛名單維護" width={W} height={H}><Bare><PA_MTX_AuthVehicles theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-auth-conflict" label="MTX-AUTH-UI-06 · 衝突與 403 權限不足狀態" width={W} height={H}><Bare><PA_MTX_AuthConflictState theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-rating" title="09 · 評價治理 (P5-DESIGN-001)" subtitle="P5-RATE-UI-01..03 · 評價審查佇列/細節作廢/駕駛星級權威">
+          <DCArtboard id="p5-rating-queue" label="P5-RATE-UI-01 · 評價審查佇列 (1440px)" width={W} height={H}><Hero url="/p5-ratings"><PA_P5_RatingQueue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-rating-queue-narrow" label="P5-RATE-UI-01 · 評價審查佇列 (Narrow 390px)" width={NW} height={NH}><Hero url="/p5-ratings" width={NW} height={NH}><PA_P5_RatingQueue theme={th} isNarrow /></Hero></DCArtboard>
+          <DCArtboard id="p5-rating-detail" label="P5-RATE-UI-02 · 評價作廢與審查細節" width={W} height={H}><Bare><PA_P5_RatingDetail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="p5-rating-authority" label="P5-RATE-UI-03 · 駕駛星級權威 (rated/new_driver/unavailable)" width={W} height={H}><Bare><PA_P5_DriverRatingAuthority theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-commerce" title="10 · 車資、支付、憑證與保存 (P5-DESIGN-002)" subtitle="P5-COM-UI-01..05 · 車資異常/付款例外/乘車證明/兩年紀錄/受控匯出+Legal Hold">
+          <DCArtboard id="p5-fare-anomaly" label="P5-COM-UI-01 · 車資估算異常佇列 (Fail-Closed)" width={W} height={H}><Hero url="/p5-fare-anomalies"><PA_P5_FareAnomalyQueue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-payment-exception" label="P5-COM-UI-02 · 付款例外處置細節" width={W} height={H}><Hero url="/payments/exception"><PA_P5_PaymentExceptionDetail theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-certificate" label="P5-COM-UI-03 · 電子乘車證明查詢與支援" width={W} height={H}><Bare><PA_P5_CertificateSupport theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="p5-records-query" label="P5-COM-UI-04 · 730 天營運紀錄完整查詢" width={W} height={H}><Hero url="/multi-taxi-records"><PA_P5_RecordsQuery theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-export-retention" label="P5-COM-UI-05 · 受控匯出與 Legal Hold 法律保留" width={W} height={H}><Bare><PA_P5_ExportRetention theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="tenants" title="02 · 租戶治理" subtitle="Q-ADM01 /tenants 與 /tenant-governance 保留兩個 route">

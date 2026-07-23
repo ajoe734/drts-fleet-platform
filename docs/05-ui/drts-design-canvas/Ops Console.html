@@ -43,6 +43,7 @@
 <script type="text/babel" src="ops-screens-3.jsx"></script>
 <script type="text/babel" src="ops-supply.jsx"></script>
 <script type="text/babel" src="ops-av-fallback.jsx"></script>
+<script type="text/babel" src="mtx-operations-screens.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -54,15 +55,16 @@ function App() {
   const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const th = buildMgmtTheme({ console: 'ops', dark: tw.dark, density: tw.density });
   const W = 1440, H = 900;
-  const Frame = ({ children, chrome, url }) => chrome
-    ? <MacWindow title="Ops Console · DRTS" url={'https://ops.drts.io' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
-    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
-  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
-  const Bare = ({ children }) => <Frame>{children}</Frame>;
+  const NW = 390, NH = 844;
+  const Frame = ({ children, chrome, url, width = W, height = H }) => chrome
+    ? <MacWindow title="Ops Console · DRTS" url={'https://ops.drts.io' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={width} height={height}>{children}</MacWindow>
+    : <div style={{ width, height, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children, width, height }) => <Frame chrome url={url} width={width} height={height}>{children}</Frame>;
+  const Bare = ({ children, width, height }) => <Frame width={width} height={height}>{children}</Frame>;
 
   return (
     <>
-      <DesignCanvas projectName="Ops Console" subtitle="即時營運指揮 · 20 routes · packet OPS-DH-PKT-002 (2026-05-25)" accent="#DC2626">
+      <DesignCanvas projectName="Ops Console" subtitle="即時營運指揮 · 23 routes · Wave 0 Queue Semantics Design Gate" accent="#DC2626">
 
         <DCSection id="overview" title="01 · Workspace" subtitle="當班總覽 + 派遣多看板">
           <DCArtboard id="dashboard" label="儀表板 / Dashboard · T3" width={W} height={H}><Hero url="/dashboard"><OC_Dashboard theme={th} /></Hero></DCArtboard>
@@ -72,6 +74,13 @@ function App() {
           <DCArtboard id="dispatch-nosupply" label="派遣 · No eligible supply" width={W} height={H}><Bare><OC_Dispatch theme={th} board="no_supply" /></Bare></DCArtboard>
           <DCArtboard id="dispatch-governance" label="派遣 · Governance blocked" width={W} height={H}><Bare><OC_Dispatch theme={th} board="governance" /></Bare></DCArtboard>
           <DCArtboard id="dispatch-forwarded" label="派遣 · Forwarded mirror" width={W} height={H}><Bare><OC_Dispatch theme={th} board="forwarded" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="mtx-queue" title="08 · 派車佇列語意與法定拒絕 (MTX-DESIGN-002)" subtitle="MTX-QUEUE-UI-01..03 · 佇列總覽/條目詳情/非過濾性法定拒絕進入 (Non-Bypassable Legal Denial)">
+          <DCArtboard id="mtx-queue-overview" label="MTX-QUEUE-UI-01 · 佇列語意與資格監控 (1440px)" width={W} height={H}><Hero url="/dispatch/queue"><OPS_MTX_QueueOverview theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="mtx-queue-overview-narrow" label="MTX-QUEUE-UI-01 · 佇列語意與資格監控 (Narrow 390px)" width={NW} height={NH}><Hero url="/dispatch/queue" width={NW} height={NH}><OPS_MTX_QueueOverview theme={th} isNarrow /></Hero></DCArtboard>
+          <DCArtboard id="mtx-queue-detail" label="MTX-QUEUE-UI-02 · 佇列條目詳情 (合規說明)" width={W} height={H}><Bare><OPS_MTX_QueueEntryDetail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-queue-legal-denial" label="MTX-QUEUE-UI-03 · 實體排班/招呼站 法定拒絕進入 (Non-Bypassable Warning)" width={W} height={H}><Bare><OPS_MTX_LegalDenialState theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="dispatch-detail" title="02 · 工作項目工作區" subtitle="owned + forwarded via domain flag">

@@ -1,5 +1,6 @@
 // mtx-operations-screens.jsx — Multi-Taxi Operations UI Design Canvas Screens
 // Wave 0 Canonical Surfaces: MTX-DESIGN-001, MTX-DESIGN-002, P5-DESIGN-001, P5-DESIGN-002
+// Accessibility (WCAG 2.1 AA), Narrow Viewport (390px), Skeleton Loading & Interactive Prototype Flow Enabled
 
 // -----------------------------------------------------------------------------
 // Data Fixtures (Canonical Machine & Human Vocabulary)
@@ -44,51 +45,165 @@ const FX_P5_PAYMENT_EXCEPTIONS = [
 ];
 
 // -----------------------------------------------------------------------------
+// Accessibility & Layout Primitives (ARIA, Dialog, Skeleton, Narrow Viewport)
+// -----------------------------------------------------------------------------
+
+function AccessibleDialog({ title, onClose, children, theme: th, maxWidth = 560 }) {
+  React.useEffect(() => {
+    const handleKeyDown = (e) => { if (e.key === 'Escape' && onClose) onClose(); };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="dialog-title"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+      }}>
+      <div style={{
+        background: th.surface, border: '1px solid ' + th.border, borderRadius: 12,
+        padding: 24, width: '100%', maxWidth, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 id="dialog-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: th.text }}>{title}</h3>
+          {onClose && <Btn theme={th} size="xs" variant="ghost" onClick={onClose}>✕</Btn>}
+        </div>
+        <div>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function SkeletonCard({ theme: th, rows = 3 }) {
+  return (
+    <div aria-busy="true" aria-label="載入中" style={{ padding: 16, background: th.surface, borderRadius: 8, border: '1px solid ' + th.border }}>
+      <div style={{ height: 16, width: '40%', background: th.surfaceLo, borderRadius: 4, marginBottom: 12 }} />
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={{ height: 12, width: `${85 - i * 15}%`, background: th.surfaceLo, borderRadius: 4, marginBottom: 8 }} />
+      ))}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
 // 1. Operating Authorization Console Components (MTX-DESIGN-001)
 // -----------------------------------------------------------------------------
 
-function PA_MTX_AuthRegistry({ theme: th }) {
+function PA_MTX_AuthRegistry({ theme: th, isNarrow = false, loading = false }) {
+  const [activeModal, setActiveModal] = React.useState(null);
+
+  if (loading) {
+    return (
+      <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '營運許可註冊簿']}
+        env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
+        <div style={{ padding: isNarrow ? 12 : 24 }}><SkeletonCard theme={th} rows={6} /></div>
+      </Shell>
+    );
+  }
+
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '營運許可註冊簿']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
       <PageHeader theme={th} title="多元計程車營運許可註冊簿" subtitle="MTX-AUTH-UI-01 · 依核准許可證號與營運區域查詢核准狀態及生效期間"
-        actions={<Btn theme={th} variant="primary" icon="plus">新增許可草稿</Btn>} />
-      <div style={{ padding: 24 }}>
-        <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', background: th.surfaceLo, padding: 12, borderRadius: 8, border: '1px solid ' + th.border }}>
+        actions={<Btn theme={th} variant="primary" icon="plus" onClick={() => setActiveModal('draft')}>新增許可草稿</Btn>} />
+      <div style={{ padding: isNarrow ? 12 : 24 }}>
+        <div style={{
+          marginBottom: 16, display: 'flex', flexDirection: isNarrow ? 'column' : 'row',
+          gap: 12, alignItems: isNarrow ? 'stretch' : 'center', background: th.surfaceLo, padding: 12, borderRadius: 8, border: '1px solid ' + th.border
+        }}>
           <Select theme={th} value="業者：全部" />
           <Select theme={th} value="狀態：全部" />
           <Select theme={th} value="營運區域：全部" />
-          <Input theme={th} placeholder="搜尋許可代碼 / 營業計畫版本..." style={{ width: 260 }} />
+          <Input theme={th} placeholder="搜尋許可代碼 / 營業計畫版本..." style={{ width: isNarrow ? '100%' : 260 }} />
           <Pill theme={th} tone="info">共 4 筆許可</Pill>
         </div>
         <Card theme={th} padding={0}>
-          <Table theme={th} columns={[
-            { h: '許可代碼', k: 'code', w: 160, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 700 }}>{r.code}</span> },
-            { h: '業者名稱', k: 'operator', w: 180 },
-            { h: '計畫版本', k: 'planVer', w: 90, mono: true },
-            { h: '狀態', w: 100, r: r => <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill> },
-            { h: '營運區域', w: 150, r: r => r.areas.map(a => <Pill key={a} theme={th} tone="neutral">{a}</Pill>) },
-            { h: '生效費率', k: 'fareVer', w: 100, mono: true },
-            { h: '有效期間', w: 220, mono: true, r: r => <span style={{ fontSize: 11.5 }}>{r.effectiveFrom} ~ {r.effectiveUntil}</span> },
-            { h: '', w: 100, r: () => <Btn theme={th} size="xs" variant="ghost" icon="eye">詳情</Btn> }
-          ]} rows={FX_MTX_AUTHORIZATIONS} />
+          {isNarrow ? (
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {FX_MTX_AUTHORIZATIONS.map(r => (
+                <div key={r.id} style={{ padding: 12, background: th.surfaceLo, borderRadius: 8, border: '1px solid ' + th.border }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ color: th.accent, fontWeight: 700, fontFamily: SHELL_MONO }}>{r.code}</span>
+                    <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: th.text, marginBottom: 4 }}>{r.operator}</div>
+                  <div style={{ fontSize: 11.5, color: th.textMuted }}>計畫版本: {r.planVer} | 費率: {r.fareVer}</div>
+                  <div style={{ fontSize: 11, color: th.textMuted, marginTop: 4 }}>有效: {r.effectiveFrom} ~ {r.effectiveUntil}</div>
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Btn theme={th} size="xs" variant="ghost" icon="eye" onClick={() => setActiveModal('detail')}>詳情</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Table theme={th} columns={[
+              { h: '許可代碼', k: 'code', w: 160, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 700 }}>{r.code}</span> },
+              { h: '業者名稱', k: 'operator', w: 180 },
+              { h: '計畫版本', k: 'planVer', w: 90, mono: true },
+              { h: '狀態', w: 100, r: r => <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill> },
+              { h: '營運區域', w: 150, r: r => r.areas.map(a => <Pill key={a} theme={th} tone="neutral">{a}</Pill>) },
+              { h: '生效費率', k: 'fareVer', w: 100, mono: true },
+              { h: '有效期間', w: 220, mono: true, r: r => <span style={{ fontSize: 11.5 }}>{r.effectiveFrom} ~ {r.effectiveUntil}</span> },
+              { h: '', w: 100, r: () => <Btn theme={th} size="xs" variant="ghost" icon="eye" onClick={() => setActiveModal('detail')}>詳情</Btn> }
+            ]} rows={FX_MTX_AUTHORIZATIONS} />
+          )}
         </Card>
       </div>
+
+      {activeModal === 'draft' && (
+        <AccessibleDialog title="建立營運許可草稿 (MTX-AUTH-UI-03)" theme={th} onClose={() => setActiveModal(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field theme={th} label="許可代碼" required><Input theme={th} value="MTA-NTP-2026-05" mono /></Field>
+            <Field theme={th} label="業者 ID / 名稱" required><Input theme={th} value="新北海線多元車隊" /></Field>
+            <Field theme={th} label="營業計畫版本" required><Input theme={th} value="v1.5" mono /></Field>
+            <Field theme={th} label="綁定生效費率" required><Select theme={th} value="F-2026-04 (已備查)" /></Field>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+              <Btn theme={th} variant="secondary" onClick={() => setActiveModal(null)}>取消</Btn>
+              <Btn theme={th} variant="primary" onClick={() => setActiveModal('confirm')}>儲存草稿並預覽啟用</Btn>
+            </div>
+          </div>
+        </AccessibleDialog>
+      )}
+
+      {activeModal === 'confirm' && (
+        <AccessibleDialog title="啟用許可確認 (MTX-AUTH-UI-04)" theme={th} onClose={() => setActiveModal(null)}>
+          <Banner theme={th} tone="warn" icon="alert" body="警告：啟用後屬於該許可之車輛將正式解除派車阻擋。" />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+            <Btn theme={th} variant="secondary" onClick={() => setActiveModal(null)}>返回編輯</Btn>
+            <Btn theme={th} variant="primary" onClick={() => setActiveModal(null)}>確認正式啟用</Btn>
+          </div>
+        </AccessibleDialog>
+      )}
+
+      {activeModal === 'detail' && (
+        <AccessibleDialog title="許可詳情 (MTX-AUTH-UI-02)" theme={th} onClose={() => setActiveModal(null)}>
+          <DL theme={th} cols={2} items={[
+            { k: '許可代碼', v: 'MTA-TP-2026-01', mono: true },
+            { k: '業者', v: '台北大都會計程車' },
+            { k: '狀態', v: <Pill theme={th} tone="success">已核准</Pill> },
+            { k: '費率', v: 'F-2026-03' }
+          ]} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <Btn theme={th} variant="secondary" onClick={() => setActiveModal(null)}>關閉</Btn>
+          </div>
+        </AccessibleDialog>
+      )}
     </Shell>
   );
 }
 
-function PA_MTX_AuthDetail({ theme: th }) {
+function PA_MTX_AuthDetail({ theme: th, isNarrow = false }) {
   const auth = FX_MTX_AUTHORIZATIONS[0];
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '營運許可詳情']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
       <PageHeader theme={th} title={`營運許可詳情 · ${auth.code}`} subtitle="MTX-AUTH-UI-02 · 讀取單一許可之法定規範、車輛名單與生效費率綁定"
         actions={<><Btn theme={th} variant="secondary">編輯車輛名單</Btn><Btn theme={th} variant="warn">暫停許可</Btn></>} />
-      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ padding: isNarrow ? 12 : 24, display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1.4fr 1fr', gap: 16, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card theme={th} title="許可核心屬性" subtitle="系統唯一識別碼: AUTH-2026-TP-001">
-            <DL theme={th} cols={2} items={[
+            <DL theme={th} cols={isNarrow ? 1 : 2} items={[
               { k: '許可代碼', v: auth.code, mono: true },
               { k: '業者名稱', v: auth.operator },
               { k: '營業計畫版本', v: auth.planVer, mono: true },
@@ -122,15 +237,15 @@ function PA_MTX_AuthDetail({ theme: th }) {
   );
 }
 
-function PA_MTX_AuthDraftEditor({ theme: th }) {
+function PA_MTX_AuthDraftEditor({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '建立許可草稿']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title="建立營運許可草稿" subtitle="MTX-AUTH-UI-03 · 填寫業者、營業計畫版本、營運區域與生效時間 (儲存為草稿後方可送審啟用)"
         actions={<><Btn theme={th} variant="secondary">取消</Btn><Btn theme={th} variant="primary" icon="save">儲存草稿</Btn></>} />
-      <div style={{ padding: 24, maxWidth: 860 }}>
+      <div style={{ padding: isNarrow ? 12 : 24, maxWidth: 860 }}>
         <Card theme={th} title="許可草稿欄位填寫">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr', gap: 16 }}>
             <Field theme={th} label="許可代碼" required hint="請輸入官方交通局核准代碼"><Input theme={th} value="MTA-NTP-2026-05" mono /></Field>
             <Field theme={th} label="業者 ID / 名稱" required><Input theme={th} value="新北海線多元車隊" /></Field>
             <Field theme={th} label="營業計畫版本" required><Input theme={th} value="v1.5" mono /></Field>
@@ -140,7 +255,7 @@ function PA_MTX_AuthDraftEditor({ theme: th }) {
           </div>
           <div style={{ marginTop: 16 }}>
             <Field theme={th} label="核准營運區域 (複選)" required>
-              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
                 <Pill theme={th} tone="info">新北市 (已選擇)</Pill>
                 <Pill theme={th} tone="info">基隆市 (已選擇)</Pill>
                 <Btn theme={th} size="xs" variant="ghost" icon="plus">增加區域</Btn>
@@ -156,12 +271,12 @@ function PA_MTX_AuthDraftEditor({ theme: th }) {
   );
 }
 
-function PA_MTX_AuthLifecycleConfirm({ theme: th }) {
+function PA_MTX_AuthLifecycleConfirm({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '啟用許可確認']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title="確認啟用營運許可" subtitle="MTX-AUTH-UI-04 · 正式將營運許可由 draft/suspended 轉為 approved/active" />
-      <div style={{ padding: 24, maxWidth: 680, margin: '0 auto' }}>
+      <div style={{ padding: isNarrow ? 12 : 24, maxWidth: 680, margin: '0 auto' }}>
         <Card theme={th} title="啟用許可對象確認" subtitle="MTA-NTP-2026-04 · 新北海線多元車隊">
           <DL theme={th} cols={1} items={[
             { k: '許可代碼', v: 'MTA-NTP-2026-04', mono: true },
@@ -183,15 +298,15 @@ function PA_MTX_AuthLifecycleConfirm({ theme: th }) {
   );
 }
 
-function PA_MTX_AuthVehicles({ theme: th }) {
+function PA_MTX_AuthVehicles({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '授權車輛名單']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
       <PageHeader theme={th} title="授權車輛名單維護" subtitle="MTX-AUTH-UI-05 · MTA-TP-2026-01 · 台北大都會計程車"
         actions={<Btn theme={th} variant="primary" icon="plus">新增車輛至名單</Btn>} />
-      <div style={{ padding: 24 }}>
-        <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
-          <Input theme={th} placeholder="搜尋車牌 (例如 BKR-2208)..." style={{ width: 280 }} />
+      <div style={{ padding: isNarrow ? 12 : 24 }}>
+        <div style={{ marginBottom: 16, display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: 12 }}>
+          <Input theme={th} placeholder="搜尋車牌 (例如 BKR-2208)..." style={{ width: isNarrow ? '100%' : 280 }} />
           <Select theme={th} value="名單狀態：全部" />
         </div>
         <Card theme={th} padding={0}>
@@ -210,14 +325,16 @@ function PA_MTX_AuthVehicles({ theme: th }) {
   );
 }
 
-function PA_MTX_AuthConflictState({ theme: th }) {
+function PA_MTX_AuthConflictState({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="mtx-authorizations" breadcrumb={['多元計程車管理', '異常與權限警告']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title="許可更新衝突 / 權限不足" subtitle="MTX-AUTH-UI-06 · 處理無寫入權限、版本的併發衝突與伺服器 Fail-Closed 狀態" />
-      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ padding: isNarrow ? 12 : 24, display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr', gap: 16 }}>
         <Card theme={th} title="權限不足 (Permission Denied)" subtitle="HTTP 403 · Capability Missing">
-          <Banner theme={th} tone="danger" icon="lock" body="操作失敗：您的帳號缺少 `multi_taxi_authorization:activate` 權限。無法將許可狀態變更為 active。" />
+          <div role="alert" aria-live="assertive">
+            <Banner theme={th} tone="danger" icon="lock" body="操作失敗：您的帳號缺少 `multi_taxi_authorization:activate` 權限。無法將許可狀態變更為 active。" />
+          </div>
           <div style={{ marginTop: 12 }}>
             <DL theme={th} cols={1} items={[
               { k: '所需權限', v: 'multi_taxi_authorization:activate', mono: true },
@@ -227,7 +344,9 @@ function PA_MTX_AuthConflictState({ theme: th }) {
           </div>
         </Card>
         <Card theme={th} title="版本過期 / 併發衝突 (Stale Version)" subtitle="HTTP 409 · Version Conflict">
-          <Banner theme={th} tone="warn" icon="alert" body="儲存失敗：此許可資料已在另一工作階段被更新 (最新版本: v3，您的版本: v2)。" />
+          <div role="alert" aria-live="polite">
+            <Banner theme={th} tone="warn" icon="alert" body="儲存失敗：此許可資料已在另一工作階段被更新 (最新版本: v3，您的版本: v2)。" />
+          </div>
           <div style={{ marginTop: 12 }}>
             <DL theme={th} cols={1} items={[
               { k: '最新異動人', v: '張副局長 · 14:22:05' },
@@ -247,44 +366,87 @@ function PA_MTX_AuthConflictState({ theme: th }) {
 // 2. Queue Semantics Operations Components (MTX-DESIGN-002)
 // -----------------------------------------------------------------------------
 
-function OPS_MTX_QueueOverview({ theme: th }) {
+function OPS_MTX_QueueOverview({ theme: th, isNarrow = false }) {
+  const [selectedDenied, setSelectedDenied] = React.useState(null);
+
   return (
     <Shell theme={th} nav={OPS_NAV} active="dispatch-queue" breadcrumb={['派車營運', '佇列語意監控']}
       env="production" actor={OPS_ACTOR} health={OPS_HEALTH} refreshTier="fast" dataFreshness="fresh">
       <PageHeader theme={th} title="派車佇列語意與資格監控" subtitle="MTX-QUEUE-UI-01 · 顯式標示 virtual_matching, physical_rank, taxi_stand 佇列模式"
         meta={<Pill theme={th} tone="warn">2 筆法定拒絕佇列</Pill>} />
-      <div style={{ padding: 24 }}>
-        <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
+      <div style={{ padding: isNarrow ? 12 : 24 }}>
+        <div style={{ marginBottom: 16, display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: 12, alignItems: isNarrow ? 'stretch' : 'center' }}>
           <Select theme={th} value="佇列模式：全部 (3 種)" />
           <Select theme={th} value="運作 profile：multi_taxi_direct" />
           <Select theme={th} value="資格狀態：全部" />
-          <Input theme={th} placeholder="搜尋駕駛或車牌..." style={{ width: 240 }} />
+          <Input theme={th} placeholder="搜尋駕駛或車牌..." style={{ width: isNarrow ? '100%' : 240 }} />
         </div>
         <Card theme={th} padding={0}>
-          <Table theme={th} columns={[
-            { h: '駕駛', k: 'driverName', w: 110, r: r => <div><b>{r.driverName}</b><br/><span style={{ fontSize: 10, fontFamily: SHELL_MONO, color: th.textMuted }}>{r.driverId}</span></div> },
-            { h: '車牌', k: 'plate', w: 100, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 700 }}>{r.plate}</span> },
-            { h: '佇列模式 (Queue Mode)', w: 140, r: r => <Pill theme={th} tone={r.queueMode === 'virtual_matching' ? 'info' : 'danger'}>{r.queueModeZh}</Pill> },
-            { h: '場站/站位 (Site)', k: 'siteId', w: 130, mono: true },
-            { h: '資格判定', w: 140, r: r => <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill> },
-            { h: '簽到時間', k: 'checkIn', w: 90, mono: true },
-            { h: '', w: 100, r: () => <Btn theme={th} size="xs" variant="ghost">檢視細節</Btn> }
-          ]} rows={FX_MTX_QUEUE_ENTRIES} />
+          {isNarrow ? (
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {FX_MTX_QUEUE_ENTRIES.map(r => (
+                <div key={r.driverId} style={{ padding: 12, background: th.surfaceLo, borderRadius: 8, border: '1px solid ' + th.border }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700 }}>{r.driverName}</span>
+                    <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill>
+                  </div>
+                  <div style={{ fontSize: 12, color: th.accent, fontFamily: SHELL_MONO, fontWeight: 700 }}>{r.plate}</div>
+                  <div style={{ fontSize: 11.5, color: th.textMuted, marginTop: 4 }}>模式: {r.queueModeZh} | 場站: {r.siteId}</div>
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                    {r.status === 'denied_legal' ? (
+                      <Btn theme={th} size="xs" variant="danger" onClick={() => setSelectedDenied(r)}>檢視法定拒絕</Btn>
+                    ) : (
+                      <Btn theme={th} size="xs" variant="ghost">檢視細節</Btn>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Table theme={th} columns={[
+              { h: '駕駛', k: 'driverName', w: 110, r: r => <div><b>{r.driverName}</b><br/><span style={{ fontSize: 10, fontFamily: SHELL_MONO, color: th.textMuted }}>{r.driverId}</span></div> },
+              { h: '車牌', k: 'plate', w: 100, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 700 }}>{r.plate}</span> },
+              { h: '佇列模式 (Queue Mode)', w: 140, r: r => <Pill theme={th} tone={r.queueMode === 'virtual_matching' ? 'info' : 'danger'}>{r.queueModeZh}</Pill> },
+              { h: '場站/站位 (Site)', k: 'siteId', w: 130, mono: true },
+              { h: '資格判定', w: 140, r: r => <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill> },
+              { h: '簽到時間', k: 'checkIn', w: 90, mono: true },
+              { h: '', w: 110, r: r => r.status === 'denied_legal' ? <Btn theme={th} size="xs" variant="danger" onClick={() => setSelectedDenied(r)}>法定拒絕</Btn> : <Btn theme={th} size="xs" variant="ghost">細節</Btn> }
+            ]} rows={FX_MTX_QUEUE_ENTRIES} />
+          )}
         </Card>
       </div>
+
+      {selectedDenied && (
+        <AccessibleDialog title="實體排班 · 法定拒絕進入警告 (MTX-QUEUE-UI-03)" theme={th} onClose={() => setSelectedDenied(null)}>
+          <div role="alert" aria-live="assertive">
+            <Banner theme={th} tone="danger" icon="alert" body={`此車輛 (${selectedDenied.plate}) 屬多元化計程車服務，不得進入實體排班或招呼站候客。`} />
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <DL theme={th} cols={2} items={[
+              { k: '違規車牌', v: selectedDenied.plate, mono: true },
+              { k: '駕駛人員', v: selectedDenied.driverName },
+              { k: '試圖進入佇列', v: selectedDenied.queueModeZh },
+              { k: '處置結論', v: '系統禁止人工 Overrule 覆蓋' }
+            ]} />
+          </div>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+            <Btn theme={th} variant="primary" onClick={() => setSelectedDenied(null)}>引導駕駛返回虛擬媒合</Btn>
+          </div>
+        </AccessibleDialog>
+      )}
     </Shell>
   );
 }
 
-function OPS_MTX_QueueEntryDetail({ theme: th }) {
+function OPS_MTX_QueueEntryDetail({ theme: th, isNarrow = false }) {
   const entry = FX_MTX_QUEUE_ENTRIES[0];
   return (
     <Shell theme={th} nav={OPS_NAV} active="dispatch-queue" breadcrumb={['派車營運', '佇列條目詳情']}
       env="production" actor={OPS_ACTOR} health={OPS_HEALTH} refreshTier="fast" dataFreshness="fresh">
       <PageHeader theme={th} title={`佇列條目詳情 · ${entry.driverName} (${entry.plate})`} subtitle="MTX-QUEUE-UI-02 · 說明車輛運作 Profile、許可證號與佇列合規判定" />
-      <div style={{ padding: 24, maxWidth: 800 }}>
+      <div style={{ padding: isNarrow ? 12 : 24, maxWidth: 800 }}>
         <Card theme={th} title="佇列資格檢視">
-          <DL theme={th} cols={2} items={[
+          <DL theme={th} cols={isNarrow ? 1 : 2} items={[
             { k: '駕駛 ID', v: entry.driverId, mono: true },
             { k: '車牌號碼', v: entry.plate, mono: true },
             { k: '運作 Profile', v: <Pill theme={th} tone="info">{entry.profile}</Pill> },
@@ -301,17 +463,19 @@ function OPS_MTX_QueueEntryDetail({ theme: th }) {
   );
 }
 
-function OPS_MTX_LegalDenialState({ theme: th }) {
+function OPS_MTX_LegalDenialState({ theme: th, isNarrow = false }) {
   const deniedEntry = FX_MTX_QUEUE_ENTRIES[2];
   return (
     <Shell theme={th} nav={OPS_NAV} active="dispatch-queue" breadcrumb={['派車營運', '法定拒絕進入警告']}
       env="production" actor={OPS_ACTOR} health={OPS_HEALTH} refreshTier="fast" dataFreshness="fresh">
       <PageHeader theme={th} title="多元計程車實體排班 · 法定拒絕進入" subtitle="MTX-QUEUE-UI-03 · 依公路法及多元計程車管理辦法，嚴禁實體排班與招呼站候客 (不可人工 Overrule)" />
-      <div style={{ padding: 24, maxWidth: 750, margin: '0 auto' }}>
+      <div style={{ padding: isNarrow ? 12 : 24, maxWidth: 750, margin: '0 auto' }}>
         <Card theme={th} title="法定拒絕進入警告 (Non-Bypassable Legal Denial)" style={{ borderColor: th.danger }}>
-          <Banner theme={th} tone="danger" icon="alert" body="此車輛屬多元化計程車服務，不得進入實體排班候客。" />
+          <div role="alert" aria-live="assertive">
+            <Banner theme={th} tone="danger" icon="alert" body="此車輛屬多元化計程車服務，不得進入實體排班候客。" />
+          </div>
           <div style={{ marginTop: 16 }}>
-            <DL theme={th} cols={2} items={[
+            <DL theme={th} cols={isNarrow ? 1 : 2} items={[
               { k: '違規試圖車牌', v: deniedEntry.plate, mono: true },
               { k: '駕駛人員', v: `${deniedEntry.driverName} (${deniedEntry.driverId})` },
               { k: '試圖進入佇列', v: <Pill theme={th} tone="danger">{deniedEntry.queueModeZh} ({deniedEntry.queueMode})</Pill> },
@@ -325,7 +489,7 @@ function OPS_MTX_LegalDenialState({ theme: th }) {
               注意：營運主控台<b>無權限</b>覆蓋 (Override) 此項法定限制。請引導駕駛離開實體排班區，並切換至平台虛擬媒合系統候客。
             </span>
           </div>
-          <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+          <div style={{ marginTop: 20, display: 'flex', flexDirection: isNarrow ? 'column' : 'row', justifyContent: 'flex-end', gap: 12 }}>
             <Btn theme={th} variant="secondary">檢視合規日誌</Btn>
             <Btn theme={th} variant="primary">引導返回虛擬媒合</Btn>
           </div>
@@ -339,45 +503,83 @@ function OPS_MTX_LegalDenialState({ theme: th }) {
 // 3. Rating Governance Components (P5-DESIGN-001)
 // -----------------------------------------------------------------------------
 
-function PA_P5_RatingQueue({ theme: th }) {
+function PA_P5_RatingQueue({ theme: th, isNarrow = false }) {
+  const [activeDetail, setActiveDetail] = React.useState(null);
+
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-ratings" breadcrumb={['平台治理', '評價審查佇列']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
       <PageHeader theme={th} title="乘客評價治理與審查佇列" subtitle="P5-RATE-UI-01 · 檢視、過濾與處置不當或申訴評價 (維護駕駛與乘客真實權益)"
         actions={<Btn theme={th} variant="secondary" icon="download">匯出評價報告</Btn>} />
-      <div style={{ padding: 24 }}>
-        <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
+      <div style={{ padding: isNarrow ? 12 : 24 }}>
+        <div style={{ marginBottom: 16, display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: 12, alignItems: isNarrow ? 'stretch' : 'center' }}>
           <Select theme={th} value="評價狀態：全部" />
           <Select theme={th} value="星級：1 星 - 2 星" />
-          <Input theme={th} placeholder="搜尋訂單 ID / 駕駛..." style={{ width: 240 }} />
+          <Input theme={th} placeholder="搜尋訂單 ID / 駕駛..." style={{ width: isNarrow ? '100%' : 240 }} />
         </div>
         <Card theme={th} padding={0}>
-          <Table theme={th} columns={[
-            { h: '評價 ID', k: 'id', w: 110, mono: true },
-            { h: '關聯訂單', k: 'order', w: 140, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 600 }}>{r.order}</span> },
-            { h: '駕駛', k: 'driver', w: 160 },
-            { h: '給予星級', w: 90, mono: true, r: r => <span style={{ color: r.score <= 2 ? th.danger : th.accent, fontWeight: 700 }}>★ {r.score}</span> },
-            { h: '標籤摘要', k: 'tags', w: 150 },
-            { h: '評價內容', k: 'comment', w: 220 },
-            { h: '審核狀態', w: 100, r: r => <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill> },
-            { h: '', w: 90, r: () => <Btn theme={th} size="xs" variant="ghost">審查</Btn> }
-          ]} rows={FX_P5_RATINGS} />
+          {isNarrow ? (
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {FX_P5_RATINGS.map(r => (
+                <div key={r.id} style={{ padding: 12, background: th.surfaceLo, borderRadius: 8, border: '1px solid ' + th.border }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, color: r.score <= 2 ? th.danger : th.accent }}>★ {r.score} 分</span>
+                    <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill>
+                  </div>
+                  <div style={{ fontSize: 12, color: th.text, fontWeight: 600 }}>{r.driver}</div>
+                  <div style={{ fontSize: 11.5, color: th.textMuted, marginTop: 2 }}>{r.comment}</div>
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Btn theme={th} size="xs" variant="ghost" onClick={() => setActiveDetail(r)}>審查細節</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Table theme={th} columns={[
+              { h: '評價 ID', k: 'id', w: 110, mono: true },
+              { h: '關聯訂單', k: 'order', w: 140, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 600 }}>{r.order}</span> },
+              { h: '駕駛', k: 'driver', w: 160 },
+              { h: '給予星級', w: 90, mono: true, r: r => <span style={{ color: r.score <= 2 ? th.danger : th.accent, fontWeight: 700 }}>★ {r.score}</span> },
+              { h: '標籤摘要', k: 'tags', w: 150 },
+              { h: '評價內容', k: 'comment', w: 220 },
+              { h: '審核狀態', w: 100, r: r => <Pill theme={th} tone={r.tone} dot>{r.statusZh}</Pill> },
+              { h: '', w: 90, r: r => <Btn theme={th} size="xs" variant="ghost" onClick={() => setActiveDetail(r)}>審查</Btn> }
+            ]} rows={FX_P5_RATINGS} />
+          )}
         </Card>
       </div>
+
+      {activeDetail && (
+        <AccessibleDialog title={`評價審查與處置 · ${activeDetail.id} (P5-RATE-UI-02)`} theme={th} onClose={() => setActiveDetail(null)}>
+          <DL theme={th} cols={2} items={[
+            { k: '關聯訂單', v: activeDetail.order, mono: true },
+            { k: '評分星級', v: `★ ${activeDetail.score} 分` },
+            { k: '駕駛', v: activeDetail.driver },
+            { k: '狀態', v: <Pill theme={th} tone={activeDetail.tone}>{activeDetail.statusZh}</Pill> }
+          ]} />
+          <div style={{ marginTop: 12, padding: 10, background: th.surfaceLo, borderRadius: 6, fontSize: 12.5 }}>
+            内文: {activeDetail.comment}
+          </div>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Btn theme={th} variant="secondary" onClick={() => setActiveDetail(null)}>維持有效</Btn>
+            <Btn theme={th} variant="danger" onClick={() => setActiveDetail(null)}>確認作廢此評價</Btn>
+          </div>
+        </AccessibleDialog>
+      )}
     </Shell>
   );
 }
 
-function PA_P5_RatingDetail({ theme: th }) {
+function PA_P5_RatingDetail({ theme: th, isNarrow = false }) {
   const rating = FX_P5_RATINGS[1];
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-ratings" breadcrumb={['平台治理', '評價審查詳情']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title={`評價審查細節 · ${rating.id}`} subtitle="P5-RATE-UI-02 · 查驗乘客反饋與行程軌跡，執行評價作廢或維持有效"
         actions={<><Btn theme={th} variant="secondary">維持有效</Btn><Btn theme={th} variant="danger" icon="x">作廢此評價</Btn></>} />
-      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ padding: isNarrow ? 12 : 24, display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1.2fr 1fr', gap: 16, alignItems: 'start' }}>
         <Card theme={th} title="評價提交細節">
-          <DL theme={th} cols={2} items={[
+          <DL theme={th} cols={isNarrow ? 1 : 2} items={[
             { k: '評價識別碼', v: rating.id, mono: true },
             { k: '評分星級', v: `★ ${rating.score} 分` },
             { k: '對應行程', v: rating.order, mono: true },
@@ -403,12 +605,12 @@ function PA_P5_RatingDetail({ theme: th }) {
   );
 }
 
-function PA_P5_DriverRatingAuthority({ theme: th }) {
+function PA_P5_DriverRatingAuthority({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-ratings" breadcrumb={['平台治理', '駕駛星級權威狀態']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="medium_slow" dataFreshness="fresh">
       <PageHeader theme={th} title="駕駛星級權威狀態展示" subtitle="P5-RATE-UI-03 · 呈現 rated, new_driver, unavailable 三大服務端權威狀態 (禁止前端造假或人工修改平均值)" />
-      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+      <div style={{ padding: isNarrow ? 12 : 24, display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr 1fr', gap: 16 }}>
         <Card theme={th} title="1. 已有評價 (Rated)">
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{ fontSize: 32, fontWeight: 800, color: th.accent }}>★ 4.9</div>
@@ -439,40 +641,56 @@ function PA_P5_DriverRatingAuthority({ theme: th }) {
 // 4. Fare, Payment, Receipt, & Retention Operations (P5-DESIGN-002)
 // -----------------------------------------------------------------------------
 
-function PA_P5_FareAnomalyQueue({ theme: th }) {
+function PA_P5_FareAnomalyQueue({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-fares" breadcrumb={['商務與結算', '車資異常佇列']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="fast" dataFreshness="fresh">
       <PageHeader theme={th} title="車資估算異常佇列 (Fail-Closed)" subtitle="P5-COM-UI-01 · 監控預估車資異常、路線無法解析或費率缺失之訂單"
         meta={<Pill theme={th} tone="danger">2 筆待處理異常</Pill>} />
-      <div style={{ padding: 24 }}>
+      <div style={{ padding: isNarrow ? 12 : 24 }}>
         <Card theme={th} padding={0}>
-          <Table theme={th} columns={[
-            { h: '異常 ID', k: 'id', w: 110, mono: true },
-            { h: '訂單參考', k: 'order', w: 140, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 600 }}>{r.order}</span> },
-            { h: '上車點', k: 'pickup', w: 160 },
-            { h: '下車點', k: 'dropoff', w: 180 },
-            { h: '異常原因', k: 'reasonZh', w: 180, r: r => <span style={{ color: th.danger, fontWeight: 600 }}>{r.reasonZh}</span> },
-            { h: '費率版本', k: 'fareVer', w: 100, mono: true },
-            { h: '預估結果', k: 'estFare', w: 150 },
-            { h: '', w: 90, r: () => <Btn theme={th} size="xs" variant="ghost">排查</Btn> }
-          ]} rows={FX_P5_FARE_ANOMALIES} />
+          {isNarrow ? (
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {FX_P5_FARE_ANOMALIES.map(r => (
+                <div key={r.id} style={{ padding: 12, background: th.surfaceLo, borderRadius: 8, border: '1px solid ' + th.border }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ color: th.accent, fontWeight: 700, fontFamily: SHELL_MONO }}>{r.order}</span>
+                    <Pill theme={th} tone={r.tone}>{r.status}</Pill>
+                  </div>
+                  <div style={{ fontSize: 12, color: th.danger, fontWeight: 600 }}>{r.reasonZh}</div>
+                  <div style={{ fontSize: 11.5, color: th.textMuted, marginTop: 4 }}>{r.pickup} → {r.dropoff}</div>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 2 }}>{r.estFare}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Table theme={th} columns={[
+              { h: '異常 ID', k: 'id', w: 110, mono: true },
+              { h: '訂單參考', k: 'order', w: 140, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 600 }}>{r.order}</span> },
+              { h: '上車點', k: 'pickup', w: 160 },
+              { h: '下車點', k: 'dropoff', w: 180 },
+              { h: '異常原因', k: 'reasonZh', w: 180, r: r => <span style={{ color: th.danger, fontWeight: 600 }}>{r.reasonZh}</span> },
+              { h: '費率版本', k: 'fareVer', w: 100, mono: true },
+              { h: '預估結果', k: 'estFare', w: 150 },
+              { h: '', w: 90, r: () => <Btn theme={th} size="xs" variant="ghost">排查</Btn> }
+            ]} rows={FX_P5_FARE_ANOMALIES} />
+          )}
         </Card>
       </div>
     </Shell>
   );
 }
 
-function PA_P5_PaymentExceptionDetail({ theme: th }) {
+function PA_P5_PaymentExceptionDetail({ theme: th, isNarrow = false }) {
   const pay = FX_P5_PAYMENT_EXCEPTIONS[1];
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-fares" breadcrumb={['商務與結算', '付款異常詳情']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title={`付款例外處理 · ${pay.id}`} subtitle="P5-COM-UI-02 · 檢視支付失敗、人工處置中或退款例外"
         actions={<Btn theme={th} variant="warn">發起人工追扣/處理</Btn>} />
-      <div style={{ padding: 24, maxWidth: 750, margin: '0 auto' }}>
+      <div style={{ padding: isNarrow ? 12 : 24, maxWidth: 750, margin: '0 auto' }}>
         <Card theme={th} title="支付交易明細">
-          <DL theme={th} cols={2} items={[
+          <DL theme={th} cols={isNarrow ? 1 : 2} items={[
             { k: '支付紀錄 ID', v: pay.id, mono: true },
             { k: '關聯訂單', v: pay.order, mono: true },
             { k: '應付金額', v: pay.amount, mono: true },
@@ -481,7 +699,9 @@ function PA_P5_PaymentExceptionDetail({ theme: th }) {
             { k: '最後嘗試時間', v: pay.time, mono: true }
           ]} />
           <div style={{ marginTop: 16 }}>
-            <Banner theme={th} tone="danger" icon="alert" body="金流失敗說明：授權嘗試遭到發卡行拒絕 (Card Declined)。系統絕不遮蔽失敗狀態假裝成功。" />
+            <div role="alert" aria-live="assertive">
+              <Banner theme={th} tone="danger" icon="alert" body="金流失敗說明：授權嘗試遭到發卡行拒絕 (Card Declined)。系統絕不遮蔽失敗狀態假裝成功。" />
+            </div>
           </div>
         </Card>
       </div>
@@ -489,18 +709,18 @@ function PA_P5_PaymentExceptionDetail({ theme: th }) {
   );
 }
 
-function PA_P5_CertificateSupport({ theme: th }) {
+function PA_P5_CertificateSupport({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-records" breadcrumb={['商務與結算', '乘車證明查詢與支援']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title="電子乘車證明查詢與支援" subtitle="P5-COM-UI-03 · 協助乘客重新定位與下載已開立之電子乘車證明 (PDF/HTML)" />
-      <div style={{ padding: 24, maxWidth: 780, margin: '0 auto' }}>
+      <div style={{ padding: isNarrow ? 12 : 24, maxWidth: 780, margin: '0 auto' }}>
         <Card theme={th} title="搜尋乘車證明">
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-            <Input theme={th} placeholder="輸入行程/訂單編號 (例如 ZX-240720-0186)..." style={{ width: 320 }} />
+          <div style={{ display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: 12, marginBottom: 16 }}>
+            <Input theme={th} placeholder="輸入行程/訂單編號 (例如 ZX-240720-0186)..." style={{ width: isNarrow ? '100%' : 320 }} />
             <Btn theme={th} variant="primary" icon="search">查詢證書</Btn>
           </div>
-          <DL theme={th} cols={2} items={[
+          <DL theme={th} cols={isNarrow ? 1 : 2} items={[
             { k: '證書編號', v: 'CERT-2026-901826', mono: true },
             { k: '行程 ID', v: 'ZX-240720-0186', mono: true },
             { k: '車牌號碼', v: 'BKR-2208', mono: true },
@@ -518,15 +738,17 @@ function PA_P5_CertificateSupport({ theme: th }) {
   );
 }
 
-function PA_P5_RecordsQuery({ theme: th }) {
+function PA_P5_RecordsQuery({ theme: th, isNarrow = false }) {
+  const [showExportModal, setShowExportModal] = React.useState(false);
+
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-records" breadcrumb={['平台數據', '營運紀錄查詢']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title="730 天營運紀錄完整查詢" subtitle="P5-COM-UI-04 · 法定兩年行程軌跡、車資與費率版本完整留存"
-        actions={<Btn theme={th} variant="primary" icon="export">發起調閱匯出</Btn>} />
-      <div style={{ padding: 24 }}>
-        <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
-          <Input theme={th} placeholder="訂單 ID / 車牌號碼..." style={{ width: 240 }} />
+        actions={<Btn theme={th} variant="primary" icon="export" onClick={() => setShowExportModal(true)}>發起調閱匯出</Btn>} />
+      <div style={{ padding: isNarrow ? 12 : 24 }}>
+        <div style={{ marginBottom: 16, display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: 12 }}>
+          <Input theme={th} placeholder="訂單 ID / 車牌號碼..." style={{ width: isNarrow ? '100%' : 240 }} />
           <Select theme={th} value="日期範圍：最近 30 天" />
           <Select theme={th} value="保留狀態：正常留存中 (730天)" />
         </div>
@@ -546,22 +768,34 @@ function PA_P5_RecordsQuery({ theme: th }) {
           ]} />
         </Card>
       </div>
+
+      {showExportModal && (
+        <AccessibleDialog title="受控匯出確認 (P5-COM-UI-05)" theme={th} onClose={() => setShowExportModal(false)}>
+          <Field theme={th} label="調閱目的 (必填)" required>
+            <Input theme={th} value="交通局營運合規定期抽查" />
+          </Field>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Btn theme={th} variant="secondary" onClick={() => setShowExportModal(false)}>取消</Btn>
+            <Btn theme={th} variant="primary" onClick={() => setShowExportModal(false)}>建立受控匯出工作</Btn>
+          </div>
+        </AccessibleDialog>
+      )}
     </Shell>
   );
 }
 
-function PA_P5_ExportRetention({ theme: th }) {
+function PA_P5_ExportRetention({ theme: th, isNarrow = false }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-records" breadcrumb={['平台數據', '受控匯出與受控留存']}
       env="production" actor={PSB_ACTOR} health={PA_HEALTH} refreshTier="manual" dataFreshness="fresh">
       <PageHeader theme={th} title="受控匯出與 Legal Hold 法律保留狀態" subtitle="P5-COM-UI-05 · 審核合規調閱申請、設定法律保留 (Legal Hold) 凍結自動刪除" />
-      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16 }}>
+      <div style={{ padding: isNarrow ? 12 : 24, display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1.2fr 1fr', gap: 16 }}>
         <Card theme={th} title="受控資料匯出申請">
           <Field theme={th} label="調閱目的 (必填稽核項目)" required>
             <Input theme={th} value="交通局 2026 Q3 多元計程車營運合規定期抽查" />
           </Field>
           <div style={{ marginTop: 12 }}>
-            <DL theme={th} cols={2} items={[
+            <DL theme={th} cols={isNarrow ? 1 : 2} items={[
               { k: '預計匯出筆數', v: '1,420 筆', mono: true },
               { k: '資料敏感度', v: <Pill theme={th} tone="warn">包含駕駛與行程軌跡 (受控)</Pill> },
               { k: '申請人', v: '駱專員 (合規稽核組)' }
@@ -572,7 +806,9 @@ function PA_P5_ExportRetention({ theme: th }) {
           </div>
         </Card>
         <Card theme={th} title="法律保留狀態 (Legal Hold)">
-          <Banner theme={th} tone="warn" icon="lock" body="Legal Hold 處於生效狀態時，即使滿 730 天保留期限，系統亦不得執行實體purge銷毀。" />
+          <div role="alert" aria-live="polite">
+            <Banner theme={th} tone="warn" icon="lock" body="Legal Hold 處於生效狀態時，即使滿 730 天保留期限，系統亦不得執行實體purge銷毀。" />
+          </div>
           <div style={{ marginTop: 12 }}>
             <DL theme={th} cols={1} items={[
               { k: '目前案件', v: 'CASE-2026-COURT-009 (台北地方法院文號)' },
