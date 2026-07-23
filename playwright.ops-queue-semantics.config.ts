@@ -23,7 +23,7 @@ export default defineConfig({
     ? {
         webServer: {
           command:
-            "cd apps/ops-console-web && NEXT_PUBLIC_OPS_ASSISTANT_ENABLED=true pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3003",
+            "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/ops-console-web && NEXT_PUBLIC_OPS_ASSISTANT_ENABLED=true pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3003",
           url: localOpsConsoleBaseURL,
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
