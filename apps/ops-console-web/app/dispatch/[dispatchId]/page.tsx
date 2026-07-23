@@ -2012,30 +2012,6 @@ export default async function DispatchDetailPage({
     [] as OwnedOrderRecord[],
   );
 
-  const DEMO_REFUSAL_ORDER: OwnedOrderRecord = {
-    orderId: "ORD-MTX-REFUSAL-02",
-    orderNo: "MTX-REF-002",
-    tenantId: "tenant-alpha",
-    partnerId: "partner-alpha",
-    orderSource: "platform_reserved",
-    runtimeProfileCode: "multi_taxi_direct",
-    acquisitionMode: "platform_reserved",
-    queueMode: "physical_rank",
-    siteId: "SITE-TAIPEI-RANK-1",
-    lastDispatchFailureReason: "QUEUE_MODE_NOT_ALLOWED",
-    status: "queued",
-    dispatchAttemptCount: 2,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    pickup: { address: "Songshan Airport Rank", lat: 25.0697, lng: 121.5524 },
-    dropoff: { address: "Neihu Tech Park", lat: 25.0797, lng: 121.5724 },
-    passengerCount: 1,
-    fareEstimatedNtd: 280,
-    fareFinalNtd: 280,
-    approvalRequestIds: [],
-    availableActions: ["cancel_order"],
-  };
-
   const matchedOrder =
     ordersResult.data.find(
       (candidate) =>
@@ -2044,12 +2020,7 @@ export default async function DispatchDetailPage({
     (await resolveOrFallback(
       () => client.getOrder(dispatchId),
       null as OwnedOrderRecord | null,
-    )) ??
-    (dispatchId === "ORD-MTX-REFUSAL-02" ||
-    dispatchId === "MTX-REF-002" ||
-    dispatchId === "OPS-REFUSAL-DISPATCH"
-      ? DEMO_REFUSAL_ORDER
-      : null);
+    ));
 
   if (matchedOrder) {
     return renderOwnedWorkspace({

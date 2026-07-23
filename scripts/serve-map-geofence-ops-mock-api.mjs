@@ -100,6 +100,30 @@ const orders = [
     updatedAt: GENERATED_AT,
     availableActions: [],
   },
+  {
+    orderId: "ORD-MTX-REFUSAL-02",
+    orderNo: "MTX-REF-002",
+    tenantId: "tenant-alpha",
+    partnerId: "partner-alpha",
+    orderSource: "platform_reserved",
+    runtimeProfileCode: "multi_taxi_direct",
+    acquisitionMode: "platform_reserved",
+    queueMode: "physical_rank",
+    siteId: "SITE-TAIPEI-RANK-1",
+    lastDispatchFailureReason: "QUEUE_MODE_NOT_ALLOWED",
+    status: "queued",
+    dispatchAttemptCount: 2,
+    createdAt: GENERATED_AT,
+    updatedAt: GENERATED_AT,
+    pickup: { address: "Songshan Airport Rank", lat: 25.0697, lng: 121.5524 },
+    dropoff: { address: "Neihu Tech Park", lat: 25.0797, lng: 121.5724 },
+    passengerCount: 1,
+    fareEstimatedNtd: 280,
+    fareFinalNtd: 280,
+    approvalRequestIds: [],
+    availableActions: ["cancel_order"],
+    complianceFlags: [],
+  },
 ];
 
 const dispatchJobs = [
@@ -253,6 +277,20 @@ const server = createServer((request, response) => {
 
   if (url.pathname === "/api/orders") {
     sendJson(response, envelope(listEnvelope(orders)));
+    return;
+  }
+
+  const orderMatch = url.pathname.match(/^\/api\/orders\/([^/]+)$/);
+  if (orderMatch) {
+    const targetId = decodeURIComponent(orderMatch[1]);
+    const found = orders.find(
+      (o) => o.orderId === targetId || o.orderNo === targetId,
+    );
+    if (found) {
+      sendJson(response, envelope(found));
+    } else {
+      sendJson(response, notFoundEnvelope(url.pathname), 404);
+    }
     return;
   }
 

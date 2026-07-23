@@ -21,11 +21,12 @@ Reviewer: Codex
 
 - Realm Colors: Ops shell + Coral realm tokens from `@drts/ui-web/canvas-tokens` (`CANVAS_REALM_LIGHT.ops` / `CANVAS_REALM_DARK.ops` / `CANVAS_SURFACE_ACCENTS.ops`).
 
-## Production Fallback Masking Removal & Config Mismatch Remediation (Reviewer Remediation)
+## Production Fallback Masking Removal & Synthetic Queue Data Clean-up
 
-- Removed `DEMO_FALLBACK_ORDERS` masking in `apps/ops-console-web/app/dispatch/page.tsx:loadListRuntime`.
-- Runtime fetch failures now accurately present degraded/error state (`failed: true` with error envelope) rather than fabricating demo order items.
-- Fixed Playwright E2E baseURL and webServer port configuration in `tests/e2e/ops-queue-semantics.spec.ts` and `playwright.ops-queue-semantics.config.ts`. Tests now use Playwright's `baseURL` parameter fixture, seamlessly handling both `playwright.ops-queue-semantics.config.ts` (port 3003) and default `playwright.config.ts` (port 3202).
+- Removed `DEMO_FALLBACK_ORDERS` synthetic order fabrication in `apps/ops-console-web/app/dispatch/page.tsx:loadListRuntime`.
+- Removed `DEMO_REFUSAL_ORDER` fallback injection in `apps/ops-console-web/app/dispatch/[dispatchId]/page.tsx`.
+- Runtime fetch failures now accurately present degraded/error state (`failed: true` with error envelope) or 404 notFound state rather than injecting fabricated fallback order items.
+- Configured Playwright E2E test server (`playwright.ops-queue-semantics.config.ts`) and mock API runner (`scripts/serve-map-geofence-ops-mock-api.mjs`) to serve `/api/orders` and `/api/orders/:id` directly for seamless E2E testing without production fallback masking.
 
 ## Test Commands Executed & Verified
 

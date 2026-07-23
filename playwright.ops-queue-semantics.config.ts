@@ -20,7 +20,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `cd apps/ops-console-web && NEXT_PUBLIC_OPS_ASSISTANT_ENABLED=true pnpm exec next dev --webpack --hostname 127.0.0.1 --port ${targetPort}`,
+    command: `MAP_GEOFENCE_OPS_UI_PORT=${targetPort} node scripts/run-map-geofence-ops-ui-dev.mjs`,
     url: opsConsoleBaseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
