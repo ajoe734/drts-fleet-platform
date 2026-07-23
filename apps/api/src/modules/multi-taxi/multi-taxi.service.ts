@@ -273,6 +273,54 @@ export class MultiTaxiService implements OnModuleInit {
     return this.cloneAuthorization(authorization);
   }
 
+  expireAuthorization(authorizationId: string, requestId?: string) {
+    const authorization = this.requireAuthorization(authorizationId);
+    if (authorization.status === "revoked") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "AUTHORIZATION_CANNOT_EXPIRE",
+        "A revoked authorization cannot be expired.",
+      );
+    }
+    const previousStatus = authorization.status;
+    authorization.status = "expired";
+    authorization.updatedAt = new Date().toISOString();
+    this.persistAuthorization(authorization, "expire authorization");
+    this.recordAuditLog(
+      "expire_operating_authorization",
+      "multi_taxi_operating_authorization",
+      authorization.authorizationId,
+      { status: authorization.status, updatedAt: authorization.updatedAt },
+      { status: previousStatus },
+      requestId,
+    );
+    return this.cloneAuthorization(authorization);
+  }
+
+  revokeAuthorization(authorizationId: string, requestId?: string) {
+    const authorization = this.requireAuthorization(authorizationId);
+    if (authorization.status === "revoked") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "AUTHORIZATION_ALREADY_REVOKED",
+        "Authorization is already revoked.",
+      );
+    }
+    const previousStatus = authorization.status;
+    authorization.status = "revoked";
+    authorization.updatedAt = new Date().toISOString();
+    this.persistAuthorization(authorization, "revoke authorization");
+    this.recordAuditLog(
+      "revoke_operating_authorization",
+      "multi_taxi_operating_authorization",
+      authorization.authorizationId,
+      { status: authorization.status, updatedAt: authorization.updatedAt },
+      { status: previousStatus },
+      requestId,
+    );
+    return this.cloneAuthorization(authorization);
+  }
+
   listAuthorizedVehicles(authorizationId: string) {
     this.requireAuthorization(authorizationId);
     return this.vehicles

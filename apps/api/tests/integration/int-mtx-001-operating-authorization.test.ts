@@ -111,6 +111,14 @@ describe("MTX-AUTH-001 Operating Authorization Controller & Service Integration"
     const suspendRes = controller.suspendAuthorization(authId, requestId);
     expect(suspendRes.data.status).toBe("suspended");
 
+    // 10. POST expire authorization
+    const expireRes = controller.expireAuthorization(authId, requestId);
+    expect(expireRes.data.status).toBe("expired");
+
+    // 11. POST revoke authorization
+    const revokeRes = controller.revokeAuthorization(authId, requestId);
+    expect(revokeRes.data.status).toBe("revoked");
+
     // Verify all audit logs recorded in auditNotificationService
     const auditLogs = auditNotificationService.getAuditLogsSnapshot();
     const actionNames = auditLogs.map((l) => l.actionName);
@@ -120,6 +128,8 @@ describe("MTX-AUTH-001 Operating Authorization Controller & Service Integration"
     expect(actionNames).toContain("add_authorized_vehicle");
     expect(actionNames).toContain("remove_authorized_vehicle");
     expect(actionNames).toContain("suspend_operating_authorization");
+    expect(actionNames).toContain("expire_operating_authorization");
+    expect(actionNames).toContain("revoke_operating_authorization");
   });
 
   it("Hard Gate validation on RegulatoryRegistryService reads live state from MultiTaxiService", () => {

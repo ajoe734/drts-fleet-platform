@@ -235,6 +235,30 @@ export class MultiTaxiController {
     );
   }
 
+  @Post("platform-admin/multi-taxi/authorizations/:authorizationId/expire")
+  @RequireRealms("platform")
+  expireAuthorization(
+    @Param("authorizationId") authorizationId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.multiTaxiService.expireAuthorization(authorizationId, requestId),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/multi-taxi/authorizations/:authorizationId/revoke")
+  @RequireRealms("platform")
+  revokeAuthorization(
+    @Param("authorizationId") authorizationId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.multiTaxiService.revokeAuthorization(authorizationId, requestId),
+      requestId,
+    );
+  }
+
   @Get("platform-admin/multi-taxi/authorizations/:authorizationId/vehicles")
   @RequireRealms("platform")
   listAuthorizedVehicles(

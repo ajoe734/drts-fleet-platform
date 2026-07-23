@@ -102,11 +102,8 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       expect(err.response?.error?.code).toBe("P5_OPERATING_AUTHORIZATION_INACTIVE");
     }
 
-    // Expired status denied
-    const internalAuth = (service as any).authorizations.find(
-      (a: any) => a.authorizationId === auth.authorizationId,
-    );
-    internalAuth.status = "expired";
+    // Expired status via service method denied
+    service.expireAuthorization(auth.authorizationId);
     try {
       service.validateOperatingAuthorizationForAssignment(
         auth.authorizationId,
@@ -118,6 +115,9 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
     }
 
     // Past effectiveUntil window denied
+    const internalAuth = (service as any).authorizations.find(
+      (a: any) => a.authorizationId === auth.authorizationId,
+    );
     internalAuth.status = "approved";
     internalAuth.effectiveUntil = "2020-01-01T00:00:00.000Z";
     try {
@@ -130,9 +130,9 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       expect(err.response?.error?.code).toBe("P5_OPERATING_AUTHORIZATION_INACTIVE");
     }
 
-    // Revoked status denied
+    // Revoked status via service method denied
     internalAuth.effectiveUntil = null;
-    internalAuth.status = "revoked";
+    service.revokeAuthorization(auth.authorizationId);
     try {
       service.validateOperatingAuthorizationForAssignment(
         auth.authorizationId,
@@ -300,6 +300,24 @@ describe("MultiTaxiService Operating Authorization Unit Tests (MTX-AUTH-001)", (
       expect.objectContaining({
         actionName: "remove_authorized_vehicle",
         resourceType: "multi_taxi_authorized_vehicle",
+      }),
+    );
+
+    // 6. Expire authorization
+    service.expireAuthorization(auth.authorizationId);
+    expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "expire_operating_authorization",
+        resourceId: auth.authorizationId,
+      }),
+    );
+
+    // 7. Revoke authorization
+    service.revokeAuthorization(auth.authorizationId);
+    expect(mockAuditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "revoke_operating_authorization",
+        resourceId: auth.authorizationId,
       }),
     );
   });
