@@ -1552,10 +1552,9 @@ describe("owned mobility service", () => {
     );
   });
 
-  it("enforces multi_taxi_direct reservation-only guard on order creation and tenant booking", async () => {
+  it("rejects public runtime-profile overrides on every generic intake route", async () => {
     const { ownedMobilityService } = createService();
 
-    // 1. Immediate order with multi_taxi_direct profile should fail with 409 Conflict
     const immediateCommand = {
       pickup: { address: "Pickup St" },
       dropoff: { address: "Dropoff St" },
@@ -1571,16 +1570,15 @@ describe("owned mobility service", () => {
       );
     }).rejects.toThrowError(
       expect.objectContaining({
-        status: 409,
+        status: 403,
         response: expect.objectContaining({
           error: expect.objectContaining({
-            code: "RESERVATION_ONLY_PROFILE",
+            code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
           }),
         }),
       }),
     );
 
-    // 2. Call center immediate order with multi_taxi_direct profile should fail with 409 Conflict
     const callCenterCommand = {
       callId: "call-123",
       pickup: { address: "Pickup St" },
@@ -1596,16 +1594,15 @@ describe("owned mobility service", () => {
       );
     }).rejects.toThrowError(
       expect.objectContaining({
-        status: 409,
+        status: 403,
         response: expect.objectContaining({
           error: expect.objectContaining({
-            code: "RESERVATION_ONLY_PROFILE",
+            code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
           }),
         }),
       }),
     );
 
-    // 3. Tenant booking with multi_taxi_direct profile and wrong service product (not taxi_reservation) should fail with 409
     const wrongProductBookingCommand = {
       businessDispatchSubtype: "enterprise_dispatch",
       pickup: { address: "Pickup St" },
@@ -1623,10 +1620,10 @@ describe("owned mobility service", () => {
       );
     }).rejects.toThrowError(
       expect.objectContaining({
-        status: 409,
+        status: 403,
         response: expect.objectContaining({
           error: expect.objectContaining({
-            code: "SERVICE_PRODUCT_NOT_ALLOWED",
+            code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
           }),
         }),
       }),
