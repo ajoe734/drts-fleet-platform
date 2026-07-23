@@ -230,6 +230,24 @@ export class MultiTaxiController {
     );
   }
 
+  @Get("platform-admin/multi-taxi/authorizations/:authorizationId/vehicles")
+  @RequireRealms("platform")
+  listAuthorizedVehicles(
+    @Param("authorizationId") authorizationId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.multiTaxiService.listAuthorizedVehicles(authorizationId);
+    return toApiSuccessEnvelope(
+      toApiListData(items, {
+        page: 1,
+        pageSize: items.length,
+        totalItems: items.length,
+        totalPages: items.length === 0 ? 0 : 1,
+      }),
+      requestId,
+    );
+  }
+
   @Post("platform-admin/multi-taxi/authorizations/:authorizationId/vehicles")
   @RequireRealms("platform")
   addAuthorizedVehicle(

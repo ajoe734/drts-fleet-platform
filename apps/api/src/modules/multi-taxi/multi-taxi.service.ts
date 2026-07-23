@@ -85,6 +85,13 @@ export class MultiTaxiService implements OnModuleInit {
     return this.cloneAuthorization(this.requireAuthorization(authorizationId));
   }
 
+  listAuthorizedVehicles(authorizationId: string) {
+    this.requireAuthorization(authorizationId);
+    return this.vehicles
+      .filter((vehicle) => vehicle.authorizationId === authorizationId)
+      .map((vehicle) => ({ ...vehicle }));
+  }
+
   createAuthorization(command: CreateMultiTaxiOperatingAuthorizationCommand) {
     const now = new Date().toISOString();
     const effectiveFrom = this.requireIso(
