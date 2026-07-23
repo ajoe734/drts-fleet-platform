@@ -150,4 +150,79 @@ describe("OwnedMobilityRepository", () => {
     const [outboxSql] = query.mock.calls[1]!;
     expect(outboxSql).toContain("INSERT INTO ops.consumer_notification_outbox");
   });
+
+  it("keeps stale redispatch replacements from superseding newer assignment snapshots", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const repository = new OwnedMobilityRepository({
+      isEnabled: true,
+      query,
+    } as never);
+    const staleSnapshot: PassengerDispatchDisclosureSnapshot = {
+      snapshotId: "snapshot-stale-1",
+      orderId: "order-1",
+      dispatchJobId: "job-1",
+      assignmentId: "assignment-1",
+      assignmentVersion: 1,
+      runtimeProfileCode: "multi_taxi_direct",
+      operatingAuthorizationId: "authorization-1",
+      passengerSubjectRef: "passenger-1",
+      driver: {
+        driverId: "driver-1",
+        displayName: "Driver One",
+        publicCredentialNo: "******1234",
+        credentialVerifiedAt: "2026-07-23T00:00:00.000Z",
+      },
+      vehicle: {
+        vehicleId: "vehicle-1",
+        plateNo: "TAXI-001",
+        make: "Toyota",
+        model: "Camry",
+        color: "Silver",
+        doorCount: 5,
+      },
+      rating: {
+        status: "new_driver",
+        displayLabel: "New driver",
+        averageScore: null,
+        ratingCount: 0,
+      },
+      route: {
+        pickup: {
+          label: "Pickup",
+          latitude: 25.033,
+          longitude: 121.5654,
+        },
+        dropoff: {
+          label: "Dropoff",
+          latitude: 25.0478,
+          longitude: 121.517,
+        },
+        distanceMeters: null,
+        durationSeconds: null,
+        geometry: null,
+        source: "dispatch_authority",
+      },
+      fare: {
+        currency: "TWD",
+        estimateMinor: null,
+        policyLabel: "Metered fare",
+        source: "operating_authority",
+      },
+      createdAt: "2026-07-23T00:00:00.000Z",
+      supersededAt: null,
+    };
+
+    await repository.persistOrderWorkflow({ query } as never, {
+      passengerDisclosureSnapshots: [staleSnapshot],
+      consumerNotificationOutbox: [],
+    });
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const [snapshotSql, snapshotParameters] = query.mock.calls[0]!;
+    expect(snapshotSql).toContain("assignment_version < $5");
+    expect(snapshotSql).toContain(
+      "ON CONFLICT (assignment_id, assignment_version) DO NOTHING",
+    );
+    expect(snapshotParameters[4]).toBe(1);
+  });
 });

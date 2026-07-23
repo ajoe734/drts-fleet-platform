@@ -34,7 +34,12 @@ describe("platform admin P5 UI contract", () => {
   });
 
   it("keeps the correction queue actions and fare lifecycle states wired", () => {
+    expect(p5ConsoleSource).toContain(
+      'type P5View = "disclosure" | "queue" | "fares"',
+    );
+    expect(p5ConsoleSource).toContain('view === "disclosure"');
     expect(p5ConsoleSource).toContain('view === "queue"');
+    expect(p5ConsoleSource).toContain('title={t("p5.fares.title")}');
     expect(p5ConsoleSource).toContain('t("p5.action.view")');
     expect(p5ConsoleSource).toContain('t("p5.action.return")');
     expect(p5ConsoleSource).toContain('t("p5.action.approve")');
@@ -42,5 +47,12 @@ describe("platform admin P5 UI contract", () => {
     expect(p5ConsoleSource).toContain('status: "filed"');
     expect(p5ConsoleSource).toContain('status: "active"');
     expect(p5ConsoleSource).toContain('status: "retired"');
+  });
+
+  it("keeps rating moderation deferred and avoids aggregate editing controls", () => {
+    expect(p5ConsoleSource).not.toContain("rating moderation");
+    expect(p5ConsoleSource).not.toContain("aggregateVersion");
+    expect(p5ConsoleSource).not.toContain("edit aggregate");
+    expect(p5ConsoleSource).not.toContain("driver_rating_summaries");
   });
 });

@@ -93,5 +93,42 @@ Inspected commit: `b084729263a90856bc674772443d9b0c17a49009`
 
 ## Remaining delta / reviewer focus
 
-- Decide whether the current-head evidence is sufficient for reviewer handoff with a known e2e-evidence caveat.
-- If strict acceptance requires named Fleet-D e2e evidence, add a task-scoped `tests/e2e/` scenario covering multi-taxi assignment snapshot creation plus redispatch replacement ordering.
+- Added direct task-scoped coverage on 2026-07-23:
+  - [tests/unit/platform-admin-p5-ui.test.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-p5-rate-001/tests/unit/platform-admin-p5-ui.test.ts:1)
+    now asserts the P5 surface remains limited to `disclosure` / `queue` /
+    `fares` and does not expose rating aggregate editing.
+  - [apps/api/tests/unit/owned-mobility.repository.test.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-p5-rate-001/apps/api/tests/unit/owned-mobility.repository.test.ts:1)
+    now has a named stale-redispatch regression asserting persisted snapshot
+    writes keep the `assignment_version < $5` guard and conflict idempotence.
+  - [tests/e2e/platform-admin-p5-surfaces.spec.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-p5-rate-001/tests/e2e/platform-admin-p5-surfaces.spec.ts:1)
+    was added as a route-level smoke for `/platform-admin/p5/disclosure`,
+    `/platform-admin/p5/corrections`, and `/platform-admin/p5/fares`.
+
+## Verification update: 2026-07-23
+
+- `pnpm exec vitest run tests/unit/platform-admin-p5-ui.test.ts`
+  Result: `1` file / `4` tests passed.
+- `pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility.repository.test.ts`
+  Result: `1` file / `3` tests passed.
+- `pnpm --filter @drts/platform-admin-web typecheck`
+  Result: passed.
+- `pnpm test:e2e -- --project=platform-admin-assistant-off tests/e2e/platform-admin-p5-surfaces.spec.ts`
+  Result: blocked before the new spec executed because the default Playwright
+  `webServer` could not start the current-head API. Exact compile failures were
+  emitted from
+  [apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-p5-rate-001/apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:51)
+  against the current `@drts/contracts` surface, including missing exports
+  `VehiclePassengerDisclosureProfile` and
+  `DriverPublicRegistrationCredential`, plus stale `licenseType`,
+  `doorCount`, and `color` property references. This is an existing current-head
+  compile blocker outside the P5-RATE-001 diff.
+
+## Reviewer focus
+
+- The task-owned acceptance evidence is now stronger for UI deferral and stale
+  redispatch safety.
+- Reviewer handoff still depends on either:
+  1. fixing the unrelated current-head API compile blocker so the new e2e spec
+     can run, or
+  2. explicitly accepting the current evidence set with the e2e blocker recorded
+     as external to this task.
