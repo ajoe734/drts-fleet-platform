@@ -44,9 +44,7 @@
       "archived": "full_source_utf8"
     }
   ],
-  "derivedNonCanonical": [
-    "00_source_specs_index.md"
-  ],
+  "derivedNonCanonical": ["00_source_specs_index.md"],
   "currentAnalysisDocs": [
     {
       "path": "03_gap_closure_implementation_plan.md",
@@ -69,7 +67,7 @@
     {
       "path": "06_multi_taxi_runtime_execution_register_20260723.md",
       "role": "execution register",
-      "reviewedCommit": "ff16b7131bee4594ec56b195d43539a8d65ce379",
+      "reviewedCommit": "bf3990d9c",
       "status": "current"
     }
   ],
@@ -87,7 +85,9 @@
     "V0052__s3_driver_sos.sql",
     "V0053__s3_driver_sos_urgent_alert_outbox.sql",
     "V0054__make_driver_credentials_columns_nullable.sql",
-    "V0055__p5_disclosure_ids_as_varchar.sql"
+    "V0055__p5_disclosure_ids_as_varchar.sql",
+    "V0056__multi_taxi_runtime_compliance_closure.sql",
+    "V0057__runtime_profile_service_product_policy.sql"
   ],
   "nextMigrationPolicy": "reserve next unused number on implementation branch; suggested V0056-V0058 if still free",
   "architectureDecisions": {
@@ -96,20 +96,9 @@
       "multi_taxi_direct",
       "business_dispatch"
     ],
-    "acquisitionModes": [
-      "platform_reserved",
-      "street_hail",
-      "physical_rank"
-    ],
-    "timingModes": [
-      "on_demand",
-      "scheduled"
-    ],
-    "queueModes": [
-      "virtual_matching",
-      "physical_rank",
-      "taxi_stand"
-    ],
+    "acquisitionModes": ["platform_reserved", "street_hail", "physical_rank"],
+    "timingModes": ["on_demand", "scheduled"],
+    "queueModes": ["virtual_matching", "physical_rank", "taxi_stand"],
     "multiTaxiOperatingAuthorizationRequired": true,
     "publicHeaderIsNotRuntimeAuthority": true,
     "assignmentSnapshotMustBeAtomic": true,
@@ -125,17 +114,23 @@
       "s3_driver_ui",
       "s3_ops_ui",
       "p5_passenger_ui_fixture",
-      "p5_admin_ui"
-    ],
-    "remainingWorkflowClosure": [
+      "p5_admin_ui",
       "typed_multi_taxi_intake",
       "server_authoritative_runtime_profile",
+      "runtime_profile_service_product_policy",
       "multi_taxi_operating_authorization",
-      "queue_semantics",
+      "queue_semantics_backend",
       "rating_authority",
       "p5_hard_gate",
       "atomic_disclosure_snapshot",
       "live_passenger_api_sse",
+      "production_passenger_fixture_gate",
+      "multi_taxi_authorization_admin_ui"
+    ],
+    "remainingWorkflowClosure": [
+      "current_head_multi_taxi_e2e",
+      "queue_semantics_ops_ui",
+      "rating_moderation_admin_ui",
       "fare_payment_receipt",
       "two_year_operational_record",
       "s3_production_verification"
