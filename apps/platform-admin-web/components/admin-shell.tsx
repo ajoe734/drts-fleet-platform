@@ -146,6 +146,12 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.serviceProducts",
   },
   {
+    key: "multi-taxi-authorizations",
+    icon: ShieldCheck,
+    section: "fleet",
+    labelKey: "adminShell.route.multiTaxiAuthorizations",
+  },
+  {
     key: "vehicle-eligibility",
     icon: Truck,
     section: "fleet",

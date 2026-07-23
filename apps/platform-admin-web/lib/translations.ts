@@ -1311,6 +1311,7 @@ const en = {
   "adminShell.route.users": "Platform Staff",
   "adminShell.route.fleet": "Fleet & Compliance",
   "adminShell.route.serviceProducts": "Service Products",
+  "adminShell.route.multiTaxiAuthorizations": "Multi-Taxi Authorizations",
   "adminShell.route.vehicleEligibility": "Vehicle Eligibility Matrix",
   "adminShell.route.fleetPartners": "Fleet Partners",
   "adminShell.route.p5Disclosure": "P5 Disclosure Review",
@@ -1351,7 +1352,8 @@ const en = {
   "p5.disclosure.previewSubtitle": "Rendered after approval",
   "p5.disclosure.previewVehicleMeta":
     "{year} model year · {doors} doors · {color}",
-  "p5.disclosure.backendOnly": "Stored backend-only, never exposed in passenger APIs.",
+  "p5.disclosure.backendOnly":
+    "Stored backend-only, never exposed in passenger APIs.",
   "p5.disclosure.validBadge": "Registration valid",
   "p5.disclosure.validUntil": "Valid until {date}",
   "p5.disclosure.maskedNote":
@@ -4131,6 +4133,7 @@ const zh: typeof en = {
   "adminShell.route.users": "平台人員",
   "adminShell.route.fleet": "車隊與法遵",
   "adminShell.route.serviceProducts": "服務產品",
+  "adminShell.route.multiTaxiAuthorizations": "多元計程車營運許可",
   "adminShell.route.vehicleEligibility": "車輛資格矩陣",
   "adminShell.route.fleetPartners": "車隊夥伴",
   "adminShell.route.p5Disclosure": "P5 揭露審核",
@@ -4168,8 +4171,7 @@ const zh: typeof en = {
   "p5.disclosure.driverSubtitle": "只顯示遮碼證號；完整證號僅留後端。",
   "p5.disclosure.previewCard": "乘客顯示預覽",
   "p5.disclosure.previewSubtitle": "核准後乘客端呈現",
-  "p5.disclosure.previewVehicleMeta":
-    "{year} 年出廠 · {doors} 門 · {color}",
+  "p5.disclosure.previewVehicleMeta": "{year} 年出廠 · {doors} 門 · {color}",
   "p5.disclosure.backendOnly": "僅存後端，不進乘客 API。",
   "p5.disclosure.validBadge": "執登有效",
   "p5.disclosure.validUntil": "有效至 {date}",
@@ -4194,8 +4196,7 @@ const zh: typeof en = {
   "p5.queue.subjectType.vehicle": "車輛揭露",
   "p5.queue.subjectType.driver": "駕駛執登憑證",
   "p5.fares.title": "公開車資版本",
-  "p5.fares.subtitle":
-    "公開車資版本草稿、已備查、已生效、已停用與公開預覽。",
+  "p5.fares.subtitle": "公開車資版本草稿、已備查、已生效、已停用與公開預覽。",
   "p5.fares.create": "建立版本",
   "p5.fares.previewCard": "公開頁預覽 · /fares",
   "p5.fares.previewNote":
