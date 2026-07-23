@@ -47,6 +47,7 @@
 <script type="text/babel" src="platform-sandbox.jsx"></script>
 <script type="text/babel" src="platform-regulator.jsx"></script>
 <script type="text/babel" src="platform-service-area.jsx"></script>
+<script type="text/babel" src="platform-p5.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -123,6 +124,13 @@ function App() {
           <DCArtboard id="sa-preview" label="流程2 / 5.6 · 受影響樣本預覽 · 後端評估為權威" width={W} height={H}><Bare><PA_ServiceAreaPreview theme={th} /></Bare></DCArtboard>
           <DCArtboard id="sa-retire" label="流程3 / 5.7 · 退場/替換 + active history + audit" width={W} height={H}><Bare><PA_ServiceAreaRetire theme={th} /></Bare></DCArtboard>
           <DCArtboard id="sa-states" label="空 / 錯誤 / 降級 狀態 ×8" width={W} height={H}><Bare><PA_ServiceAreaStates theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-backoffice" title="03h · 智行叫車 P-5 揭露後台 · §21 + A01/A02/A05" subtitle="車輛/駕駛揭露欄位審核 · 補正佇列 · 公開車資版本 · 2 年營運紀錄">
+          <DCArtboard id="p5-a01" label="P5-A01 · 揭露欄位審核 + 乘客顯示預覽" width={W} height={H}><Hero url="/p5/disclosure"><PA_P5Disclosure theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-a02" label="P5-A02 · 補正佇列 · 查看/退件/核准" width={W} height={H}><Bare><PA_P5Queue theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="p5-a03b" label="公開車資版本 · 草稿/備查/生效/停用 + 預覽" width={W} height={H}><Bare><PA_P5Fare theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="p5-a05" label="P5-A05 · 行程營運紀錄（730 天）+ 匯出" width={W} height={H}><Bare><PA_P5Records theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
