@@ -1,32 +1,91 @@
 === Hermetic E2E Execution Audit ===
-Date: 2026-07-23T15:02:52Z
+Date: 2026-07-23T15:08:48Z
 Branch: gemini/s3-verify-001
-Head Baseline: 3b8b753a008283e788803a8ba3a0b1d54f245cf6
+Head Baseline: 1de85a5071b74d18779fcdac9f3f553de04e9e5c
 
 Executed Scenarios:
 1. tests/e2e/E2E-017-driver-sos-incident.sh
 2. tests/e2e/E2E-018-driver-device-lifecycle.sh
 3. tests/e2e/E2E-021-driver-heartbeat-replay.sh
 
+[hermetic] building @drts/api because apps/api/dist/main.js is missing
+──────── hermetic E2E-017 ────────
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 1785602
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-017-driver-sos-incident
+  ✓ PASS  E2E-017-driver-sos-incident
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-1785602.json
+  Evidence log:  /tmp/drts-e2e-evidence-1785602.log
+
+Evidence capture:
+2026-07-23T15:04:17Z | E2E-017 | driver | incidentId=INC-000001
+2026-07-23T15:04:17Z | E2E-017 | driver | sosEventId=8f8e0413-82d2-4031-a4c5-6486ec1abfb5
+2026-07-23T15:04:17Z | E2E-017 | driver | eventNo=SOS-20260723150417-95CF2F
+2026-07-23T15:04:17Z | E2E-017 | driver | listForbidden=true
+════════════════════════════════════════════════════════
+
+──────── hermetic E2E-018 ────────
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 1825102
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-018-driver-device-lifecycle
+  ✓ PASS  E2E-018-driver-device-lifecycle
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-1825102.json
+  Evidence log:  /tmp/drts-e2e-evidence-1825102.log
+
+Evidence capture:
+2026-07-23T15:06:35Z | E2E-018 | driver_device | bindingId=drvbind_05264aa230b1439fb1221a970e736fae
+2026-07-23T15:06:35Z | E2E-018 | driver_device | deviceId=e2e-device-1825102
+2026-07-23T15:06:35Z | E2E-018 | driver_device | refreshRotated=true
+2026-07-23T15:06:35Z | E2E-018 | driver_device | revokedAt=2026-07-23T15:06:35.685Z
+════════════════════════════════════════════════════════
+
+──────── hermetic E2E-021 ────────
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 1895143
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-021-driver-heartbeat-replay
+  ✓ PASS  E2E-021-driver-heartbeat-replay
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-1895143.json
+  Evidence log:  /tmp/drts-e2e-evidence-1895143.log
+
+Evidence capture:
+2026-07-23T15:08:46Z | E2E-021 | tracking | baselineFreshness=missing
+2026-07-23T15:08:46Z | E2E-021 | heartbeat | replayDeduped=true
+2026-07-23T15:08:46Z | E2E-021 | tracking | currentRecordedAt=2026-07-23T15:08:46.000Z
+2026-07-23T15:08:46Z | E2E-021 | tracking | freshness=fresh
+2026-07-23T15:08:46Z | E2E-021 | tracking | opsParity=true
+2026-07-23T15:08:46Z | E2E-021 | tracking | lowAccuracyFreshness=low_accuracy
+════════════════════════════════════════════════════════
+
+════════════════════════════════════════
 [hermetic] PASS (3): 017 018 021
 [hermetic] FAIL (0): none
-
-E2E-017 evidence:
-2026-07-23T14:54:41Z | E2E-017 | driver | incidentId=INC-000001
-2026-07-23T14:54:41Z | E2E-017 | driver | sosEventId=f5f6690d-4936-4bbb-9590-50820cf0ee5b
-2026-07-23T14:54:41Z | E2E-017 | driver | eventNo=SOS-20260723145441-540214
-2026-07-23T14:54:41Z | E2E-017 | driver | listForbidden=true
-
-E2E-018 evidence:
-2026-07-23T14:56:54Z | E2E-018 | driver_device | bindingId=drvbind_97ec6f514c6443fca513c0172c74cd48
-2026-07-23T14:56:54Z | E2E-018 | driver_device | deviceId=e2e-device-1668112
-2026-07-23T14:56:54Z | E2E-018 | driver_device | refreshRotated=true
-2026-07-23T14:56:54Z | E2E-018 | driver_device | revokedAt=2026-07-23T14:56:54.513Z
-
-E2E-021 evidence:
-2026-07-23T14:59:08Z | E2E-021 | tracking | baselineFreshness=missing
-2026-07-23T14:59:08Z | E2E-021 | heartbeat | replayDeduped=true
-2026-07-23T14:59:08Z | E2E-021 | tracking | currentRecordedAt=2026-07-23T14:59:07.000Z
-2026-07-23T14:59:08Z | E2E-021 | tracking | freshness=fresh
-2026-07-23T14:59:08Z | E2E-021 | tracking | opsParity=true
-2026-07-23T14:59:08Z | E2E-021 | tracking | lowAccuracyFreshness=low_accuracy
