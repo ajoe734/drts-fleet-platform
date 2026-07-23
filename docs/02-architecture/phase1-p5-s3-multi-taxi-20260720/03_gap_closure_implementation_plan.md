@@ -1,6 +1,7 @@
 # P-5 / S-3 與一般／多元化計程車雙軌營運 Gap-Closure Implementation Plan
 
-**文件版本：** v2.0  
+**文件版本：** v2.1
+
 **日期：** 2026-07-23  
 **Repository：** `ajoe734/drts-fleet-platform`  
 **基準分支：** `dev`  
@@ -13,6 +14,23 @@
 ---
 
 # 0. 本版取代範圍
+
+## 0.1 法規 MVP 實用性裁決
+
+2026-07-23 重新盤點後，UI 與營運工具只保留法規明文結果或現場必要入口。
+以下項目不屬本期法規 MVP，不得阻擋其他功能：
+
+- rating moderation console；
+- payment exception console；
+- fare anomaly triage console；
+- legal hold；
+- export job orchestration；
+- 指定 Figma、全畫面 PNG 或獨立 Design QA package。
+
+最小 UI delta 與重新啟動條件以
+`08_multi_taxi_operations_ui_design_requirements_20260723.md` v1.1 為準。
+
+## 0.2 基準取代範圍
 
 本文件取代 2026-07-20 版本中已被後續合併結果淘汰的「目前不存在」判定，但保留其可重用 spine 與 P-5 / S-3 原始 work-package 語意。
 
@@ -54,16 +72,16 @@ origin/dev = ff16b7131bee4594ec56b195d43539a8d65ce379
 
 ## 1.2 已合併能力
 
-| PR | 已落地能力 | 本計畫判定 |
-|---|---|---|
-| #1108 | P-5 / S-3 contracts、V0051 / V0052 anchors | Foundation landed |
-| #1111 | Dedicated Driver SOS backend、Incident correlation、urgent outbox | Backend landed |
-| #1112 | Clean UTF-8 source specs、P-5 / S-3 design canvas | Source / visual truth landed |
-| #1114 | Standalone Driver SOS UI、2s hold、dial、offline outbox、attachments | Driver UI landed |
-| #1116 | Ops SOS queue / detail / map / ack / SSE | Ops UI landed |
-| #1117 | doorCount / color、canonical vehicle disclosure、driver credential masking、backfill | Supply / registry landed |
-| #1119 | Passenger P-5 screen set | UI landed, fixture-backed |
-| #1121 | Platform Admin disclosure / correction / fare screens | UI landed |
+| PR    | 已落地能力                                                                           | 本計畫判定                   |
+| ----- | ------------------------------------------------------------------------------------ | ---------------------------- |
+| #1108 | P-5 / S-3 contracts、V0051 / V0052 anchors                                           | Foundation landed            |
+| #1111 | Dedicated Driver SOS backend、Incident correlation、urgent outbox                    | Backend landed               |
+| #1112 | Clean UTF-8 source specs、P-5 / S-3 design canvas                                    | Source / visual truth landed |
+| #1114 | Standalone Driver SOS UI、2s hold、dial、offline outbox、attachments                 | Driver UI landed             |
+| #1116 | Ops SOS queue / detail / map / ack / SSE                                             | Ops UI landed                |
+| #1117 | doorCount / color、canonical vehicle disclosure、driver credential masking、backfill | Supply / registry landed     |
+| #1119 | Passenger P-5 screen set                                                             | UI landed, fixture-backed    |
+| #1121 | Platform Admin disclosure / correction / fare screens                                | UI landed                    |
 
 ## 1.3 已存在且應重用的 spine
 
@@ -110,9 +128,7 @@ export type PassengerAcquisitionMode =
   | "street_hail"
   | "physical_rank";
 
-export type RideTimingMode =
-  | "on_demand"
-  | "scheduled";
+export type RideTimingMode = "on_demand" | "scheduled";
 
 export type DispatchQueueMode =
   | "virtual_matching"
@@ -198,7 +214,7 @@ Header 只允許 trusted internal client 使用，且必須：
 移除目前錯誤的：
 
 ```ts
-businessDispatchSubtype === "taxi_reservation"
+businessDispatchSubtype === "taxi_reservation";
 ```
 
 `taxi_reservation` 是 Service Product，不是 Business Dispatch Subtype。
@@ -277,29 +293,29 @@ Eligibility 必須同時確認：
 
 # 3. 現況分類：已落地、部分落地、仍缺
 
-| 能力 | 現況 | 本輪動作 |
-|---|---|---|
-| P-5 contracts | 已落地 | 補 command / authority / response contracts |
-| Vehicle disclosure | 已落地 | 串 eligibility / assignment |
-| Driver credential | 已落地 | 串 eligibility / assignment |
-| Runtime profile | Contract + 錯誤 partial guard | 重構為 server authority |
-| Multi-taxi intake | 不可用 | 新增 dedicated typed routes |
-| Operating authorization | 無 | 新增 authority |
-| Queue semantics | 未分離 | 新增 enum / gate / route rules |
-| Driver rating | Contract only | 新增 DB / service / API / aggregation |
-| P-5 hard gate | 無 runtime wiring | 接入 evaluator，列 non-bypassable |
-| Disclosure snapshot | Contract only | 新增 persistence + assignment txn |
-| Passenger UI | 已落地，fixture-backed | 接 live token/API/SSE；prod 禁 fixture |
-| Admin UI | 已落地 | 串 live review / fare authority |
-| Route / fare snapshot | Contract only | 新增 booking confirmation authority |
-| Public fare version | UI / contract | 新增 DB / service / activation |
-| Seatbelt | UI / contract | 新增 runtime event |
-| Payment | State contract | 新增 provider port / state / recovery |
-| Ride certificate | Contract / UI | 新增 generation / PDF / API |
-| 730-day record | Contract | 新增 builder / retention / export |
-| S-3 backend | 已落地 | 做 current-head E2E / SLO hardening |
-| S-3 Driver UI | 已落地 | 真機離線 / dial / attachments UAT |
-| S-3 Ops UI | 已落地 | SSE / first-ack / sound / SLO UAT |
+| 能力                    | 現況                          | 本輪動作                                         |
+| ----------------------- | ----------------------------- | ------------------------------------------------ |
+| P-5 contracts           | 已落地                        | 補 command / authority / response contracts      |
+| Vehicle disclosure      | 已落地                        | 串 eligibility / assignment                      |
+| Driver credential       | 已落地                        | 串 eligibility / assignment                      |
+| Runtime profile         | Contract + 錯誤 partial guard | 重構為 server authority                          |
+| Multi-taxi intake       | 不可用                        | 新增 dedicated typed routes                      |
+| Operating authorization | 無                            | 新增 authority                                   |
+| Queue semantics         | 未分離                        | 新增 enum / gate / route rules                   |
+| Driver rating           | Contract only                 | 新增 DB / service / API / aggregation            |
+| P-5 hard gate           | 無 runtime wiring             | 接入 evaluator，列 non-bypassable                |
+| Disclosure snapshot     | Contract only                 | 新增 persistence + assignment txn                |
+| Passenger UI            | 已落地，fixture-backed        | 接 live token/API/SSE；prod 禁 fixture           |
+| Admin UI                | 已落地                        | 沿用既有頁面；只補許可、queue 標示與紀錄查詢下載 |
+| Route / fare snapshot   | Contract only                 | 新增 booking confirmation authority              |
+| Public fare version     | UI / contract                 | 新增 DB / service / activation                   |
+| Seatbelt                | UI / contract                 | 新增 runtime event                               |
+| Payment                 | State contract                | 新增 provider port / state / recovery            |
+| Ride certificate        | Contract / UI                 | 新增 generation / PDF / API                      |
+| 730-day record          | Contract                      | 新增 builder / retention / query-download        |
+| S-3 backend             | 已落地                        | 做 current-head E2E / SLO hardening              |
+| S-3 Driver UI           | 已落地                        | 真機離線 / dial / attachments UAT                |
+| S-3 Ops UI              | 已落地                        | SSE / first-ack / sound / SLO UAT                |
 
 ---
 
@@ -359,7 +375,7 @@ operatingAuthorizationId
 刪除：
 
 ```ts
-command.businessDispatchSubtype !== "taxi_reservation"
+command.businessDispatchSubtype !== "taxi_reservation";
 ```
 
 用 typed context 取代：
@@ -709,10 +725,12 @@ Provider tokenization；不得保存 raw card。
 提供：
 
 - Admin query。
-- controlled export。
-- access audit。
-- legal hold。
+- 主管機關所需範圍下載。
+- 沿用既有 access control / audit primitive。
 - coverage metric = 100% for post-rollout completed trips。
+
+本期不建立 legal hold、export job queue 或 retention policy editor；如法務、
+資料量或主管機關格式另有明確需求，再獨立立項。
 
 ---
 

@@ -1,1129 +1,476 @@
-# Multi-Taxi Operations UI Design Requirements
+# 多元化計程車操作 UI 最小需求
 
-**Document version:** v1.0  
-**Date:** 2026-07-23  
-**Status:** Ready for Design  
-**Audience:** Product Design, UX, Visual Design, Content Design, Prototype,
-Design QA  
-**System baseline:** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`  
-**Execution mapping:** `07_fleets_execution_tasks_20260723.md`
+**文件版本：** v1.1
 
----
+**日期：** 2026-07-23
 
-# 0. Purpose and Boundary
+**狀態：** Ready for Minimal Design
 
-This is the handoff requirement for the missing multi-taxi operational UI. It
-defines:
+**對象：** Product Design、Frontend、Backend、QA、法遵審查
 
-- users and permissions;
-- information architecture;
-- required screens;
-- fields and status presentation;
-- actions and confirmation flows;
-- loading, empty, conflict, unavailable, and permission states;
-- content rules;
-- responsive and accessibility requirements;
-- prototype and Design QA deliverables.
+**系統基準：** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`
 
-This document does not define database tables, new API behavior, backend
-lifecycle transitions, legal-policy overrides, production deployment, or
-implementation technology.
-
-Design must consume canonical field and status names from the system spec. It
-must not create a second business vocabulary.
+**執行對照：** `07_fleets_execution_tasks_20260723.md`
 
 ---
 
-# 1. Product Decision
+# 0. 本次重新盤點結論
 
-General taxi and multi-taxi use a shared dispatch spine but are different
-runtime profiles:
+v1.0 把法定功能、營運控制與設計交付物混在一起，形成 17 個畫面及過多
+handoff gate。v1.1 依「實用性優先、法規必要、沿用現有 UI」原則縮減為
+4 個 UI delta，不再為了完整性建立專用後台。
 
-```text
-ordinary_taxi
-multi_taxi_direct
-business_dispatch
-```
+本版明確取消下列法規 MVP gate：
 
-The operational UI must make these multi-taxi rules understandable:
+- rating moderation console；
+- payment exception console；
+- legal hold 管理；
+- 獨立 queue overview、detail、denial 三頁；
+- 獨立 authorization lifecycle 與 conflict 頁；
+- export job orchestration；
+- 指定 Figma page structure；
+- 全畫面 PNG 套件；
+- 獨立 Design QA 流程。
 
-```text
-acquisitionMode = platform_reserved
-timingMode = on_demand | scheduled
-queueMode = virtual_matching
-operating authorization = required
-authorized vehicle membership = required
-active fare version = required
-```
-
-For `multi_taxi_direct`, `street_hail`, `physical_rank`, and `taxi_stand` are
-forbidden.
-
-The UI is not runtime authority. It displays server decisions and submits
-permitted commands. It must never provide a visual override for a non-bypassable
-legal gate.
+取消上述項目不代表移除後端法定 hard gate。預約載客、禁止巡迴攬客與
+招呼站排班、乘前揭露、乘後評價、電子支付、電子乘車證明及二年營運資料
+仍須依適用條件完成。
 
 ---
 
-# 2. Existing Visual Sources to Reuse
+# 1. 範圍判斷原則
 
-Do not redesign the completed P-5/S-3 visual hierarchy.
+每個 UI 要求必須至少符合一項：
 
-| Existing surface     | Canonical source                                               | Coverage                               |
-| -------------------- | -------------------------------------------------------------- | -------------------------------------- |
-| P-5 Passenger        | `docs/05-ui/drts-design-canvas/p5-ui.jsx` and `p5-screens.jsx` | P5-01..12, P5-A03, P5-A04              |
-| P-5 Back Office      | `docs/05-ui/drts-design-canvas/platform-p5.jsx`                | P5-A01, P5-A02, P5-A03, P5-A05         |
-| S-3 Driver           | `docs/05-ui/drts-design-canvas/driver-sos.jsx`                 | S3-01..11                              |
-| S-3 Ops              | `docs/05-ui/drts-design-canvas/ops-sos.jsx`                    | S3-O01..O06                            |
-| Platform Admin shell | `docs/05-ui/drts-design-canvas/Platform Admin.html`            | navigation, tables, forms, banners     |
-| Ops shell            | `docs/05-ui/drts-design-canvas/Ops Console.html`               | navigation, operational tables, alerts |
+1. 法規明文要求使用者可取得、輸入或下載資訊；
+2. 現場人員若無此資訊，無法正確完成必要工作；
+3. 既有後端能力需要最小操作入口，且可直接沿用現有頁面。
 
-New work must extend these tokens and components. It must not introduce a
-separate multi-taxi design system.
+下列理由不足以新增畫面：
 
----
+- 只是讓 architecture 看起來完整；
+- 尚無 API command，但先畫一套操作；
+- 只為可能發生的未定義例外建立 console；
+- 其他產品線有同類頁面；
+- 只為產出 Figma、PNG 或 checklist。
 
-# 3. Users and Capabilities
-
-The UI must be capability-driven. Hidden or disabled actions do not replace
-server authorization.
-
-| User                       | Required capability                 | UI responsibility                                         |
-| -------------------------- | ----------------------------------- | --------------------------------------------------------- |
-| Platform compliance viewer | `multi_taxi_authorization:read`     | Read authorization and vehicle membership                 |
-| Authorization editor       | `multi_taxi_authorization:write`    | Create/edit draft and maintain vehicle membership         |
-| Authorization activator    | `multi_taxi_authorization:activate` | Activate or suspend with confirmation                     |
-| Rating moderator           | `rating:moderate`                   | Review and invalidate ratings with reason/audit context   |
-| Fare manager               | `fare_publication:manage`           | Manage fare versions and anomaly workflow                 |
-| Records viewer             | `multi_taxi_records:read`           | Query operational records                                 |
-| Records exporter           | `multi_taxi_records:export`         | Create and download controlled exports                    |
-| Ops dispatcher             | Existing dispatch capabilities      | Understand queue mode and legal denial; no legal override |
-
-Required permission states:
-
-- read denied;
-- read allowed but mutation denied;
-- mutation allowed but activation denied;
-- export denied;
-- session expired;
-- capability changed while the screen is open.
-
-Do not show an enabled control and wait for the API to reject it when the
-capability is already known.
+設計不得建立第二套 multi-taxi design system，也不得把後端 reason code
+直接丟給營運人員。
 
 ---
 
-# 4. Information Architecture
+# 2. 法規與 UI 的正確關係
 
-## 4.1 Platform Admin
+截至 2026-07-23，本文件採用下列官方來源：
 
-```text
-Fleet Programs
-  └─ Multi-Taxi Operating Authorizations
-       ├─ Authorization Registry
-       ├─ Authorization Detail
-       ├─ Draft Editor
-       └─ Authorized Vehicles
+1. [交通部現行《汽車運輸業管理規則》](https://motclaw.motc.gov.tw/webMotcLaw2018/Law/ArticleContent?LawID=E0046101&type=-1)
+2. [第 4 條申請核准區段](https://motclaw.motc.gov.tw/webMotcLaw2018/Law/ArticleContent?LawID=E0046097&NoRange=3-7)
+3. [第 91 條多元化計程車區段](https://motclaw.motc.gov.tw/webMotcLaw2018/Law/ArticleContent?LawID=E0046097&NoRange=91-96.10)
+4. [附表一之一營業計畫書應載事項](https://gazette.nat.gov.tw/egFront/fileView.do?fileName=57dfe30d0489841c265040d2512554a7435819b43af6e2606c151421bfc231987d6f608b6ebcdde6&fileType=fileroot)
 
-Platform & Commerce
-  ├─ Rating Governance
-  ├─ Public Fare Versions
-  ├─ Fare Anomalies
-  ├─ Payment Exceptions
-  └─ Multi-Taxi Records and Exports
-```
+| 法規結果                               | 系統最低需求                       | 是否需要專用 UI                    |
+| -------------------------------------- | ---------------------------------- | ---------------------------------- |
+| 營業計畫書及變更經核准                 | Runtime 使用正確核准資料與車輛範圍 | 不一定；既有管理頁即可             |
+| 僅預約載客                             | Intake 固定為 `platform_reserved`  | 不需要新頁                         |
+| 不得巡迴攬客或招呼站排班               | 後端拒絕違規 queue mode            | 不需要新頁；既有 dispatch 顯示即可 |
+| 叫車時提供車輛、駕駛、評價、路線與車資 | 既有 Passenger ride 顯示完整資料   | 不需要新 route                     |
+| 乘後可評價                             | 完成旅程後可送出評分               | 不需要 moderation console          |
+| 依營業計畫期程全面電子支付             | 乘客可辨識付款結果                 | 不需要 payment exception console   |
+| 免計費表時提供電子化乘車證明           | 乘客可讀取法定欄位                 | 沿用既有 ride/receipt surface      |
+| 營運資料至少保存二年                   | 保存 730 日並可查詢                | 需要最小查詢入口                   |
+| 配合主管機關查詢及下載                 | 可依範圍下載法定欄位               | 需要最小下載能力                   |
 
-## 4.2 Ops Console
-
-```text
-Dispatch
-  └─ Queue Operations
-       ├─ Queue Overview
-       ├─ Queue Entry Detail
-       └─ Legal Denial State
-```
-
-## 4.3 Recommended Implementation Routes
-
-Routes are handoff recommendations, not a license to change backend APIs:
-
-```text
-/multi-taxi-authorizations
-/multi-taxi-authorizations/{authorizationId}
-/p5-ratings
-/p5-fares
-/p5-fare-anomalies
-/payments
-/multi-taxi-records
-
-/dispatch/queue
-```
+法規規定的是結果，不指定 React route、後台頁數、Figma 或 PNG。
 
 ---
 
-# 5. Screen Inventory
+# 3. Repository 現況
 
-## 5.1 Operating Authorization
+| 能力            | 現況                                         | 本版決定                             |
+| --------------- | -------------------------------------------- | ------------------------------------ |
+| 營運許可        | 已有 `/multi-taxi-authorizations` 頁面及 API | 改善既有頁，不重畫 6 頁              |
+| Queue hard gate | Contract、policy 與 negative test 已存在     | 在既有 dispatch 頁補標示             |
+| 乘客評價        | Passenger API/contract 已存在                | 完成既有 ride flow，不做 moderation  |
+| Payment state   | Passenger authority contract 已存在          | 顯示必要狀態，不做 exception console |
+| 電子乘車證明    | Passenger receipt API/contract 已存在        | 沿用既有 ride/receipt surface        |
+| 二年紀錄        | Contract 已存在，查詢下載尚未閉環            | 新增一個最小 admin surface           |
 
-| Screen ID        | Name                        | Primary purpose                                  |
-| ---------------- | --------------------------- | ------------------------------------------------ |
-| `MTX-AUTH-UI-01` | Authorization Registry      | Search, filter, compare status/effective window  |
-| `MTX-AUTH-UI-02` | Authorization Detail        | Read canonical authorization and lifecycle       |
-| `MTX-AUTH-UI-03` | Draft Editor                | Create or edit a draft                           |
-| `MTX-AUTH-UI-04` | Lifecycle Confirmation      | Confirm activate or suspend                      |
-| `MTX-AUTH-UI-05` | Authorized Vehicles         | Maintain vehicle membership                      |
-| `MTX-AUTH-UI-06` | Conflict / Permission State | Handle stale, forbidden, and unavailable actions |
-
-## 5.2 Queue Semantics
-
-| Screen ID         | Name                        | Primary purpose                                |
-| ----------------- | --------------------------- | ---------------------------------------------- |
-| `MTX-QUEUE-UI-01` | Queue Overview              | Show queue entries with explicit queue mode    |
-| `MTX-QUEUE-UI-02` | Queue Entry Detail          | Explain runtime profile, site, and eligibility |
-| `MTX-QUEUE-UI-03` | Non-Bypassable Legal Denial | Explain why physical rank/stand is denied      |
-
-## 5.3 Rating Governance
-
-| Screen ID       | Name                    | Primary purpose                                      |
-| --------------- | ----------------------- | ---------------------------------------------------- |
-| `P5-RATE-UI-01` | Rating Review Queue     | Filter active, under-review, and invalidated ratings |
-| `P5-RATE-UI-02` | Rating Review Detail    | Review trip-linked rating and moderation history     |
-| `P5-RATE-UI-03` | Driver Rating Authority | Show aggregate state without editable/fake values    |
-
-## 5.4 Fare, Payment, Certificate, and Retention
-
-| Screen ID      | Name                          | Primary purpose                                       |
-| -------------- | ----------------------------- | ----------------------------------------------------- |
-| `P5-COM-UI-01` | Fare Anomaly Queue / Detail   | Triage fail-closed quote anomalies                    |
-| `P5-COM-UI-02` | Payment Exception Detail      | Explain failed/manual-recovery payment state          |
-| `P5-COM-UI-03` | Certificate Support           | Locate and re-open available ride certificates        |
-| `P5-COM-UI-04` | Operational Record Query      | Query the two-year trip record                        |
-| `P5-COM-UI-05` | Controlled Export / Retention | Create export, show job status, retention, legal hold |
+設計工作只處理尚未清楚的 delta，不重做已存在的 P-5/S-3 canvas。
 
 ---
 
-# 6. Operating Authorization Requirements
+# 4. 最小 UI Delta
 
-## 6.1 Canonical Fields
+## `MTX-UI-MVP-01` 既有營運許可頁
 
-| System field          | UI label     | Required display rule                         |
-| --------------------- | ------------ | --------------------------------------------- |
-| `authorizationId`     | 許可 ID      | Detail/audit only; monospace; copy control    |
-| `operatorId`          | 業者         | Registry and detail                           |
-| `authorityCode`       | 許可代碼     | Primary human identifier                      |
-| `businessPlanVersion` | 營業計畫版本 | Registry and detail                           |
-| `status`              | 狀態         | Text + semantic color; never color-only       |
-| `serviceAreaCodes[]`  | 營運區域     | Named chips where labels exist; code fallback |
-| `activeFareVersionId` | 生效費率版本 | Link to fare detail when permitted            |
-| `effectiveFrom`       | 生效時間     | Display timezone explicitly                   |
-| `effectiveUntil`      | 失效時間     | `null` = 無預定失效日                         |
-| `createdAt`           | 建立時間     | Detail/audit section                          |
-| `updatedAt`           | 最後更新     | Registry and detail                           |
+**沿用 route：** `/multi-taxi-authorizations`
 
-Status copy:
+**使用者：** 經授權的 Platform Admin
+
+**目的：** 讓系統使用的核准資料與主管機關核准內容一致。
+
+### 必須顯示
+
+- 業者；
+- 許可／核准識別碼；
+- 營業計畫版本；
+- 狀態；
+- 營運區域；
+- 生效與失效時間；
+- 生效費率版本；
+- 納入此計畫的車輛及有效期間。
+
+### 必須支援
+
+- 建立 draft；
+- 編輯 draft；
+- 啟用 draft 或 suspended record；
+- 暫停 approved record；
+- 加入車輛；
+- 顯示 API validation error。
+
+只能呈現目前已核准的 commands：
 
 ```text
-draft      草稿
-approved   已核准
-suspended  已暫停
-expired    已失效
-revoked    已撤銷
+create draft
+update draft
+activate
+suspend
+add vehicle
 ```
 
-## 6.2 Registry
-
-Required columns:
+不得新增：
 
 ```text
-許可代碼
-業者
-營業計畫版本
-狀態
-營運區域
-生效費率版本
-有效期間
-最後更新
+revoke
+restore
+delete
+vehicle suspend
+legal hold
+bulk import
 ```
 
-Required filters:
+除非對應 API、權限及 lifecycle 已另行核准。
+
+### 最小狀態
 
 ```text
-業者
-狀態
-營運區域
-有效日期
-許可代碼／版本關鍵字
-```
-
-Default sorting:
-
-1. active/approved;
-2. nearest effective boundary;
-3. most recently updated.
-
-Rows with an upcoming expiry need a text warning and date. Do not infer
-regulatory invalidity beyond the backend status/effective window.
-
-## 6.3 Detail
-
-Required sections:
-
-1. identity and status;
-2. operator and business-plan authority;
-3. service areas;
-4. active fare version;
-5. effective window;
-6. authorized vehicles summary;
-7. lifecycle/audit timestamps;
-8. available actions.
-
-Action availability:
-
-| Current status | Edit | Activate        | Suspend         |
-| -------------- | ---- | --------------- | --------------- |
-| `draft`        | Yes  | With capability | No              |
-| `approved`     | No   | No              | With capability |
-| `suspended`    | No   | With capability | No              |
-| `expired`      | No   | No              | No              |
-| `revoked`      | No   | No              | No              |
-
-`expired` and `revoked` must be read-only. Do not add revoke, restore, or delete
-controls until a system command is approved.
-
-## 6.4 Draft Editor
-
-Fields:
-
-```text
-operatorId
-authorityCode
-businessPlanVersion
-serviceAreaCodes
-activeFareVersionId
-effectiveFrom
-effectiveUntil
-```
-
-Validation:
-
-- all fields except `effectiveUntil` are required;
-- at least one service area is required;
-- `effectiveUntil` must be later than `effectiveFrom`;
-- timestamps must show timezone;
-- fare version selection must show status and effective window;
-- errors appear at field and summary level;
-- unsaved changes require navigation confirmation.
-
-The form creates a draft. Activation is always a separate controlled action.
-
-## 6.5 Lifecycle Confirmation
-
-Activation confirmation shows:
-
-- authorization code;
-- operator;
-- business-plan version;
-- service areas;
-- active fare version;
-- effective window;
-- authorized vehicle count supplied by the backend;
-- consequence copy: future multi-taxi eligibility may use this authority.
-
-Suspension confirmation shows the same identity summary and consequence copy:
-new eligibility checks will no longer use this authority.
-
-Do not fabricate affected-order counts. Show an impact count only when returned
-by a server-owned preview.
-
-## 6.6 Authorized Vehicles
-
-Canonical fields:
-
-| System field             | UI label    |
-| ------------------------ | ----------- |
-| `authorizationVehicleId` | 名單紀錄 ID |
-| `vehicleId`              | 車輛        |
-| `status`                 | 名單狀態    |
-| `effectiveFrom`          | 生效時間    |
-| `effectiveUntil`         | 失效時間    |
-
-Membership status copy:
-
-```text
-active     生效中
-suspended 已暫停
-removed    已移除
-```
-
-Required functions:
-
-- search by vehicle ID or plate when the backend supplies plate projection;
-- add vehicle with effective window;
-- show current and historical membership;
-- remove with confirmation when the command is available;
-- prevent the UI from implying that vehicle type alone equals authorization.
-
-Do not add a vehicle-suspend action until a corresponding command is approved.
-
----
-
-# 7. Queue Semantics Requirements
-
-## 7.1 Queue Mode Presentation
-
-Canonical values and copy:
-
-```text
-virtual_matching  虛擬媒合
-physical_rank     實體排班
-taxi_stand        計程車招呼站
-```
-
-Every queue row and detail must display queue mode as text. Icons/colors may
-support but cannot replace the label.
-
-## 7.2 Queue Overview
-
-Required data:
-
-```text
-driverId
-vehicleId / plate projection
-runtimeProfileCode
-queueMode
-siteId
-serviceAreaCode
-operatingAuthorizationId
-eligibility decision
-check-in time
-last update
-```
-
-`siteId` is relevant to physical rank/stand contexts. A blank `siteId` must not
-make a physical queue look like virtual matching.
-
-Filters:
-
-```text
-queue mode
-runtime profile
-service area
-site
-eligibility
-driver / vehicle
-```
-
-## 7.3 Multi-Taxi Denial
-
-For `multi_taxi_direct`:
-
-```text
-virtual_matching = allowed when all other gates pass
-physical_rank = denied
-taxi_stand = denied
-```
-
-Human copy:
-
-```text
-此車輛屬多元化計程車服務，不得進入實體排班候客。
-
-此車輛屬多元化計程車服務，不得於計程車招呼站排班候客。
-```
-
-Required denial UI:
-
-- queue mode and site;
-- affected driver/vehicle;
-- multi-taxi runtime profile;
-- authorization reference where available;
-- human explanation;
-- safe next step: return to virtual matching or contact the responsible
-  administrator;
-- no `override`, `force check-in`, or equivalent action.
-
-Do not expose raw reason code as the primary message.
-
----
-
-# 8. Rating Governance Requirements
-
-## 8.1 Rating Record
-
-Required fields:
-
-```text
-ratingId
-orderId
-tripId
-driverId
-score (1..5)
-tags
-comment
-status
-submittedAt
-updatedAt
-```
-
-`passengerSubjectRef` is sensitive internal data. It may be shown only in a
-masked form when moderation requires correlation.
-
-Status copy:
-
-```text
-active        有效
-under_review  審查中
-invalidated   已作廢
-```
-
-## 8.2 Review Queue
-
-Required filters:
-
-```text
-status
-score
-tag
-driver
-trip/order
-submission date
-```
-
-Queue rows:
-
-```text
-score
-tag summary
-comment excerpt
-driver
-trip/order reference
-status
-submitted time
-last update
-```
-
-## 8.3 Moderation Detail
-
-Required sections:
-
-1. rating content;
-2. completed-trip reference;
-3. driver identity;
-4. current aggregate summary;
-5. moderation status/history;
-6. audit actor/time;
-7. permitted action.
-
-Invalidation requires explicit confirmation, a required reason, notice that the
-aggregate will be rebuilt, and the resulting server-owned state.
-
-Do not provide direct editing of score, rating count, or average. Do not provide
-an action that makes a rating active again until a restore command is approved.
-
-## 8.4 Driver Rating Authority
-
-Canonical display states:
-
-```text
-rated       show average to one decimal and rating count
-new_driver  show 新加入駕駛
-unavailable show 評價資料目前無法使用
-```
-
-Admin detail may show:
-
-```text
-averageRating
-ratingCount
-lastRatedAt
-aggregateVersion
-calculatedAt
-```
-
-`unavailable` must never render as `5.0`, `0.0`, or `new_driver`.
-
----
-
-# 9. Fare and Commerce Requirements
-
-## 9.1 Fare Version
-
-Reuse P5-A03. Canonical lifecycle:
-
-```text
-draft → filed → active → retired
-```
-
-Required fields:
-
-```text
-fareVersionId
-displayName
-status
-effectiveFrom
-effectiveUntil
-publicSummary
-authorityFilingRef
-```
-
-Only `active` is represented as usable for booking. Future-effective versions
-must not appear active before their effective time.
-
-## 9.2 Fare Anomaly
-
-| System reason                | Human copy               |
-| ---------------------------- | ------------------------ |
-| `quote_provider_unavailable` | 暫時無法取得預估車資     |
-| `quote_out_of_range`         | 預估車資超出可接受範圍   |
-| `route_unresolved`           | 尚無法確認預估路線       |
-| `fare_policy_missing`        | 目前沒有可用的生效費率   |
-| `calculation_mismatch`       | 車資計算結果需要重新確認 |
-
-Required display:
-
-- order/request reference;
-- pickup/dropoff summary;
-- route state;
-- fare version;
-- estimated/payable fare when available;
-- anomaly reason as human copy;
-- occurred/last-updated time;
-- retryability returned by the backend.
-
-This is fail closed. Do not provide a manual number field that bypasses fare
-authority.
-
-## 9.3 Payment Exception
-
-Canonical statuses:
-
-```text
-not_selected    尚未選擇
-authorized      已授權
-captured        已完成
-failed          付款失敗
-refunded        已退款
-manual_recovery 人工處理中
-```
-
-Required detail:
-
-- order/trip;
-- payable amount and currency;
-- status;
-- provider reference only when safe;
-- attempt/update time;
-- available recovery command returned by the backend;
-- audit timeline.
-
-Never display raw card data. Never present `failed` or `manual_recovery` as
-paid. Do not invent a `mark paid` control.
-
-## 9.4 Electronic Ride Certificate Support
-
-Required fields:
-
-```text
-certificateId
-orderId
-tripId
-plateNo
-pickupAt
-dropoffAt
-travelDurationSeconds
-routeSummary
-distanceMeters
-fareMinor
-tollMinor
-currency
-consumerServicePhone
-authorityComplaintPhone
-issuedAt
-certificateVersion
-```
-
-Support states:
-
-- available HTML/PDF;
-- generating;
-- unavailable;
-- failed generation;
-- access denied;
-- superseded version.
-
-The support UI may locate and open an existing certificate. Regeneration must
-not be actionable until a server command is approved.
-
----
-
-# 10. Operational Record, Export, and Retention
-
-## 10.1 Query
-
-Required filters:
-
-```text
-orderId / tripId
-vehicleId / plateNo
-reserved date range
-pickup/dropoff date range
-fare policy version
-charging mode
-retention state
-legal hold state
-```
-
-Required columns:
-
-```text
-order/trip
-plate
-reservedAt
-pickupAt
-dropoffAt
-distance
-payable fare
-actual fare
-toll
-fare policy version
-charging mode
-retainUntil
-record status
-```
-
-Missing pickup/dropoff/route values must show `未取得` or `未完成`, not zero.
-
-## 10.2 Record Detail
-
-Display trip identity, vehicle/plate, reservation/pickup/dropoff timeline,
-route source/point count/distance/duration, payable/actual/toll amounts, fare
-policy version, charging mode, generated time, `retainUntil`, and audit
-references when available.
-
-The UI must state that the minimum retention floor is 730 days after trip
-completion. It must not promise deletion exactly at `retainUntil` when a legal
-hold exists.
-
-## 10.3 Controlled Export
-
-Flow:
-
-```text
-query/filter
-→ preview scope and record count
-→ confirm export purpose
-→ create export job
-→ pending/running/completed/failed
-→ controlled download when completed
-```
-
-Confirmation must show filter scope, server-owned record count, export purpose,
-data sensitivity, requesting actor, and audit notice.
-
-Do not generate an export solely in the browser.
-
-## 10.4 Legal Hold
-
-Required states:
-
-```text
-not held
-held
-hold release pending
-released
-```
-
-The UI may display or filter legal-hold state. Hold/create/release actions remain
-design-only until evidence-governance commands and permissions are approved.
-
----
-
-# 11. Global State Requirements
-
-Every screen must include:
-
-## Loading
-
-- skeleton matching final hierarchy;
-- no fake status/count;
-- mutation controls disabled.
-
-## Empty
-
-- distinguish `no records`, `no filter results`, and `not yet initialized`;
-- provide a safe next action only when permitted.
-
-## Error
-
-- human title and recovery action;
-- request/trace ID in a secondary technical-details area;
-- no raw stack, SQL, phone, payment token, or full passenger identifier.
-
-## Stale / Conflict
-
-- explain that data changed;
-- preserve unsaved input where safe;
-- offer reload/compare;
-- never silently overwrite a newer lifecycle state.
-
-## Unavailable Authority
-
-- show the unavailable authority explicitly;
-- do not substitute fixture/default values;
-- disable dependent mutations.
-
-## Permission Denied
-
-- identify the unavailable capability in human terms;
-- do not reveal data the actor cannot read;
-- retain navigation to other permitted areas.
-
----
-
-# 12. Error-to-Copy Mapping
-
-Raw codes are for logs/audit details only.
-
-| Error code                               | Primary UI copy                              |
-| ---------------------------------------- | -------------------------------------------- |
-| `MULTI_TAXI_AUTHORIZATION_NOT_FOUND`     | 找不到此營運許可                             |
-| `AUTHORIZATION_NOT_EDITABLE`             | 此許可已不是草稿，無法編輯                   |
-| `AUTHORIZATION_CANNOT_ACTIVATE`          | 目前狀態無法啟用此許可                       |
-| `AUTHORIZATION_NOT_ACTIVE`               | 只有已核准的許可可以暫停                     |
-| `AUTHORIZATION_OUTSIDE_EFFECTIVE_WINDOW` | 此許可不在有效期間內                         |
-| `MULTI_TAXI_FIELD_REQUIRED`              | 請完成所有必填欄位                           |
-| `MULTI_TAXI_TIMESTAMP_INVALID`           | 日期或時間格式不正確                         |
-| `MULTI_TAXI_EFFECTIVE_WINDOW_INVALID`    | 失效時間必須晚於生效時間                     |
-| `MULTI_TAXI_AUTHORIZATION_AMBIGUOUS`     | 找到多筆可用許可，請由系統管理員確認服務對應 |
-| `MULTI_TAXI_AUTHORIZATION_UNAVAILABLE`   | 目前沒有可用的多元計程車營運許可             |
-| `MULTI_TAXI_VEHICLE_NOT_AUTHORIZED`      | 此車輛未列入目前生效的營運許可               |
-| `P5_OPERATING_AUTHORIZATION_MISSING`     | 缺少多元計程車營運許可                       |
-| `P5_OPERATING_AUTHORIZATION_INACTIVE`    | 多元計程車營運許可未生效                     |
-| `P5_VEHICLE_NOT_IN_AUTHORIZATION`        | 車輛未列入核准名單                           |
-| `P5_AUTHORIZATION_SERVICE_AREA_MISMATCH` | 此許可不適用於目前營運區域                   |
-| `P5_FARE_VERSION_NOT_ACTIVE`             | 目前費率版本尚未生效                         |
-| `P5_RATING_STATE_UNINITIALIZED`          | 駕駛評價資料尚未完成                         |
-
-Content Design may refine wording but may not change meaning or make a hard
-denial sound retryable.
-
----
-
-# 13. Component Requirements
-
-Reuse existing DRTS primitives and add variants where needed:
-
-```text
-AuthorizationStatusChip
-EffectiveWindow
-ServiceAreaList
-FareVersionLink
-AuthorizationActionBar
-AuthorizedVehicleTable
-QueueModeChip
-LegalDenialBanner
-RatingStatusChip
-DriverRatingAuthorityCard
-ModerationHistory
-FareAnomalyBanner
-PaymentStatusChip
-OperationalRecordTable
-RetentionStatus
-LegalHoldBadge
-ControlledExportDialog
-AuditMetadata
-PermissionBoundary
-StaleDataBanner
-```
-
-Required component states:
-
-```text
-default
-hover
-focus-visible
-disabled
 loading
-error
-read-only
-permission-denied
-stale/conflict
+empty
+loaded
+save_failed
+permission_denied
 ```
+
+`draft`、`approved`、`suspended`、`expired`、`revoked` 必須以文字顯示；
+`expired` 與 `revoked` 為唯讀。
+
+### 驗收
+
+使用者不離開既有頁面即可判斷：
+
+1. 哪一個核准目前有效；
+2. 哪些車輛在有效範圍內；
+3. 使用哪個費率版本；
+4. 現在可執行哪些既有 command。
 
 ---
 
-# 14. Visual and Responsive Requirements
+## `MTX-UI-MVP-02` 既有 Dispatch Queue 標示
 
-## Platform Admin
+**沿用 route：** `/dispatch` 與既有 dispatch detail
 
-Primary frames:
+**使用者：** Ops dispatcher
 
-```text
-1440 × 900
-1280 × 800
-1024 × 768
-```
+**目的：** 避免把平台內部媒合誤認為實體招呼站排班。
 
-At narrow widths:
+### 必須顯示
 
-- forms become one column;
-- tables use a designed horizontal-scroll or card strategy;
-- status and primary identity remain visible;
-- actions do not detach from record identity;
-- confirmation dialogs fit at 200% browser zoom.
-
-## Ops Console
-
-Primary frames:
+對 `multi_taxi_direct` 顯示：
 
 ```text
-1440 × 900
-1280 × 800
+服務類型：多元化計程車（平台預約）
+媒合方式：平台媒合
 ```
 
-The legal-denial message and absence of override must remain visible without
-opening a secondary panel.
+對應值：
 
-Use existing semantic tokens. Status must not rely on color alone.
+```text
+runtimeProfileCode = multi_taxi_direct
+acquisitionMode = platform_reserved
+queueMode = virtual_matching
+```
+
+不得在 multi-taxi 操作中提供：
+
+```text
+street_hail
+physical_rank
+taxi_stand
+```
+
+若後端拒絕不相容的 queue mode，既有頁面只需顯示：
+
+```text
+此訂單為多元化計程車平台預約，不能進入實體排班或招呼站候客。
+```
+
+不得提供「仍要派遣」或其他 bypass 按鈕。
+
+### 不需要
+
+- 新增 queue 管理首頁；
+- 新增 queue detail route；
+- 新增 legal denial 專頁；
+- 顯示 raw reason code；
+- 為三種 queue mode 建立營運設定器。
+
+### 驗收
+
+Ops 在既有 dispatch list/detail 即可辨識服務類型與媒合方式；違規組合由
+後端拒絕，UI 只負責清楚說明。
 
 ---
 
-# 15. Accessibility
+## `MTX-UI-MVP-03` 既有 Passenger Ride 法定狀態
 
-Target WCAG 2.1 AA.
+**沿用 route：** `/ride/{token}` 與既有 fares/receipt surface
 
-Required:
+**使用者：** 乘客
 
-- complete keyboard operation and visible focus;
-- semantic heading order;
-- table headers and accessible row actions;
-- status announced as text;
-- dialogs trap focus and return it on close;
-- validation summary links to fields;
-- date/time includes timezone in accessible name;
-- confirmation actions use explicit verbs;
-- live mutation result announced;
-- no auto-dismiss for legal denial or destructive-action result;
-- 200% zoom without losing controls or content;
-- motion-reduction support.
+**目的：** 完成乘前資訊、乘後評價、支付結果及適用時的電子乘車證明。
+
+### 乘前資訊
+
+既有 ride surface 必須顯示：
+
+- 車輛廠牌、車型、牌照號碼、出廠年份及車門數；
+- 駕駛人有效執業登記顯示；
+- 駕駛評價，無評價時顯示「新進駕駛」；
+- 預估路線；
+- 預估或應付車資；
+- 車資變更規則。
+
+缺少法定資料時不得顯示假預設值，也不得完成指派。
+
+### 乘後評價
+
+旅程完成且 `canRate = true` 時：
+
+- 可送出 1 至 5 分；
+- 已送出時顯示結果，不重複建立另一筆評價；
+- 不需要提供管理員修改平均分數的 UI；
+- 不需要在本期建立 moderation queue。
+
+### 支付狀態
+
+只需將既有 canonical status 轉為乘客可理解的結果：
+
+| Status            | 顯示               |
+| ----------------- | ------------------ |
+| `not_selected`    | 尚未選擇付款方式   |
+| `authorized`      | 已授權，待完成扣款 |
+| `captured`        | 付款完成           |
+| `failed`          | 付款失敗           |
+| `refunded`        | 已退款             |
+| `manual_recovery` | 請聯絡客服確認付款 |
+
+只有後端提供 retry command 時才顯示「重新付款」。不得假裝付款成功。
+
+### 電子乘車證明
+
+在免裝計費表或產品採電子證明的適用情形，必須能讀取：
+
+- 車號；
+- 上下車時間與行駛時間；
+- 路線與里程；
+- 車資金額；
+- 客服電話；
+- 主管機關申訴電話。
+
+證明尚未產生時顯示「乘車證明準備中」；API 失敗時提供重試讀取，不建立
+後台 certificate support console。
+
+### 驗收
+
+Passenger ride 主流程可完成：
+
+```text
+乘前查看
+→ 搭乘
+→ 付款結果
+→ 乘後評價
+→ 讀取乘車證明
+```
+
+不新增與此流程無關的管理畫面。
 
 ---
 
-# 16. Content and Localization
+## `MTX-UI-MVP-04` 二年營運紀錄查詢與下載
 
-Primary locale is Traditional Chinese (Taiwan). English must use translation
-keys, not inline copy.
+**建議 route：** 優先整合既有 reporting/admin，必要時新增
+`/multi-taxi-records`。
 
-| Concept                 | Required Traditional Chinese |
-| ----------------------- | ---------------------------- |
-| operating authorization | 多元計程車營運許可           |
-| business plan version   | 營業計畫版本                 |
-| authorized vehicle      | 授權車輛                     |
-| virtual matching        | 虛擬媒合                     |
-| physical rank           | 實體排班                     |
-| taxi stand              | 計程車招呼站                 |
-| active fare version     | 生效費率版本                 |
-| rating moderation       | 評價治理                     |
-| controlled export       | 受控匯出                     |
-| legal hold              | 法律保留                     |
-| retention               | 保存期限                     |
+**使用者：** 既有授權的 Platform Admin／法遵人員
 
-Forbidden:
+**目的：** 滿足至少二年保存及主管機關查詢下載。
 
-- raw error code as primary copy;
-- internal table/column names;
-- fake rating or fake fare/payment success;
-- full passenger subject reference;
-- raw card/provider token, driver phone, or personal data;
-- wording that implies Ops may bypass a legal gate.
+### 法定欄位
+
+- 車號；
+- 預約時間；
+- 上車時間；
+- 下車時間；
+- 行駛路線；
+- 行駛里程；
+- 應付車資；
+- 實收車資；
+- 通行費。
+
+### 最小查詢
+
+- 日期區間；
+- 車號；
+- 訂單／趟次識別碼；
+- 查詢結果數；
+- 單筆詳情。
+
+### 最小下載
+
+- 下載目前查詢範圍；
+- CSV 或主管機關同意的既有格式；
+- 顯示匯出筆數與資料範圍；
+- 沿用現有登入、授權及 audit primitive。
+
+資料量未證明需要非同步工作前，不建立：
+
+- export job queue；
+- retry dashboard；
+- legal hold；
+- archive tier console；
+- 自訂 retention policy editor。
+
+畫面只需顯示：
+
+```text
+法定最低保存期間：各趟次至少二年
+```
+
+實際 730 日保存與 purge policy 由後端負責，UI 不得讓使用者縮短。
+
+### 驗收
+
+授權人員能在合理時間內找到一趟紀錄並下載指定範圍；未授權使用者沿用
+既有 access control 被拒絕。
 
 ---
 
-# 17. Prototype Flows
+# 5. 共用實用性要求
 
-Required clickable flows:
-
-## Authorization
+所有 delta 只要求下列基本狀態：
 
 ```text
-registry
-→ create draft
-→ field validation
-→ save
-→ add authorized vehicle
-→ activate confirmation
-→ approved detail
-→ suspend confirmation
-→ suspended detail
+loading
+empty
+success
+validation error
+request error
+permission denied
 ```
 
-## Queue
+不為極低機率情境建立專頁。錯誤優先在原操作位置顯示，並提供可行下一步。
 
-```text
-queue overview
-→ virtual matching detail
-→ physical rank denial
-→ safe next action
-```
+基本可用性：
 
-## Rating
+- 狀態不得只靠顏色；
+- 表單欄位有可見 label；
+- 鍵盤可完成主要 desktop 操作；
+- 乘客頁維持 mobile-first；
+- 既有中文字詞優先，不顯示 raw enum；
+- 日期時間標示時區；
+- 金額標示 NTD。
 
-```text
-review queue
-→ under-review detail
-→ invalidate confirmation
-→ aggregate rebuilding
-→ updated authority state
-```
-
-## Payment / Certificate
-
-```text
-payment failed
-→ permitted recovery action
-→ captured
-→ certificate available
-```
-
-## Record Export
-
-```text
-record query
-→ scope preview
-→ export confirmation
-→ running
-→ completed
-→ controlled download
-```
-
-Prototype actions not backed by an approved command must be labeled
-`design-only / command pending`.
+這些是基本可用性要求，不宣稱為多元化計程車法規明文，也不要求另做
+無障礙認證。若政府採購或其他契約另有 AA／APP 無障礙要求，另開任務處理。
 
 ---
 
-# 18. Sample Data
+# 6. 明確延後項目
 
-Use fictional data only:
+| 項目                           | 本期決定     | 重新啟動條件                                          |
+| ------------------------------ | ------------ | ----------------------------------------------------- |
+| Rating moderation console      | 延後         | 出現實際 abuse case 且 moderation policy/command 核准 |
+| Payment exception console      | 延後         | PSP 上線且現有 payments 頁不足                        |
+| Fare anomaly triage console    | 延後         | 有可操作 recovery command                             |
+| Authorization revoke/restore   | 延後         | Lifecycle、權限與 API 核准                            |
+| Vehicle suspend/remove history | 延後         | API 與法遵流程核准                                    |
+| Legal hold                     | 移出法規 MVP | 法務提出案件保存政策                                  |
+| Export job orchestration       | 延後         | 實際資料量超過同步下載能力                            |
+| 專用 queue 管理頁              | 不做         | 既有 dispatch 無法容納必要資訊                        |
+| 新 design system               | 不做         | 無                                                    |
+| 完整 Figma/PNG package         | 不做         | 契約明文要求                                          |
 
-```text
-Operator: 智行示範車隊
-Authority code: MTX-TPE-2026-001
-Business plan version: BP-2026.07
-Service areas: TPE, NWT
-Fare version: FARE-MTX-2026-07
-Vehicle: VEH-DEMO-0186 / BKR-2208
-Driver: 吳明翰
-Trip: ZX-240720-0186
-Export: EXP-MTX-20260723-001
-```
-
-No real personal, vehicle, payment, or authority data.
-
----
-
-# 19. Figma and Handoff Structure
-
-Required pages:
-
-```text
-00_Cover
-01_Foundations_Reuse
-02_MTX_Authorization
-03_MTX_Queue
-04_P5_Rating
-05_P5_Fare_Payment
-06_P5_Records_Retention
-07_Components
-08_Prototype
-09_Accessibility
-10_Handoff
-```
-
-Frame naming:
-
-```text
-MTX-AUTH-UI-01_Registry_1440x900
-MTX-AUTH-UI-03_Draft_Error_1280x800
-MTX-QUEUE-UI-03_TaxiStandDenied_1440x900
-P5-RATE-UI-02_InvalidationConfirm_1280x800
-P5-COM-UI-05_ExportRunning_1440x900
-```
-
-Every frame must annotate Screen ID, viewport, user capability, data state,
-source status (`live-contract`, `design-only`, or `command-pending`), component
-variants, focus order, API/field mapping, and empty/error/conflict behavior.
+延後項目不得偷偷包進其他 Fleet PR。
 
 ---
 
-# 20. Required Deliverables
+# 7. 最小設計交付
 
-1. Editable Figma source.
-2. Component variants and token mapping.
-3. All required desktop/narrow frames.
-4. Clickable prototype flows.
-5. Traditional Chinese and English copy deck.
-6. Screen/state/permission matrix.
-7. Accessibility annotations.
-8. Developer handoff annotations.
-9. PNG screenshots for every primary screen and critical state.
-10. Design QA checklist.
-11. Forbidden-content scan.
-12. Open command/API dependency list.
+設計只需交付 4 個 delta：
 
-Required screenshot names:
+1. 既有 authorization 頁的欄位／動作調整；
+2. 既有 dispatch list/detail 的兩個標籤與 denial copy；
+3. 既有 passenger ride 的 rating/payment/receipt states；
+4. records query/download 的單一 desktop flow。
 
-```text
-MTX_authorization_registry.png
-MTX_authorization_detail_approved.png
-MTX_authorization_vehicle_membership.png
-MTX_queue_virtual_matching.png
-MTX_queue_physical_rank_denied.png
-P5_rating_moderation.png
-P5_fare_anomaly.png
-P5_payment_exception.png
-P5_operational_record_export.png
-```
+可接受的交付媒介：
+
+- 既有 Figma 檔中的增量 frame；
+- 可點擊 code prototype；
+- 清楚標註的現有 canvas 修改稿。
+
+不強制指定 Figma，也不要求每個 loading/error state 各輸出 PNG。
+
+每個 delta 必須提供：
+
+- 使用者目標；
+- 欄位與 canonical status mapping；
+- 可執行 action；
+- 一個正常狀態；
+- 必要的 empty/error state；
+- 最終繁體中文文案；
+- 對應既有 route/component。
 
 ---
 
-# 21. Design Definition of Done
+# 8. Design Definition of Done
 
-The operational UI is Design Ready for Implementation only when:
+最小設計只有在下列條件全部完成後，才可標記
+`designReadyForImplementation = true`：
 
-1. all screen IDs in section 5 are present;
-2. all canonical fields and statuses are mapped;
-3. permission variants are complete;
-4. lifecycle actions match approved commands;
-5. unsupported actions are not presented as live;
-6. queue legal denials are explicit and non-bypassable;
-7. rating aggregates cannot be edited or fabricated;
-8. fare/payment unavailable states fail closed;
-9. retention and legal hold are distinct;
-10. responsive frames pass at target sizes and 200% zoom;
-11. accessibility annotations are complete;
-12. prototype flows are connected;
-13. copy is frozen;
-14. PNG and Design QA evidence exist;
-15. Product, System, Content, Accessibility, and Design QA sign off.
+1. 4 個 UI delta 均有明確增量稿；
+2. 沒有新增本文件第 6 節的延後功能；
+3. 所有 action 均有現存或已核准 API command；
+4. queue UI 沒有 legal bypass；
+5. Passenger ride 不使用假評分、假付款或假證明；
+6. records surface 包含全部法定欄位及查詢下載；
+7. Product、System 與實作 owner 完成一次共同 review。
 
-Until all 15 conditions are met:
-
-```text
-designReadyForImplementation = false
-```
+不以 Figma、PNG 數量或獨立 Design QA 文件判定完成。
 
 ---
 
-# 22. Handoff to Fleets
+# 9. Fleets Handoff
 
-| Design output                                 | Unblocks                          |
-| --------------------------------------------- | --------------------------------- |
-| Authorization screens `MTX-AUTH-UI-01..06`    | `MTX-AUTH-UI-001`                 |
-| Queue screens `MTX-QUEUE-UI-01..03`           | `MTX-QUEUE-003`                   |
-| Rating governance screens `P5-RATE-UI-01..03` | `P5-RATE-003`                     |
-| Commerce/record screens `P5-COM-UI-01..05`    | UI portions of Fleet F            |
-| Final Design QA evidence                      | `P5-S3-DESIGN-QA-001` and Fleet H |
+| UI delta        | Fleets task                                  |
+| --------------- | -------------------------------------------- |
+| `MTX-UI-MVP-01` | `MTX-AUTH-UI-001` verify/minimal delta       |
+| `MTX-UI-MVP-02` | `MTX-QUEUE-003`                              |
+| `MTX-UI-MVP-03` | `P5-PAX-WEB-001`、`P5-PAY-001`、`P5-RCT-001` |
+| `MTX-UI-MVP-04` | `P5-RET-003`                                 |
 
-Implementation Fleets must link the exact Figma frame and Screen ID in every UI
-PR. They must not substitute a locally invented layout for a missing signed-off
-frame.
+`P5-RATE-003` moderation 不在法規 MVP，不能阻擋 Passenger rating 上線。
+
+Implementation PR 只需連結相關 delta 與實際變更畫面，不得以「設計完整性」
+為理由擴增本文件已延後的功能。
