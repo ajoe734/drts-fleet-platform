@@ -1,8 +1,18 @@
-import { CANVAS_REALM_DARK, CANVAS_REALM_LIGHT, CANVAS_SURFACE_ACCENTS } from "@drts/ui-web/canvas-tokens";
+import {
+  CANVAS_REALM_DARK,
+  CANVAS_REALM_LIGHT,
+  CANVAS_SURFACE_ACCENTS,
+} from "@drts/ui-web/canvas-tokens";
 import { t, type Locale } from "./translations";
 
-export type DispatchQueueMode = "virtual_matching" | "physical_rank" | "taxi_stand";
-export type RuntimeProfileCode = "ordinary_taxi" | "multi_taxi_direct" | "business_dispatch";
+export type DispatchQueueMode =
+  | "virtual_matching"
+  | "physical_rank"
+  | "taxi_stand";
+export type RuntimeProfileCode =
+  | "ordinary_taxi"
+  | "multi_taxi_direct"
+  | "business_dispatch";
 
 export type QueueSemanticsInfo = {
   queueMode: DispatchQueueMode | null;
@@ -29,8 +39,12 @@ export function resolveQueueSemantics(
 ): QueueSemanticsInfo {
   const serviceBucketStr = String(order?.serviceBucket ?? "");
   const runtimeProfileCode = (order?.runtimeProfileCode ??
-    (serviceBucketStr === "multi_taxi_direct" ? "multi_taxi_direct" : null)) as RuntimeProfileCode | null;
-  const isMultiTaxi = runtimeProfileCode === "multi_taxi_direct" || serviceBucketStr === "multi_taxi_direct";
+    (serviceBucketStr === "multi_taxi_direct"
+      ? "multi_taxi_direct"
+      : null)) as RuntimeProfileCode | null;
+  const isMultiTaxi =
+    runtimeProfileCode === "multi_taxi_direct" ||
+    serviceBucketStr === "multi_taxi_direct";
 
   const rawQueueMode = (order?.queueMode ??
     (isMultiTaxi ? "virtual_matching" : null)) as DispatchQueueMode | null;
@@ -61,7 +75,9 @@ export function resolveQueueSemantics(
     : siteId.trim();
 
   // 3. Multi-taxi statutory refusal state check (physical_rank or taxi_stand or street_hail attempt on multi_taxi_direct)
-  const failureReason = String(order?.lastDispatchFailureReason ?? order?.queueEntryReason ?? "");
+  const failureReason = String(
+    order?.lastDispatchFailureReason ?? order?.queueEntryReason ?? "",
+  );
   const isStatutoryRefusal =
     isMultiTaxi &&
     (rawQueueMode === "physical_rank" ||
@@ -79,9 +95,9 @@ export function resolveQueueSemantics(
 
   const serviceTypeText = isMultiTaxi
     ? t("dispatch.queue.multiTaxiDirectService", locale)
-    : (runtimeProfileCode
-        ? t(`opsCode.${runtimeProfileCode.toLowerCase()}`, locale)
-        : t("common.notAvailable", locale));
+    : runtimeProfileCode
+      ? t(`opsCode.${runtimeProfileCode.toLowerCase()}`, locale)
+      : t("common.notAvailable", locale);
 
   const matchingModeText = isMultiTaxi
     ? t("dispatch.queue.platformReservedAcquisition", locale)
@@ -129,7 +145,8 @@ export function isForbiddenStatutoryOverrideAction(action: string): boolean {
     normalized.includes("override") ||
     normalized.includes("force_checkin") ||
     normalized.includes("force_check_in") ||
-    normalized.includes("manual_fare")
+    normalized.includes("manual_fare") ||
+    normalized.includes("approval_request") ||
+    normalized.includes("jump_approval")
   );
 }
-

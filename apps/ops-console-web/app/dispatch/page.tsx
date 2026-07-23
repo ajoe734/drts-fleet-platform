@@ -2391,6 +2391,19 @@ function renderBoardSignalBanner({
   }
 
   const title = `${selectedRecord.orderNo} · ${getTenantLabel(selectedRecord)}`;
+  const selectedSem = resolveQueueSemantics(selectedRecord, locale);
+  if (selectedSem.isStatutoryRefusal) {
+    return (
+      <Banner
+        theme={theme}
+        tone="danger"
+        icon="warn"
+        title={t("dispatch.denial.statutoryRefusalTitle", locale)}
+        body={`${selectedSem.refusalCopy} (${t("dispatch.denial.noOverrideAllowed", locale)})`}
+      />
+    );
+  }
+
   if (board === "governance") {
     return (
       <Banner
@@ -3566,6 +3579,7 @@ export default async function DispatchPage({
   } else if (board === "governance") {
     boardRows = visibleOwnedByBoard.map((order) => {
       const request = order.exceptionHold?.overrideRequest;
+      const sem = resolveQueueSemantics(order, locale);
       const approvalHref = order.approvalRequestIds[0]
         ? `/approval-requests?approvalRequestId=${encodeURIComponent(order.approvalRequestIds[0])}`
         : "/approval-requests";
@@ -3603,13 +3617,19 @@ export default async function DispatchPage({
           </div>
         ),
         tenant: getTenantLabel(order),
-        overrideType: formatDispatchCode(locale, request?.overrideType),
+        overrideType: sem.isStatutoryRefusal
+          ? t("dispatch.denial.statutoryRefusalTitle", locale)
+          : formatDispatchCode(locale, request?.overrideType),
         requester: request?.requestedBy.actorId ?? "—",
         age: formatDurationSince(
           locale,
           request?.requestedAt ?? order.updatedAt,
         ),
-        approval: (
+        approval: sem.isStatutoryRefusal ? (
+          <span style={{ color: theme.textDim, fontSize: 12 }}>
+            {t("dispatch.denial.noOverrideAllowed", locale)}
+          </span>
+        ) : (
           <Link
             href={approvalHref}
             style={{ color: theme.accent, textDecoration: "none" }}

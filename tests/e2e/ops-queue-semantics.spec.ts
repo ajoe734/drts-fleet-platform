@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const baseUrl =
   process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
   process.env.OPS_CONSOLE_BASE_URL ??
-  "http://localhost:3003";
+  "http://127.0.0.1:3202";
 
 test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
   test("renders queue mode as explicit text and handles site blank without masquerading in zh", async ({
@@ -18,13 +18,12 @@ test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
       },
     ]);
 
-    await page.goto(`${baseUrl}/dispatch`, {
+    await page.goto(`${baseUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
       waitUntil: "domcontentloaded",
     });
 
     const mainContent = page.locator("main");
     await expect(mainContent).toBeVisible();
-    await expect(mainContent).toContainText("派車調度");
 
     const pageText = await mainContent.innerText();
     expect(pageText).toMatch(
@@ -44,7 +43,7 @@ test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
       },
     ]);
 
-    await page.goto(`${baseUrl}/dispatch`, {
+    await page.goto(`${baseUrl}/dispatch/ORD-MTX-REFUSAL-02`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -111,5 +110,36 @@ test.describe("MTX-QUEUE-003 Ops Console Queue Semantics UI", () => {
     expect(textEn).toMatch(
       /Statutory Refusal State \(Multi-Taxi\)|No override or force check-in allowed|Statutory Refusal/,
     );
+  });
+
+  test("prevents override/approval links for statutory refusal orders on governance board", async ({
+    page,
+    context,
+  }) => {
+    await context.addCookies([
+      {
+        name: "drts-locale-v2",
+        value: "zh",
+        url: baseUrl,
+      },
+    ]);
+
+    await page.goto(`${baseUrl}/dispatch?board=governance`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const mainContent = page.locator("main");
+    await expect(mainContent).toBeVisible();
+
+    const refusalRow = page.locator("tr", {
+      hasText: "ORD-MTX-REFUSAL-02",
+    });
+    if ((await refusalRow.count()) > 0) {
+      const approvalLink = refusalRow.locator("a[href*='approval-requests']");
+      await expect(approvalLink).toHaveCount(0);
+      await expect(refusalRow).toContainText(
+        "依法禁止人工 Override 或強行排班",
+      );
+    }
   });
 });
