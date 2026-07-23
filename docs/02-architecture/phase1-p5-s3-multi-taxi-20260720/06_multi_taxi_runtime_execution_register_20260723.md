@@ -1,6 +1,7 @@
 # Multi-Taxi Runtime Execution Register
 
-**文件版本：** v1.0  
+**文件版本：** v1.1
+
 **日期：** 2026-07-23  
 **Repository / Base：** `ajoe734/drts-fleet-platform` / PR #1122 head `bf3990d9c`
 **用途：** Supervisor、開發團隊、Reviewer、QA 的可派工清單  
@@ -12,11 +13,15 @@
 
 ```text
 landed        已在 dev
-ready         設計完整，可立即開工
+ready         規格與依賴明確，可立即開工
 blocked_ext   只受外部 provider阻擋
 verify        功能已落地，需 current-head驗證
+deferred      非法規 MVP，待實際需求及核准 command 再啟動
 done          code / test / evidence全部完成
 ```
+
+UI task 預設沿用既有 route/component。不得因 `ready` 另建專用 console；
+法規只要求結果時，以最小可用入口完成。
 
 ---
 
@@ -68,13 +73,13 @@ typed code has no any-based subtype comparison
 
 # 5. P-5 Data Authority
 
-| Task ID          | Status | Owner Surface    | 依賴     | 交付                                   |
-| ---------------- | ------ | ---------------- | -------- | -------------------------------------- |
-| `P5-SUP-DRV-001` | landed | fleet + registry | —        | Disclosure data / credential           |
-| `P5-RATE-001`    | verify | contracts + DB   | CORE-001 | Rating event / summary                 |
-| `P5-RATE-002`    | verify | API / service    | RATE-001 | submit / aggregate                     |
-| `P5-RATE-003`    | ready  | platform-admin   | RATE-002 | moderation                             |
-| `P5-RATE-QA-001` | verify | QA               | RATE-002 | idempotency / new-driver / unavailable |
+| Task ID          | Status   | Owner Surface    | 依賴     | 交付                                   |
+| ---------------- | -------- | ---------------- | -------- | -------------------------------------- |
+| `P5-SUP-DRV-001` | landed   | fleet + registry | —        | Disclosure data / credential           |
+| `P5-RATE-001`    | verify   | contracts + DB   | CORE-001 | Rating event / summary                 |
+| `P5-RATE-002`    | verify   | API / service    | RATE-001 | submit / aggregate                     |
+| `P5-RATE-003`    | deferred | platform-admin   | RATE-002 | Optional moderation; outside legal MVP |
+| `P5-RATE-QA-001` | verify   | QA               | RATE-002 | idempotency / new-driver / unavailable |
 
 ---
 
@@ -111,20 +116,20 @@ typed code has no any-based subtype comparison
 
 # 8. Fare / Payment / Receipt / Retention
 
-| Task ID            | Status      | Owner Surface             | 依賴         | 交付                        |
-| ------------------ | ----------- | ------------------------- | ------------ | --------------------------- |
-| `P5-ROUTE-001`     | ready       | geo + owned-mobility      | CORE-002     | Route snapshot              |
-| `P5-FARE-001`      | ready       | pricing + DB              | AUTH-001     | Fare authority              |
-| `P5-FARE-ANOM-001` | ready       | pricing + Ops             | FARE-001     | Quote anomaly flow          |
-| `P5-FARE-PUB-001`  | ready       | public web + admin        | FARE-001     | Public active fare          |
-| `P5-SEAT-001`      | ready       | passenger / task event    | PAX-WEB-001  | Seatbelt reminder           |
-| `P5-PAY-001`       | ready       | billing + contracts       | CORE-002     | Payment state / port        |
-| `P5-PAY-EXT-001`   | blocked_ext | PSP integration           | PAY-001      | Electronic payment provider |
-| `P5-RCT-001`       | ready       | reporting + passenger API | PAY-001      | Electronic certificate      |
-| `P5-RET-001`       | ready       | reporting + DB            | RCT-001      | Operational record          |
-| `P5-RET-002`       | ready       | evidence governance       | RET-001      | 730-day policy              |
-| `P5-RET-003`       | ready       | platform-admin API        | RET-001      | Query / export              |
-| `P5-RET-QA-001`    | ready       | QA                        | RET-001..003 | coverage / retention E2E    |
+| Task ID            | Status      | Owner Surface             | 依賴         | 交付                                   |
+| ------------------ | ----------- | ------------------------- | ------------ | -------------------------------------- |
+| `P5-ROUTE-001`     | ready       | geo + owned-mobility      | CORE-002     | Route snapshot                         |
+| `P5-FARE-001`      | ready       | pricing + DB              | AUTH-001     | Fare authority                         |
+| `P5-FARE-ANOM-001` | ready       | pricing                   | FARE-001     | Fail-closed quote handling; no console |
+| `P5-FARE-PUB-001`  | ready       | public web + admin        | FARE-001     | Public active fare                     |
+| `P5-SEAT-001`      | ready       | passenger / task event    | PAX-WEB-001  | Seatbelt reminder                      |
+| `P5-PAY-001`       | ready       | billing + contracts       | CORE-002     | Payment state / port                   |
+| `P5-PAY-EXT-001`   | blocked_ext | PSP integration           | PAY-001      | Electronic payment provider            |
+| `P5-RCT-001`       | ready       | reporting + passenger API | PAY-001      | Electronic certificate                 |
+| `P5-RET-001`       | ready       | reporting + DB            | RCT-001      | Operational record                     |
+| `P5-RET-002`       | ready       | reporting + DB            | RET-001      | 730-day retention floor                |
+| `P5-RET-003`       | ready       | platform-admin API + UI   | RET-001      | Minimum query / download               |
+| `P5-RET-QA-001`    | ready       | QA                        | RET-001..003 | coverage / retention E2E               |
 
 ---
 
@@ -271,10 +276,18 @@ production `done`。
 
 ```text
 MTX-QUEUE-003
-P5-RATE-003
 P5-FARE-001 / P5-FARE-ANOM-001 / P5-FARE-PUB-001
 P5-PAY-001 / P5-RCT-001 / P5-RET-001..003
 all QA rows without current-head integration/E2E/runtime evidence
+```
+
+本期明確延後，不得派工：
+
+```text
+P5-RATE-003 (rating moderation console)
+payment exception console
+legal hold
+export job orchestration
 ```
 
 外部阻擋保持：

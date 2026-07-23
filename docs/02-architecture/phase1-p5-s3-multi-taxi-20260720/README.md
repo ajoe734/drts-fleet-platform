@@ -67,7 +67,7 @@ external platform badge
 | `05_external_review_reconciliation_20260722.md`                         | 外部審查採納／修正／branch-state verification                           |
 | `06_multi_taxi_runtime_execution_register_20260723.md`                  | 可派工 task register                                                    |
 | `07_fleets_execution_tasks_20260723.md`                                 | Fleets design gates、execution packets、dependency 與 evidence contract |
-| `08_multi_taxi_operations_ui_design_requirements_20260723.md`           | 操作 UI screen、state、RBAC、copy、prototype 與 Design DoD requirements |
+| `08_multi_taxi_operations_ui_design_requirements_20260723.md`           | 法規／實用性優先的 4 項最小操作 UI delta 與 deferred scope              |
 | `manifest.json`                                                         | Machine-readable index / baseline / implementation status               |
 
 ---
