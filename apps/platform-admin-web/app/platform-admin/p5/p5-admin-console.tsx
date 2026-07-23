@@ -6,6 +6,8 @@ import { useTranslation } from "@/lib/i18n";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import type {
   DriverPublicRegistrationCredential,
+  MultiTaxiTripOperationalAdminView,
+  MultiTaxiTripOperationalExportRow,
   VehiclePassengerDisclosureProfile,
 } from "@drts/contracts";
 import {
@@ -21,7 +23,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
-type P5View = "disclosure" | "queue" | "fares";
+type P5View = "disclosure" | "queue" | "fares" | "records";
 
 type CorrectionQueueRow = Record<string, unknown> & {
   id: string;
@@ -51,6 +53,9 @@ type FareVersionRow = Record<string, unknown> & {
     note: string;
   };
 };
+
+type TripOperationalRow = MultiTaxiTripOperationalAdminView &
+  Record<string, unknown>;
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -84,6 +89,15 @@ const actionRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 6,
+};
+
+const inputStyle: CSSProperties = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 8,
+  background: theme.bgRaised,
+  color: theme.text,
+  padding: "8px 10px",
+  minHeight: 36,
 };
 
 const queueDetailListStyle: CSSProperties = {
@@ -287,8 +301,59 @@ function requiresAnyScope(scopeSet: Set<string>, scopes: string[]) {
   return scopes.some((scope) => scopeSet.has(scope));
 }
 
+function formatCurrencyMinor(amountMinor: number, locale: string) {
+  return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    style: "currency",
+    currency: "TWD",
+    maximumFractionDigits: 0,
+  }).format(amountMinor / 100);
+}
+
+function formatMonthLabel(month: string, locale: string) {
+  const [year, value] = month.split("-");
+  return locale === "zh" ? `${year}-${value}` : `${year}-${value}`;
+}
+
+function buildRecordsCsv(rows: MultiTaxiTripOperationalExportRow[]) {
+  const header = [
+    "order_no_masked",
+    "plate_no_masked",
+    "reserved_at",
+    "pickup_at",
+    "dropoff_at",
+    "payable_fare_minor",
+    "actual_fare_minor",
+    "toll_minor",
+    "currency",
+    "fare_policy_version",
+    "charging_mode",
+    "generated_at",
+    "retain_until",
+  ];
+  const body = rows.map((row) =>
+    [
+      row.orderNoMasked,
+      row.plateNoMasked,
+      row.reservedAt,
+      row.pickupAt ?? "",
+      row.dropoffAt ?? "",
+      String(row.payableFareMinor),
+      String(row.actualFareMinor),
+      String(row.tollMinor),
+      row.currency,
+      row.farePolicyVersion,
+      row.chargingMode,
+      row.generatedAt,
+      row.retainUntil,
+    ]
+      .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+      .join(","),
+  );
+  return [header.join(","), ...body].join("\n");
+}
+
 export function P5AdminConsole({ view }: { view: P5View }) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
   const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
@@ -297,6 +362,12 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     "reg.review",
   ]);
   const canReviewRegistry = requiresAnyScope(scopeSet, ["reg.review"]);
+  const canReadTripRecords = requiresAnyScope(scopeSet, [
+    "multi_taxi_records:read",
+  ]);
+  const canExportTripRecords = requiresAnyScope(scopeSet, [
+    "multi_taxi_records:export",
+  ]);
   const [vehicle, setVehicle] =
     useState<VehiclePassengerDisclosureProfile>(fallbackVehicle);
   const [driver, setDriver] =
@@ -307,6 +378,12 @@ export function P5AdminConsole({ view }: { view: P5View }) {
   const [selectedFareId, setSelectedFareId] = useState(
     fareSeed.find((row) => row.status === "active")?.id ?? fareSeed[0]?.id ?? "",
   );
+  const [recordsRows, setRecordsRows] = useState<TripOperationalRow[]>([]);
+  const [recordsMonthOptions, setRecordsMonthOptions] = useState<string[]>([]);
+  const [recordsMonth, setRecordsMonth] = useState("");
+  const [recordsLoading, setRecordsLoading] = useState(view === "records");
+  const [recordsError, setRecordsError] = useState<string | null>(null);
+  const [recordsExporting, setRecordsExporting] = useState(false);
   const maskedRegistrationDisplay = getMaskedRegistrationDisplay(driver);
   const selectedQueueRow =
     queueRows.find((row) => row.id === selectedQueueId) ?? queueRows[0] ?? null;
@@ -316,6 +393,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     fareSeed[0]!;
   const disclosureVehiclePlate = queueSeed[0]?.vehiclePlate ?? "—";
   const disclosureDriverName = queueSeed[0]?.driverName ?? "—";
+  const canAccessView = view === "records" ? canReadTripRecords : canReadRegistry;
 
   useEffect(() => {
     if (view !== "disclosure" || !canReadRegistry) {
@@ -362,6 +440,63 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     };
   }, [canReadRegistry, client, view]);
 
+  useEffect(() => {
+    if (view !== "records" || !canReadTripRecords) {
+      setRecordsLoading(false);
+      setRecordsError(null);
+      return;
+    }
+
+    let active = true;
+    async function load() {
+      setRecordsLoading(true);
+      setRecordsError(null);
+      try {
+        const params = new URLSearchParams();
+        if (recordsMonth) {
+          params.set("month", recordsMonth);
+        }
+        const payload = await client.get<{
+          items?: MultiTaxiTripOperationalAdminView[];
+        }>(
+          `/api/platform-admin/multi-taxi-trip-records${params.size > 0 ? `?${params.toString()}` : ""}`,
+        );
+        if (!active) {
+          return;
+        }
+        const nextRows = (payload.items ?? []) as TripOperationalRow[];
+        setRecordsRows(nextRows);
+        if (!recordsMonth) {
+          setRecordsMonthOptions(
+            Array.from(
+              new Set(nextRows.map((row) => row.reservedAt.slice(0, 7))),
+            ).sort((left, right) => right.localeCompare(left)),
+          );
+        }
+        if (!recordsMonth && nextRows[0]?.reservedAt) {
+          setRecordsMonth(nextRows[0].reservedAt.slice(0, 7));
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setRecordsRows([]);
+        setRecordsError(
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        if (active) {
+          setRecordsLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [canReadTripRecords, client, recordsMonth, view]);
+
   function actOnQueue(id: string, action: "return" | "approve") {
     setQueueRows((current) =>
       current.map((row) =>
@@ -377,7 +512,37 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     setSelectedQueueId(id);
   }
 
-  if (!canReadRegistry) {
+  async function exportRecords() {
+    setRecordsExporting(true);
+    setRecordsError(null);
+    try {
+      const params = new URLSearchParams();
+      if (recordsMonth) {
+        params.set("month", recordsMonth);
+      }
+      const exported = await client.get<{
+        filename: string;
+        rows: MultiTaxiTripOperationalExportRow[];
+      }>(
+        `/api/platform-admin/multi-taxi-trip-records/export${params.size > 0 ? `?${params.toString()}` : ""}`,
+      );
+      const blob = new Blob([buildRecordsCsv(exported.rows)], {
+        type: "text/csv;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = exported.filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setRecordsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecordsExporting(false);
+    }
+  }
+
+  if (!canAccessView) {
     return (
       <div style={pageBodyStyle}>
         <CanvasPageHeader
@@ -390,7 +555,11 @@ export function P5AdminConsole({ view }: { view: P5View }) {
           tone="warn"
           icon="lock"
           title={t("p5.scope.locked.title")}
-          body={t("p5.scope.locked.body")}
+          body={
+            view === "records"
+              ? t("p5.records.scope.locked.body")
+              : t("p5.scope.locked.body")
+          }
         />
       </div>
     );
@@ -740,6 +909,156 @@ export function P5AdminConsole({ view }: { view: P5View }) {
             ) : null}
           </CanvasCard>
         </div>
+      </div>
+    );
+  }
+
+  if (view === "records") {
+    if (!canReadTripRecords) {
+      return (
+        <div style={pageBodyStyle}>
+          <CanvasPageHeader
+            theme={theme}
+            title={t("p5.records.title")}
+            subtitle={t("p5.records.subtitle")}
+          />
+          <CanvasBanner
+            theme={theme}
+            tone="warn"
+            icon="lock"
+            title={t("p5.scope.locked.title")}
+            body={t("p5.records.scope.locked.body")}
+          />
+        </div>
+      );
+    }
+
+    const monthOptions = recordsMonthOptions;
+    const coverageCount = recordsRows.filter((row) => {
+      const generatedAt = Date.parse(row.generatedAt);
+      const retainUntil = Date.parse(row.retainUntil);
+      if (!Number.isFinite(generatedAt) || !Number.isFinite(retainUntil)) {
+        return false;
+      }
+      return retainUntil - generatedAt >= 730 * 24 * 60 * 60 * 1000;
+    }).length;
+    const coveragePercent =
+      recordsRows.length === 0
+        ? 100
+        : Math.round((coverageCount / recordsRows.length) * 100);
+    const recordColumns: CanvasTableColumn<TripOperationalRow>[] = [
+      {
+        h: t("p5.records.col.order"),
+        w: 150,
+        r: (row) => (
+          <span style={{ color: theme.accent, fontWeight: 600, ...monoStyle }}>
+            {row.orderNo}
+          </span>
+        ),
+      },
+      { h: t("p5.records.col.plate"), k: "plateNo", w: 96, mono: true },
+      {
+        h: t("p5.records.col.reserved"),
+        k: "reservedAt",
+        w: 160,
+        mono: true,
+      },
+      { h: t("p5.records.col.pickup"), k: "pickupAt", w: 160, mono: true },
+      { h: t("p5.records.col.dropoff"), k: "dropoffAt", w: 160, mono: true },
+      {
+        h: t("p5.records.col.fare"),
+        w: 108,
+        align: "right",
+        r: (row) => formatCurrencyMinor(row.actualFareMinor, locale),
+      },
+      {
+        h: t("p5.records.col.retainUntil"),
+        k: "retainUntil",
+        w: 160,
+        mono: true,
+      },
+      {
+        h: "",
+        w: 96,
+        r: () => (
+          <CanvasBtn theme={theme} size="xs" variant="ghost" icon="eye">
+            {t("p5.records.detail")}
+          </CanvasBtn>
+        ),
+      },
+    ];
+
+    return (
+      <div style={pageBodyStyle}>
+        <CanvasPageHeader
+          theme={theme}
+          title={t("p5.records.title")}
+          subtitle={t("p5.records.subtitle")}
+          actions={
+            <div style={actionRowStyle}>
+              <select
+                aria-label={t("p5.records.filter.month")}
+                value={recordsMonth}
+                onChange={(event) => setRecordsMonth(event.target.value)}
+                style={inputStyle}
+              >
+                {monthOptions.length === 0 ? (
+                  <option value="">{t("p5.records.filter.empty")}</option>
+                ) : null}
+                {monthOptions.map((month) => (
+                  <option key={month} value={month}>
+                    {t("p5.records.filter.monthLabel", {
+                      month: formatMonthLabel(month, locale),
+                    })}
+                  </option>
+                ))}
+              </select>
+              <CanvasPill theme={theme} tone="success" dot>
+                {t("p5.records.coverage", { percent: coveragePercent })}
+              </CanvasPill>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                icon="export"
+                onClick={() => void exportRecords()}
+                disabled={!canExportTripRecords || recordsExporting}
+              >
+                {recordsExporting
+                  ? t("p5.records.exporting")
+                  : t("p5.records.export")}
+              </CanvasBtn>
+            </div>
+          }
+        />
+        {!canExportTripRecords ? (
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            icon="lock"
+            body={t("p5.records.scope.exportOnly")}
+          />
+        ) : null}
+        {recordsError ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            icon="warning"
+            title={t("p5.records.error.title")}
+            body={recordsError}
+          />
+        ) : null}
+        <CanvasCard theme={theme} padding={0}>
+          <CanvasTable
+            theme={theme}
+            columns={recordColumns}
+            rows={recordsLoading ? [] : recordsRows}
+          />
+          <div style={{ padding: "10px 16px", borderTop: `1px solid ${theme.border}` }}>
+            <span style={{ fontSize: 11, color: theme.textMuted }}>
+              {t("p5.records.footer")}
+            </span>
+          </div>
+        </CanvasCard>
       </div>
     );
   }

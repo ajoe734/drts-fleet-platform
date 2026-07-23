@@ -555,6 +555,33 @@ export interface MultiTaxiTripOperationalRecord {
   retainUntil: string;
 }
 
+export interface MultiTaxiTripOperationalRecordQuery {
+  month?: string;
+  q?: string;
+}
+
+export interface MultiTaxiTripOperationalAdminView
+  extends MultiTaxiTripOperationalRecord {
+  orderNo: string;
+  assignmentId: string | null;
+}
+
+export interface MultiTaxiTripOperationalExportRow {
+  orderNoMasked: string;
+  plateNoMasked: string;
+  reservedAt: string;
+  pickupAt: string | null;
+  dropoffAt: string | null;
+  payableFareMinor: number;
+  actualFareMinor: number;
+  tollMinor: number;
+  currency: "NTD";
+  farePolicyVersion: string;
+  chargingMode: "meter" | "platform_quote";
+  generatedAt: string;
+  retainUntil: string;
+}
+
 // ===========================================================================
 // §15 Public fare version
 // ===========================================================================

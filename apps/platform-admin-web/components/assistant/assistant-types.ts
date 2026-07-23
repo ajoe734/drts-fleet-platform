@@ -250,6 +250,7 @@ export type PlatformAdminRouteKey =
   | "sandbox-regulatory-reports"
   | "p5-disclosure"
   | "p5-corrections"
+  | "p5-records"
   | "p5-fares";
 
 export type LocalizedText = { zh: string; en: string };

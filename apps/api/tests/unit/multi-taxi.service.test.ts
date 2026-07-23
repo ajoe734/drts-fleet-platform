@@ -31,6 +31,7 @@ function createService(options?: {
   const ownedMobilityService = {
     createMultiTaxiRide: vi.fn(() => ({ ...order })),
     getOrder: vi.fn(() => ({ ...order })),
+    listOrders: vi.fn(() => [{ ...order }]),
     findPassengerAssignmentDisclosure: vi.fn(() => options?.assignment ?? null),
     cancelOwnedOrder: vi.fn((_orderId, command) => {
       order.status = "cancelled";
@@ -459,5 +460,86 @@ describe("MultiTaxiService passenger ride authority", () => {
         error: { code: "PASSENGER_RATING_TRIP_NOT_COMPLETED" },
       },
     });
+  });
+});
+
+describe("MultiTaxiService trip operational records", () => {
+  it("lists completed multi-taxi records with 730-day retention readback", async () => {
+    const assignment = {
+      assignmentId: "assignment-001",
+      vehicle: {
+        vehicleId: "vehicle-001",
+        plateNo: "BKR-2208",
+      },
+      routeFare: {
+        encodedPolyline: "abc",
+        estimatedDistanceMeters: 12400,
+        estimatedDurationSeconds: 2100,
+        farePolicyVersion: "fare-v2026-07",
+      },
+      createdAt: "2026-07-20T14:32:00.000Z",
+    };
+    const { service } = createService({
+      orderStatus: "completed",
+      assignment,
+      repository: {
+        persistAuthorization: vi.fn().mockResolvedValue(undefined),
+        findElectronicReceipt: vi.fn(async () => ({
+          receiptId: "receipt-001",
+          orderId: "order-001",
+          receiptNo: "AB-001",
+          amountMinor: 41000,
+          currency: "NTD",
+          issuedAt: "2026-07-20T15:07:00.000Z",
+          record: {},
+        })),
+      },
+    });
+    createAndActivateAuthorization(service);
+
+    const records = await service.listTripOperationalRecords({
+      month: "2026-07",
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      orderNo: "MTX-001",
+      plateNo: "BKR-2208",
+      actualFareMinor: 41000,
+      farePolicyVersion: "fare-v2026-07",
+    });
+    expect(records[0]?.retainUntil).toBe("2028-07-22T00:00:00.000Z");
+  });
+
+  it("exports masked identifiers for trip records", async () => {
+    const { service } = createService({
+      orderStatus: "completed",
+      assignment: {
+        assignmentId: "assignment-001",
+        vehicle: {
+          vehicleId: "vehicle-001",
+          plateNo: "BKR-2208",
+        },
+        routeFare: {},
+        createdAt: "2026-07-20T14:32:00.000Z",
+      },
+      repository: {
+        persistAuthorization: vi.fn().mockResolvedValue(undefined),
+        findElectronicReceipt: vi.fn(async () => null),
+      },
+    });
+    createAndActivateAuthorization(service);
+
+    const exported = await service.exportTripOperationalRecords({
+      month: "2026-07",
+    });
+
+    expect(exported.filename).toBe("multi-taxi-trip-records-202607.csv");
+    expect(exported.rows).toEqual([
+      expect.objectContaining({
+        orderNoMasked: "M***1",
+        plateNoMasked: "BK...08",
+      }),
+    ]);
   });
 });

@@ -24,6 +24,9 @@ import type {
   CreateMultiTaxiRideCommand,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiOperatingAuthorizationRecord,
+  MultiTaxiTripOperationalAdminView,
+  MultiTaxiTripOperationalExportRow,
+  MultiTaxiTripOperationalRecordQuery,
   OwnedOrderRecord,
   PassengerRideAccessGrant,
   PassengerRideAccessToken,
@@ -40,6 +43,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../service-product/service-product.service";
@@ -237,6 +241,67 @@ export class MultiTaxiService implements OnModuleInit {
     }
     this.persistVehicle(vehicle, "authorize vehicle");
     return { ...vehicle };
+  }
+
+  async listTripOperationalRecords(
+    query: MultiTaxiTripOperationalRecordQuery,
+  ): Promise<MultiTaxiTripOperationalAdminView[]> {
+    const month = this.normalizeMonthFilter(query.month);
+    const needle = query.q?.trim().toLowerCase() ?? "";
+    const records = await Promise.all(
+      this.ownedMobilityService
+        .listOrders()
+        .filter((order) => this.isCompletedMultiTaxiOrder(order))
+        .map((order) => this.mapOrderToOperationalRecord(order)),
+    );
+
+    return records
+      .filter((record) =>
+        month ? record.reservedAt.slice(0, 7) === month : true,
+      )
+      .filter((record) =>
+        needle.length === 0
+          ? true
+          : [
+              record.orderNo,
+              record.plateNo,
+              record.orderId,
+              record.tripId,
+              record.farePolicyVersion,
+            ].some((value) => value.toLowerCase().includes(needle)),
+      )
+      .sort((left, right) => right.reservedAt.localeCompare(left.reservedAt));
+  }
+
+  async exportTripOperationalRecords(
+    query: MultiTaxiTripOperationalRecordQuery,
+  ): Promise<{
+    exportedAt: string;
+    filename: string;
+    rows: MultiTaxiTripOperationalExportRow[];
+  }> {
+    const records = await this.listTripOperationalRecords(query);
+    const suffix = this.normalizeMonthFilter(query.month)?.replace("-", "") ?? "all";
+
+    return {
+      exportedAt: new Date().toISOString(),
+      filename: `multi-taxi-trip-records-${suffix}.csv`,
+      rows: records.map((record) => ({
+        orderNoMasked: maskOpaqueToken(record.orderNo, 3, 2) ?? "***",
+        plateNoMasked: maskOpaqueToken(record.plateNo, 2, 2) ?? "***",
+        reservedAt: record.reservedAt,
+        pickupAt: record.pickupAt,
+        dropoffAt: record.dropoffAt,
+        payableFareMinor: record.payableFareMinor,
+        actualFareMinor: record.actualFareMinor,
+        tollMinor: record.tollMinor,
+        currency: record.currency,
+        farePolicyVersion: record.farePolicyVersion,
+        chargingMode: record.chargingMode,
+        generatedAt: record.generatedAt,
+        retainUntil: record.retainUntil,
+      })),
+    };
   }
 
   async createRide(
@@ -746,6 +811,80 @@ export class MultiTaxiService implements OnModuleInit {
       throw this.invalidPassengerToken();
     }
     return order;
+  }
+
+  private isCompletedMultiTaxiOrder(order: OwnedOrderRecord) {
+    return (
+      order.runtimeProfileCode === "multi_taxi_direct" &&
+      order.status === "completed"
+    );
+  }
+
+  private normalizeMonthFilter(month: string | undefined) {
+    const normalized = month?.trim();
+    if (!normalized) {
+      return null;
+    }
+    if (!/^\d{4}-\d{2}$/.test(normalized)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_RECORDS_MONTH_INVALID",
+        "month must use YYYY-MM format.",
+      );
+    }
+    return normalized;
+  }
+
+  private async mapOrderToOperationalRecord(
+    order: OwnedOrderRecord,
+  ): Promise<MultiTaxiTripOperationalAdminView> {
+    const assignment = this.ownedMobilityService.findPassengerAssignmentDisclosure(
+      order.orderId,
+    );
+    const receipt =
+      (await this.repository?.findElectronicReceipt(order.orderId)) ?? null;
+    const payableFareMinor = order.quotedFare?.amountMinor ?? 0;
+    const actualFareMinor = receipt?.amountMinor ?? payableFareMinor;
+    const completedAt = order.updatedAt;
+    const generatedAt = completedAt;
+
+    return {
+      recordId: `mtr-${order.orderId}`,
+      orderId: order.orderId,
+      orderNo: order.orderNo,
+      tripId: assignment?.assignmentId ?? order.orderId,
+      assignmentId: assignment?.assignmentId ?? null,
+      vehicleId: assignment?.vehicle?.vehicleId ?? "unassigned",
+      plateNo: assignment?.vehicle?.plateNo ?? "—",
+      reservedAt: order.reservationWindowStart ?? order.createdAt,
+      pickupAt: assignment?.createdAt ?? null,
+      dropoffAt: completedAt,
+      route: {
+        encodedPolyline: assignment?.routeFare?.encodedPolyline ?? null,
+        pointCount: assignment?.routeFare?.encodedPolyline ? 1 : 0,
+        distanceMeters: assignment?.routeFare?.estimatedDistanceMeters ?? null,
+        durationSeconds:
+          assignment?.routeFare?.estimatedDurationSeconds ?? null,
+        source: "provider_route",
+      },
+      payableFareMinor,
+      actualFareMinor,
+      tollMinor: 0,
+      currency: "NTD",
+      farePolicyVersion:
+        assignment?.routeFare?.farePolicyVersion ??
+        order.quotedFareRuleVersion ??
+        "active_authorization_fare",
+      chargingMode: order.fixedPrice ? "platform_quote" : "meter",
+      generatedAt,
+      retainUntil: this.plusRetentionDays(generatedAt, 730),
+    };
+  }
+
+  private plusRetentionDays(iso: string, days: number) {
+    const date = new Date(iso);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString();
   }
 
   private isPassengerCancelable(order: OwnedOrderRecord) {
