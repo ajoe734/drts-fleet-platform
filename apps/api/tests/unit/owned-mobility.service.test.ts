@@ -4302,6 +4302,113 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ).toThrowError(ApiRequestError);
   });
 
+  it("enforces MTX-QUEUE-001 queue semantics and independent ordinary_taxi configuration", () => {
+    const { service } = createOwnedMobilityService();
+    const authorization = {
+      authorizationId: "auth-mtx-002",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    // 1. multi_taxi_direct + virtual_matching passes
+    const virtualCheckIn = service.queueCheckInMultiTaxi(
+      {
+        vehicleId: "veh-demo-001",
+        siteId: "virtual-site-01",
+        queueMode: "virtual_matching",
+      },
+      authorization,
+    );
+    expect(virtualCheckIn.queueMode).toBe("virtual_matching");
+
+    // 2. multi_taxi_direct + physical_rank denied
+    expect(() =>
+      service.queueCheckInMultiTaxi(
+        {
+          vehicleId: "veh-demo-001",
+          siteId: "rank-site-01",
+          queueMode: "physical_rank",
+        },
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    // 3. multi_taxi_direct + taxi_stand denied
+    expect(() =>
+      service.queueCheckInMultiTaxi(
+        {
+          vehicleId: "veh-demo-001",
+          siteId: "stand-site-01",
+          queueMode: "taxi_stand",
+        },
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    // Cannot loosen multi_taxi_direct policy via setProfileQueuePolicy
+    expect(() =>
+      service.setProfileQueuePolicy("multi_taxi_direct", [
+        "virtual_matching",
+        "physical_rank",
+      ]),
+    ).toThrowError(ApiRequestError);
+
+    // 4. ordinary_taxi policy is independently configurable
+    expect(service.getProfileQueuePolicy("ordinary_taxi")).toEqual([
+      "virtual_matching",
+      "physical_rank",
+      "taxi_stand",
+    ]);
+
+    // Check-in ordinary_taxi under virtual_matching before policy change
+    const priorVirtualCheckIn = service.queueCheckIn({
+      vehicleId: "veh-demo-002",
+      siteId: "virtual-site-02",
+      queueMode: "virtual_matching",
+    });
+    expect(priorVirtualCheckIn.status).toBe("checked_in");
+
+    // Reconfigure ordinary_taxi to disallow virtual_matching
+    service.setProfileQueuePolicy("ordinary_taxi", ["physical_rank", "taxi_stand"]);
+    expect(service.getProfileQueuePolicy("ordinary_taxi")).toEqual([
+      "physical_rank",
+      "taxi_stand",
+    ]);
+
+    // New check-in for ordinary_taxi with virtual_matching should now be denied
+    expect(() =>
+      service.queueCheckIn({
+        vehicleId: "veh-demo-001",
+        siteId: "virtual-site-01",
+        queueMode: "virtual_matching",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    // Existing entry checked in under virtual_matching can still check out successfully
+    const virtualCheckOut = service.queueCheckOut({
+      vehicleId: "veh-demo-002",
+      siteId: "virtual-site-02",
+      queueMode: "virtual_matching",
+    });
+    expect(virtualCheckOut.status).toBe("checked_out");
+
+    // Check-in for ordinary_taxi with physical_rank should still work
+    const ordinaryCheckIn = service.queueCheckIn({
+      vehicleId: "veh-demo-001",
+      siteId: "rank-site-01",
+      queueMode: "physical_rank",
+    });
+    expect(ordinaryCheckIn.queueMode).toBe("physical_rank");
+  });
+
   it("builds a P-5 disclosure snapshot as part of multi-taxi assignment", () => {
     const { service } = createOwnedMobilityService({
       candidates: [

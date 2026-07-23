@@ -298,6 +298,13 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private queueEntries: QueueEntryRecord[] = [];
 
+  private profileQueuePolicies: Map<RuntimeProfileCode, Set<DispatchQueueMode>> =
+    new Map([
+      ["multi_taxi_direct", new Set(["virtual_matching"])],
+      ["ordinary_taxi", new Set(["virtual_matching", "physical_rank", "taxi_stand"])],
+      ["business_dispatch", new Set(["virtual_matching", "physical_rank", "taxi_stand"])],
+    ]);
+
   /** Maps forwarded mirror order IDs to their source platform codes. */
   private forwarderSourceMap = new Map<string, string>();
 
@@ -3397,18 +3404,51 @@ export class OwnedMobilityService implements OnModuleInit {
     return cancelledTasks.map((t) => this.cloneTask(t));
   }
 
+  setProfileQueuePolicy(
+    runtimeProfileCode: RuntimeProfileCode,
+    allowedQueueModes: DispatchQueueMode[],
+  ) {
+    if (runtimeProfileCode === "multi_taxi_direct") {
+      const isOnlyVirtual =
+        allowedQueueModes.length === 1 && allowedQueueModes[0] === "virtual_matching";
+      if (!isOnlyVirtual) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+          "Multi-taxi direct may use virtual matching but may not use physical-rank or taxi-stand queues.",
+          {
+            runtimeProfileCode,
+            allowedQueueModes,
+          },
+        );
+      }
+    }
+    this.profileQueuePolicies.set(
+      runtimeProfileCode,
+      new Set(allowedQueueModes),
+    );
+  }
+
+  getProfileQueuePolicy(
+    runtimeProfileCode: RuntimeProfileCode,
+  ): DispatchQueueMode[] {
+    const policy = this.profileQueuePolicies.get(runtimeProfileCode);
+    return policy ? Array.from(policy) : [];
+  }
+
   queueCheckIn(
     command: QueueCheckInCommand,
     requestId?: string,
-    runtimeContext: QueueRuntimeContext = {
-      runtimeProfileCode: "ordinary_taxi",
-      queueMode: "physical_rank",
-      operatingAuthorizationId: null,
-    },
+    runtimeContext?: QueueRuntimeContext,
   ) {
+    const context: QueueRuntimeContext = runtimeContext ?? {
+      runtimeProfileCode: "ordinary_taxi",
+      queueMode: command.queueMode ?? "physical_rank",
+      operatingAuthorizationId: null,
+    };
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
-    this.assertQueuePolicy(runtimeContext);
+    this.assertQueuePolicy(context);
 
     if (
       !this.regulatoryRegistryService.getVehicleDispatchability(
@@ -3441,14 +3481,14 @@ export class OwnedMobilityService implements OnModuleInit {
       queueEntryId: randomUUID(),
       vehicleId: command.vehicleId,
       siteId: command.siteId,
-      runtimeProfileCode: runtimeContext.runtimeProfileCode,
-      queueMode: runtimeContext.queueMode,
-      operatingAuthorizationId: runtimeContext.operatingAuthorizationId,
+      runtimeProfileCode: context.runtimeProfileCode,
+      queueMode: context.queueMode,
+      operatingAuthorizationId: context.operatingAuthorizationId,
       status: "checked_in",
       position: this.nextQueuePosition(
         command.siteId,
-        runtimeContext.runtimeProfileCode,
-        runtimeContext.queueMode,
+        context.runtimeProfileCode,
+        context.queueMode,
       ),
       checkedInAt,
       checkedOutAt: null,
@@ -3498,23 +3538,23 @@ export class OwnedMobilityService implements OnModuleInit {
   queueCheckOut(
     command: QueueCheckOutCommand,
     requestId?: string,
-    runtimeContext: QueueRuntimeContext = {
-      runtimeProfileCode: "ordinary_taxi",
-      queueMode: "physical_rank",
-      operatingAuthorizationId: null,
-    },
+    runtimeContext?: QueueRuntimeContext,
   ) {
+    const context: QueueRuntimeContext = runtimeContext ?? {
+      runtimeProfileCode: "ordinary_taxi",
+      queueMode: command.queueMode ?? "physical_rank",
+      operatingAuthorizationId: null,
+    };
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
-    this.assertQueuePolicy(runtimeContext);
 
     const queueEntry = this.queueEntries.find(
       (entry) =>
         entry.vehicleId === command.vehicleId &&
         entry.siteId === command.siteId &&
         (entry.runtimeProfileCode ?? "ordinary_taxi") ===
-          runtimeContext.runtimeProfileCode &&
-        (entry.queueMode ?? "physical_rank") === runtimeContext.queueMode &&
+          context.runtimeProfileCode &&
+        (entry.queueMode ?? "physical_rank") === context.queueMode &&
         entry.status === "checked_in",
     );
     if (!queueEntry) {
@@ -4659,6 +4699,22 @@ export class OwnedMobilityService implements OnModuleInit {
         {
           runtimeProfileCode: context.runtimeProfileCode,
           queueMode: context.queueMode,
+        },
+      );
+    }
+
+    const allowedModes = this.profileQueuePolicies.get(
+      context.runtimeProfileCode,
+    );
+    if (allowedModes && !allowedModes.has(context.queueMode)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "QUEUE_MODE_NOT_ALLOWED",
+        `Queue mode ${context.queueMode} is not allowed for profile ${context.runtimeProfileCode}.`,
+        {
+          runtimeProfileCode: context.runtimeProfileCode,
+          queueMode: context.queueMode,
+          allowedQueueModes: Array.from(allowedModes),
         },
       );
     }
