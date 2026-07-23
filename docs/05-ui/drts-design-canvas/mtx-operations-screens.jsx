@@ -753,19 +753,37 @@ function PA_P5_RecordsQuery({ theme: th, isNarrow = false }) {
           <Select theme={th} value="保留狀態：正常留存中 (730天)" />
         </div>
         <Card theme={th} padding={0}>
-          <Table theme={th} columns={[
-            { h: '訂單號', k: 'order', w: 150, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 600 }}>{r.order}</span> },
-            { h: '車牌', k: 'plate', w: 100, mono: true },
-            { h: '預約時間', k: 'reserved', w: 110, mono: true },
-            { h: '上車時間', k: 'pickup', w: 80, mono: true },
-            { h: '下車時間', k: 'dropoff', w: 80, mono: true },
-            { h: '車資', k: 'fare', w: 100, mono: true },
-            { h: '保留截止日', k: 'retain', w: 110, mono: true },
-            { h: '', w: 80, r: () => <Btn theme={th} size="xs" variant="ghost">細節</Btn> }
-          ]} rows={[
-            { order: 'ZX-240720-0186', plate: 'BKR-2208', reserved: '07-20 13:50', pickup: '14:32', dropoff: '15:07', fare: 'NT$ 355', retain: '2028-07-20' },
-            { order: 'ZX-240720-0171', plate: 'TDK-9317', reserved: '07-20 12:10', pickup: '12:44', dropoff: '13:20', fare: 'NT$ 410', retain: '2028-07-20' }
-          ]} />
+          {isNarrow ? (
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {[
+                { order: 'ZX-240720-0186', plate: 'BKR-2208', reserved: '07-20 13:50', pickup: '14:32', dropoff: '15:07', fare: 'NT$ 355', retain: '2028-07-20' },
+                { order: 'ZX-240720-0171', plate: 'TDK-9317', reserved: '07-20 12:10', pickup: '12:44', dropoff: '13:20', fare: 'NT$ 410', retain: '2028-07-20' }
+              ].map(r => (
+                <div key={r.order} style={{ padding: 12, background: th.surfaceLo, borderRadius: 8, border: '1px solid ' + th.border }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ color: th.accent, fontWeight: 700, fontFamily: SHELL_MONO }}>{r.order}</span>
+                    <span style={{ fontSize: 11.5, color: th.textMuted, fontFamily: SHELL_MONO }}>{r.plate}</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: th.textSub }}>行程時間：{r.pickup} - {r.dropoff} | 車資：{r.fare}</div>
+                  <div style={{ fontSize: 11, color: th.textMuted, marginTop: 4 }}>法定保留至：{r.retain}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Table theme={th} columns={[
+              { h: '訂單號', k: 'order', w: 150, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 600 }}>{r.order}</span> },
+              { h: '車牌', k: 'plate', w: 100, mono: true },
+              { h: '預約時間', k: 'reserved', w: 110, mono: true },
+              { h: '上車時間', k: 'pickup', w: 80, mono: true },
+              { h: '下車時間', k: 'dropoff', w: 80, mono: true },
+              { h: '車資', k: 'fare', w: 100, mono: true },
+              { h: '保留截止日', k: 'retain', w: 110, mono: true },
+              { h: '', w: 80, r: () => <Btn theme={th} size="xs" variant="ghost">細節</Btn> }
+            ]} rows={[
+              { order: 'ZX-240720-0186', plate: 'BKR-2208', reserved: '07-20 13:50', pickup: '14:32', dropoff: '15:07', fare: 'NT$ 355', retain: '2028-07-20' },
+              { order: 'ZX-240720-0171', plate: 'TDK-9317', reserved: '07-20 12:10', pickup: '12:44', dropoff: '13:20', fare: 'NT$ 410', retain: '2028-07-20' }
+            ]} />
+          )}
         </Card>
       </div>
 

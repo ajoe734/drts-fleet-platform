@@ -1,0 +1,313 @@
+{
+  "$schema": "https://figma.com/schemas/design-system-tree-v1.json",
+  "documentName": "DRTS Multi-Taxi Operations UI Figma Design System",
+  "version": "1.0.0",
+  "lastUpdated": "2026-07-23T12:28:00Z",
+  "tokensBinding": "@drts/ui-tokens",
+  "canonicalCanvasMount": "docs/05-ui/drts-design-canvas/Platform Admin.html",
+  "pages": [
+    {
+      "name": "00_Cover",
+      "description": "Multi-Taxi Operations Wave 0 Design Cover & Version Ledger",
+      "frames": [
+        {
+          "name": "Cover_1920x1080",
+          "screenId": "COVER-01",
+          "width": 1920,
+          "height": 1080,
+          "components": ["TitleBlock", "VersionTag", "AuthorisationBadge"]
+        }
+      ]
+    },
+    {
+      "name": "01_Foundations_Reuse",
+      "description": "@drts/ui-tokens Foundation Swatches, Typography, and Shared Layout Shells",
+      "frames": [
+        {
+          "name": "ColorTokens_Platform_Ops_Tenant",
+          "width": 1440,
+          "height": 900,
+          "components": ["ColorSwatch_Platform", "ColorSwatch_Ops", "ColorSwatch_Tenant"]
+        },
+        {
+          "name": "Typography_Inter_Mono",
+          "width": 1440,
+          "height": 900,
+          "components": ["HeaderStyles", "BodyStyles", "MonoStyles"]
+        }
+      ]
+    },
+    {
+      "name": "02_MTX_Authorization",
+      "description": "MTX-DESIGN-001 Operating Authorization Console Screens & Viewports",
+      "frames": [
+        {
+          "name": "MTX-AUTH-UI-01_Registry_1440x900",
+          "screenId": "MTX-AUTH-UI-01",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "PageHeader", "AuthorizationRegistryTable", "StatusFilterPills"]
+        },
+        {
+          "name": "MTX-AUTH-UI-01_Registry_Narrow_390x844",
+          "screenId": "MTX-AUTH-UI-01_Narrow",
+          "viewport": "narrow_mobile",
+          "width": 390,
+          "height": 844,
+          "autoLayout": true,
+          "components": ["MobileShell", "PageHeader_Compact", "AuthorizationCardList"]
+        },
+        {
+          "name": "MTX-AUTH-UI-02_Detail_Approved_1440x900",
+          "screenId": "MTX-AUTH-UI-02",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "DataList", "VehicleMembershipSummary", "ActionBar"]
+        },
+        {
+          "name": "MTX-AUTH-UI-03_Draft_Editor_1280x800",
+          "screenId": "MTX-AUTH-UI-03",
+          "viewport": "laptop",
+          "width": 1280,
+          "height": 800,
+          "autoLayout": true,
+          "components": ["AdminShell", "FormGrid", "EffectiveDatePicker", "FareVersionSelect"]
+        },
+        {
+          "name": "MTX-AUTH-UI-04_Lifecycle_Confirm_1440x900",
+          "screenId": "MTX-AUTH-UI-04",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "ConfirmationModal", "ConsequenceSummary"]
+        },
+        {
+          "name": "MTX-AUTH-UI-05_Vehicles_1440x900",
+          "screenId": "MTX-AUTH-UI-05",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "AuthorizedVehicleTable", "AddVehicleDrawer"]
+        },
+        {
+          "name": "MTX-AUTH-UI-06_Conflict_403_1440x900",
+          "screenId": "MTX-AUTH-UI-06",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "ForbiddenBanner", "PermissionBoundary"]
+        }
+      ]
+    },
+    {
+      "name": "03_MTX_Queue",
+      "description": "MTX-DESIGN-002 Queue Semantics Operations Screens",
+      "frames": [
+        {
+          "name": "MTX-QUEUE-UI-01_Overview_1440x900",
+          "screenId": "MTX-QUEUE-UI-01",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["OpsShell", "QueueModeBadge", "VirtualMatchingTable"]
+        },
+        {
+          "name": "MTX-QUEUE-UI-01_Overview_Narrow_390x844",
+          "screenId": "MTX-QUEUE-UI-01_Narrow",
+          "viewport": "narrow_mobile",
+          "width": 390,
+          "height": 844,
+          "autoLayout": true,
+          "components": ["MobileShell", "QueueCardList_Compact"]
+        },
+        {
+          "name": "MTX-QUEUE-UI-02_Detail_1440x900",
+          "screenId": "MTX-QUEUE-UI-02",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["OpsShell", "QueueEntryDetailCard"]
+        },
+        {
+          "name": "MTX-QUEUE-UI-03_TaxiStandDenied_1440x900",
+          "screenId": "MTX-QUEUE-UI-03",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["OpsShell", "NonBypassableLegalDenialBanner", "SafeNextStepAction"]
+        }
+      ]
+    },
+    {
+      "name": "04_P5_Rating",
+      "description": "P5-DESIGN-001 Rating Governance Screens",
+      "frames": [
+        {
+          "name": "P5-RATE-UI-01_Queue_1440x900",
+          "screenId": "P5-RATE-UI-01",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "RatingReviewQueueTable"]
+        },
+        {
+          "name": "P5-RATE-UI-01_Queue_Narrow_390x844",
+          "screenId": "P5-RATE-UI-01_Narrow",
+          "viewport": "narrow_mobile",
+          "width": 390,
+          "height": 844,
+          "autoLayout": true,
+          "components": ["MobileShell", "RatingReviewCardList"]
+        },
+        {
+          "name": "P5-RATE-UI-02_InvalidationConfirm_1280x800",
+          "screenId": "P5-RATE-UI-02",
+          "viewport": "laptop",
+          "width": 1280,
+          "height": 800,
+          "autoLayout": true,
+          "components": ["AdminShell", "RatingDetailCard", "InvalidationConfirmModal"]
+        },
+        {
+          "name": "P5-RATE-UI-03_Authority_1440x900",
+          "screenId": "P5-RATE-UI-03",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "DriverRatingAuthorityCard"]
+        }
+      ]
+    },
+    {
+      "name": "05_P5_Fare_Payment",
+      "description": "P5-DESIGN-002 Fare & Payment Operations Screens",
+      "frames": [
+        {
+          "name": "P5-COM-UI-01_FareAnomaly_1440x900",
+          "screenId": "P5-COM-UI-01",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "FareAnomalyFailClosedTable"]
+        },
+        {
+          "name": "P5-COM-UI-01_FareAnomaly_Narrow_390x844",
+          "screenId": "P5-COM-UI-01_Narrow",
+          "viewport": "narrow_mobile",
+          "width": 390,
+          "height": 844,
+          "autoLayout": true,
+          "components": ["MobileShell", "FareAnomalyCardList"]
+        },
+        {
+          "name": "P5-COM-UI-02_PaymentException_1440x900",
+          "screenId": "P5-COM-UI-02",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "PaymentExceptionDetailCard"]
+        },
+        {
+          "name": "P5-COM-UI-02_PaymentException_Narrow_390x844",
+          "screenId": "P5-COM-UI-02_Narrow",
+          "viewport": "narrow_mobile",
+          "width": 390,
+          "height": 844,
+          "autoLayout": true,
+          "components": ["MobileShell", "PaymentExceptionCard_Compact"]
+        },
+        {
+          "name": "P5-COM-UI-03_CertificateSupport_1440x900",
+          "screenId": "P5-COM-UI-03",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "CertificateSearchCard", "PdfDownloadButton"]
+        }
+      ]
+    },
+    {
+      "name": "06_P5_Records_Retention",
+      "description": "P5-DESIGN-002 Records Query & Controlled Export Screens",
+      "frames": [
+        {
+          "name": "P5-COM-UI-04_RecordsQuery_1440x900",
+          "screenId": "P5-COM-UI-04",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "OperationalRecordsTable", "RetentionFloorBanner"]
+        },
+        {
+          "name": "P5-COM-UI-04_RecordsQuery_Narrow_390x844",
+          "screenId": "P5-COM-UI-04_Narrow",
+          "viewport": "narrow_mobile",
+          "width": 390,
+          "height": 844,
+          "autoLayout": true,
+          "components": ["MobileShell", "RecordsCardList"]
+        },
+        {
+          "name": "P5-COM-UI-05_ControlledExport_1440x900",
+          "screenId": "P5-COM-UI-05",
+          "viewport": "desktop",
+          "width": 1440,
+          "height": 900,
+          "autoLayout": true,
+          "components": ["AdminShell", "ControlledExportModal", "LegalHoldBadge"]
+        }
+      ]
+    },
+    {
+      "name": "07_Components",
+      "description": "Reusable Multi-Taxi Component Master Variants",
+      "variants": [
+        "AuthorizationStatusChip",
+        "EffectiveWindow",
+        "AuthorizedVehicleTable",
+        "QueueModeChip",
+        "LegalDenialBanner",
+        "RatingStatusChip",
+        "DriverRatingAuthorityCard",
+        "FareAnomalyBanner",
+        "PaymentStatusChip",
+        "LegalHoldBadge",
+        "ControlledExportDialog"
+      ]
+    },
+    {
+      "name": "08_Prototype",
+      "description": "Interactive Component State Transitions & Route Links",
+      "connections": [
+        "MTX-AUTH-UI-01 -> MTX-AUTH-UI-03 -> MTX-AUTH-UI-04 -> MTX-AUTH-UI-02",
+        "MTX-QUEUE-UI-01 -> MTX-QUEUE-UI-02 -> MTX-QUEUE-UI-03",
+        "P5-RATE-UI-01 -> P5-RATE-UI-02 -> P5-RATE-UI-03",
+        "P5-COM-UI-01 -> P5-COM-UI-02 -> P5-COM-UI-03 -> P5-COM-UI-04 -> P5-COM-UI-05"
+      ]
+    },
+    {
+      "name": "09_Accessibility",
+      "description": "WCAG 2.1 AA Focus Order, ARIA Dialog Hooks & Live Region Specs"
+    },
+    {
+      "name": "10_Handoff",
+      "description": "Developer Handoff Annotations, Token Bindings & Field Mappings"
+    }
+  ]
+}

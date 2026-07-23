@@ -30,12 +30,13 @@ The visual design and operational UI handoff for Phase 1 Multi-Taxi (Wave 0 Desi
    - **Packet:** `support/sidecars/P5-DESIGN-001/DESIGN-HANDOFF-PACKET.md`.
 
 4. **`P5-DESIGN-002` Fare, Payment, Receipt, and Retention Operations:**
-   - **Screens:** `P5-COM-UI-01..05` (Fare Anomaly Queue/Detail, Payment Exception Detail, Certificate Support, Operational Record Query, Controlled Export/Retention).
-   - **Canvas Mounting:** Mounted in `Platform Admin.html` (Section 10) & `mtx-operations-screens.jsx`.
+   - **Screens:** `P5-COM-UI-01..05` (Fare Anomaly Queue/Detail, Payment Exception Detail, Certificate Support, Operational Record Query, Controlled Export/Retention, Narrow 390px Viewports).
+   - **Canvas Mounting:** Mounted in `Platform Admin.html` Section 10 (`p5-fare-anomaly`, `p5-fare-anomaly-narrow`, `p5-payment-exception`, `p5-payment-exception-narrow`, `p5-certificate`, `p5-records-query`, `p5-records-query-narrow`, `p5-export-retention`) & `mtx-operations-screens.jsx`.
    - **Packet:** `support/sidecars/P5-DESIGN-002/DESIGN-HANDOFF-PACKET.md`.
 
 5. **`P5-S3-DESIGN-QA-001` Handoff Completion & Design QA:**
    - **Deliverable:** `support/sidecars/P5-S3-DESIGN-QA-001/DESIGN-QA-HANDOFF-CHECKLIST.md`.
+   - **Editable Figma Source Tree:** `docs/05-ui/drts-design-canvas/figma-source-tree.json` (10 Figma pages `00_Cover`..`10_Handoff`, auto-layout specs, token mappings).
    - **Preflight Record:** `support/sidecars/MTX-DESIGN-WAVE0/CURRENT-HEAD-PREFLIGHT.md`.
    - **PNG Screenshots:** All 11 required PNG files generated under `support/sidecars/P5-S3-DESIGN-QA-001/screenshots/` and `docs/05-ui/drts-design-canvas/screenshots/`.
 
@@ -45,7 +46,8 @@ The visual design and operational UI handoff for Phase 1 Multi-Taxi (Wave 0 Desi
 
 - [x] State matrix + frames + frozen copy + a11y + prototype + handoff for all four design packets (`MTX-DESIGN-001`, `MTX-DESIGN-002`, `P5-DESIGN-001`, `P5-DESIGN-002`).
 - [x] Design QA handoff complete (`P5-S3-DESIGN-QA-001`).
-- [x] Mounted in design canvas HTML shells (`Platform Admin.html` & `Ops Console.html`).
+- [x] Editable Figma source tree JSON (`docs/05-ui/drts-design-canvas/figma-source-tree.json`) and 10 Figma page layer specifications.
+- [x] Mounted in design canvas HTML shells (`Platform Admin.html` Sections 08-10 & `Ops Console.html` Section 08) with explicit Desktop 1440px and Narrow 390px viewports for all packets including `P5-DESIGN-002`.
 - [x] All 11 PNG screenshot evidence files generated and verified against requirements §20.
 - [x] Explicit narrow viewport frames (390px), ARIA dialog/alert/live-region hooks, skeletal loading, and interactive prototype transitions implemented.
 - [x] All visual components strictly built with `@drts/ui-tokens` realm tokens (Platform, Ops, Tenant, System, Driver). No ad-hoc hex palettes introduced.

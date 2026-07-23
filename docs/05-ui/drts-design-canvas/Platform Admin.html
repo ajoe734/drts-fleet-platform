@@ -92,10 +92,12 @@ function App() {
         </DCSection>
 
         <DCSection id="p5-commerce" title="10 · 車資、支付、憑證與保存 (P5-DESIGN-002)" subtitle="P5-COM-UI-01..05 · 車資異常/付款例外/乘車證明/兩年紀錄/受控匯出+Legal Hold">
-          <DCArtboard id="p5-fare-anomaly" label="P5-COM-UI-01 · 車資估算異常佇列 (Fail-Closed)" width={W} height={H}><Hero url="/p5-fare-anomalies"><PA_P5_FareAnomalyQueue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-fare-anomaly" label="P5-COM-UI-01 · 車資估算異常佇列 (Fail-Closed 1440px)" width={W} height={H}><Hero url="/p5-fare-anomalies"><PA_P5_FareAnomalyQueue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-fare-anomaly-narrow" label="P5-COM-UI-01 · 車資估算異常佇列 (Narrow 390px)" width={NW} height={NH}><Hero url="/p5-fare-anomalies" width={NW} height={NH}><PA_P5_FareAnomalyQueue theme={th} isNarrow /></Hero></DCArtboard>
           <DCArtboard id="p5-payment-exception" label="P5-COM-UI-02 · 付款例外處置細節" width={W} height={H}><Hero url="/payments/exception"><PA_P5_PaymentExceptionDetail theme={th} /></Hero></DCArtboard>
           <DCArtboard id="p5-certificate" label="P5-COM-UI-03 · 電子乘車證明查詢與支援" width={W} height={H}><Bare><PA_P5_CertificateSupport theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="p5-records-query" label="P5-COM-UI-04 · 730 天營運紀錄完整查詢" width={W} height={H}><Hero url="/multi-taxi-records"><PA_P5_RecordsQuery theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-records-query" label="P5-COM-UI-04 · 730 天營運紀錄完整查詢 (1440px)" width={W} height={H}><Hero url="/multi-taxi-records"><PA_P5_RecordsQuery theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="p5-records-query-narrow" label="P5-COM-UI-04 · 730 天營運紀錄完整查詢 (Narrow 390px)" width={NW} height={NH}><Hero url="/multi-taxi-records" width={NW} height={NH}><PA_P5_RecordsQuery theme={th} isNarrow /></Hero></DCArtboard>
           <DCArtboard id="p5-export-retention" label="P5-COM-UI-05 · 受控匯出與 Legal Hold 法律保留" width={W} height={H}><Bare><PA_P5_ExportRetention theme={th} /></Bare></DCArtboard>
         </DCSection>
 

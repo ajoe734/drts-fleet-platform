@@ -16,6 +16,10 @@
   - Index integration: Indexed in `Design Index.html` and `DRTS Index.html`.
   - Covers all 17 multi-taxi operational UI screens across Operating Authorization, Queue Semantics, Rating Governance, and Commerce/Retention.
 
+- [x] **Editable Figma Source & Design System Tree:**
+  - Figma source tree JSON: `docs/05-ui/drts-design-canvas/figma-source-tree.json`.
+  - 10 Figma Pages (`00_Cover` .. `10_Handoff`) detailing frames, auto-layout, component variants, and token bindings (@drts/ui-tokens).
+
 - [x] **Prototype Interaction Links & Flow Connections:**
   - Interactive state machine hooks implemented in `mtx-operations-screens.jsx`:
     - Operating Authorization: `MTX-AUTH-UI-01` (Registry) -> `MTX-AUTH-UI-03` (Draft Editor) -> `MTX-AUTH-UI-04` (Lifecycle Confirmation) -> `MTX-AUTH-UI-02` (Detail) -> `MTX-AUTH-UI-05` (Vehicles).
@@ -24,8 +28,12 @@
     - Commerce & Records: `P5-COM-UI-01` (Fare Anomaly Fail-Closed) -> `P5-COM-UI-02` (Payment Exception) -> `P5-COM-UI-03` (Certificate Support) -> `P5-COM-UI-04` (730-day Record Query) -> `P5-COM-UI-05` (Controlled Export & Legal Hold).
 
 - [x] **Responsive & Narrow Viewport Frames:**
-  - Explicit Desktop 1440px multi-column layouts & Narrow Viewport 390px responsive frames (`MTX-AUTH-UI-01_Narrow`, `MTX-QUEUE-UI-01_Narrow`, `P5-RATE-UI-01_Narrow`) mounted in design canvases.
-  - Mobile/narrow single-column card layouts, responsive flex wraps, and 200% zoom compatibility verified.
+  - Explicit Desktop 1440px multi-column layouts & Narrow Viewport 390px responsive frames mounted in design canvases:
+    - Operating Authorization: `MTX-AUTH-UI-01_Narrow` (`mtx-auth-registry-narrow`) in `Platform Admin.html` Section 08.
+    - Queue Semantics: `MTX-QUEUE-UI-01_Narrow` (`mtx-queue-overview-narrow`) in `Ops Console.html` Section 08.
+    - Rating Governance: `P5-RATE-UI-01_Narrow` (`p5-rating-queue-narrow`) in `Platform Admin.html` Section 09.
+    - Commerce & Retention (P5-DESIGN-002): `P5-COM-UI-01_Narrow` (`p5-fare-anomaly-narrow`), `P5-COM-UI-02_Narrow` (`p5-payment-exception-narrow`), `P5-COM-UI-04_Narrow` (`p5-records-query-narrow`) in `Platform Admin.html` Section 10.
+  - Mobile/narrow single-column card layouts, responsive flex wraps, and 200% zoom compatibility verified across all four design packets.
 
 - [x] **Copy and State Matrices:**
   - Complete state matrices (Happy, Draft, Suspended, Expired, Loading, Empty, 403 Forbidden, 409 Stale Version, Fail-Closed, Non-Bypassable Legal Denial) defined with frozen Traditional Chinese (ZH-TW) vocabulary.

@@ -11,13 +11,23 @@
 
 ## 1. Screen Inventory
 
-| Screen ID | Screen Name | Canvas Component | Purpose |
-| --------- | ----------- | ---------------- | ------- |
-| `P5-COM-UI-01` | Fare Anomaly Queue / Detail | `PA_P5_FareAnomalyQueue` | Triage fail-closed quote anomalies and route resolution failures |
-| `P5-COM-UI-02` | Payment Exception Detail | `PA_P5_PaymentExceptionDetail` | Explain failed, manual-recovery, or reversed payment states |
-| `P5-COM-UI-03` | Certificate Support | `PA_P5_CertificateSupport` | Locate, preview, and download electronic ride certificates |
-| `P5-COM-UI-04` | Operational Record Query | `PA_P5_RecordsQuery` | Query 730-day (2-year) complete operational ride records |
-| `P5-COM-UI-05` | Controlled Export / Retention | `PA_P5_ExportRetention` | Create controlled exports and manage Legal Hold retention freezes |
+| Screen ID | Screen Name | Canvas Component | Viewport Artboards | Purpose |
+| --------- | ----------- | ---------------- | ------------------ | ------- |
+| `P5-COM-UI-01` | Fare Anomaly Queue / Detail | `PA_P5_FareAnomalyQueue` | Desktop 1440px + Narrow 390px (`p5-fare-anomaly-narrow`) | Triage fail-closed quote anomalies and route resolution failures |
+| `P5-COM-UI-02` | Payment Exception Detail | `PA_P5_PaymentExceptionDetail` | Desktop 1440px + Narrow 390px (`p5-payment-exception-narrow`) | Explain failed, manual-recovery, or reversed payment states |
+| `P5-COM-UI-03` | Certificate Support | `PA_P5_CertificateSupport` | Desktop 1440px | Locate, preview, and download electronic ride certificates |
+| `P5-COM-UI-04` | Operational Record Query | `PA_P5_RecordsQuery` | Desktop 1440px + Narrow 390px (`p5-records-query-narrow`) | Query 730-day (2-year) complete operational ride records |
+| `P5-COM-UI-05` | Controlled Export / Retention | `PA_P5_ExportRetention` | Desktop 1440px Modal | Create controlled exports and manage Legal Hold retention freezes |
+
+---
+
+## 1.5 Editable Figma Source & Component Spec
+
+- **Figma Source Structure:** `docs/05-ui/drts-design-canvas/figma-source-tree.json` (`05_P5_Fare_Payment`, `06_P5_Records_Retention`).
+- **Figma Pages & Component Variants:**
+  - Page `05_P5_Fare_Payment`: `P5-COM-UI-01_FareAnomaly_1440x900`, `P5-COM-UI-01_FareAnomaly_Narrow_390x844`, `P5-COM-UI-02_PaymentException_1440x900`, `P5-COM-UI-02_PaymentException_Narrow_390x844`, `P5-COM-UI-03_CertificateSupport_1440x900`.
+  - Page `06_P5_Records_Retention`: `P5-COM-UI-04_RecordsQuery_1440x900`, `P5-COM-UI-04_RecordsQuery_Narrow_390x844`, `P5-COM-UI-05_ControlledExport_1440x900`.
+  - Component Tokens: Bound to `@drts/ui-tokens` (Platform & Commerce realm).
 
 ---
 
