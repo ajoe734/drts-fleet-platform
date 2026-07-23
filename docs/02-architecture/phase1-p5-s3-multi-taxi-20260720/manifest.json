@@ -123,11 +123,10 @@
     "canonicalCanvasAvailable": true,
     "designReadyForImplementation": false,
     "remainingGates": [
-      "multi_taxi_operating_authorization_console",
-      "queue_semantics_operations",
-      "rating_governance",
-      "fare_payment_receipt_retention_operations",
-      "figma_accessibility_screenshot_design_qa_handoff"
+      "existing_authorization_page_minimum_delta",
+      "existing_dispatch_queue_labels_and_denial_copy",
+      "existing_passenger_rating_payment_receipt_states",
+      "two_year_record_query_download"
     ],
     "executionPacket": "07_fleets_execution_tasks_20260723.md",
     "requirementsDocument": "08_multi_taxi_operations_ui_design_requirements_20260723.md"
@@ -157,11 +156,18 @@
     ],
     "remainingWorkflowClosure": [
       "current_head_multi_taxi_e2e",
-      "queue_semantics_ops_ui",
-      "rating_moderation_admin_ui",
-      "fare_payment_receipt",
-      "two_year_operational_record",
+      "minimum_queue_labels_and_denial_copy",
+      "passenger_rating_payment_receipt_state_verification",
+      "two_year_operational_record_query_download",
       "s3_production_verification"
+    ],
+    "deferredOutsideLegalMvp": [
+      "rating_moderation_console",
+      "payment_exception_console",
+      "fare_anomaly_triage_console",
+      "legal_hold",
+      "export_job_orchestration",
+      "mandatory_figma_png_design_qa_package"
     ]
   }
 }

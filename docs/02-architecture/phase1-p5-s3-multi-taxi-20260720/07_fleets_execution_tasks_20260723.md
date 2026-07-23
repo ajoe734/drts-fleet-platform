@@ -78,117 +78,56 @@ commands, and remaining delta.
 The UI brief is approved, but not every operational surface is Design Ready for
 Implementation.
 
-| Surface         | Canonical visual coverage                          | Remaining design gate                                                                      | Status  |
-| --------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------- |
-| P-5 Passenger   | `p5-ui.jsx`, `p5-screens.jsx`; P5-01..12, A03, A04 | Editable handoff, responsive/a11y annotations, final PNG evidence                          | partial |
-| P-5 Back Office | `platform-p5.jsx`; A01, A02, A03, A05              | Multi-taxi authorization, queue semantics, rating moderation, payment/retention operations | partial |
-| S-3 Driver      | `driver-sos.jsx`; S3-01..11                        | Device frames, interaction/a11y annotations, final PNG evidence                            | partial |
-| S-3 Ops         | `ops-sos.jsx`; S3-O01..O06                         | Responsive states, sound/ack interaction annotations, final PNG evidence                   | partial |
+| Surface         | Existing coverage                                    | Remaining minimum delta                           | Status              |
+| --------------- | ---------------------------------------------------- | ------------------------------------------------- | ------------------- |
+| P-5 Passenger   | `p5-ui.jsx`, `p5-screens.jsx`, live ride route       | Rating, payment, and receipt state verification   | reuse + small delta |
+| P-5 Back Office | `platform-p5.jsx`, live authorization page           | Authorization usability and record query/download | reuse + small delta |
+| Ops Dispatch    | Existing dispatch list/detail                        | Multi-taxi service/queue labels and denial copy   | small delta         |
+| S-3             | Driver and Ops implementation/canvases already exist | Current-head verification only                    | no redesign         |
 
 Existing canvases are visual source and must be reused. Missing operational
-screens must not be invented independently by implementation Fleets.
-The screen inventory, field definitions, state matrices, RBAC behavior, copy,
-prototype flows, and Design Definition of Done are specified in
+behavior must be added to the closest existing surface. The legal/practical
+scope, four UI deltas, deferred features, and minimum Definition of Done are in
 `08_multi_taxi_operations_ui_design_requirements_20260723.md`.
 
-## Wave 0: Design Fleet Tasks
+The archived UI brief does not make Figma, PNG count, rating moderation,
+payment exception management, legal hold, or a separate Design QA process a
+legal MVP gate. This execution packet follows the later practicality decision
+captured in requirement v1.1.
 
-### `MTX-DESIGN-001` Operating Authorization Console
+## Wave 0: Minimum Design Delta
 
-**Owner:** Product Design / Platform Admin Design  
-**Depends on:** approved system spec  
+### `MTX-DESIGN-001` Four-Delta Compliance Handoff
+
+**Owner:** Product Design with Platform Admin, Ops, and Passenger owners
+
+**Depends on:** approved system spec and existing implemented surfaces
+
 **Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
 
-**Blocks:** `MTX-AUTH-UI-001`
+**Blocks:** only the UI portions of `MTX-AUTH-UI-001`, `MTX-QUEUE-003`,
+`P5-PAX-WEB-001`, `P5-PAY-001`, `P5-RCT-001`, and `P5-RET-003`
 
 Design:
 
-- authorization registry and detail;
-- create/edit draft;
-- activate, suspend, expire, and revoke states;
-- effective window, service areas, business-plan version, and fare version;
-- authorized vehicle membership add/remove/history;
-- permission denied, stale version, validation, empty, loading, and error states;
-- audit context without exposing internal-only data.
+- improve the existing authorization page without adding routes;
+- add two labels and one denial message to existing dispatch surfaces;
+- complete rating/payment/receipt states in the existing passenger ride flow;
+- define one minimal operational-record query/download flow.
 
-**Acceptance:** state matrix, desktop and narrow viewport frames, frozen copy,
-a11y annotations, prototype flow, and implementation handoff are all present.
+Explicitly deferred:
 
-### `MTX-DESIGN-002` Queue Semantics Operations
+- rating moderation;
+- payment exception and fare anomaly consoles;
+- legal hold;
+- export job orchestration;
+- new design system or dedicated queue pages;
+- mandatory Figma/PNG/Design-QA package.
 
-**Owner:** Product Design / Ops Console Design  
-**Depends on:** approved queue decision  
-**Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
-
-**Blocks:** `MTX-QUEUE-003`
-
-Design:
-
-- explicit `virtual_matching`, `physical_rank`, and `taxi_stand` labels;
-- multi-taxi legal-denial presentation for physical rank and taxi stand;
-- non-bypassable denial copy;
-- filter, detail, empty, loading, and error states;
-- no implication that virtual matching is a physical taxi rank.
-
-**Acceptance:** Ops users can identify queue mode and legal eligibility without
-reading raw reason codes.
-
-### `P5-DESIGN-001` Rating Governance
-
-**Owner:** Product Design / Platform Admin Design  
-**Depends on:** rating authority contract  
-**Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
-
-**Blocks:** `P5-RATE-003`
-
-Design:
-
-- rating review queue and detail;
-- flagged, reviewed, retained, and policy-action states;
-- driver summary shown as server-owned and non-editable;
-- duplicate/idempotent submission context;
-- no operator control that directly fabricates an aggregate rating.
-
-**Acceptance:** moderation actions, permissions, audit visibility, and all
-non-happy states are specified.
-
-### `P5-DESIGN-002` Fare, Payment, Receipt, and Retention Operations
-
-**Owner:** Product Design / Platform Admin and Passenger Design  
-**Depends on:** fare/payment/retention system contracts  
-**Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
-
-**Blocks:** operational UI portions of `P5-FARE-ANOM-001`, `P5-PAY-001`,
-`P5-RCT-001`, and `P5-RET-003`
-
-Reuse P5-A03, P5-A04, P5-A05, P5-10, and extend only the missing states:
-
-- fare anomaly triage and activation conflict;
-- payment pending, failed, reversed, and unavailable;
-- certificate generation/download failure;
-- retention coverage, legal hold, query, and controlled export.
-
-**Acceptance:** passenger and operator state/copy mappings use the same
-canonical status names and do not expose PSP-internal details.
-
-### `P5-S3-DESIGN-QA-001` Handoff Completion
-
-**Owner:** Design QA  
-**Depends on:** `MTX-DESIGN-001..002`, `P5-DESIGN-001..002`  
-**Blocks:** visual implementation closeout
-
-Deliver:
-
-- editable Figma/component source and variants;
-- prototype links;
-- responsive frames;
-- copy and state matrices;
-- accessibility and developer annotations;
-- `P5_dispatch_disclosure.png`;
-- `S3_sos_fullscreen.png`;
-- design QA checklist and forbidden-word scan.
-
-**Acceptance:** every item in UI brief section 30 and section 31 has evidence.
+**Acceptance:** each delta identifies its existing route/component, canonical
+fields, available actions, final copy, and minimum empty/error state. The
+handoff medium may be an incremental design frame, annotated canvas, or code
+prototype.
 
 ---
 
@@ -230,7 +169,8 @@ Evidence:
 
 **Task IDs:** `MTX-AUTH-001..003`, `MTX-AUTH-UI-001`,
 `MTX-AUTH-QA-001`  
-**Starts after:** Fleet A; UI work also requires `MTX-DESIGN-001`  
+**Starts after:** Fleet A; remaining UI delta also requires `MTX-DESIGN-001`
+
 **Owned surfaces:** contracts, migration, authorization service/API,
 Platform Admin authorization route
 
@@ -255,14 +195,15 @@ all writes audited
 ## Fleet C: Queue Semantics
 
 **Task IDs:** `MTX-QUEUE-001..003`, `MTX-QUEUE-QA-001`  
-**Starts after:** Fleet A; UI work also requires `MTX-DESIGN-002`  
+**Starts after:** Fleet A; remaining UI delta also requires `MTX-DESIGN-001`
+
 **Owned surfaces:** queue contracts, dispatch queue policy, Ops queue UI
 
 Deliver:
 
 - persisted queue mode;
 - explicit profile queue policy;
-- Ops labels and legal-denial state;
+- two Ops labels and inline legal-denial copy on existing dispatch surfaces;
 - negative E2E for physical rank and taxi stand.
 
 Acceptance:
@@ -276,19 +217,22 @@ ordinary_taxi policy remains independently configurable
 
 ## Fleet D: P-5 Data Authority and Assignment
 
-**Task IDs:** `P5-RATE-001..003`, `P5-RATE-QA-001`,
+**Task IDs:** `P5-RATE-001..002`, `P5-RATE-QA-001`,
 `P5-GATE-001..002`, `P5-SNAP-001`, `P5-ASSIGN-001`,
 `P5-REDISPATCH-001`, `P5-ASSIGN-QA-001`,
 `P5-REDISPATCH-QA-001`  
-**Starts after:** Fleets B and C; moderation UI requires `P5-DESIGN-001`  
+**Starts after:** Fleets B and C
+
 **Owned surfaces:** rating, eligibility, assignment transaction, outbox
 
 Deliver:
 
-- canonical rating event and aggregate;
+- canonical rating submission and passenger-visible aggregate;
 - P-5 hard eligibility reasons;
 - atomic assignment, disclosure snapshot, token, and outbox;
 - version-safe redispatch.
+
+`P5-RATE-003` rating moderation is deferred and does not block this Fleet.
 
 Acceptance:
 
@@ -339,18 +283,19 @@ tests are supplied.
 `P5-FARE-ANOM-001`, `P5-FARE-PUB-001`, `P5-SEAT-001`,
 `P5-PAY-001`, `P5-RCT-001`, `P5-RET-001..003`,
 `P5-RET-QA-001`  
-**Starts after:** Fleets B and E; operational UI requires `P5-DESIGN-002`  
+**Starts after:** Fleets B and E; UI deltas require `MTX-DESIGN-001`
+
 **Owned surfaces:** geo snapshot, pricing, billing, reporting, evidence
 
 Deliver:
 
 - route/fare snapshot before confirmation;
 - active fare authority and public fare page;
-- anomaly handling;
+- fail-closed anomaly handling without a dedicated Ops console;
 - seatbelt event;
-- payment state and provider port;
+- payment state/provider port and existing passenger status display;
 - electronic ride certificate;
-- complete operational record and 730-day retention/query/export.
+- complete operational record and 730-day retention/query/download.
 
 Acceptance:
 
@@ -361,8 +306,7 @@ payment unavailable never appears paid
 certificate is token-scoped
 completed trip record coverage is 100%
 retention floor is 730 days
-legal hold prevents purge
-controlled export is audited
+authorized regulator query/download is available
 ```
 
 PSP integration remains `blocked_ext` until credentials, sandbox cases, and
@@ -371,7 +315,8 @@ signed contract tests are available.
 ## Fleet G: S-3 Production Verification
 
 **Task IDs:** `S3-VERIFY-001..005`  
-**Starts after:** `P5-S3-DESIGN-QA-001` for visual sign-off  
+**Starts after:** mandatory preflight; may run in parallel
+
 **Owned surfaces:** QA, Mobile QA, Security, Observability
 
 Do not rebuild the S-3 domain or screens. Verify the landed implementation:
@@ -421,11 +366,12 @@ Only one Fleet may own each high-collision surface at a time:
 Dependency order:
 
 ```text
-Wave 0 Design
-  ├─ MTX-DESIGN-001 → Fleet B UI
-  ├─ MTX-DESIGN-002 → Fleet C UI
-  ├─ P5-DESIGN-001  → Fleet D moderation UI
-  └─ P5-DESIGN-002  → Fleet F operational UI
+Wave 0 Minimum Design
+  └─ MTX-DESIGN-001
+       → Fleet B authorization delta
+       → Fleet C queue labels
+       → Fleet E passenger states
+       → Fleet F record query/download
 
 Fleet A
   → Fleets B + C
@@ -434,7 +380,7 @@ Fleet A
   → Fleet F
   → Fleet H
 
-Fleet G may run in parallel after Design QA.
+Fleet G may run in parallel because S-3 is verification-only.
 ```
 
 ---
@@ -457,7 +403,7 @@ Required evidence:
 3. unit/integration/E2E commands and results;
 4. migration replay where schema changes;
 5. API/DB readback for persisted authority;
-6. screenshots for UI tasks;
+6. screenshots only for changed UI surfaces;
 7. residual external blockers;
 8. rollback or disable strategy.
 
@@ -471,12 +417,13 @@ whole acceptance boundary.
 
 Dispatch in this order:
 
-1. Wave 0 Design Fleet tasks in parallel.
+1. Wave 0 minimum design delta.
 2. Fleet A preflight and delta.
 3. Fleets B and C after Fleet A contracts freeze.
 4. Fleet D after authorization and queue policy.
 5. Fleet E after atomic assignment.
-6. Fleet F after live passenger authority and fare design handoff.
+6. Fleet F after live passenger authority and the minimum record/passenger
+   handoff.
 7. Fleet G verification in parallel where devices/environments are available.
 8. Fleet H only after all non-external tasks have evidence.
 
