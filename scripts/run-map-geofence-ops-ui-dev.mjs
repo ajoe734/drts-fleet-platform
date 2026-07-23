@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,8 +8,17 @@ const OPS_APP_DIR = path.join(ROOT, "apps/ops-console-web");
 const API_HOST = process.env.MAP_GEOFENCE_OPS_MOCK_API_HOST ?? "127.0.0.1";
 const API_PORT = process.env.MAP_GEOFENCE_OPS_MOCK_API_PORT ?? "3106";
 const OPS_HOST = process.env.MAP_GEOFENCE_OPS_UI_HOST ?? "127.0.0.1";
-const OPS_PORT = process.env.MAP_GEOFENCE_OPS_UI_PORT ?? "3006";
+const OPS_PORT = process.env.MAP_GEOFENCE_OPS_UI_PORT ?? "3202";
 const API_BASE_URL = `http://${API_HOST}:${API_PORT}`;
+
+try {
+  execSync("pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build", {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
+} catch (err) {
+  console.warn("[run-map-geofence-ops-ui-dev] package prebuild warning", err);
+}
 
 const children = new Set();
 let shuttingDown = false;
