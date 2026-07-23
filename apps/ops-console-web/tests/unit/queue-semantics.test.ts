@@ -115,6 +115,8 @@ describe("MTX-QUEUE-003 Queue Semantics & Statutory Refusal UI", () => {
     expect(t("dispatch.denial.statutoryRefusalTitle", "zh")).toBe(
       "多元化計程車法定拒絕態",
     );
+    expect(t("opsCode.statutory_refusal", "zh")).toBe("法定拒絕態");
+    expect(t("opsCode.statutory_refusal", "en")).toBe("Statutory Refusal");
   });
 });
 

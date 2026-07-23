@@ -961,7 +961,11 @@ function getApprovalLabel(value: string, locale: Locale) {
   return formatDispatchCode(locale, value);
 }
 
-function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
+function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord, locale: Locale = "zh") {
+  const queueSemantics = resolveQueueSemantics(order, locale);
+  if (queueSemantics.isStatutoryRefusal) {
+    return "statutory_refusal";
+  }
   if (order.exceptionHold?.overrideRequest && !order.exceptionHold.resolution) {
     return "override_pending";
   }
@@ -983,8 +987,10 @@ function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
 function getOwnedBoard(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
+  locale: Locale = "zh",
 ): DispatchBoard {
-  const state = getVisibleStateCode(order, job);
+  const state = getVisibleStateCode(order, job, locale);
+  if (state === "statutory_refusal") return "governance";
   if (state === "override_pending") return "governance";
   if (state === "no_supply") return "no_supply";
   if (state === "exception_hold") return "exception";
@@ -993,11 +999,11 @@ function getOwnedBoard(
 }
 
 function getStateTone(stateCode: string): CanvasTone {
+  if (stateCode === "statutory_refusal" || stateCode === "no_supply") {
+    return "danger";
+  }
   if (stateCode === "assigned" || stateCode === "completed") {
     return "success";
-  }
-  if (stateCode === "no_supply") {
-    return "danger";
   }
   if (stateCode === "exception_hold" || stateCode === "override_pending") {
     return "warn";
@@ -1008,10 +1014,14 @@ function getStateTone(stateCode: string): CanvasTone {
   return "neutral";
 }
 
-function getOwnedGateSummary(order: OwnedOrderRecord): {
+function getOwnedGateSummary(order: OwnedOrderRecord, locale: Locale = "zh"): {
   label: string;
   tone: CanvasTone;
 } {
+  const queueSemantics = resolveQueueSemantics(order, locale);
+  if (queueSemantics.isStatutoryRefusal) {
+    return { label: "statutory_refusal", tone: "danger" };
+  }
   if (order.exceptionHold?.overrideRequest && !order.exceptionHold.resolution) {
     return { label: "override_pending", tone: "warn" };
   }
@@ -3562,8 +3572,8 @@ export default async function DispatchPage({
   } else {
     boardRows = visibleOwnedByBoard.map((order) => {
       const job = jobByOrderId.get(order.orderId);
-      const state = getVisibleStateCode(order, job);
-      const gate = getOwnedGateSummary(order);
+      const state = getVisibleStateCode(order, job, locale);
+      const gate = getOwnedGateSummary(order, locale);
       const candidates = job
         ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
         : [];
@@ -3611,7 +3621,9 @@ export default async function DispatchPage({
           </div>
         ),
         window: formatWindow(order, locale),
-        service: formatDispatchCode(locale, getServiceProductValue(order)),
+        service: queueSemantics.isMultiTaxi
+          ? queueSemantics.serviceTypeText
+          : formatDispatchCode(locale, getServiceProductValue(order)),
         queueModeCell: (
           <div style={{ display: "grid", gap: 2 }}>
             <Pill
@@ -3627,6 +3639,11 @@ export default async function DispatchPage({
             >
               {queueSemantics.queueModeText}
             </Pill>
+            {queueSemantics.isMultiTaxi && !queueSemantics.isStatutoryRefusal ? (
+              <span style={{ fontSize: 10.5, color: theme.textMuted }}>
+                {queueSemantics.matchingModeText}
+              </span>
+            ) : null}
             {queueSemantics.isStatutoryRefusal ? (
               <span
                 style={{
