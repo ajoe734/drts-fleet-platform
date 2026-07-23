@@ -5,7 +5,7 @@
 - Task: `S3-VERIFY-001`
 - Owner: `Codex`
 - Reviewer: `Copilot`
-- Inspected commit: `ccc563844c12a986c4f933496665286f318980b8`
+- Inspected commit: `cf82c7a436484d493dca45db6d8a0af50cc524b6`
 - Inspection date: `2026-07-23`
 
 ## Current-Head Inventory
@@ -46,14 +46,30 @@ Executed in: `apps/api`
 Result: `PASS` (`3` files, `38` tests)
 
 ```bash
+pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
+```
+
+Executed in: `apps/api`
+
+Result: `PASS` (`6` files, `45` tests) on inspected commit `cf82c7a436484d493dca45db6d8a0af50cc524b6`
+
+```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
 ```
 
 Executed in: `apps/driver-app`
 
-Result: `PASS` (`2` files, `6` tests)
+Result: `PASS` (`2` files, `6` tests) on inspected commit `cf82c7a436484d493dca45db6d8a0af50cc524b6`
 
 Note: the driver-app run emitted `react-test-renderer` deprecation plus `act(...)` environment warnings, but the process still exited `0` and all assertions passed.
+
+```bash
+grep -RInE --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=coverage "(attachment|attachments|presign|checksum|malware|clam|virus|content-type|mime|scan)" apps/api/src/modules/driver-sos apps/api/src/modules/incident apps/api/tests apps/driver-app support/sidecars/DRV-UI-010 support/sidecars/S3-VERIFY-001 | head -n 250
+```
+
+Executed at repo root.
+
+Result: matches confirm only local driver-app attachment draft persistence under `apps/driver-app/app/sos.tsx` and `apps/driver-app/lib/driver-sos-outbox.ts`, plus non-S3 attachment checksum flows in other domains such as Fleet Partner onboarding. No S-3-specific presign / checksum / malware-scan proof was found under current head.
 
 ## Remaining Delta
 

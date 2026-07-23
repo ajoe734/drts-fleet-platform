@@ -2,7 +2,7 @@
 
 ## Summary
 
-Current head `ccc563844c12a986c4f933496665286f318980b8` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-23`, and recorded the external blockers that remain for full Fleet G closure.
+Current head `cf82c7a436484d493dca45db6d8a0af50cc524b6` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-23`, and recorded the external blockers that remain for full Fleet G closure.
 
 ## Verified Locally
 
@@ -121,14 +121,21 @@ Task brief requires measuring `fleetReportConfirmedAt -> opsAlertRenderedAt` wit
 ```bash
 pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts --reporter=dot
 pnpm exec vitest run tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
+pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
 ```
 
-Executed in `apps/api` on `2026-07-23`: all passed.
+Executed in `apps/api` on `2026-07-23`: all passed. The combined rerun on `cf82c7a436484d493dca45db6d8a0af50cc524b6` passed `6` files / `45` tests.
 
 ```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
 ```
 
-Executed in `apps/driver-app` on `2026-07-23`: all passed.
+Executed in `apps/driver-app` on `2026-07-23`: all passed on `cf82c7a436484d493dca45db6d8a0af50cc524b6` (`2` files / `6` tests).
 
 The driver-app run emitted `react-test-renderer` deprecation and `act(...)` environment warnings, but still exited `0` with all six assertions passing. Those warnings are pre-existing test-environment noise, not S-3 acceptance failures.
+
+```bash
+grep -RInE --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=coverage "(attachment|attachments|presign|checksum|malware|clam|virus|content-type|mime|scan)" apps/api/src/modules/driver-sos apps/api/src/modules/incident apps/api/tests apps/driver-app support/sidecars/DRV-UI-010 support/sidecars/S3-VERIFY-001 | head -n 250
+```
+
+Executed at repo root on `2026-07-23`: no S-3-specific attachment upload / presign / checksum / malware-scan path was found beyond the local driver-app draft/outbox handling already cited above.
