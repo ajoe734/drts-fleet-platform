@@ -46,6 +46,19 @@ export interface SosQueueRow {
   incident: IncidentRecord;
 }
 
+export function collectUnreportedSosIncidentIds(
+  rows: readonly SosQueueRow[],
+  reportedIncidentIds: ReadonlySet<string>,
+): string[] {
+  return rows
+    .map((row) => row.id)
+    .filter(
+      (incidentId, index, incidentIds) =>
+        !reportedIncidentIds.has(incidentId) &&
+        incidentIds.indexOf(incidentId) === index,
+    );
+}
+
 export type SosTimelineActorRealm = "driver" | "ops" | "system";
 
 export function unwrapListItems<T>(

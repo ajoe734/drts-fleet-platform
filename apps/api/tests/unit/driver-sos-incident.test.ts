@@ -10,6 +10,22 @@ describe("driver SOS auth policy", () => {
     expect(policy?.requiredScopes).toContain("incident:write");
   });
 
+  it("protects attachment and Ops render-receipt routes", () => {
+    const attachmentPolicy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/driver/sos-events/sos-1/attachments/upload-intents",
+    );
+    expect(attachmentPolicy?.allowedRealms).toEqual(["system", "driver"]);
+    expect(attachmentPolicy?.requiredScopes).toEqual(["incident:write"]);
+
+    const opsPolicy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/ops/driver-sos/alerts/rendered",
+    );
+    expect(opsPolicy?.allowedRealms).toEqual(["system", "ops"]);
+    expect(opsPolicy?.requiredScopes).toEqual(["incident:write"]);
+  });
+
   it("does NOT allow the driver realm to POST /incidents anymore", () => {
     const policy = resolveRouteAuthPolicy("POST", "/api/incidents");
     expect(policy?.allowedRealms ?? []).not.toContain("driver");

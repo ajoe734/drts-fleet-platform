@@ -3,6 +3,7 @@ import type { IncidentRecord } from "@drts/contracts";
 import {
   buildDriverNameMap,
   buildSosQueueRows,
+  collectUnreportedSosIncidentIds,
   buildVehiclePlateMap,
   isSosIncident,
 } from "../../lib/sos-view-model";
@@ -36,6 +37,17 @@ function buildIncident(
 }
 
 describe("sos-view-model", () => {
+  it("collects each newly rendered SOS incident once", () => {
+    const rows = buildSosQueueRows(
+      [buildIncident(), buildIncident({ incidentId: "inc_0215" })],
+      { nowMs: Date.parse("2026-07-20T09:01:00.000Z") },
+    );
+
+    expect(collectUnreportedSosIncidentIds(rows, new Set(["inc-1"]))).toEqual([
+      "inc_0215",
+    ]);
+  });
+
   it("detects only SOS incidents by event number", () => {
     expect(isSosIncident(buildIncident())).toBe(true);
     expect(

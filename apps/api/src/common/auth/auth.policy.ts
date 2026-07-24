@@ -388,6 +388,27 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("driver/sos-events/")) {
+    return {
+      routeKey: `driver:sos-attachments:${upperMethod}`,
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver SOS attachment upload and scan status",
+    };
+  }
+
+  if (
+    routePath === "ops/driver-sos/alerts/rendered" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "ops:driver-sos-alerts:rendered",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops driver SOS alert render receipt",
+    };
+  }
+
   if (routePath.startsWith("callcenter/")) {
     return {
       routeKey: `callcenter:${upperMethod}`,

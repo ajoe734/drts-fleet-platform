@@ -14,6 +14,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import {
+  type ConfirmDriverSosAttachmentUploadResult,
+  type CreateDriverSosAttachmentUploadIntentResult,
+  type DriverSosAttachmentRecord,
   PLATFORM_CODE_REGISTRY,
   type DriverTaskRecord,
   type DriverSosEventType,
@@ -37,6 +40,7 @@ import {
   recoverDriverSessionFromApiError,
 } from "@/lib/api-client";
 import {
+  applyDriverSosAttachmentSyncResult,
   addDriverSosDialRecord,
   buildDriverSosSubmitCommand,
   createDriverSosActiveCase,
@@ -51,6 +55,7 @@ import {
   type DriverSosActiveCase,
   type DriverSosAttachmentDraft,
 } from "@/lib/driver-sos-outbox";
+import { syncDriverSosAttachments } from "@/lib/driver-sos-attachment-upload";
 import { getLatestDriverLocationUpdate } from "@/lib/driver-location-heartbeat";
 import {
   buildFallbackUnifiedDriverTaskView,
@@ -304,11 +309,20 @@ function getSyncChipModel(
     };
   }
 
+  if (activeCase.syncState === "attachment_pending") {
+    return {
+      tone: "warn",
+      label: "attachment pending",
+      detail: activeCase.receipt
+        ? `SOS ${activeCase.receipt.eventNo} 已送達；附件等待儲存或掃描服務。`
+        : "SOS 已送達；附件等待儲存或掃描服務。",
+    };
+  }
+
   return {
     tone: "warn",
     label: "offline",
-    detail:
-      "offline · 事件尚未送達，會保留在本機 outbox 並等待補送 / 重試。",
+    detail: "offline · 事件尚未送達，會保留在本機 outbox 並等待補送 / 重試。",
   };
 }
 
@@ -350,8 +364,18 @@ function AttachmentList({
           <View style={styles.attachmentCopy}>
             <Text style={styles.attachmentName}>{attachment.fileName}</Text>
             <Text style={styles.attachmentMeta}>
-              {attachment.mimeType || "image/jpeg"} · {formatAt(attachment.addedAt)}
+              {attachment.mimeType || "image/jpeg"} ·{" "}
+              {formatAt(attachment.addedAt)}
             </Text>
+            {attachment.uploadState !== "local" ? (
+              <Text style={styles.attachmentMeta}>
+                upload {attachment.uploadState}
+                {attachment.scanStatus
+                  ? ` · scan ${attachment.scanStatus}`
+                  : ""}
+                {attachment.lastError ? ` · ${attachment.lastError}` : ""}
+              </Text>
+            ) : null}
           </View>
           {onRemove ? (
             <Btn
@@ -476,7 +500,9 @@ function FalseAlarmSlider({
           },
         ]}
       />
-      <Text style={styles.falseAlarmText}>向右滑動後再二次確認，才會標記誤觸</Text>
+      <Text style={styles.falseAlarmText}>
+        向右滑動後再二次確認，才會標記誤觸
+      </Text>
       <View
         {...responder.panHandlers}
         style={[
@@ -501,7 +527,10 @@ export default function DriverSosScreen() {
   const holdTriggeredRef = useRef(false);
 
   const [browserOnline, setBrowserOnline] = useState<boolean | null>(() => {
-    if (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") {
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.onLine === "boolean"
+    ) {
       return navigator.onLine;
     }
 
@@ -509,7 +538,9 @@ export default function DriverSosScreen() {
   });
   const [context, setContext] = useState<SosTaskContext | null>(null);
   const [loadingContext, setLoadingContext] = useState(true);
-  const [activeCase, setActiveCase] = useState<DriverSosActiveCase | null>(null);
+  const [activeCase, setActiveCase] = useState<DriverSosActiveCase | null>(
+    null,
+  );
   const [loadingCase, setLoadingCase] = useState(true);
   const [selectedSituation, setSelectedSituation] =
     useState<SosSituationId | null>("passenger_conflict");
@@ -630,7 +661,74 @@ export default function DriverSosScreen() {
       );
       const submittedCase = markDriverSosCaseSubmitted(sendingCase, result);
       await persistActiveCase(submittedCase);
-      setUiNotice(`SOS ${result.receipt.eventNo} 已送達安全值班。`);
+      const attachments = [
+        ...submittedCase.attachments,
+        ...submittedCase.supplements.flatMap(
+          (supplement) => supplement.attachments,
+        ),
+      ];
+      if (attachments.length === 0) {
+        setUiNotice(`SOS ${result.receipt.eventNo} 已送達安全值班。`);
+        return;
+      }
+
+      const client = getDriverClient();
+      const attachmentSync = await syncDriverSosAttachments({
+        sosEventId: result.receipt.sosEventId,
+        attachments,
+        transport: {
+          async prepare(attachment) {
+            const response = await fetch(attachment.uri);
+            const body = await response.blob();
+            const contentType =
+              attachment.mimeType?.trim().toLowerCase() ||
+              body.type?.trim().toLowerCase() ||
+              "image/jpeg";
+            const fileSize = attachment.fileSize ?? body.size;
+            if (!Number.isSafeInteger(fileSize) || fileSize <= 0) {
+              throw new Error("無法讀取附件大小，附件保留於本機等待重試。");
+            }
+            return { body, contentType, fileSize };
+          },
+          createUploadIntent(sosEventId, command) {
+            return client.post<CreateDriverSosAttachmentUploadIntentResult>(
+              `/api/driver/sos-events/${encodeURIComponent(sosEventId)}/attachments/upload-intents`,
+              { body: command },
+            );
+          },
+          async upload(intent, prepared) {
+            const response = await fetch(intent.uploadUrl, {
+              method: intent.method,
+              headers: intent.headers,
+              body: prepared.body,
+            });
+            if (!response.ok) {
+              throw new Error(`附件上傳失敗 (${response.status})。`);
+            }
+          },
+          confirm(sosEventId, objectKey) {
+            return client.post<ConfirmDriverSosAttachmentUploadResult>(
+              `/api/driver/sos-events/${encodeURIComponent(sosEventId)}/attachments/confirm`,
+              { body: { objectKey } },
+            );
+          },
+          retryScan(sosEventId, attachmentId) {
+            return client.post<DriverSosAttachmentRecord>(
+              `/api/driver/sos-events/${encodeURIComponent(sosEventId)}/attachments/${encodeURIComponent(attachmentId)}/retry-scan`,
+            );
+          },
+        },
+      });
+      const completedCase = applyDriverSosAttachmentSyncResult(
+        submittedCase,
+        attachmentSync.attachments,
+      );
+      await persistActiveCase(completedCase);
+      setUiNotice(
+        attachmentSync.unavailableCount + attachmentSync.failedCount > 0
+          ? `SOS ${result.receipt.eventNo} 已送達；附件服務未就緒，已保留供重試。`
+          : `SOS ${result.receipt.eventNo} 與附件已由伺服器確認。`,
+      );
     } catch (error) {
       await recoverDriverSessionFromApiError(error);
       const failedCase = markDriverSosCaseFailed(
@@ -650,9 +748,21 @@ export default function DriverSosScreen() {
     target: "initial" | "supplement",
     existing: DriverSosAttachmentDraft[],
   ) {
-    const remaining = MAX_ATTACHMENTS - existing.length;
+    const committedAttachmentCount =
+      target === "supplement" && activeCase
+        ? activeCase.attachments.length +
+          activeCase.supplements.reduce(
+            (count, supplement) => count + supplement.attachments.length,
+            0,
+          )
+        : 0;
+    const remaining =
+      MAX_ATTACHMENTS - committedAttachmentCount - existing.length;
     if (remaining <= 0) {
-      Alert.alert("已達附件上限", `每次最多附上 ${MAX_ATTACHMENTS} 件附件。`);
+      Alert.alert(
+        "已達附件上限",
+        `每筆 SOS 合計最多附上 ${MAX_ATTACHMENTS} 件附件。`,
+      );
       return;
     }
 
@@ -763,8 +873,15 @@ export default function DriverSosScreen() {
     await persistActiveCase(nextCase);
     setSupplementNote("");
     setSupplementAttachments([]);
-    setUiNotice("補充資料已加入本機 case timeline。");
+    setUiNotice(
+      browserOnline === true
+        ? "補充資料已加入本機 case timeline，正在送出。"
+        : "補充資料已加入本機 case timeline，等待連線後送出。",
+    );
     setScreenError(null);
+    if (browserOnline === true && activeCase.receipt) {
+      await syncActiveCase(nextCase, false);
+    }
   }
 
   async function handleFalseAlarmConfirm() {
@@ -839,12 +956,18 @@ export default function DriverSosScreen() {
       theme={THEME}
       footer={
         <View style={styles.footerBar}>
-          <Btn theme={THEME} variant="secondary" size="md" onPress={() => router.back()}>
+          <Btn
+            theme={THEME}
+            variant="secondary"
+            size="md"
+            onPress={() => router.back()}
+          >
             返回
           </Btn>
           {activeCase &&
           (activeCase.syncState === "pending" ||
-            activeCase.syncState === "failed_retryable") ? (
+            activeCase.syncState === "failed_retryable" ||
+            activeCase.syncState === "attachment_pending") ? (
             <Btn
               theme={THEME}
               variant="primary"
@@ -948,19 +1071,24 @@ export default function DriverSosScreen() {
             theme={THEME}
             variant="secondary"
             size="md"
-            onPress={() => void openNativeDial("fleet", FLEET_DUTY_PHONE_NUMBER)}
+            onPress={() =>
+              void openNativeDial("fleet", FLEET_DUTY_PHONE_NUMBER)
+            }
           >
             車隊值班
           </Btn>
         </View>
         <Text style={styles.supportingCopy}>
-          110 / 119 / 車隊值班分開撥打；這三個動作不依賴網路，且會寫入本機 SOS timeline。
+          110 / 119 / 車隊值班分開撥打；這三個動作不依賴網路，且會寫入本機 SOS
+          timeline。
         </Text>
       </Card>
 
       {loading ? (
         <Card theme={THEME} title="載入中">
-          <Text style={styles.emptyCopy}>正在準備 SOS task context 與本機 outbox…</Text>
+          <Text style={styles.emptyCopy}>
+            正在準備 SOS task context 與本機 outbox…
+          </Text>
         </Card>
       ) : null}
 
@@ -1053,7 +1181,8 @@ export default function DriverSosScreen() {
               </View>
             ) : (
               <Text style={styles.emptyCopy}>
-                目前沒有可帶入的行程脈絡，SOS 仍可建立為一般 driver safety 事件。
+                目前沒有可帶入的行程脈絡，SOS 仍可建立為一般 driver safety
+                事件。
               </Text>
             )}
           </Card>
@@ -1083,12 +1212,15 @@ export default function DriverSosScreen() {
                 theme={THEME}
                 variant="secondary"
                 size="sm"
-                onPress={() => void pickAttachments("initial", draftAttachments)}
+                onPress={() =>
+                  void pickAttachments("initial", draftAttachments)
+                }
               >
                 加入附件
               </Btn>
               <Text style={styles.supportingCopy}>
-                最多 {MAX_ATTACHMENTS} 件。附件會跟著本機 case timeline 一起保留。
+                每筆 SOS 合計最多 {MAX_ATTACHMENTS} 件。附件會跟著本機 case
+                timeline 一起保留。
               </Text>
             </View>
 
@@ -1097,7 +1229,9 @@ export default function DriverSosScreen() {
               emptyLabel="尚未附上附件。"
               onRemove={(attachmentId) =>
                 setDraftAttachments((current) =>
-                  current.filter((attachment) => attachment.id !== attachmentId),
+                  current.filter(
+                    (attachment) => attachment.id !== attachmentId,
+                  ),
                 )
               }
             />
@@ -1121,8 +1255,16 @@ export default function DriverSosScreen() {
               theme={THEME}
               cols={2}
               items={[
-                { label: "triggered at", value: formatAt(activeCase.originalTriggeredAt), mono: true },
-                { label: "next retry", value: formatAt(activeCase.nextAttemptAt), mono: true },
+                {
+                  label: "triggered at",
+                  value: formatAt(activeCase.originalTriggeredAt),
+                  mono: true,
+                },
+                {
+                  label: "next retry",
+                  value: formatAt(activeCase.nextAttemptAt),
+                  mono: true,
+                },
                 {
                   label: "attempts",
                   value: String(activeCase.attemptCount),
@@ -1145,7 +1287,9 @@ export default function DriverSosScreen() {
               ]}
             />
             {activeCase.description ? (
-              <Text style={styles.caseDescription}>{activeCase.description}</Text>
+              <Text style={styles.caseDescription}>
+                {activeCase.description}
+              </Text>
             ) : null}
             <AttachmentList
               attachments={activeCase.attachments}
@@ -1156,7 +1300,7 @@ export default function DriverSosScreen() {
           <Card
             theme={THEME}
             title="補充說明 / 附件"
-            subtitle="補充資料先寫入本機 case timeline，待 evidence channel 接線後補送"
+            subtitle="補充資料先寫入本機 case timeline，連線時使用同一附件驗證流程補送"
           >
             <Field theme={THEME} label="補充說明">
               <TextInput
@@ -1193,7 +1337,9 @@ export default function DriverSosScreen() {
               emptyLabel="尚未附上補充附件。"
               onRemove={(attachmentId) =>
                 setSupplementAttachments((current) =>
-                  current.filter((attachment) => attachment.id !== attachmentId),
+                  current.filter(
+                    (attachment) => attachment.id !== attachmentId,
+                  ),
                 )
               }
             />
