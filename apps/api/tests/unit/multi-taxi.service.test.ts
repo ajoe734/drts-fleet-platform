@@ -71,6 +71,45 @@ function createAndActivateAuthorization(service: MultiTaxiService) {
   return service.activateAuthorization(authorization.authorizationId);
 }
 
+async function createCompletedPassengerRating() {
+  const { service } = createService({
+    orderStatus: "completed",
+    assignment: {
+      assignmentId: "assignment-001",
+      driver: { driverId: "driver-001" },
+    },
+  });
+  createAndActivateAuthorization(service);
+  const ride = await service.createRide(
+    {
+      pickup: { address: "台北車站" },
+      dropoff: { address: "松山機場" },
+      passenger: {
+        passengerId: "passenger-001",
+        name: "測試乘客",
+        phone: "0911222333",
+      },
+      requestedPickupAt: new Date().toISOString(),
+      timingMode: "on_demand",
+      paymentMethodTokenRef: null,
+    },
+    null,
+  );
+  const rating = await service.submitPassengerRating(
+    ride.passengerAccess.accessToken,
+    {
+      score: 5,
+      tags: ["safe"],
+      comment: "Great ride",
+    },
+  );
+  return {
+    service,
+    accessToken: ride.passengerAccess.accessToken,
+    rating,
+  };
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -272,7 +311,8 @@ describe("MultiTaxiService passenger ride authority", () => {
       reportPersistenceFailure: vi.fn(),
       persistRideAccessToken: vi.fn(
         async (token: Record<string, unknown>, digest: string) => {
-          const { accessToken: _accessToken, ...persisted } = token;
+          const persisted = { ...token };
+          delete persisted.accessToken;
           persistedByDigest.set(digest, persisted);
         },
       ),
@@ -484,7 +524,9 @@ describe("MultiTaxiService passenger ride authority", () => {
     expect(vehicle.vehicleId).toBe("VEH-TPE-888");
 
     // Query vehicles via service
-    const vehiclesList = service.listAuthorizedVehicles(created.authorizationId);
+    const vehiclesList = service.listAuthorizedVehicles(
+      created.authorizationId,
+    );
     expect(vehiclesList).toHaveLength(1);
     expect(vehiclesList[0]?.vehicleId).toBe("VEH-TPE-888");
 
@@ -499,6 +541,384 @@ describe("MultiTaxiService passenger ride authority", () => {
     // Re-activate
     const reActivated = service.activateAuthorization(created.authorizationId);
     expect(reActivated.status).toBe("approved");
+  });
+});
+
+describe("MultiTaxiService rating invalidation authority", () => {
+  it("invalidates once, rebuilds the aggregate, audits the actor, and replays idempotently", async () => {
+    const { service, accessToken, rating } =
+      await createCompletedPassengerRating();
+    const command = {
+      reason: "Passenger reported that this rating was submitted in error.",
+      idempotencyKey: "rating-invalidate-001",
+      confirmation: {
+        action: "invalidate_rating" as const,
+        ratingId: rating.ratingId,
+      },
+    };
+
+    const result = await service.invalidatePassengerRating(
+      rating.ratingId,
+      command,
+      "platform-admin-001",
+      "req-rating-invalidate-001",
+    );
+    const replay = await service.invalidatePassengerRating(
+      rating.ratingId,
+      command,
+      "platform-admin-001",
+      "req-rating-invalidate-retry",
+    );
+    const passengerView = await service.getPassengerRide(accessToken);
+
+    expect(result).toMatchObject({
+      rating: {
+        ratingId: rating.ratingId,
+        status: "invalidated",
+        score: 5,
+      },
+      driverRatingSummary: {
+        driverId: "driver-001",
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+        aggregateVersion: 2,
+      },
+      audit: {
+        action: "invalidate",
+        actorId: "platform-admin-001",
+        previousStatus: "active",
+        resultingStatus: "invalidated",
+        requestId: "req-rating-invalidate-001",
+      },
+      replayed: false,
+    });
+    expect(result.rating).not.toHaveProperty("passengerSubjectRef");
+    expect(replay).toEqual({ ...result, replayed: true });
+    expect(passengerView.rating?.status).toBe("invalidated");
+  });
+
+  it("requires a reason and resource-bound confirmation", async () => {
+    const { service, rating } = await createCompletedPassengerRating();
+
+    await expect(
+      service.invalidatePassengerRating(
+        rating.ratingId,
+        {
+          reason: " ",
+          idempotencyKey: "rating-invalidate-002",
+          confirmation: {
+            action: "invalidate_rating",
+            ratingId: rating.ratingId,
+          },
+        },
+        "platform-admin-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_INVALIDATION_FIELD_INVALID" },
+      },
+    });
+
+    await expect(
+      service.invalidatePassengerRating(
+        rating.ratingId,
+        {
+          reason: "Confirmed invalid rating.",
+          idempotencyKey: "rating-invalidate-003",
+          confirmation: {
+            action: "invalidate_rating",
+            ratingId: "rating-other",
+          },
+        },
+        "platform-admin-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_INVALIDATION_CONFIRMATION_INVALID" },
+      },
+    });
+  });
+
+  it("rejects idempotency-key payload changes and a second invalidation command", async () => {
+    const { service, rating } = await createCompletedPassengerRating();
+    const confirmation = {
+      action: "invalidate_rating" as const,
+      ratingId: rating.ratingId,
+    };
+
+    await service.invalidatePassengerRating(
+      rating.ratingId,
+      {
+        reason: "First accepted reason.",
+        idempotencyKey: "rating-invalidate-004",
+        confirmation,
+      },
+      "platform-admin-001",
+    );
+
+    await expect(
+      service.invalidatePassengerRating(
+        rating.ratingId,
+        {
+          reason: "Changed reason.",
+          idempotencyKey: "rating-invalidate-004",
+          confirmation,
+        },
+        "platform-admin-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_INVALIDATION_IDEMPOTENCY_CONFLICT" },
+      },
+    });
+    await expect(
+      service.invalidatePassengerRating(
+        rating.ratingId,
+        {
+          reason: "A separate invalidation must not act as restore.",
+          idempotencyKey: "rating-invalidate-005",
+          confirmation,
+        },
+        "platform-admin-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_ALREADY_INVALIDATED" },
+      },
+    });
+  });
+
+  it("returns not found without fabricating a rating or aggregate", async () => {
+    const { service } = createService();
+
+    await expect(
+      service.invalidatePassengerRating(
+        "rating-missing",
+        {
+          reason: "Investigated invalid rating.",
+          idempotencyKey: "rating-invalidate-missing",
+          confirmation: {
+            action: "invalidate_rating",
+            ratingId: "rating-missing",
+          },
+        },
+        "platform-admin-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "PASSENGER_RATING_NOT_FOUND" },
+      },
+    });
+  });
+});
+
+describe("MultiTaxiService rating governance reads", () => {
+  it("serves list, masked detail, authority, and post-invalidation audit without fabricated values", async () => {
+    const { service, rating } = await createCompletedPassengerRating();
+
+    const list = await service.listPassengerRatingReviews({
+      status: "active",
+      score: "5",
+      tag: "safe",
+      driverId: "driver-001",
+      tripOrOrder: "MTX-001",
+      from: "2026-01-01",
+      to: "2026-12-31",
+    });
+    const readOnlyDetail = await service.getPassengerRatingReview(
+      rating.ratingId,
+      false,
+    );
+    const authority = await service.getDriverRatingAuthority("driver-001");
+
+    expect(list).toMatchObject({
+      items: [
+        {
+          ratingId: rating.ratingId,
+          driverId: "driver-001",
+          score: 5,
+          status: "active",
+        },
+      ],
+      pageInfo: {
+        page: 1,
+        pageSize: 50,
+        totalItems: 1,
+        totalPages: 1,
+      },
+      refresh: { stale: false, staleAfterMs: 300_000 },
+    });
+    expect(list.items[0]).not.toHaveProperty("passengerSubjectRef");
+    expect(list.items[0]).not.toHaveProperty("comment");
+    expect(readOnlyDetail).toMatchObject({
+      rating: {
+        ratingId: rating.ratingId,
+        status: "active",
+      },
+      orderNo: "MTX-001",
+      driverRatingSummary: {
+        displayState: "rated",
+        averageRating: 5,
+        ratingCount: 1,
+      },
+      availableActions: {
+        invalidate: {
+          enabled: false,
+          disabledReason: "missing_multi_taxi_ratings_moderate",
+        },
+      },
+    });
+    expect(readOnlyDetail.passengerSubjectMasked).toMatch(/[*…]|\.\.\./u);
+    expect(readOnlyDetail.rating).not.toHaveProperty("passengerSubjectRef");
+    expect(authority.summary).toMatchObject({
+      displayState: "rated",
+      averageRating: 5,
+      ratingCount: 1,
+    });
+
+    await service.invalidatePassengerRating(
+      rating.ratingId,
+      {
+        reason: "Confirmed invalid rating.",
+        idempotencyKey: "rating-read-after-invalidate",
+        confirmation: {
+          action: "invalidate_rating",
+          ratingId: rating.ratingId,
+        },
+      },
+      "platform-admin-001",
+      "req-rating-read-after-invalidate",
+    );
+    const invalidated = await service.getPassengerRatingReview(
+      rating.ratingId,
+      true,
+    );
+
+    expect(invalidated).toMatchObject({
+      rating: { status: "invalidated" },
+      driverRatingSummary: {
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+      },
+      moderationHistory: [
+        {
+          action: "invalidate",
+          actorId: "platform-admin-001",
+          reason: "Confirmed invalid rating.",
+        },
+      ],
+      availableActions: {
+        invalidate: {
+          enabled: false,
+          disabledReason: "rating_already_invalidated",
+        },
+      },
+    });
+  });
+
+  it("rejects invalid filters instead of broadening a malformed query", async () => {
+    const { service } = createService();
+
+    await expect(
+      service.listPassengerRatingReviews({
+        score: "6",
+        from: "2026-02-31",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_REVIEW_QUERY_INVALID" },
+      },
+    });
+    await expect(
+      service.listPassengerRatingReviews({
+        from: "2026-07-25",
+        to: "2026-07-24",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_REVIEW_QUERY_INVALID" },
+      },
+    });
+  });
+
+  it("fails closed when persisted detail or aggregate authority is absent or inconsistent", async () => {
+    const repository = {
+      isEnabled: () => true,
+      findPassengerRatingReview: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          rating: {
+            ratingId: "rating-001",
+            orderId: "order-001",
+            tripId: "trip-001",
+            driverId: "driver-001",
+            passengerSubjectRef: "passenger-sensitive-001",
+            score: 5,
+            tags: [],
+            comment: null,
+            status: "active",
+            submittedAt: "2026-07-24T00:00:00.000Z",
+            updatedAt: "2026-07-24T00:00:00.000Z",
+          },
+          orderNo: null,
+          driverDisplayName: null,
+          summary: null,
+          moderationHistory: [],
+        }),
+      findDriverRatingSummary: vi.fn().mockResolvedValue({
+        driverId: "driver-001",
+        displayState: "rated",
+        averageRating: null,
+        ratingCount: 1,
+        lastRatedAt: null,
+        aggregateVersion: 1,
+        calculatedAt: "2026-07-24T00:00:00.000Z",
+      }),
+    };
+    const { service } = createService({ repository });
+
+    await expect(
+      service.getPassengerRatingReview("rating-missing", true),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "PASSENGER_RATING_NOT_FOUND" },
+      },
+    });
+    const missingSummaryError = await service
+      .getPassengerRatingReview("rating-001", true)
+      .catch((error: unknown) => error as ApiRequestError);
+    expect(missingSummaryError.getStatus()).toBe(503);
+    expect(missingSummaryError).toMatchObject({
+      response: {
+        error: { code: "DRIVER_RATING_AUTHORITY_UNAVAILABLE" },
+      },
+    });
+    const inconsistentSummaryError = await service
+      .getDriverRatingAuthority("driver-001")
+      .catch((error: unknown) => error as ApiRequestError);
+    expect(inconsistentSummaryError.getStatus()).toBe(503);
+    expect(inconsistentSummaryError).toMatchObject({
+      response: {
+        error: { code: "DRIVER_RATING_AUTHORITY_INCONSISTENT" },
+      },
+    });
+  });
+
+  it("propagates repository read failures without falling back to local state", async () => {
+    const repository = {
+      isEnabled: () => true,
+      listPassengerRatingReviews: vi
+        .fn()
+        .mockRejectedValue(new Error("database unavailable")),
+    };
+    const { service } = createService({ repository });
+
+    await expect(service.listPassengerRatingReviews({})).rejects.toThrow(
+      "database unavailable",
+    );
   });
 });
 

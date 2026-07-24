@@ -269,6 +269,116 @@ export interface DriverRatingSummary {
   calculatedAt: string;
 }
 
+export interface InvalidatePassengerTripRatingCommand {
+  reason: string;
+  idempotencyKey: string;
+  confirmation: {
+    action: "invalidate_rating";
+    ratingId: string;
+  };
+}
+
+export interface PassengerRatingModerationAuditRecord {
+  auditId: string;
+  ratingId: string;
+  action: "invalidate";
+  reason: string;
+  actorId: string;
+  idempotencyKey: string;
+  previousStatus: PassengerTripRatingRecord["status"];
+  resultingStatus: "invalidated";
+  aggregateVersion: number;
+  requestId: string | null;
+  createdAt: string;
+}
+
+export interface PassengerRatingModerationView {
+  ratingId: string;
+  orderId: string;
+  tripId: string;
+  driverId: string;
+  score: PassengerTripRatingRecord["score"];
+  tags: string[];
+  comment: string | null;
+  status: PassengerTripRatingRecord["status"];
+  submittedAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerRatingReviewQuery {
+  status?: PassengerTripRatingRecord["status"];
+  score?: PassengerTripRatingRecord["score"] | string;
+  tag?: string;
+  driverId?: string;
+  tripOrOrder?: string;
+  from?: string;
+  to?: string;
+  page?: number | string;
+  pageSize?: number | string;
+}
+
+export interface RatingGovernanceRefreshState {
+  generatedAt: string;
+  staleAfterMs: number;
+  stale: boolean;
+}
+
+export interface PassengerRatingReviewListItem {
+  ratingId: string;
+  orderId: string;
+  tripId: string;
+  driverId: string;
+  driverDisplayName: string | null;
+  score: PassengerTripRatingRecord["score"];
+  tags: string[];
+  commentExcerpt: string | null;
+  status: PassengerTripRatingRecord["status"];
+  submittedAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerRatingReviewListData {
+  items: PassengerRatingReviewListItem[];
+  pageInfo: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  refresh: RatingGovernanceRefreshState;
+}
+
+export interface RatingGovernanceActionDescriptor {
+  enabled: boolean;
+  disabledReason: string | null;
+}
+
+export interface PassengerRatingReviewDetail {
+  rating: PassengerRatingModerationView;
+  orderNo: string | null;
+  driverDisplayName: string | null;
+  passengerSubjectMasked: string | null;
+  driverRatingSummary: DriverRatingSummary;
+  moderationHistory: PassengerRatingModerationAuditRecord[];
+  availableActions: {
+    invalidate: RatingGovernanceActionDescriptor;
+  };
+  refresh: RatingGovernanceRefreshState;
+}
+
+export interface DriverRatingAuthorityView {
+  summary: DriverRatingSummary;
+  refresh: RatingGovernanceRefreshState;
+  unavailableReason: string | null;
+}
+
+export interface InvalidatePassengerTripRatingResult {
+  rating: PassengerRatingModerationView;
+  driverRatingSummary: DriverRatingSummary;
+  audit: PassengerRatingModerationAuditRecord;
+  replayed: boolean;
+}
+
 // ===========================================================================
 // §5 Eligibility hard reasons
 // ===========================================================================
