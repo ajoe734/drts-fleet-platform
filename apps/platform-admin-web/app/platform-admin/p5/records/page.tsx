@@ -1,5 +1,5 @@
-import { P5AdminConsole } from "../p5-admin-console";
+import { RecordsOperationsConsole } from "./records-operations-console";
 
 export default function P5RecordsPage() {
-  return <P5AdminConsole view="records" />;
+  return <RecordsOperationsConsole />;
 }
