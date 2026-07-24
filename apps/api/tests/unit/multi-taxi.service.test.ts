@@ -989,7 +989,7 @@ describe("MultiTaxiService trip operational records", () => {
         {
           holdId: "hold-001",
           caseNumber: "CASE-2026-001",
-          reasonCode: "regulatory_request",
+          reasonCode: "regulatory_inquiry",
           reasonNote: "Preserve the completed trip proof.",
           placedByActorId: "platform-admin-001",
           placedAt: "2026-07-24T01:00:00.000Z",

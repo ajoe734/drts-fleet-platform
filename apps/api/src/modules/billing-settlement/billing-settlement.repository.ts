@@ -7,8 +7,10 @@ import type {
   DriverStatementRecord,
   MoneyAmount,
   OwnedOrderRecord,
+  PassengerPaymentStatus,
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
+  ResourceActionDescriptor,
   SandboxBillingTreatmentRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
@@ -24,6 +26,50 @@ type JsonRecordRow = {
 type LiveSettlementTripRow = {
   order_record: unknown;
   task_record: unknown;
+};
+
+type MultiTaxiPaymentExceptionRow = {
+  payment_id: string;
+  order_id: string;
+  trip_id: string | null;
+  provider_payment_ref: string | null;
+  status: PassengerPaymentStatus;
+  amount_minor: string | number | null;
+  currency: string;
+  attempt_count: number;
+  available_actions: unknown;
+  updated_at: Date | string;
+};
+
+type MultiTaxiPaymentAuditRow = {
+  audit_id: string;
+  actor_id: string | null;
+  actor_type: string;
+  action_name: string;
+  request_id: string | null;
+  created_at: Date | string;
+};
+
+export type MultiTaxiPaymentExceptionRecord = {
+  paymentId: string;
+  orderId: string;
+  tripId: string | null;
+  providerPaymentRef: string | null;
+  status: PassengerPaymentStatus;
+  amountMinor: number | null;
+  currency: string;
+  attemptCount: number;
+  availableActions: ResourceActionDescriptor[];
+  updatedAt: string;
+};
+
+export type MultiTaxiPaymentAuditRecord = {
+  auditId: string;
+  actorId: string | null;
+  actorType: string;
+  actionName: string;
+  requestId: string | null;
+  createdAt: string;
 };
 
 type FulfillmentSegmentRow = {
@@ -131,7 +177,10 @@ const DEFAULT_CURRENCY = "NTD";
 // and loses the exact product identity; resolving it here keeps the precise
 // serviceProductCode flowing booking -> dispatch -> task -> settlement.
 function resolvePreciseServiceProductCode(
-  order: Pick<OwnedOrderRecord, "businessDispatchSubtype" | "serviceProductCode">,
+  order: Pick<
+    OwnedOrderRecord,
+    "businessDispatchSubtype" | "serviceProductCode"
+  >,
 ): string | null {
   // Prefer the booking-origin precise code stamped on the order; otherwise keep
   // the prior settlement value (businessDispatchSubtype) byte-for-byte so legacy
@@ -147,6 +196,98 @@ export class BillingSettlementRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async findMultiTaxiPaymentException(
+    orderId: string,
+  ): Promise<MultiTaxiPaymentExceptionRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result =
+      await this.databaseService!.query<MultiTaxiPaymentExceptionRow>(
+        `
+          SELECT
+            payment.payment_id,
+            payment.order_id,
+            trip_record.trip_id,
+            payment.provider_payment_ref,
+            payment.status,
+            payment.amount_minor,
+            payment.currency,
+            payment.attempt_count,
+            payment.available_actions,
+            payment.updated_at
+          FROM billing.multi_taxi_passenger_payments payment
+          LEFT JOIN reporting.multi_taxi_trip_operational_records trip_record
+            ON trip_record.order_id = payment.order_id
+          WHERE payment.order_id = $1
+          LIMIT 1
+        `,
+        [orderId],
+      );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      paymentId: row.payment_id,
+      orderId: row.order_id,
+      tripId: row.trip_id,
+      providerPaymentRef: row.provider_payment_ref,
+      status: row.status,
+      amountMinor: row.amount_minor === null ? null : Number(row.amount_minor),
+      currency: row.currency,
+      attemptCount: Number(row.attempt_count),
+      availableActions: this.parsePaymentAvailableActions(
+        row.available_actions,
+      ),
+      updatedAt: this.toIsoString(row.updated_at),
+    };
+  }
+
+  async listMultiTaxiPaymentAuditTrail(
+    orderId: string,
+    paymentId: string,
+  ): Promise<MultiTaxiPaymentAuditRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = await this.databaseService!.query<MultiTaxiPaymentAuditRow>(
+      `
+        SELECT
+          audit_id,
+          actor_id,
+          actor_type,
+          action_name,
+          request_id,
+          created_at
+        FROM admin.audit_logs
+        WHERE resource_id IN ($1, $2)
+          AND (
+            module_name = 'billing-settlement'
+            OR resource_type IN (
+              'multi_taxi_payment',
+              'multi_taxi_payment_exception'
+            )
+          )
+        ORDER BY created_at ASC
+        LIMIT 100
+      `,
+      [orderId, paymentId],
+    );
+
+    return result.rows.map((row) => ({
+      auditId: row.audit_id,
+      actorId: row.actor_id,
+      actorType: row.actor_type,
+      actionName: row.action_name,
+      requestId: row.request_id,
+      createdAt: this.toIsoString(row.created_at),
+    }));
   }
 
   async loadState(): Promise<BillingSettlementState> {
@@ -929,7 +1070,10 @@ export class BillingSettlementRepository {
         row.internal_human_fallback_cost_minor,
         row.currency,
       ),
-      partnerCharge: this.toOptionalMoney(row.partner_charge_minor, row.currency),
+      partnerCharge: this.toOptionalMoney(
+        row.partner_charge_minor,
+        row.currency,
+      ),
       tenantCharge: this.toOptionalMoney(row.tenant_charge_minor, row.currency),
       platformAbsorbed: this.toOptionalMoney(
         row.platform_absorbed_minor,
@@ -952,5 +1096,61 @@ export class BillingSettlementRepository {
           currency,
           amountMinor: Number(amountMinor),
         };
+  }
+
+  private parsePaymentAvailableActions(
+    value: unknown,
+  ): ResourceActionDescriptor[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.flatMap((candidate) => {
+      if (
+        !candidate ||
+        typeof candidate !== "object" ||
+        typeof (candidate as { action?: unknown }).action !== "string" ||
+        typeof (candidate as { enabled?: unknown }).enabled !== "boolean"
+      ) {
+        return [];
+      }
+      const descriptor = candidate as {
+        action: string;
+        enabled: boolean;
+        disabledReasonCode?: unknown;
+        requiresReason?: unknown;
+        riskLevel?: unknown;
+      };
+      const action = descriptor.action.trim();
+      const normalizedAction = action.toLowerCase().replace(/[-\s]+/g, "_");
+      const riskLevel = descriptor.riskLevel;
+      if (
+        !action ||
+        normalizedAction === "mark_paid" ||
+        !["low", "medium", "high"].includes(String(riskLevel))
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          action,
+          enabled: descriptor.enabled,
+          riskLevel: riskLevel as ResourceActionDescriptor["riskLevel"],
+          ...(typeof descriptor.disabledReasonCode === "string"
+            ? { disabledReasonCode: descriptor.disabledReasonCode }
+            : {}),
+          ...(typeof descriptor.requiresReason === "boolean"
+            ? { requiresReason: descriptor.requiresReason }
+            : {}),
+        },
+      ];
+    });
+  }
+
+  private toIsoString(value: Date | string) {
+    return value instanceof Date
+      ? value.toISOString()
+      : new Date(value).toISOString();
   }
 }
