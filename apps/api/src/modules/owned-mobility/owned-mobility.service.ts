@@ -30,6 +30,8 @@ import type {
   DispatchAssignmentRecord,
   DispatchAttemptRecord,
   DispatchCandidate,
+  DispatchQueueEligibilityReasonCode,
+  DispatchQueueEntryReadRecord,
   DispatchQueueEntryReason,
   DispatchQueueFamily,
   DispatchJobRecord,
@@ -207,6 +209,20 @@ type QueueRuntimeContext = {
   operatingAuthorizationId: string | null;
 };
 
+type QueueRegistryProjection = {
+  authorityAvailable: boolean;
+  driversById: Map<string, { driverId: string; name: string }>;
+  pairsByVehicleId: Map<string, { vehicleId: string; driverId: string }>;
+  vehiclesById: Map<
+    string,
+    {
+      vehicleId: string;
+      plateNo: string;
+      operatingArea: string;
+    }
+  >;
+};
+
 type ServiceAreaGateResolution = {
   serviceProductType: ServiceProductType | null;
   pickup: GeoPoint | null;
@@ -298,12 +314,20 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private queueEntries: QueueEntryRecord[] = [];
 
-  private profileQueuePolicies: Map<RuntimeProfileCode, Set<DispatchQueueMode>> =
-    new Map([
-      ["multi_taxi_direct", new Set(["virtual_matching"])],
-      ["ordinary_taxi", new Set(["virtual_matching", "physical_rank", "taxi_stand"])],
-      ["business_dispatch", new Set(["virtual_matching", "physical_rank", "taxi_stand"])],
-    ]);
+  private profileQueuePolicies: Map<
+    RuntimeProfileCode,
+    Set<DispatchQueueMode>
+  > = new Map([
+    ["multi_taxi_direct", new Set(["virtual_matching"])],
+    [
+      "ordinary_taxi",
+      new Set(["virtual_matching", "physical_rank", "taxi_stand"]),
+    ],
+    [
+      "business_dispatch",
+      new Set(["virtual_matching", "physical_rank", "taxi_stand"]),
+    ],
+  ]);
 
   /** Maps forwarded mirror order IDs to their source platform codes. */
   private forwarderSourceMap = new Map<string, string>();
@@ -3410,7 +3434,8 @@ export class OwnedMobilityService implements OnModuleInit {
   ) {
     if (runtimeProfileCode === "multi_taxi_direct") {
       const isOnlyVirtual =
-        allowedQueueModes.length === 1 && allowedQueueModes[0] === "virtual_matching";
+        allowedQueueModes.length === 1 &&
+        allowedQueueModes[0] === "virtual_matching";
       if (!isOnlyVirtual) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -3436,6 +3461,33 @@ export class OwnedMobilityService implements OnModuleInit {
     return policy ? Array.from(policy) : [];
   }
 
+  listQueueEntries(): DispatchQueueEntryReadRecord[] {
+    const registryProjection = this.buildQueueRegistryProjection();
+    return this.queueEntries.map((entry) =>
+      this.buildQueueEntryReadRecord(entry, registryProjection),
+    );
+  }
+
+  getQueueEntry(queueEntryId: string): DispatchQueueEntryReadRecord {
+    const normalizedQueueEntryId = queueEntryId.trim();
+    const queueEntry = this.queueEntries.find(
+      (entry) => entry.queueEntryId === normalizedQueueEntryId,
+    );
+    if (!queueEntry) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "QUEUE_ENTRY_NOT_FOUND",
+        "Queue entry was not found.",
+        { queueEntryId: normalizedQueueEntryId },
+      );
+    }
+
+    return this.buildQueueEntryReadRecord(
+      queueEntry,
+      this.buildQueueRegistryProjection(),
+    );
+  }
+
   queueCheckIn(
     command: QueueCheckInCommand,
     requestId?: string,
@@ -3448,23 +3500,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
-    this.assertQueuePolicy(context);
-
-    if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
-        command.vehicleId,
-        "standard_taxi",
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VEHICLE_NOT_DISPATCHABLE",
-        "Vehicle is not eligible for queue check-in.",
-        {
-          vehicleId: command.vehicleId,
-        },
-      );
-    }
+    this.assertQueueEligibility(command.vehicleId, context);
 
     const existingEntry = this.queueEntries.find(
       (entry) =>
@@ -4718,6 +4754,225 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private assertQueueEligibility(
+    vehicleId: string,
+    context: QueueRuntimeContext,
+  ) {
+    this.assertQueuePolicy(context);
+    if (
+      context.runtimeProfileCode === "multi_taxi_direct" &&
+      !context.operatingAuthorizationId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MULTI_TAXI_AUTHORIZATION_REQUIRED",
+        "Multi-taxi queue eligibility requires a server-resolved operating authorization.",
+        { vehicleId },
+      );
+    }
+
+    if (
+      !this.regulatoryRegistryService.getVehicleDispatchability(
+        vehicleId,
+        "standard_taxi",
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VEHICLE_NOT_DISPATCHABLE",
+        "Vehicle is not eligible for queue check-in.",
+        { vehicleId },
+      );
+    }
+  }
+
+  private buildQueueRegistryProjection(): QueueRegistryProjection {
+    try {
+      const vehicles = this.regulatoryRegistryService.listVehicles();
+      const drivers = this.regulatoryRegistryService.listDrivers();
+      const supplyPairs = this.regulatoryRegistryService.listSupplyPairs();
+      return {
+        authorityAvailable: true,
+        vehiclesById: new Map(
+          vehicles.map((vehicle) => [
+            vehicle.vehicleId,
+            {
+              vehicleId: vehicle.vehicleId,
+              plateNo: vehicle.plateNo,
+              operatingArea: vehicle.operatingArea,
+            },
+          ]),
+        ),
+        driversById: new Map(
+          drivers.map((driver) => [
+            driver.driverId,
+            {
+              driverId: driver.driverId,
+              name: driver.name,
+            },
+          ]),
+        ),
+        pairsByVehicleId: new Map(
+          supplyPairs.map((pair) => [
+            pair.vehicleId,
+            {
+              vehicleId: pair.vehicleId,
+              driverId: pair.driverId,
+            },
+          ]),
+        ),
+      };
+    } catch {
+      return {
+        authorityAvailable: false,
+        vehiclesById: new Map(),
+        driversById: new Map(),
+        pairsByVehicleId: new Map(),
+      };
+    }
+  }
+
+  private buildQueueEntryReadRecord(
+    entry: QueueEntryRecord,
+    registryProjection: QueueRegistryProjection,
+  ): DispatchQueueEntryReadRecord {
+    const runtimeProfileCode = entry.runtimeProfileCode ?? null;
+    const queueMode = entry.queueMode ?? null;
+    const vehicle =
+      registryProjection.vehiclesById.get(entry.vehicleId) ?? null;
+    const supplyPair =
+      registryProjection.pairsByVehicleId.get(entry.vehicleId) ?? null;
+    const driver = supplyPair
+      ? (registryProjection.driversById.get(supplyPair.driverId) ?? null)
+      : null;
+
+    return {
+      ...entry,
+      runtimeProfileCode,
+      queueMode,
+      driverId: driver?.driverId ?? null,
+      driverName: driver?.name ?? null,
+      vehiclePlateNo: vehicle?.plateNo ?? null,
+      serviceAreaCode: vehicle?.operatingArea ?? null,
+      lastUpdatedAt: entry.checkedOutAt ?? entry.checkedInAt,
+      eligibility: this.evaluateQueueEntryEligibility(
+        entry,
+        registryProjection.authorityAvailable,
+        Boolean(vehicle),
+      ),
+      availableActions: [
+        {
+          action: "back_to_queue_overview",
+          enabled: true,
+          riskLevel: "low",
+        },
+        ...(vehicle
+          ? [
+              {
+                action: "open_vehicle",
+                enabled: true,
+                riskLevel: "low" as const,
+              },
+            ]
+          : []),
+        ...(driver
+          ? [
+              {
+                action: "open_driver",
+                enabled: true,
+                riskLevel: "low" as const,
+              },
+            ]
+          : []),
+        ...(entry.operatingAuthorizationId
+          ? [
+              {
+                action: "open_authorization",
+                enabled: true,
+                riskLevel: "low" as const,
+              },
+            ]
+          : []),
+      ],
+    };
+  }
+
+  private evaluateQueueEntryEligibility(
+    entry: QueueEntryRecord,
+    authorityAvailable: boolean,
+    vehicleExists: boolean,
+  ): DispatchQueueEntryReadRecord["eligibility"] {
+    const evaluatedAt = new Date().toISOString();
+    if (!entry.runtimeProfileCode || !entry.queueMode) {
+      return {
+        decision: "denied",
+        reasonCode: "QUEUE_CONTEXT_INCOMPLETE",
+        evaluatedAt,
+      };
+    }
+    if (!authorityAvailable) {
+      return {
+        decision: "denied",
+        reasonCode: "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+        evaluatedAt,
+      };
+    }
+    if (!vehicleExists) {
+      return {
+        decision: "denied",
+        reasonCode: "VEHICLE_NOT_FOUND",
+        evaluatedAt,
+      };
+    }
+
+    try {
+      this.assertQueueEligibility(entry.vehicleId, {
+        runtimeProfileCode: entry.runtimeProfileCode,
+        queueMode: entry.queueMode,
+        operatingAuthorizationId: entry.operatingAuthorizationId ?? null,
+      });
+      return {
+        decision: "eligible",
+        reasonCode: null,
+        evaluatedAt,
+      };
+    } catch (error) {
+      return {
+        decision: "denied",
+        reasonCode: this.resolveQueueEligibilityReasonCode(error),
+        evaluatedAt,
+      };
+    }
+  }
+
+  private resolveQueueEligibilityReasonCode(
+    error: unknown,
+  ): DispatchQueueEligibilityReasonCode {
+    if (error instanceof ApiRequestError) {
+      const response = error.getResponse();
+      if (
+        response &&
+        typeof response === "object" &&
+        "error" in response &&
+        response.error &&
+        typeof response.error === "object" &&
+        "code" in response.error &&
+        typeof response.error.code === "string"
+      ) {
+        const reasonCode = response.error.code;
+        if (
+          reasonCode === "MULTI_TAXI_AUTHORIZATION_REQUIRED" ||
+          reasonCode === "MULTI_TAXI_QUEUE_MODE_FORBIDDEN" ||
+          reasonCode === "QUEUE_MODE_NOT_ALLOWED" ||
+          reasonCode === "VEHICLE_NOT_DISPATCHABLE"
+        ) {
+          return reasonCode;
+        }
+      }
+    }
+    return "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE";
   }
 
   private requireActiveBookingServiceProduct(

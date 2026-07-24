@@ -3,6 +3,8 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   DispatchDailyRecord,
   FilingPackageRecord,
+  MultiTaxiTripOperationalExportRow,
+  MultiTaxiTripOperationalRecordQuery,
   OwnedOrderRecord,
   PartnerRevenueSummaryRowRecord,
   ReportArtifactRecord,
@@ -48,8 +50,17 @@ type TenantMonthlyTripReportRow = {
 type ReportJobRow =
   | DispatchRecordingIndexRow
   | DispatchDailyRecord
+  | MultiTaxiTripOperationalExportRow
   | SixMonthOperationsSummary
   | TenantMonthlyTripReportRow;
+
+export type MultiTaxiTripExportJobMetadata = {
+  scope: MultiTaxiTripOperationalRecordQuery;
+  purpose: string;
+  idempotencyKey: string;
+  requestedByActorId: string;
+  recordCount: number;
+};
 
 type ReportArtifactView = ReportArtifactRecord & {
   downloadMetadata: ControlledDownloadMetadata;
@@ -81,6 +92,7 @@ export type StoredReportJobRecord = ReportJobRecord & {
   rows: ReportJobRow[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
+  multiTaxiTripExport?: MultiTaxiTripExportJobMetadata;
 };
 
 export type StoredFilingPackageRecord = FilingPackageRecord & {

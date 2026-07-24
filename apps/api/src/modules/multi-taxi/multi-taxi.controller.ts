@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
+  Optional,
   Param,
   Post,
   Query,
@@ -17,6 +19,9 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  CreateMultiTaxiTripOperationalExportJobCommand,
+  InvalidatePassengerTripRatingCommand,
+  PassengerRatingReviewQuery,
   MultiTaxiTripOperationalRecordQuery,
   QueueCheckInCommand,
   QueueCheckOutCommand,
@@ -24,7 +29,11 @@ import type {
   UpdateMultiTaxiOperatingAuthorizationCommand,
 } from "@drts/contracts";
 
-import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import {
   CurrentIdentity,
   OpenRoute,
@@ -32,11 +41,16 @@ import {
   RequireScopes,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import { MultiTaxiService } from "./multi-taxi.service";
 
 @Controller()
 export class MultiTaxiController {
-  constructor(private readonly multiTaxiService: MultiTaxiService) {}
+  constructor(
+    private readonly multiTaxiService: MultiTaxiService,
+    @Optional()
+    private readonly reportingFilingService?: ReportingFilingService,
+  ) {}
 
   @Post("multi-taxi/rides")
   @OpenRoute()
@@ -268,6 +282,69 @@ export class MultiTaxiController {
     );
   }
 
+  @Post("platform-admin/multi-taxi-ratings/:ratingId/invalidate")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:moderate")
+  async invalidatePassengerRating(
+    @Param("ratingId") ratingId: string,
+    @Body() command: InvalidatePassengerTripRatingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.invalidatePassengerRating(
+        ratingId,
+        command,
+        this.requireActorId(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-ratings")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:read")
+  async listPassengerRatingReviews(
+    @Query() query: PassengerRatingReviewQuery,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.listPassengerRatingReviews(query),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-ratings/:ratingId")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:read")
+  async getPassengerRatingReview(
+    @Param("ratingId") ratingId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getPassengerRatingReview(
+        ratingId,
+        identity?.scopes.includes("multi_taxi_ratings:moderate") ?? false,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-rating-authorities/:driverId")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:read")
+  async getDriverRatingAuthority(
+    @Param("driverId") driverId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getDriverRatingAuthority(driverId),
+      requestId,
+    );
+  }
+
   @Get("platform-admin/multi-taxi-trip-records")
   @RequireRealms("platform")
   @RequireScopes("multi_taxi_records:read")
@@ -298,5 +375,104 @@ export class MultiTaxiController {
       await this.multiTaxiService.exportTripOperationalRecords(query),
       requestId,
     );
+  }
+
+  private requireActorId(identity: BootstrapRequestIdentity | null) {
+    const actorId = identity?.actorId?.trim();
+    if (!actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "RATING_MODERATION_ACTOR_REQUIRED",
+        "An authenticated actor is required to moderate passenger ratings.",
+      );
+    }
+    return actorId;
+  }
+
+  @Post("platform-admin/multi-taxi-trip-records/export-jobs/preview")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  async previewTripOperationalExport(
+    @Body() query: MultiTaxiTripOperationalRecordQuery,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scope = query ?? {};
+    const payload =
+      await this.multiTaxiService.exportTripOperationalRecords(scope);
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().previewMultiTaxiTripExport(
+        scope,
+        payload.rows.length,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/multi-taxi-trip-records/export-jobs")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  async createTripOperationalExportJob(
+    @Body() command: CreateMultiTaxiTripOperationalExportJobCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const payload = await this.multiTaxiService.exportTripOperationalRecords(
+      command.scope ?? {},
+    );
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().createMultiTaxiTripExportJob(
+        command,
+        payload.rows,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-trip-records/export-jobs/:jobId")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  getTripOperationalExportJob(
+    @Param("jobId") jobId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().getMultiTaxiTripExportJob(
+        jobId,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-trip-records/export-jobs/:jobId/download")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  downloadTripOperationalExport(
+    @Param("jobId") jobId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().issueMultiTaxiTripExportDownload(
+        jobId,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  private requireReportingFilingService() {
+    if (!this.reportingFilingService) {
+      throw new Error("ReportingFilingService is required for export jobs.");
+    }
+    return this.reportingFilingService;
   }
 }

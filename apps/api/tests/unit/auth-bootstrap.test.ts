@@ -8,6 +8,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { AuthController } from "../../src/modules/auth/auth.controller";
 import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
@@ -489,10 +490,11 @@ describe("bootstrap auth guard", () => {
         "x-actor-type": "platform_admin",
         "x-actor-id": "platform-admin-001",
         "x-realm": "platform",
-        "x-scopes": "audit:read",
+        "x-scopes": "foundation:write",
       },
       method: "POST",
-      originalUrl: "/api/unmatched-route",
+      originalUrl:
+        "/api/platform-admin/multi-taxi-ratings/rating-001/invalidate",
     };
     class ScopedHandler {
       handler() {}
@@ -558,6 +560,135 @@ describe("bootstrap auth guard", () => {
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity?.actorType).toBe("tenant_admin");
     expect(request.identity?.scopes).toContain("tenant:webhooks:write");
+  });
+
+  it("returns 403 when rating moderation capability is missing", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "platform-admin-001",
+        "x-realm": "platform",
+        "x-scopes": "audit:read",
+      },
+      method: "POST",
+      originalUrl: "/api/unmatched-route",
+    };
+    const context = createExecutionContext(
+      request,
+      MultiTaxiController.prototype.invalidatePassengerRating as never,
+      MultiTaxiController as never,
+    );
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    try {
+      guard.canActivate(context);
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_SCOPE_DENIED",
+          details: expect.objectContaining({
+            requiredScopes: expect.arrayContaining([
+              "multi_taxi_ratings:moderate",
+            ]),
+          }),
+        },
+      });
+    }
+  });
+
+  it("allows platform rating moderation with the required capability", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "platform-admin-001",
+        "x-realm": "platform",
+        "x-scopes": "foundation:write multi_taxi_ratings:moderate",
+      },
+      method: "POST",
+      originalUrl:
+        "/api/platform-admin/multi-taxi-ratings/rating-001/invalidate",
+    };
+    const context = createExecutionContext(
+      request,
+      MultiTaxiController.prototype.invalidatePassengerRating as never,
+      MultiTaxiController as never,
+    );
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      actorId: "platform-admin-001",
+      realm: "platform",
+      scopes: ["foundation:write", "multi_taxi_ratings:moderate"],
+    });
+  });
+
+  it("returns 403 when rating read capability is missing", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "platform-admin-001",
+        "x-realm": "platform",
+        "x-scopes": "foundation:read",
+      },
+      method: "GET",
+      originalUrl: "/api/platform-admin/multi-taxi-ratings",
+    };
+    const context = createExecutionContext(
+      request,
+      MultiTaxiController.prototype.listPassengerRatingReviews as never,
+      MultiTaxiController as never,
+    );
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    try {
+      guard.canActivate(context);
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_SCOPE_DENIED",
+          details: expect.objectContaining({
+            requiredScopes: expect.arrayContaining([
+              "foundation:read",
+              "multi_taxi_ratings:read",
+            ]),
+          }),
+        },
+      });
+    }
+  });
+
+  it("allows platform rating reads with the required capability", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "platform-admin-001",
+        "x-realm": "platform",
+        "x-scopes": "foundation:read multi_taxi_ratings:read",
+      },
+      method: "GET",
+      originalUrl:
+        "/api/platform-admin/multi-taxi-rating-authorities/driver-001",
+    };
+    const context = createExecutionContext(
+      request,
+      MultiTaxiController.prototype.getDriverRatingAuthority as never,
+      MultiTaxiController as never,
+    );
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      actorId: "platform-admin-001",
+      realm: "platform",
+      scopes: ["foundation:read", "multi_taxi_ratings:read"],
+    });
   });
 
   it("denies ops identities from requesting sandbox legal-hold release", () => {
@@ -698,6 +829,58 @@ describe("bootstrap auth guard", () => {
       actorId: "platform-admin-001",
       realm: "platform",
     });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+  });
+
+  it("applies queue read realm and scope policy to verified bearer tokens", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    const jwtAuthService = new JwtAuthService();
+    const createToken = (realm: "ops" | "tenant", scopes: string[]) =>
+      jwtAuthService.sign(
+        {
+          authMode: "bootstrap_headers",
+          actorType: realm === "ops" ? "ops_user" : "tenant_admin",
+          actorId: `${realm}-queue-reader-001`,
+          realm,
+          tenantId: realm === "tenant" ? "tenant-demo-001" : null,
+          roleFamilies: [realm],
+          roles: [realm === "ops" ? "ops_dispatcher" : "tenant_admin"],
+          scopes,
+          requestId: `req-${realm}-queue-read`,
+        },
+        { expiresIn: "10m" },
+      );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
+    const createQueueRequest = (token: string): AuthenticatedRequestLike => ({
+      headers: { authorization: `Bearer ${token}` },
+      method: "GET",
+      originalUrl: "/api/dispatch/queue",
+    });
+
+    expect(() =>
+      guard.canActivate(
+        createExecutionContext(
+          createQueueRequest(createToken("tenant", ["dispatch:read"])),
+        ),
+      ),
+    ).toThrowError(ApiRequestError);
+    expect(() =>
+      guard.canActivate(
+        createExecutionContext(createQueueRequest(createToken("ops", []))),
+      ),
+    ).toThrowError(ApiRequestError);
+    expect(
+      guard.canActivate(
+        createExecutionContext(
+          createQueueRequest(createToken("ops", ["dispatch:read"])),
+        ),
+      ),
+    ).toBe(true);
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
