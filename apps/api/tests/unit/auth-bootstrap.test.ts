@@ -704,6 +704,58 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_AUDIENCE;
   });
 
+  it("applies queue read realm and scope policy to verified bearer tokens", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    const jwtAuthService = new JwtAuthService();
+    const createToken = (realm: "ops" | "tenant", scopes: string[]) =>
+      jwtAuthService.sign(
+        {
+          authMode: "bootstrap_headers",
+          actorType: realm === "ops" ? "ops_user" : "tenant_admin",
+          actorId: `${realm}-queue-reader-001`,
+          realm,
+          tenantId: realm === "tenant" ? "tenant-demo-001" : null,
+          roleFamilies: [realm],
+          roles: [realm === "ops" ? "ops_dispatcher" : "tenant_admin"],
+          scopes,
+          requestId: `req-${realm}-queue-read`,
+        },
+        { expiresIn: "10m" },
+      );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
+    const createQueueRequest = (token: string): AuthenticatedRequestLike => ({
+      headers: { authorization: `Bearer ${token}` },
+      method: "GET",
+      originalUrl: "/api/dispatch/queue",
+    });
+
+    expect(() =>
+      guard.canActivate(
+        createExecutionContext(
+          createQueueRequest(createToken("tenant", ["dispatch:read"])),
+        ),
+      ),
+    ).toThrowError(ApiRequestError);
+    expect(() =>
+      guard.canActivate(
+        createExecutionContext(createQueueRequest(createToken("ops", []))),
+      ),
+    ).toThrowError(ApiRequestError);
+    expect(
+      guard.canActivate(
+        createExecutionContext(
+          createQueueRequest(createToken("ops", ["dispatch:read"])),
+        ),
+      ),
+    ).toBe(true);
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+  });
+
   it("accepts bearer tokens even when issuer and audience are not configured", () => {
     process.env.JWT_SECRET = "test-secret";
     delete process.env.JWT_ISSUER;
