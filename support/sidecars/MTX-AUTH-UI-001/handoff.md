@@ -2,11 +2,11 @@
 
 ## Status
 
-`implementation_complete_runtime_screenshots_pending`
+`verified_current_head`
 
-Fleet B resumed `origin/gemini/mtx-auth-ui-001`, preserved its three existing
-implementation commits, and merged authoritative head
-`8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`.
+Fleet B resumed the existing implementation and reconciled it onto the merged
+requirements baseline. The clean integration branch adds authenticated runtime
+evidence and fixes the create-draft selection race exposed by that browser flow.
 
 ## Delivered Surfaces
 
@@ -46,7 +46,8 @@ closed into the permission/capability-change state.
 | Platform Admin ESLint              | passed                         |
 | Prettier check                     | passed                         |
 | `git diff --check`                 | passed                         |
+| Authenticated Playwright flow      | `1 passed`                     |
 
-Runtime screenshots for registry, detail, draft error, vehicles, confirmation,
-and conflict/permission state are still pending an authenticated review runtime.
-No deployment or publication was performed.
+Authenticated runtime screenshots are archived under `screenshots/` for the
+registry, detail, draft validation, vehicles, lifecycle confirmation, and 403
+permission state. No deployment or publication was performed.

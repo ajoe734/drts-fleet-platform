@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import type {
@@ -165,6 +171,7 @@ export default function MultiTaxiAuthorizationsPage() {
 
   const [rows, setRows] = useState<AuthorizationRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -243,12 +250,14 @@ export default function MultiTaxiAuthorizationsPage() {
       const nextRows = (payload.items ?? []) as AuthorizationRow[];
       setRows(nextRows);
 
+      const currentSelectedId = selectedIdRef.current;
       const targetId = nextRows.some(
-        (row) => row.authorizationId === selectedId,
+        (row) => row.authorizationId === currentSelectedId,
       )
-        ? selectedId
+        ? currentSelectedId
         : (nextRows[0]?.authorizationId ?? null);
 
+      selectedIdRef.current = targetId;
       setSelectedId(targetId);
       if (targetId) {
         await loadVehicles(targetId);
@@ -260,7 +269,7 @@ export default function MultiTaxiAuthorizationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [client, selectedId, loadVehicles]);
+  }, [client, loadVehicles]);
 
   useEffect(() => {
     void load();
@@ -284,6 +293,7 @@ export default function MultiTaxiAuthorizationsPage() {
 
   const handleSelectRow = (authId: string) => {
     if (!confirmDiscardDraft()) return;
+    selectedIdRef.current = authId;
     setSelectedId(authId);
     setError(null);
     setDraftMode("create");
@@ -294,6 +304,7 @@ export default function MultiTaxiAuthorizationsPage() {
 
   const handleNewDraft = () => {
     if (!confirmDiscardDraft()) return;
+    selectedIdRef.current = null;
     setSelectedId(null);
     setVehicles([]);
     setError(null);
