@@ -1339,12 +1339,40 @@ const en = {
   "multiTaxiAuth.error.permissionDeniedTitle": "Permission Denied",
   "multiTaxiAuth.error.permissionDeniedBody":
     "You do not have the required platform administration scopes to modify authorizations.",
+  "multiTaxiAuth.error.sessionTitle": "Session expired",
+  "multiTaxiAuth.error.sessionBody":
+    "Sign in again before continuing. Unsaved form input remains on this page.",
+  "multiTaxiAuth.error.staleTitle": "Server state changed",
+  "multiTaxiAuth.error.staleBody":
+    "This authorization changed after the page loaded. Reload server state and review it before retrying.",
+  "multiTaxiAuth.error.unavailableTitle": "Authorization unavailable",
+  "multiTaxiAuth.error.unavailableBody":
+    "The server could not provide the requested authorization. No default authorization was substituted.",
   "multiTaxiAuth.error.conflictTitle": "Conflict / Lifecycle Violation",
   "multiTaxiAuth.error.validationTitle": "Validation Error",
+  "multiTaxiAuth.loading.title": "Loading authorizations",
+  "multiTaxiAuth.loading.body":
+    "Reading the current registry and vehicle membership from the server.",
   "multiTaxiAuth.registry.title": "Authorization registry",
   "multiTaxiAuth.registry.count": "{count} records",
+  "multiTaxiAuth.registry.search": "Search",
+  "multiTaxiAuth.registry.searchPlaceholder":
+    "Authority, operator, plan, fare, or service area",
+  "multiTaxiAuth.registry.sort": "Sort",
+  "multiTaxiAuth.registry.sortCanonical":
+    "Approved, effective boundary, updated",
+  "multiTaxiAuth.registry.sortUpdated": "Recently updated",
+  "multiTaxiAuth.registry.sortEffective": "Effective date",
+  "multiTaxiAuth.registry.expiryWarning": "Expires within 30 days",
+  "multiTaxiAuth.registry.emptyTitle": "No matching authorizations",
+  "multiTaxiAuth.registry.emptyBody":
+    "Change the search or status filter. The server registry was not replaced with sample data.",
   "multiTaxiAuth.detail.title": "Authorization Detail",
-  "multiTaxiAuth.detail.readOnly": "This record is read-only (expired or revoked).",
+  "multiTaxiAuth.detail.readOnly":
+    "This record is read-only (expired or revoked).",
+  "multiTaxiAuth.detail.lifecycleAuthority": "Server-owned lifecycle",
+  "multiTaxiAuth.detail.lifecycleAuthorityBody":
+    "Actions are derived from the latest server status. Lifecycle confirmation refreshes this record before submission.",
   "multiTaxiAuth.create.title": "Create draft authorization",
   "multiTaxiAuth.create.subtitle":
     "Activation remains a separate controlled action.",
@@ -1354,6 +1382,7 @@ const en = {
   "multiTaxiAuth.column.status": "Status",
   "multiTaxiAuth.column.serviceAreas": "Service areas",
   "multiTaxiAuth.column.fareVersion": "Fare version",
+  "multiTaxiAuth.column.effectiveWindow": "Effective window",
   "multiTaxiAuth.field.operatorId": "Operator ID",
   "multiTaxiAuth.field.authorityCode": "Authority code",
   "multiTaxiAuth.field.businessPlanVersion": "Business plan version",
@@ -1380,6 +1409,19 @@ const en = {
   "multiTaxiAuth.action.activate": "Activate",
   "multiTaxiAuth.action.suspend": "Suspend",
   "multiTaxiAuth.action.addVehicle": "Add authorized vehicle",
+  "multiTaxiAuth.action.reloadServerState": "Reload server state",
+  "multiTaxiAuth.action.revokePending": "Revoke · command pending",
+  "multiTaxiAuth.action.restorePending": "Restore · command pending",
+  "multiTaxiAuth.action.deletePending": "Delete · command pending",
+  "multiTaxiAuth.action.vehicleSuspendPending":
+    "Suspend vehicle · command pending",
+  "multiTaxiAuth.action.vehicleRemovePending":
+    "Remove vehicle · command pending",
+  "multiTaxiAuth.commandPending.title": "Command pending",
+  "multiTaxiAuth.commandPending.body":
+    "Revoke, restore, and delete remain disabled until canonical commands, permissions, audit evidence, and tests land.",
+  "multiTaxiAuth.commandPending.vehicleBody":
+    "Vehicle suspend and remove remain disabled until canonical commands, permissions, audit evidence, and tests land.",
   "multiTaxiAuth.confirm.title": "Lifecycle Action Confirmation",
   "multiTaxiAuth.confirm.activateBody":
     "Are you sure you want to activate operating authorization {code}? Activated authorizations enable multi-taxi fulfillment.",
@@ -1387,10 +1429,29 @@ const en = {
     "Are you sure you want to suspend operating authorization {code}? Suspended authorizations block multi-taxi fulfillment.",
   "multiTaxiAuth.confirm.confirm": "Confirm Action",
   "multiTaxiAuth.confirm.cancel": "Cancel",
+  "multiTaxiAuth.confirm.reason": "Operation reason (sent with request)",
+  "multiTaxiAuth.confirm.serverVehicleCount": "Authorized vehicles (server)",
+  "multiTaxiAuth.confirm.serverPreviewTitle": "Current server preview",
+  "multiTaxiAuth.confirm.serverPreviewBody":
+    "All values above were refreshed from the canonical authorization and vehicle APIs. No affected-trip estimate is inferred.",
+  "multiTaxiAuth.draft.discardConfirmation":
+    "Discard unsaved authorization changes?",
+  "multiTaxiAuth.validation.required": "This field is required.",
+  "multiTaxiAuth.validation.invalid_date": "Enter a valid date and time.",
+  "multiTaxiAuth.validation.invalid_window":
+    "The end time must be later than the start time.",
+  "multiTaxiAuth.validation.summary":
+    "Review and correct {count} highlighted field(s).",
   "multiTaxiAuth.vehicles.title": "Authorized Vehicles",
   "multiTaxiAuth.vehicles.subtitle":
     "Vehicles bound to this operating plan and validity window.",
   "multiTaxiAuth.vehicles.empty": "No authorized vehicles attached.",
+  "multiTaxiAuth.vehicles.search": "Search vehicle or membership ID",
+  "multiTaxiAuth.vehicles.scope": "Membership scope",
+  "multiTaxiAuth.vehicles.membership": "Membership",
+  "multiTaxiAuth.vehicles.all": "Current and history",
+  "multiTaxiAuth.vehicles.current": "Current",
+  "multiTaxiAuth.vehicles.history": "History",
   "multiTaxiAuth.vehicles.status.active": "Active",
   "multiTaxiAuth.vehicles.status.suspended": "Suspended",
   "multiTaxiAuth.vehicles.status.removed": "Removed",
@@ -4249,12 +4310,37 @@ const zh: typeof en = {
   "multiTaxiAuth.error.permissionDeniedTitle": "權限不足",
   "multiTaxiAuth.error.permissionDeniedBody":
     "您缺乏修改營運許可所需的平台管理權限。",
+  "multiTaxiAuth.error.sessionTitle": "登入已逾時",
+  "multiTaxiAuth.error.sessionBody":
+    "請重新登入後再繼續；本頁尚未儲存的表單內容會保留。",
+  "multiTaxiAuth.error.staleTitle": "伺服器資料已變更",
+  "multiTaxiAuth.error.staleBody":
+    "此許可在頁面載入後已被更新，請重新讀取伺服器狀態並確認後再送出。",
+  "multiTaxiAuth.error.unavailableTitle": "許可資料目前不可用",
+  "multiTaxiAuth.error.unavailableBody":
+    "伺服器無法提供指定許可；系統不會代入預設許可。",
   "multiTaxiAuth.error.conflictTitle": "狀態衝突錯誤",
   "multiTaxiAuth.error.validationTitle": "欄位驗證錯誤",
+  "multiTaxiAuth.loading.title": "載入營運許可中",
+  "multiTaxiAuth.loading.body": "正在向伺服器讀取最新清冊與車輛名單。",
   "multiTaxiAuth.registry.title": "營運許可清冊",
   "multiTaxiAuth.registry.count": "共 {count} 筆",
+  "multiTaxiAuth.registry.search": "搜尋",
+  "multiTaxiAuth.registry.searchPlaceholder":
+    "許可、業者、計畫、費率或營運區域",
+  "multiTaxiAuth.registry.sort": "排序",
+  "multiTaxiAuth.registry.sortCanonical": "已核准、效期邊界、最近更新",
+  "multiTaxiAuth.registry.sortUpdated": "最近更新",
+  "multiTaxiAuth.registry.sortEffective": "生效日期",
+  "multiTaxiAuth.registry.expiryWarning": "30 天內到期",
+  "multiTaxiAuth.registry.emptyTitle": "找不到符合條件的許可",
+  "multiTaxiAuth.registry.emptyBody":
+    "請調整搜尋或狀態條件；系統不會用範例資料取代伺服器清冊。",
   "multiTaxiAuth.detail.title": "許可詳細資料",
   "multiTaxiAuth.detail.readOnly": "此紀錄為唯讀狀態（已失效或已撤銷）。",
+  "multiTaxiAuth.detail.lifecycleAuthority": "伺服器生命週期權威",
+  "multiTaxiAuth.detail.lifecycleAuthorityBody":
+    "可用動作依伺服器最新狀態判定；送出生命週期變更前會重新讀取本筆許可。",
   "multiTaxiAuth.create.title": "建立許可草稿",
   "multiTaxiAuth.create.subtitle": "啟用許可仍須另行執行受控操作。",
   "multiTaxiAuth.edit.title": "編輯許可草稿",
@@ -4263,6 +4349,7 @@ const zh: typeof en = {
   "multiTaxiAuth.column.status": "狀態",
   "multiTaxiAuth.column.serviceAreas": "營運區域",
   "multiTaxiAuth.column.fareVersion": "費率版本",
+  "multiTaxiAuth.column.effectiveWindow": "有效期間",
   "multiTaxiAuth.field.operatorId": "業者 ID",
   "multiTaxiAuth.field.authorityCode": "許可代碼",
   "multiTaxiAuth.field.businessPlanVersion": "營業計畫版本",
@@ -4289,6 +4376,17 @@ const zh: typeof en = {
   "multiTaxiAuth.action.activate": "啟用",
   "multiTaxiAuth.action.suspend": "暫停",
   "multiTaxiAuth.action.addVehicle": "加入授權車輛",
+  "multiTaxiAuth.action.reloadServerState": "重新讀取伺服器狀態",
+  "multiTaxiAuth.action.revokePending": "撤銷 · 命令待完成",
+  "multiTaxiAuth.action.restorePending": "還原 · 命令待完成",
+  "multiTaxiAuth.action.deletePending": "刪除 · 命令待完成",
+  "multiTaxiAuth.action.vehicleSuspendPending": "暫停車輛 · 命令待完成",
+  "multiTaxiAuth.action.vehicleRemovePending": "移除車輛 · 命令待完成",
+  "multiTaxiAuth.commandPending.title": "命令尚未完成",
+  "multiTaxiAuth.commandPending.body":
+    "撤銷、還原與刪除須等 canonical command、權限、稽核證據及測試完成後才能啟用。",
+  "multiTaxiAuth.commandPending.vehicleBody":
+    "車輛暫停與移除須等 canonical command、權限、稽核證據及測試完成後才能啟用。",
   "multiTaxiAuth.confirm.title": "生命週期變更確認",
   "multiTaxiAuth.confirm.activateBody":
     "確定要啟用營運許可 {code} 嗎？啟用後將開放多元計程車派遣服務。",
@@ -4296,9 +4394,25 @@ const zh: typeof en = {
     "確定要暫停營運許可 {code} 嗎？暫停後將阻擋對應營運服務。",
   "multiTaxiAuth.confirm.confirm": "確認執行",
   "multiTaxiAuth.confirm.cancel": "取消",
+  "multiTaxiAuth.confirm.reason": "操作原因（隨請求送出）",
+  "multiTaxiAuth.confirm.serverVehicleCount": "授權車輛數（伺服器）",
+  "multiTaxiAuth.confirm.serverPreviewTitle": "目前伺服器預覽",
+  "multiTaxiAuth.confirm.serverPreviewBody":
+    "以上內容均由 canonical 許可與車輛 API 重新讀取；不自行推估受影響行程。",
+  "multiTaxiAuth.draft.discardConfirmation": "要捨棄尚未儲存的許可變更嗎？",
+  "multiTaxiAuth.validation.required": "此欄位必填。",
+  "multiTaxiAuth.validation.invalid_date": "請輸入有效的日期與時間。",
+  "multiTaxiAuth.validation.invalid_window": "失效時間必須晚於生效時間。",
+  "multiTaxiAuth.validation.summary": "請檢查並修正 {count} 個標示欄位。",
   "multiTaxiAuth.vehicles.title": "授權車輛名單",
   "multiTaxiAuth.vehicles.subtitle": "綁定至此營業計畫與有效期間的車輛。",
   "multiTaxiAuth.vehicles.empty": "尚無授權車輛。",
+  "multiTaxiAuth.vehicles.search": "搜尋車輛或名單紀錄 ID",
+  "multiTaxiAuth.vehicles.scope": "名單範圍",
+  "multiTaxiAuth.vehicles.membership": "名單類型",
+  "multiTaxiAuth.vehicles.all": "目前與歷史",
+  "multiTaxiAuth.vehicles.current": "目前",
+  "multiTaxiAuth.vehicles.history": "歷史",
   "multiTaxiAuth.vehicles.status.active": "有效",
   "multiTaxiAuth.vehicles.status.suspended": "暫停",
   "multiTaxiAuth.vehicles.status.removed": "移除",
