@@ -76,4 +76,31 @@ describe("passenger control-plane proxy", () => {
     expect(new Headers(init.headers).has("x-actor-id")).toBe(false);
     expect(new Headers(init.headers).has("x-realm")).toBe(false);
   });
+
+  it("allows only a token-scoped GET for certificate retry reads", async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { receiptNo: "RC-001" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", upstreamFetch);
+    const request = new NextRequest(
+      `http://passenger.local/control-plane-proxy/passenger-rides/${ACCESS_TOKEN}/receipt`,
+    );
+
+    const response = await GET(request, {
+      params: Promise.resolve({
+        path: ["passenger-rides", ACCESS_TOKEN, "receipt"],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    const [target, init] = upstreamFetch.mock.calls[0] as [URL, RequestInit];
+    expect(target.toString()).toBe(
+      `http://localhost:3001/api/passenger-rides/${ACCESS_TOKEN}/receipt`,
+    );
+    expect(init.method).toBe("GET");
+  });
 });
