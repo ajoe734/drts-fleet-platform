@@ -182,4 +182,104 @@ describe("MultiTaxiController ride intake", () => {
     });
     expect(service.invalidatePassengerRating).not.toHaveBeenCalled();
   });
+
+  it("wraps the canonical rating review list without reshaping it", async () => {
+    const result = {
+      items: [{ ratingId: "rating-001", status: "active" }],
+      pageInfo: {
+        page: 1,
+        pageSize: 50,
+        totalItems: 1,
+        totalPages: 1,
+      },
+      refresh: {
+        generatedAt: "2026-07-24T00:00:00.000Z",
+        staleAfterMs: 300_000,
+        stale: false,
+      },
+    };
+    const service = {
+      listPassengerRatingReviews: vi.fn().mockResolvedValue(result),
+    } as unknown as MultiTaxiService;
+    const controller = new MultiTaxiController(service);
+    const query = { status: "active" as const, score: "5" };
+
+    const response = await controller.listPassengerRatingReviews(
+      query,
+      "req-rating-list-001",
+    );
+
+    expect(response.data).toEqual(result);
+    expect(service.listPassengerRatingReviews).toHaveBeenCalledWith(query);
+  });
+
+  it("derives detail mutation availability from authenticated capability", async () => {
+    const result = {
+      rating: { ratingId: "rating-001", status: "active" },
+      availableActions: {
+        invalidate: {
+          enabled: false,
+          disabledReason: "missing_multi_taxi_ratings_moderate",
+        },
+      },
+    };
+    const service = {
+      getPassengerRatingReview: vi.fn().mockResolvedValue(result),
+    } as unknown as MultiTaxiService;
+    const controller = new MultiTaxiController(service);
+
+    const response = await controller.getPassengerRatingReview(
+      "rating-001",
+      {
+        authMode: "bootstrap_headers",
+        actorType: "platform_admin",
+        actorId: "platform-admin-001",
+        realm: "platform",
+        tenantId: null,
+        roleFamilies: ["platform"],
+        roles: ["platform_admin"],
+        scopes: ["foundation:read", "multi_taxi_ratings:read"],
+        requestId: "req-rating-detail-001",
+      },
+      "req-rating-detail-001",
+    );
+
+    expect(response.data).toEqual(result);
+    expect(service.getPassengerRatingReview).toHaveBeenCalledWith(
+      "rating-001",
+      false,
+    );
+  });
+
+  it("exposes the canonical driver rating authority envelope", async () => {
+    const result = {
+      summary: {
+        driverId: "driver-001",
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+        lastRatedAt: null,
+        aggregateVersion: 1,
+        calculatedAt: "2026-07-24T00:00:00.000Z",
+      },
+      refresh: {
+        generatedAt: "2026-07-24T00:00:00.000Z",
+        staleAfterMs: 300_000,
+        stale: false,
+      },
+      unavailableReason: null,
+    };
+    const service = {
+      getDriverRatingAuthority: vi.fn().mockResolvedValue(result),
+    } as unknown as MultiTaxiService;
+    const controller = new MultiTaxiController(service);
+
+    const response = await controller.getDriverRatingAuthority(
+      "driver-001",
+      "req-rating-authority-001",
+    );
+
+    expect(response.data).toEqual(result);
+    expect(service.getDriverRatingAuthority).toHaveBeenCalledWith("driver-001");
+  });
 });

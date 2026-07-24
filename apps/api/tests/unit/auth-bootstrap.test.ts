@@ -626,6 +626,71 @@ describe("bootstrap auth guard", () => {
     });
   });
 
+  it("returns 403 when rating read capability is missing", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "platform-admin-001",
+        "x-realm": "platform",
+        "x-scopes": "foundation:read",
+      },
+      method: "GET",
+      originalUrl: "/api/platform-admin/multi-taxi-ratings",
+    };
+    const context = createExecutionContext(
+      request,
+      MultiTaxiController.prototype.listPassengerRatingReviews as never,
+      MultiTaxiController as never,
+    );
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    try {
+      guard.canActivate(context);
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_SCOPE_DENIED",
+          details: expect.objectContaining({
+            requiredScopes: expect.arrayContaining([
+              "foundation:read",
+              "multi_taxi_ratings:read",
+            ]),
+          }),
+        },
+      });
+    }
+  });
+
+  it("allows platform rating reads with the required capability", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "platform-admin-001",
+        "x-realm": "platform",
+        "x-scopes": "foundation:read multi_taxi_ratings:read",
+      },
+      method: "GET",
+      originalUrl:
+        "/api/platform-admin/multi-taxi-rating-authorities/driver-001",
+    };
+    const context = createExecutionContext(
+      request,
+      MultiTaxiController.prototype.getDriverRatingAuthority as never,
+      MultiTaxiController as never,
+    );
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      actorId: "platform-admin-001",
+      realm: "platform",
+      scopes: ["foundation:read", "multi_taxi_ratings:read"],
+    });
+  });
+
   it("denies ops identities from requesting sandbox legal-hold release", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {

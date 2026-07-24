@@ -19,6 +19,7 @@ import type {
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
   InvalidatePassengerTripRatingCommand,
+  PassengerRatingReviewQuery,
   MultiTaxiTripOperationalRecordQuery,
   QueueCheckInCommand,
   QueueCheckOutCommand,
@@ -290,6 +291,49 @@ export class MultiTaxiController {
         this.requireActorId(identity),
         requestId,
       ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-ratings")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:read")
+  async listPassengerRatingReviews(
+    @Query() query: PassengerRatingReviewQuery,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.listPassengerRatingReviews(query),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-ratings/:ratingId")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:read")
+  async getPassengerRatingReview(
+    @Param("ratingId") ratingId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getPassengerRatingReview(
+        ratingId,
+        identity?.scopes.includes("multi_taxi_ratings:moderate") ?? false,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-rating-authorities/:driverId")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:read")
+  async getDriverRatingAuthority(
+    @Param("driverId") driverId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getDriverRatingAuthority(driverId),
       requestId,
     );
   }

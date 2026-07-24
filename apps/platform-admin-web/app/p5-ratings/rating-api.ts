@@ -1,10 +1,16 @@
 import type {
   ApiSuccessEnvelope,
+  DriverRatingAuthorityView,
   DriverRatingSummary,
   InvalidatePassengerTripRatingCommand,
   InvalidatePassengerTripRatingResult,
   PassengerRatingModerationAuditRecord,
   PassengerRatingModerationView,
+  PassengerRatingReviewDetail,
+  PassengerRatingReviewListData,
+  PassengerRatingReviewListItem,
+  RatingGovernanceActionDescriptor,
+  RatingGovernanceRefreshState,
 } from "@drts/contracts";
 
 export const RATING_REVIEW_STATUSES = [
@@ -24,60 +30,12 @@ export type RatingReviewFilters = {
   to: string;
 };
 
-export type RatingRefreshState = {
-  generatedAt: string;
-  staleAfterMs: number;
-  stale: boolean;
-};
-
-export type RatingReviewRow = {
-  ratingId: string;
-  orderId: string;
-  tripId: string;
-  driverId: string;
-  driverDisplayName: string | null;
-  score: 1 | 2 | 3 | 4 | 5;
-  tags: string[];
-  commentExcerpt: string | null;
-  status: RatingReviewStatus;
-  submittedAt: string;
-  updatedAt: string;
-};
-
-export type RatingReviewList = {
-  items: RatingReviewRow[];
-  pageInfo: {
-    page: number;
-    pageSize: number;
-    totalItems: number;
-    totalPages: number;
-  };
-  refresh: RatingRefreshState;
-};
-
-export type RatingActionDescriptor = {
-  enabled: boolean;
-  disabledReason: string | null;
-};
-
-export type RatingReviewDetail = {
-  rating: PassengerRatingModerationView;
-  orderNo: string | null;
-  driverDisplayName: string | null;
-  passengerSubjectMasked: string | null;
-  driverRatingSummary: DriverRatingSummary;
-  moderationHistory: PassengerRatingModerationAuditRecord[];
-  availableActions: {
-    invalidate: RatingActionDescriptor;
-  };
-  refresh: RatingRefreshState;
-};
-
-export type DriverRatingAuthorityView = {
-  summary: DriverRatingSummary;
-  refresh: RatingRefreshState;
-  unavailableReason: string | null;
-};
+export type RatingRefreshState = RatingGovernanceRefreshState;
+export type RatingReviewRow = PassengerRatingReviewListItem;
+export type RatingReviewList = PassengerRatingReviewListData;
+export type RatingActionDescriptor = RatingGovernanceActionDescriptor;
+export type RatingReviewDetail = PassengerRatingReviewDetail;
+export type { DriverRatingAuthorityView };
 
 export type RatingReadFailure =
   | "forbidden"
@@ -330,7 +288,7 @@ function maskedSubjectOf(value: unknown): string | null {
   if (!subject) {
     return null;
   }
-  return /[*•…]/u.test(subject) ? subject : null;
+  return /[*•…]/u.test(subject) || subject.includes("...") ? subject : null;
 }
 
 function actionOf(value: unknown): RatingActionDescriptor {

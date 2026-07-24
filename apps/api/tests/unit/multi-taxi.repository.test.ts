@@ -76,6 +76,16 @@ const invalidationAuditRow = {
   created_at: "2026-07-24T01:00:00.000Z",
 };
 
+const ratedSummaryRow = {
+  driver_id: "driver-001",
+  display_state: "rated",
+  average_rating: "4.50",
+  rating_count: 2,
+  last_rated_at: "2026-07-24T00:00:00.000Z",
+  aggregate_version: 3,
+  calculated_at: "2026-07-24T00:05:00.000Z",
+};
+
 function createInvalidationInput() {
   return {
     auditId: "audit-001",
@@ -221,5 +231,143 @@ describe("MultiTaxiRepository rating invalidation", () => {
 
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
     expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+describe("MultiTaxiRepository rating governance reads", () => {
+  it("lists canonical rating rows with server-side filters and no passenger subject", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ total_items: 1 }] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            rating_id: "rating-001",
+            order_id: "order-001",
+            trip_id: "trip-001",
+            driver_id: "driver-001",
+            driver_display_name: "Driver One",
+            score: 5,
+            tags: ["safe"],
+            comment_excerpt: "Great ride",
+            status: "active",
+            submitted_at: "2026-07-24T00:00:00.000Z",
+            updated_at: "2026-07-24T00:00:00.000Z",
+          },
+        ],
+      });
+    const repository = new MultiTaxiRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const result = await repository.listPassengerRatingReviews({
+      status: "active",
+      score: 5,
+      tag: "safe",
+      driverId: "driver-001",
+      tripOrOrder: "trip_001%",
+      from: "2026-07-01",
+      to: "2026-07-31",
+      page: 2,
+      pageSize: 20,
+    });
+    const sql = query.mock.calls.map(([statement]) => statement).join("\n");
+    const listParameters = query.mock.calls[1]?.[1] as unknown[];
+
+    expect(result).toEqual({
+      items: [
+        {
+          ratingId: "rating-001",
+          orderId: "order-001",
+          tripId: "trip-001",
+          driverId: "driver-001",
+          driverDisplayName: "Driver One",
+          score: 5,
+          tags: ["safe"],
+          commentExcerpt: "Great ride",
+          status: "active",
+          submittedAt: "2026-07-24T00:00:00.000Z",
+          updatedAt: "2026-07-24T00:00:00.000Z",
+        },
+      ],
+      totalItems: 1,
+    });
+    expect(result.items[0]).not.toHaveProperty("passengerSubjectRef");
+    expect(result.items[0]).not.toHaveProperty("comment");
+    expect(sql).toContain("FROM ops.passenger_trip_ratings r");
+    expect(sql).toContain("r.tags @>");
+    expect(sql).toContain("AT TIME ZONE 'Asia/Taipei'");
+    expect(sql).toContain("LIMIT");
+    expect(listParameters).toContain("%trip\\_001\\%%");
+    expect(listParameters.slice(-2)).toEqual([20, 20]);
+  });
+
+  it("reads detail, aggregate, and ordered audit history from canonical tables", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM ops.passenger_trip_ratings r")) {
+        return {
+          rows: [
+            {
+              ...activeRatingRow,
+              order_no: "MTX-001",
+              driver_display_name: "Driver One",
+            },
+          ],
+        };
+      }
+      if (sql.includes("FROM ops.driver_rating_summaries")) {
+        return { rows: [ratedSummaryRow] };
+      }
+      if (sql.includes("FROM ops.passenger_rating_moderation_audits")) {
+        return { rows: [invalidationAuditRow] };
+      }
+      return { rows: [] };
+    });
+    const repository = new MultiTaxiRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const result = await repository.findPassengerRatingReview("rating-001");
+    const sql = query.mock.calls.map(([statement]) => statement).join("\n");
+
+    expect(result).toMatchObject({
+      rating: {
+        ratingId: "rating-001",
+        passengerSubjectRef: "passenger-sensitive-001",
+      },
+      orderNo: "MTX-001",
+      driverDisplayName: "Driver One",
+      summary: {
+        displayState: "rated",
+        averageRating: 4.5,
+        ratingCount: 2,
+      },
+      moderationHistory: [{ auditId: "audit-001" }],
+    });
+    expect(sql).toContain("ORDER BY created_at DESC, audit_id ASC");
+  });
+
+  it("returns only the persisted driver summary authority", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [ratedSummaryRow] });
+    const repository = new MultiTaxiRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.findDriverRatingSummary("driver-001"),
+    ).resolves.toMatchObject({
+      driverId: "driver-001",
+      displayState: "rated",
+      averageRating: 4.5,
+      ratingCount: 2,
+      aggregateVersion: 3,
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("FROM ops.driver_rating_summaries"),
+      ["driver-001"],
+    );
   });
 });

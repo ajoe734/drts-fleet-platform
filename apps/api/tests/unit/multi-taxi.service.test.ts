@@ -711,6 +711,215 @@ describe("MultiTaxiService rating invalidation authority", () => {
   });
 });
 
+describe("MultiTaxiService rating governance reads", () => {
+  it("serves list, masked detail, authority, and post-invalidation audit without fabricated values", async () => {
+    const { service, rating } = await createCompletedPassengerRating();
+
+    const list = await service.listPassengerRatingReviews({
+      status: "active",
+      score: "5",
+      tag: "safe",
+      driverId: "driver-001",
+      tripOrOrder: "MTX-001",
+      from: "2026-01-01",
+      to: "2026-12-31",
+    });
+    const readOnlyDetail = await service.getPassengerRatingReview(
+      rating.ratingId,
+      false,
+    );
+    const authority = await service.getDriverRatingAuthority("driver-001");
+
+    expect(list).toMatchObject({
+      items: [
+        {
+          ratingId: rating.ratingId,
+          driverId: "driver-001",
+          score: 5,
+          status: "active",
+        },
+      ],
+      pageInfo: {
+        page: 1,
+        pageSize: 50,
+        totalItems: 1,
+        totalPages: 1,
+      },
+      refresh: { stale: false, staleAfterMs: 300_000 },
+    });
+    expect(list.items[0]).not.toHaveProperty("passengerSubjectRef");
+    expect(list.items[0]).not.toHaveProperty("comment");
+    expect(readOnlyDetail).toMatchObject({
+      rating: {
+        ratingId: rating.ratingId,
+        status: "active",
+      },
+      orderNo: "MTX-001",
+      driverRatingSummary: {
+        displayState: "rated",
+        averageRating: 5,
+        ratingCount: 1,
+      },
+      availableActions: {
+        invalidate: {
+          enabled: false,
+          disabledReason: "missing_multi_taxi_ratings_moderate",
+        },
+      },
+    });
+    expect(readOnlyDetail.passengerSubjectMasked).toMatch(/[*…]|\.\.\./u);
+    expect(readOnlyDetail.rating).not.toHaveProperty("passengerSubjectRef");
+    expect(authority.summary).toMatchObject({
+      displayState: "rated",
+      averageRating: 5,
+      ratingCount: 1,
+    });
+
+    await service.invalidatePassengerRating(
+      rating.ratingId,
+      {
+        reason: "Confirmed invalid rating.",
+        idempotencyKey: "rating-read-after-invalidate",
+        confirmation: {
+          action: "invalidate_rating",
+          ratingId: rating.ratingId,
+        },
+      },
+      "platform-admin-001",
+      "req-rating-read-after-invalidate",
+    );
+    const invalidated = await service.getPassengerRatingReview(
+      rating.ratingId,
+      true,
+    );
+
+    expect(invalidated).toMatchObject({
+      rating: { status: "invalidated" },
+      driverRatingSummary: {
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+      },
+      moderationHistory: [
+        {
+          action: "invalidate",
+          actorId: "platform-admin-001",
+          reason: "Confirmed invalid rating.",
+        },
+      ],
+      availableActions: {
+        invalidate: {
+          enabled: false,
+          disabledReason: "rating_already_invalidated",
+        },
+      },
+    });
+  });
+
+  it("rejects invalid filters instead of broadening a malformed query", async () => {
+    const { service } = createService();
+
+    await expect(
+      service.listPassengerRatingReviews({
+        score: "6",
+        from: "2026-02-31",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_REVIEW_QUERY_INVALID" },
+      },
+    });
+    await expect(
+      service.listPassengerRatingReviews({
+        from: "2026-07-25",
+        to: "2026-07-24",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "RATING_REVIEW_QUERY_INVALID" },
+      },
+    });
+  });
+
+  it("fails closed when persisted detail or aggregate authority is absent or inconsistent", async () => {
+    const repository = {
+      isEnabled: () => true,
+      findPassengerRatingReview: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          rating: {
+            ratingId: "rating-001",
+            orderId: "order-001",
+            tripId: "trip-001",
+            driverId: "driver-001",
+            passengerSubjectRef: "passenger-sensitive-001",
+            score: 5,
+            tags: [],
+            comment: null,
+            status: "active",
+            submittedAt: "2026-07-24T00:00:00.000Z",
+            updatedAt: "2026-07-24T00:00:00.000Z",
+          },
+          orderNo: null,
+          driverDisplayName: null,
+          summary: null,
+          moderationHistory: [],
+        }),
+      findDriverRatingSummary: vi.fn().mockResolvedValue({
+        driverId: "driver-001",
+        displayState: "rated",
+        averageRating: null,
+        ratingCount: 1,
+        lastRatedAt: null,
+        aggregateVersion: 1,
+        calculatedAt: "2026-07-24T00:00:00.000Z",
+      }),
+    };
+    const { service } = createService({ repository });
+
+    await expect(
+      service.getPassengerRatingReview("rating-missing", true),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "PASSENGER_RATING_NOT_FOUND" },
+      },
+    });
+    const missingSummaryError = await service
+      .getPassengerRatingReview("rating-001", true)
+      .catch((error: unknown) => error as ApiRequestError);
+    expect(missingSummaryError.getStatus()).toBe(503);
+    expect(missingSummaryError).toMatchObject({
+      response: {
+        error: { code: "DRIVER_RATING_AUTHORITY_UNAVAILABLE" },
+      },
+    });
+    const inconsistentSummaryError = await service
+      .getDriverRatingAuthority("driver-001")
+      .catch((error: unknown) => error as ApiRequestError);
+    expect(inconsistentSummaryError.getStatus()).toBe(503);
+    expect(inconsistentSummaryError).toMatchObject({
+      response: {
+        error: { code: "DRIVER_RATING_AUTHORITY_INCONSISTENT" },
+      },
+    });
+  });
+
+  it("propagates repository read failures without falling back to local state", async () => {
+    const repository = {
+      isEnabled: () => true,
+      listPassengerRatingReviews: vi
+        .fn()
+        .mockRejectedValue(new Error("database unavailable")),
+    };
+    const { service } = createService({ repository });
+
+    await expect(service.listPassengerRatingReviews({})).rejects.toThrow(
+      "database unavailable",
+    );
+  });
+});
+
 describe("MultiTaxiService trip operational records", () => {
   it("lists completed multi-taxi records with 730-day retention readback", async () => {
     const assignment = {

@@ -48,6 +48,7 @@ const SANDBOX_COMPLIANCE_SCOPES = [
 ] as const;
 
 const MULTI_TAXI_RATING_GOVERNANCE_SCOPES = [
+  "multi_taxi_ratings:read",
   "multi_taxi_ratings:moderate",
 ] as const;
 

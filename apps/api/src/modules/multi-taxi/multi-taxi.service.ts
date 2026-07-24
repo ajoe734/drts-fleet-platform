@@ -22,6 +22,7 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  DriverRatingAuthorityView,
   DriverRatingSummary,
   InvalidatePassengerTripRatingCommand,
   InvalidatePassengerTripRatingResult,
@@ -36,6 +37,11 @@ import type {
   PassengerRideAuthorityView,
   PassengerRideContactOption,
   PassengerRatingModerationAuditRecord,
+  PassengerRatingModerationView,
+  PassengerRatingReviewDetail,
+  PassengerRatingReviewListData,
+  PassengerRatingReviewListItem,
+  PassengerRatingReviewQuery,
   PassengerRideSseEvent,
   PassengerRideSseEventEnvelope,
   PassengerRideTokenScope,
@@ -51,7 +57,11 @@ import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../service-product/service-product.service";
-import { MultiTaxiRepository } from "./multi-taxi.repository";
+import {
+  MultiTaxiRepository,
+  type PassengerRatingReviewRepositoryDetail,
+  type PassengerRatingReviewRepositoryQuery,
+} from "./multi-taxi.repository";
 
 @Injectable()
 export class MultiTaxiService implements OnModuleInit {
@@ -73,6 +83,10 @@ export class MultiTaxiService implements OnModuleInit {
   private readonly ratingInvalidationsByIdempotencyKey = new Map<
     string,
     InvalidatePassengerTripRatingResult
+  >();
+  private readonly ratingModerationAuditsByRatingId = new Map<
+    string,
+    PassengerRatingModerationAuditRecord[]
   >();
 
   constructor(
@@ -508,6 +522,162 @@ export class MultiTaxiService implements OnModuleInit {
     return persisted.rating;
   }
 
+  async listPassengerRatingReviews(
+    query: PassengerRatingReviewQuery,
+  ): Promise<PassengerRatingReviewListData> {
+    const normalized = this.normalizePassengerRatingReviewQuery(query);
+    const generatedAt = new Date().toISOString();
+
+    if (this.repository?.isEnabled()) {
+      const result =
+        await this.repository.listPassengerRatingReviews(normalized);
+      return {
+        items: result.items.map((item) => structuredClone(item)),
+        pageInfo: this.toRatingReviewPageInfo(
+          normalized.page,
+          normalized.pageSize,
+          result.totalItems,
+        ),
+        refresh: this.createRatingGovernanceRefresh(generatedAt),
+      };
+    }
+
+    const ordersById = new Map(
+      this.ownedMobilityService
+        .listOrders()
+        .map((order) => [order.orderId, order] as const),
+    );
+    const filtered = [...this.ratingsById.values()]
+      .filter((rating) =>
+        normalized.status ? rating.status === normalized.status : true,
+      )
+      .filter((rating) =>
+        normalized.score ? rating.score === normalized.score : true,
+      )
+      .filter((rating) =>
+        normalized.tag ? rating.tags.includes(normalized.tag) : true,
+      )
+      .filter((rating) =>
+        normalized.driverId ? rating.driverId === normalized.driverId : true,
+      )
+      .filter((rating) => {
+        if (!normalized.tripOrOrder) {
+          return true;
+        }
+        const needle = normalized.tripOrOrder.toLowerCase();
+        const orderNo = ordersById.get(rating.orderId)?.orderNo ?? "";
+        return [rating.tripId, rating.orderId, orderNo].some((value) =>
+          value.toLowerCase().includes(needle),
+        );
+      })
+      .filter((rating) => {
+        const submittedDate = this.toTaipeiCalendarDate(rating.submittedAt);
+        return (
+          (!normalized.from || submittedDate >= normalized.from) &&
+          (!normalized.to || submittedDate <= normalized.to)
+        );
+      })
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          left.ratingId.localeCompare(right.ratingId),
+      );
+    const offset = (normalized.page - 1) * normalized.pageSize;
+    const items = filtered
+      .slice(offset, offset + normalized.pageSize)
+      .map((rating) => this.toPassengerRatingReviewListItem(rating));
+
+    return {
+      items,
+      pageInfo: this.toRatingReviewPageInfo(
+        normalized.page,
+        normalized.pageSize,
+        filtered.length,
+      ),
+      refresh: this.createRatingGovernanceRefresh(generatedAt),
+    };
+  }
+
+  async getPassengerRatingReview(
+    ratingId: string,
+    canInvalidate: boolean,
+  ): Promise<PassengerRatingReviewDetail> {
+    const normalizedRatingId = this.requireRatingReadIdentifier(
+      ratingId,
+      "ratingId",
+    );
+    const authority = this.repository?.isEnabled()
+      ? await this.repository.findPassengerRatingReview(normalizedRatingId)
+      : this.findInMemoryPassengerRatingReview(normalizedRatingId);
+    if (!authority) {
+      this.throwRatingNotFound(normalizedRatingId);
+    }
+    if (!authority.summary) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "DRIVER_RATING_AUTHORITY_UNAVAILABLE",
+        "The canonical driver rating summary is unavailable for this rating.",
+        {
+          ratingId: normalizedRatingId,
+          driverId: authority.rating.driverId,
+        },
+      );
+    }
+    this.assertCanonicalDriverRatingSummary(
+      authority.summary,
+      authority.rating.driverId,
+    );
+
+    return {
+      rating: this.toPassengerRatingModerationView(authority.rating),
+      orderNo: authority.orderNo,
+      driverDisplayName: authority.driverDisplayName,
+      passengerSubjectMasked: maskOpaqueToken(
+        authority.rating.passengerSubjectRef,
+        3,
+        3,
+      ),
+      driverRatingSummary: structuredClone(authority.summary),
+      moderationHistory: authority.moderationHistory.map((audit) =>
+        structuredClone(audit),
+      ),
+      availableActions: {
+        invalidate: this.resolveRatingInvalidationAction(
+          authority.rating,
+          canInvalidate,
+        ),
+      },
+      refresh: this.createRatingGovernanceRefresh(new Date().toISOString()),
+    };
+  }
+
+  async getDriverRatingAuthority(
+    driverId: string,
+  ): Promise<DriverRatingAuthorityView> {
+    const normalizedDriverId = this.requireRatingReadIdentifier(
+      driverId,
+      "driverId",
+    );
+    const summary = this.repository?.isEnabled()
+      ? await this.repository.findDriverRatingSummary(normalizedDriverId)
+      : (this.driverRatingSummaries.get(normalizedDriverId) ?? null);
+    if (!summary) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_RATING_AUTHORITY_NOT_FOUND",
+        "The canonical driver rating authority was not found.",
+        { driverId: normalizedDriverId },
+      );
+    }
+    this.assertCanonicalDriverRatingSummary(summary, normalizedDriverId);
+
+    return {
+      summary: structuredClone(summary),
+      refresh: this.createRatingGovernanceRefresh(new Date().toISOString()),
+      unavailableReason: null,
+    };
+  }
+
   async invalidatePassengerRating(
     ratingId: string,
     command: InvalidatePassengerTripRatingCommand,
@@ -573,6 +743,7 @@ export class MultiTaxiService implements OnModuleInit {
         normalizedActorId,
       );
       this.cacheRatingAndSummary(persisted.rating, persisted.summary);
+      this.cacheRatingModerationAudit(persisted.audit);
       return this.toRatingInvalidationResult(
         persisted.rating,
         persisted.summary,
@@ -1096,6 +1267,7 @@ export class MultiTaxiService implements OnModuleInit {
       false,
     );
     this.ratingInvalidationsByIdempotencyKey.set(replayKey, result);
+    this.cacheRatingModerationAudit(audit);
     return result;
   }
 
@@ -1145,6 +1317,24 @@ export class MultiTaxiService implements OnModuleInit {
     this.driverRatingSummaries.set(summary.driverId, summary);
   }
 
+  private cacheRatingModerationAudit(
+    audit: PassengerRatingModerationAuditRecord,
+  ) {
+    const current =
+      this.ratingModerationAuditsByRatingId.get(audit.ratingId) ?? [];
+    if (current.some((record) => record.auditId === audit.auditId)) {
+      return;
+    }
+    this.ratingModerationAuditsByRatingId.set(
+      audit.ratingId,
+      [structuredClone(audit), ...current].sort(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) ||
+          left.auditId.localeCompare(right.auditId),
+      ),
+    );
+  }
+
   private toRatingInvalidationResult(
     rating: PassengerTripRatingRecord,
     summary: DriverRatingSummary,
@@ -1168,6 +1358,303 @@ export class MultiTaxiService implements OnModuleInit {
       audit: structuredClone(audit),
       replayed,
     };
+  }
+
+  private toPassengerRatingModerationView(
+    rating: PassengerTripRatingRecord,
+  ): PassengerRatingModerationView {
+    return {
+      ratingId: rating.ratingId,
+      orderId: rating.orderId,
+      tripId: rating.tripId,
+      driverId: rating.driverId,
+      score: rating.score,
+      tags: [...rating.tags],
+      comment: rating.comment,
+      status: rating.status,
+      submittedAt: rating.submittedAt,
+      updatedAt: rating.updatedAt,
+    };
+  }
+
+  private toPassengerRatingReviewListItem(
+    rating: PassengerTripRatingRecord,
+  ): PassengerRatingReviewListItem {
+    const comment =
+      rating.comment && rating.comment.length > 160
+        ? `${rating.comment.slice(0, 157)}...`
+        : rating.comment;
+    return {
+      ratingId: rating.ratingId,
+      orderId: rating.orderId,
+      tripId: rating.tripId,
+      driverId: rating.driverId,
+      driverDisplayName: null,
+      score: rating.score,
+      tags: [...rating.tags],
+      commentExcerpt: comment,
+      status: rating.status,
+      submittedAt: rating.submittedAt,
+      updatedAt: rating.updatedAt,
+    };
+  }
+
+  private findInMemoryPassengerRatingReview(
+    ratingId: string,
+  ): PassengerRatingReviewRepositoryDetail | null {
+    const rating = this.ratingsById.get(ratingId);
+    if (!rating) {
+      return null;
+    }
+    const order = this.ownedMobilityService
+      .listOrders()
+      .find((candidate) => candidate.orderId === rating.orderId);
+    return {
+      rating: structuredClone(rating),
+      orderNo: order?.orderNo ?? null,
+      driverDisplayName: null,
+      summary: this.driverRatingSummaries.get(rating.driverId) ?? null,
+      moderationHistory: (
+        this.ratingModerationAuditsByRatingId.get(ratingId) ?? []
+      ).map((audit) => structuredClone(audit)),
+    };
+  }
+
+  private resolveRatingInvalidationAction(
+    rating: PassengerTripRatingRecord,
+    canInvalidate: boolean,
+  ) {
+    if (rating.status === "invalidated") {
+      return {
+        enabled: false,
+        disabledReason: "rating_already_invalidated",
+      };
+    }
+    if (!canInvalidate) {
+      return {
+        enabled: false,
+        disabledReason: "missing_multi_taxi_ratings_moderate",
+      };
+    }
+    return { enabled: true, disabledReason: null };
+  }
+
+  private createRatingGovernanceRefresh(generatedAt: string) {
+    return {
+      generatedAt,
+      staleAfterMs: 300_000,
+      stale: false,
+    };
+  }
+
+  private toRatingReviewPageInfo(
+    page: number,
+    pageSize: number,
+    totalItems: number,
+  ) {
+    return {
+      page,
+      pageSize,
+      totalItems,
+      totalPages: totalItems === 0 ? 0 : Math.ceil(totalItems / pageSize),
+    };
+  }
+
+  private normalizePassengerRatingReviewQuery(
+    query: PassengerRatingReviewQuery,
+  ): PassengerRatingReviewRepositoryQuery {
+    const status = query?.status;
+    if (
+      status !== undefined &&
+      !["active", "under_review", "invalidated"].includes(status)
+    ) {
+      this.throwRatingReviewQueryInvalid(
+        "status",
+        "status must be active, under_review, or invalidated.",
+      );
+    }
+    const score =
+      query?.score === undefined || query.score === ""
+        ? null
+        : Number(query.score);
+    if (
+      score !== null &&
+      (!Number.isInteger(score) || score < 1 || score > 5)
+    ) {
+      this.throwRatingReviewQueryInvalid(
+        "score",
+        "score must be an integer from 1 through 5.",
+      );
+    }
+    const from = this.normalizeRatingReviewDate(query?.from, "from");
+    const to = this.normalizeRatingReviewDate(query?.to, "to");
+    if (from && to && from > to) {
+      this.throwRatingReviewQueryInvalid("to", "to must be on or after from.");
+    }
+
+    return {
+      status: status ?? null,
+      score: score as PassengerTripRatingRecord["score"] | null,
+      tag: this.normalizeRatingReviewText(query?.tag, "tag", 100),
+      driverId: this.normalizeRatingReviewText(
+        query?.driverId,
+        "driverId",
+        255,
+      ),
+      tripOrOrder: this.normalizeRatingReviewText(
+        query?.tripOrOrder,
+        "tripOrOrder",
+        255,
+      ),
+      from,
+      to,
+      page: this.normalizeRatingReviewPositiveInteger(query?.page, "page", 1),
+      pageSize: this.normalizeRatingReviewPositiveInteger(
+        query?.pageSize,
+        "pageSize",
+        50,
+        100,
+      ),
+    };
+  }
+
+  private normalizeRatingReviewText(
+    value: unknown,
+    field: string,
+    maxLength: number,
+  ) {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+    if (typeof value !== "string") {
+      this.throwRatingReviewQueryInvalid(field, `${field} must be a string.`);
+    }
+    const normalized = value.trim();
+    if (!normalized) {
+      return null;
+    }
+    if (normalized.length > maxLength) {
+      this.throwRatingReviewQueryInvalid(
+        field,
+        `${field} must not exceed ${maxLength} characters.`,
+      );
+    }
+    return normalized;
+  }
+
+  private normalizeRatingReviewDate(value: unknown, field: string) {
+    const normalized = this.normalizeRatingReviewText(value, field, 10);
+    if (!normalized) {
+      return null;
+    }
+    const parsed = new Date(`${normalized}T00:00:00.000Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(normalized) ||
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== normalized
+    ) {
+      this.throwRatingReviewQueryInvalid(
+        field,
+        `${field} must be a valid YYYY-MM-DD date.`,
+      );
+    }
+    return normalized;
+  }
+
+  private normalizeRatingReviewPositiveInteger(
+    value: unknown,
+    field: string,
+    fallback: number,
+    maximum = Number.MAX_SAFE_INTEGER,
+  ) {
+    if (value === undefined || value === null || value === "") {
+      return fallback;
+    }
+    const parsed =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && /^\d+$/.test(value)
+          ? Number(value)
+          : Number.NaN;
+    if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
+      this.throwRatingReviewQueryInvalid(
+        field,
+        `${field} must be an integer from 1 through ${maximum}.`,
+      );
+    }
+    return parsed;
+  }
+
+  private throwRatingReviewQueryInvalid(field: string, message: string): never {
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "RATING_REVIEW_QUERY_INVALID",
+      message,
+      { field },
+    );
+  }
+
+  private requireRatingReadIdentifier(value: unknown, field: string) {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (!normalized || normalized.length > 255) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RATING_READ_IDENTIFIER_INVALID",
+        `${field} is required and must not exceed 255 characters.`,
+        { field },
+      );
+    }
+    return normalized;
+  }
+
+  private assertCanonicalDriverRatingSummary(
+    summary: DriverRatingSummary,
+    expectedDriverId: string,
+  ) {
+    const averageValid =
+      summary.averageRating === null ||
+      (Number.isFinite(summary.averageRating) &&
+        summary.averageRating >= 1 &&
+        summary.averageRating <= 5);
+    const canonical =
+      summary.driverId === expectedDriverId &&
+      Number.isInteger(summary.ratingCount) &&
+      summary.ratingCount >= 0 &&
+      Number.isInteger(summary.aggregateVersion) &&
+      summary.aggregateVersion >= 1 &&
+      Number.isFinite(Date.parse(summary.calculatedAt)) &&
+      averageValid &&
+      ((summary.displayState === "rated" &&
+        summary.averageRating !== null &&
+        summary.ratingCount > 0) ||
+        (summary.displayState === "new_driver" &&
+          summary.averageRating === null &&
+          summary.ratingCount === 0) ||
+        (summary.displayState === "unavailable" &&
+          summary.averageRating === null));
+    if (!canonical) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "DRIVER_RATING_AUTHORITY_INCONSISTENT",
+        "The canonical driver rating authority is internally inconsistent.",
+        { driverId: expectedDriverId },
+      );
+    }
+  }
+
+  private toTaipeiCalendarDate(value: string) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(new Date(value))
+      .reduce<Record<string, string>>((result, part) => {
+        result[part.type] = part.value;
+        return result;
+      }, {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
   }
 
   private assertRatingInvalidationReplay(

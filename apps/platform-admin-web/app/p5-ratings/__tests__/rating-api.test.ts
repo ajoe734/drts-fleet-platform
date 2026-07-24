@@ -141,6 +141,32 @@ describe("rating read model", () => {
     });
   });
 
+  it("accepts the server sensitive-data policy ellipsis mask", async () => {
+    const client = readClient({
+      rating: rating(),
+      orderNo: "M-001",
+      driverDisplayName: "Driver Lin",
+      passengerSubjectMasked: "pas...001",
+      driverRatingSummary: summary(),
+      moderationHistory: [],
+      availableActions: {
+        invalidate: {
+          enabled: true,
+          disabledReason: null,
+        },
+      },
+      refresh: {
+        generatedAt: NOW,
+        staleAfterMs: 300_000,
+        stale: false,
+      },
+    });
+
+    const result = await getRatingReview(client, "rating-001");
+
+    expect(result.passengerSubjectMasked).toBe("pas...001");
+  });
+
   it.each([
     {
       displayState: "rated",
