@@ -9,13 +9,13 @@ import {
 } from "@drts/contracts";
 
 import {
-  FARE_ANOMALY_REASON_COPY,
   hasFareAnomalyReadScope,
   hasFareAnomalyWriteScope,
   parseFareAnomalyListReadModel,
   resolveFareAnomalyPageState,
   resolveRetryAction,
 } from "../../apps/platform-admin-web/app/p5-fare-anomalies/fare-anomaly-model";
+import { FARE_ANOMALY_TRANSLATIONS } from "../../apps/platform-admin-web/app/p5-fare-anomalies/translations";
 
 function buildItem(): FareQuoteAnomalyAdminView {
   return {
@@ -28,16 +28,16 @@ function buildItem(): FareQuoteAnomalyAdminView {
         address: "台北市信義區松仁路",
         lat: 25.033,
         lng: 121.568,
-        coordinateSource: "provider_geocode",
-        geocodeConfidence: "rooftop",
+        coordinateSource: "provider_candidate",
+        geocodeConfidence: "exact",
         resolvedAt: "2026-07-24T08:00:00.000Z",
       },
       dropoff: {
         address: "台北市南港區經貿二路",
         lat: 25.056,
         lng: 121.618,
-        coordinateSource: "provider_geocode",
-        geocodeConfidence: "rooftop",
+        coordinateSource: "provider_candidate",
+        geocodeConfidence: "exact",
         resolvedAt: "2026-07-24T08:01:00.000Z",
       },
       estimatedDistanceMeters: 8200,
@@ -135,9 +135,11 @@ describe("Platform Admin fare anomaly states", () => {
   });
 
   it("covers exactly the five canonical anomaly reasons", () => {
-    expect(Object.keys(FARE_ANOMALY_REASON_COPY).sort()).toEqual(
-      [...FARE_QUOTE_ANOMALIES].sort(),
-    );
+    for (const locale of ["zh", "en"] as const) {
+      expect(
+        Object.keys(FARE_ANOMALY_TRANSLATIONS[locale].reasons).sort(),
+      ).toEqual([...FARE_QUOTE_ANOMALIES].sort());
+    }
   });
 });
 

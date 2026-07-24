@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, type CSSProperties } from "react";
 
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import type {
   ActionReceipt,
@@ -22,8 +23,6 @@ import {
 } from "@drts/ui-web";
 
 import {
-  FARE_ANOMALY_REASON_COPY,
-  formatFareMinor,
   formatRoute,
   hasFareAnomalyReadScope,
   hasFareAnomalyWriteScope,
@@ -33,6 +32,7 @@ import {
   resolveRetryAction,
 } from "./fare-anomaly-model";
 import styles from "./fare-anomaly.module.css";
+import { formatFareMinor, getFareAnomalyCopy } from "./translations";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 const pageStyle: CSSProperties = {
@@ -59,6 +59,8 @@ const linkStyle: CSSProperties = {
 export function FareAnomalyQueueScreen() {
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
+  const { locale } = useTranslation();
+  const copy = getFareAnomalyCopy(locale);
   const canRead = hasFareAnomalyReadScope(authority.scopes);
   const canWrite = hasFareAnomalyWriteScope(authority.scopes);
   const [items, setItems] = useState<FareQuoteAnomalyAdminView[]>([]);
@@ -137,15 +139,15 @@ export function FareAnomalyQueueScreen() {
     <main className={styles.screen} data-screen-id="P5-COM-UI-01">
       <CanvasPageHeader
         theme={theme}
-        title="費率異常 · Fare Anomalies"
-        subtitle="P5-COM-UI-01 · 正式報價完成前不確認訂單 · 不提供人工金額欄位"
+        title={copy.queue.title}
+        subtitle={copy.queue.subtitle}
         actions={
           <CanvasPill
             theme={theme}
             tone={items.length ? "warn" : "neutral"}
             dot
           >
-            {items.length} 筆待處理
+            {copy.queue.pendingCount(items.length)}
           </CanvasPill>
         }
       />
@@ -154,39 +156,39 @@ export function FareAnomalyQueueScreen() {
           theme={theme}
           tone="warn"
           icon="lock"
-          title="Fail closed"
-          body="異常報價不可自動確認固定車資；所有回復動作只依後端 availableActions 顯示。"
+          title={copy.queue.failClosedTitle}
+          body={copy.queue.failClosedBody}
         />
 
         {state === "permission_denied" ? (
           <CanvasEmptyState
             theme={theme}
             tone="danger"
-            title="無權檢視費率異常"
-            body="需要 foundation:read。頁面不會在前端推算或顯示替代資料。"
+            title={copy.queue.permissionDeniedTitle}
+            body={copy.queue.permissionDeniedBody}
           />
         ) : null}
         {state === "loading" ? (
           <CanvasEmptyState
             theme={theme}
             tone="info"
-            title="載入費率異常"
-            body="正在讀取伺服器權威資料。"
+            title={copy.queue.loadingTitle}
+            body={copy.common.authorityLoading}
           />
         ) : null}
         {state === "error" ? (
           <CanvasEmptyState
             theme={theme}
             tone="danger"
-            title="費率異常資料無法使用"
-            body={error ?? "讀取失敗"}
+            title={copy.queue.errorTitle}
+            body={error ?? copy.common.readFailed}
             action={
               <CanvasBtn
                 theme={theme}
                 variant="primary"
                 onClick={() => setReloadToken((token) => token + 1)}
               >
-                重新讀取
+                {copy.common.reload}
               </CanvasBtn>
             }
           />
@@ -195,8 +197,8 @@ export function FareAnomalyQueueScreen() {
           <CanvasEmptyState
             theme={theme}
             tone="success"
-            title="目前沒有待處理異常"
-            body="伺服器目前未回傳未解決的報價異常。"
+            title={copy.queue.emptyTitle}
+            body={copy.queue.emptyBody}
           />
         ) : null}
 
@@ -204,9 +206,9 @@ export function FareAnomalyQueueScreen() {
           <>
             <CanvasCard theme={theme} padding={12}>
               <label style={{ fontSize: 12, color: theme.textMuted }}>
-                異常原因{" "}
+                {copy.queue.reasonLabel}{" "}
                 <select
-                  aria-label="異常原因"
+                  aria-label={copy.queue.reasonLabel}
                   value={reason}
                   onChange={(event) =>
                     setReason(event.target.value as FareQuoteAnomaly | "all")
@@ -220,27 +222,25 @@ export function FareAnomalyQueueScreen() {
                     background: theme.surface,
                   }}
                 >
-                  <option value="all">全部</option>
-                  {Object.entries(FARE_ANOMALY_REASON_COPY).map(
-                    ([code, copy]) => (
-                      <option key={code} value={code}>
-                        {copy.title}
-                      </option>
-                    ),
-                  )}
+                  <option value="all">{copy.queue.allReasons}</option>
+                  {Object.entries(copy.reasons).map(([code, reasonCopy]) => (
+                    <option key={code} value={code}>
+                      {reasonCopy.title}
+                    </option>
+                  ))}
                 </select>
               </label>
             </CanvasCard>
 
             {items.map((item) => {
               const quoteSnapshotId = item.snapshot.quoteSnapshotId;
-              const copy = FARE_ANOMALY_REASON_COPY[item.reason];
+              const reasonCopy = copy.reasons[item.reason];
               const retry = resolveRetryAction(item, canWrite);
               return (
                 <CanvasCard key={quoteSnapshotId} theme={theme} padding={14}>
                   <div style={cardRowStyle}>
                     <CanvasPill theme={theme} tone="warn" dot>
-                      {copy.title}
+                      {reasonCopy.title}
                     </CanvasPill>
                     <Link
                       href={`/p5-fare-anomalies/${encodeURIComponent(
@@ -254,10 +254,14 @@ export function FareAnomalyQueueScreen() {
                       {formatRoute(item)}
                     </span>
                     <span style={monoStyle}>
-                      {formatFareMinor(item.snapshot.estimatedFareMinor)}
+                      {formatFareMinor(
+                        item.snapshot.estimatedFareMinor,
+                        locale,
+                      )}
                       {item.reason === "calculation_mismatch"
                         ? ` / ${formatFareMinor(
                             item.snapshot.payableFareMinor,
+                            locale,
                           )}`
                         : ""}
                     </span>
@@ -273,13 +277,13 @@ export function FareAnomalyQueueScreen() {
                           onClick={() => setConfirmingId(quoteSnapshotId)}
                         >
                           {item.recoveryPending
-                            ? "重新報價處理中"
-                            : "重新取得報價"}
+                            ? copy.common.recoveryPending
+                            : copy.common.retryQuote}
                         </CanvasBtn>
                       </span>
                     ) : (
                       <CanvasPill theme={theme} tone="neutral">
-                        無伺服器回復動作
+                        {copy.common.noServerRecoveryAction}
                       </CanvasPill>
                     )}
                   </div>
@@ -292,9 +296,11 @@ export function FareAnomalyQueueScreen() {
                   >
                     <span style={monoStyle}>{item.reason}</span>
                     {" · "}
-                    費率版本 {item.snapshot.farePolicyVersion}
+                    {copy.queue.farePolicyVersion(
+                      item.snapshot.farePolicyVersion,
+                    )}
                     {" · "}
-                    可否重試由後端回傳
+                    {copy.queue.retryAuthority}
                   </div>
                   {confirmingId === quoteSnapshotId ? (
                     <RecoveryConfirmation
@@ -315,7 +321,7 @@ export function FareAnomalyQueueScreen() {
             tone="success"
             icon="check"
             title={receipt.message}
-            body={`Audit ${receipt.auditId} · ${receipt.status}`}
+            body={copy.common.auditReceipt(receipt.auditId, receipt.status)}
           />
         ) : null}
       </div>
@@ -330,6 +336,8 @@ export function FareAnomalyDetailScreen({
 }) {
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
+  const { locale } = useTranslation();
+  const copy = getFareAnomalyCopy(locale);
   const canRead = hasFareAnomalyReadScope(authority.scopes);
   const canWrite = hasFareAnomalyWriteScope(authority.scopes);
   const [item, setItem] = useState<FareQuoteAnomalyAdminView | null>(null);
@@ -409,13 +417,16 @@ export function FareAnomalyDetailScreen({
         theme={theme}
         title={
           item
-            ? `${item.snapshot.orderId} · ${FARE_ANOMALY_REASON_COPY[item.reason].title}`
-            : "費率異常明細"
+            ? copy.detail.title(
+                item.snapshot.orderId,
+                copy.reasons[item.reason].title,
+              )
+            : copy.detail.fallbackTitle
         }
-        subtitle="P5-COM-UI-01 · Fare Anomaly Detail"
+        subtitle={copy.detail.subtitle}
         actions={
           <Link href="/p5-fare-anomalies" style={linkStyle}>
-            返回異常清單
+            {copy.detail.backToQueue}
           </Link>
         }
       />
@@ -424,31 +435,31 @@ export function FareAnomalyDetailScreen({
           <CanvasEmptyState
             theme={theme}
             tone="danger"
-            title="無權檢視費率異常"
-            body="需要 foundation:read。"
+            title={copy.detail.permissionDeniedTitle}
+            body={copy.detail.permissionDeniedBody}
           />
         ) : null}
         {state === "loading" ? (
           <CanvasEmptyState
             theme={theme}
             tone="info"
-            title="載入異常明細"
-            body="正在讀取伺服器權威資料。"
+            title={copy.detail.loadingTitle}
+            body={copy.common.authorityLoading}
           />
         ) : null}
         {state === "error" ? (
           <CanvasEmptyState
             theme={theme}
             tone="danger"
-            title="異常明細無法使用"
-            body={error ?? "讀取失敗"}
+            title={copy.detail.errorTitle}
+            body={error ?? copy.common.readFailed}
             action={
               <CanvasBtn
                 theme={theme}
                 variant="primary"
                 onClick={() => setReloadToken((token) => token + 1)}
               >
-                重新讀取
+                {copy.common.reload}
               </CanvasBtn>
             }
           />
@@ -459,8 +470,8 @@ export function FareAnomalyDetailScreen({
               theme={theme}
               tone="warn"
               icon="lock"
-              title={FARE_ANOMALY_REASON_COPY[item.reason].title}
-              body={FARE_ANOMALY_REASON_COPY[item.reason].guidance}
+              title={copy.reasons[item.reason].title}
+              body={copy.reasons[item.reason].guidance}
             />
             <div
               style={{
@@ -471,53 +482,59 @@ export function FareAnomalyDetailScreen({
                 alignItems: "start",
               }}
             >
-              <CanvasCard theme={theme} title="路線與報價快照">
+              <CanvasCard theme={theme} title={copy.detail.snapshotCardTitle}>
                 <CanvasDL
                   theme={theme}
                   cols={2}
                   items={[
                     {
-                      k: "訂單",
+                      k: copy.detail.orderLabel,
                       v: item.snapshot.orderId,
                       mono: true,
                     },
                     {
-                      k: "Quote Snapshot",
+                      k: copy.detail.quoteSnapshotLabel,
                       v: item.snapshot.quoteSnapshotId,
                       mono: true,
                     },
-                    { k: "路線", v: formatRoute(item) },
+                    { k: copy.detail.routeLabel, v: formatRoute(item) },
                     {
-                      k: "計費模式",
+                      k: copy.detail.chargingModeLabel,
                       v: item.snapshot.chargingMode,
                       mono: true,
                     },
                     {
-                      k: "預估車資",
-                      v: formatFareMinor(item.snapshot.estimatedFareMinor),
+                      k: copy.detail.estimatedFareLabel,
+                      v: formatFareMinor(
+                        item.snapshot.estimatedFareMinor,
+                        locale,
+                      ),
                       mono: true,
                     },
                     {
-                      k: "應付車資",
-                      v: formatFareMinor(item.snapshot.payableFareMinor),
+                      k: copy.detail.payableFareLabel,
+                      v: formatFareMinor(
+                        item.snapshot.payableFareMinor,
+                        locale,
+                      ),
                       mono: true,
                     },
                     {
-                      k: "費率版本",
+                      k: copy.detail.farePolicyVersionLabel,
                       v: item.snapshot.farePolicyVersion,
                       mono: true,
                     },
                     {
-                      k: "乘客確認",
-                      v: "未確認 · anomaly fail-closed",
+                      k: copy.detail.passengerConfirmationLabel,
+                      v: copy.detail.passengerUnconfirmed,
                     },
                   ]}
                 />
               </CanvasCard>
               <CanvasCard
                 theme={theme}
-                title="伺服器回復權威"
-                subtitle="availableActions"
+                title={copy.detail.recoveryCardTitle}
+                subtitle={copy.detail.recoveryCardSubtitle}
               >
                 <div style={{ display: "grid", gap: 10 }}>
                   <span style={monoStyle}>{item.reason}</span>
@@ -530,25 +547,27 @@ export function FareAnomalyDetailScreen({
                         onClick={() => setConfirming(true)}
                       >
                         {item.recoveryPending
-                          ? "重新報價處理中"
-                          : "重新取得報價"}
+                          ? copy.common.recoveryPending
+                          : copy.common.retryQuote}
                       </CanvasBtn>
                     </span>
                   ) : (
                     <CanvasPill theme={theme} tone="neutral">
-                      無伺服器回復動作
+                      {copy.common.noServerRecoveryAction}
                     </CanvasPill>
                   )}
                   {item.lastRecoveryRequestedAt ? (
                     <span style={{ fontSize: 11, color: theme.textMuted }}>
-                      最近要求：{item.lastRecoveryRequestedAt}
+                      {copy.detail.lastRequestedAt(
+                        item.lastRecoveryRequestedAt,
+                      )}
                     </span>
                   ) : null}
                   <CanvasBanner
                     theme={theme}
                     tone="info"
                     icon="info"
-                    body="此畫面沒有人工金額覆寫、套用草稿費率或直接確認訂單的控制。"
+                    body={copy.detail.noManualControls}
                   />
                 </div>
               </CanvasCard>
@@ -568,7 +587,7 @@ export function FareAnomalyDetailScreen({
             tone="success"
             icon="check"
             title={receipt.message}
-            body={`Audit ${receipt.auditId} · ${receipt.status}`}
+            body={copy.common.auditReceipt(receipt.auditId, receipt.status)}
           />
         ) : null}
       </div>
@@ -585,10 +604,13 @@ function RecoveryConfirmation({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { locale } = useTranslation();
+  const copy = getFareAnomalyCopy(locale);
+
   return (
     <div
       role="dialog"
-      aria-label="確認重新取得報價"
+      aria-label={copy.confirmation.ariaLabel}
       style={{
         marginTop: 12,
         padding: 12,
@@ -601,10 +623,10 @@ function RecoveryConfirmation({
       }}
     >
       <span style={{ flex: 1, fontSize: 12, color: theme.warn }}>
-        確認向正式報價服務重新取得報價？此操作不會接受人工車資。
+        {copy.confirmation.prompt}
       </span>
       <CanvasBtn theme={theme} size="xs" disabled={busy} onClick={onCancel}>
-        取消
+        {copy.confirmation.cancel}
       </CanvasBtn>
       <CanvasBtn
         theme={theme}
@@ -613,7 +635,7 @@ function RecoveryConfirmation({
         disabled={busy}
         onClick={onConfirm}
       >
-        {busy ? "送出中" : "確認重新報價"}
+        {busy ? copy.confirmation.submitting : copy.confirmation.confirm}
       </CanvasBtn>
     </div>
   );

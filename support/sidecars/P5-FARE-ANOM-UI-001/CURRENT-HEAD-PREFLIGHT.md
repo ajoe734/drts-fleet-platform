@@ -115,6 +115,23 @@ recovery was introduced to conceal these blockers.
 - Live PostgreSQL migration execution: not run; no disposable database was
   provided for this isolated worktree.
 
+## PR #1140 CI Follow-up
+
+Baseline commit: `f7d26c72d4405c11cf5804264085f40085affa12`.
+
+- Moved all fare-anomaly screen copy into feature-local `translations.ts`.
+  Chinese remains the default through the existing Platform Admin locale, and
+  English is maintained alongside it without changing global translations.
+- Removed all 26 inline JSX/attribute-copy violations without adding an i18n
+  exemption.
+- Updated the test fixture to the canonical address unions
+  `provider_candidate` and `exact`; production contract types were not changed.
+- Root typecheck: PASS.
+- i18n guard: `432 files / 0 exemptions` PASS.
+- Platform Admin fare-anomaly tests: `1 file / 11 tests` PASS.
+- Platform Admin lint: PASS.
+- Targeted Prettier check and `git diff --check`: PASS.
+
 ## Screenshot Evidence
 
 Screenshots were captured from the production Next build through the real

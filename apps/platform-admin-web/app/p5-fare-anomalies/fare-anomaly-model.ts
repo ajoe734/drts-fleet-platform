@@ -15,32 +15,6 @@ export type FareAnomalyPageState =
   | "empty"
   | "ready";
 
-export const FARE_ANOMALY_REASON_COPY: Record<
-  FareQuoteAnomaly,
-  { title: string; guidance: string }
-> = {
-  quote_provider_unavailable: {
-    title: "暫時無法取得預估車資",
-    guidance: "等待報價服務恢復後，依伺服器提供的動作重新取得報價。",
-  },
-  quote_out_of_range: {
-    title: "預估車資超出可接受範圍",
-    guidance: "需由費率政策流程確認，不可人工輸入替代金額。",
-  },
-  route_unresolved: {
-    title: "尚無法確認預估路線",
-    guidance: "先完成路線解析，再依伺服器提供的動作重新取得報價。",
-  },
-  fare_policy_missing: {
-    title: "目前沒有可用的生效費率",
-    guidance: "需先完成費率生效流程，不可套用草稿或人工金額。",
-  },
-  calculation_mismatch: {
-    title: "車資計算結果需要重新確認",
-    guidance: "重新計算只能由正式報價服務執行，不可直接修改結果。",
-  },
-};
-
 export function resolveFareAnomalyPageState(input: {
   canRead: boolean;
   loading: boolean;
@@ -78,11 +52,6 @@ export function resolveRetryAction(
     };
   }
   return { ...serverAction };
-}
-
-export function formatFareMinor(value: number | null) {
-  if (value === null) return "未取得";
-  return `NT$ ${new Intl.NumberFormat("zh-TW").format(value / 100)}`;
 }
 
 export function formatRoute(item: FareQuoteAnomalyAdminView) {
