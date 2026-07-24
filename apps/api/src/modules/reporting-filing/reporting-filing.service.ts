@@ -4,6 +4,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  CreateMultiTaxiTripOperationalExportJobCommand,
   CreateReportJobCommand,
   DispatchDailyRecord,
   EvidenceSubjectGovernanceRecord,
@@ -11,6 +12,13 @@ import type {
   FilingPackageRecord,
   FilingPackageType,
   GenerateFilingPackageCommand,
+  MultiTaxiTripOperationalExportDownload,
+  MultiTaxiTripOperationalExportJobAccepted,
+  MultiTaxiTripOperationalExportJobStatus,
+  MultiTaxiTripOperationalExportJobView,
+  MultiTaxiTripOperationalExportPreview,
+  MultiTaxiTripOperationalExportRow,
+  MultiTaxiTripOperationalRecordQuery,
   OwnedOrderRecord,
   PartnerRevenueSummaryRowRecord,
   PackageItemRecord,
@@ -34,6 +42,7 @@ import type { DailyDispatchRecordQuery } from "../reporting/reporting.repository
 import {
   ReportingFilingRepository,
   type PersistReportingFilingChanges,
+  type MultiTaxiTripExportJobMetadata,
 } from "./reporting-filing.repository";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
@@ -76,6 +85,7 @@ type TenantMonthlyTripReportRow = {
 type ReportingJobRow =
   | DispatchRecordingIndexRow
   | DispatchDailyRecord
+  | MultiTaxiTripOperationalExportRow
   | SixMonthOperationsSummary
   | TenantMonthlyTripReportRow;
 
@@ -124,6 +134,7 @@ type StoredReportJob = ReportJobRecord & {
   rows: ReportingJobRow[];
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
   settlementMatrix: SettlementMatrixRecord[];
+  multiTaxiTripExport?: MultiTaxiTripExportJobMetadata;
 };
 
 type StoredFilingPackage = FilingPackageRecord & {
@@ -144,6 +155,12 @@ type SixMonthOperationsSummaryProvider = (filters: {
   businessArea?: string;
   serviceProductCode?: string;
 }) => Promise<SixMonthOperationsSummary[]> | SixMonthOperationsSummary[];
+
+const MULTI_TAXI_TRIP_EXPORT_JOB_TYPE = "multi_taxi_trip_records";
+const MULTI_TAXI_TRIP_EXPORT_SCOPE = "multi_taxi_records:export";
+const MAX_EXPORT_PURPOSE_LENGTH = 500;
+const MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH = 200;
+const MAX_EXPORT_QUERY_LENGTH = 200;
 
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
@@ -200,7 +217,11 @@ export class ReportingFilingService implements OnModuleInit {
         this.cloneStoredFilingPackage(filingPackage),
       );
       for (const job of this.reportJobs) {
-        if (job.status === "queued" || job.status === "running") {
+        if (
+          job.status === "pending" ||
+          job.status === "queued" ||
+          job.status === "running"
+        ) {
           this.scheduleReportJobCompletion(job.jobId);
         }
       }
@@ -236,6 +257,255 @@ export class ReportingFilingService implements OnModuleInit {
     provider: SixMonthOperationsSummaryProvider,
   ) {
     this.sixMonthOperationsSummaryProvider = provider;
+  }
+
+  previewMultiTaxiTripExport(
+    scope: MultiTaxiTripOperationalRecordQuery,
+    recordCount: number,
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): MultiTaxiTripOperationalExportPreview {
+    const { actorId, policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const normalizedScope = this.normalizeMultiTaxiTripExportScope(scope);
+    if (!Number.isSafeInteger(recordCount) || recordCount < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_EXPORT_RECORD_COUNT_INVALID",
+        "Export preview recordCount must be a non-negative integer.",
+      );
+    }
+
+    const preview: MultiTaxiTripOperationalExportPreview = {
+      scope: normalizedScope,
+      recordCount,
+      format: "csv",
+      purposeRequired: true,
+      previewedAt: new Date().toISOString(),
+    };
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "preview_multi_taxi_trip_export",
+        resourceType: "report_job",
+        resourceId: null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
+          actorId,
+          scope: normalizedScope,
+          recordCount,
+          format: preview.format,
+        }),
+      },
+      requestId,
+      identity,
+      null,
+      policy,
+    );
+    return preview;
+  }
+
+  createMultiTaxiTripExportJob(
+    command: CreateMultiTaxiTripOperationalExportJobCommand,
+    rows: readonly MultiTaxiTripOperationalExportRow[],
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): MultiTaxiTripOperationalExportJobAccepted {
+    const { actorId, policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const scope = this.normalizeMultiTaxiTripExportScope(command.scope ?? {});
+    const purpose = this.normalizeRequiredText(
+      command.purpose,
+      "purpose",
+      MAX_EXPORT_PURPOSE_LENGTH,
+    );
+    const idempotencyKey = this.normalizeRequiredText(
+      command.idempotencyKey,
+      "idempotencyKey",
+      MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH,
+    );
+    const existing = this.reportJobs.find(
+      (job) =>
+        job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE &&
+        job.multiTaxiTripExport?.requestedByActorId === actorId &&
+        job.multiTaxiTripExport.idempotencyKey === idempotencyKey,
+    );
+
+    if (existing) {
+      const existingMetadata =
+        this.requireMultiTaxiTripExportMetadata(existing);
+      if (
+        this.stableSerialize(existingMetadata.scope) !==
+          this.stableSerialize(scope) ||
+        existingMetadata.purpose !== purpose
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "MULTI_TAXI_EXPORT_IDEMPOTENCY_CONFLICT",
+          "The idempotency key is already bound to a different export request.",
+          {
+            jobId: existing.jobId,
+          },
+        );
+      }
+      this.recordArtifactAccessAudit(
+        {
+          actionName: "replay_multi_taxi_trip_export_job",
+          resourceType: "report_job",
+          resourceId: existing.jobId,
+          newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
+            actorId,
+            status: existing.status,
+            recordCount: existingMetadata.recordCount,
+          }),
+        },
+        requestId,
+        identity,
+        null,
+        policy,
+      );
+      return {
+        jobId: existing.jobId,
+        status: this.toMultiTaxiTripExportStatus(existing.status),
+        idempotentReplay: true,
+      };
+    }
+
+    const createdAt = new Date().toISOString();
+    const metadata: MultiTaxiTripExportJobMetadata = {
+      scope,
+      purpose,
+      idempotencyKey,
+      requestedByActorId: actorId,
+      recordCount: rows.length,
+    };
+    const job: StoredReportJob = {
+      jobId: `JOB-${randomUUID()}`,
+      jobType: MULTI_TAXI_TRIP_EXPORT_JOB_TYPE,
+      format: "csv",
+      status: "pending",
+      filters: { ...scope },
+      artifact: null,
+      rows: rows.map((row) => ({ ...row })),
+      partnerRevenueRows: [],
+      settlementMatrix: [],
+      multiTaxiTripExport: metadata,
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    this.reportJobs = [job, ...this.reportJobs];
+    this.persistChanges(
+      {
+        reportJobs: [this.cloneStoredReportJob(job)],
+      },
+      "queue_multi_taxi_trip_export",
+    );
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "create_multi_taxi_trip_export_job",
+        resourceType: "report_job",
+        resourceId: job.jobId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
+          actorId,
+          status: job.status,
+          scope,
+          purpose,
+          recordCount: metadata.recordCount,
+          format: job.format,
+        }),
+      },
+      requestId,
+      identity,
+      null,
+      policy,
+    );
+    this.scheduleReportJobCompletion(job.jobId, requestId);
+
+    return {
+      jobId: job.jobId,
+      status: "pending",
+      idempotentReplay: false,
+    };
+  }
+
+  getMultiTaxiTripExportJob(
+    jobId: string,
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): MultiTaxiTripOperationalExportJobView {
+    const { policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const job = this.requireMultiTaxiTripExportJob(jobId);
+    const view = this.toMultiTaxiTripExportView(job);
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "read_multi_taxi_trip_export_job",
+        resourceType: "report_job",
+        resourceId: job.jobId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+          status: view.status,
+          recordCount: view.recordCount,
+          downloadAvailable: view.downloadAvailable,
+        }),
+      },
+      requestId,
+      identity,
+      null,
+      policy,
+    );
+    return view;
+  }
+
+  issueMultiTaxiTripExportDownload(
+    jobId: string,
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): MultiTaxiTripOperationalExportDownload {
+    const { policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const job = this.requireMultiTaxiTripExportJob(jobId);
+    const metadata = this.requireMultiTaxiTripExportMetadata(job);
+    if (job.status !== "completed" || !job.artifact) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MULTI_TAXI_EXPORT_NOT_READY",
+        "The export is not ready for download.",
+        {
+          jobId,
+          status: job.status,
+        },
+      );
+    }
+
+    const download = createControlledDownloadMetadata({
+      kind: "multi-taxi-trip-records",
+      subjectId: job.artifact.artifactId,
+      manifestHash: job.artifact.manifestHash,
+      host: this.downloadHost,
+      keyId: this.downloadSigningKeyId,
+      signingSecret: this.downloadSigningSecret,
+      ttlMinutes: this.downloadExpiryMinutes,
+      signatureVersion: this.downloadSignatureVersion,
+    });
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "issue_multi_taxi_trip_export_download",
+        resourceType: "report_artifact",
+        resourceId: job.artifact.artifactId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "download", {
+          jobId,
+          recordCount: metadata.recordCount,
+          manifestHash: job.artifact.manifestHash,
+          expiresAt: download.expiresAt,
+          ttlMinutes: download.ttlMinutes,
+        }),
+      },
+      requestId,
+      identity,
+      null,
+      policy,
+    );
+    return {
+      jobId,
+      recordCount: metadata.recordCount,
+      manifestHash: job.artifact.manifestHash,
+      download,
+    };
   }
 
   createReportJob(
@@ -570,7 +840,12 @@ export class ReportingFilingService implements OnModuleInit {
     const job = this.reportJobs.find(
       (candidateJob) => candidateJob.jobId === jobId,
     );
-    if (!job || (job.status !== "queued" && job.status !== "running")) {
+    if (
+      !job ||
+      (job.status !== "pending" &&
+        job.status !== "queued" &&
+        job.status !== "running")
+    ) {
       return;
     }
 
@@ -630,16 +905,31 @@ export class ReportingFilingService implements OnModuleInit {
       job.partnerRevenueRows = this.buildPartnerRevenueSummaryRows();
     }
 
-    const artifactPayload = {
-      jobId: job.jobId,
-      jobType: job.jobType,
-      format: job.format,
-      filters: job.filters,
-      rows: job.rows,
-      partnerRevenueRows: job.partnerRevenueRows,
-      settlementMatrix: buildSettlementMatrix(),
-    };
-    job.settlementMatrix = buildSettlementMatrix();
+    const artifactPayload =
+      job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE
+        ? {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            filters: job.filters,
+            purpose: this.requireMultiTaxiTripExportMetadata(job).purpose,
+            recordCount:
+              this.requireMultiTaxiTripExportMetadata(job).recordCount,
+            rows: job.rows,
+          }
+        : {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            filters: job.filters,
+            rows: job.rows,
+            partnerRevenueRows: job.partnerRevenueRows,
+            settlementMatrix: buildSettlementMatrix(),
+          };
+    job.settlementMatrix =
+      job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE
+        ? []
+        : buildSettlementMatrix();
     job.artifact = this.createArtifact("report", job.jobId, artifactPayload);
     job.status = "completed";
     job.updatedAt = new Date().toISOString();
@@ -1153,7 +1443,10 @@ export class ReportingFilingService implements OnModuleInit {
 
   private cloneReportJob(job: StoredReportJob): ReportJobView {
     return {
-      ...job,
+      jobId: job.jobId,
+      jobType: job.jobType,
+      format: job.format,
+      status: job.status,
       filters: { ...job.filters },
       artifact: job.artifact
         ? {
@@ -1171,6 +1464,8 @@ export class ReportingFilingService implements OnModuleInit {
         orderSources: [...row.orderSources],
         reportingArtifacts: [...row.reportingArtifacts],
       })),
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
     };
   }
 
@@ -1178,6 +1473,14 @@ export class ReportingFilingService implements OnModuleInit {
     return {
       ...job,
       filters: { ...job.filters },
+      ...(job.multiTaxiTripExport
+        ? {
+            multiTaxiTripExport: {
+              ...job.multiTaxiTripExport,
+              scope: { ...job.multiTaxiTripExport.scope },
+            },
+          }
+        : {}),
       artifact: job.artifact
         ? {
             ...job.artifact,
@@ -1259,6 +1562,151 @@ export class ReportingFilingService implements OnModuleInit {
       );
     }
     return job;
+  }
+
+  private requireMultiTaxiTripExportJob(jobId: string) {
+    const job = this.requireReportJob(jobId);
+    if (
+      job.jobType !== MULTI_TAXI_TRIP_EXPORT_JOB_TYPE ||
+      !job.multiTaxiTripExport
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "MULTI_TAXI_EXPORT_JOB_NOT_FOUND",
+        "Multi-taxi trip export job was not found.",
+        {
+          jobId,
+        },
+      );
+    }
+    return job;
+  }
+
+  private requireMultiTaxiTripExportMetadata(job: StoredReportJob) {
+    if (!job.multiTaxiTripExport) {
+      throw new Error(
+        `Report job ${job.jobId} is missing multi-taxi export metadata.`,
+      );
+    }
+    return job.multiTaxiTripExport;
+  }
+
+  private toMultiTaxiTripExportView(
+    job: StoredReportJob,
+  ): MultiTaxiTripOperationalExportJobView {
+    const metadata = this.requireMultiTaxiTripExportMetadata(job);
+    return {
+      jobId: job.jobId,
+      status: this.toMultiTaxiTripExportStatus(job.status),
+      scope: { ...metadata.scope },
+      purpose: metadata.purpose,
+      recordCount: metadata.recordCount,
+      requestedByActorId: metadata.requestedByActorId,
+      downloadAvailable: job.status === "completed" && Boolean(job.artifact),
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    };
+  }
+
+  private toMultiTaxiTripExportStatus(
+    status: ReportJobRecord["status"],
+  ): MultiTaxiTripOperationalExportJobStatus {
+    if (status === "queued") {
+      return "pending";
+    }
+    if (
+      status === "pending" ||
+      status === "running" ||
+      status === "completed" ||
+      status === "failed"
+    ) {
+      return status;
+    }
+    throw new Error(`Unsupported multi-taxi export job status: ${status}`);
+  }
+
+  private assertMultiTaxiTripExportAccess(
+    identity: EvidenceAccessIdentity | null,
+  ) {
+    const actorId = identity?.actorId?.trim();
+    if (
+      identity?.realm !== "platform" ||
+      identity.actorType !== "platform_admin" ||
+      !actorId ||
+      !identity.scopes.includes(MULTI_TAXI_TRIP_EXPORT_SCOPE)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "MULTI_TAXI_EXPORT_FORBIDDEN",
+        "A platform actor with multi_taxi_records:export is required.",
+      );
+    }
+    return {
+      actorId,
+      policy: assertEvidenceAccess({
+        family: "report_artifact",
+        identity,
+      }),
+    };
+  }
+
+  private normalizeMultiTaxiTripExportScope(
+    scope: MultiTaxiTripOperationalRecordQuery,
+  ): MultiTaxiTripOperationalRecordQuery {
+    const normalized: MultiTaxiTripOperationalRecordQuery = {};
+    const month = scope.month?.trim();
+    if (month) {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "MULTI_TAXI_EXPORT_MONTH_INVALID",
+          "Export month must use YYYY-MM.",
+        );
+      }
+      normalized.month = month;
+    }
+    const query = scope.q?.trim();
+    if (query) {
+      if (query.length > MAX_EXPORT_QUERY_LENGTH) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "MULTI_TAXI_EXPORT_QUERY_TOO_LONG",
+          `Export q must not exceed ${MAX_EXPORT_QUERY_LENGTH} characters.`,
+        );
+      }
+      normalized.q = query;
+    }
+    return normalized;
+  }
+
+  private normalizeRequiredText(
+    value: string | null | undefined,
+    field: string,
+    maxLength: number,
+  ) {
+    const normalized = value?.trim();
+    if (!normalized) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_EXPORT_FIELD_REQUIRED",
+        `${field} is required.`,
+        {
+          field,
+        },
+      );
+    }
+    if (normalized.length > maxLength) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_EXPORT_FIELD_TOO_LONG",
+        `${field} must not exceed ${maxLength} characters.`,
+        {
+          field,
+          maxLength,
+        },
+      );
+    }
+    return normalized;
   }
 
   private requireFilingPackage(packageId: string) {
