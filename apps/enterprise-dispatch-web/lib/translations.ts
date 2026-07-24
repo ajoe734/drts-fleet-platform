@@ -388,6 +388,8 @@ const en = {
   "fixture.place.nangangRdc": "Nangang R&D Center",
   "fixture.place.nangangRdcFull":
     "Nangang R&D Center · No. 19-2, Sanchong Rd., Nangang Dist., Taipei",
+  "fixture.place.songshanT1Full":
+    "Taipei Songshan Airport T1 · No. 340-10, Dunhua N. Rd., Songshan Dist., Taipei",
   "fixture.place.taoyuanT1Arrival": "Taoyuan Airport T1 · Arrivals Hall",
   "fixture.place.taoyuanT2": "Taoyuan Airport T2",
   "fixture.place.taoyuanT2Full":
@@ -950,6 +952,8 @@ const zh: Record<TranslationKey, string> = {
   "fixture.place.taipeiHqFull": "台北總部 · 台北市信義區松高路 19 號",
   "fixture.place.nangangRdc": "南港研發中心",
   "fixture.place.nangangRdcFull": "南港研發中心 · 台北市南港區三重路 19-2 號",
+  "fixture.place.songshanT1Full":
+    "臺北松山機場 T1 · 台北市松山區敦化北路 340-10 號",
   "fixture.place.taoyuanT1Arrival": "桃園機場 T1 · 入境大廳",
   "fixture.place.taoyuanT2": "桃園機場 T2",
   "fixture.place.taoyuanT2Full": "桃園機場 T2 · 桃園市大園區航站南路 9 號",
