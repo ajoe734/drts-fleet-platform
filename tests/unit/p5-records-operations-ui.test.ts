@@ -145,7 +145,7 @@ describe("P5 records operations production boundaries", () => {
 
   it("does not invent legal-hold state absent from the canonical read", () => {
     expect(recordsComponentSource).not.toMatch(/legalHold|legal_hold/);
-    expect(recordsComponentSource).toContain('tx("hold.body")');
-    expect(recordsComponentSource).toContain('tx("hold.pending")');
+    expect(recordsComponentSource).toContain('t("hold.body")');
+    expect(recordsComponentSource).toContain('t("hold.pending")');
   });
 });

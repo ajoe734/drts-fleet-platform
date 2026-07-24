@@ -2,9 +2,10 @@
 
 - Task-ID: `P5-RET-OPS-UI-001`
 - Includes: records/export portion of `P5-COM-UI-04..05`
-- Branch: `codex/p5-export-001-backend`
+- Branch: `codex/p5-ret-ops-ui-001-final`
 - Parent implementation: `5b81edb42f74bd0a22b175fabe9b060e9519aadd`
-- Authoritative product head: `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`
+- Merged requirements baseline: `c5df24a41ba8ed9c790649719dd731b560cde6fd`
+- Integration parent: `codex/p5-rate-ui-001-final`
 - Verification date: `2026-07-24`
 - Deployment: not performed
 

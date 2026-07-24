@@ -4,10 +4,10 @@
 
 - Task: `P5-EXPORT-001`
 - Fleet: F
-- Authoritative head: `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`
+- Merged requirements baseline: `c5df24a41ba8ed9c790649719dd731b560cde6fd`
 - Authoritative PR: `#1131`
-- Working branch: `codex/p5-export-001-backend`
-- Worktree: `/tmp/drts-p5-export-001`
+- Working branch: `codex/p5-ret-ops-ui-001-final`
+- Integration order: authorization, rating governance, then controlled export
 - Initial worktree status: clean
 
 ## Landed baseline
@@ -78,3 +78,7 @@ Explicitly excluded:
 - deployment or publication.
 
 Legal-hold create/release remains `command-pending`.
+
+The backend was replayed after rating governance. Shared controller and test
+conflicts were resolved by retaining both rating authority and controlled
+export routes; neither command surface was replaced.

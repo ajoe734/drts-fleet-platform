@@ -81,7 +81,7 @@ export function RecordsOperationsConsole() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
-  const tx = (
+  const t = (
     key: RecordsTranslationKey,
     params?: Record<string, string | number>,
   ) => recordsT(locale, key, params);
@@ -125,7 +125,7 @@ export function RecordsOperationsConsole() {
       setSelectedRecordId(null);
       setRecordsLoading(false);
       setRecordsError({
-        message: tx("error.permissionBody"),
+        message: t("error.permissionBody"),
         permission: true,
       });
       return;
@@ -156,7 +156,7 @@ export function RecordsOperationsConsole() {
         setRecords([]);
         setSelectedRecordId(null);
         setRecordsError({
-          message: getApiErrorMessage(error, tx("error.title")),
+          message: getApiErrorMessage(error, t("error.title")),
           permission: isPermissionError(error),
         });
       } finally {
@@ -198,7 +198,7 @@ export function RecordsOperationsConsole() {
         }
       } catch (error) {
         if (active) {
-          setExportError(getApiErrorMessage(error, tx("export.errorTitle")));
+          setExportError(getApiErrorMessage(error, t("export.errorTitle")));
         }
       }
     }
@@ -249,7 +249,7 @@ export function RecordsOperationsConsole() {
       setExportJob(null);
       setIdempotencyKey(createExportIdempotencyKey());
     } catch (error) {
-      setExportError(getApiErrorMessage(error, tx("export.errorTitle")));
+      setExportError(getApiErrorMessage(error, t("export.errorTitle")));
     } finally {
       setExportBusy(null);
     }
@@ -257,11 +257,11 @@ export function RecordsOperationsConsole() {
 
   async function createExportJob() {
     if (!exportPurpose.trim()) {
-      setExportError(tx("export.validationPurpose"));
+      setExportError(t("export.validationPurpose"));
       return;
     }
     if (!exportPreview) {
-      setExportError(tx("export.previewMissing"));
+      setExportError(t("export.previewMissing"));
       return;
     }
 
@@ -291,7 +291,7 @@ export function RecordsOperationsConsole() {
       );
       setExportJob(detail);
     } catch (error) {
-      setExportError(getApiErrorMessage(error, tx("export.errorTitle")));
+      setExportError(getApiErrorMessage(error, t("export.errorTitle")));
     } finally {
       setExportBusy(null);
     }
@@ -311,7 +311,7 @@ export function RecordsOperationsConsole() {
         ),
       );
     } catch (error) {
-      setExportError(getApiErrorMessage(error, tx("export.errorTitle")));
+      setExportError(getApiErrorMessage(error, t("export.errorTitle")));
     } finally {
       setExportBusy(null);
     }
@@ -337,7 +337,7 @@ export function RecordsOperationsConsole() {
         },
       });
     } catch (error) {
-      setExportError(getApiErrorMessage(error, tx("export.errorTitle")));
+      setExportError(getApiErrorMessage(error, t("export.errorTitle")));
     } finally {
       setExportBusy(null);
     }
@@ -345,7 +345,7 @@ export function RecordsOperationsConsole() {
 
   const recordColumns: CanvasTableColumn<OperationalRecordRow>[] = [
     {
-      h: tx("table.order"),
+      h: t("table.order"),
       w: 190,
       r: (row) => (
         <div className={styles.orderCell}>
@@ -355,7 +355,7 @@ export function RecordsOperationsConsole() {
       ),
     },
     {
-      h: tx("table.plate"),
+      h: t("table.plate"),
       w: 120,
       r: (row) => (
         <div className={styles.orderCell}>
@@ -365,29 +365,29 @@ export function RecordsOperationsConsole() {
       ),
     },
     {
-      h: tx("table.reserved"),
+      h: t("table.reserved"),
       w: 178,
       r: (row) =>
         unavailable(
           formatRecordDateTime(row.reservedAt, locale),
-          tx("table.unavailable"),
+          t("table.unavailable"),
         ),
     },
     {
-      h: tx("table.fare"),
+      h: t("table.fare"),
       w: 118,
       align: "right",
       r: (row) => formatRecordMoney(row.actualFareMinor, locale),
     },
     {
-      h: tx("table.retention"),
+      h: t("table.retention"),
       w: 178,
       r: (row) => (
         <div className={styles.orderCell}>
           <span>
             {unavailable(
               formatRecordDateTime(row.retainUntil, locale),
-              tx("table.unavailable"),
+              t("table.unavailable"),
             )}
           </span>
           <CanvasPill
@@ -395,14 +395,14 @@ export function RecordsOperationsConsole() {
             tone={isRetentionFloorMet(row) ? "success" : "warn"}
           >
             {isRetentionFloorMet(row)
-              ? tx("retention.pass")
-              : tx("retention.fail")}
+              ? t("retention.pass")
+              : t("retention.fail")}
           </CanvasPill>
         </div>
       ),
     },
     {
-      h: tx("table.action"),
+      h: t("table.action"),
       w: 104,
       r: (row) => (
         <CanvasBtn
@@ -412,7 +412,7 @@ export function RecordsOperationsConsole() {
           icon="search"
           onClick={() => setSelectedRecordId(row.recordId)}
         >
-          {tx("table.detail")}
+          {t("table.detail")}
         </CanvasBtn>
       ),
     },
@@ -426,27 +426,27 @@ export function RecordsOperationsConsole() {
     >
       <header className={styles.hero}>
         <div>
-          <p className={styles.eyebrow}>{tx("page.eyebrow")}</p>
-          <h1 className={styles.title}>{tx("page.title")}</h1>
-          <p className={styles.subtitle}>{tx("page.subtitle")}</p>
+          <p className={styles.eyebrow}>{t("page.eyebrow")}</p>
+          <h1 className={styles.title}>{t("page.title")}</h1>
+          <p className={styles.subtitle}>{t("page.subtitle")}</p>
         </div>
         <div className={styles.heroMeta}>
-          <Stat value={records.length} label={tx("stats.records")} />
+          <Stat value={records.length} label={t("stats.records")} />
           <Stat
             value={`${retentionCoverage.percent}%`}
-            label={tx("stats.retention")}
+            label={t("stats.retention")}
           />
-          <Stat value="UTC+8" label={tx("stats.timezone")} />
+          <Stat value="UTC+8" label={t("stats.timezone")} />
         </div>
-        <span className={styles.screenId}>{tx("page.screen")}</span>
+        <span className={styles.screenId}>{t("page.screen")}</span>
       </header>
 
       <div className={styles.workspace}>
         <main className={styles.mainColumn}>
           <CanvasCard
             theme={theme}
-            title={tx("query.title")}
-            subtitle={tx("query.subtitle")}
+            title={t("query.title")}
+            subtitle={t("query.subtitle")}
             actions={
               <CanvasBtn
                 theme={theme}
@@ -454,13 +454,13 @@ export function RecordsOperationsConsole() {
                 icon="reports"
                 onClick={() => setExportOpen((current) => !current)}
               >
-                {exportOpen ? tx("export.close") : tx("export.open")}
+                {exportOpen ? t("export.close") : t("export.open")}
               </CanvasBtn>
             }
           >
             <form className={styles.queryForm} onSubmit={applyQuery}>
               <label className={styles.field}>
-                <span className={styles.fieldLabel}>{tx("query.month")}</span>
+                <span className={styles.fieldLabel}>{t("query.month")}</span>
                 <input
                   className={styles.input}
                   type="month"
@@ -474,12 +474,12 @@ export function RecordsOperationsConsole() {
                 />
               </label>
               <label className={styles.field}>
-                <span className={styles.fieldLabel}>{tx("query.search")}</span>
+                <span className={styles.fieldLabel}>{t("query.search")}</span>
                 <input
                   className={styles.input}
                   type="search"
                   value={draftScope.q ?? ""}
-                  placeholder={tx("query.searchPlaceholder")}
+                  placeholder={t("query.searchPlaceholder")}
                   onChange={(event) =>
                     setDraftScope((current) => ({
                       ...current,
@@ -495,30 +495,30 @@ export function RecordsOperationsConsole() {
                 type="submit"
                 disabled={recordsLoading}
               >
-                {recordsLoading ? tx("query.loading") : tx("query.apply")}
+                {recordsLoading ? t("query.loading") : t("query.apply")}
               </CanvasBtn>
             </form>
             <div className={styles.toolbarMeta}>
               <CanvasPill theme={theme} tone="info" dot>
-                {tx("query.resultCount", { count: records.length })}
+                {t("query.resultCount", { count: records.length })}
               </CanvasPill>
               <CanvasPill
                 theme={theme}
                 tone={canAttemptRead ? "success" : "warn"}
               >
-                {tx("query.readScope")} ·{" "}
+                {t("query.readScope")} ·{" "}
                 {featureScopesDeclared
-                  ? tx(canAttemptRead ? "scope.available" : "scope.denied")
-                  : tx("scope.serverChecked")}
+                  ? t(canAttemptRead ? "scope.available" : "scope.denied")
+                  : t("scope.serverChecked")}
               </CanvasPill>
               <CanvasPill
                 theme={theme}
                 tone={canAttemptExport ? "success" : "warn"}
               >
-                {tx("query.exportScope")} ·{" "}
+                {t("query.exportScope")} ·{" "}
                 {featureScopesDeclared
-                  ? tx(canAttemptExport ? "scope.available" : "scope.denied")
-                  : tx("scope.serverChecked")}
+                  ? t(canAttemptExport ? "scope.available" : "scope.denied")
+                  : t("scope.serverChecked")}
               </CanvasPill>
             </div>
           </CanvasCard>
@@ -530,12 +530,12 @@ export function RecordsOperationsConsole() {
               icon="warn"
               title={
                 recordsError.permission
-                  ? tx("error.permissionTitle")
-                  : tx("error.title")
+                  ? t("error.permissionTitle")
+                  : t("error.title")
               }
               body={
                 recordsError.permission
-                  ? tx("error.permissionBody")
+                  ? t("error.permissionBody")
                   : recordsError.message
               }
             />
@@ -543,12 +543,12 @@ export function RecordsOperationsConsole() {
 
           <CanvasCard theme={theme} padding={0}>
             {recordsLoading ? (
-              <div style={{ padding: 28 }}>{tx("query.loading")}</div>
+              <div style={{ padding: 28 }}>{t("query.loading")}</div>
             ) : records.length === 0 ? (
               <CanvasEmptyState
                 theme={theme}
-                title={tx("empty.title")}
-                body={tx("empty.body")}
+                title={t("empty.title")}
+                body={t("empty.body")}
               />
             ) : (
               <>
@@ -561,10 +561,10 @@ export function RecordsOperationsConsole() {
                 </div>
                 <div className={styles.tableFooter}>
                   <span>
-                    {tx("query.resultCount", { count: records.length })}
+                    {t("query.resultCount", { count: records.length })}
                   </span>
                   <span>
-                    {TAIPEI_TIME_ZONE} · {tx("retention.floorValue")}
+                    {TAIPEI_TIME_ZONE} · {t("retention.floorValue")}
                   </span>
                 </div>
               </>
@@ -573,7 +573,7 @@ export function RecordsOperationsConsole() {
         </main>
 
         <aside className={styles.sideColumn}>
-          <RecordDetail record={selectedRecord} locale={locale} tx={tx} />
+          <RecordDetail record={selectedRecord} locale={locale} t={t} />
         </aside>
       </div>
 
@@ -585,8 +585,8 @@ export function RecordsOperationsConsole() {
         >
           <div className={styles.exportHeader}>
             <div>
-              <h2>{tx("export.title")}</h2>
-              <p>{tx("export.subtitle")}</p>
+              <h2>{t("export.title")}</h2>
+              <p>{t("export.subtitle")}</p>
             </div>
             <CanvasBtn
               theme={theme}
@@ -594,7 +594,7 @@ export function RecordsOperationsConsole() {
               variant="ghost"
               onClick={() => setExportOpen(false)}
             >
-              {tx("export.close")}
+              {t("export.close")}
             </CanvasBtn>
           </div>
 
@@ -602,8 +602,8 @@ export function RecordsOperationsConsole() {
             theme={theme}
             tone="warn"
             icon="warn"
-            title={tx("export.noticeTitle")}
-            body={tx("export.noticeBody")}
+            title={t("export.noticeTitle")}
+            body={t("export.noticeBody")}
           />
           {!canAttemptExport ? (
             <div style={{ marginTop: 10 }}>
@@ -611,7 +611,7 @@ export function RecordsOperationsConsole() {
                 theme={theme}
                 tone="warn"
                 icon="audit"
-                body={tx("export.permission")}
+                body={t("export.permission")}
               />
             </div>
           ) : null}
@@ -621,7 +621,7 @@ export function RecordsOperationsConsole() {
                 theme={theme}
                 tone="danger"
                 icon="warn"
-                title={tx("export.errorTitle")}
+                title={t("export.errorTitle")}
                 body={exportError}
               />
             </div>
@@ -629,22 +629,22 @@ export function RecordsOperationsConsole() {
 
           <div className={styles.exportGrid}>
             <div className={styles.scopeBox}>
-              <p className={styles.sectionLabel}>{tx("export.scopeTitle")}</p>
+              <p className={styles.sectionLabel}>{t("export.scopeTitle")}</p>
               <div className={styles.scopeRows}>
                 <ScopeRow
-                  label={tx("export.scopeMonth")}
-                  value={appliedScope.month ?? tx("export.scopeAll")}
+                  label={t("export.scopeMonth")}
+                  value={appliedScope.month ?? t("export.scopeAll")}
                 />
                 <ScopeRow
-                  label={tx("export.scopeSearch")}
-                  value={appliedScope.q ?? tx("export.scopeAll")}
+                  label={t("export.scopeSearch")}
+                  value={appliedScope.q ?? t("export.scopeAll")}
                 />
                 <ScopeRow
-                  label={tx("export.previewCount")}
+                  label={t("export.previewCount")}
                   value={
                     exportPreview
                       ? String(exportPreview.recordCount)
-                      : tx("export.previewMissing")
+                      : t("export.previewMissing")
                   }
                 />
               </div>
@@ -657,26 +657,24 @@ export function RecordsOperationsConsole() {
                   onClick={() => void previewExport()}
                 >
                   {exportBusy === "preview"
-                    ? tx("export.previewing")
-                    : tx("export.preview")}
+                    ? t("export.previewing")
+                    : t("export.preview")}
                 </CanvasBtn>
               </div>
             </div>
 
             <div className={styles.jobBox}>
               <label className={styles.field}>
-                <span className={styles.fieldLabel}>
-                  {tx("export.purpose")}
-                </span>
+                <span className={styles.fieldLabel}>{t("export.purpose")}</span>
                 <textarea
                   className={styles.textarea}
                   value={exportPurpose}
-                  placeholder={tx("export.purposePlaceholder")}
+                  placeholder={t("export.purposePlaceholder")}
                   disabled={Boolean(exportAccepted)}
                   onChange={(event) => setExportPurpose(event.target.value)}
                 />
               </label>
-              <p className={styles.helper}>{tx("export.purposeHelp")}</p>
+              <p className={styles.helper}>{t("export.purposeHelp")}</p>
               <div className={styles.actionRow}>
                 <CanvasBtn
                   theme={theme}
@@ -691,8 +689,8 @@ export function RecordsOperationsConsole() {
                   onClick={() => void createExportJob()}
                 >
                   {exportBusy === "create"
-                    ? tx("export.creating")
-                    : tx("export.create")}
+                    ? t("export.creating")
+                    : t("export.create")}
                 </CanvasBtn>
                 {exportAccepted ? (
                   <CanvasBtn
@@ -701,7 +699,7 @@ export function RecordsOperationsConsole() {
                     disabled={exportBusy !== null}
                     onClick={() => void refreshExportStatus()}
                   >
-                    {tx("export.refresh")}
+                    {t("export.refresh")}
                   </CanvasBtn>
                 ) : null}
               </div>
@@ -710,7 +708,7 @@ export function RecordsOperationsConsole() {
                 accepted={exportAccepted}
                 detail={exportJob}
                 locale={locale}
-                tx={tx}
+                t={t}
               />
 
               {currentJobStatus === "completed" && !issuedDownload ? (
@@ -723,8 +721,8 @@ export function RecordsOperationsConsole() {
                     onClick={() => void issueDownload()}
                   >
                     {exportBusy === "download"
-                      ? tx("export.downloadPreparing")
-                      : tx("export.downloadPrepare")}
+                      ? t("export.downloadPreparing")
+                      : t("export.downloadPrepare")}
                   </CanvasBtn>
                 </div>
               ) : null}
@@ -735,7 +733,7 @@ export function RecordsOperationsConsole() {
                   data-testid="controlled-download-ready"
                 >
                   <CanvasPill theme={theme} tone="success" dot>
-                    {tx("export.downloadReady")}
+                    {t("export.downloadReady")}
                   </CanvasPill>
                   <div>
                     <a
@@ -744,17 +742,17 @@ export function RecordsOperationsConsole() {
                       target="_blank"
                       rel="noreferrer noopener"
                     >
-                      {tx("export.downloadLink")}
+                      {t("export.downloadLink")}
                     </a>
                   </div>
                   <div className={styles.downloadMeta}>
-                    {tx("export.downloadExpiry")}:{" "}
+                    {t("export.downloadExpiry")}:{" "}
                     {formatRecordDateTime(
                       issuedDownload.download.expiresAt,
                       locale,
-                    ) ?? tx("table.unavailable")}
+                    ) ?? t("table.unavailable")}
                     <br />
-                    {tx("export.downloadPolicy")}
+                    {t("export.downloadPolicy")}
                   </div>
                 </div>
               ) : null}
@@ -767,7 +765,7 @@ export function RecordsOperationsConsole() {
                     variant="ghost"
                     onClick={resetExportWorkflow}
                   >
-                    {tx("export.reset")}
+                    {t("export.reset")}
                   </CanvasBtn>
                 </div>
               ) : null}
@@ -800,11 +798,11 @@ function ScopeRow({ label, value }: { label: string; value: string }) {
 function RecordDetail({
   record,
   locale,
-  tx,
+  t,
 }: {
   record: OperationalRecordRow | null;
   locale: "zh" | "en";
-  tx: (
+  t: (
     key: RecordsTranslationKey,
     params?: Record<string, string | number>,
   ) => string;
@@ -813,26 +811,26 @@ function RecordDetail({
     return (
       <CanvasCard
         theme={theme}
-        title={tx("detail.title")}
-        subtitle={tx("detail.subtitle")}
+        title={t("detail.title")}
+        subtitle={t("detail.subtitle")}
       >
         <CanvasEmptyState
           theme={theme}
-          title={tx("detail.title")}
-          body={tx("detail.empty")}
+          title={t("detail.title")}
+          body={t("detail.empty")}
         />
       </CanvasCard>
     );
   }
 
-  const missing = tx("table.unavailable");
+  const missing = t("table.unavailable");
   const retentionMet = isRetentionFloorMet(record);
   return (
     <div className={styles.detailStack} data-testid="record-detail">
       <CanvasCard
         theme={theme}
-        title={tx("detail.title")}
-        subtitle={tx("detail.subtitle")}
+        title={t("detail.title")}
+        subtitle={t("detail.subtitle")}
       >
         <div className={styles.detailBand}>
           <div>
@@ -845,131 +843,131 @@ function RecordDetail({
         </div>
 
         <p className={styles.sectionLabel} style={{ marginTop: 14 }}>
-          {tx("table.order")}
+          {t("table.order")}
         </p>
         <CanvasDL
           theme={theme}
           cols={1}
           items={[
-            { k: tx("detail.order"), v: record.orderNo, mono: true },
-            { k: tx("detail.orderId"), v: record.orderId, mono: true },
-            { k: tx("detail.tripId"), v: record.tripId, mono: true },
+            { k: t("detail.order"), v: record.orderNo, mono: true },
+            { k: t("detail.orderId"), v: record.orderId, mono: true },
+            { k: t("detail.tripId"), v: record.tripId, mono: true },
             {
-              k: tx("detail.assignmentId"),
+              k: t("detail.assignmentId"),
               v: record.assignmentId ?? missing,
               mono: true,
             },
-            { k: tx("detail.vehicleId"), v: record.vehicleId, mono: true },
-            { k: tx("detail.plate"), v: record.plateNo, mono: true },
+            { k: t("detail.vehicleId"), v: record.vehicleId, mono: true },
+            { k: t("detail.plate"), v: record.plateNo, mono: true },
             {
-              k: tx("detail.reserved"),
+              k: t("detail.reserved"),
               v: formatRecordDateTime(record.reservedAt, locale) ?? missing,
             },
             {
-              k: tx("detail.pickup"),
+              k: t("detail.pickup"),
               v: formatRecordDateTime(record.pickupAt, locale) ?? missing,
             },
             {
-              k: tx("detail.dropoff"),
+              k: t("detail.dropoff"),
               v: formatRecordDateTime(record.dropoffAt, locale) ?? missing,
             },
           ]}
         />
 
         <p className={styles.sectionLabel} style={{ marginTop: 14 }}>
-          {tx("detail.routeSource")}
+          {t("detail.routeSource")}
         </p>
         <CanvasDL
           theme={theme}
           cols={1}
           items={[
-            { k: tx("detail.routeSource"), v: record.route.source },
+            { k: t("detail.routeSource"), v: record.route.source },
             {
-              k: tx("detail.routeDistance"),
+              k: t("detail.routeDistance"),
               v: formatRecordDistance(record.route.distanceMeters) ?? missing,
             },
             {
-              k: tx("detail.routeDuration"),
+              k: t("detail.routeDuration"),
               v: formatRecordDuration(record.route.durationSeconds) ?? missing,
             },
             {
-              k: tx("detail.routePoints"),
+              k: t("detail.routePoints"),
               v: String(record.route.pointCount),
               mono: true,
             },
             {
-              k: tx("detail.routeGeometry"),
+              k: t("detail.routeGeometry"),
               v: record.route.encodedPolyline
-                ? tx("detail.routeAvailable")
-                : tx("detail.routeUnavailable"),
+                ? t("detail.routeAvailable")
+                : t("detail.routeUnavailable"),
             },
           ]}
         />
 
         <p className={styles.sectionLabel} style={{ marginTop: 14 }}>
-          {tx("table.fare")}
+          {t("table.fare")}
         </p>
         <CanvasDL
           theme={theme}
           cols={1}
           items={[
             {
-              k: tx("detail.payableFare"),
+              k: t("detail.payableFare"),
               v: formatRecordMoney(record.payableFareMinor, locale),
               mono: true,
             },
             {
-              k: tx("detail.actualFare"),
+              k: t("detail.actualFare"),
               v: formatRecordMoney(record.actualFareMinor, locale),
               mono: true,
             },
             {
-              k: tx("detail.toll"),
+              k: t("detail.toll"),
               v: formatRecordMoney(record.tollMinor, locale),
               mono: true,
             },
             {
-              k: tx("detail.fareVersion"),
+              k: t("detail.fareVersion"),
               v: record.farePolicyVersion,
               mono: true,
             },
-            { k: tx("detail.chargingMode"), v: record.chargingMode },
-            { k: tx("detail.currency"), v: record.currency, mono: true },
+            { k: t("detail.chargingMode"), v: record.chargingMode },
+            { k: t("detail.currency"), v: record.currency, mono: true },
           ]}
         />
       </CanvasCard>
 
       <CanvasCard
         theme={theme}
-        title={tx("retention.title")}
-        subtitle={tx("retention.subtitle")}
+        title={t("retention.title")}
+        subtitle={t("retention.subtitle")}
       >
         <CanvasDL
           theme={theme}
           cols={1}
           items={[
             {
-              k: tx("retention.generated"),
+              k: t("retention.generated"),
               v: formatRecordDateTime(record.generatedAt, locale) ?? missing,
             },
             {
-              k: tx("retention.until"),
+              k: t("retention.until"),
               v: formatRecordDateTime(record.retainUntil, locale) ?? missing,
             },
             {
-              k: tx("retention.floor"),
-              v: tx("retention.floorValue"),
+              k: t("retention.floor"),
+              v: t("retention.floorValue"),
               mono: true,
             },
             {
-              k: tx("retention.title"),
+              k: t("retention.title"),
               v: (
                 <CanvasPill
                   theme={theme}
                   tone={retentionMet ? "success" : "warn"}
                   dot
                 >
-                  {retentionMet ? tx("retention.pass") : tx("retention.fail")}
+                  {retentionMet ? t("retention.pass") : t("retention.fail")}
                 </CanvasPill>
               ),
             },
@@ -981,12 +979,12 @@ function RecordDetail({
         theme={theme}
         tone="info"
         icon="audit"
-        title={tx("hold.title")}
+        title={t("hold.title")}
         body={
           <>
-            {tx("hold.body")}
+            {t("hold.body")}
             <br />
-            {tx("hold.pending")}
+            {t("hold.pending")}
           </>
         }
       />
@@ -998,12 +996,12 @@ function ExportJobSummary({
   accepted,
   detail,
   locale,
-  tx,
+  t,
 }: {
   accepted: MultiTaxiTripOperationalExportJobAccepted | null;
   detail: MultiTaxiTripOperationalExportJobView | null;
   locale: "zh" | "en";
-  tx: (
+  t: (
     key: RecordsTranslationKey,
     params?: Record<string, string | number>,
   ) => string;
@@ -1022,7 +1020,7 @@ function ExportJobSummary({
           : 3;
   return (
     <div className={styles.jobBox} style={{ marginTop: 12 }}>
-      <p className={styles.sectionLabel}>{tx("export.jobTitle")}</p>
+      <p className={styles.sectionLabel}>{t("export.jobTitle")}</p>
       <div className={styles.timeline} aria-hidden="true">
         {[1, 2, 3, 4].map((value) => (
           <span
@@ -1034,35 +1032,35 @@ function ExportJobSummary({
         ))}
       </div>
       <div className={styles.scopeRows}>
-        <ScopeRow label={tx("export.jobId")} value={accepted.jobId} />
+        <ScopeRow label={t("export.jobId")} value={accepted.jobId} />
         <div className={styles.scopeRow}>
-          <span>{tx("export.jobStatus")}</span>
+          <span>{t("export.jobStatus")}</span>
           <CanvasPill theme={theme} tone={statusTone(status)} dot>
-            {tx(`export.status.${status}`)}
+            {t(`export.status.${status}`)}
           </CanvasPill>
         </div>
         {detail ? (
           <>
             <ScopeRow
-              label={tx("export.jobActor")}
+              label={t("export.jobActor")}
               value={detail.requestedByActorId}
             />
             <ScopeRow
-              label={tx("export.jobCount")}
+              label={t("export.jobCount")}
               value={String(detail.recordCount)}
             />
             <ScopeRow
-              label={tx("export.jobCreated")}
+              label={t("export.jobCreated")}
               value={
                 formatRecordDateTime(detail.createdAt, locale) ??
-                tx("table.unavailable")
+                t("table.unavailable")
               }
             />
             <ScopeRow
-              label={tx("export.jobUpdated")}
+              label={t("export.jobUpdated")}
               value={
                 formatRecordDateTime(detail.updatedAt, locale) ??
-                tx("table.unavailable")
+                t("table.unavailable")
               }
             />
           </>
