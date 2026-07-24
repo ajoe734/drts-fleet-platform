@@ -2,8 +2,9 @@
 
 **Task:** `P5-RATE-003`
 **UI dependency:** backend acceptance for `P5-RATE-UI-001`
-**Authoritative head:** `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`
-**Continuation baseline:** `2541408114deda0a2228a5e75b0b984554fd083e`
+**Merged requirements baseline:** `c5df24a41ba8ed9c790649719dd731b560cde6fd`
+**Clean integration baseline:** `54675de25`
+**Branch:** `codex/p5-rate-ui-001-final`
 **Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
 v1.2 and `10_full_17_screen_fleets_execution_tasks_20260724.md` sections 6/11
 **Scope:** rating backend/read contracts, rating-local API adapter, and auth
@@ -85,3 +86,7 @@ authenticated actor's moderation capability.
 | Restore command                                   | `blocked_command` and not implemented                 |
 | Shared nav/shell/global translations              | not touched                                           |
 | Migration deployment                              | not performed; this branch does not deploy or publish |
+
+The three implementation commits were replayed cleanly after the merged
+authorization work. Git resolved the shared multi-taxi controller/service
+changes without dropping either authorization or rating behavior.
