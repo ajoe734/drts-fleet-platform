@@ -11,6 +11,7 @@ import {
 
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
+import { useTranslation } from "@/lib/i18n";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -23,13 +24,8 @@ import {
 } from "@drts/ui-web";
 
 import {
-  CERTIFICATE_STATE_COPY,
   CERTIFICATE_SUPPORT_STATES,
   classifyCertificateSupportError,
-  displayValue,
-  formatDistance,
-  formatDuration,
-  formatMoney,
   hasCertificateReadScope,
   parseCertificateSupportList,
   parseCertificateSupportView,
@@ -38,16 +34,31 @@ import {
   type CertificateSupportView,
 } from "./certificate-support-model";
 import styles from "./certificate-support.module.css";
+import {
+  certificateStateCopy,
+  certificateSupportCopy,
+  displayCertificateValue,
+  formatCertificateDateTime,
+  formatCertificateDistance,
+  formatCertificateDuration,
+  formatCertificateMoney,
+  type CertificateSupportCopyKey,
+  type CertificateSupportLocale,
+  type CertificateTone,
+} from "./translations";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 const monoStyle: CSSProperties = { fontFamily: theme.monoFamily };
 
-function StateCatalog() {
+function StateCatalog({ locale }: { locale: CertificateSupportLocale }) {
   return (
-    <CanvasCard theme={theme} title="支援狀態 × 6">
+    <CanvasCard
+      theme={theme}
+      title={certificateSupportCopy(locale, "stateCatalogTitle")}
+    >
       <div className={styles.stateGrid} data-testid="certificate-state-catalog">
         {CERTIFICATE_SUPPORT_STATES.map((state) => {
-          const copy = CERTIFICATE_STATE_COPY[state];
+          const copy = certificateStateCopy(locale, state);
           return (
             <div className={styles.stateCell} key={state}>
               <CanvasPill theme={theme} tone={copy.tone} dot>
@@ -68,23 +79,26 @@ function StatePanel({
   body,
   action,
   testId,
+  locale,
 }: {
   state: CertificateSupportState;
   title: string;
   body: string;
   action?: ReactNode;
   testId: string;
+  locale: CertificateSupportLocale;
 }) {
+  const stateCopy = certificateStateCopy(locale, state);
   return (
     <div className={styles.body} data-testid={testId}>
       <CanvasBanner
         theme={theme}
-        tone={bannerTone(CERTIFICATE_STATE_COPY[state].tone)}
+        tone={bannerTone(stateCopy.tone)}
         title={title}
         body={body}
         actions={action}
       />
-      <StateCatalog />
+      <StateCatalog locale={locale} />
     </div>
   );
 }
@@ -92,6 +106,11 @@ function StatePanel({
 export function CertificateSupportSearchScreen() {
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
+  const { locale } = useTranslation();
+  const copy = (
+    key: CertificateSupportCopyKey,
+    params?: Record<string, string | number>,
+  ) => certificateSupportCopy(locale, key, params);
   const canRead = hasCertificateReadScope(authority.scopes);
   const [draftQuery, setDraftQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -152,11 +171,11 @@ export function CertificateSupportSearchScreen() {
     >
       <CanvasPageHeader
         theme={theme}
-        title="電子乘車證明支援 · Certificate Support"
-        subtitle="P5-COM-UI-03 · 搜尋與開啟既有證明 · 重新產生維持 command pending"
+        title={copy("pageTitle")}
+        subtitle={copy("pageSubtitle")}
         actions={
           <CanvasPill theme={theme} tone="neutral" dot>
-            只讀支援
+            {copy("readOnlySupport")}
           </CanvasPill>
         }
       />
@@ -165,71 +184,71 @@ export function CertificateSupportSearchScreen() {
           theme={theme}
           tone="info"
           icon="lock"
-          title="既有憑證 authority"
-          body="本頁只讀取 reporting.multi_taxi_electronic_receipts；缺少的法定欄位顯示「未取得」，不以前端推算或補零。"
+          title={copy("authorityTitle")}
+          body={copy("authorityBody")}
         />
 
-        <CanvasCard theme={theme} title="定位乘車證明">
+        <CanvasCard theme={theme} title={copy("searchCardTitle")}>
           <form className={styles.searchForm} onSubmit={submitSearch}>
             <input
               className={styles.input}
-              aria-label="搜尋訂單、行程或證明編號"
-              placeholder="訂單 / 行程 / 證明編號"
+              aria-label={copy("searchAria")}
+              placeholder={copy("searchPlaceholder")}
               value={draftQuery}
               onChange={(event) => setDraftQuery(event.target.value)}
               maxLength={120}
             />
             <select
               className={styles.select}
-              aria-label="乘車證明狀態"
+              aria-label={copy("stateAria")}
               value={state}
               onChange={(event) =>
                 setState(event.target.value as CertificateSupportState | "all")
               }
             >
-              <option value="all">全部狀態</option>
+              <option value="all">{copy("allStates")}</option>
               {CERTIFICATE_SUPPORT_STATES.map((itemState) => (
                 <option value={itemState} key={itemState}>
-                  {CERTIFICATE_STATE_COPY[itemState].label} · {itemState}
+                  {certificateStateCopy(locale, itemState).label} · {itemState}
                 </option>
               ))}
             </select>
             <CanvasBtn theme={theme} variant="primary" type="submit">
-              搜尋既有證明
+              {copy("searchButton")}
             </CanvasBtn>
           </form>
         </CanvasCard>
 
-        <StateCatalog />
+        <StateCatalog locale={locale} />
 
         {loading ? (
           <CanvasEmptyState
             theme={theme}
             tone="info"
-            title="讀取乘車證明"
-            body="正在查詢伺服器權威資料。"
+            title={copy("loadingTitle")}
+            body={copy("loadingBody")}
           />
         ) : null}
         {error === "access_denied" ? (
           <CanvasEmptyState
             theme={theme}
             tone="danger"
-            title="無存取權"
-            body="需要 Platform Admin 的 foundation:read；頁面不會顯示憑證資料。"
+            title={copy("accessDeniedTitle")}
+            body={copy("accessDeniedSearchBody")}
           />
         ) : null}
         {error === "failed" ? (
           <CanvasEmptyState
             theme={theme}
             tone="danger"
-            title="讀取失敗"
-            body="無法取得既有乘車證明。可重新執行只讀查詢，不會觸發重產生。"
+            title={copy("readFailedTitle")}
+            body={copy("readFailedBody")}
             action={
               <CanvasBtn
                 theme={theme}
                 onClick={() => setReloadToken((value) => value + 1)}
               >
-                重新讀取
+                {copy("retryRead")}
               </CanvasBtn>
             }
           />
@@ -238,40 +257,47 @@ export function CertificateSupportSearchScreen() {
           <CanvasEmptyState
             theme={theme}
             tone="neutral"
-            title="沒有符合的既有乘車證明"
-            body="此結果為 unavailable；請確認訂單、行程或證明編號。"
+            title={copy("emptyTitle")}
+            body={copy("emptyBody")}
           />
         ) : null}
         {!loading && !error && items.length > 0 ? (
-          <CanvasCard theme={theme} title={`搜尋結果 · ${items.length} 筆`}>
+          <CanvasCard
+            theme={theme}
+            title={copy("resultsTitle", { count: items.length })}
+          >
             <div className={styles.results}>
               {items.map((item) => (
                 <article className={styles.resultCard} key={item.certificateId}>
                   <div>
                     <h3 className={styles.resultTitle}>{item.certificateNo}</h3>
                     <p className={styles.muted}>
-                      訂單 <span className={styles.mono}>{item.orderId}</span>
+                      {copy("orderLabel")}{" "}
+                      <span className={styles.mono}>{item.orderId}</span>
                     </p>
                     <p className={styles.muted}>
-                      行程{" "}
+                      {copy("tripLabel")}{" "}
                       <span className={styles.mono}>
-                        {displayValue(item.tripId)}
+                        {displayCertificateValue(locale, item.tripId)}
                       </span>
                     </p>
                   </div>
                   <div>
                     <CanvasPill
                       theme={theme}
-                      tone={CERTIFICATE_STATE_COPY[item.state].tone}
+                      tone={certificateStateCopy(locale, item.state).tone}
                       dot
                     >
-                      {CERTIFICATE_STATE_COPY[item.state].label} · {item.state}
+                      {certificateStateCopy(locale, item.state).label} ·{" "}
+                      {item.state}
                     </CanvasPill>
                     <p className={styles.muted}>
-                      車牌 {displayValue(item.plateNo)}
+                      {copy("plateLabel")}{" "}
+                      {displayCertificateValue(locale, item.plateNo)}
                     </p>
                     <p className={styles.muted}>
-                      簽發 {formatDateTime(item.issuedAt)}
+                      {copy("issuedLabel")}{" "}
+                      {formatCertificateDateTime(locale, item.issuedAt)}
                     </p>
                   </div>
                   <Link
@@ -280,7 +306,7 @@ export function CertificateSupportSearchScreen() {
                       item.certificateId,
                     )}`}
                   >
-                    開啟明細
+                    {copy("openDetail")}
                   </Link>
                 </article>
               ))}
@@ -299,6 +325,11 @@ export function CertificateSupportDetailScreen({
 }) {
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
+  const { locale } = useTranslation();
+  const copy = (
+    key: CertificateSupportCopyKey,
+    params?: Record<string, string | number>,
+  ) => certificateSupportCopy(locale, key, params);
   const canRead = hasCertificateReadScope(authority.scopes);
   const [view, setView] = useState<CertificateSupportView | null>(null);
   const [loading, setLoading] = useState(canRead);
@@ -346,7 +377,7 @@ export function CertificateSupportDetailScreen({
       theme={theme}
       onClick={() => setReloadToken((value) => value + 1)}
     >
-      重新讀取
+      {copy("retryRead")}
     </CanvasBtn>
   );
 
@@ -355,9 +386,10 @@ export function CertificateSupportDetailScreen({
       <main className={styles.screen} data-screen-id="P5-COM-UI-03">
         <StatePanel
           state="generating"
-          title="讀取乘車證明"
-          body="正在讀取既有憑證與法定欄位。"
+          title={copy("loadingTitle")}
+          body={copy("detailLoadingBody")}
           testId="certificate-detail-loading"
+          locale={locale}
         />
       </main>
     );
@@ -367,9 +399,10 @@ export function CertificateSupportDetailScreen({
       <main className={styles.screen} data-screen-id="P5-COM-UI-03">
         <StatePanel
           state="access_denied"
-          title="無存取權"
-          body="需要 Platform Admin 的 foundation:read；憑證資料未顯示。"
+          title={copy("accessDeniedTitle")}
+          body={copy("detailAccessDeniedBody")}
           testId="certificate-detail-access-denied"
+          locale={locale}
         />
       </main>
     );
@@ -379,10 +412,11 @@ export function CertificateSupportDetailScreen({
       <main className={styles.screen} data-screen-id="P5-COM-UI-03">
         <StatePanel
           state="unavailable"
-          title="乘車證明不可用"
-          body="找不到指定的既有乘車證明，沒有產生替代資料。"
+          title={copy("detailUnavailableTitle")}
+          body={copy("detailUnavailableBody")}
           action={retry}
           testId="certificate-detail-unavailable"
+          locale={locale}
         />
       </main>
     );
@@ -392,16 +426,17 @@ export function CertificateSupportDetailScreen({
       <main className={styles.screen} data-screen-id="P5-COM-UI-03">
         <StatePanel
           state="failed"
-          title="乘車證明讀取失敗"
-          body="可重新執行只讀查詢；重新產生命令仍未核准。"
+          title={copy("detailFailedTitle")}
+          body={copy("detailFailedBody")}
           action={retry}
           testId="certificate-detail-failed"
+          locale={locale}
         />
       </main>
     );
   }
 
-  const stateCopy = CERTIFICATE_STATE_COPY[view.state];
+  const stateCopy = certificateStateCopy(locale, view.state);
   const canOpenArtifacts = view.state === "available";
 
   return (
@@ -412,8 +447,10 @@ export function CertificateSupportDetailScreen({
     >
       <CanvasPageHeader
         theme={theme}
-        title={`電子乘車證明 · ${view.certificateNo}`}
-        subtitle="P5-COM-UI-03 · 既有憑證明細 · 缺值不補零"
+        title={copy("detailPageTitle", {
+          certificateNo: view.certificateNo,
+        })}
+        subtitle={copy("detailPageSubtitle")}
         actions={
           <CanvasPill theme={theme} tone={stateCopy.tone} dot>
             {stateCopy.label} · {view.state}
@@ -422,7 +459,7 @@ export function CertificateSupportDetailScreen({
       />
       <div className={styles.body}>
         <Link className={styles.backLink} href="/multi-taxi-certificates">
-          返回乘車證明搜尋
+          {copy("backToSearch")}
         </Link>
         <CanvasBanner
           theme={theme}
@@ -434,82 +471,103 @@ export function CertificateSupportDetailScreen({
           <CanvasBanner
             theme={theme}
             tone="warn"
-            title="版本已被取代"
-            body={`後續憑證：${displayValue(
-              view.supersededByCertificateId,
-            )}。本頁不把舊版標示為有效版本。`}
+            title={copy("supersededTitle")}
+            body={copy("supersededBody", {
+              certificateId: displayCertificateValue(
+                locale,
+                view.supersededByCertificateId,
+              ),
+            })}
           />
         ) : null}
         <div className={styles.detailGrid}>
-          <CanvasCard theme={theme} title="法定乘車證明欄位">
+          <CanvasCard theme={theme} title={copy("legalFieldsTitle")}>
             <CanvasDL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: "證明編號 / 版本",
-                  v: `${view.certificateNo} / ${displayValue(
+                  k: copy("fieldCertificateVersion"),
+                  v: `${view.certificateNo} / ${displayCertificateValue(
+                    locale,
                     view.certificateVersion,
                   )}`,
                   mono: true,
                 },
                 {
-                  k: "訂單 / 行程",
-                  v: `${view.orderId} / ${displayValue(view.tripId)}`,
+                  k: copy("fieldOrderTrip"),
+                  v: `${view.orderId} / ${displayCertificateValue(
+                    locale,
+                    view.tripId,
+                  )}`,
                   mono: true,
                 },
                 {
-                  k: "車號",
-                  v: displayValue(view.plateNo),
+                  k: copy("fieldPlate"),
+                  v: displayCertificateValue(locale, view.plateNo),
                   mono: true,
                 },
                 {
-                  k: "上車時間",
-                  v: formatDateTime(view.pickupAt),
+                  k: copy("fieldPickup"),
+                  v: formatCertificateDateTime(locale, view.pickupAt),
                   mono: true,
                 },
                 {
-                  k: "下車時間",
-                  v: formatDateTime(view.dropoffAt),
+                  k: copy("fieldDropoff"),
+                  v: formatCertificateDateTime(locale, view.dropoffAt),
                   mono: true,
                 },
                 {
-                  k: "行駛時間",
-                  v: formatDuration(view.travelDurationSeconds),
+                  k: copy("fieldDuration"),
+                  v: formatCertificateDuration(
+                    locale,
+                    view.travelDurationSeconds,
+                  ),
                   mono: true,
                 },
                 {
-                  k: "路線",
-                  v: displayValue(view.routeSummary),
+                  k: copy("fieldRoute"),
+                  v: displayCertificateValue(locale, view.routeSummary),
                 },
                 {
-                  k: "里程",
-                  v: formatDistance(view.distanceMeters),
+                  k: copy("fieldDistance"),
+                  v: formatCertificateDistance(locale, view.distanceMeters),
                   mono: true,
                 },
                 {
-                  k: "車資",
-                  v: formatMoney(view.fareMinor, view.currency),
+                  k: copy("fieldFare"),
+                  v: formatCertificateMoney(
+                    locale,
+                    view.fareMinor,
+                    view.currency,
+                  ),
                   mono: true,
                 },
                 {
-                  k: "通行費",
-                  v: formatMoney(view.tollMinor, view.currency),
+                  k: copy("fieldToll"),
+                  v: formatCertificateMoney(
+                    locale,
+                    view.tollMinor,
+                    view.currency,
+                  ),
                   mono: true,
                 },
                 {
-                  k: "客服電話",
-                  v: displayValue(view.consumerServicePhone),
+                  k: copy("fieldServicePhone"),
+                  v: displayCertificateValue(locale, view.consumerServicePhone),
                   mono: true,
                 },
                 {
-                  k: "主管機關申訴電話",
-                  v: displayValue(view.authorityComplaintPhone),
+                  k: copy("fieldComplaintPhone"),
+                  v: displayCertificateValue(
+                    locale,
+                    view.authorityComplaintPhone,
+                  ),
                   mono: true,
                 },
                 {
-                  k: "簽發時間",
-                  v: formatDateTime(view.issuedAt),
+                  k: copy("fieldIssuedAt"),
+                  v: formatCertificateDateTime(locale, view.issuedAt),
                   mono: true,
                 },
               ]}
@@ -522,7 +580,7 @@ export function CertificateSupportDetailScreen({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  開啟 HTML
+                  {copy("openHtml")}
                 </a>
               ) : null}
               {canOpenArtifacts && view.pdfUrl ? (
@@ -532,11 +590,13 @@ export function CertificateSupportDetailScreen({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  開啟 PDF
+                  {copy("openPdf")}
                 </a>
               ) : null}
               {!view.htmlUrl && !view.pdfUrl ? (
-                <span className={styles.muted}>既有 HTML/PDF 連結未取得</span>
+                <span className={styles.muted}>
+                  {copy("artifactsUnavailable")}
+                </span>
               ) : null}
               <button
                 className={styles.disabledAction}
@@ -544,26 +604,24 @@ export function CertificateSupportDetailScreen({
                 disabled
                 title={view.regeneration.reasonCode}
               >
-                重新產生 · 命令未核准
+                {copy("regenerationDisabled")}
               </button>
             </div>
           </CanvasCard>
           <div style={{ display: "grid", gap: 16 }}>
-            <StateCatalog />
+            <StateCatalog locale={locale} />
             <CanvasCard
               theme={theme}
-              title="重新產生"
-              subtitle="production command posture"
+              title={copy("regenerationTitle")}
+              subtitle={copy("regenerationSubtitle")}
             >
               <CanvasPill theme={theme} tone="neutral" dot>
-                disabled
+                {copy("disabled")}
               </CanvasPill>
               <p className={styles.muted} style={monoStyle}>
                 {view.regeneration.reasonCode}
               </p>
-              <p className={styles.muted}>
-                尚無 canonical command；本頁不提供假動作。
-              </p>
+              <p className={styles.muted}>{copy("regenerationBody")}</p>
             </CanvasCard>
           </div>
         </div>
@@ -572,19 +630,6 @@ export function CertificateSupportDetailScreen({
   );
 }
 
-function formatDateTime(value: string | null) {
-  if (!value) return "未取得";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-TW", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Taipei",
-  }).format(date);
-}
-
-function bannerTone(
-  tone: (typeof CERTIFICATE_STATE_COPY)[CertificateSupportState]["tone"],
-) {
+function bannerTone(tone: CertificateTone) {
   return tone === "neutral" ? ("info" as const) : tone;
 }
