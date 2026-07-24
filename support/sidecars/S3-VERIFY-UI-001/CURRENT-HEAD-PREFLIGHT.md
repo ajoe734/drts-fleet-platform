@@ -2,21 +2,21 @@
 
 ## Control
 
-| Field                         | Value                                                             |
-| ----------------------------- | ----------------------------------------------------------------- |
-| Primary task                  | `S3-VERIFY-UI-001`                                                |
-| Verification slices           | `S3-VERIFY-001..005`                                              |
-| Owner                         | Fleet G                                                           |
-| Authoritative head            | `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`                        |
-| Latest inspected `origin/dev` | `2711c366f2e103ae9556d5afaf4558dfd9b0bb4c`                        |
-| Working branch                | `codex/s3-verify-ui-001-current-head`                             |
-| Inspection date               | `2026-07-24`                                                      |
-| Requirement                   | `10_full_17_screen_fleets_execution_tasks_20260724.md`, section 9 |
-| Scope decision                | Close repository-owned S-3 gaps without rebuilding S-3 screens.   |
+| Field                   | Value                                                             |
+| ----------------------- | ----------------------------------------------------------------- |
+| Primary task            | `S3-VERIFY-UI-001`                                                |
+| Verification slices     | `S3-VERIFY-001..005`                                              |
+| Owner                   | Fleet G                                                           |
+| Implementation commit   | `778be942a`                                                       |
+| Merged integration base | `29769289ce91aac57007953d89b7fa0559fe4d3b`                        |
+| Working branch          | `codex/s3-verify-ui-001-final`                                    |
+| Inspection date         | `2026-07-24`                                                      |
+| Requirement             | `10_full_17_screen_fleets_execution_tasks_20260724.md`, section 9 |
+| Scope decision          | Close repository-owned S-3 gaps without rebuilding S-3 screens.   |
 
-The authoritative head is two commits ahead of the inspected `origin/dev` and
-has `origin/dev` as its merge base. All commands below were run from the
-authoritative head. No canonical design or specification file was edited.
+The repository-owned implementation was replayed onto the merged rating and
+certificate integration base. All commands below were run from the integrated
+branch. No canonical design or specification file was edited.
 
 ## Result
 
@@ -148,7 +148,7 @@ pnpm --dir apps/ops-console-web exec vitest run \
 
 Results:
 
-- full Ops suite: `5` files and `19` tests passed;
+- full Ops suite: `7` files and `29` tests passed;
 - targeted SOS view model: `1` file and `3` tests passed;
 - Ops TypeScript and ESLint passed.
 
