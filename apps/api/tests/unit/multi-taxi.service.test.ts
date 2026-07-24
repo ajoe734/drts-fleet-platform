@@ -461,6 +461,45 @@ describe("MultiTaxiService passenger ride authority", () => {
       },
     });
   });
+
+  it("wires listAuthorizedVehicles and lifecycle capabilities on service", () => {
+    const { service } = createService();
+    const now = new Date().toISOString();
+    const created = service.createAuthorization({
+      operatorId: "op-test-001",
+      authorityCode: "AUTH-TAIPEI-001",
+      businessPlanVersion: "v1.0",
+      serviceAreaCodes: ["TPE", "NPT"],
+      activeFareVersionId: "fare_2026_v1",
+      effectiveFrom: now,
+    });
+
+    expect(created.status).toBe("draft");
+
+    // Add authorized vehicle
+    const vehicle = service.addAuthorizedVehicle(created.authorizationId, {
+      vehicleId: "VEH-TPE-888",
+      effectiveFrom: now,
+    });
+    expect(vehicle.vehicleId).toBe("VEH-TPE-888");
+
+    // Query vehicles via service
+    const vehiclesList = service.listAuthorizedVehicles(created.authorizationId);
+    expect(vehiclesList).toHaveLength(1);
+    expect(vehiclesList[0]?.vehicleId).toBe("VEH-TPE-888");
+
+    // Lifecycle activate
+    const activated = service.activateAuthorization(created.authorizationId);
+    expect(activated.status).toBe("approved");
+
+    // Lifecycle suspend
+    const suspended = service.suspendAuthorization(created.authorizationId);
+    expect(suspended.status).toBe("suspended");
+
+    // Re-activate
+    const reActivated = service.activateAuthorization(created.authorizationId);
+    expect(reActivated.status).toBe("approved");
+  });
 });
 
 describe("MultiTaxiService trip operational records", () => {
