@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Param,
   Post,
   Query,
@@ -17,6 +18,7 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  InvalidatePassengerTripRatingCommand,
   MultiTaxiTripOperationalRecordQuery,
   QueueCheckInCommand,
   QueueCheckOutCommand,
@@ -24,7 +26,11 @@ import type {
   UpdateMultiTaxiOperatingAuthorizationCommand,
 } from "@drts/contracts";
 
-import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import {
   CurrentIdentity,
   OpenRoute,
@@ -268,6 +274,26 @@ export class MultiTaxiController {
     );
   }
 
+  @Post("platform-admin/multi-taxi-ratings/:ratingId/invalidate")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_ratings:moderate")
+  async invalidatePassengerRating(
+    @Param("ratingId") ratingId: string,
+    @Body() command: InvalidatePassengerTripRatingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.invalidatePassengerRating(
+        ratingId,
+        command,
+        this.requireActorId(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Get("platform-admin/multi-taxi-trip-records")
   @RequireRealms("platform")
   @RequireScopes("multi_taxi_records:read")
@@ -298,5 +324,17 @@ export class MultiTaxiController {
       await this.multiTaxiService.exportTripOperationalRecords(query),
       requestId,
     );
+  }
+
+  private requireActorId(identity: BootstrapRequestIdentity | null) {
+    const actorId = identity?.actorId?.trim();
+    if (!actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "RATING_MODERATION_ACTOR_REQUIRED",
+        "An authenticated actor is required to moderate passenger ratings.",
+      );
+    }
+    return actorId;
   }
 }

@@ -79,7 +79,6 @@ export const DEFAULT_PROFILE_QUEUE_POLICY_MAP: ProfileQueuePolicyMap = {
   },
 };
 
-
 export interface OwnedRideRuntimeContext {
   runtimeProfileCode: RuntimeProfileCode;
   serviceProductCode: ServiceProductType;
@@ -268,6 +267,49 @@ export interface DriverRatingSummary {
   lastRatedAt: string | null;
   aggregateVersion: number;
   calculatedAt: string;
+}
+
+export interface InvalidatePassengerTripRatingCommand {
+  reason: string;
+  idempotencyKey: string;
+  confirmation: {
+    action: "invalidate_rating";
+    ratingId: string;
+  };
+}
+
+export interface PassengerRatingModerationAuditRecord {
+  auditId: string;
+  ratingId: string;
+  action: "invalidate";
+  reason: string;
+  actorId: string;
+  idempotencyKey: string;
+  previousStatus: PassengerTripRatingRecord["status"];
+  resultingStatus: "invalidated";
+  aggregateVersion: number;
+  requestId: string | null;
+  createdAt: string;
+}
+
+export interface PassengerRatingModerationView {
+  ratingId: string;
+  orderId: string;
+  tripId: string;
+  driverId: string;
+  score: PassengerTripRatingRecord["score"];
+  tags: string[];
+  comment: string | null;
+  status: PassengerTripRatingRecord["status"];
+  submittedAt: string;
+  updatedAt: string;
+}
+
+export interface InvalidatePassengerTripRatingResult {
+  rating: PassengerRatingModerationView;
+  driverRatingSummary: DriverRatingSummary;
+  audit: PassengerRatingModerationAuditRecord;
+  replayed: boolean;
 }
 
 // ===========================================================================
@@ -560,8 +602,7 @@ export interface MultiTaxiTripOperationalRecordQuery {
   q?: string;
 }
 
-export interface MultiTaxiTripOperationalAdminView
-  extends MultiTaxiTripOperationalRecord {
+export interface MultiTaxiTripOperationalAdminView extends MultiTaxiTripOperationalRecord {
   orderNo: string;
   assignmentId: string | null;
 }

@@ -22,6 +22,9 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  DriverRatingSummary,
+  InvalidatePassengerTripRatingCommand,
+  InvalidatePassengerTripRatingResult,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiOperatingAuthorizationRecord,
   MultiTaxiTripOperationalAdminView,
@@ -32,6 +35,7 @@ import type {
   PassengerRideAccessToken,
   PassengerRideAuthorityView,
   PassengerRideContactOption,
+  PassengerRatingModerationAuditRecord,
   PassengerRideSseEvent,
   PassengerRideSseEventEnvelope,
   PassengerRideTokenScope,
@@ -60,6 +64,15 @@ export class MultiTaxiService implements OnModuleInit {
   private readonly ratingsByPassengerOrder = new Map<
     string,
     PassengerTripRatingRecord
+  >();
+  private readonly ratingsById = new Map<string, PassengerTripRatingRecord>();
+  private readonly driverRatingSummaries = new Map<
+    string,
+    DriverRatingSummary
+  >();
+  private readonly ratingInvalidationsByIdempotencyKey = new Map<
+    string,
+    InvalidatePassengerTripRatingResult
   >();
 
   constructor(
@@ -288,7 +301,8 @@ export class MultiTaxiService implements OnModuleInit {
     rows: MultiTaxiTripOperationalExportRow[];
   }> {
     const records = await this.listTripOperationalRecords(query);
-    const suffix = this.normalizeMonthFilter(query.month)?.replace("-", "") ?? "all";
+    const suffix =
+      this.normalizeMonthFilter(query.month)?.replace("-", "") ?? "all";
 
     return {
       exportedAt: new Date().toISOString(),
@@ -479,7 +493,101 @@ export class MultiTaxiService implements OnModuleInit {
       this.ratingKey(order.orderId, token.passengerSubjectRef),
       persisted.rating,
     );
+    this.ratingsById.set(persisted.rating.ratingId, persisted.rating);
+    if (persisted.summary) {
+      this.driverRatingSummaries.set(
+        persisted.summary.driverId,
+        persisted.summary,
+      );
+    } else {
+      this.rebuildInMemoryDriverRatingSummary(
+        persisted.rating.driverId,
+        persisted.rating.updatedAt,
+      );
+    }
     return persisted.rating;
+  }
+
+  async invalidatePassengerRating(
+    ratingId: string,
+    command: InvalidatePassengerTripRatingCommand,
+    actorId: string,
+    requestId?: string,
+  ): Promise<InvalidatePassengerTripRatingResult> {
+    const normalizedRatingId = this.requireRatingModerationText(
+      ratingId,
+      "ratingId",
+      255,
+    );
+    const reason = this.requireRatingModerationText(
+      command?.reason,
+      "reason",
+      1000,
+    );
+    const idempotencyKey = this.requireRatingModerationText(
+      command?.idempotencyKey,
+      "idempotencyKey",
+      255,
+    );
+    const normalizedActorId = this.requireRatingModerationText(
+      actorId,
+      "actorId",
+      255,
+    );
+    if (
+      command?.confirmation?.action !== "invalidate_rating" ||
+      command.confirmation.ratingId !== normalizedRatingId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RATING_INVALIDATION_CONFIRMATION_INVALID",
+        "confirmation must explicitly invalidate the rating in the request path.",
+        { ratingId: normalizedRatingId },
+      );
+    }
+
+    if (this.repository?.isEnabled()) {
+      const persisted = await this.repository.invalidatePassengerRating({
+        auditId: randomUUID(),
+        ratingId: normalizedRatingId,
+        reason,
+        actorId: normalizedActorId,
+        idempotencyKey,
+        requestId: requestId?.trim() || null,
+        invalidatedAt: new Date().toISOString(),
+      });
+      if (persisted.outcome === "not_found") {
+        this.throwRatingNotFound(normalizedRatingId);
+      }
+      if (persisted.outcome === "already_invalidated") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "RATING_ALREADY_INVALIDATED",
+          "The passenger rating has already been invalidated.",
+          { ratingId: normalizedRatingId },
+        );
+      }
+      this.assertRatingInvalidationReplay(
+        persisted.audit,
+        reason,
+        normalizedActorId,
+      );
+      this.cacheRatingAndSummary(persisted.rating, persisted.summary);
+      return this.toRatingInvalidationResult(
+        persisted.rating,
+        persisted.summary,
+        persisted.audit,
+        persisted.outcome === "replayed",
+      );
+    }
+
+    return this.invalidatePassengerRatingInMemory(
+      normalizedRatingId,
+      reason,
+      idempotencyKey,
+      normalizedActorId,
+      requestId?.trim() || null,
+    );
   }
 
   async getPassengerContact(
@@ -845,9 +953,10 @@ export class MultiTaxiService implements OnModuleInit {
   private async mapOrderToOperationalRecord(
     order: OwnedOrderRecord,
   ): Promise<MultiTaxiTripOperationalAdminView> {
-    const assignment = this.ownedMobilityService.findPassengerAssignmentDisclosure(
-      order.orderId,
-    );
+    const assignment =
+      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+        order.orderId,
+      );
     const receipt =
       (await this.repository?.findElectronicReceipt(order.orderId)) ?? null;
     const payableFareMinor = order.quotedFare?.amountMinor ?? 0;
@@ -914,8 +1023,192 @@ export class MultiTaxiService implements OnModuleInit {
       null;
     if (rating) {
       this.ratingsByPassengerOrder.set(key, rating);
+      this.ratingsById.set(rating.ratingId, rating);
     }
     return rating;
+  }
+
+  private invalidatePassengerRatingInMemory(
+    ratingId: string,
+    reason: string,
+    idempotencyKey: string,
+    actorId: string,
+    requestId: string | null,
+  ): InvalidatePassengerTripRatingResult {
+    const replayKey = `${ratingId}\0${idempotencyKey}`;
+    const existing =
+      this.ratingInvalidationsByIdempotencyKey.get(replayKey) ?? null;
+    if (existing) {
+      this.assertRatingInvalidationReplay(existing.audit, reason, actorId);
+      return {
+        rating: structuredClone(existing.rating),
+        driverRatingSummary: structuredClone(existing.driverRatingSummary),
+        audit: structuredClone(existing.audit),
+        replayed: true,
+      };
+    }
+
+    const rating = this.ratingsById.get(ratingId);
+    if (!rating) {
+      this.throwRatingNotFound(ratingId);
+    }
+    if (rating.status === "invalidated") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "RATING_ALREADY_INVALIDATED",
+        "The passenger rating has already been invalidated.",
+        { ratingId },
+      );
+    }
+
+    const invalidatedAt = new Date().toISOString();
+    const updatedRating: PassengerTripRatingRecord = {
+      ...rating,
+      status: "invalidated",
+      updatedAt: invalidatedAt,
+    };
+    this.ratingsById.set(updatedRating.ratingId, updatedRating);
+    this.ratingsByPassengerOrder.set(
+      this.ratingKey(updatedRating.orderId, updatedRating.passengerSubjectRef),
+      updatedRating,
+    );
+    const summary = this.rebuildInMemoryDriverRatingSummary(
+      updatedRating.driverId,
+      invalidatedAt,
+    );
+    const audit: PassengerRatingModerationAuditRecord = {
+      auditId: randomUUID(),
+      ratingId,
+      action: "invalidate",
+      reason,
+      actorId,
+      idempotencyKey,
+      previousStatus: rating.status,
+      resultingStatus: "invalidated",
+      aggregateVersion: summary.aggregateVersion,
+      requestId,
+      createdAt: invalidatedAt,
+    };
+    const result = this.toRatingInvalidationResult(
+      updatedRating,
+      summary,
+      audit,
+      false,
+    );
+    this.ratingInvalidationsByIdempotencyKey.set(replayKey, result);
+    return result;
+  }
+
+  private rebuildInMemoryDriverRatingSummary(
+    driverId: string,
+    calculatedAt: string,
+  ): DriverRatingSummary {
+    const activeRatings = [...this.ratingsById.values()].filter(
+      (rating) => rating.driverId === driverId && rating.status === "active",
+    );
+    const previous = this.driverRatingSummaries.get(driverId);
+    const ratingCount = activeRatings.length;
+    const averageRating =
+      ratingCount === 0
+        ? null
+        : Math.round(
+            (activeRatings.reduce((total, rating) => total + rating.score, 0) /
+              ratingCount) *
+              100,
+          ) / 100;
+    const lastRatedAt =
+      activeRatings
+        .map((rating) => rating.submittedAt)
+        .sort((left, right) => right.localeCompare(left))[0] ?? null;
+    const summary: DriverRatingSummary = {
+      driverId,
+      displayState: ratingCount === 0 ? "new_driver" : "rated",
+      averageRating,
+      ratingCount,
+      lastRatedAt,
+      aggregateVersion: previous ? previous.aggregateVersion + 1 : 1,
+      calculatedAt,
+    };
+    this.driverRatingSummaries.set(driverId, summary);
+    return summary;
+  }
+
+  private cacheRatingAndSummary(
+    rating: PassengerTripRatingRecord,
+    summary: DriverRatingSummary,
+  ) {
+    this.ratingsById.set(rating.ratingId, rating);
+    this.ratingsByPassengerOrder.set(
+      this.ratingKey(rating.orderId, rating.passengerSubjectRef),
+      rating,
+    );
+    this.driverRatingSummaries.set(summary.driverId, summary);
+  }
+
+  private toRatingInvalidationResult(
+    rating: PassengerTripRatingRecord,
+    summary: DriverRatingSummary,
+    audit: PassengerRatingModerationAuditRecord,
+    replayed: boolean,
+  ): InvalidatePassengerTripRatingResult {
+    return {
+      rating: {
+        ratingId: rating.ratingId,
+        orderId: rating.orderId,
+        tripId: rating.tripId,
+        driverId: rating.driverId,
+        score: rating.score,
+        tags: [...rating.tags],
+        comment: rating.comment,
+        status: rating.status,
+        submittedAt: rating.submittedAt,
+        updatedAt: rating.updatedAt,
+      },
+      driverRatingSummary: structuredClone(summary),
+      audit: structuredClone(audit),
+      replayed,
+    };
+  }
+
+  private assertRatingInvalidationReplay(
+    audit: PassengerRatingModerationAuditRecord,
+    reason: string,
+    actorId: string,
+  ) {
+    if (audit.reason !== reason || audit.actorId !== actorId) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "RATING_INVALIDATION_IDEMPOTENCY_CONFLICT",
+        "The idempotency key was already used with different invalidation data.",
+        { ratingId: audit.ratingId },
+      );
+    }
+  }
+
+  private throwRatingNotFound(ratingId: string): never {
+    throw new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "PASSENGER_RATING_NOT_FOUND",
+      "Passenger rating was not found.",
+      { ratingId },
+    );
+  }
+
+  private requireRatingModerationText(
+    value: unknown,
+    field: string,
+    maxLength: number,
+  ) {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (!normalized || normalized.length > maxLength) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RATING_INVALIDATION_FIELD_INVALID",
+        `${field} is required and must not exceed ${maxLength} characters.`,
+        { field, maxLength },
+      );
+    }
+    return normalized;
   }
 
   private ratingKey(orderId: string, passengerSubjectRef: string) {

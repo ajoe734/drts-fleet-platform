@@ -47,6 +47,10 @@ const SANDBOX_COMPLIANCE_SCOPES = [
   "sandbox.regulatory_report.submit",
 ] as const;
 
+const MULTI_TAXI_RATING_GOVERNANCE_SCOPES = [
+  "multi_taxi_ratings:moderate",
+] as const;
+
 export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   system: [
     "identity:read",
@@ -86,6 +90,7 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "forwarder:read",
     "forwarder:write",
     ...SANDBOX_COMPLIANCE_SCOPES,
+    ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
   ],
   platform_admin: [
     "identity:read",
@@ -114,6 +119,7 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "reports:write",
     "forwarder:read",
     ...SANDBOX_COMPLIANCE_SCOPES,
+    ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
   ],
   tenant_admin: [
     "identity:read",
