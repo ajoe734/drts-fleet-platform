@@ -21,7 +21,10 @@ import {
 } from "@/lib/passenger-fixtures";
 import {
   fetchPassengerRideAuthority,
+  fetchPassengerReceipt,
+  mapPassengerCertificate,
   mapPassengerRideAuthorityToFixture,
+  PassengerAuthorityError,
   requestPassengerRideAction,
   subscribePassengerRideAuthority,
 } from "@/lib/passenger-live";
@@ -561,7 +564,13 @@ function VehicleCard({
   plateChanged?: boolean;
 }) {
   if (!fixture.assignment) return null;
-  const rated = fixture.driver.ratingState === "rated";
+  const assignment = fixture.assignment;
+  const rated = assignment.rating.displayState === "rated";
+  const vehicleDetails = [
+    `${assignment.vehicle.modelYear} 年出廠`,
+    `${assignment.vehicle.doorCount} 門`,
+    assignment.vehicle.color,
+  ].filter((value): value is string => Boolean(value));
 
   return (
     <Card title="您的車輛與駕駛" dimmed={dimmed} tag={tag}>
@@ -575,7 +584,7 @@ function VehicleCard({
       >
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>
-            {fixture.driver.vehicle}
+            {assignment.vehicle.make} {assignment.vehicle.model}
           </div>
           <div
             style={{
@@ -584,7 +593,7 @@ function VehicleCard({
               marginTop: 2,
             }}
           >
-            2024 年出廠 · 4 門 · {fixture.driver.color}
+            {vehicleDetails.join(" · ")}
           </div>
         </div>
         <div style={{ textAlign: "center" }}>
@@ -601,7 +610,7 @@ function VehicleCard({
               background: passengerChrome.background,
             }}
           >
-            {fixture.driver.plateNo}
+            {assignment.vehicle.plateNo}
           </div>
           <div
             style={{
@@ -641,7 +650,7 @@ function VehicleCard({
             flexShrink: 0,
           }}
         >
-          {fixture.driver.name.slice(0, 1)}
+          {(assignment.driver.displayName || "駕").slice(0, 1)}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -653,7 +662,7 @@ function VehicleCard({
             }}
           >
             <span style={{ fontSize: 14, fontWeight: 700 }}>
-              {fixture.driver.name}
+              {assignment.driver.displayName || "駕駛姓名未提供"}
             </span>
             <span
               style={{
@@ -680,8 +689,8 @@ function VehicleCard({
               fontFamily: monoFont,
             }}
           >
-            {fixture.driver.registrationMaskedDisplay} · 有效至{" "}
-            {fixture.driver.registrationEffectiveUntil}
+            {assignment.driver.registrationMaskedDisplay} · 有效至{" "}
+            {assignment.driver.registrationEffectiveUntil}
           </div>
           <div style={{ marginTop: 6 }}>
             {rated ? (
@@ -702,11 +711,13 @@ function VehicleCard({
                 >
                   <span aria-hidden="true">★</span>
                   <b style={{ fontSize: 15, color: passengerChrome.text }}>
-                    4.9
+                    {assignment.rating.averageRating === null
+                      ? "評價資料未提供"
+                      : assignment.rating.averageRating.toFixed(1)}
                   </b>
                 </span>
                 <span style={{ fontSize: 11, color: passengerChrome.muted }}>
-                  328 則評價
+                  {assignment.rating.ratingCount} 則評價
                 </span>
               </span>
             ) : (
@@ -939,11 +950,155 @@ function FareCard({
   );
 }
 
-function ReceiptCard({ fixture }: { fixture: PassengerRideFixture }) {
-  if (!fixture.receiptRows) return null;
+function PaymentCard({ fixture }: { fixture: PassengerRideFixture }) {
+  if (!fixture.payment) return null;
+  const tone = getToneRamp(fixture.payment.tone);
   return (
-    <Card>
-      {fixture.receiptRows.map((row, index) => (
+    <Card title="付款狀態">
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "flex-start",
+        }}
+      >
+        <div>
+          <div style={{ color: tone.fg, fontSize: 13.5, fontWeight: 800 }}>
+            {fixture.payment.label}
+          </div>
+          <div
+            style={{
+              color: passengerChrome.muted,
+              fontSize: 11.5,
+              lineHeight: 1.55,
+              marginTop: 3,
+            }}
+          >
+            {fixture.payment.detail}
+          </div>
+        </div>
+        {fixture.payment.amountText ? (
+          <b style={{ flexShrink: 0, fontFamily: monoFont, fontSize: 14 }}>
+            {fixture.payment.amountText}
+          </b>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function CertificateCard({
+  fixture,
+  token,
+}: {
+  fixture: PassengerRideFixture;
+  token: string;
+}) {
+  const [certificate, setCertificate] = useState(fixture.certificate);
+  const [retrying, setRetrying] = useState(false);
+
+  useEffect(() => {
+    setCertificate(fixture.certificate);
+  }, [fixture.certificate]);
+
+  if (!certificate) return null;
+
+  const retryRead = () => {
+    if (fixture.canReadReceipt !== true || retrying) return;
+    setRetrying(true);
+    void fetchPassengerReceipt(token)
+      .then((receipt) => {
+        setCertificate(mapPassengerCertificate(receipt, true));
+        setRetrying(false);
+      })
+      .catch((error: unknown) => {
+        if (
+          error instanceof PassengerAuthorityError &&
+          error.code === "PASSENGER_RECEIPT_NOT_READY"
+        ) {
+          setCertificate({ state: "pending" });
+        } else {
+          setCertificate({
+            state: "error",
+            errorCode:
+              error instanceof PassengerAuthorityError
+                ? error.code
+                : "PASSENGER_RECEIPT_REQUEST_FAILED",
+          });
+        }
+        setRetrying(false);
+      });
+  };
+
+  if (certificate.state === "pending") {
+    return (
+      <Card title="電子乘車證明">
+        <div style={{ fontSize: 13.5, fontWeight: 800 }}>乘車證明準備中</div>
+        <div
+          style={{
+            color: passengerChrome.muted,
+            fontSize: 11.5,
+            lineHeight: 1.55,
+            marginTop: 4,
+          }}
+        >
+          證明尚未產生。可重新讀取，但此頁不會要求後端重新開立。
+        </div>
+        {fixture.canReadReceipt === true ? (
+          <button
+            type="button"
+            style={{ ...buttonStyle("secondary"), marginTop: 12 }}
+            onClick={retryRead}
+            disabled={retrying}
+          >
+            {retrying ? "讀取中..." : "重新讀取乘車證明"}
+          </button>
+        ) : null}
+      </Card>
+    );
+  }
+
+  if (certificate.state === "error") {
+    return (
+      <Card title="電子乘車證明">
+        <div
+          style={{
+            border: `1px solid ${passengerChrome.danger.border}`,
+            borderRadius: 10,
+            background: passengerChrome.danger.bg,
+            color: passengerChrome.danger.fg,
+            padding: "10px 12px",
+          }}
+        >
+          <div style={{ fontSize: 13.5, fontWeight: 800 }}>
+            無法讀取完整乘車證明
+          </div>
+          <div style={{ fontSize: 11.5, lineHeight: 1.55, marginTop: 4 }}>
+            系統不會以展示資料補齊缺少欄位。錯誤代碼：
+            <span style={{ fontFamily: monoFont }}>
+              {certificate.errorCode || "PASSENGER_RECEIPT_REQUEST_FAILED"}
+            </span>
+          </div>
+        </div>
+        {fixture.canReadReceipt === true ? (
+          <button
+            type="button"
+            style={{ ...buttonStyle("secondary"), marginTop: 12 }}
+            onClick={retryRead}
+            disabled={retrying}
+          >
+            {retrying ? "讀取中..." : "重試讀取"}
+          </button>
+        ) : null}
+      </Card>
+    );
+  }
+
+  const rows = certificate.rows ?? [];
+  return (
+    <Card title="電子乘車證明">
+      {rows.map((row, index) => (
         <div
           key={`${row.label}-${index}`}
           style={{
@@ -952,7 +1107,7 @@ function ReceiptCard({ fixture }: { fixture: PassengerRideFixture }) {
             gap: 12,
             padding: "8px 0",
             borderBottom:
-              index < fixture.receiptRows!.length - 1
+              index < rows.length - 1
                 ? `1px solid ${passengerChrome.border}`
                 : undefined,
             fontSize: 12.5,
@@ -970,9 +1125,6 @@ function ReceiptCard({ fixture }: { fixture: PassengerRideFixture }) {
           </span>
         </div>
       ))}
-      <div style={{ fontSize: 10, color: passengerChrome.dim, marginTop: 4 }}>
-        證明編號 RC-2607••-0186 · 個資已遮碼
-      </div>
     </Card>
   );
 }
@@ -1026,20 +1178,57 @@ function RatingCard({
 }) {
   const [selectedScore, setSelectedScore] = useState(5);
   const [submitting, setSubmitting] = useState(false);
+  const [submittedScore, setSubmittedScore] = useState<number | null>(null);
   if (!fixture.ratingSummary) return null;
+  if (submittedScore !== null) {
+    return (
+      <Card>
+        <div
+          aria-live="polite"
+          style={{ padding: "8px 0", textAlign: "center" }}
+        >
+          <div
+            style={{
+              color: passengerChrome.success.fg,
+              fontSize: 16,
+              fontWeight: 800,
+            }}
+          >
+            評價已送出
+          </div>
+          <div
+            style={{
+              color: passengerChrome.muted,
+              fontSize: 12,
+              marginTop: 4,
+            }}
+          >
+            本趟評價為 {submittedScore} 星；重整後仍以伺服器已評價狀態為準。
+          </div>
+        </div>
+      </Card>
+    );
+  }
   const submitRating = () => {
     if (onSubmit) {
       onSubmit(selectedScore);
       return;
     }
-    if (fixture.canCancel === undefined || submitting) {
+    if (fixture.canRate === undefined) {
+      setSubmittedScore(selectedScore);
+      return;
+    }
+    if (fixture.canRate !== true || submitting) {
       return;
     }
     setSubmitting(true);
-    void requestPassengerRideAction(token, "ratings", {
+    void requestPassengerRideAction<{ score: number }>(token, "ratings", {
       score: selectedScore,
     })
-      .then(() => window.location.reload())
+      .then((rating) => {
+        setSubmittedScore(rating.score);
+        setSubmitting(false);
+      })
       .catch((error: unknown) => {
         window.alert(
           error instanceof Error ? error.message : "PASSENGER_ACTION_FAILED",
@@ -1071,7 +1260,7 @@ function RatingCard({
             marginTop: 4,
           }}
         >
-          {fixture.ratingSummary.scoreText}
+          {selectedScore} 星
         </div>
       </div>
       <div
@@ -1105,9 +1294,13 @@ function RatingCard({
         type="button"
         style={{ ...buttonStyle("primary"), marginTop: 12 }}
         onClick={submitRating}
-        disabled={submitting}
+        disabled={fixture.canRate === false || submitting}
       >
-        {submitting ? "送出中..." : "送出評價"}
+        {fixture.canRate === false
+          ? "目前無法評價"
+          : submitting
+            ? "送出中..."
+            : "送出評價"}
       </button>
     </Card>
   );
@@ -1257,9 +1450,9 @@ function FooterNotice() {
         flexShrink: 0,
       }}
     >
-      客服 0800-090-000 · 主管機關申訴 1999
-      <br />
       本服務僅提供預約叫車
+      <br />
+      聯絡與申訴資訊以本趟權威資料為準
     </div>
   );
 }
@@ -1326,13 +1519,11 @@ function Actions({
   token,
   onCancel,
   onContact,
-  onRefresh,
 }: {
   fixture: PassengerRideFixture;
   token: string;
   onCancel?: () => void;
   onContact?: () => void;
-  onRefresh?: () => void;
 }) {
   const [actionPending, setActionPending] = useState(false);
   const runLiveAction = (
@@ -1369,13 +1560,6 @@ function Actions({
   };
   const cancel = () => runLiveAction("cancel", onCancel);
   const contact = () => runLiveAction("contact", onContact);
-  const refresh = () => {
-    if (onRefresh) {
-      onRefresh();
-      return;
-    }
-    window.location.reload();
-  };
 
   if (fixture.screenId === "P5-01") {
     return (
@@ -1430,10 +1614,7 @@ function Actions({
   if (fixture.screenId === "P5-09") {
     return (
       <ActionGroup>
-        <Link
-          href={`/ride/${token}?screen=P5-10`}
-          style={buttonStyle("secondary")}
-        >
+        <Link href={`/ride/${token}/receipt`} style={buttonStyle("secondary")}>
           查看電子乘車證明
         </Link>
         <Link href="/" style={buttonStyle("ghost")}>
@@ -1446,18 +1627,7 @@ function Actions({
   if (fixture.screenId === "P5-10") {
     return (
       <ActionGroup>
-        <button type="button" style={buttonStyle("primary")} onClick={refresh}>
-          下載 PDF
-        </button>
-        <button
-          type="button"
-          style={buttonStyle("secondary")}
-          onClick={contact}
-          disabled={fixture.canContact === false || actionPending}
-        >
-          分享
-        </button>
-        <Link href={`/ride/${token}?screen=P5-09`} style={buttonStyle("ghost")}>
+        <Link href={`/ride/${token}`} style={buttonStyle("ghost")}>
           返回行程
         </Link>
       </ActionGroup>
@@ -1577,6 +1747,8 @@ function RideContent({
     return (
       <>
         <CompletedThanks />
+        <PaymentCard fixture={fixture} />
+        <CertificateCard fixture={fixture} token={token} />
         <Actions fixture={fixture} token={token} />
       </>
     );
@@ -1585,7 +1757,8 @@ function RideContent({
   if (fixture.screenId === "P5-10") {
     return (
       <>
-        <ReceiptCard fixture={fixture} />
+        <PaymentCard fixture={fixture} />
+        <CertificateCard fixture={fixture} token={token} />
         <Actions fixture={fixture} token={token} />
       </>
     );
@@ -1678,9 +1851,15 @@ function RideContent({
             }}
           >
             <span style={{ color: passengerChrome.muted }}>本趟車資</span>
-            <b>NT$ 355</b>
+            <b>
+              {fixture.payment?.amountText ||
+                fixture.routeFareText ||
+                "車資資料尚未提供"}
+            </b>
           </div>
         </Card>
+        <PaymentCard fixture={fixture} />
+        <CertificateCard fixture={fixture} token={token} />
       </>
     );
   }
@@ -1692,6 +1871,7 @@ function RideContent({
         <MapCard fixture={fixture} />
         <EtaBlock fixture={fixture} />
         <VehicleCard fixture={fixture} plateChanged />
+        <PaymentCard fixture={fixture} />
         <Actions fixture={fixture} token={token} />
       </>
     );
@@ -1704,6 +1884,7 @@ function RideContent({
         <EtaBlock fixture={fixture} />
         <VehicleCard fixture={fixture} />
         <SeatbeltNotice />
+        <PaymentCard fixture={fixture} />
         <Actions fixture={fixture} token={token} />
       </>
     );
@@ -1717,6 +1898,7 @@ function RideContent({
         <SeatbeltNotice />
         <VehicleCard fixture={fixture} />
         <FareCard fixture={fixture} />
+        <PaymentCard fixture={fixture} />
       </>
     );
   }
@@ -1740,6 +1922,7 @@ function RideContent({
       <StatusSubline fixture={fixture} />
       <VehicleCard fixture={fixture} />
       <FareCard fixture={fixture} />
+      <PaymentCard fixture={fixture} />
       <Actions fixture={fixture} token={token} />
     </>
   );
@@ -1786,7 +1969,7 @@ export function PassengerRidePage({
 }: {
   token: string;
   searchParams: Record<string, string | string[] | undefined>;
-  kind: "ride" | "fares";
+  kind: "ride" | "fares" | "receipt";
 }) {
   const sourceMode = resolvePassengerDataMode(
     readQueryValue(searchParams.mode),
@@ -1806,7 +1989,7 @@ export function PassengerRidePage({
       .then((view) => {
         if (!active) return;
         startTransition(() => {
-          setLiveFixture(mapPassengerRideAuthorityToFixture(view, token));
+          setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
           setAuthorityError(null);
         });
         unsubscribe = subscribePassengerRideAuthority(
@@ -1815,7 +1998,7 @@ export function PassengerRidePage({
             if (!active) return;
             startTransition(() => {
               setLiveFixture(
-                mapPassengerRideAuthorityToFixture(nextView, token),
+                mapPassengerRideAuthorityToFixture(nextView, token, kind),
               );
             });
           },
@@ -1834,7 +2017,7 @@ export function PassengerRidePage({
       active = false;
       unsubscribe();
     };
-  }, [sourceMode, token]);
+  }, [kind, sourceMode, token]);
 
   const fixture =
     sourceMode === "fixture"

@@ -1,10 +1,13 @@
 import type {
   ApiSuccessEnvelope,
+  MultiTaxiElectronicReceipt,
   PassengerRideAuthorityView,
   PassengerRideSseEventEnvelope,
 } from "@drts/contracts";
 
 import type {
+  PassengerCertificatePresentation,
+  PassengerPaymentPresentation,
   PassengerRideFixture,
   PassengerScreenId,
 } from "./passenger-fixtures";
@@ -68,6 +71,25 @@ export async function requestPassengerRideAction<T>(
   return payload.data;
 }
 
+export async function fetchPassengerReceipt(token: string) {
+  const response = await fetch(
+    `${PASSENGER_PROXY_BASE}/passenger-rides/${encodeURIComponent(token)}/receipt`,
+    { cache: "no-store" },
+  );
+  const payload = camelizeKeys(await response.json()) as
+    | ApiSuccessEnvelope<MultiTaxiElectronicReceipt>
+    | { error?: { code?: string } };
+  if (!response.ok || !("data" in payload)) {
+    throw new PassengerAuthorityError(
+      response.status,
+      "error" in payload
+        ? payload.error?.code || "PASSENGER_RECEIPT_REQUEST_FAILED"
+        : "PASSENGER_RECEIPT_REQUEST_FAILED",
+    );
+  }
+  return payload.data;
+}
+
 export function subscribePassengerRideAuthority(
   token: string,
   onView: (view: PassengerRideAuthorityView) => void,
@@ -107,26 +129,20 @@ export function subscribePassengerRideAuthority(
 export function mapPassengerRideAuthorityToFixture(
   view: PassengerRideAuthorityView,
   token: string,
+  kind: "ride" | "fares" | "receipt" = "ride",
 ): PassengerRideFixture {
   const assignment = view.assignment;
-  const screenId = resolveScreenId(view);
+  const screenId = resolveScreenId(view, kind);
   const fareMinor = assignment?.routeFare.estimatedFareMinor ?? null;
+  const payableFareMinor = assignment?.routeFare.payableFareMinor ?? null;
   const distanceMeters = assignment?.routeFare.estimatedDistanceMeters ?? null;
   const durationSeconds =
     assignment?.routeFare.estimatedDurationSeconds ?? null;
-  const receiptRows = view.receipt
-    ? [
-        { label: "乘車證明編號", value: view.receipt.receiptNo, mono: true },
-        {
-          label: "實付金額",
-          value: formatMoney(view.receipt.amountMinor),
-        },
-        {
-          label: "開立時間",
-          value: formatDateTime(view.receipt.issuedAt),
-        },
-      ]
-    : undefined;
+  const payment = mapPassengerPayment(view.payment);
+  const certificate =
+    view.order.status === "completed" || view.receipt
+      ? mapPassengerCertificate(view.receipt, view.actions.canReadReceipt)
+      : undefined;
 
   return {
     token,
@@ -154,16 +170,20 @@ export function mapPassengerRideAuthorityToFixture(
         }),
     routeFareMode: "range",
     routeFareText:
-      fareMinor === null
-        ? "依計費表實際金額收費"
-        : `預估 ${formatMoney(fareMinor)}`,
+      payableFareMinor !== null
+        ? `應付 ${formatMoney(payableFareMinor)}`
+        : fareMinor === null
+          ? "依計費表實際金額收費"
+          : `預估 ${formatMoney(fareMinor)}`,
     ...(assignment?.routeFare.fareChangeRuleDisplayText
       ? {
           routeFareHint: assignment.routeFare.fareChangeRuleDisplayText,
         }
       : {}),
-    pickupLabel: view.order.pickup.address,
-    dropoffLabel: view.order.dropoff.address,
+    pickupLabel:
+      assignment?.routeFare.pickup.address || view.order.pickup.address,
+    dropoffLabel:
+      assignment?.routeFare.dropoff.address || view.order.dropoff.address,
     mapState:
       assignment?.eta.locationFreshness === "fresh"
         ? "fresh"
@@ -174,7 +194,9 @@ export function mapPassengerRideAuthorityToFixture(
       ? "driver_contact_ready"
       : "support_only",
     canCancel: view.actions.canCancel,
+    canRate: view.actions.canRate,
     canContact: view.actions.canContact,
+    canReadReceipt: view.actions.canReadReceipt,
     ...(view.actions.canCancel
       ? {
           cancelNote: "取消條件依目前訂單狀態計算",
@@ -182,7 +204,8 @@ export function mapPassengerRideAuthorityToFixture(
         }
       : {}),
     seatbeltNotice: ["arrived_pickup", "on_trip"].includes(view.order.status),
-    ...(receiptRows ? { receiptRows } : {}),
+    ...(payment ? { payment } : {}),
+    ...(certificate ? { certificate } : {}),
     ...(view.order.status === "completed"
       ? {
           ratingSummary: view.rating
@@ -215,9 +238,142 @@ export function mapPassengerRideAuthorityToFixture(
   };
 }
 
-function resolveScreenId(view: PassengerRideAuthorityView): PassengerScreenId {
-  if (view.receipt) return "P5-10";
+export function mapPassengerPayment(
+  payment: PassengerRideAuthorityView["payment"],
+): PassengerPaymentPresentation | undefined {
+  if (!payment) {
+    return undefined;
+  }
+  const presentations = {
+    not_selected: {
+      label: "尚未選擇付款方式",
+      detail: "目前尚無付款方式。",
+      tone: "info",
+    },
+    authorized: {
+      label: "已授權，待完成扣款",
+      detail: "付款方式已授權，將依行程結果完成扣款。",
+      tone: "warning",
+    },
+    captured: {
+      label: "付款完成",
+      detail: "款項已完成扣款。",
+      tone: "success",
+    },
+    failed: {
+      label: "付款失敗",
+      detail: "目前未完成付款；此頁不會自行重試扣款。",
+      tone: "danger",
+    },
+    refunded: {
+      label: "已退款",
+      detail: "退款狀態已由付款服務確認。",
+      tone: "info",
+    },
+    manual_recovery: {
+      label: "請聯絡客服確認付款",
+      detail: "付款需要人工確認；此頁不會顯示為已付款。",
+      tone: "warning",
+    },
+  } as const;
+  const presentation = presentations[payment.status];
+  return {
+    status: payment.status,
+    ...presentation,
+    ...(payment.amount
+      ? { amountText: formatMoney(payment.amount.amountMinor) }
+      : {}),
+  };
+}
+
+export function mapPassengerCertificate(
+  receipt: MultiTaxiElectronicReceipt | null,
+  canReadReceipt: boolean,
+): PassengerCertificatePresentation {
+  if (!canReadReceipt) {
+    return {
+      state: "error",
+      errorCode: "PASSENGER_RECEIPT_SCOPE_FORBIDDEN",
+    };
+  }
+  if (!receipt) {
+    return { state: "pending" };
+  }
+
+  const record = receipt.record;
+  const plateNo = readText(record, "plateNo");
+  const pickupAt = readDate(record, "pickupAt");
+  const dropoffAt = readDate(record, "dropoffAt");
+  const travelDurationSeconds = readNonNegativeNumber(
+    record,
+    "travelDurationSeconds",
+  );
+  const routeSummary = readText(record, "routeSummary");
+  const distanceMeters = readNonNegativeNumber(record, "distanceMeters");
+  const tollMinor = readNonNegativeNumber(record, "tollMinor");
+  const consumerServicePhone = readText(record, "consumerServicePhone");
+  const authorityComplaintPhone = readText(record, "authorityComplaintPhone");
+  if (
+    !plateNo ||
+    !pickupAt ||
+    !dropoffAt ||
+    travelDurationSeconds === null ||
+    !routeSummary ||
+    distanceMeters === null ||
+    tollMinor === null ||
+    !consumerServicePhone ||
+    !authorityComplaintPhone
+  ) {
+    return {
+      state: "error",
+      receiptNo: receipt.receiptNo,
+      errorCode: "PASSENGER_RECEIPT_LEGAL_FIELDS_MISSING",
+    };
+  }
+
+  return {
+    state: "available",
+    receiptNo: receipt.receiptNo,
+    rows: [
+      { label: "乘車證明編號", value: receipt.receiptNo, mono: true },
+      {
+        label: "開立時間",
+        value: formatDateTime(receipt.issuedAt),
+        mono: true,
+      },
+      { label: "車號", value: plateNo, mono: true },
+      { label: "上車時間", value: formatDateTime(pickupAt), mono: true },
+      { label: "下車時間", value: formatDateTime(dropoffAt), mono: true },
+      { label: "行駛時間", value: formatDuration(travelDurationSeconds) },
+      { label: "路線", value: routeSummary },
+      {
+        label: "行駛里程",
+        value: `${(distanceMeters / 1000).toFixed(1)} 公里`,
+        mono: true,
+      },
+      {
+        label: "車資金額",
+        value: formatMoney(receipt.amountMinor),
+        mono: true,
+      },
+      { label: "通行費", value: formatMoney(tollMinor), mono: true },
+      { label: "客服電話", value: consumerServicePhone, mono: true },
+      {
+        label: "主管機關申訴電話",
+        value: authorityComplaintPhone,
+        mono: true,
+      },
+    ],
+  };
+}
+
+function resolveScreenId(
+  view: PassengerRideAuthorityView,
+  kind: "ride" | "fares" | "receipt",
+): PassengerScreenId {
+  if (kind === "receipt") return "P5-10";
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
+  if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
   if (view.order.status === "arrived_pickup") return "P5-06";
   if (!view.assignment) {
@@ -276,6 +432,29 @@ function formatDateTime(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder === 0 ? `${minutes} 分鐘` : `${minutes} 分 ${remainder} 秒`;
+}
+
+function readText(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readDate(record: Record<string, unknown>, key: string) {
+  const value = readText(record, key);
+  return value && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+function readNonNegativeNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
 }
 
 function camelizeKeys(value: unknown): unknown {

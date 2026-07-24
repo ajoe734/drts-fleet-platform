@@ -2,6 +2,7 @@ import type {
   DriverRatingDisplayState,
   MultiTaxiPublicFareVersion,
   PassengerDispatchDisclosureSnapshot,
+  PassengerPaymentStatus,
   PassengerRideSseEvent,
   ResolvedAddressPayload,
 } from "@drts/contracts";
@@ -32,6 +33,27 @@ export type PassengerActionMode = "driver_contact_ready" | "support_only";
 
 export type PassengerBadgeTone = "info" | "success" | "warning" | "danger";
 
+export interface PassengerPaymentPresentation {
+  status: PassengerPaymentStatus;
+  label: string;
+  detail: string;
+  tone: PassengerBadgeTone;
+  amountText?: string;
+}
+
+export interface PassengerCertificateRow {
+  label: string;
+  value: string;
+  mono?: boolean;
+}
+
+export interface PassengerCertificatePresentation {
+  state: "pending" | "available" | "error";
+  receiptNo?: string;
+  rows?: PassengerCertificateRow[];
+  errorCode?: string;
+}
+
 export interface PassengerTimelineEvent {
   eventType: PassengerRideSseEvent;
   happenedAt: string;
@@ -58,7 +80,9 @@ export interface PassengerRideFixture {
   mapState: PassengerMapState;
   actionMode: PassengerActionMode;
   canCancel?: boolean;
+  canRate?: boolean;
   canContact?: boolean;
+  canReadReceipt?: boolean;
   cancelNote?: string;
   actionLabel?: string;
   banner?: {
@@ -70,7 +94,8 @@ export interface PassengerRideFixture {
   disclosureBlockReason?: string;
   contactSafetyNote?: string;
   seatbeltNotice?: boolean;
-  receiptRows?: Array<{ label: string; value: string; mono?: boolean }>;
+  payment?: PassengerPaymentPresentation;
+  certificate?: PassengerCertificatePresentation;
   ratingSummary?: {
     state: DriverRatingDisplayState | "unavailable";
     scoreText?: string;
@@ -402,6 +427,16 @@ export function getPassengerRideFixture(
           countText: "吳明翰 · BKR-2208 · 14:32–15:07",
           chips: ["準時抵達", "駕駛有禮", "車內整潔", "行車平穩", "路線適當"],
         },
+        payment: {
+          status: "captured",
+          label: "付款完成",
+          detail: "款項已完成扣款。",
+          tone: "success",
+          amountText: "NT$ 355",
+        },
+        certificate: {
+          state: "pending",
+        },
       };
     case "P5-09":
       return {
@@ -414,6 +449,16 @@ export function getPassengerRideFixture(
           title: "感謝您的評價",
           detail: "您的意見會協助我們維持服務品質。",
         },
+        payment: {
+          status: "captured",
+          label: "付款完成",
+          detail: "款項已完成扣款。",
+          tone: "success",
+          amountText: "NT$ 355",
+        },
+        certificate: {
+          state: "pending",
+        },
       };
     case "P5-10":
       return {
@@ -421,20 +466,34 @@ export function getPassengerRideFixture(
         screenId,
         title: "Electronic Ride Certificate",
         status: "電子乘車證明",
-        receiptRows: [
-          { label: "車牌", value: "BKR-2208", mono: true },
-          { label: "上車 / 下車", value: "14:32 / 15:07", mono: true },
-          { label: "行駛時間", value: "35 分鐘" },
-          {
-            label: "起訖",
-            value: "信義區松仁路 100 號 → 中山區南京東路二段 100 號",
-          },
-          { label: "行駛里程", value: "6.4 公里", mono: true },
-          { label: "車資", value: "NT$ 355", mono: true },
-          { label: "通行費", value: "NT$ 0", mono: true },
-          { label: "客服電話", value: "0800-090-000", mono: true },
-          { label: "主管機關申訴電話", value: "1999", mono: true },
-        ],
+        payment: {
+          status: "captured",
+          label: "付款完成",
+          detail: "款項已完成扣款。",
+          tone: "success",
+          amountText: "NT$ 355",
+        },
+        certificate: {
+          state: "available",
+          receiptNo: "RC-2607-0186",
+          rows: [
+            { label: "乘車證明編號", value: "RC-2607-0186", mono: true },
+            { label: "開立時間", value: "2026/07/21 15:08", mono: true },
+            { label: "車牌", value: "BKR-2208", mono: true },
+            { label: "上車時間", value: "2026/07/21 14:32", mono: true },
+            { label: "下車時間", value: "2026/07/21 15:07", mono: true },
+            { label: "行駛時間", value: "35 分鐘" },
+            {
+              label: "路線",
+              value: "信義區松仁路 100 號 → 中山區南京東路二段 100 號",
+            },
+            { label: "行駛里程", value: "6.4 公里", mono: true },
+            { label: "車資", value: "NT$ 355", mono: true },
+            { label: "通行費", value: "NT$ 0", mono: true },
+            { label: "客服電話", value: "0800-090-000", mono: true },
+            { label: "主管機關申訴電話", value: "1999", mono: true },
+          ],
+        },
       };
     case "P5-11":
       return {
