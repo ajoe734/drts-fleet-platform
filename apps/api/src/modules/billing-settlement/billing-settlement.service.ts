@@ -20,6 +20,7 @@ import type {
   InvoiceLineRecord,
   MarkReimbursementPaidCommand,
   MoneyAmount,
+  PassengerPaymentStatus,
   PublishDriverFeePlanCommand,
   ReconciliationIssueCommentRecord,
   ReconciliationIssueRecord,
@@ -43,10 +44,13 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   BillingSettlementRepository,
   type LiveSettlementTripRecord,
+  type MultiTaxiPaymentAuditRecord,
+  type MultiTaxiPaymentExceptionRecord,
   type PersistBillingSettlementChanges,
 } from "./billing-settlement.repository";
 import {
@@ -88,6 +92,30 @@ const DEFAULT_CURRENCY = "NTD";
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 const TENANT_REFRESH_INTERVAL_MS = 30_000;
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
+const PAYMENT_RECOVERY_COMMAND_PENDING = "payment_recovery_command_pending";
+
+export type MultiTaxiPaymentExceptionView = {
+  paymentId: string;
+  orderId: string;
+  tripId: string | null;
+  status: PassengerPaymentStatus;
+  amount: {
+    amountMinor: number;
+    currency: string;
+  } | null;
+  safeProviderReference: string | null;
+  attemptCount: number;
+  updatedAt: string;
+  availableActions: ResourceActionDescriptor[];
+  auditTimeline: Array<{
+    auditId: string;
+    actorId: string | null;
+    actorType: string;
+    actionName: string;
+    requestId: string | null;
+    createdAt: string;
+  }>;
+};
 
 export type BillingSettlementTripRecord = {
   settlementId: string;
@@ -424,6 +452,75 @@ export class BillingSettlementService implements OnModuleInit {
     private readonly billingSettlementRepository?: BillingSettlementRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
   ) {}
+
+  async getMultiTaxiPaymentException(
+    orderId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<MultiTaxiPaymentExceptionView> {
+    const normalizedOrderId = orderId.trim();
+    if (!normalizedOrderId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PAYMENT_EXCEPTION_ORDER_ID_REQUIRED",
+        "orderId is required.",
+      );
+    }
+    if (
+      !this.billingSettlementRepository ||
+      !this.billingSettlementRepository.isEnabled()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PAYMENT_EXCEPTION_READ_AUTHORITY_UNAVAILABLE",
+        "Payment exception read authority requires the billing database.",
+        { orderId: normalizedOrderId },
+        true,
+      );
+    }
+
+    const payment =
+      await this.billingSettlementRepository.findMultiTaxiPaymentException(
+        normalizedOrderId,
+      );
+    if (!payment) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PAYMENT_EXCEPTION_NOT_FOUND",
+        "Payment exception was not found.",
+        { orderId: normalizedOrderId },
+      );
+    }
+    const auditTrail =
+      await this.billingSettlementRepository.listMultiTaxiPaymentAuditTrail(
+        payment.orderId,
+        payment.paymentId,
+      );
+    const view = this.buildMultiTaxiPaymentExceptionView(payment, auditTrail);
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "read_multi_taxi_payment_exception",
+        resourceType: "multi_taxi_payment_exception",
+        resourceId: payment.paymentId,
+        newValuesSummary: {
+          orderId: payment.orderId,
+          status: payment.status,
+          availableActionCount: view.availableActions.length,
+        },
+      },
+      requestId,
+    );
+
+    return view;
+  }
 
   @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
   handleOwnedMobilityTripCompleted(event: OwnedMobilityTripCompletedEvent) {
@@ -2890,7 +2987,9 @@ export class BillingSettlementService implements OnModuleInit {
       partnerCharge: treatment.partnerCharge
         ? { ...treatment.partnerCharge }
         : null,
-      tenantCharge: treatment.tenantCharge ? { ...treatment.tenantCharge } : null,
+      tenantCharge: treatment.tenantCharge
+        ? { ...treatment.tenantCharge }
+        : null,
       platformAbsorbed: treatment.platformAbsorbed
         ? { ...treatment.platformAbsorbed }
         : null,
@@ -3175,6 +3274,34 @@ export class BillingSettlementService implements OnModuleInit {
       auditLogInput.requestId = requestId;
     }
     this.auditNotificationService.recordAuditLog(auditLogInput);
+  }
+
+  private buildMultiTaxiPaymentExceptionView(
+    payment: MultiTaxiPaymentExceptionRecord,
+    auditTrail: MultiTaxiPaymentAuditRecord[],
+  ): MultiTaxiPaymentExceptionView {
+    return {
+      paymentId: payment.paymentId,
+      orderId: payment.orderId,
+      tripId: payment.tripId,
+      status: payment.status,
+      amount:
+        payment.amountMinor === null
+          ? null
+          : {
+              amountMinor: payment.amountMinor,
+              currency: payment.currency,
+            },
+      safeProviderReference: maskOpaqueToken(payment.providerPaymentRef, 4, 4),
+      attemptCount: payment.attemptCount,
+      updatedAt: payment.updatedAt,
+      availableActions: payment.availableActions.map((descriptor) => ({
+        ...descriptor,
+        enabled: false,
+        disabledReasonCode: PAYMENT_RECOVERY_COMMAND_PENDING,
+      })),
+      auditTimeline: auditTrail.map((event) => ({ ...event })),
+    };
   }
 
   private persistChanges(
