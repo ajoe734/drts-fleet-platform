@@ -3,44 +3,48 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const pageSource = readFileSync(
-  join(
-    process.cwd(),
-    "app/multi-taxi-authorizations/page.tsx",
-  ),
+  join(process.cwd(), "app/multi-taxi-authorizations/page.tsx"),
+  "utf8",
+);
+const behaviorSource = readFileSync(
+  join(process.cwd(), "app/multi-taxi-authorizations/authorization-ui.ts"),
   "utf8",
 );
 
 describe("MTX-AUTH-UI-001 Platform Admin Web Authorization UI", () => {
-  it("implements all 6 sub-screens / views in multi-taxi-authorizations page", () => {
-    // 1. Registry view
-    expect(pageSource).toContain('t("multiTaxiAuth.registry.title")');
-    expect(pageSource).toContain("CanvasTable");
+  it("maps all six screen IDs to production surfaces", () => {
+    for (const id of [
+      "MTX-AUTH-UI-01",
+      "MTX-AUTH-UI-02",
+      "MTX-AUTH-UI-03",
+      "MTX-AUTH-UI-04",
+      "MTX-AUTH-UI-05",
+      "MTX-AUTH-UI-06",
+    ]) {
+      expect(pageSource).toContain(`data-screen-id="${id}"`);
+    }
+  });
 
-    // 2. Detail view
-    expect(pageSource).toContain('t("multiTaxiAuth.detail.title")');
-    expect(pageSource).toContain("CanvasDL");
-    expect(pageSource).toContain('t("multiTaxiAuth.detail.readOnly")');
+  it("implements registry, detail, draft, lifecycle, vehicles, and typed state behavior", () => {
+    expect(pageSource).toContain("selectAuthorizationRows");
+    expect(pageSource).toContain("getEffectiveWindowState");
+    expect(pageSource).toContain("validateAuthorizationDraft");
+    expect(pageSource).toContain("openLifecycleConfirmation");
+    expect(pageSource).toContain("selectAuthorizedVehicles");
+    expect(pageSource).toContain("classifyAuthorizationError");
+    expect(behaviorSource).toContain('"session"');
+    expect(behaviorSource).toContain('"permission"');
+    expect(behaviorSource).toContain('"stale"');
+    expect(behaviorSource).toContain('"unavailable"');
+  });
 
-    // 3. Draft Editor view (Create & Edit)
-    expect(pageSource).toContain('t("multiTaxiAuth.create.title")');
-    expect(pageSource).toContain('t("multiTaxiAuth.edit.title")');
-    expect(pageSource).toContain('t("multiTaxiAuth.action.saveDraft")');
-
-    // 4. Lifecycle Confirm dialog
-    expect(pageSource).toContain("confirmModal");
-    expect(pageSource).toContain('t("multiTaxiAuth.confirm.title")');
-    expect(pageSource).toContain('t("multiTaxiAuth.confirm.confirm")');
-
-    // 5. Authorized Vehicles section
-    expect(pageSource).toContain('t("multiTaxiAuth.vehicles.title")');
-    expect(pageSource).toContain('t("multiTaxiAuth.action.addVehicle")');
-    expect(pageSource).toContain("canAddVehicle");
-
-    // 6. Conflict & Permission Error states
-    expect(pageSource).toContain("handleApiError");
-    expect(pageSource).toContain('t("multiTaxiAuth.error.permissionDeniedTitle")');
-    expect(pageSource).toContain('t("multiTaxiAuth.error.conflictTitle")');
-    expect(pageSource).toContain('t("multiTaxiAuth.error.validationTitle")');
+  it("refreshes lifecycle preview from canonical server APIs", () => {
+    expect(pageSource).toContain("Promise.all");
+    expect(pageSource).toContain(
+      "client.get<MultiTaxiOperatingAuthorizationRecord>",
+    );
+    expect(pageSource).toContain("confirmModal.vehicleCount");
+    expect(pageSource).toContain('"X-Action-Reason": confirmReason.trim()');
   });
 
   it("strictly excludes forbidden commands (revoke, restore, delete, vehicle suspend, legal hold, bulk import)", () => {
@@ -52,9 +56,13 @@ describe("MTX-AUTH-UI-001 Platform Admin Web Authorization UI", () => {
     expect(pageSource).not.toContain("bulkImport");
   });
 
-  it("gates add-vehicle form and actions when authorization status is expired or revoked", () => {
-    expect(pageSource).toContain("isReadOnly");
-    expect(pageSource).toContain("canAddVehicle");
-    expect(pageSource).toContain('!isReadOnly &&');
+  it("keeps unsupported commands visibly disabled and out of request paths", () => {
+    expect(pageSource).toContain('t("multiTaxiAuth.action.revokePending")');
+    expect(pageSource).toContain(
+      't("multiTaxiAuth.action.vehicleRemovePending")',
+    );
+    expect(pageSource).not.toMatch(
+      /client\.(post|put|delete)\([^)]*\/(revoke|restore|delete|remove)/s,
+    );
   });
 });
