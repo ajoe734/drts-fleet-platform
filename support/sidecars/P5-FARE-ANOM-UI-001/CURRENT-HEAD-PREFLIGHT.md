@@ -1,10 +1,10 @@
 # P5-FARE-ANOM-UI-001 Current-Head Preflight
 
 - Task-ID: `P5-FARE-ANOM-UI-001`
-- Branch: `codex/p5-fare-anom-ui-001`
-- Required base: `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`
-- Verified base: `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`
-- Status: `IMPLEMENTED LOCALLY — INTEGRATION BLOCKERS RECORDED`
+- Branch: `codex/p5-fare-anom-ui-001-final`
+- Merged requirements base: `c5df24a41ba8ed9c790649719dd731b560cde6fd`
+- Clean integration base: `54675de25`
+- Status: `FEATURE VERIFIED — EXTERNAL INTEGRATION BLOCKERS RECORDED`
 - Date: `2026-07-24`
 
 ## Scope
@@ -130,4 +130,5 @@ evidence.
 | `screenshots/04-detail-mobile.png`  | 390 x 844   | `994d07a42232a7388cfa982188936bdd5c956ee25e8c7872283a3d90fa0cdec0` |
 
 The screenshot stub was not written into the repository and was stopped after
-capture.
+capture. The feature was then replayed cleanly onto the latest merged
+authorization baseline without changing the verified implementation.
