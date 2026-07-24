@@ -108,12 +108,20 @@ function createOwnedMobilityService(options?: {
       {
         vehicleId: "veh-demo-001",
         plateNo: "TAXI-001",
+        operatingArea: "TPE",
       },
     ]),
     listDrivers: vi.fn(() => [
       {
         driverId: "drv-demo-001",
         name: "Driver One",
+      },
+    ]),
+    listSupplyPairs: vi.fn(() => [
+      {
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+        etaMinutes: 8,
       },
     ]),
   };
@@ -759,6 +767,87 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
           code: "VEHICLE_NOT_DISPATCHABLE",
+        },
+      });
+    }
+  });
+
+  it("projects queue reads from registry authority and fails closed when eligibility changes", () => {
+    let vehicleDispatchable = true;
+    const { service } = createOwnedMobilityService({
+      getVehicleDispatchability: () => vehicleDispatchable,
+    });
+    const checkedIn = service.queueCheckIn({
+      vehicleId: "veh-demo-001",
+      siteId: "north-station",
+      queueMode: "physical_rank",
+    });
+
+    expect(service.listQueueEntries()).toEqual([
+      expect.objectContaining({
+        queueEntryId: checkedIn.queueEntryId,
+        runtimeProfileCode: "ordinary_taxi",
+        queueMode: "physical_rank",
+        driverId: "drv-demo-001",
+        driverName: "Driver One",
+        vehiclePlateNo: "TAXI-001",
+        serviceAreaCode: "TPE",
+        eligibility: expect.objectContaining({
+          decision: "eligible",
+          reasonCode: null,
+        }),
+        availableActions: expect.arrayContaining([
+          expect.objectContaining({ action: "open_vehicle", enabled: true }),
+          expect.objectContaining({ action: "open_driver", enabled: true }),
+        ]),
+      }),
+    ]);
+
+    vehicleDispatchable = false;
+    expect(service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
+      eligibility: {
+        decision: "denied",
+        reasonCode: "VEHICLE_NOT_DISPATCHABLE",
+      },
+    });
+  });
+
+  it("fails queue reads closed when registry authority is unavailable", () => {
+    const { service, regulatoryRegistryService } = createOwnedMobilityService();
+    const checkedIn = service.queueCheckIn({
+      vehicleId: "veh-demo-001",
+      siteId: "north-station",
+    });
+    regulatoryRegistryService.listVehicles.mockImplementation(() => {
+      throw new Error("registry unavailable");
+    });
+
+    expect(service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
+      driverId: null,
+      vehiclePlateNo: null,
+      serviceAreaCode: null,
+      eligibility: {
+        decision: "denied",
+        reasonCode: "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+      },
+      availableActions: [
+        expect.objectContaining({ action: "back_to_queue_overview" }),
+      ],
+    });
+  });
+
+  it("returns a canonical not-found error for unknown queue entry details", () => {
+    const { service } = createOwnedMobilityService();
+
+    expect(() => service.getQueueEntry("queue-entry-missing")).toThrowError(
+      ApiRequestError,
+    );
+    try {
+      service.getQueueEntry("queue-entry-missing");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "QUEUE_ENTRY_NOT_FOUND",
         },
       });
     }
@@ -4377,7 +4466,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(priorVirtualCheckIn.status).toBe("checked_in");
 
     // Reconfigure ordinary_taxi to disallow virtual_matching
-    service.setProfileQueuePolicy("ordinary_taxi", ["physical_rank", "taxi_stand"]);
+    service.setProfileQueuePolicy("ordinary_taxi", [
+      "physical_rank",
+      "taxi_stand",
+    ]);
     expect(service.getProfileQueuePolicy("ordinary_taxi")).toEqual([
       "physical_rank",
       "taxi_stand",

@@ -3445,6 +3445,48 @@ export interface QueueEntryRecord {
   checkedOutAt: string | null;
 }
 
+export const DISPATCH_QUEUE_ELIGIBILITY_DECISIONS = [
+  "eligible",
+  "denied",
+] as const;
+export type DispatchQueueEligibilityDecision =
+  (typeof DISPATCH_QUEUE_ELIGIBILITY_DECISIONS)[number];
+
+export const DISPATCH_QUEUE_ELIGIBILITY_REASON_CODES = [
+  "QUEUE_CONTEXT_INCOMPLETE",
+  "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+  "MULTI_TAXI_AUTHORIZATION_REQUIRED",
+  "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+  "QUEUE_MODE_NOT_ALLOWED",
+  "VEHICLE_NOT_DISPATCHABLE",
+  "VEHICLE_NOT_FOUND",
+] as const;
+export type DispatchQueueEligibilityReasonCode =
+  (typeof DISPATCH_QUEUE_ELIGIBILITY_REASON_CODES)[number];
+
+export interface DispatchQueueEligibilitySnapshot {
+  decision: DispatchQueueEligibilityDecision;
+  reasonCode: DispatchQueueEligibilityReasonCode | null;
+  evaluatedAt: string;
+}
+
+export interface DispatchQueueEntryReadRecord extends Omit<
+  QueueEntryRecord,
+  "runtimeProfileCode" | "queueMode"
+> {
+  runtimeProfileCode:
+    | import("./phase1-p5-s3-multi-taxi").RuntimeProfileCode
+    | null;
+  queueMode: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode | null;
+  driverId: string | null;
+  driverName: string | null;
+  vehiclePlateNo: string | null;
+  serviceAreaCode: string | null;
+  lastUpdatedAt: string;
+  eligibility: DispatchQueueEligibilitySnapshot;
+  availableActions: import("./ui-runtime").ResourceActionDescriptor[];
+}
+
 export type VehicleContractLifecycleStatus =
   | "missing"
   | "draft"
