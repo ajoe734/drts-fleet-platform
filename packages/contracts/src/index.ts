@@ -6440,3 +6440,4 @@ export * from "./ui-runtime";
 export * from "./phase1-delta-supply-eligibility";
 export * from "./phase2-tesla-fsd-sandbox";
 export * from "./phase1-p5-s3-multi-taxi";
+export * from "./p5-fare-anomaly-admin";
