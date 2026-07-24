@@ -6,45 +6,45 @@
 | -------------------- | ------------------------------------------------------ |
 | Task ID              | `E2E-MTX-UI-FULL-001`                                  |
 | Fleet                | H                                                      |
-| Baseline             | `origin/dev@1021f3e8c`                                 |
+| Baseline             | `origin/dev@cf26c0c43`                                 |
 | Evidence date        | `2026-07-24`                                           |
 | Canonical packet     | `10_full_17_screen_fleets_execution_tasks_20260724.md` |
-| Owned change surface | Fleet H unit contract and this sidecar only            |
+| Candidate            | `codex/mtx-release-gaps-20260724`                      |
+| Owned change surface | Repository release gaps, tests, and this sidecar       |
 | Deployment           | Not performed                                          |
 
-The baseline includes all merged feature work through `P5-HOLD-001`, including
-fare migration `V0059`, payment migration `V0060`, and S3 migration `V0061`.
-This packet performs a source and evidence census. It does not claim that a
-route/contract census is a live-provider or persisted cross-surface E2E.
+The candidate starts from the final 17-screen census and closes the
+repository-owned fare producer, certificate writer/regeneration, payment
+recovery command, legal-hold action, SOS provider-adapter, and persisted p95
+instrumentation gaps. It does not claim that hermetic tests are live-provider,
+physical-device, or production-environment evidence.
 
 ## Acceptance Decision
 
-| Acceptance area                                     | Result            | Interpretation                                                                                                                                                                                    |
-| --------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exactly 17 approved Screen IDs                      | `verified`        | The automated census asserts the canonical ID set and rejects duplicates or omissions.                                                                                                            |
-| Production route or embedded surface for 17 screens | `verified`        | Every ID maps to an existing production route source and explicit `data-screen-id` or typed `screenId` surface marker.                                                                            |
-| Backend read/command authority source               | `verified`        | Every screen group maps to an existing production controller authority.                                                                                                                           |
-| Forbidden control boundary                          | `verified`        | Census rejects queue bypass endpoints/controls, fare amount overrides, payment mark-paid controls, and enabled legal-hold mutations.                                                              |
-| Migration order                                     | `verified`        | `V0059`, `V0060`, and `V0061` exist in sequence.                                                                                                                                                  |
-| Full persisted cross-surface positive flow          | `partial`         | No current suite persists one identity through authorization, queue, Passenger, fare/payment/certificate, rating, record, and export. Existing browser suites cannot be combined into that claim. |
-| Full negative cross-surface flow                    | `partial`         | Feature-local negative tests exist, but no single persisted suite proves the full canonical sequence and readback.                                                                                |
-| Payment recovery                                    | `blocked_command` | No approved mutation/provider contract exists. The read UI remains fail-closed and does not invent mark-paid.                                                                                     |
-| Certificate regeneration                            | `blocked_command` | No approved regeneration command exists; the control remains disabled.                                                                                                                            |
-| S3 physical-device and production evidence          | `blocked_ext`     | Android/iOS physical replay, external malware scanner evidence, and production alert-to-Ops p95 are unavailable.                                                                                  |
-| Live fare and PSP execution                         | `blocked_ext`     | No live provider execution was available for this acceptance run.                                                                                                                                 |
+| Acceptance area                                     | Result          | Interpretation                                                                                                                                                                                    |
+| --------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exactly 17 approved Screen IDs                      | `verified`      | The automated census asserts the canonical ID set and rejects duplicates or omissions.                                                                                                            |
+| Production route or embedded surface for 17 screens | `verified`      | Every ID maps to an existing production route source and explicit `data-screen-id` or typed `screenId` surface marker.                                                                            |
+| Backend read/command authority source               | `verified`      | Every screen group maps to an existing production controller authority.                                                                                                                           |
+| Forbidden control boundary                          | `verified`      | Census rejects queue bypass endpoints/controls, fare amount overrides, and payment mark-paid controls; legal hold uses canonical evidence governance.                                             |
+| Migration order                                     | `verified`      | `V0059` through `V0063` exist in sequence and were applied to the local verification database.                                                                                                    |
+| Full persisted cross-surface positive flow          | `partial`       | No current suite persists one identity through authorization, queue, Passenger, fare/payment/certificate, rating, record, and export. Existing browser suites cannot be combined into that claim. |
+| Full negative cross-surface flow                    | `partial`       | Feature-local negative tests exist, but no single persisted suite proves the full canonical sequence and readback.                                                                                |
+| Fare anomaly producer                               | `verified`      | Assignment records canonical anomalies and resolves prior order anomalies only after a valid route/fare assignment.                                                                               |
+| Payment recovery                                    | `verified_repo` | Authorized, idempotent, audited commands and UI exist; the default provider remains fail-closed and no mark-paid action exists.                                                                   |
+| Certificate writer/regeneration                     | `verified_repo` | Completion writer, HTML/PDF artifacts, `V0062`, and audited idempotent regeneration exist.                                                                                                        |
+| Legal hold create/release                           | `verified_repo` | Records UI calls the existing evidence-governance authority and handles confirmation, 403, 409, and 503.                                                                                          |
+| S3 adapters and p95 instrumentation                 | `verified_repo` | S3-compatible storage, HTTPS scanner, actual object SHA-256 inspection, and persisted p95 query/display are implemented.                                                                          |
+| S3 physical-device and production evidence          | `blocked_ext`   | Android/iOS physical replay, real storage/scanner execution, and production alert-to-Ops samples are unavailable.                                                                                 |
+| Live fare and PSP execution                         | `blocked_ext`   | No live provider execution was available for this acceptance run.                                                                                                                                 |
 
 ## Release Verdict
 
-The 17/17 production screen implementation is verified at source/contract
-level. The program is **not ready for an unconditional production release**
-under the full-suite acceptance definition because the persisted cross-surface
-flow is not implemented, fare anomaly production wiring and the certificate
-writer remain repository gaps, and the command/external blockers above remain
-open.
-
-This verdict does not reject the merged read-only and fail-closed screens. It
-separates their implementation completion from evidence that has not actually
-been produced.
+The 17/17 production screen implementation and the listed repository-owned
+release gaps are verified. The candidate is ready for PR/CI and staging
+evaluation, but **not for unconditional production approval** until the P0
+live-provider, physical-device, and production-trace evidence exists. The
+single persisted cross-surface journey remains a P1 acceptance gap.
 
 ## Evidence Rules
 
@@ -54,62 +54,53 @@ been produced.
   It is rendering and interaction evidence only.
 - Unit and integration tests establish contracts and authority behavior. They
   do not substitute for a persisted browser journey.
-- No Fleet H test uses `page.route()` or starts four services to manufacture a
-  successful flow.
-- No provider, payment recovery command, certificate writer, fare producer, or
-  legal-hold mutation is added by Fleet H.
+- Controlled browser tests remain classified `PW-C`; they do not manufacture a
+  production claim.
+- Provider adapters default to unavailable when environment configuration is
+  absent.
+- No test or UI can mark a failed/manual-recovery payment as paid.
 
 The complete per-screen classification is in `EVIDENCE-MATRIX.md`.
 
 ## Repository-Owned Gaps
 
-1. Wire the production quote workflow to record and resolve canonical fare
-   anomalies. The read/retry authority exists, but the production producer is
-   not connected.
-2. Implement the production certificate writer/artifact pipeline that persists
-   completed-trip receipts and HTML/PDF references. Certificate Support
-   correctly fails closed when this source is absent.
-3. Add a true persisted cross-surface acceptance harness using one set of
+1. Add a true persisted cross-surface acceptance harness using one set of
    authorization, vehicle, order, trip, rating, record, and export identifiers.
    Positive flow must not use `page.route()` to create success.
-4. Add Passenger browser coverage for disclosure, payment/certificate states,
+2. Add Passenger browser coverage for disclosure, payment/certificate states,
    and rating submission against the same persisted journey.
 
 ## Command-Gated Gaps
 
-- Payment recovery remains disabled until an approved idempotent mutation,
-  provider adapter, authorization rule, and audit receipt exist.
-- Certificate regeneration remains disabled until an approved command and
-  writer pipeline exist.
-- Legal-hold create/release remain disabled until evidence-governance mutation
-  commands are approved. Canonical hold read/filter is already present.
+There are no remaining repository `blocked_command` items in this closeout
+wave. Live payment and fare execution stays disabled until an approved provider
+adapter is provisioned with external credentials.
 
 ## External Evidence Gaps
 
 - Android and iOS physical-device SOS offline replay.
-- External malware scanner contract/provider execution.
+- Real S3-compatible storage and malware scanner execution.
 - Production `fleetReportConfirmedAt -> opsAlertRenderedAt` traces and p95.
 - Live fare-provider and PSP execution evidence.
 
 ## Verification
 
-Final command results:
+Integrated candidate command results:
 
 ```text
 Fleet H route/contract census: PASS, 1 file / 5 tests
-Existing feature evidence: inventoried in EVIDENCE-MATRIX.md from merged sidecars
-Root typecheck: BLOCKED_ENV, isolated worktree lacks workspace package links
+API full suite: PASS, 138 files / 965 tests
+Root unit suite: PASS
+Workspace typecheck: PASS, 27/27 tasks
+Workspace lint: PASS, 20/20 tasks
 i18n guard: PASS, 461 files / 0 exemptions
+Certificate Playwright: PASS, 7/7
+Payment Playwright: PASS, 5/5
+Records/legal-hold Playwright: PASS, 1/1
+V0062/V0063 local migration apply: PASS
+Database verification after apply: PASS, 61 migrations
 git diff --check: PASS
 ```
 
-The root typecheck reached the new test and identified one strict indexed-access
-error, which was corrected before the final census rerun. The remaining errors
-are unresolved package imports such as `@nestjs/common` from workspace-local
-dependencies that are absent in this isolated worktree; they are not source
-diagnostics introduced by these three files.
-
-No existing heavy suite was rerun. Its exact unit, integration, and controlled
-Playwright evidence is classified in the matrix from merged feature sidecars.
-No deployment, push, migration execution, or production provider call is part
-of this Fleet H commit.
+No deployment or production provider call was performed. Local migration and
+controlled browser results are repository acceptance evidence only.

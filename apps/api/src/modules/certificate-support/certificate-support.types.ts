@@ -14,6 +14,13 @@ export interface CertificateSupportRow {
   receiptId: string;
   orderId: string;
   receiptNo: string;
+  receiptVersion: number;
+  isCurrent: boolean;
+  supersedesReceiptId: string | null;
+  regenerationIdempotencyKey: string | null;
+  regeneratedByActorId: string | null;
+  regenerationReason: string | null;
+  regenerationAuditId: string | null;
   amountMinor: number;
   currency: string;
   issuedAt: string;
@@ -43,7 +50,22 @@ export interface CertificateSupportView {
   pdfUrl: string | null;
   supersededByCertificateId: string | null;
   regeneration: {
-    enabled: false;
-    reasonCode: "certificate_regeneration_command_pending";
+    enabled: boolean;
+    reasonCode: string | null;
   };
+}
+
+export interface CertificateArtifact {
+  buffer: Buffer;
+  contentType: "text/html; charset=utf-8" | "application/pdf";
+  fileName: string;
+}
+
+export interface CertificateRegenerationCommand {
+  reason?: string;
+}
+
+export interface CertificateRegenerationResult {
+  certificate: CertificateSupportView;
+  actionReceipt: import("@drts/contracts").ActionReceipt;
 }

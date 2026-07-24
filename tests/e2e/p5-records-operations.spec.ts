@@ -19,6 +19,9 @@ type ApiObservation = {
   statusReads: number;
   downloadReads: number;
   legacyExportRequests: number;
+  createHoldBody: unknown;
+  releaseHoldBody: unknown;
+  releaseHoldId: string | null;
 };
 
 const canonicalRecords = [
@@ -57,7 +60,7 @@ const canonicalRecords = [
         {
           hold_id: "hold_202607_001",
           case_number: "CASE-2026-071",
-          reason_code: "regulatory_request",
+          reason_code: "regulatory_inquiry",
           reason_note: "Statutory review",
           placed_by_actor_id: "platform-admin-records-e2e",
           placed_at: "2026-07-24T01:00:00.000Z",
@@ -120,6 +123,9 @@ async function mockRecordsAuthority(page: Page): Promise<ApiObservation> {
     statusReads: 0,
     downloadReads: 0,
     legacyExportRequests: 0,
+    createHoldBody: null,
+    releaseHoldBody: null,
+    releaseHoldId: null,
   };
 
   await page.route("**/control-plane-proxy/health*", async (route) => {
@@ -129,6 +135,74 @@ async function mockRecordsAuthority(page: Page): Promise<ApiObservation> {
       body: success({ status: "ok" }),
     });
   });
+
+  await page.route(
+    "**/control-plane-proxy/audit/legal-holds**",
+    async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const releaseMatch = path.match(
+        /\/audit\/legal-holds\/([^/]+)\/release$/,
+      );
+
+      if (releaseMatch && request.method() === "POST") {
+        observed.releaseHoldId = decodeURIComponent(releaseMatch[1]!);
+        observed.releaseHoldBody = request.postDataJSON();
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: success({
+            hold_id: observed.releaseHoldId,
+            family: "proof_bundle",
+            subject_id: "order_202607_001",
+            case_number: "CASE-2026-071",
+            reason_code: "regulatory_inquiry",
+            reason_note: "Statutory review",
+            tenant_id: null,
+            manifest_hash: null,
+            status: "released",
+            placed_by_actor_id: "platform-admin-records-e2e",
+            placed_by_actor_type: "platform_admin",
+            placed_at: "2026-07-24T01:00:00.000Z",
+            released_by_actor_id: "platform-admin-records-e2e",
+            released_by_actor_type: "platform_admin",
+            released_at: "2026-07-24T04:03:00.000Z",
+            release_reason: "監理檢核已完成",
+          }),
+        });
+        return;
+      }
+
+      if (path.endsWith("/audit/legal-holds") && request.method() === "POST") {
+        observed.createHoldBody = request.postDataJSON();
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: success({
+            hold_id: "hold_202607_002",
+            family: "proof_bundle",
+            subject_id: "order_202607_002",
+            case_number: "REG-2026-072",
+            reason_code: "regulatory_inquiry",
+            reason_note: "監理機關要求保全本訂單證據",
+            tenant_id: null,
+            manifest_hash: null,
+            status: "active",
+            placed_by_actor_id: "platform-admin-records-e2e",
+            placed_by_actor_type: "platform_admin",
+            placed_at: "2026-07-24T04:02:30.000Z",
+            released_by_actor_id: null,
+            released_by_actor_type: null,
+            released_at: null,
+            release_reason: null,
+          }),
+        });
+        return;
+      }
+
+      await route.abort("failed");
+    },
+  );
 
   await page.route(
     "**/control-plane-proxy/platform-admin/multi-taxi-trip-records**",
@@ -265,6 +339,7 @@ test("queries canonical records, inspects detail, and completes a controlled exp
   page,
 }) => {
   const observed = await mockRecordsAuthority(page);
+  page.on("dialog", (dialog) => void dialog.accept());
 
   await page.goto("/platform-admin/p5/records");
   await expect(page.getByTestId("p5-records-page")).toBeVisible();
@@ -284,8 +359,24 @@ test("queries canonical records, inspects detail, and completes a controlled exp
   );
   await expect(page.getByTestId("record-detail")).toContainText("TDM-3026");
   await expect(page.getByText("Legal hold 狀態").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "建立 hold" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "解除 hold" })).toBeDisabled();
+
+  await page.getByLabel("案件").fill("REG-2026-072");
+  await page.getByLabel("原因代碼").selectOption("regulatory_inquiry");
+  await page.getByLabel("原因說明").fill("監理機關要求保全本訂單證據");
+  await page.getByRole("button", { name: "建立 hold" }).click();
+  await expect(
+    page.getByText("Legal hold 已建立，營運紀錄權威資料已重新整理。"),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "開啟明細" }).first().click();
+  await page
+    .getByTestId("legal-hold-release-select")
+    .selectOption("hold_202607_001");
+  await page.getByLabel("解除原因").fill("監理檢核已完成");
+  await page.getByRole("button", { name: "解除 hold" }).click();
+  await expect(
+    page.getByText("Legal hold 已解除，營運紀錄權威資料已重新整理。"),
+  ).toBeVisible();
 
   await page.screenshot({
     path: resolve(ARTIFACT_DIR, "01-records-query-detail.png"),
@@ -324,6 +415,18 @@ test("queries canonical records, inspects detail, and completes a controlled exp
   expect(observed.statusReads).toBeGreaterThanOrEqual(1);
   expect(observed.downloadReads).toBe(1);
   expect(observed.legacyExportRequests).toBe(0);
+  expect(observed.createHoldBody).toEqual({
+    family: "proof_bundle",
+    subjectId: "order_202607_002",
+    caseNumber: "REG-2026-072",
+    reasonCode: "regulatory_inquiry",
+    reasonNote: "監理機關要求保全本訂單證據",
+  });
+  expect(observed.releaseHoldId).toBe("hold_202607_001");
+  expect(observed.releaseHoldBody).toEqual({
+    releaseReason: "監理檢核已完成",
+  });
+  expect(observed.listUrls.length).toBeGreaterThanOrEqual(4);
 
   await page.screenshot({
     path: resolve(ARTIFACT_DIR, "02-controlled-export-ready.png"),

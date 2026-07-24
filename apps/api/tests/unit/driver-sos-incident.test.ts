@@ -24,6 +24,13 @@ describe("driver SOS auth policy", () => {
     );
     expect(opsPolicy?.allowedRealms).toEqual(["system", "ops"]);
     expect(opsPolicy?.requiredScopes).toEqual(["incident:write"]);
+
+    const metricsPolicy = resolveRouteAuthPolicy(
+      "GET",
+      "/api/ops/driver-sos/metrics/alert-latency",
+    );
+    expect(metricsPolicy?.allowedRealms).toEqual(["system", "ops"]);
+    expect(metricsPolicy?.requiredScopes).toEqual(["incident:read"]);
   });
 
   it("does NOT allow the driver realm to POST /incidents anymore", () => {

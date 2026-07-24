@@ -8,6 +8,8 @@ import {
   formatDuration,
   formatMoney,
   hasCertificateReadScope,
+  hasCertificateWriteScope,
+  parseCertificateRegenerationResult,
   parseCertificateSupportList,
   parseCertificateSupportView,
 } from "../../app/multi-taxi-certificates/certificate-support-model";
@@ -40,8 +42,8 @@ const baseView = {
   pdfUrl: "/certificates/receipt-001.pdf",
   supersededByCertificateId: null,
   regeneration: {
-    enabled: false,
-    reasonCode: "certificate_regeneration_command_pending",
+    enabled: true,
+    reasonCode: null,
   },
 };
 
@@ -72,16 +74,35 @@ describe("certificate support model", () => {
     ).toThrow("CERTIFICATE_SUPPORT_TOTAL_INVALID");
   });
 
-  it("rejects an invented regeneration action", () => {
+  it("accepts only a consistent server-authorized regeneration action", () => {
+    expect(parseCertificateSupportView(baseView).regeneration.enabled).toBe(
+      true,
+    );
     expect(() =>
       parseCertificateSupportView({
         ...baseView,
         regeneration: {
           enabled: true,
-          reasonCode: "certificate_regeneration_command_pending",
+          reasonCode: "certificate_writer_unavailable",
         },
       }),
     ).toThrow("CERTIFICATE_SUPPORT_VIEW_INVALID");
+  });
+
+  it("parses an audited regeneration result", () => {
+    expect(
+      parseCertificateRegenerationResult({
+        certificate: baseView,
+        actionReceipt: {
+          actionId: "idem-001",
+          auditId: "audit-001",
+          resourceType: "multi_taxi_electronic_receipt",
+          resourceId: "receipt-002",
+          status: "completed",
+          message: "regenerated",
+        },
+      }).actionReceipt.auditId,
+    ).toBe("audit-001");
   });
 
   it("keeps missing display values explicit instead of formatting zero", () => {
@@ -106,6 +127,7 @@ describe("certificate support model", () => {
 
   it("uses the existing platform read authority", () => {
     expect(hasCertificateReadScope(["foundation:read"])).toBe(true);
+    expect(hasCertificateWriteScope(["foundation:write"])).toBe(true);
     expect(hasCertificateReadScope(["billing:read"])).toBe(false);
     expect(certificateSupportCopy("zh", "retryRead")).toBe("重新讀取");
     expect(certificateSupportCopy("en", "retryRead")).toBe("Retry read");

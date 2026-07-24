@@ -1,4 +1,5 @@
 import { EventEmitter2 } from "@nestjs/event-emitter";
+import { HttpStatus } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -13,6 +14,8 @@ import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.s
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { FareAnomalyRepository } from "../../src/modules/product-rule/fare-anomaly.repository";
+import { FareAnomalyService } from "../../src/modules/product-rule/fare-anomaly.service";
 import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
@@ -60,6 +63,7 @@ function createOwnedMobilityService(options?: {
     evaluate: ReturnType<typeof vi.fn>;
   };
   serviceAreaService?: ServiceAreaService;
+  fareAnomalyService?: FareAnomalyService;
   vehicleDisclosureProfile?: Record<string, unknown> | null;
   driverRegistrationCredential?: Record<string, unknown> | null;
   repository?: {
@@ -189,6 +193,7 @@ function createOwnedMobilityService(options?: {
     undefined,
     undefined,
     options?.serviceAreaService,
+    options?.fareAnomalyService,
   );
 
   return {
@@ -196,6 +201,108 @@ function createOwnedMobilityService(options?: {
     regulatoryRegistryService,
     auditNotificationService,
   };
+}
+
+async function createFareAnomalyAuthority(databaseService?: {
+  isEnabled: () => boolean;
+  query: ReturnType<typeof vi.fn>;
+}) {
+  const repository = new FareAnomalyRepository(databaseService as never);
+  const service = new FareAnomalyService(
+    repository,
+    { recordAuditLog: vi.fn() } as never,
+    {
+      isAvailable: vi.fn(() => false),
+      recover: vi.fn(),
+    } as never,
+  );
+  await service.onModuleInit();
+  return service;
+}
+
+function createMultiTaxiFareProducerService(
+  fareAnomalyService: FareAnomalyService,
+) {
+  return createOwnedMobilityService({
+    candidates: [
+      {
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        etaMinutes: 4,
+        operatingArea: "TPE",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ],
+    serviceProductOverrides: {
+      serviceProductType: "taxi_reservation",
+      displayName: "Multi-taxi reservation",
+      timing: "reservation",
+      active: true,
+      defaultBillingMode: "meter",
+      defaultProofRequirements: [],
+    },
+    vehicleDisclosureProfile: {
+      vehicleId: "veh-demo-001",
+      make: "Toyota",
+      model: "Sienta",
+      modelYear: 2024,
+      doorCount: 5,
+      color: "Silver",
+      status: "complete",
+      missingFieldCodes: [],
+      version: 2,
+    },
+    driverRegistrationCredential: {
+      driverId: "drv-demo-001",
+      effectiveUntil: "2027-01-01",
+      status: "verified_active",
+      maskedDisplay: "RE***01",
+      version: 3,
+    },
+    fareAnomalyService,
+  }).service;
+}
+
+function createFareProducerOrder(
+  service: OwnedMobilityService,
+  options: {
+    activeFareVersionId?: string;
+    resolvedRoute?: boolean;
+  } = {},
+) {
+  return service.createMultiTaxiRide(
+    {
+      pickup:
+        options.resolvedRoute === false
+          ? { address: "台北車站" }
+          : { address: "台北車站", lat: 25.0478, lng: 121.517 },
+      dropoff:
+        options.resolvedRoute === false
+          ? { address: "松山機場" }
+          : { address: "松山機場", lat: 25.0697, lng: 121.5525 },
+      passenger: {
+        passengerId: "passenger-fare-producer-001",
+        name: "測試乘客",
+        phone: "0911222333",
+      },
+      requestedPickupAt: new Date().toISOString(),
+      timingMode: "on_demand",
+      paymentMethodTokenRef: null,
+    },
+    {
+      authorizationId: "auth-mtx-fare-producer-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved",
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: options.activeFareVersionId ?? "fare-2026-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  );
 }
 
 describe("OwnedMobilityService queue and reservation orchestration", () => {
@@ -4585,6 +4692,163 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
       rating: { displayState: "new_driver" },
     });
+  });
+
+  it("persists one route_unresolved anomaly before failing assignment closed", async () => {
+    const databaseService = {
+      isEnabled: vi.fn(() => true),
+      query: vi.fn(async () => ({ rows: [] })),
+    };
+    const fareAnomalyService =
+      await createFareAnomalyAuthority(databaseService);
+    const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service, { resolvedRoute: false });
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.CONFLICT,
+    });
+
+    expect(recordSpy).toHaveBeenCalledTimes(1);
+    expect(recordSpy).toHaveBeenCalledWith({
+      reason: "route_unresolved",
+      snapshot: expect.objectContaining({
+        orderId: order.orderId,
+        passengerConfirmedAt: null,
+      }),
+    });
+    const insertCall = databaseService.query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO ops.fare_quote_anomalies"),
+    );
+    expect(insertCall).toBeDefined();
+    expect(insertCall?.[1]).toEqual(
+      expect.arrayContaining([order.orderId, "route_unresolved"]),
+    );
+    const persistedRecord = JSON.parse(String(insertCall?.[1]?.[6]));
+    expect(persistedRecord.snapshot).toMatchObject({
+      pickup: { lat: null, lng: null, resolvedAt: null },
+      dropoff: { lat: null, lng: null, resolvedAt: null },
+      passengerConfirmedAt: null,
+    });
+    expect(fareAnomalyService.list()[0]?.snapshot).toMatchObject({
+      pickup: { lat: null, lng: null, resolvedAt: null },
+      dropoff: { lat: null, lng: null, resolvedAt: null },
+    });
+  });
+
+  it("records fare_policy_missing instead of inventing a fallback policy", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service, {
+      activeFareVersionId: " ",
+    });
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    ).rejects.toThrowError(ApiRequestError);
+
+    expect(recordSpy).toHaveBeenCalledTimes(1);
+    expect(fareAnomalyService.list()).toEqual([
+      expect.objectContaining({
+        reason: "fare_policy_missing",
+        snapshot: expect.objectContaining({
+          orderId: order.orderId,
+          farePolicyVersion: "",
+          passengerConfirmedAt: null,
+        }),
+      }),
+    ]);
+  });
+
+  it("resolves prior order anomalies after a valid route and fare snapshot", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const resolveSpy = vi.spyOn(fareAnomalyService, "resolveOrderAnomalies");
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service);
+    await fareAnomalyService.recordQuoteAnomaly({
+      reason: "route_unresolved",
+      snapshot: {
+        routeSnapshotId: "route-prior-001",
+        quoteSnapshotId: "quote-prior-001",
+        orderId: order.orderId,
+        pickup: {
+          address: "台北車站",
+          lat: 25.0478,
+          lng: 121.517,
+          coordinateSource: "legacy_text",
+          geocodeConfidence: "unknown",
+          resolvedAt: "2026-07-24T08:00:00.000Z",
+        },
+        dropoff: {
+          address: "松山機場",
+          lat: 25.0697,
+          lng: 121.5525,
+          coordinateSource: "legacy_text",
+          geocodeConfidence: "unknown",
+          resolvedAt: "2026-07-24T08:00:00.000Z",
+        },
+        estimatedDistanceMeters: null,
+        estimatedDurationSeconds: null,
+        encodedPolyline: null,
+        chargingMode: "meter_estimate",
+        estimatedFareMinor: null,
+        payableFareMinor: null,
+        currency: "NTD",
+        farePolicyId: "auth-mtx-fare-producer-001",
+        farePolicyVersion: "fare-2026-001",
+        fareChangeRuleId: "multi_taxi_passenger_confirmation",
+        fareChangeRuleVersion: "1",
+        fareChangeRuleDisplayText:
+          "Fare changes require passenger disclosure and confirmation.",
+        passengerConfirmedAt: null,
+        generatedAt: "2026-07-24T08:00:00.000Z",
+      },
+    });
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+    });
+
+    expect(assignment.status).toBe("assigned");
+    expect(resolveSpy).toHaveBeenCalledWith(order.orderId, expect.any(String));
+    expect(fareAnomalyService.list()).toHaveLength(0);
+  });
+
+  it("does not report a committed assignment as failed when anomaly cleanup is unavailable", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    vi.spyOn(fareAnomalyService, "resolveOrderAnomalies").mockRejectedValueOnce(
+      new Error("fare anomaly store unavailable"),
+    );
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service);
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    ).resolves.toMatchObject({
+      status: "assigned",
+    });
+    expect(service.getOrder(order.orderId).status).toBe("assigned");
   });
 });
 

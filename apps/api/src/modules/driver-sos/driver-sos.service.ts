@@ -14,6 +14,7 @@ import type {
   ConfirmDriverSosAttachmentUploadResult,
   CreateDriverSosAttachmentUploadIntentCommand,
   CreateDriverSosAttachmentUploadIntentResult,
+  DriverSosAlertLatencySummary,
   DriverMatchingSuppression,
   DriverSosAlertRenderObservation,
   DriverSosAttachmentRecord,
@@ -78,6 +79,7 @@ const DRIVER_SOS_ATTACHMENT_SIZE_LIMITS = {
 } as const;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
 const OPS_RENDER_RECEIPT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+const OPS_ALERT_TARGET_LATENCY_MS = 5_000;
 
 @Injectable()
 export class DriverSosService implements OnModuleInit {
@@ -640,6 +642,62 @@ export class DriverSosService implements OnModuleInit {
     return { observations };
   }
 
+  async getOpsAlertLatencySummary(
+    input: { from?: string; to?: string },
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<DriverSosAlertLatencySummary> {
+    this.requireOpsIdentity(identity);
+    const from = input.from
+      ? this.normalizeIsoTimestamp(input.from, "from")
+      : null;
+    const to = input.to ? this.normalizeIsoTimestamp(input.to, "to") : null;
+    if (from && to && Date.parse(from) > Date.parse(to)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "from cannot be later than to.",
+      );
+    }
+
+    if (this.verificationRepository?.isEnabled()) {
+      return this.verificationRepository.summarizeAlertLatency(
+        from,
+        to,
+        OPS_ALERT_TARGET_LATENCY_MS,
+      );
+    }
+
+    const latencies = [...this.urgentAlertOutbox.values()]
+      .filter((record) => {
+        if (record.alertToOpsLatencyMs === null) {
+          return false;
+        }
+        const confirmedAt = Date.parse(record.fleetReportConfirmedAt);
+        return (
+          (!from || confirmedAt >= Date.parse(from)) &&
+          (!to || confirmedAt <= Date.parse(to))
+        );
+      })
+      .map((record) => record.alertToOpsLatencyMs!)
+      .sort((left, right) => left - right);
+    const withinTargetCount = latencies.filter(
+      (latency) => latency <= OPS_ALERT_TARGET_LATENCY_MS,
+    ).length;
+
+    return {
+      from,
+      to,
+      targetLatencyMs: OPS_ALERT_TARGET_LATENCY_MS,
+      sampleCount: latencies.length,
+      withinTargetCount,
+      withinTargetRate:
+        latencies.length === 0 ? null : withinTargetCount / latencies.length,
+      p50LatencyMs: this.percentile(latencies, 0.5),
+      p95LatencyMs: this.percentile(latencies, 0.95),
+      maxLatencyMs: latencies.at(-1) ?? null,
+    };
+  }
+
   private hydrateState(state: DriverSosRepositoryState) {
     this.events = [];
     this.eventById.clear();
@@ -937,6 +995,18 @@ export class DriverSosService implements OnModuleInit {
       recordedAt: new Date().toISOString(),
       payload,
     };
+  }
+
+  private percentile(sortedValues: number[], quantile: number) {
+    if (sortedValues.length === 0) {
+      return null;
+    }
+    const position = (sortedValues.length - 1) * quantile;
+    const lowerIndex = Math.floor(position);
+    const upperIndex = Math.ceil(position);
+    const lower = sortedValues[lowerIndex]!;
+    const upper = sortedValues[upperIndex]!;
+    return lower + (upper - lower) * (position - lowerIndex);
   }
 
   private requireDriverEvent(sosEventId: string, driverId: string) {

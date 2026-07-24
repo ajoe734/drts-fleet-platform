@@ -626,7 +626,35 @@ export interface MultiTaxiElectronicReceipt {
   amountMinor: number;
   currency: "NTD";
   issuedAt: string;
-  record: Record<string, unknown>;
+  record: Partial<MultiTaxiElectronicReceiptRecord> & Record<string, unknown>;
+}
+
+export interface MultiTaxiElectronicReceiptRecord {
+  tripId: string;
+  plateNo: string;
+  pickupAt: string;
+  dropoffAt: string;
+  travelDurationSeconds: number;
+  routeSummary: string;
+  distanceMeters: number;
+  tollMinor: number;
+  consumerServicePhone: string;
+  authorityComplaintPhone: string;
+  certificateVersion: string;
+  certificateState: "available" | "superseded";
+  htmlUrl: string;
+  pdfUrl: string;
+  supersededByCertificateId?: string;
+  generatedFrom: "owned_mobility_completion" | "certificate_regeneration";
+}
+
+export interface RegenerateMultiTaxiElectronicReceiptCommand {
+  reason: string;
+}
+
+export interface MultiTaxiElectronicReceiptRegenerationResult {
+  certificate: MultiTaxiElectronicReceipt;
+  actionReceipt: import("./ui-runtime").ActionReceipt;
 }
 
 // ===========================================================================
@@ -1038,6 +1066,18 @@ export interface DriverSosAlertRenderObservation {
 
 export interface RecordDriverSosOpsAlertRenderedResult {
   observations: DriverSosAlertRenderObservation[];
+}
+
+export interface DriverSosAlertLatencySummary {
+  from: string | null;
+  to: string | null;
+  targetLatencyMs: number;
+  sampleCount: number;
+  withinTargetCount: number;
+  withinTargetRate: number | null;
+  p50LatencyMs: number | null;
+  p95LatencyMs: number | null;
+  maxLatencyMs: number | null;
 }
 
 // §20 Driver-app offline outbox item (client durable state)

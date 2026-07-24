@@ -32,8 +32,8 @@ const baseCertificate = {
   pdfUrl: "/evidence/certificates/receipt-001.pdf",
   supersededByCertificateId: null,
   regeneration: {
-    enabled: false,
-    reasonCode: "certificate_regeneration_command_pending",
+    enabled: true,
+    reasonCode: null,
   },
 };
 
@@ -54,6 +54,35 @@ async function mockControlPlane(
   await page.route("**/control-plane-proxy/**", async (route) => {
     if (handler && (await handler(route))) return;
     const url = route.request().url();
+    if (
+      route.request().method() === "POST" &&
+      url.includes("/multi-taxi/certificates/receipt-001/actions/regenerate")
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          envelope({
+            certificate: {
+              ...baseCertificate,
+              certificateId: "receipt-002",
+              certificateNo: "RC-2607-0186-R3",
+              certificateVersion: "v3",
+            },
+            actionReceipt: {
+              actionId:
+                route.request().headers()["idempotency-key"] ?? "missing",
+              auditId: "audit-certificate-001",
+              resourceType: "multi_taxi_electronic_receipt",
+              resourceId: "receipt-002",
+              status: "completed",
+              message: "Electronic ride certificate regenerated.",
+            },
+          }),
+        ),
+      });
+      return;
+    }
     if (url.includes("/multi-taxi/certificates/receipt-001")) {
       await route.fulfill({
         status: 200,
@@ -105,9 +134,17 @@ test("searches and opens the existing legal certificate fields", async ({
   await expect(page.getByText("BKR-2208")).toBeVisible();
   await expect(page.getByText("0800-090-000")).toBeVisible();
   await expect(page.getByText("1999")).toBeVisible();
+  await page
+    .getByLabel("重產原因（必填，將寫入稽核紀錄）")
+    .fill("客服確認原憑證欄位需重新簽發");
+  await page.getByRole("button", { name: "產生新版本" }).click();
+  await expect(page.getByText("新版本已產生")).toBeVisible();
+  await expect(page.getByText("audit-certificate-001")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "重新產生 · 命令未核准" }),
-  ).toBeDisabled();
+    page.getByRole("heading", {
+      name: "電子乘車證明 · RC-2607-0186-R3",
+    }),
+  ).toBeVisible();
   await page.screenshot({
     path: resolve(screenshotDir, "02-available-detail-desktop.png"),
     fullPage: true,

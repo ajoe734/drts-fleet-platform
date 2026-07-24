@@ -8,6 +8,7 @@ import {
   buildRecordsQueryPath,
   calculateRetentionCoverage,
   formatRecordDateTime,
+  getLegalHoldActionError,
   isExportTerminal,
   isRetentionFloorMet,
   normalizeRecordsScope,
@@ -27,6 +28,10 @@ const recordsPageSource = readFileSync(
     process.cwd(),
     "apps/platform-admin-web/app/platform-admin/p5/records/page.tsx",
   ),
+  "utf8",
+);
+const apiClientSource = readFileSync(
+  join(process.cwd(), "packages/api-client/src/index.ts"),
   "utf8",
 );
 
@@ -118,6 +123,42 @@ describe("P5 records operations UI model", () => {
     expect(() => requireControlledDownloadUrl("not-a-url")).toThrow();
   });
 
+  it("preserves canonical legal-hold error status and server detail", () => {
+    expect(
+      getLegalHoldActionError(
+        {
+          statusCode: 409,
+          apiMessage: "An active legal hold already exists.",
+        },
+        "fallback",
+      ),
+    ).toEqual({
+      status: 409,
+      message: "An active legal hold already exists.",
+    });
+    expect(
+      getLegalHoldActionError(
+        { statusCode: 403, apiMessage: "Operator is not allowed." },
+        "fallback",
+      ),
+    ).toEqual({
+      status: 403,
+      message: "Operator is not allowed.",
+    });
+    expect(
+      getLegalHoldActionError({ statusCode: 503 }, "authority unavailable"),
+    ).toEqual({
+      status: 503,
+      message: "authority unavailable",
+    });
+    expect(
+      getLegalHoldActionError(new Error("network failed"), "fallback"),
+    ).toEqual({
+      status: null,
+      message: "network failed",
+    });
+  });
+
   it("keeps feature-local translations complete and interpolated", () => {
     expect(recordsT("en", "query.resultCount", { count: 8 })).toBe(
       "8 matching records",
@@ -128,7 +169,10 @@ describe("P5 records operations UI model", () => {
     expect(recordsT("en", "hold.state.active")).toBe("Active");
     expect(recordsT("en", "hold.state.none")).toBe("None");
     expect(recordsT("en", "hold.state.unavailable")).toBe("Unavailable");
-    expect(recordsT("zh", "hold.pending")).toContain("command-pending");
+    expect(
+      recordsT("zh", "hold.confirmRelease", { holdId: "hold-001" }),
+    ).toContain("hold-001");
+    expect(recordsT("zh", "hold.error503")).toContain("503");
   });
 });
 
@@ -150,14 +194,21 @@ describe("P5 records operations production boundaries", () => {
     );
   });
 
-  it("shows canonical legal-hold state while keeping mutations command-pending", () => {
+  it("connects canonical legal-hold create and release without changing retention semantics", () => {
     expect(recordsComponentSource).toContain("row.legalHold.state");
     expect(recordsComponentSource).toContain("record.legalHold.activeHolds");
     expect(recordsComponentSource).toContain('value="active"');
     expect(recordsComponentSource).toContain('value="none"');
     expect(recordsComponentSource).toContain('t("hold.body")');
-    expect(recordsComponentSource).toContain('t("hold.pending")');
-    expect(recordsComponentSource).not.toContain("createLegalHold");
-    expect(recordsComponentSource).not.toContain("releaseLegalHold");
+    expect(recordsComponentSource).toContain("client.placeEvidenceLegalHold");
+    expect(recordsComponentSource).toContain("client.releaseEvidenceLegalHold");
+    expect(recordsComponentSource).toContain('family: "proof_bundle"');
+    expect(recordsComponentSource).toContain("subjectId: record.orderId");
+    expect(recordsComponentSource).toContain("window.confirm");
+    expect(recordsComponentSource).toContain("hold.placedBy");
+    expect(apiClientSource).toContain('"/api/audit/legal-holds"');
+    expect(apiClientSource).toContain(
+      "`/api/audit/legal-holds/${encodeURIComponent(holdId)}/release`",
+    );
   });
 });

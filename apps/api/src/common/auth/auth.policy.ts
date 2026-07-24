@@ -409,6 +409,18 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "ops/driver-sos/metrics/alert-latency" &&
+    upperMethod === "GET"
+  ) {
+    return {
+      routeKey: "ops:driver-sos-alerts:latency-metrics",
+      requiredScopes: ["incident:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops driver SOS alert latency metrics",
+    };
+  }
+
   if (routePath.startsWith("callcenter/")) {
     return {
       routeKey: `callcenter:${upperMethod}`,

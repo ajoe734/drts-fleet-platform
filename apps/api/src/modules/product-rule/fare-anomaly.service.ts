@@ -117,6 +117,22 @@ export class FareAnomalyService implements OnModuleInit {
     );
   }
 
+  async resolveOrderAnomalies(orderId: string, resolvedAt?: string) {
+    this.assertReady();
+    const normalizedOrderId = orderId.trim();
+    if (!normalizedOrderId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FARE_ANOMALY_ORDER_ID_REQUIRED",
+        "orderId is required to resolve fare quote anomalies.",
+      );
+    }
+    await this.repository.resolveByOrderId(
+      normalizedOrderId,
+      resolvedAt ?? new Date().toISOString(),
+    );
+  }
+
   async retryQuote(
     quoteSnapshotId: string,
     context: {

@@ -293,27 +293,31 @@ describe("E2E-MTX-UI-FULL-001 route and contract census", () => {
     expect(paymentSource).not.toContain("mark-paid");
   });
 
-  it("keeps legal-hold create and release visibly disabled without a mutation call", () => {
+  it("connects legal-hold create and release to canonical evidence governance", () => {
     const source = read(recordsSurface);
+    const apiClient = read("packages/api-client/src/index.ts");
 
-    expect(source).toMatch(
-      /<CanvasBtn[^>]*disabled>\s*\{t\("hold\.create"\)\}/s,
+    expect(source).toContain("client.placeEvidenceLegalHold");
+    expect(source).toContain("client.releaseEvidenceLegalHold");
+    expect(source).toContain('family: "proof_bundle"');
+    expect(source).toContain("subjectId: record.orderId");
+    expect(source).toContain("window.confirm");
+    expect(apiClient).toContain(
+      'this.post<EvidenceLegalHoldRecord>("/api/audit/legal-holds"',
     );
-    expect(source).toMatch(
-      /<CanvasBtn[^>]*disabled>\s*\{t\("hold\.release"\)\}/s,
+    expect(apiClient).toContain(
+      "`/api/audit/legal-holds/${encodeURIComponent(holdId)}/release`",
     );
-    expect(source).not.toContain("createLegalHold");
-    expect(source).not.toContain("placeLegalHold");
-    expect(source).not.toContain("releaseLegalHold");
-    expect(source).not.toContain("/legal-holds");
   });
 
-  it("keeps fare, payment, and S3 schema migrations in V0059/V0060/V0061 order", () => {
+  it("keeps the multi-taxi release migrations in V0059 through V0063 order", () => {
     const migrations = readdirSync(join(root, "infra/migrations")).sort();
     const expected = [
       "V0059__fare_quote_anomaly_authority.sql",
       "V0060__multi_taxi_payment_exception_read_authority.sql",
       "V0061__s3_attachment_scan_and_alert_latency.sql",
+      "V0062__multi_taxi_electronic_certificate_writer.sql",
+      "V0063__multi_taxi_payment_recovery_commands.sql",
     ];
     const start = migrations.indexOf(expected[0]!);
 
