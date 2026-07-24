@@ -12,6 +12,7 @@ import type {
   MultiTaxiTripOperationalExportJobStatus,
   MultiTaxiTripOperationalExportJobView,
   MultiTaxiTripOperationalExportPreview,
+  MultiTaxiTripOperationalLegalHoldFilter,
   MultiTaxiTripOperationalRecordQuery,
 } from "@drts/contracts";
 import {
@@ -75,6 +76,18 @@ function statusTone(
 
 function unavailable(value: string | null, fallback: string) {
   return value ?? fallback;
+}
+
+function legalHoldTone(
+  state: MultiTaxiTripOperationalAdminView["legalHold"]["state"],
+): CanvasTone {
+  if (state === "active") {
+    return "warn";
+  }
+  if (state === "none") {
+    return "success";
+  }
+  return "danger";
 }
 
 export function RecordsOperationsConsole() {
@@ -402,6 +415,15 @@ export function RecordsOperationsConsole() {
       ),
     },
     {
+      h: t("table.legalHold"),
+      w: 130,
+      r: (row) => (
+        <CanvasPill theme={theme} tone={legalHoldTone(row.legalHold.state)} dot>
+          {t(`hold.state.${row.legalHold.state}`)}
+        </CanvasPill>
+      ),
+    },
+    {
       h: t("table.action"),
       w: 104,
       r: (row) => (
@@ -472,6 +494,26 @@ export function RecordsOperationsConsole() {
                     }))
                   }
                 />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>
+                  {t("query.legalHold")}
+                </span>
+                <select
+                  className={styles.input}
+                  value={draftScope.legalHold ?? "all"}
+                  onChange={(event) =>
+                    setDraftScope((current) => ({
+                      ...current,
+                      legalHold: event.target
+                        .value as MultiTaxiTripOperationalLegalHoldFilter,
+                    }))
+                  }
+                >
+                  <option value="all">{t("query.legalHoldAll")}</option>
+                  <option value="active">{t("query.legalHoldActive")}</option>
+                  <option value="none">{t("query.legalHoldNone")}</option>
+                </select>
               </label>
               <label className={styles.field}>
                 <span className={styles.fieldLabel}>{t("query.search")}</span>
@@ -975,19 +1017,77 @@ function RecordDetail({
         />
       </CanvasCard>
 
-      <CanvasBanner
+      <CanvasCard
         theme={theme}
-        tone="info"
-        icon="audit"
         title={t("hold.title")}
-        body={
-          <>
-            {t("hold.body")}
-            <br />
-            {t("hold.pending")}
-          </>
-        }
-      />
+        subtitle={t("hold.subtitle")}
+      >
+        <CanvasDL
+          theme={theme}
+          cols={1}
+          items={[
+            {
+              k: t("hold.title"),
+              v: (
+                <CanvasPill
+                  theme={theme}
+                  tone={legalHoldTone(record.legalHold.state)}
+                  dot
+                >
+                  {t(`hold.state.${record.legalHold.state}`)}
+                </CanvasPill>
+              ),
+            },
+            {
+              k: t("hold.family"),
+              v: record.legalHold.family,
+              mono: true,
+            },
+            {
+              k: t("hold.subject"),
+              v: record.legalHold.subjectId,
+              mono: true,
+            },
+            {
+              k: t("hold.count"),
+              v:
+                record.legalHold.activeHoldCount === null
+                  ? missing
+                  : String(record.legalHold.activeHoldCount),
+              mono: true,
+            },
+          ]}
+        />
+        <p className={styles.secondary} style={{ marginTop: 12 }}>
+          {t("hold.body")}
+        </p>
+        {record.legalHold.activeHolds?.map((hold) => (
+          <div className={styles.scopeRows} key={hold.holdId}>
+            <ScopeRow
+              label={t("hold.case")}
+              value={`${hold.caseNumber} · ${hold.holdId}`}
+            />
+            <ScopeRow
+              label={t("hold.placedAt")}
+              value={
+                formatRecordDateTime(hold.placedAt, locale) ??
+                t("table.unavailable")
+              }
+            />
+          </div>
+        ))}
+        <div className={styles.actionRow} style={{ marginTop: 12 }}>
+          <CanvasBtn theme={theme} size="xs" disabled>
+            {t("hold.create")}
+          </CanvasBtn>
+          <CanvasBtn theme={theme} size="xs" disabled>
+            {t("hold.release")}
+          </CanvasBtn>
+        </div>
+        <p className={styles.secondary} style={{ marginTop: 8 }}>
+          {t("hold.pending")}
+        </p>
+      </CanvasCard>
     </div>
   );
 }

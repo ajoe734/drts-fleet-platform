@@ -8,6 +8,7 @@ function createService(options?: {
   assignment?: Record<string, unknown> | null;
   repository?: Record<string, unknown>;
   serviceProductService?: Record<string, unknown>;
+  auditNotificationService?: Record<string, unknown>;
 }) {
   const order = {
     orderId: "order-001",
@@ -52,6 +53,7 @@ function createService(options?: {
       ownedMobilityService as never,
       options?.repository as never,
       options?.serviceProductService as never,
+      options?.auditNotificationService as never,
     ),
     ownedMobilityService,
     order,
@@ -966,8 +968,133 @@ describe("MultiTaxiService trip operational records", () => {
       plateNo: "BKR-2208",
       actualFareMinor: 41000,
       farePolicyVersion: "fare-v2026-07",
+      legalHold: {
+        state: "unavailable",
+        family: "proof_bundle",
+        subjectId: "order-001",
+        activeHoldCount: null,
+        activeHolds: null,
+      },
     });
     expect(records[0]?.retainUntil).toBe("2028-07-22T00:00:00.000Z");
+  });
+
+  it("maps proof-bundle governance by order ID and filters active holds separately from retention", async () => {
+    const getEvidenceSubjectGovernance = vi.fn(() => ({
+      family: "proof_bundle",
+      subjectId: "order-001",
+      tenantId: null,
+      manifestHash: null,
+      activeLegalHolds: [
+        {
+          holdId: "hold-001",
+          caseNumber: "CASE-2026-001",
+          reasonCode: "regulatory_request",
+          reasonNote: "Preserve the completed trip proof.",
+          placedByActorId: "platform-admin-001",
+          placedAt: "2026-07-24T01:00:00.000Z",
+        },
+      ],
+      activeDeletionExceptions: [],
+      deletionSuppressed: true,
+    }));
+    const { service } = createService({
+      orderStatus: "completed",
+      auditNotificationService: { getEvidenceSubjectGovernance },
+      repository: {
+        persistAuthorization: vi.fn().mockResolvedValue(undefined),
+        findElectronicReceipt: vi.fn(async () => null),
+      },
+    });
+    createAndActivateAuthorization(service);
+
+    const active = await service.listTripOperationalRecords({
+      legalHold: "active",
+    });
+    const none = await service.listTripOperationalRecords({
+      legalHold: "none",
+    });
+
+    expect(getEvidenceSubjectGovernance).toHaveBeenCalledWith(
+      "proof_bundle",
+      "order-001",
+    );
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({
+      retainUntil: "2028-07-22T00:00:00.000Z",
+      legalHold: {
+        state: "active",
+        activeHoldCount: 1,
+        activeHolds: [
+          {
+            holdId: "hold-001",
+            caseNumber: "CASE-2026-001",
+          },
+        ],
+      },
+    });
+    expect(none).toEqual([]);
+  });
+
+  it("returns none only from an available authority and supports the none filter", async () => {
+    const { service } = createService({
+      orderStatus: "completed",
+      auditNotificationService: {
+        getEvidenceSubjectGovernance: vi.fn(() => ({
+          activeLegalHolds: [],
+          activeDeletionExceptions: [],
+          deletionSuppressed: false,
+        })),
+      },
+      repository: {
+        persistAuthorization: vi.fn().mockResolvedValue(undefined),
+        findElectronicReceipt: vi.fn(async () => null),
+      },
+    });
+    createAndActivateAuthorization(service);
+
+    const records = await service.listTripOperationalRecords({
+      legalHold: "none",
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.legalHold).toEqual({
+      state: "none",
+      family: "proof_bundle",
+      subjectId: "order-001",
+      activeHoldCount: 0,
+      activeHolds: [],
+    });
+  });
+
+  it("fails closed when legal-hold authority is unavailable", async () => {
+    const { service } = createService({
+      orderStatus: "completed",
+      auditNotificationService: {
+        getEvidenceSubjectGovernance: vi.fn(() => {
+          throw new Error("evidence governance unavailable");
+        }),
+      },
+      repository: {
+        persistAuthorization: vi.fn().mockResolvedValue(undefined),
+        findElectronicReceipt: vi.fn(async () => null),
+      },
+    });
+    createAndActivateAuthorization(service);
+
+    const all = await service.listTripOperationalRecords({
+      legalHold: "all",
+    });
+    const none = await service.listTripOperationalRecords({
+      legalHold: "none",
+    });
+    const active = await service.listTripOperationalRecords({
+      legalHold: "active",
+    });
+
+    expect(all[0]?.legalHold.state).toBe("unavailable");
+    expect(none).toEqual([]);
+    expect(active).toEqual([]);
   });
 
   it("exports masked identifiers for trip records", async () => {

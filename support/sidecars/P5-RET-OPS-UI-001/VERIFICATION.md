@@ -26,10 +26,15 @@ legacy direct-export route, or substitute fixture records.
 
 ## Legal-Hold Boundary
 
-The canonical operational-record read does not expose legal-hold state.
-Accordingly, this UI does not display or filter invented hold state. It presents
-the contract boundary only. Legal-hold create/release remains disabled and
-command-pending.
+`P5-HOLD-001` now adds a canonical operational-record legal-hold read by mapping
+completed multi-taxi orders to evidence family `proof_bundle` with `orderId` as
+the subject ID. The records UI filters confirmed `active` and `none` states and
+shows `unavailable` when evidence governance cannot be read. It does not treat
+authority failure as no hold.
+
+Legal hold remains distinct from the 730-day retention calculation and display.
+Legal-hold create and release remain disabled and `command-pending`; this slice
+adds no mutation route.
 
 ## Automated Evidence
 
@@ -47,13 +52,20 @@ command-pending.
   - Passed.
 - `pnpm typecheck:root`
   - Passed.
+- `pnpm i18n:guard`
+  - Passed; zero exemptions.
+
+## P5-HOLD-001 Command-Pending
+
+- Legal-hold create/place: disabled; no records mutation contract or request.
+- Legal-hold release: disabled; no records mutation contract or request.
 
 ## Screenshot Evidence
 
 - `artifacts/01-records-query-detail.png`
-  - SHA-256: `6f5b5355f2263bd9c9a88b01b6fb9c8eda938690ce7c7f71f9544864dab8462f`
+  - SHA-256: `cf80d74f22d8460f18c632ac67cee298458683705968ee4d5b035056aa46bcbd`
 - `artifacts/02-controlled-export-ready.png`
-  - SHA-256: `b7907ba2464e4d8cd8632d05ee30797b5ed28c719dce126c4809a4c9340049d8`
+  - SHA-256: `d7bbb2280a68e5c8c2e9b76b44059fd86952dd07c1bd3d9b7ffeb1fd0c6385c3`
 
 ## Merge Boundary
 

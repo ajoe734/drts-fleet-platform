@@ -668,11 +668,35 @@ export interface MultiTaxiTripOperationalRecord {
 export interface MultiTaxiTripOperationalRecordQuery {
   month?: string;
   q?: string;
+  legalHold?: MultiTaxiTripOperationalLegalHoldFilter;
+}
+
+export type MultiTaxiTripOperationalLegalHoldFilter = "all" | "active" | "none";
+
+export type MultiTaxiTripOperationalLegalHoldState =
+  | "active"
+  | "none"
+  | "unavailable";
+
+export interface MultiTaxiTripOperationalLegalHoldView {
+  state: MultiTaxiTripOperationalLegalHoldState;
+  family: "proof_bundle";
+  subjectId: string;
+  activeHoldCount: number | null;
+  activeHolds: Array<{
+    holdId: string;
+    caseNumber: string;
+    reasonCode: string;
+    reasonNote: string | null;
+    placedByActorId: string;
+    placedAt: string;
+  }> | null;
 }
 
 export interface MultiTaxiTripOperationalAdminView extends MultiTaxiTripOperationalRecord {
   orderNo: string;
   assignmentId: string | null;
+  legalHold: MultiTaxiTripOperationalLegalHoldView;
 }
 
 export interface MultiTaxiTripOperationalExportRow {

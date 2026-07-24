@@ -48,6 +48,22 @@ const canonicalRecords = [
     charging_mode: "platform_quote",
     generated_at: "2026-07-22T02:20:00.000Z",
     retain_until: "2028-07-22T02:20:00.000Z",
+    legal_hold: {
+      state: "active",
+      family: "proof_bundle",
+      subject_id: "order_202607_001",
+      active_hold_count: 1,
+      active_holds: [
+        {
+          hold_id: "hold_202607_001",
+          case_number: "CASE-2026-071",
+          reason_code: "regulatory_request",
+          reason_note: "Statutory review",
+          placed_by_actor_id: "platform-admin-records-e2e",
+          placed_at: "2026-07-24T01:00:00.000Z",
+        },
+      ],
+    },
   },
   {
     record_id: "mtr_202607_002",
@@ -75,6 +91,13 @@ const canonicalRecords = [
     charging_mode: "meter",
     generated_at: "2026-07-23T09:00:00.000Z",
     retain_until: "2028-07-23T09:00:00.000Z",
+    legal_hold: {
+      state: "none",
+      family: "proof_bundle",
+      subject_id: "order_202607_002",
+      active_hold_count: 0,
+      active_holds: [],
+    },
   },
 ] as const;
 
@@ -129,7 +152,7 @@ async function mockRecordsAuthority(page: Page): Promise<ApiObservation> {
           status: 200,
           contentType: "application/json",
           body: success({
-            scope: { month: "2026-07", q: "MTX" },
+            scope: { month: "2026-07", q: "MTX", legal_hold: "active" },
             record_count: 2,
             format: "csv",
             purpose_required: true,
@@ -197,7 +220,7 @@ async function mockRecordsAuthority(page: Page): Promise<ApiObservation> {
           body: success({
             job_id: JOB_ID,
             status: "completed",
-            scope: { month: "2026-07", q: "MTX" },
+            scope: { month: "2026-07", q: "MTX", legal_hold: "active" },
             purpose: "2026 年 7 月法定營運紀錄檢核 REG-2026-071",
             record_count: 2,
             requested_by_actor_id: "platform-admin-records-e2e",
@@ -248,18 +271,21 @@ test("queries canonical records, inspects detail, and completes a controlled exp
   await expect(page.getByText("符合 2 筆紀錄").first()).toBeVisible();
 
   await page.getByLabel("預約月份").fill("2026-07");
+  await page.getByLabel("Legal hold").selectOption("active");
   await page.getByLabel("訂單、行程、車牌或費率版本").fill("MTX");
   await page.getByRole("button", { name: "執行查詢" }).click();
   await expect
     .poll(() => observed.listUrls.at(-1) ?? "")
-    .toContain("month=2026-07&q=MTX");
+    .toContain("month=2026-07&q=MTX&legalHold=active");
 
   await page.getByRole("button", { name: "開啟明細" }).nth(1).click();
   await expect(page.getByTestId("record-detail")).toContainText(
     "MTX-202607-0214",
   );
   await expect(page.getByTestId("record-detail")).toContainText("TDM-3026");
-  await expect(page.getByText("Legal hold 邊界")).toBeVisible();
+  await expect(page.getByText("Legal hold 狀態").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "建立 hold" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "解除 hold" })).toBeDisabled();
 
   await page.screenshot({
     path: resolve(ARTIFACT_DIR, "01-records-query-detail.png"),
@@ -284,9 +310,13 @@ test("queries canonical records, inspects detail, and completes a controlled exp
   await expect(downloadLink).toHaveAttribute("href", SIGNED_DOWNLOAD_URL);
   await expect(downloadLink).toHaveAttribute("target", "_blank");
 
-  expect(observed.previewBody).toEqual({ month: "2026-07", q: "MTX" });
+  expect(observed.previewBody).toEqual({
+    month: "2026-07",
+    q: "MTX",
+    legalHold: "active",
+  });
   expect(observed.createBody).toEqual({
-    scope: { month: "2026-07", q: "MTX" },
+    scope: { month: "2026-07", q: "MTX", legalHold: "active" },
     purpose: "2026 年 7 月法定營運紀錄檢核 REG-2026-071",
     idempotencyKey: observed.createIdempotencyKey,
   });

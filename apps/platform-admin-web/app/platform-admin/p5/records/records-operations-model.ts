@@ -20,6 +20,9 @@ export function normalizeRecordsScope(
   if (search) {
     normalized.q = search;
   }
+  if (query.legalHold && query.legalHold !== "all") {
+    normalized.legalHold = query.legalHold;
+  }
   return normalized;
 }
 
@@ -33,6 +36,9 @@ export function buildRecordsQueryPath(
   }
   if (scope.q) {
     params.set("q", scope.q);
+  }
+  if (scope.legalHold) {
+    params.set("legalHold", scope.legalHold);
   }
   const suffix = params.toString();
   return `/api/platform-admin/multi-taxi-trip-records${suffix ? `?${suffix}` : ""}`;

@@ -38,24 +38,28 @@ function retentionRecord(
 }
 
 describe("P5 records operations UI model", () => {
-  it("normalizes and encodes only the canonical #1130 query fields", () => {
+  it("normalizes and encodes the canonical record and legal-hold query fields", () => {
     expect(
       normalizeRecordsScope({
         month: " 2026-07 ",
         q: " ORD/7 台北 ",
+        legalHold: "active",
       }),
     ).toEqual({
       month: "2026-07",
       q: "ORD/7 台北",
+      legalHold: "active",
     });
     expect(
       buildRecordsQueryPath({
         month: " 2026-07 ",
         q: " ORD/7 台北 ",
+        legalHold: "active",
       }),
     ).toBe(
-      "/api/platform-admin/multi-taxi-trip-records?month=2026-07&q=ORD%2F7+%E5%8F%B0%E5%8C%97",
+      "/api/platform-admin/multi-taxi-trip-records?month=2026-07&q=ORD%2F7+%E5%8F%B0%E5%8C%97&legalHold=active",
     );
+    expect(normalizeRecordsScope({ legalHold: "all" })).toEqual({});
   });
 
   it("calculates the 730-day retention floor without treating invalid dates as compliant", () => {
@@ -121,6 +125,9 @@ describe("P5 records operations UI model", () => {
     expect(recordsT("zh", "query.resultCount", { count: 8 })).toBe(
       "符合 8 筆紀錄",
     );
+    expect(recordsT("en", "hold.state.active")).toBe("Active");
+    expect(recordsT("en", "hold.state.none")).toBe("None");
+    expect(recordsT("en", "hold.state.unavailable")).toBe("Unavailable");
     expect(recordsT("zh", "hold.pending")).toContain("command-pending");
   });
 });
@@ -143,9 +150,14 @@ describe("P5 records operations production boundaries", () => {
     );
   });
 
-  it("does not invent legal-hold state absent from the canonical read", () => {
-    expect(recordsComponentSource).not.toMatch(/legalHold|legal_hold/);
+  it("shows canonical legal-hold state while keeping mutations command-pending", () => {
+    expect(recordsComponentSource).toContain("row.legalHold.state");
+    expect(recordsComponentSource).toContain("record.legalHold.activeHolds");
+    expect(recordsComponentSource).toContain('value="active"');
+    expect(recordsComponentSource).toContain('value="none"');
     expect(recordsComponentSource).toContain('t("hold.body")');
     expect(recordsComponentSource).toContain('t("hold.pending")');
+    expect(recordsComponentSource).not.toContain("createLegalHold");
+    expect(recordsComponentSource).not.toContain("releaseLegalHold");
   });
 });
