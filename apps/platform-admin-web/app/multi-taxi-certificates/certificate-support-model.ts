@@ -49,49 +49,6 @@ export type CertificateSupportErrorKind =
   | "not_found"
   | "failed";
 
-export const CERTIFICATE_STATE_COPY: Record<
-  CertificateSupportState,
-  { label: string; detail: string; tone: CertificateTone }
-> = {
-  available: {
-    label: "可開啟",
-    detail: "既有乘車證明可供檢視；檔案連結仍以伺服器回傳為準。",
-    tone: "success",
-  },
-  generating: {
-    label: "產生中",
-    detail: "乘車證明準備中，請稍後重新讀取。",
-    tone: "info",
-  },
-  unavailable: {
-    label: "不可用",
-    detail: "目前沒有可開啟的既有乘車證明。",
-    tone: "neutral",
-  },
-  failed: {
-    label: "產生失敗",
-    detail: "證明產生失敗；本頁僅能重新讀取，不能自行重產生。",
-    tone: "danger",
-  },
-  access_denied: {
-    label: "無存取權",
-    detail: "目前登入身份沒有讀取乘車證明的權限。",
-    tone: "neutral",
-  },
-  superseded: {
-    label: "已被新版取代",
-    detail: "此版本僅供辨識，應改開啟後續有效版本。",
-    tone: "warn",
-  },
-};
-
-export type CertificateTone =
-  | "success"
-  | "info"
-  | "neutral"
-  | "danger"
-  | "warn";
-
 export function hasCertificateReadScope(scopes: readonly string[]) {
   return scopes.includes("foundation:read");
 }
