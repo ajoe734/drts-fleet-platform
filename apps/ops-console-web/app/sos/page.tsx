@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiClientError } from "@drts/api-client";
 import type {
   DriverRegistryRecord,
   IdentityContext,
   IncidentRecord,
+  RecordDriverSosOpsAlertRenderedResult,
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import {
@@ -30,6 +31,7 @@ import {
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
+  collectUnreportedSosIncidentIds,
   formatSosActorLabel,
   isSosIncident,
   unwrapListItems,
@@ -107,6 +109,8 @@ export default function SosQueuePage() {
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
+  const [renderReceiptRetry, setRenderReceiptRetry] = useState(0);
+  const reportedAlertIdsRef = useRef(new Set<string>());
 
   const driverNamesById = buildDriverNameMap(drivers);
   const platesByVehicleId = buildVehiclePlateMap(vehicles);
@@ -119,6 +123,10 @@ export default function SosQueuePage() {
   const pendingAlert = rows.find((row) => row.isCriticalAlert);
   const currentActorId = identity?.actorId?.trim() || DEFAULT_OPS_ACTOR_ID;
   const currentActorLabel = formatSosActorLabel(currentActorId);
+  const renderedIncidentKey = collectUnreportedSosIncidentIds(
+    rows,
+    reportedAlertIdsRef.current,
+  ).join("|");
 
   const fetchRuntime = async () => {
     try {
@@ -216,6 +224,51 @@ export default function SosQueuePage() {
       clearInterval(timer);
     };
   }, [pendingAlert, soundOff]);
+
+  useEffect(() => {
+    const incidentIds = renderedIncidentKey
+      .split("|")
+      .filter((incidentId) => incidentId.length > 0);
+    if (incidentIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const frameId = window.requestAnimationFrame(() => {
+      if (cancelled) {
+        return;
+      }
+      const renderedAt = new Date().toISOString();
+      for (const incidentId of incidentIds) {
+        reportedAlertIdsRef.current.add(incidentId);
+      }
+      void getOpsClient()
+        .post<RecordDriverSosOpsAlertRenderedResult>(
+          "/api/ops/driver-sos/alerts/rendered",
+          { body: { incidentIds, renderedAt } },
+        )
+        .catch((error) => {
+          for (const incidentId of incidentIds) {
+            reportedAlertIdsRef.current.delete(incidentId);
+          }
+          console.error("Failed to record SOS alert render receipt", error);
+          if (!cancelled) {
+            retryTimer = setTimeout(() => {
+              setRenderReceiptRetry((current) => current + 1);
+            }, 5000);
+          }
+        });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+    };
+  }, [renderedIncidentKey, renderReceiptRetry]);
 
   const toggleSound = async () => {
     const nextSoundOff = !soundOff;

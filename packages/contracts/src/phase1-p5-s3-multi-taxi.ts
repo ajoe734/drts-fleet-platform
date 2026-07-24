@@ -79,7 +79,6 @@ export const DEFAULT_PROFILE_QUEUE_POLICY_MAP: ProfileQueuePolicyMap = {
   },
 };
 
-
 export interface OwnedRideRuntimeContext {
   runtimeProfileCode: RuntimeProfileCode;
   serviceProductCode: ServiceProductType;
@@ -560,8 +559,7 @@ export interface MultiTaxiTripOperationalRecordQuery {
   q?: string;
 }
 
-export interface MultiTaxiTripOperationalAdminView
-  extends MultiTaxiTripOperationalRecord {
+export interface MultiTaxiTripOperationalAdminView extends MultiTaxiTripOperationalRecord {
   orderNo: string;
   assignmentId: string | null;
 }
@@ -653,6 +651,7 @@ export interface DriverSosEventRecord {
 
   originalTriggeredAt: string;
   serverReceivedAt: string | null;
+  fleetReportConfirmedAt: string | null;
   offlineAtTrigger: boolean;
 
   falseAlarm: {
@@ -695,6 +694,8 @@ export const DRIVER_SOS_TIMELINE_EVENTS = [
   "duty_acknowledged",
   "supplement_added",
   "attachment_uploaded",
+  "attachment_scan_updated",
+  "ops_alert_rendered",
   "false_alarm_dismissed",
   "investigation_started",
   "resolved",
@@ -737,6 +738,10 @@ export interface DriverSosUrgentAlertOutboxRecord {
   payload: Record<string, unknown>;
   createdAt: string;
   deliveredAt: string | null;
+  fleetReportConfirmedAt: string;
+  opsAlertRenderedAt: string | null;
+  opsAlertReceiptRecordedAt: string | null;
+  alertToOpsLatencyMs: number | null;
 }
 
 export interface DriverSosSubmissionReceipt {
@@ -746,11 +751,113 @@ export interface DriverSosSubmissionReceipt {
   eventNo: string;
   duplicate: boolean;
   serverReceivedAt: string;
+  fleetReportConfirmedAt: string;
 }
 
 export interface SubmitDriverSosEventResult {
   event: DriverSosEventRecord;
   receipt: DriverSosSubmissionReceipt;
+}
+
+export const DRIVER_SOS_ATTACHMENT_TYPES = ["photo", "audio"] as const;
+export type DriverSosAttachmentType =
+  (typeof DRIVER_SOS_ATTACHMENT_TYPES)[number];
+
+export const DRIVER_SOS_ATTACHMENT_SCAN_STATUSES = [
+  "pending",
+  "clean",
+  "infected",
+  "error",
+  "unavailable",
+] as const;
+export type DriverSosAttachmentScanStatus =
+  (typeof DRIVER_SOS_ATTACHMENT_SCAN_STATUSES)[number];
+
+export interface DriverSosAttachmentRecord {
+  attachmentId: string;
+  sosEventId: string;
+  attachmentType: DriverSosAttachmentType;
+  objectKey: string;
+  originalFileName: string;
+  contentType: string;
+  fileSize: number;
+  checksumSha256: string;
+  scanStatus: DriverSosAttachmentScanStatus;
+  scannerProvider: string | null;
+  scanReason: string | null;
+  scanAttemptCount: number;
+  lastScanAttemptAt: string | null;
+  uploadedAt: string;
+  scannedAt: string | null;
+  updatedAt: string;
+}
+
+export interface CreateDriverSosAttachmentUploadIntentCommand {
+  attachmentType: DriverSosAttachmentType;
+  originalFileName: string;
+  contentType: string;
+  fileSize: number;
+}
+
+export type DriverSosAttachmentProviderUnavailableReason =
+  | "storage_provider_unavailable"
+  | "storage_provider_error";
+
+export type CreateDriverSosAttachmentUploadIntentResult =
+  | {
+      state: "ready";
+      sosEventId: string;
+      objectKey: string;
+      uploadUrl: string;
+      expiresAt: string;
+      method: "PUT";
+      headers: Record<string, string>;
+      provider: string;
+    }
+  | {
+      state: "unavailable";
+      sosEventId: string;
+      reasonCode: DriverSosAttachmentProviderUnavailableReason;
+      reason: string;
+      retryable: true;
+    };
+
+export interface ConfirmDriverSosAttachmentUploadCommand {
+  objectKey: string;
+}
+
+export type ConfirmDriverSosAttachmentUploadResult =
+  | {
+      state: "confirmed";
+      attachment: DriverSosAttachmentRecord;
+    }
+  | {
+      state: "unavailable";
+      sosEventId: string;
+      objectKey: string;
+      reasonCode: DriverSosAttachmentProviderUnavailableReason;
+      reason: string;
+      retryable: true;
+    };
+
+export interface RecordDriverSosOpsAlertRenderedCommand {
+  incidentIds: string[];
+  renderedAt: string;
+}
+
+export interface DriverSosAlertRenderObservation {
+  sosEventId: string;
+  incidentId: string;
+  eventNo: string;
+  fleetReportConfirmedAt: string;
+  opsAlertRenderedAt: string;
+  opsAlertReceiptRecordedAt: string;
+  alertToOpsLatencyMs: number;
+  duplicate: boolean;
+}
+
+export interface RecordDriverSosOpsAlertRenderedResult {
+  observations: DriverSosAlertRenderObservation[];
 }
 
 // §20 Driver-app offline outbox item (client durable state)

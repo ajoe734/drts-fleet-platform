@@ -8,6 +8,7 @@ vi.mock("expo-secure-store", () => ({
 
 import {
   buildDriverSosSubmitCommand,
+  applyDriverSosAttachmentSyncResult,
   createDriverSosActiveCase,
   markDriverSosCaseFailed,
   markDriverSosCaseSubmitted,
@@ -31,7 +32,12 @@ describe("driver-sos-outbox", () => {
       uri: `file:///tmp/${id}.jpg`,
       fileName: `${id}.jpg`,
       mimeType: "image/jpeg",
+      fileSize: 1024,
       addedAt: "2026-07-20T09:00:00.000Z",
+      uploadState: "local",
+      serverAttachmentId: null,
+      scanStatus: null,
+      lastError: null,
     };
   }
 
@@ -55,6 +61,9 @@ describe("driver-sos-outbox", () => {
     });
 
     expect(activeCase.syncState).toBe("pending");
+    expect(activeCase.clientEventId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(activeCase.timeline[0]?.kind).toBe("attachment_added");
     expect(activeCase.timeline[1]?.kind).toBe("sos_local_triggered");
 
@@ -108,6 +117,7 @@ describe("driver-sos-outbox", () => {
         location: null,
         originalTriggeredAt: "2026-07-20T09:00:00.000Z",
         serverReceivedAt: "2026-07-20T09:00:05.000Z",
+        fleetReportConfirmedAt: "2026-07-20T09:00:05.000Z",
         offlineAtTrigger: false,
         falseAlarm: {
           dismissed: false,
@@ -129,6 +139,7 @@ describe("driver-sos-outbox", () => {
         eventNo: "SOS-20260720-001",
         duplicate: false,
         serverReceivedAt: "2026-07-20T09:00:05.000Z",
+        fleetReportConfirmedAt: "2026-07-20T09:00:05.000Z",
       },
     });
 
@@ -137,6 +148,31 @@ describe("driver-sos-outbox", () => {
     expect(submitted.receipt?.eventNo).toBe("SOS-20260720-001");
     expect(submitted.timeline[0]?.kind).toBe("incident_created");
     expect(submitted.timeline[1]?.kind).toBe("fleet_report_confirmed");
+  });
+
+  it("keeps a submitted SOS while unavailable attachments remain retryable", () => {
+    const activeCase = createDriverSosActiveCase({
+      eventType: "other",
+      description: "",
+      attachments: [createAttachment("att-unavailable")],
+      originalTriggeredAt: "2026-07-20T09:00:00.000Z",
+      offlineAtTrigger: false,
+      location: null,
+      orderId: null,
+      taskId: null,
+    });
+
+    const updated = applyDriverSosAttachmentSyncResult(activeCase, [
+      {
+        ...activeCase.attachments[0]!,
+        uploadState: "unavailable",
+        lastError: "No attachment storage provider is configured.",
+      },
+    ]);
+
+    expect(updated.syncState).toBe("attachment_pending");
+    expect(updated.timeline[0]?.kind).toBe("attachment_sync_pending");
+    expect(updated.attachments[0]?.lastError).toContain("storage provider");
   });
 
   it("marks failures as retryable and preserves supplemental notes", () => {

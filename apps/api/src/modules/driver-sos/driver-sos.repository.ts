@@ -35,6 +35,7 @@ type DriverSosEventRow = {
   location_snapshot: unknown;
   original_triggered_at: Date | string;
   server_received_at: Date | string | null;
+  fleet_report_confirmed_at: Date | string | null;
   offline_at_trigger: boolean;
   false_alarm_snapshot: unknown;
   duty_ack_snapshot: unknown;
@@ -65,6 +66,10 @@ type DriverSosUrgentAlertOutboxRow = {
   payload: unknown;
   created_at: Date | string;
   delivered_at: Date | string | null;
+  fleet_report_confirmed_at: Date | string;
+  ops_alert_rendered_at: Date | string | null;
+  ops_alert_receipt_recorded_at: Date | string | null;
+  alert_to_ops_latency_ms: number | string | null;
 };
 
 type JsonRecordRow = {
@@ -85,8 +90,7 @@ export interface PersistDriverSosSubmission {
   incidentTimelines: readonly IncidentTimelineEntry[];
 }
 
-export interface PersistDriverSosSubmissionResult
-  extends PersistDriverSosSubmission {
+export interface PersistDriverSosSubmissionResult extends PersistDriverSosSubmission {
   duplicate: boolean;
 }
 
@@ -129,6 +133,7 @@ export class DriverSosRepository {
             location_snapshot,
             original_triggered_at,
             server_received_at,
+            fleet_report_confirmed_at,
             offline_at_trigger,
             false_alarm_snapshot,
             duty_ack_snapshot,
@@ -166,7 +171,11 @@ export class DriverSosRepository {
             next_attempt_at,
             payload,
             created_at,
-            delivered_at
+            delivered_at,
+            fleet_report_confirmed_at,
+            ops_alert_rendered_at,
+            ops_alert_receipt_recorded_at,
+            alert_to_ops_latency_ms
           FROM safety.driver_sos_urgent_alert_outbox
           ORDER BY created_at DESC
         `,
@@ -250,7 +259,9 @@ export class DriverSosRepository {
 
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
-    this.logger.warn(`Driver SOS persistence skipped during ${context}: ${detail}`);
+    this.logger.warn(
+      `Driver SOS persistence skipped during ${context}: ${detail}`,
+    );
   }
 
   private async persistIncidentBundle(
@@ -411,6 +422,7 @@ export class DriverSosRepository {
           location_snapshot,
           original_triggered_at,
           server_received_at,
+          fleet_report_confirmed_at,
           offline_at_trigger,
           false_alarm_snapshot,
           duty_ack_snapshot,
@@ -418,7 +430,8 @@ export class DriverSosRepository {
           updated_at
         ) VALUES (
           $1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13, $14::jsonb, $15, $16, $17, $18::jsonb, $19::jsonb, $20, $21
+          $11, $12, $13, $14::jsonb, $15, $16, $17, $18, $19::jsonb,
+          $20::jsonb, $21, $22
         )
       `,
       [
@@ -438,6 +451,7 @@ export class DriverSosRepository {
         JSON.stringify(event.location),
         event.originalTriggeredAt,
         event.serverReceivedAt,
+        event.fleetReportConfirmedAt,
         event.offlineAtTrigger,
         JSON.stringify(event.falseAlarm),
         JSON.stringify(event.dutyAcknowledgement),
@@ -486,8 +500,15 @@ export class DriverSosRepository {
           next_attempt_at,
           payload,
           created_at,
-          delivered_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+          delivered_at,
+          fleet_report_confirmed_at,
+          ops_alert_rendered_at,
+          ops_alert_receipt_recorded_at,
+          alert_to_ops_latency_ms
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13,
+          $14, $15
+        )
       `,
       [
         urgentAlertOutbox.outboxId,
@@ -501,6 +522,10 @@ export class DriverSosRepository {
         JSON.stringify(urgentAlertOutbox.payload),
         urgentAlertOutbox.createdAt,
         urgentAlertOutbox.deliveredAt,
+        urgentAlertOutbox.fleetReportConfirmedAt,
+        urgentAlertOutbox.opsAlertRenderedAt,
+        urgentAlertOutbox.opsAlertReceiptRecordedAt,
+        urgentAlertOutbox.alertToOpsLatencyMs,
       ],
     );
   }
@@ -529,6 +554,7 @@ export class DriverSosRepository {
           location_snapshot,
           original_triggered_at,
           server_received_at,
+          fleet_report_confirmed_at,
           offline_at_trigger,
           false_alarm_snapshot,
           duty_ack_snapshot,
@@ -586,7 +612,11 @@ export class DriverSosRepository {
               next_attempt_at,
               payload,
               created_at,
-              delivered_at
+              delivered_at,
+              fleet_report_confirmed_at,
+              ops_alert_rendered_at,
+              ops_alert_receipt_recorded_at,
+              alert_to_ops_latency_ms
             FROM safety.driver_sos_urgent_alert_outbox
             WHERE sos_event_id = $1
             LIMIT 1
@@ -662,6 +692,9 @@ export class DriverSosRepository {
       serverReceivedAt: row.server_received_at
         ? this.toIsoString(row.server_received_at)
         : null,
+      fleetReportConfirmedAt: row.fleet_report_confirmed_at
+        ? this.toIsoString(row.fleet_report_confirmed_at)
+        : null,
       offlineAtTrigger: row.offline_at_trigger,
       falseAlarm: this.parseRecord<DriverSosEventRecord["falseAlarm"]>(
         row.false_alarm_snapshot,
@@ -669,10 +702,7 @@ export class DriverSosRepository {
       ),
       dutyAcknowledgement: this.parseRecord<
         DriverSosEventRecord["dutyAcknowledgement"]
-      >(
-        row.duty_ack_snapshot,
-        "safety.driver_sos_events.duty_ack_snapshot",
-      ),
+      >(row.duty_ack_snapshot, "safety.driver_sos_events.duty_ack_snapshot"),
       createdAt: this.toIsoString(row.created_at),
       updatedAt: this.toIsoString(row.updated_at),
     };
@@ -712,6 +742,17 @@ export class DriverSosRepository {
       ),
       createdAt: this.toIsoString(row.created_at),
       deliveredAt: row.delivered_at ? this.toIsoString(row.delivered_at) : null,
+      fleetReportConfirmedAt: this.toIsoString(row.fleet_report_confirmed_at),
+      opsAlertRenderedAt: row.ops_alert_rendered_at
+        ? this.toIsoString(row.ops_alert_rendered_at)
+        : null,
+      opsAlertReceiptRecordedAt: row.ops_alert_receipt_recorded_at
+        ? this.toIsoString(row.ops_alert_receipt_recorded_at)
+        : null,
+      alertToOpsLatencyMs:
+        row.alert_to_ops_latency_ms === null
+          ? null
+          : Number(row.alert_to_ops_latency_ms),
     };
   }
 
@@ -730,7 +771,9 @@ export class DriverSosRepository {
   }
 
   private toIsoString(value: Date | string) {
-    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    return value instanceof Date
+      ? value.toISOString()
+      : new Date(value).toISOString();
   }
 
   private isUniqueViolation(error: unknown) {

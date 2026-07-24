@@ -15,7 +15,10 @@ import type {
 
 import { BootstrapAuthGuard } from "../../src/common/auth";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
-import { DriverSosController } from "../../src/modules/driver-sos/driver-sos.controller";
+import {
+  DriverSosController,
+  OpsDriverSosController,
+} from "../../src/modules/driver-sos/driver-sos.controller";
 import {
   type DriverSosRepositoryState,
   type PersistDriverSosSubmission,
@@ -29,7 +32,10 @@ class InMemoryDriverSosRepository {
   private events = new Map<string, DriverSosEventRecord>();
   private eventIdByKey = new Map<string, string>();
   private timelines = new Map<string, DriverSosTimelineEntry[]>();
-  private urgentAlertOutbox = new Map<string, DriverSosUrgentAlertOutboxRecord>();
+  private urgentAlertOutbox = new Map<
+    string,
+    DriverSosUrgentAlertOutboxRecord
+  >();
   private incidents = new Map<string, IncidentRecord>();
   private incidentTimelines = new Map<string, IncidentTimelineEntry[]>();
 
@@ -109,9 +115,9 @@ class InMemoryDriverSosRepository {
   snapshot(): DriverSosRepositoryState {
     return {
       events: [...this.events.values()].map((event) => this.cloneEvent(event)),
-      timelines: [...this.timelines.values()].flat().map((entry) =>
-        this.cloneTimeline(entry),
-      ),
+      timelines: [...this.timelines.values()]
+        .flat()
+        .map((entry) => this.cloneTimeline(entry)),
       urgentAlertOutbox: [...this.urgentAlertOutbox.values()].map((record) =>
         this.cloneOutbox(record),
       ),
@@ -170,7 +176,7 @@ class InMemoryDriverSosRepository {
 }
 
 @Module({
-  controllers: [DriverSosController],
+  controllers: [DriverSosController, OpsDriverSosController],
   providers: [
     DriverSosService,
     IncidentService,
@@ -214,6 +220,17 @@ function buildDriverHeaders() {
     "x-realm": "driver",
     "x-role-families": "driver",
     "x-scopes": "driver:read,driver:write,incident:write",
+  };
+}
+
+function buildOpsHeaders() {
+  return {
+    "content-type": "application/json",
+    "x-actor-type": "ops_user",
+    "x-actor-id": "ops-int-sos-001",
+    "x-realm": "ops",
+    "x-role-families": "ops",
+    "x-scopes": "incident:read,incident:write",
   };
 }
 
@@ -270,10 +287,14 @@ describe("INT-S3-001 driver SOS idempotency", () => {
 
       expect(firstBody.data.event.driverId).toBe("drv-int-sos-001");
       expect(firstBody.data.receipt.duplicate).toBe(false);
-      expect(firstBody.data.event.incidentId).toBe(firstBody.data.receipt.incidentId);
+      expect(firstBody.data.event.incidentId).toBe(
+        firstBody.data.receipt.incidentId,
+      );
 
       expect(replayBody.data.receipt.duplicate).toBe(true);
-      expect(replayBody.data.event.sosEventId).toBe(firstBody.data.event.sosEventId);
+      expect(replayBody.data.event.sosEventId).toBe(
+        firstBody.data.event.sosEventId,
+      );
       expect(replayBody.data.receipt.incidentId).toBe(
         firstBody.data.receipt.incidentId,
       );
@@ -281,7 +302,60 @@ describe("INT-S3-001 driver SOS idempotency", () => {
         "Driver pressed SOS in integration test.",
       );
 
-      const repository = app.get(DriverSosRepository) as InMemoryDriverSosRepository;
+      const uploadIntentResponse = await fetch(
+        `${baseUrl}/api/driver/sos-events/${firstBody.data.event.sosEventId}/attachments/upload-intents`,
+        {
+          method: "POST",
+          headers: buildDriverHeaders(),
+          body: JSON.stringify({
+            attachmentType: "photo",
+            originalFileName: "scene.jpg",
+            contentType: "image/jpeg",
+            fileSize: 1024,
+          }),
+        },
+      );
+      expect(uploadIntentResponse.ok).toBe(true);
+      expect((await uploadIntentResponse.json()).data).toEqual({
+        state: "unavailable",
+        sosEventId: firstBody.data.event.sosEventId,
+        reasonCode: "storage_provider_unavailable",
+        reason: "No attachment storage provider is configured.",
+        retryable: true,
+      });
+
+      const renderedAt = new Date(
+        Math.max(
+          Date.now(),
+          Date.parse(firstBody.data.receipt.fleetReportConfirmedAt),
+        ),
+      ).toISOString();
+      const renderResponse = await fetch(
+        `${baseUrl}/api/ops/driver-sos/alerts/rendered`,
+        {
+          method: "POST",
+          headers: buildOpsHeaders(),
+          body: JSON.stringify({
+            incidentIds: [firstBody.data.receipt.incidentId],
+            renderedAt,
+          }),
+        },
+      );
+      expect(renderResponse.ok).toBe(true);
+      const renderBody = await renderResponse.json();
+      expect(renderBody.data.observations[0]).toEqual(
+        expect.objectContaining({
+          incidentId: firstBody.data.receipt.incidentId,
+          fleetReportConfirmedAt: firstBody.data.receipt.fleetReportConfirmedAt,
+          opsAlertRenderedAt: renderedAt,
+          alertToOpsLatencyMs: expect.any(Number),
+          duplicate: false,
+        }),
+      );
+
+      const repository = app.get(
+        DriverSosRepository,
+      ) as InMemoryDriverSosRepository;
       const incidentService = app.get(IncidentService);
       const snapshot = repository.snapshot();
 

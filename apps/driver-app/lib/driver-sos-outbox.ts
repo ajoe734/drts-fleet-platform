@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import type { ImagePickerAsset } from "expo-image-picker";
 import type {
   DriverSosEventType,
+  DriverSosAttachmentScanStatus,
   DriverSosLocationSnapshot,
   DriverSosSubmissionReceipt,
   PendingSosOutboxItem,
@@ -27,7 +28,17 @@ export interface DriverSosAttachmentDraft {
   uri: string;
   fileName: string;
   mimeType: string | null;
+  fileSize: number | null;
   addedAt: string;
+  uploadState:
+    | "local"
+    | "uploading"
+    | "confirmed"
+    | "unavailable"
+    | "failed_retryable";
+  serverAttachmentId: string | null;
+  scanStatus: DriverSosAttachmentScanStatus | null;
+  lastError: string | null;
 }
 
 export interface DriverSosSupplementDraft {
@@ -93,10 +104,27 @@ function createLocalId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function createClientEventId(): string {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+    /[xy]/g,
+    (character) => {
+      const random = Math.floor(Math.random() * 16);
+      const value = character === "x" ? random : (random & 0x3) | 0x8;
+      return value.toString(16);
+    },
+  );
+}
+
 function clampRetryDelayMs(attemptCount: number) {
   const rawDelay =
-    DRIVER_SOS_RETRY_BASE_MS *
-    2 ** Math.max(0, Math.min(attemptCount - 1, 5));
+    DRIVER_SOS_RETRY_BASE_MS * 2 ** Math.max(0, Math.min(attemptCount - 1, 5));
   return Math.min(rawDelay, DRIVER_SOS_RETRY_MAX_MS);
 }
 
@@ -110,6 +138,19 @@ function cloneTimelineEntry(
   entry: DriverSosTimelineRecord,
 ): DriverSosTimelineRecord {
   return { ...entry };
+}
+
+function normalizeAttachmentDraft(
+  attachment: DriverSosAttachmentDraft,
+): DriverSosAttachmentDraft {
+  return {
+    ...attachment,
+    fileSize: attachment.fileSize ?? null,
+    uploadState: attachment.uploadState ?? "local",
+    serverAttachmentId: attachment.serverAttachmentId ?? null,
+    scanStatus: attachment.scanStatus ?? null,
+    lastError: attachment.lastError ?? null,
+  };
 }
 
 function appendTimelineEntry(
@@ -129,7 +170,7 @@ function appendTimelineEntry(
 }
 
 export function createDriverSosAttachmentDraft(
-  asset: Pick<ImagePickerAsset, "uri" | "mimeType" | "fileName">,
+  asset: Pick<ImagePickerAsset, "uri" | "mimeType" | "fileName" | "fileSize">,
 ): DriverSosAttachmentDraft {
   const now = new Date().toISOString();
   return {
@@ -140,7 +181,15 @@ export function createDriverSosAttachmentDraft(
       asset.uri.split("/").pop()?.trim() ||
       `sos-${now}.jpg`,
     mimeType: asset.mimeType?.trim() || null,
+    fileSize:
+      typeof asset.fileSize === "number" && asset.fileSize > 0
+        ? asset.fileSize
+        : null,
     addedAt: now,
+    uploadState: "local",
+    serverAttachmentId: null,
+    scanStatus: null,
+    lastError: null,
   };
 }
 
@@ -156,7 +205,7 @@ export function createDriverSosActiveCase(params: {
 }): DriverSosActiveCase {
   const now = new Date().toISOString();
   const baseCase: DriverSosActiveCase = {
-    clientEventId: createLocalId("sos"),
+    clientEventId: createClientEventId(),
     incidentId: null,
     eventNo: null,
     eventType: params.eventType,
@@ -244,7 +293,7 @@ export function markDriverSosCaseSubmitted(
   activeCase: DriverSosActiveCase,
   result: SubmitDriverSosEventResult,
 ): DriverSosActiveCase {
-  const receivedAt = result.receipt.serverReceivedAt;
+  const receivedAt = result.receipt.fleetReportConfirmedAt;
   let nextCase: DriverSosActiveCase = {
     ...activeCase,
     incidentId: result.receipt.incidentId,
@@ -283,6 +332,79 @@ export function markDriverSosCaseSubmitted(
   }
 
   return nextCase;
+}
+
+export function applyDriverSosAttachmentSyncResult(
+  activeCase: DriverSosActiveCase,
+  attachments: DriverSosAttachmentDraft[],
+): DriverSosActiveCase {
+  if (attachments.length === 0) {
+    return activeCase;
+  }
+
+  const confirmedCount = attachments.filter(
+    (attachment) => attachment.uploadState === "confirmed",
+  ).length;
+  const unavailableCount = attachments.filter(
+    (attachment) => attachment.uploadState === "unavailable",
+  ).length;
+  const failedCount = attachments.filter(
+    (attachment) => attachment.uploadState === "failed_retryable",
+  ).length;
+  const scanPendingCount = attachments.filter(
+    (attachment) =>
+      attachment.scanStatus === "unavailable" ||
+      attachment.scanStatus === "error" ||
+      attachment.scanStatus === "pending",
+  ).length;
+  const pending = unavailableCount + failedCount + scanPendingCount > 0;
+  const now = new Date().toISOString();
+  const attachmentById = new Map(
+    attachments.map((attachment) => [attachment.id, attachment]),
+  );
+  const supplements = activeCase.supplements.map((supplement) => {
+    const syncedAttachments = supplement.attachments.map(
+      (attachment) => attachmentById.get(attachment.id) ?? attachment,
+    );
+    const supplementPending = syncedAttachments.some(
+      (attachment) =>
+        attachment.uploadState !== "confirmed" ||
+        attachment.scanStatus === "pending" ||
+        attachment.scanStatus === "unavailable" ||
+        attachment.scanStatus === "error",
+    );
+    return {
+      ...supplement,
+      attachments: syncedAttachments,
+      state: supplementPending
+        ? ("attachment_pending" as const)
+        : ("complete" as const),
+      lastError:
+        syncedAttachments.find((attachment) => attachment.lastError)
+          ?.lastError ?? null,
+    };
+  });
+
+  return appendTimelineEntry(
+    {
+      ...activeCase,
+      attachments: activeCase.attachments.map(
+        (attachment) => attachmentById.get(attachment.id) ?? attachment,
+      ),
+      supplements,
+      syncState: pending ? "attachment_pending" : "complete",
+      lastError: pending ? "SOS 已送達；部分附件仍等待儲存或掃描服務。" : null,
+    },
+    {
+      kind: pending ? "attachment_sync_pending" : "attachment_sync_complete",
+      title: pending ? "附件等待補送" : "附件處理完成",
+      detail: pending
+        ? `${confirmedCount} 件已確認，${unavailableCount} 件服務未就緒，${failedCount} 件可重試。SOS 主事件不受影響。`
+        : `${confirmedCount} 件附件已由伺服器確認；掃描結果逐件保留。`,
+      occurredAt: now,
+      tone: pending ? "warn" : "success",
+    },
+  );
 }
 
 export function markDriverSosCaseFailed(
@@ -379,7 +501,8 @@ export function queueDriverSosSupplement(
       kind: "supplement_added",
       title: "已加入補充資料",
       detail:
-        detailParts.join("，") || "補充資料已寫入本機 case timeline，待後續補送。",
+        detailParts.join("，") ||
+        "補充資料已寫入本機 case timeline，待後續補送。",
       occurredAt: createdAt,
       tone: "info",
     },
@@ -403,8 +526,7 @@ export function markDriverSosFalseAlarm(
     {
       kind: "false_alarm_dismissed",
       title: "已標記誤觸",
-      detail:
-        note.trim() || "司機已以二次確認方式標記本次 SOS 為誤觸。",
+      detail: note.trim() || "司機已以二次確認方式標記本次 SOS 為誤觸。",
       occurredAt: dismissedAt,
       tone: "warn",
     },
@@ -425,8 +547,17 @@ export async function loadDriverSosActiveCase(): Promise<DriverSosActiveCase | n
 
     return {
       ...parsed,
-      attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
-      supplements: Array.isArray(parsed.supplements) ? parsed.supplements : [],
+      attachments: Array.isArray(parsed.attachments)
+        ? parsed.attachments.map(normalizeAttachmentDraft)
+        : [],
+      supplements: Array.isArray(parsed.supplements)
+        ? parsed.supplements.map((supplement) => ({
+            ...supplement,
+            attachments: Array.isArray(supplement.attachments)
+              ? supplement.attachments.map(normalizeAttachmentDraft)
+              : [],
+          }))
+        : [],
       dialRecords: Array.isArray(parsed.dialRecords) ? parsed.dialRecords : [],
       timeline: Array.isArray(parsed.timeline)
         ? parsed.timeline.map(cloneTimelineEntry)
