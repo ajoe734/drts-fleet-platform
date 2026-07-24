@@ -5,6 +5,7 @@ import {
   Headers,
   Param,
   Post,
+  Query,
   Put,
   Sse,
 } from "@nestjs/common";
@@ -16,6 +17,7 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  MultiTaxiTripOperationalRecordQuery,
   QueueCheckInCommand,
   QueueCheckOutCommand,
   SubmitPassengerTripRatingCommand,
@@ -23,7 +25,12 @@ import type {
 } from "@drts/contracts";
 
 import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
-import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
+import {
+  CurrentIdentity,
+  OpenRoute,
+  RequireRealms,
+  RequireScopes,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { MultiTaxiService } from "./multi-taxi.service";
 
@@ -257,6 +264,38 @@ export class MultiTaxiController {
   ) {
     return toApiSuccessEnvelope(
       this.multiTaxiService.addAuthorizedVehicle(authorizationId, command),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-trip-records")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:read")
+  async listTripOperationalRecords(
+    @Query() query: MultiTaxiTripOperationalRecordQuery,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = await this.multiTaxiService.listTripOperationalRecords(query);
+    return toApiSuccessEnvelope(
+      toApiListData(items, {
+        page: 1,
+        pageSize: items.length,
+        totalItems: items.length,
+        totalPages: items.length === 0 ? 0 : 1,
+      }),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-trip-records/export")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  async exportTripOperationalRecords(
+    @Query() query: MultiTaxiTripOperationalRecordQuery,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.exportTripOperationalRecords(query),
       requestId,
     );
   }

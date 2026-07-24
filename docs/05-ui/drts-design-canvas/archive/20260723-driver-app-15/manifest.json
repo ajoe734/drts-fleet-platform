@@ -1,0 +1,112 @@
+{
+  "archiveId": "driver-app-15-20260723",
+  "archiveDate": "2026-07-23",
+  "archiveType": "submitted_source_snapshot",
+  "authority": "approved_design_source_provenance",
+  "canonicalPromotionDate": "2026-07-24",
+  "sourceZip": {
+    "name": "driver app (15).zip",
+    "originalPath": "/home/edna/workspace/driver app (15).zip",
+    "sha256": "634f27855d141633a1c1de102a2fee1c2a03850949f43b927c5fb6dea859a915",
+    "entries": 138,
+    "uncompressedBytes": 10562023,
+    "pathTraversalCheck": "passed",
+    "symlinkCheck": "passed"
+  },
+  "comparedAgainst": {
+    "repositoryPath": "docs/05-ui/drts-design-canvas/",
+    "branch": "dev",
+    "commit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c"
+  },
+  "governingRequirement": "../../../../02-architecture/phase1-p5-s3-multi-taxi-20260720/08_multi_taxi_operations_ui_design_requirements_20260723.md",
+  "executionPacket": "../../../../02-architecture/phase1-p5-s3-multi-taxi-20260720/10_full_17_screen_fleets_execution_tasks_20260724.md",
+  "files": [
+    {
+      "path": "Driver App.html",
+      "bytes": 19069,
+      "sha256": "d8cc5df942dd4f201f1f19502011c6308b81bef077de955e0c04f05f55c72416",
+      "baselineComparison": "identical",
+      "disposition": "canonical_already_identical"
+    },
+    {
+      "path": "Ops Console.html",
+      "bytes": 13989,
+      "sha256": "a83588be2297d026244b4de54d8fa194eb0a8764b9cf2a33bdc820045bd5a834",
+      "baselineComparison": "different",
+      "disposition": "promoted_to_canonical"
+    },
+    {
+      "path": "Platform Admin.html",
+      "bytes": 20605,
+      "sha256": "2c15d1f8feed896c1fa1edaec19caf29f62d048844de021c337a43a210adbeba",
+      "baselineComparison": "different",
+      "disposition": "promoted_to_canonical"
+    },
+    {
+      "path": "ops-mtx-queue.jsx",
+      "bytes": 8261,
+      "sha256": "eb5e08ed011849360f8563ff8a2843ba8c7e953fa651ed92fe98db9e89c46283",
+      "baselineComparison": "new",
+      "disposition": "promoted_to_canonical_full_queue_suite"
+    },
+    {
+      "path": "ops-screens-1.jsx",
+      "bytes": 30622,
+      "sha256": "831ad659bb54877f63efd29322749603d4456c4594d2f8ed210ba0503412ff46",
+      "baselineComparison": "different",
+      "disposition": "promoted_to_canonical"
+    },
+    {
+      "path": "platform-mtx-auth.jsx",
+      "bytes": 19813,
+      "sha256": "2fde1f85eb4018672b40938b84ae531fe3980fa8831d8d774c24ac547737cc9b",
+      "baselineComparison": "new",
+      "disposition": "promoted_to_canonical_six_screen_suite"
+    },
+    {
+      "path": "platform-mtx-commerce.jsx",
+      "bytes": 23131,
+      "sha256": "7de587da3f54b6173fdc3d24b7eef3867a25d53841e9e43682fb0324c828771f",
+      "baselineComparison": "new",
+      "disposition": "promoted_to_canonical_rating_and_commerce_suite"
+    },
+    {
+      "path": "platform-screens-1.jsx",
+      "bytes": 30345,
+      "sha256": "2cbc5850009a806e839289c8228b64953ab6f16399371a9e01ceb0be8a2a2906",
+      "baselineComparison": "different",
+      "disposition": "promoted_to_canonical"
+    }
+  ],
+  "excludedEntryGroups": [
+    {
+      "path": ".scratch/",
+      "reason": "generated_preview_assets"
+    },
+    {
+      "path": ".thumbnail",
+      "reason": "generated_thumbnail"
+    },
+    {
+      "path": ".design-canvas.state.json",
+      "reason": "local_canvas_state"
+    },
+    {
+      "path": "export/",
+      "reason": "generated_or_duplicate_export"
+    },
+    {
+      "path": "docs/",
+      "reason": "duplicate_repository_documents"
+    },
+    {
+      "path": "uploads/",
+      "reason": "duplicate_inputs_and_images"
+    },
+    {
+      "path": "remaining_unchanged_source_files",
+      "reason": "already_present_in_canonical_canvas"
+    }
+  ],
+  "integrityPolicy": "archived files remain byte-identical to the source ZIP"
+}

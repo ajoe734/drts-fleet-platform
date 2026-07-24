@@ -53,4 +53,55 @@ describe("MultiTaxiController ride intake", () => {
       "req-create-002",
     );
   });
+
+  it("wraps platform-admin trip records list responses after awaiting the service", async () => {
+    const result = [
+      {
+        recordId: "mtr-order-001",
+        orderId: "order-001",
+        orderNo: "ZX-240720-0186",
+      },
+    ];
+    const service = {
+      listTripOperationalRecords: vi.fn().mockResolvedValue(result),
+    } as unknown as MultiTaxiService;
+    const controller = new MultiTaxiController(service);
+
+    const response = await controller.listTripOperationalRecords(
+      { month: "2026-07" },
+      "req-records-001",
+    );
+
+    expect(response.data.items).toEqual(result);
+    expect(service.listTripOperationalRecords).toHaveBeenCalledWith({
+      month: "2026-07",
+    });
+  });
+
+  it("wraps platform-admin trip records export payload after awaiting the service", async () => {
+    const result = {
+      exportedAt: "2026-07-23T00:00:00.000Z",
+      filename: "multi-taxi-trip-records-202607.csv",
+      rows: [
+        {
+          orderNoMasked: "ZX-240...86",
+          plateNoMasked: "BK...08",
+        },
+      ],
+    };
+    const service = {
+      exportTripOperationalRecords: vi.fn().mockResolvedValue(result),
+    } as unknown as MultiTaxiService;
+    const controller = new MultiTaxiController(service);
+
+    const response = await controller.exportTripOperationalRecords(
+      { month: "2026-07" },
+      "req-records-export-001",
+    );
+
+    expect(response.data).toEqual(result);
+    expect(service.exportTripOperationalRecords).toHaveBeenCalledWith({
+      month: "2026-07",
+    });
+  });
 });

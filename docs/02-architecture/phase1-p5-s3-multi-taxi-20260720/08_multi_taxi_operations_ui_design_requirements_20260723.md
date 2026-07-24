@@ -1,40 +1,43 @@
-# 多元化計程車操作 UI 最小需求
+# 多元化計程車操作 UI 完整需求
 
-**文件版本：** v1.1
+**文件版本：** v1.2
 
-**日期：** 2026-07-23
+**日期：** 2026-07-24
 
-**狀態：** Ready for Minimal Design
+**狀態：** Approved for Full-Suite Implementation
 
 **對象：** Product Design、Frontend、Backend、QA、法遵審查
 
-**系統基準：** `dev@b8f1f56b20a77c8abeabf0ac3c51b8443d5616af`
+**系統基準：** `dev@2711c366f2e103ae9556d5afaf4558dfd9b0bb4c`
 
-**執行對照：** `07_fleets_execution_tasks_20260723.md`
+**執行對照：**
+`10_full_17_screen_fleets_execution_tasks_20260724.md`
 
 ---
 
-# 0. 本次重新盤點結論
+# 0. 2026-07-24 產品決策變更
 
-v1.0 把法定功能、營運控制與設計交付物混在一起，形成 17 個畫面及過多
-handoff gate。v1.1 依「實用性優先、法規必要、沿用現有 UI」原則縮減為
-4 個 UI delta，不再為了完整性建立專用後台。
+v1.1 曾依「只做法規與實用性最低需求」把操作 UI 縮為 4 個 delta。
+Product Owner 於 2026-07-24 改變決定，核准原 17 個營運畫面全部進入開發。
 
-本版明確取消下列法規 MVP gate：
+本版採雙層範圍：
 
-- rating moderation console；
-- payment exception console；
-- legal hold 管理；
-- 獨立 queue overview、detail、denial 三頁；
-- 獨立 authorization lifecycle 與 conflict 頁；
-- export job orchestration；
-- 指定 Figma page structure；
-- 全畫面 PNG 套件；
-- 獨立 Design QA 流程。
+1. 第 4 節的 4 個 delta 仍是法規／上線最低基線；
+2. 第 6 節的 17 頁是本次產品決策新增的完整營運套件。
 
-取消上述項目不代表移除後端法定 hard gate。預約載客、禁止巡迴攬客與
-招呼站排班、乘前揭露、乘後評價、電子支付、電子乘車證明及二年營運資料
-仍須依適用條件完成。
+完整套件屬產品與營運選擇，不代表下列功能都是法規明文要求。實作仍不得
+建立法律 bypass、偽造付款／評價／證明，或把 `design-only` action 當成
+已核准後端 command。
+
+本次同時核准：
+
+- 6 頁 Operating Authorization；
+- 3 頁 Queue Operations；
+- 3 頁 Rating Governance；
+- 5 頁 Fare、Payment、Certificate、Records、Export／Retention。
+
+不重新引入「為交付而交付」的 Figma、全畫面 PNG 或獨立 Design QA gate。
+repository 內的 code canvas 為本輪核准設計來源。
 
 ---
 
@@ -45,8 +48,9 @@ handoff gate。v1.1 依「實用性優先、法規必要、沿用現有 UI」原
 1. 法規明文要求使用者可取得、輸入或下載資訊；
 2. 現場人員若無此資訊，無法正確完成必要工作；
 3. 既有後端能力需要最小操作入口，且可直接沿用現有頁面。
+4. Product Owner 已明確核准為營運效率、治理或客服工具。
 
-下列理由不足以新增畫面：
+即使已核准完整套件，下列理由仍不足以擴大這 17 頁以外的範圍：
 
 - 只是讓 architecture 看起來完整；
 - 尚無 API command，但先畫一套操作；
@@ -80,26 +84,28 @@ handoff gate。v1.1 依「實用性優先、法規必要、沿用現有 UI」原
 | 營運資料至少保存二年                   | 保存 730 日並可查詢                | 需要最小查詢入口                   |
 | 配合主管機關查詢及下載                 | 可依範圍下載法定欄位               | 需要最小下載能力                   |
 
-法規規定的是結果，不指定 React route、後台頁數、Figma 或 PNG。
+法規規定的是結果，不指定 React route、後台頁數、Figma 或 PNG。本版新增
+專頁是產品決策，不是法規解讀變更。
 
 ---
 
 # 3. Repository 現況
 
-| 能力            | 現況                                         | 本版決定                             |
-| --------------- | -------------------------------------------- | ------------------------------------ |
-| 營運許可        | 已有 `/multi-taxi-authorizations` 頁面及 API | 改善既有頁，不重畫 6 頁              |
-| Queue hard gate | Contract、policy 與 negative test 已存在     | 在既有 dispatch 頁補標示             |
-| 乘客評價        | Passenger API/contract 已存在                | 完成既有 ride flow，不做 moderation  |
-| Payment state   | Passenger authority contract 已存在          | 顯示必要狀態，不做 exception console |
-| 電子乘車證明    | Passenger receipt API/contract 已存在        | 沿用既有 ride/receipt surface        |
-| 二年紀錄        | Contract 已存在，查詢下載尚未閉環            | 新增一個最小 admin surface           |
+| 能力            | 現況                                         | 本版決定                                  |
+| --------------- | -------------------------------------------- | ----------------------------------------- |
+| 營運許可        | 已有 `/multi-taxi-authorizations` 頁面及 API | 擴成 registry/detail/draft/confirm/vehicles/states |
+| Queue hard gate | Contract、policy 與 negative test 已存在     | 增加 overview/detail/legal-denial 三頁    |
+| 乘客評價        | Passenger API/contract 已存在                | 保留 ride flow，另增加三頁 rating governance |
+| Payment state   | Passenger authority contract 已存在          | 保留乘客狀態，另增加 exception detail     |
+| 電子乘車證明    | Passenger receipt API/contract 已存在        | 保留 passenger receipt，另增加 support 頁 |
+| 二年紀錄        | 基本 query/CSV 已存在                        | 擴成 records detail 與 controlled export/retention |
 
-設計工作只處理尚未清楚的 delta，不重做已存在的 P-5/S-3 canvas。
+P-5 Passenger 與 S-3 既有 canvas 不重做；17 頁增量使用 2026-07-23 上傳的
+code canvas，並依本版 command gate 實作。
 
 ---
 
-# 4. 最小 UI Delta
+# 4. 法規／上線最低 UI Delta
 
 ## `MTX-UI-MVP-01` 既有營運許可頁
 
@@ -217,13 +223,16 @@ taxi_stand
 
 不得提供「仍要派遣」或其他 bypass 按鈕。
 
-### 不需要
+### 法規最低版本身不要求
 
 - 新增 queue 管理首頁；
 - 新增 queue detail route；
 - 新增 legal denial 專頁；
 - 顯示 raw reason code；
 - 為三種 queue mode 建立營運設定器。
+
+本版第 6 節已另以產品決策核准 queue overview/detail/denial 三頁，但上述
+hard gate 與禁止 bypass 規則不變。
 
 ### 驗收
 
@@ -259,8 +268,8 @@ Ops 在既有 dispatch list/detail 即可辨識服務類型與媒合方式；違
 
 - 可送出 1 至 5 分；
 - 已送出時顯示結果，不重複建立另一筆評價；
-- 不需要提供管理員修改平均分數的 UI；
-- 不需要在本期建立 moderation queue。
+- 乘客流程本身不提供管理員修改平均分數的 UI；
+- 第 6 節另有 moderation queue，但不得直接編輯 aggregate。
 
 ### 支付狀態
 
@@ -288,8 +297,8 @@ Ops 在既有 dispatch list/detail 即可辨識服務類型與媒合方式；違
 - 客服電話；
 - 主管機關申訴電話。
 
-證明尚未產生時顯示「乘車證明準備中」；API 失敗時提供重試讀取，不建立
-後台 certificate support console。
+證明尚未產生時顯示「乘車證明準備中」；API 失敗時提供重試讀取。第 6 節
+另有後台 certificate support，但不能取代 Passenger flow。
 
 ### 驗收
 
@@ -303,7 +312,7 @@ Passenger ride 主流程可完成：
 → 讀取乘車證明
 ```
 
-不新增與此流程無關的管理畫面。
+新增的治理／客服管理頁必須與 Passenger flow 分離，不能改變乘客 authority。
 
 ---
 
@@ -343,13 +352,17 @@ Passenger ride 主流程可完成：
 - 顯示匯出筆數與資料範圍；
 - 沿用現有登入、授權及 audit primitive。
 
-資料量未證明需要非同步工作前，不建立：
+法規最低版原可不建立：
 
 - export job queue；
 - retry dashboard；
 - legal hold；
 - archive tier console；
 - 自訂 retention policy editor。
+
+Product Owner 已於 v1.2 核准 controlled export/retention 頁及 server export
+job；legal hold 先完成 display/filter，write actions 依第 7 節 command gate。
+archive tier 與自訂 retention editor 仍不在範圍。
 
 畫面只需顯示：
 
@@ -368,7 +381,7 @@ Passenger ride 主流程可完成：
 
 # 5. 共用實用性要求
 
-所有 delta 只要求下列基本狀態：
+所有法規 delta 與 17 頁至少要求下列基本狀態：
 
 ```text
 loading
@@ -396,81 +409,163 @@ permission denied
 
 ---
 
-# 6. 明確延後項目
+# 6. 核准開發的 17 頁
 
-| 項目                           | 本期決定     | 重新啟動條件                                          |
-| ------------------------------ | ------------ | ----------------------------------------------------- |
-| Rating moderation console      | 延後         | 出現實際 abuse case 且 moderation policy/command 核准 |
-| Payment exception console      | 延後         | PSP 上線且現有 payments 頁不足                        |
-| Fare anomaly triage console    | 延後         | 有可操作 recovery command                             |
-| Authorization revoke/restore   | 延後         | Lifecycle、權限與 API 核准                            |
-| Vehicle suspend/remove history | 延後         | API 與法遵流程核准                                    |
-| Legal hold                     | 移出法規 MVP | 法務提出案件保存政策                                  |
-| Export job orchestration       | 延後         | 實際資料量超過同步下載能力                            |
-| 專用 queue 管理頁              | 不做         | 既有 dispatch 無法容納必要資訊                        |
-| 新 design system               | 不做         | 無                                                    |
-| 完整 Figma/PNG package         | 不做         | 契約明文要求                                          |
+## 6.1 Operating Authorization：6 頁
 
-延後項目不得偷偷包進其他 Fleet PR。
+| Screen ID        | 頁面                      | 建議 route／surface                              |
+| ---------------- | ------------------------- | ----------------------------------------------- |
+| `MTX-AUTH-UI-01` | Authorization Registry    | `/multi-taxi-authorizations`                    |
+| `MTX-AUTH-UI-02` | Authorization Detail      | `/multi-taxi-authorizations/{authorizationId}`  |
+| `MTX-AUTH-UI-03` | Draft Editor              | `/multi-taxi-authorizations/new`／draft edit    |
+| `MTX-AUTH-UI-04` | Lifecycle Confirmation    | detail 內受控 confirmation flow                 |
+| `MTX-AUTH-UI-05` | Authorized Vehicles       | authorization detail 的 vehicles surface        |
+| `MTX-AUTH-UI-06` | Conflict／Permission State | 共用 stale、forbidden、unavailable state surface |
+
+六頁必須使用同一 authorization authority，不建立第二份 client-side
+lifecycle。已核准 live commands：
+
+```text
+create draft
+update draft
+activate
+suspend
+add vehicle
+```
+
+`revoke`、`restore`、`delete`、vehicle suspend/remove 只有在對應 command、
+permission、audit 與 tests 落地後才能啟用；在此之前可保留 disabled
+`command pending` 說明，不可模擬成功。
+
+## 6.2 Queue Operations：3 頁
+
+| Screen ID         | 頁面                        | 建議 route／surface                 |
+| ----------------- | --------------------------- | ---------------------------------- |
+| `MTX-QUEUE-UI-01` | Queue Overview              | `/dispatch/queue`                  |
+| `MTX-QUEUE-UI-02` | Queue Entry Detail          | `/dispatch/queue/{queueEntryId}`   |
+| `MTX-QUEUE-UI-03` | Non-Bypassable Legal Denial | detail 或 denial state             |
+
+Overview/detail 必須顯示 queue mode、runtime profile、service area、site、
+driver/vehicle、authorization、eligibility、check-in 與 last update。
+`multi_taxi_direct` 的 `physical_rank`／`taxi_stand` denial 永遠不得提供
+override 或 force check-in。
+
+## 6.3 Rating Governance：3 頁
+
+| Screen ID       | 頁面                    | 建議 route／surface              |
+| --------------- | ----------------------- | ------------------------------- |
+| `P5-RATE-UI-01` | Rating Review Queue     | `/p5-ratings`                   |
+| `P5-RATE-UI-02` | Rating Review Detail    | `/p5-ratings/{ratingId}`        |
+| `P5-RATE-UI-03` | Driver Rating Authority | driver rating authority surface |
+
+Review queue 支援 status、score、tag、driver、trip/order、date filters。
+Invalidation 必須有 reason、confirmation、audit 與 aggregate rebuild。平均分、
+rating count 與 score 不可直接編輯；restore command 未核准前保持 disabled。
+
+## 6.4 Fare、Payment、Certificate、Records：5 頁
+
+| Screen ID      | 頁面                          | 建議 route／surface                    |
+| -------------- | ----------------------------- | ------------------------------------- |
+| `P5-COM-UI-01` | Fare Anomaly Queue／Detail   | `/p5-fare-anomalies`                  |
+| `P5-COM-UI-02` | Payment Exception Detail      | `/payments/{orderId}`                 |
+| `P5-COM-UI-03` | Certificate Support           | `/multi-taxi-certificates`            |
+| `P5-COM-UI-04` | Operational Record Query      | `/platform-admin/p5/records`          |
+| `P5-COM-UI-05` | Controlled Export／Retention | records 內 export/retention surface   |
+
+Fare anomaly 維持 fail closed，不提供人工金額 bypass。Payment exception
+不得把 `failed`／`manual_recovery` 顯示成已付款，也不得顯示 raw card data。
+Certificate support 可定位與重開既有證明；regeneration command 落地前保持
+disabled。
+
+Controlled export 必須由 server 產生，流程至少包含 scope preview、purpose、
+record count、pending/running/completed/failed、audit 與 controlled download。
+Legal hold 在本期需完成 display/filter；create/release action 需先完成獨立
+command、permission 與 audit task。
 
 ---
 
-# 7. 最小設計交付
+# 7. Command 與 Backend Dependency Gate
 
-設計只需交付 4 個 delta：
+17 頁全部核准開發，但 page approval 不等於 write command 已存在。
 
-1. 既有 authorization 頁的欄位／動作調整；
-2. 既有 dispatch list/detail 的兩個標籤與 denial copy；
-3. 既有 passenger ride 的 rating/payment/receipt states；
-4. records query/download 的單一 desktop flow。
+| 能力                              | 本期要求                                           |
+| --------------------------------- | -------------------------------------------------- |
+| Authorization 既有 lifecycle     | 直接接 canonical API                               |
+| Vehicle remove/suspend            | 先完成 command task，再啟用 UI                     |
+| Queue denial                      | 只顯示 server decision，不得加入 bypass            |
+| Rating invalidate                 | 完成 moderation command、reason、audit、rebuild    |
+| Rating restore                    | command 未核准前 disabled                          |
+| Fare anomaly retry/recovery       | 只依 server `availableActions` 啟用                |
+| Payment recovery                  | 只依 provider/backend descriptor 啟用              |
+| Certificate regeneration          | command 未落地前 disabled                          |
+| Controlled export                 | 實作 server job，不得只在 browser 產出敏感匯出     |
+| Legal hold create/release         | 獨立 evidence-governance command 完成後才啟用      |
 
-可接受的交付媒介：
-
-- 既有 Figma 檔中的增量 frame；
-- 可點擊 code prototype；
-- 清楚標註的現有 canvas 修改稿。
-
-不強制指定 Figma，也不要求每個 loading/error state 各輸出 PNG。
-
-每個 delta 必須提供：
-
-- 使用者目標；
-- 欄位與 canonical status mapping；
-- 可執行 action；
-- 一個正常狀態；
-- 必要的 empty/error state；
-- 最終繁體中文文案；
-- 對應既有 route/component。
+每個 mutation 必須有 capability、idempotency、audit receipt、conflict handling
+與 negative test。這些是可執行 command 的基本完整性，不是額外畫面要求。
 
 ---
 
-# 8. Design Definition of Done
+# 8. 核准設計來源
 
-最小設計只有在下列條件全部完成後，才可標記
-`designReadyForImplementation = true`：
+正式 code canvas：
 
-1. 4 個 UI delta 均有明確增量稿；
-2. 沒有新增本文件第 6 節的延後功能；
-3. 所有 action 均有現存或已核准 API command；
-4. queue UI 沒有 legal bypass；
-5. Passenger ride 不使用假評分、假付款或假證明；
-6. records surface 包含全部法定欄位及查詢下載；
-7. Product、System 與實作 owner 完成一次共同 review。
+```text
+docs/05-ui/drts-design-canvas/
+```
 
-不以 Figma、PNG 數量或獨立 Design QA 文件判定完成。
+提交來源 snapshot：
+
+```text
+docs/05-ui/drts-design-canvas/archive/20260723-driver-app-15/
+```
+
+17 頁已由下列檔案覆蓋：
+
+```text
+platform-mtx-auth.jsx       MTX-AUTH-UI-01..06
+ops-mtx-queue.jsx           MTX-QUEUE-UI-01..03
+platform-mtx-commerce.jsx   P5-RATE-UI-01..03 + P5-COM-UI-01..05
+Platform Admin.html         Platform Admin frame integration
+Ops Console.html            Ops frame integration
+```
+
+Fleets 必須重建為 production stack 並接 canonical contracts；不得把 canvas
+fixture 當 production data。Figma、全畫面 PNG 與獨立 Design QA package
+不是開工 gate；每個 UI PR 仍須附實際變更 screenshot 與 tests。
 
 ---
 
-# 9. Fleets Handoff
+# 9. Full-Suite Definition of Done
 
-| UI delta        | Fleets task                                  |
-| --------------- | -------------------------------------------- |
-| `MTX-UI-MVP-01` | `MTX-AUTH-UI-001` verify/minimal delta       |
-| `MTX-UI-MVP-02` | `MTX-QUEUE-003`                              |
-| `MTX-UI-MVP-03` | `P5-PAX-WEB-001`、`P5-PAY-001`、`P5-RCT-001` |
-| `MTX-UI-MVP-04` | `P5-RET-003`                                 |
+只有下列條件全部完成，17 頁範圍才可 close：
 
-`P5-RATE-003` moderation 不在法規 MVP，不能阻擋 Passenger rating 上線。
+1. 17 個 Screen ID 均有 production route 或明確嵌入 surface；
+2. 4 個法規最低 delta 仍完整；
+3. read/write capability 與 server authorization 一致；
+4. unsupported command 保持 disabled，不模擬成功；
+5. queue denial 無 legal bypass；
+6. rating aggregate、fare、payment、receipt 不使用 fixture 或假預設值；
+7. controlled export 由 server 產生並有 audit；
+8. legal hold 與 retention 為不同狀態；
+9. loading、empty、error、permission、stale/conflict 可驗證；
+10. 繁中／英文 translation keys、keyboard flow 與 200% zoom 通過；
+11. 每頁有 current-head unit/integration 或 E2E evidence；
+12. Fleet H 完成跨 surface final matrix。
 
-Implementation PR 只需連結相關 delta 與實際變更畫面，不得以「設計完整性」
-為理由擴增本文件已延後的功能。
+---
+
+# 10. Fleets Handoff
+
+| Screen group                    | Fleet／Task |
+| ------------------------------- | ----------- |
+| `MTX-AUTH-UI-01..06`            | Fleet B：`MTX-AUTH-UI-001` |
+| `MTX-QUEUE-UI-01..03`           | Fleet C：`MTX-QUEUE-003` |
+| `P5-RATE-UI-01..03`             | Fleet D：`P5-RATE-003`、`P5-RATE-UI-001` |
+| Passenger legal ride states     | Fleet E：`P5-PAX-WEB-001` |
+| `P5-COM-UI-01..05`              | Fleet F：fare/payment/receipt/retention/export/hold tasks |
+| S-3 current-head verification   | Fleet G：`S3-VERIFY-UI-001` |
+| 17-page cross-surface acceptance | Fleet H：`E2E-MTX-UI-FULL-001` |
+
+詳細 ownership、branch reconciliation、dependency 與 PR contract 見
+`10_full_17_screen_fleets_execution_tasks_20260724.md`。

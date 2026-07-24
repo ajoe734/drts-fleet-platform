@@ -224,6 +224,12 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.p5Corrections",
   },
   {
+    key: "p5-records",
+    icon: Package,
+    section: "fleet",
+    labelKey: "adminShell.route.p5Records",
+  },
+  {
     key: "p5-fares",
     icon: DollarSign,
     section: "commerce",

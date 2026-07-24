@@ -5,7 +5,7 @@
 **Canonical product name：** **智行叫車**  
 **Service category：** 多元化計程車  
 **Repository / Branch：** `drts-fleet-platform` / `dev`  
-**Current verified baseline：** `ff16b7131bee4594ec56b195d43539a8d65ce379`
+**Current execution baseline：** `2711c366f2e103ae9556d5afaf4558dfd9b0bb4c`
 
 本資料夾同時保存：
 
@@ -67,14 +67,16 @@ external platform badge
 | `05_external_review_reconciliation_20260722.md`                         | 外部審查採納／修正／branch-state verification                           |
 | `06_multi_taxi_runtime_execution_register_20260723.md`                  | 可派工 task register                                                    |
 | `07_fleets_execution_tasks_20260723.md`                                 | Fleets design gates、execution packets、dependency 與 evidence contract |
-| `08_multi_taxi_operations_ui_design_requirements_20260723.md`           | 法規／實用性優先的 4 項最小操作 UI delta 與 deferred scope              |
+| `08_multi_taxi_operations_ui_design_requirements_20260723.md`           | v1.2：4 項法規基線與產品核准的完整 17 頁操作 UI                         |
+| `09_uploaded_system_design_archive_execution_tasks_20260723.md`         | 上傳 ZIP provenance 與 2026-07-23 歷史最小範圍裁決                      |
+| `10_full_17_screen_fleets_execution_tasks_20260724.md`                  | 現行 17 頁 Fleet ownership、依賴、branch 收斂與驗收                     |
 | `manifest.json`                                                         | Machine-readable index / baseline / implementation status               |
 
 ---
 
 ## Current implementation baseline
 
-截至 `dev@ff16b713...`：
+截至 `dev@2711c366f...`：
 
 ### Landed
 
@@ -83,18 +85,21 @@ external platform badge
 - S-3 backend / Driver UI / Ops UI。
 - P-5 Passenger UI and Platform Admin UI。
 - Clean source specs and design canvas。
+- Typed multi-taxi intake、server-authoritative runtime profile。
+- Operating authorization backend 與既有 admin baseline。
+- Queue semantics backend。
+- P-5 rating authority、hard gate、atomic snapshot、live Passenger API/SSE。
+- Minimum records query/CSV baseline。
+- Canonical 17-screen code canvas。
 
 ### Not yet workflow-closed
 
-- Typed `multi_taxi_direct` intake。
-- Server-authoritative runtime profile。
-- Multi-taxi operating authorization。
-- Queue-mode semantics。
-- Rating authority。
-- P-5 eligibility hard gate。
-- Atomic assignment disclosure snapshot。
-- Live Passenger token / API / SSE。
-- Fare / payment / receipt / 730-day operational record。
+- Authorization 6-screen production suite。
+- Queue Operations 3-screen production suite。
+- Rating Governance 3-screen production suite。
+- Passenger payment/receipt legal-state closure。
+- Fare anomaly、payment exception、certificate support。
+- Full operational record detail、server controlled export、legal-hold state。
 - S-3 production SLO / physical-device closure。
 
 不得以已合併 UI、contract 或 migration 取代上述 workflow closure。
