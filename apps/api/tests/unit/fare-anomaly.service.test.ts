@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FARE_QUOTE_ANOMALIES,
   type AuditLogRecord,
-  type FareQuoteAnomaly,
   type RouteFareDisclosureSnapshot,
 } from "@drts/contracts";
 
