@@ -24,6 +24,7 @@ import { AuditNotificationModule } from "./modules/audit-notification/audit-noti
 import { AssistantModule } from "./modules/assistant/assistant.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
+import { CertificateSupportModule } from "./modules/certificate-support/certificate-support.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
 import { DriverSosModule } from "./modules/driver-sos/driver-sos.module";
@@ -80,6 +81,7 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     ProductRuleModule,
     AuditNotificationModule,
     CallcenterModule,
+    CertificateSupportModule,
     ComplaintModule,
     DriverProfileModule,
     DriverSosModule,
