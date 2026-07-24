@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import type { ActionReceipt } from "@drts/contracts";
 import {
   CanvasActionButton,
   CanvasBanner,
@@ -19,7 +20,10 @@ import {
   PAYMENT_STATUSES,
   classifyPaymentExceptionError,
   parsePaymentExceptionView,
+  parsePaymentRecoveryReceipt,
+  paymentRecoveryCommandPath,
   paymentStatusTone,
+  type PaymentActionDescriptor,
   type PaymentExceptionErrorKind,
   type PaymentExceptionView,
   type PaymentStatus,
@@ -141,6 +145,9 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
     null,
   );
   const [invalidResponse, setInvalidResponse] = useState(false);
+  const [executingAction, setExecutingAction] = useState<string | null>(null);
+  const [commandError, setCommandError] = useState(false);
+  const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
   const copy = (key: Parameters<typeof paymentExceptionCopy>[1]) =>
     paymentExceptionCopy(locale, key);
 
@@ -181,6 +188,55 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
   }, [client, orderId, reloadToken]);
 
   const retry = () => setReloadToken((current) => current + 1);
+
+  const executeRecovery = async (descriptor: PaymentActionDescriptor) => {
+    const path = paymentRecoveryCommandPath(orderId, descriptor.action);
+    if (!descriptor.enabled || !path || executingAction) {
+      return;
+    }
+
+    let reason: string | undefined;
+    if (descriptor.requiresReason) {
+      const enteredReason = window.prompt(copy("reasonPrompt"));
+      if (enteredReason === null) {
+        return;
+      }
+      reason = enteredReason.trim();
+      if (!reason) {
+        setCommandError(true);
+        return;
+      }
+    } else if (
+      !window.confirm(
+        `${copy("confirmAction")} ${paymentActionLabel(locale, descriptor.action)}?`,
+      )
+    ) {
+      return;
+    }
+
+    setExecutingAction(descriptor.action);
+    setCommandError(false);
+    setReceipt(null);
+    try {
+      const payload = await client.post<unknown>(path, {
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        ...(reason ? { body: { reason } } : {}),
+      });
+      const parsedReceipt = parsePaymentRecoveryReceipt(payload);
+      if (!parsedReceipt) {
+        setCommandError(true);
+        return;
+      }
+      setReceipt(parsedReceipt);
+      setReloadToken((current) => current + 1);
+    } catch {
+      setCommandError(true);
+    } finally {
+      setExecutingAction(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -276,6 +332,25 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
           icon="lock"
         />
 
+        {receipt ? (
+          <CanvasBanner
+            theme={theme}
+            tone={receipt.status === "completed" ? "success" : "info"}
+            title={copy("commandAccepted")}
+            body={`${receipt.message} ${copy("auditReceipt")}: ${receipt.auditId}`}
+            icon="check"
+          />
+        ) : null}
+        {commandError ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            title={copy("commandFailed")}
+            body={copy("commandFailedBody")}
+            icon="warning"
+          />
+        ) : null}
+
         <div style={splitStyle}>
           <CanvasCard theme={theme} title={copy("paymentInfo")}>
             <CanvasDL
@@ -335,14 +410,37 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
                 data-testid="payment-recovery-actions"
               >
                 {view.availableActions.map((descriptor) => (
-                  <CanvasActionButton
-                    key={descriptor.action}
-                    theme={theme}
-                    descriptor={descriptor}
-                    label={paymentActionLabel(locale, descriptor.action)}
-                    en={descriptor.action}
-                    icon="refresh"
-                  />
+                  <span key={descriptor.action}>
+                    {descriptor.enabled ? (
+                      <CanvasBtn
+                        theme={theme}
+                        variant={
+                          descriptor.riskLevel === "low"
+                            ? "secondary"
+                            : "primary"
+                        }
+                        danger={descriptor.riskLevel === "high"}
+                        disabled={executingAction !== null}
+                        icon="refresh"
+                        onClick={() => void executeRecovery(descriptor)}
+                      >
+                        {executingAction === descriptor.action
+                          ? copy("executing")
+                          : paymentActionLabel(locale, descriptor.action)}
+                        <span style={{ opacity: 0.72 }}>
+                          · {descriptor.action}
+                        </span>
+                      </CanvasBtn>
+                    ) : (
+                      <CanvasActionButton
+                        theme={theme}
+                        descriptor={descriptor}
+                        label={paymentActionLabel(locale, descriptor.action)}
+                        en={descriptor.action}
+                        icon="refresh"
+                      />
+                    )}
+                  </span>
                 ))}
               </div>
             ) : (

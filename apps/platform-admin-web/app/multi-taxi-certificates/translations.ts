@@ -11,9 +11,8 @@ export type CertificateTone =
 const zhCopy = {
   stateCatalogTitle: "支援狀態 × 6",
   pageTitle: "電子乘車證明支援 · Certificate Support",
-  pageSubtitle:
-    "P5-COM-UI-03 · 搜尋與開啟既有證明 · 重新產生維持 command pending",
-  readOnlySupport: "只讀支援",
+  pageSubtitle: "P5-COM-UI-03 · 搜尋、開啟與稽核重產電子乘車證明",
+  readOnlySupport: "canonical writer",
   authorityTitle: "既有憑證 authority",
   authorityBody:
     "本頁只讀取 reporting.multi_taxi_electronic_receipts；缺少的法定欄位顯示「未取得」，不以前端推算或補零。",
@@ -45,7 +44,7 @@ const zhCopy = {
   detailUnavailableTitle: "乘車證明不可用",
   detailUnavailableBody: "找不到指定的既有乘車證明，沒有產生替代資料。",
   detailFailedTitle: "乘車證明讀取失敗",
-  detailFailedBody: "可重新執行只讀查詢；重新產生命令仍未核准。",
+  detailFailedBody: "可重新執行查詢；系統不會在資料來源失敗時產生替代憑證。",
   detailPageTitle: "電子乘車證明 · {certificateNo}",
   detailPageSubtitle: "P5-COM-UI-03 · 既有憑證明細 · 缺值不補零",
   backToSearch: "返回乘車證明搜尋",
@@ -70,9 +69,18 @@ const zhCopy = {
   artifactsUnavailable: "既有 HTML/PDF 連結未取得",
   regenerationDisabled: "重新產生 · 命令未核准",
   regenerationTitle: "重新產生",
-  regenerationSubtitle: "production command posture",
+  regenerationSubtitle: "audited idempotent command",
   disabled: "disabled",
-  regenerationBody: "尚無 canonical command；本頁不提供假動作。",
+  regenerationBody: "重產命令目前不可用。",
+  regenerationReasonLabel: "重產原因（必填，將寫入稽核紀錄）",
+  regenerationAction: "產生新版本",
+  regenerating: "產生中…",
+  regenerationUnavailableBody:
+    "writer、資料庫或目前版本狀態不允許重產；系統不會降級成假動作。",
+  regenerationScopeBody: "需要 Platform Admin 的 foundation:write 才能重產。",
+  regenerationSuccess: "新版本已產生",
+  regenerationAudit: "Audit ID：{auditId}",
+  regenerationFailed: "重產失敗",
   unavailableValue: "未取得",
 } as const;
 
@@ -82,8 +90,8 @@ const enCopy: Record<CertificateSupportCopyKey, string> = {
   stateCatalogTitle: "Six support states",
   pageTitle: "Electronic Ride Certificate Support",
   pageSubtitle:
-    "P5-COM-UI-03 · Find and open existing certificates · Regeneration remains command pending",
-  readOnlySupport: "Read-only support",
+    "P5-COM-UI-03 · Find, open, and auditably regenerate ride certificates",
+  readOnlySupport: "Canonical writer",
   authorityTitle: "Existing certificate authority",
   authorityBody:
     "This page only reads reporting.multi_taxi_electronic_receipts. Missing legal fields remain unavailable and are never inferred or replaced with zero.",
@@ -119,7 +127,7 @@ const enCopy: Record<CertificateSupportCopyKey, string> = {
     "The requested existing certificate was not found. No substitute data was generated.",
   detailFailedTitle: "Ride certificate read failed",
   detailFailedBody:
-    "The read may be retried. The regeneration command is still not approved.",
+    "The read may be retried. No substitute certificate is generated when authority data fails.",
   detailPageTitle: "Electronic Ride Certificate · {certificateNo}",
   detailPageSubtitle:
     "P5-COM-UI-03 · Existing certificate details · Missing values stay unavailable",
@@ -146,10 +154,20 @@ const enCopy: Record<CertificateSupportCopyKey, string> = {
   artifactsUnavailable: "Existing HTML/PDF links are unavailable",
   regenerationDisabled: "Regenerate · Command not approved",
   regenerationTitle: "Regeneration",
-  regenerationSubtitle: "production command posture",
+  regenerationSubtitle: "audited idempotent command",
   disabled: "disabled",
-  regenerationBody:
-    "No canonical command is available; this page does not expose a placeholder action.",
+  regenerationBody: "The regeneration command is currently unavailable.",
+  regenerationReasonLabel:
+    "Regeneration reason (required and written to the audit trail)",
+  regenerationAction: "Generate new version",
+  regenerating: "Generating…",
+  regenerationUnavailableBody:
+    "The writer, database, or current version state does not allow regeneration. No placeholder action is exposed.",
+  regenerationScopeBody:
+    "Platform Admin foundation:write is required to regenerate.",
+  regenerationSuccess: "New version generated",
+  regenerationAudit: "Audit ID: {auditId}",
+  regenerationFailed: "Regeneration failed",
   unavailableValue: "Unavailable",
 };
 

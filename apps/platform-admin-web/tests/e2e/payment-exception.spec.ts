@@ -196,3 +196,63 @@ test("keeps manual recovery visibly unpaid", async ({ page }) => {
     fullPage: true,
   });
 });
+
+test("executes only an enabled backend descriptor and refreshes authoritative state", async ({
+  page,
+}) => {
+  const commandRequests: Array<{
+    idempotencyKey: string | undefined;
+    body: string | null;
+  }> = [];
+  await mockControlPlane(page, async (route) => {
+    if (route.request().method() === "POST") {
+      commandRequests.push({
+        idempotencyKey: route.request().headers()["idempotency-key"],
+        body: route.request().postData(),
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          envelope({
+            actionId: "idem-payment-ui-001",
+            auditId: "audit-payment-ui-001",
+            resourceType: "multi_taxi_payment_exception",
+            resourceId: "payment-001",
+            status: "accepted",
+            message: "Payment capture retry accepted.",
+          }),
+        ),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({
+          ...failedPayment,
+          availableActions: [
+            {
+              action: "retry_capture",
+              enabled: commandRequests.length === 0,
+              ...(commandRequests.length > 0
+                ? { disabledReasonCode: "payment_recovery_pending" }
+                : {}),
+              riskLevel: "medium",
+            },
+          ],
+        }),
+      ),
+    });
+  });
+  page.on("dialog", (dialog) => void dialog.accept());
+
+  await page.goto(`/payments/${ORDER_ID}`);
+  await page.getByRole("button", { name: /retry_capture/ }).click();
+
+  await expect(page.getByText(/audit-payment-ui-001/)).toBeVisible();
+  await expect(page.getByText(/payment_recovery_pending/)).toBeVisible();
+  expect(commandRequests[0]?.idempotencyKey).toBeTruthy();
+  expect(commandRequests[0]?.body).toBeNull();
+});

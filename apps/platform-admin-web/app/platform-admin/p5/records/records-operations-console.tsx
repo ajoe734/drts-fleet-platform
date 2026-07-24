@@ -5,7 +5,9 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
-import type {
+import {
+  EVIDENCE_LEGAL_HOLD_REASON_CODES,
+  type EvidenceLegalHoldReasonCode,
   MultiTaxiTripOperationalAdminView,
   MultiTaxiTripOperationalExportDownload,
   MultiTaxiTripOperationalExportJobAccepted,
@@ -37,6 +39,7 @@ import {
   formatRecordDuration,
   formatRecordMoney,
   getApiErrorMessage,
+  getLegalHoldActionError,
   isExportTerminal,
   isPermissionError,
   isRetentionFloorMet,
@@ -113,6 +116,7 @@ export function RecordsOperationsConsole() {
   const [appliedScope, setAppliedScope] =
     useState<MultiTaxiTripOperationalRecordQuery>({});
   const [records, setRecords] = useState<OperationalRecordRow[]>([]);
+  const [recordsRevision, setRecordsRevision] = useState(0);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [recordsLoading, setRecordsLoading] = useState(true);
   const [recordsError, setRecordsError] = useState<RecordsError | null>(null);
@@ -183,7 +187,7 @@ export function RecordsOperationsConsole() {
     return () => {
       active = false;
     };
-  }, [appliedScope, canAttemptRead, client, locale]);
+  }, [appliedScope, canAttemptRead, client, locale, recordsRevision]);
 
   const currentJobStatus = exportJob?.status ?? exportAccepted?.status ?? null;
   useEffect(() => {
@@ -615,7 +619,13 @@ export function RecordsOperationsConsole() {
         </main>
 
         <aside className={styles.sideColumn}>
-          <RecordDetail record={selectedRecord} locale={locale} t={t} />
+          <RecordDetail
+            record={selectedRecord}
+            locale={locale}
+            actorId={authority.actorId}
+            t={t}
+            onHoldChanged={() => setRecordsRevision((revision) => revision + 1)}
+          />
         </aside>
       </div>
 
@@ -840,14 +850,18 @@ function ScopeRow({ label, value }: { label: string; value: string }) {
 function RecordDetail({
   record,
   locale,
+  actorId,
   t,
+  onHoldChanged,
 }: {
   record: OperationalRecordRow | null;
   locale: "zh" | "en";
+  actorId: string;
   t: (
     key: RecordsTranslationKey,
     params?: Record<string, string | number>,
   ) => string;
+  onHoldChanged: () => void;
 }) {
   if (!record) {
     return (
@@ -1067,6 +1081,12 @@ function RecordDetail({
               label={t("hold.case")}
               value={`${hold.caseNumber} · ${hold.holdId}`}
             />
+            <ScopeRow label={t("hold.placedBy")} value={hold.placedByActorId} />
+            <ScopeRow label={t("hold.reasonCode")} value={hold.reasonCode} />
+            <ScopeRow
+              label={t("hold.reasonNote")}
+              value={hold.reasonNote ?? missing}
+            />
             <ScopeRow
               label={t("hold.placedAt")}
               value={
@@ -1076,18 +1096,306 @@ function RecordDetail({
             />
           </div>
         ))}
-        <div className={styles.actionRow} style={{ marginTop: 12 }}>
-          <CanvasBtn theme={theme} size="xs" disabled>
-            {t("hold.create")}
-          </CanvasBtn>
-          <CanvasBtn theme={theme} size="xs" disabled>
-            {t("hold.release")}
-          </CanvasBtn>
-        </div>
-        <p className={styles.secondary} style={{ marginTop: 8 }}>
-          {t("hold.pending")}
-        </p>
+        <LegalHoldActions
+          key={record.recordId}
+          record={record}
+          actorId={actorId}
+          t={t}
+          onHoldChanged={onHoldChanged}
+        />
       </CanvasCard>
+    </div>
+  );
+}
+
+type HoldFeedback = {
+  tone: "success" | "danger";
+  title: string;
+  body: string;
+};
+
+function LegalHoldActions({
+  record,
+  actorId,
+  t,
+  onHoldChanged,
+}: {
+  record: OperationalRecordRow;
+  actorId: string;
+  t: (
+    key: RecordsTranslationKey,
+    params?: Record<string, string | number>,
+  ) => string;
+  onHoldChanged: () => void;
+}) {
+  const client = usePlatformAdminClient();
+  const activeHolds = record.legalHold.activeHolds ?? [];
+  const firstActiveHoldId = activeHolds[0]?.holdId ?? "";
+  const [caseNumber, setCaseNumber] = useState("");
+  const [reasonCode, setReasonCode] =
+    useState<EvidenceLegalHoldReasonCode>("regulatory_inquiry");
+  const [reasonNote, setReasonNote] = useState("");
+  const [selectedHoldId, setSelectedHoldId] = useState(firstActiveHoldId);
+  const [releaseReason, setReleaseReason] = useState("");
+  const [busy, setBusy] = useState<"create" | "release" | null>(null);
+  const [feedback, setFeedback] = useState<HoldFeedback | null>(null);
+  const governanceAvailable = record.legalHold.state !== "unavailable";
+
+  useEffect(() => {
+    setSelectedHoldId((current) =>
+      activeHolds.some((hold) => hold.holdId === current)
+        ? current
+        : firstActiveHoldId,
+    );
+  }, [activeHolds, firstActiveHoldId]);
+
+  function setActionError(error: unknown) {
+    const detail = getLegalHoldActionError(error, t("hold.errorTitle"));
+    const title =
+      detail.status === 403
+        ? t("hold.error403")
+        : detail.status === 409
+          ? t("hold.error409")
+          : detail.status === 503
+            ? t("hold.error503")
+            : t("hold.errorTitle");
+    setFeedback({ tone: "danger", title, body: detail.message });
+  }
+
+  async function createLegalHold(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedCaseNumber = caseNumber.trim();
+    const normalizedReasonNote = reasonNote.trim();
+    if (!normalizedCaseNumber) {
+      setFeedback({
+        tone: "danger",
+        title: t("hold.errorTitle"),
+        body: t("hold.validationCase"),
+      });
+      return;
+    }
+    if (!normalizedReasonNote) {
+      setFeedback({
+        tone: "danger",
+        title: t("hold.errorTitle"),
+        body: t("hold.validationReasonNote"),
+      });
+      return;
+    }
+    if (
+      !window.confirm(
+        t("hold.confirmCreate", {
+          orderId: record.orderId,
+          caseNumber: normalizedCaseNumber,
+        }),
+      )
+    ) {
+      return;
+    }
+
+    setBusy("create");
+    setFeedback(null);
+    try {
+      await client.placeEvidenceLegalHold({
+        family: "proof_bundle",
+        subjectId: record.orderId,
+        caseNumber: normalizedCaseNumber,
+        reasonCode,
+        reasonNote: normalizedReasonNote,
+      });
+      setCaseNumber("");
+      setReasonNote("");
+      setFeedback({
+        tone: "success",
+        title: t("hold.create"),
+        body: t("hold.created"),
+      });
+      onHoldChanged();
+    } catch (error) {
+      setActionError(error);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function releaseLegalHold(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selectedHold = activeHolds.find(
+      (hold) => hold.holdId === selectedHoldId,
+    );
+    if (!selectedHold) {
+      setFeedback({
+        tone: "danger",
+        title: t("hold.errorTitle"),
+        body: t("hold.validationActive"),
+      });
+      return;
+    }
+    const normalizedReleaseReason = releaseReason.trim();
+    if (!normalizedReleaseReason) {
+      setFeedback({
+        tone: "danger",
+        title: t("hold.errorTitle"),
+        body: t("hold.validationReleaseReason"),
+      });
+      return;
+    }
+    if (
+      !window.confirm(t("hold.confirmRelease", { holdId: selectedHold.holdId }))
+    ) {
+      return;
+    }
+
+    setBusy("release");
+    setFeedback(null);
+    try {
+      await client.releaseEvidenceLegalHold(selectedHold.holdId, {
+        releaseReason: normalizedReleaseReason,
+      });
+      setReleaseReason("");
+      setFeedback({
+        tone: "success",
+        title: t("hold.release"),
+        body: t("hold.released"),
+      });
+      onHoldChanged();
+    } catch (error) {
+      setActionError(error);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className={styles.holdActions} data-testid="legal-hold-actions">
+      <div className={styles.actorRow}>
+        <span>{t("hold.actor")}</span>
+        <strong>{actorId}</strong>
+      </div>
+      <p className={styles.helper}>{t("hold.actorHelp")}</p>
+
+      {!governanceAvailable ? (
+        <CanvasBanner
+          theme={theme}
+          tone="danger"
+          icon="warn"
+          body={t("hold.unavailable")}
+        />
+      ) : null}
+      {feedback ? (
+        <CanvasBanner
+          theme={theme}
+          tone={feedback.tone}
+          icon={feedback.tone === "success" ? "check" : "warn"}
+          title={feedback.title}
+          body={feedback.body}
+        />
+      ) : null}
+
+      <form className={styles.holdForm} onSubmit={createLegalHold}>
+        <p className={styles.sectionLabel}>{t("hold.createTitle")}</p>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t("hold.case")}</span>
+          <input
+            className={styles.input}
+            value={caseNumber}
+            placeholder={t("hold.casePlaceholder")}
+            disabled={!governanceAvailable || busy !== null}
+            onChange={(event) => setCaseNumber(event.target.value)}
+          />
+        </label>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t("hold.reasonCode")}</span>
+          <select
+            className={styles.input}
+            value={reasonCode}
+            disabled={!governanceAvailable || busy !== null}
+            onChange={(event) =>
+              setReasonCode(event.target.value as EvidenceLegalHoldReasonCode)
+            }
+          >
+            <option value={EVIDENCE_LEGAL_HOLD_REASON_CODES[0]}>
+              {t("hold.reason.complaintEscalation")}
+            </option>
+            <option value={EVIDENCE_LEGAL_HOLD_REASON_CODES[1]}>
+              {t("hold.reason.regulatoryInquiry")}
+            </option>
+            <option value={EVIDENCE_LEGAL_HOLD_REASON_CODES[2]}>
+              {t("hold.reason.settlementDispute")}
+            </option>
+            <option value={EVIDENCE_LEGAL_HOLD_REASON_CODES[3]}>
+              {t("hold.reason.internalInvestigation")}
+            </option>
+          </select>
+        </label>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t("hold.reasonNote")}</span>
+          <textarea
+            className={styles.textarea}
+            value={reasonNote}
+            placeholder={t("hold.reasonNotePlaceholder")}
+            disabled={!governanceAvailable || busy !== null}
+            onChange={(event) => setReasonNote(event.target.value)}
+          />
+        </label>
+        <CanvasBtn
+          theme={theme}
+          size="xs"
+          variant="primary"
+          type="submit"
+          disabled={!governanceAvailable || busy !== null}
+        >
+          {busy === "create" ? t("hold.creating") : t("hold.create")}
+        </CanvasBtn>
+      </form>
+
+      <form className={styles.holdForm} onSubmit={releaseLegalHold}>
+        <p className={styles.sectionLabel}>{t("hold.releaseTitle")}</p>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t("hold.selectActive")}</span>
+          <select
+            className={styles.input}
+            data-testid="legal-hold-release-select"
+            value={selectedHoldId}
+            disabled={
+              !governanceAvailable || activeHolds.length === 0 || busy !== null
+            }
+            onChange={(event) => setSelectedHoldId(event.target.value)}
+          >
+            {activeHolds.length === 0 ? (
+              <option value="">{t("hold.state.none")}</option>
+            ) : null}
+            {activeHolds.map((hold) => (
+              <option key={hold.holdId} value={hold.holdId}>
+                {hold.caseNumber} · {hold.holdId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t("hold.releaseReason")}</span>
+          <textarea
+            className={styles.textarea}
+            value={releaseReason}
+            placeholder={t("hold.releaseReasonPlaceholder")}
+            disabled={
+              !governanceAvailable || activeHolds.length === 0 || busy !== null
+            }
+            onChange={(event) => setReleaseReason(event.target.value)}
+          />
+        </label>
+        <CanvasBtn
+          theme={theme}
+          size="xs"
+          variant="secondary"
+          type="submit"
+          disabled={
+            !governanceAvailable || activeHolds.length === 0 || busy !== null
+          }
+        >
+          {busy === "release" ? t("hold.releasing") : t("hold.release")}
+        </CanvasBtn>
+      </form>
     </div>
   );
 }

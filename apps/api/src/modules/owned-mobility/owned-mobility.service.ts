@@ -4,6 +4,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   OnModuleInit,
   Optional,
   forwardRef,
@@ -51,6 +52,8 @@ import type {
   ApproveExceptionOverrideCommand,
   ExceptionHoldRecord,
   ExceptionHoldReasonCode,
+  FareQuoteAnomaly,
+  FareQuoteAnomalySnapshot,
   FulfillmentSegmentRecord,
   MoneyAmount,
   MultiTaxiOperatingAuthorizationRecord,
@@ -87,6 +90,7 @@ import type {
   ServiceProductType,
   DispatchQueueMode,
   RuntimeProfileCode,
+  RouteFareDisclosureSnapshot,
 } from "@drts/contracts";
 
 import {
@@ -101,6 +105,7 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterService } from "../callcenter/callcenter.service";
+import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
   type OwnedMobilityQueryExecutor,
@@ -113,7 +118,9 @@ import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import { ServiceAreaService } from "../service-area/service-area.service";
 import {
+  OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+  type OwnedMobilityMultiTaxiTripCompletedEvent,
   type OwnedMobilityTripCompletedEvent,
 } from "./owned-mobility-events";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
@@ -278,6 +285,8 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
+const DEFAULT_CERTIFICATE_SERVICE_PHONE = "0800-090-000";
+const DEFAULT_AUTHORITY_COMPLAINT_PHONE = "1999";
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
@@ -291,6 +300,8 @@ const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
 
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
+  private readonly logger = new Logger(OwnedMobilityService.name);
+
   private orderSequence = 1;
 
   private bookingSequence = 1;
@@ -361,6 +372,8 @@ export class OwnedMobilityService implements OnModuleInit {
     @Inject(forwardRef(() => SandboxDispatchGateService))
     private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
     private readonly serviceAreaService?: ServiceAreaService,
+    @Optional()
+    private readonly fareAnomalyService?: FareAnomalyService,
   ) {}
 
   private callRecordingListenersRegistered = false;
@@ -694,7 +707,7 @@ export class OwnedMobilityService implements OnModuleInit {
       fixedPrice: false,
       quotedFare: null,
       quotedFareSource: null,
-      quotedFareRuleVersion: null,
+      quotedFareRuleVersion: authorization.activeFareVersionId.trim() || null,
       manualFareOverride: null,
       exceptionHold: null,
       proofRequirements: {
@@ -3148,7 +3161,7 @@ export class OwnedMobilityService implements OnModuleInit {
                   new Date().toISOString(),
                 )
               : null;
-          const bundle = this.buildDispatchAssignmentBundle(
+          const bundle = await this.buildDispatchAssignmentBundle(
             dispatchJob,
             order,
             vehicleId,
@@ -3204,9 +3217,10 @@ export class OwnedMobilityService implements OnModuleInit {
           });
           return bundle;
         })
-        .then((bundle) =>
-          this.applyDispatchAssignmentBundle(bundle, requestId, false),
-        );
+        .then(async (bundle) => {
+          await this.resolveSuccessfulFareQuoteAnomalies(bundle);
+          return this.applyDispatchAssignmentBundle(bundle, requestId, false);
+        });
     }
 
     this.assertAssignmentEligibilityRecheck(
@@ -3224,7 +3238,7 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     return this.afterMaybePromise(sandboxGateResult, () =>
-      this.applyDispatchAssignmentBundle(
+      this.afterMaybePromise(
         this.buildDispatchAssignmentBundle(
           dispatchJob,
           order,
@@ -3233,7 +3247,11 @@ export class OwnedMobilityService implements OnModuleInit {
           sandboxDispatchSnapshot,
           options,
         ),
-        requestId,
+        (bundle) =>
+          this.afterMaybePromise(
+            this.resolveSuccessfulFareQuoteAnomalies(bundle),
+            () => this.applyDispatchAssignmentBundle(bundle, requestId),
+          ),
       ),
     );
   }
@@ -4121,6 +4139,10 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
+    const certificateEvent =
+      order.runtimeProfileCode === "multi_taxi_direct"
+        ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
+        : null;
     const now = new Date().toISOString();
     task.status = "completed";
     task.completedAt = command.completedAt;
@@ -4170,6 +4192,12 @@ export class OwnedMobilityService implements OnModuleInit {
       assignmentId: assignment.assignmentId,
     });
     this.publishCompletedTripSettlementEvent(order, task);
+    if (certificateEvent && this.eventEmitter) {
+      this.eventEmitter.emit(
+        OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+        certificateEvent,
+      );
+    }
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
@@ -4178,6 +4206,68 @@ export class OwnedMobilityService implements OnModuleInit {
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneTask(task);
+  }
+
+  private buildMultiTaxiCertificateEvent(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    command: DriverCompleteTaskCommand,
+    proof: Required<Pick<CompletionProofBundle, "photos" | "expenseItems">> & {
+      signatureId: string | null;
+    },
+  ): OwnedMobilityMultiTaxiTripCompletedEvent {
+    const fare = order.fixedPrice ? order.quotedFare : command.fare;
+    const plateNo =
+      this.regulatoryRegistryService
+        .listVehicles()
+        .find((vehicle) => vehicle.vehicleId === task.vehicleId)?.plateNo ??
+      null;
+    if (
+      !task.startedAt ||
+      !plateNo ||
+      !fare ||
+      fare.currency !== "NTD" ||
+      !Number.isFinite(fare.amountMinor) ||
+      fare.amountMinor < 0 ||
+      !Number.isFinite(command.actualDistanceKm) ||
+      command.actualDistanceKm < 0 ||
+      !Number.isFinite(command.actualDurationSec) ||
+      command.actualDurationSec < 0
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "MULTI_TAXI_CERTIFICATE_FIELDS_REQUIRED",
+        "A completed multi-taxi trip requires canonical timing, vehicle, distance, duration, and NTD fare fields.",
+        {
+          orderId: order.orderId,
+          taskId: task.taskId,
+        },
+      );
+    }
+    const tollMinor = proof.expenseItems
+      .filter((item) => item.type.trim().toLowerCase() === "toll")
+      .reduce((sum, item) => sum + item.amountMinor, 0);
+    return {
+      runtimeProfileCode: "multi_taxi_direct",
+      orderId: order.orderId,
+      tripId: task.taskId,
+      plateNo,
+      pickupAt: task.startedAt,
+      dropoffAt: command.completedAt,
+      travelDurationSeconds: command.actualDurationSec,
+      routeSummary: `${order.pickup.address} → ${order.dropoff.address}`,
+      distanceMeters: Math.round(command.actualDistanceKm * 1000),
+      fareMinor: fare.amountMinor,
+      tollMinor,
+      currency: "NTD",
+      consumerServicePhone:
+        process.env.MULTI_TAXI_CERTIFICATE_SERVICE_PHONE ??
+        DEFAULT_CERTIFICATE_SERVICE_PHONE,
+      authorityComplaintPhone:
+        process.env.MULTI_TAXI_AUTHORITY_COMPLAINT_PHONE ??
+        DEFAULT_AUTHORITY_COMPLAINT_PHONE,
+      completedAt: command.completedAt,
+    };
   }
 
   private publishCompletedTripSettlementEvent(
@@ -5770,7 +5860,7 @@ export class OwnedMobilityService implements OnModuleInit {
     _sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     options?: CreateDispatchAssignmentOptions,
     ratingSummary?: DriverRatingSummary | null,
-  ): DispatchAssignmentBundle {
+  ): MaybePromise<DispatchAssignmentBundle> {
     const now = new Date().toISOString();
     const nextOrder = this.cloneOrder(order);
     const nextDispatchJob = { ...dispatchJob };
@@ -5857,27 +5947,29 @@ export class OwnedMobilityService implements OnModuleInit {
       }),
     );
 
-    const passengerAuthority = this.buildPassengerAssignmentAuthority(
-      nextOrder,
-      nextDispatchJob,
-      assignment,
-      vehicleId,
-      driverId,
-      now,
-      ratingSummary ?? this.createNewDriverRatingSummary(driverId, now),
+    return this.afterMaybePromise(
+      this.buildPassengerAssignmentAuthority(
+        nextOrder,
+        nextDispatchJob,
+        assignment,
+        vehicleId,
+        driverId,
+        now,
+        ratingSummary ?? this.createNewDriverRatingSummary(driverId, now),
+      ),
+      (passengerAuthority) => ({
+        order: nextOrder,
+        dispatchJob: nextDispatchJob,
+        assignment,
+        task,
+        dispatchAttempt,
+        traceLogs,
+        passengerDisclosureSnapshot:
+          passengerAuthority.passengerDisclosureSnapshot,
+        consumerNotificationOutbox:
+          passengerAuthority.consumerNotificationOutbox,
+      }),
     );
-
-    return {
-      order: nextOrder,
-      dispatchJob: nextDispatchJob,
-      assignment,
-      task,
-      dispatchAttempt,
-      traceLogs,
-      passengerDisclosureSnapshot:
-        passengerAuthority.passengerDisclosureSnapshot,
-      consumerNotificationOutbox: passengerAuthority.consumerNotificationOutbox,
-    };
   }
 
   private buildPassengerAssignmentAuthority(
@@ -5888,10 +5980,15 @@ export class OwnedMobilityService implements OnModuleInit {
     driverId: string,
     now: string,
     ratingSummary: DriverRatingSummary,
-  ): {
-    passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
-    consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
-  } {
+  ):
+    | {
+        passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
+        consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
+      }
+    | Promise<{
+        passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
+        consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
+      }> {
     if (order.runtimeProfileCode !== "multi_taxi_direct") {
       return {
         passengerDisclosureSnapshot: null,
@@ -5964,27 +6061,25 @@ export class OwnedMobilityService implements OnModuleInit {
         { vehicleId },
       );
     }
-    if (
-      !Number.isFinite(order.pickup.lat) ||
-      !Number.isFinite(order.pickup.lng) ||
-      !Number.isFinite(order.dropoff.lat) ||
-      !Number.isFinite(order.dropoff.lng)
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "P5_ROUTE_SNAPSHOT_UNRESOLVED",
-        "Resolved pickup and dropoff coordinates are required before multi-taxi assignment.",
-        { orderId: order.orderId },
-      );
-    }
-
     const assignmentVersion =
       this.passengerDisclosureSnapshots.filter(
         (snapshot) => snapshot.orderId === order.orderId,
       ).length + 1;
     const routeSnapshotId = randomUUID();
     const quoteSnapshotId = randomUUID();
-    const fareMinor = order.quotedFare?.amountMinor ?? null;
+    const routeFare = this.buildFareQuoteSnapshot(
+      order,
+      routeSnapshotId,
+      quoteSnapshotId,
+      now,
+    );
+    if (!this.isResolvedRouteFareSnapshot(routeFare)) {
+      return this.recordFareQuoteAnomalyAndFail("route_unresolved", routeFare);
+    }
+    const anomalyReason = this.resolveFareQuoteAnomalyReason(order);
+    if (anomalyReason) {
+      return this.recordFareQuoteAnomalyAndFail(anomalyReason, routeFare);
+    }
     const snapshot: PassengerDispatchDisclosureSnapshot = {
       snapshotId: randomUUID(),
       runtimeProfileCode: "multi_taxi_direct",
@@ -6022,49 +6117,7 @@ export class OwnedMobilityService implements OnModuleInit {
         calculatedAt: order.etaSnapshot?.calculatedAt ?? null,
         locationFreshness: "missing",
       },
-      routeFare: {
-        routeSnapshotId,
-        quoteSnapshotId,
-        orderId: order.orderId,
-        pickup: {
-          ...order.pickup,
-          lat: order.pickup.lat!,
-          lng: order.pickup.lng!,
-          coordinateSource:
-            order.pickup.coordinateProvenance?.coordinateSource ??
-            "legacy_text",
-          geocodeConfidence:
-            order.pickup.coordinateProvenance?.geocodeConfidence ?? "unknown",
-          resolvedAt: now,
-        },
-        dropoff: {
-          ...order.dropoff,
-          lat: order.dropoff.lat!,
-          lng: order.dropoff.lng!,
-          coordinateSource:
-            order.dropoff.coordinateProvenance?.coordinateSource ??
-            "legacy_text",
-          geocodeConfidence:
-            order.dropoff.coordinateProvenance?.geocodeConfidence ?? "unknown",
-          resolvedAt: now,
-        },
-        estimatedDistanceMeters: null,
-        estimatedDurationSeconds: null,
-        encodedPolyline: null,
-        chargingMode: order.fixedPrice ? "fixed_quote" : "meter_estimate",
-        estimatedFareMinor: fareMinor,
-        payableFareMinor: fareMinor,
-        currency: "NTD",
-        farePolicyId: order.operatingAuthorizationId!,
-        farePolicyVersion:
-          order.quotedFareRuleVersion ?? "active_authorization_fare",
-        fareChangeRuleId: "multi_taxi_passenger_confirmation",
-        fareChangeRuleVersion: "1",
-        fareChangeRuleDisplayText:
-          "Fare changes require passenger disclosure and confirmation.",
-        passengerConfirmedAt: null,
-        generatedAt: now,
-      },
+      routeFare,
       createdAt: now,
       supersededAt: null,
     };
@@ -6089,10 +6142,186 @@ export class OwnedMobilityService implements OnModuleInit {
       createdAt: now,
       deliveredAt: null,
     };
-    return {
+    const authority = {
       passengerDisclosureSnapshot: snapshot,
       consumerNotificationOutbox: outbox,
     };
+    return authority;
+  }
+
+  private buildFareQuoteSnapshot(
+    order: OwnedOrderRecord,
+    routeSnapshotId: string,
+    quoteSnapshotId: string,
+    generatedAt: string,
+  ): FareQuoteAnomalySnapshot {
+    const fareMinor = order.quotedFare?.amountMinor ?? null;
+    const buildAddress = (
+      address: OwnedOrderRecord["pickup"],
+    ): FareQuoteAnomalySnapshot["pickup"] => {
+      const lat = Number.isFinite(address.lat) ? address.lat! : null;
+      const lng = Number.isFinite(address.lng) ? address.lng! : null;
+      return {
+        ...address,
+        lat,
+        lng,
+        coordinateSource:
+          address.coordinateProvenance?.coordinateSource ??
+          address.coordinateSource ??
+          "legacy_text",
+        geocodeConfidence:
+          address.coordinateProvenance?.geocodeConfidence ??
+          address.geocodeConfidence ??
+          "unknown",
+        resolvedAt: lat !== null && lng !== null ? generatedAt : null,
+      };
+    };
+
+    return {
+      routeSnapshotId,
+      quoteSnapshotId,
+      orderId: order.orderId,
+      pickup: buildAddress(order.pickup),
+      dropoff: buildAddress(order.dropoff),
+      estimatedDistanceMeters: null,
+      estimatedDurationSeconds: null,
+      encodedPolyline: null,
+      chargingMode: order.fixedPrice ? "fixed_quote" : "meter_estimate",
+      estimatedFareMinor: fareMinor,
+      payableFareMinor: fareMinor,
+      currency: "NTD",
+      farePolicyId: order.operatingAuthorizationId?.trim() ?? "",
+      farePolicyVersion: order.quotedFareRuleVersion?.trim() ?? "",
+      fareChangeRuleId: "multi_taxi_passenger_confirmation",
+      fareChangeRuleVersion: "1",
+      fareChangeRuleDisplayText:
+        "Fare changes require passenger disclosure and confirmation.",
+      passengerConfirmedAt: null,
+      generatedAt,
+    };
+  }
+
+  private isResolvedRouteFareSnapshot(
+    snapshot: FareQuoteAnomalySnapshot,
+  ): snapshot is RouteFareDisclosureSnapshot {
+    return (
+      Number.isFinite(snapshot.pickup.lat) &&
+      Number.isFinite(snapshot.pickup.lng) &&
+      snapshot.pickup.resolvedAt !== null &&
+      Number.isFinite(snapshot.dropoff.lat) &&
+      Number.isFinite(snapshot.dropoff.lng) &&
+      snapshot.dropoff.resolvedAt !== null
+    );
+  }
+
+  private resolveFareQuoteAnomalyReason(
+    order: OwnedOrderRecord,
+  ): FareQuoteAnomaly | null {
+    if (
+      !order.operatingAuthorizationId?.trim() ||
+      !order.quotedFareRuleVersion?.trim()
+    ) {
+      return "fare_policy_missing";
+    }
+    if (
+      order.fixedPrice &&
+      (!order.quotedFare || !order.quotedFareSource?.trim())
+    ) {
+      return "quote_provider_unavailable";
+    }
+    if (
+      order.quotedFare &&
+      (!Number.isSafeInteger(order.quotedFare.amountMinor) ||
+        order.quotedFare.amountMinor <= 0)
+    ) {
+      return "quote_out_of_range";
+    }
+    if (order.quotedFare && order.quotedFare.currency !== "NTD") {
+      return "calculation_mismatch";
+    }
+    return null;
+  }
+
+  private recordFareQuoteAnomalyAndFail(
+    reason: FareQuoteAnomaly,
+    snapshot: FareQuoteAnomalySnapshot,
+  ): Promise<never> | never {
+    const failClosed = (): never => {
+      const errors: Record<
+        FareQuoteAnomaly,
+        { code: string; message: string }
+      > = {
+        quote_provider_unavailable: {
+          code: "P5_QUOTE_PROVIDER_UNAVAILABLE",
+          message:
+            "A fare quote provider result is required before multi-taxi assignment.",
+        },
+        quote_out_of_range: {
+          code: "P5_QUOTE_OUT_OF_RANGE",
+          message:
+            "The fare quote is outside the canonical range for assignment.",
+        },
+        route_unresolved: {
+          code: "P5_ROUTE_SNAPSHOT_UNRESOLVED",
+          message:
+            "Resolved pickup and dropoff coordinates are required before multi-taxi assignment.",
+        },
+        fare_policy_missing: {
+          code: "P5_FARE_POLICY_MISSING",
+          message:
+            "An active fare policy is required before multi-taxi assignment.",
+        },
+        calculation_mismatch: {
+          code: "P5_FARE_CALCULATION_MISMATCH",
+          message:
+            "The fare quote does not match the canonical multi-taxi calculation.",
+        },
+      };
+      const error = errors[reason];
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        error.code,
+        error.message,
+        {
+          orderId: snapshot.orderId,
+          quoteSnapshotId: snapshot.quoteSnapshotId,
+          reason,
+        },
+      );
+    };
+
+    if (!this.fareAnomalyService) {
+      return failClosed();
+    }
+    return this.fareAnomalyService
+      .recordQuoteAnomaly({ reason, snapshot })
+      .then(failClosed);
+  }
+
+  private resolveSuccessfulFareQuoteAnomalies(
+    bundle: DispatchAssignmentBundle,
+  ): void | Promise<void> {
+    if (
+      !this.fareAnomalyService ||
+      !bundle.passengerDisclosureSnapshot ||
+      bundle.order.runtimeProfileCode !== "multi_taxi_direct"
+    ) {
+      return;
+    }
+    return this.fareAnomalyService
+      .resolveOrderAnomalies(
+        bundle.order.orderId,
+        bundle.passengerDisclosureSnapshot.createdAt,
+      )
+      .catch((error: unknown) => {
+        // Assignment is already canonical at this point. Do not make callers
+        // retry a committed dispatch because stale anomaly cleanup failed.
+        this.logger.error(
+          `Fare anomaly cleanup failed after assigning order ${bundle.order.orderId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
   }
 
   private createNewDriverRatingSummary(

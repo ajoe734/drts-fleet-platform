@@ -27,6 +27,8 @@ import {
   CERTIFICATE_SUPPORT_STATES,
   classifyCertificateSupportError,
   hasCertificateReadScope,
+  hasCertificateWriteScope,
+  parseCertificateRegenerationResult,
   parseCertificateSupportList,
   parseCertificateSupportView,
   type CertificateSupportErrorKind,
@@ -331,10 +333,19 @@ export function CertificateSupportDetailScreen({
     params?: Record<string, string | number>,
   ) => certificateSupportCopy(locale, key, params);
   const canRead = hasCertificateReadScope(authority.scopes);
+  const canWrite = hasCertificateWriteScope(authority.scopes);
   const [view, setView] = useState<CertificateSupportView | null>(null);
   const [loading, setLoading] = useState(canRead);
   const [error, setError] = useState<CertificateSupportErrorKind | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [regenerationReason, setRegenerationReason] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerationError, setRegenerationError] = useState<string | null>(
+    null,
+  );
+  const [regenerationAuditId, setRegenerationAuditId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!canRead) {
@@ -371,6 +382,54 @@ export function CertificateSupportDetailScreen({
 
     return () => controller.abort();
   }, [canRead, certificateId, client, reloadToken]);
+
+  async function regenerateCertificate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      !view?.regeneration.enabled ||
+      !canWrite ||
+      !regenerationReason.trim() ||
+      regenerating
+    ) {
+      return;
+    }
+    setRegenerating(true);
+    setRegenerationError(null);
+    setRegenerationAuditId(null);
+    try {
+      const result = parseCertificateRegenerationResult(
+        await client.post<unknown>(
+          `/api/platform-admin/multi-taxi/certificates/${encodeURIComponent(
+            view.certificateId,
+          )}/actions/regenerate`,
+          {
+            headers: {
+              "Idempotency-Key": globalThis.crypto.randomUUID(),
+            },
+            body: { reason: regenerationReason.trim() },
+          },
+        ),
+      );
+      setView(result.certificate);
+      setRegenerationReason("");
+      setRegenerationAuditId(result.actionReceipt.auditId);
+      globalThis.history.replaceState(
+        null,
+        "",
+        `/multi-taxi-certificates/${encodeURIComponent(
+          result.certificate.certificateId,
+        )}`,
+      );
+    } catch (regenerationFailure) {
+      setRegenerationError(
+        regenerationFailure instanceof Error
+          ? regenerationFailure.message
+          : String(regenerationFailure),
+      );
+    } finally {
+      setRegenerating(false);
+    }
+  }
 
   const retry = (
     <CanvasBtn
@@ -598,14 +657,6 @@ export function CertificateSupportDetailScreen({
                   {copy("artifactsUnavailable")}
                 </span>
               ) : null}
-              <button
-                className={styles.disabledAction}
-                type="button"
-                disabled
-                title={view.regeneration.reasonCode}
-              >
-                {copy("regenerationDisabled")}
-              </button>
             </div>
           </CanvasCard>
           <div style={{ display: "grid", gap: 16 }}>
@@ -615,13 +666,70 @@ export function CertificateSupportDetailScreen({
               title={copy("regenerationTitle")}
               subtitle={copy("regenerationSubtitle")}
             >
-              <CanvasPill theme={theme} tone="neutral" dot>
-                {copy("disabled")}
-              </CanvasPill>
-              <p className={styles.muted} style={monoStyle}>
-                {view.regeneration.reasonCode}
-              </p>
-              <p className={styles.muted}>{copy("regenerationBody")}</p>
+              {view.regeneration.enabled && canWrite ? (
+                <form
+                  className={styles.regenerationForm}
+                  onSubmit={regenerateCertificate}
+                >
+                  <label className={styles.regenerationLabel}>
+                    {copy("regenerationReasonLabel")}
+                    <textarea
+                      className={styles.reasonInput}
+                      value={regenerationReason}
+                      onChange={(event) =>
+                        setRegenerationReason(event.target.value)
+                      }
+                      maxLength={500}
+                      required
+                    />
+                  </label>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    type="submit"
+                    disabled={
+                      regenerating || regenerationReason.trim().length === 0
+                    }
+                  >
+                    {regenerating
+                      ? copy("regenerating")
+                      : copy("regenerationAction")}
+                  </CanvasBtn>
+                </form>
+              ) : (
+                <>
+                  <CanvasPill theme={theme} tone="neutral" dot>
+                    {copy("disabled")}
+                  </CanvasPill>
+                  <p className={styles.muted} style={monoStyle}>
+                    {view.regeneration.reasonCode ??
+                      "certificate_write_scope_required"}
+                  </p>
+                  <p className={styles.muted}>
+                    {canWrite
+                      ? copy("regenerationUnavailableBody")
+                      : copy("regenerationScopeBody")}
+                  </p>
+                </>
+              )}
+              {regenerationAuditId ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="success"
+                  title={copy("regenerationSuccess")}
+                  body={copy("regenerationAudit", {
+                    auditId: regenerationAuditId,
+                  })}
+                />
+              ) : null}
+              {regenerationError ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  title={copy("regenerationFailed")}
+                  body={regenerationError}
+                />
+              ) : null}
             </CanvasCard>
           </div>
         </div>

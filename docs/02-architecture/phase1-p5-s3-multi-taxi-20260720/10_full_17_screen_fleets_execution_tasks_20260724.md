@@ -1,9 +1,10 @@
 # Full 17-Screen Fleets Execution Tasks
 
-**Document version:** v1.0
+**Document version:** v1.1
 **Date:** 2026-07-24
-**Status:** Approved for Dispatch
-**Execution baseline:** `dev@2711c366f2e103ae9556d5afaf4558dfd9b0bb4c`
+**Status:** Repository implementation verified; external evidence pending
+**Execution baseline:** `origin/dev@cf26c0c43`
+**Release candidate:** `codex/mtx-release-gaps-20260724`
 **Requirement:** `08_multi_taxi_operations_ui_design_requirements_20260723.md`
 v1.2
 **Design source:** `docs/05-ui/drts-design-canvas/`
@@ -19,25 +20,25 @@ implementation work.
 
 # 1. Screen Register
 
-| Group | Screen ID | Screen | Fleet | Primary task |
-| ----- | --------- | ------ | ----- | ------------ |
-| Authorization | `MTX-AUTH-UI-01` | Authorization Registry | B | `MTX-AUTH-UI-001` |
-| Authorization | `MTX-AUTH-UI-02` | Authorization Detail | B | `MTX-AUTH-UI-001` |
-| Authorization | `MTX-AUTH-UI-03` | Draft Editor | B | `MTX-AUTH-UI-001` |
-| Authorization | `MTX-AUTH-UI-04` | Lifecycle Confirmation | B | `MTX-AUTH-UI-001` |
-| Authorization | `MTX-AUTH-UI-05` | Authorized Vehicles | B | `MTX-AUTH-UI-001` |
-| Authorization | `MTX-AUTH-UI-06` | Conflict／Permission State | B | `MTX-AUTH-UI-001` |
-| Queue | `MTX-QUEUE-UI-01` | Queue Overview | C | `MTX-QUEUE-003` |
-| Queue | `MTX-QUEUE-UI-02` | Queue Entry Detail | C | `MTX-QUEUE-003` |
-| Queue | `MTX-QUEUE-UI-03` | Non-Bypassable Legal Denial | C | `MTX-QUEUE-003` |
-| Rating | `P5-RATE-UI-01` | Rating Review Queue | D | `P5-RATE-003`／`P5-RATE-UI-001` |
-| Rating | `P5-RATE-UI-02` | Rating Review Detail | D | `P5-RATE-003`／`P5-RATE-UI-001` |
-| Rating | `P5-RATE-UI-03` | Driver Rating Authority | D | `P5-RATE-UI-001` |
-| Commerce | `P5-COM-UI-01` | Fare Anomaly Queue／Detail | F | `P5-FARE-ANOM-001`／`P5-FARE-ANOM-UI-001` |
-| Commerce | `P5-COM-UI-02` | Payment Exception Detail | F | `P5-PAY-001`／`P5-PAY-OPS-UI-001` |
-| Commerce | `P5-COM-UI-03` | Certificate Support | F | `P5-RCT-001`／`P5-RCT-SUPPORT-UI-001` |
-| Commerce | `P5-COM-UI-04` | Operational Record Query | F | `P5-RET-003`／`P5-RET-OPS-UI-001` |
-| Commerce | `P5-COM-UI-05` | Controlled Export／Retention | F | `P5-EXPORT-001`／`P5-HOLD-001` |
+| Group         | Screen ID         | Screen                       | Fleet | Primary task                              |
+| ------------- | ----------------- | ---------------------------- | ----- | ----------------------------------------- |
+| Authorization | `MTX-AUTH-UI-01`  | Authorization Registry       | B     | `MTX-AUTH-UI-001`                         |
+| Authorization | `MTX-AUTH-UI-02`  | Authorization Detail         | B     | `MTX-AUTH-UI-001`                         |
+| Authorization | `MTX-AUTH-UI-03`  | Draft Editor                 | B     | `MTX-AUTH-UI-001`                         |
+| Authorization | `MTX-AUTH-UI-04`  | Lifecycle Confirmation       | B     | `MTX-AUTH-UI-001`                         |
+| Authorization | `MTX-AUTH-UI-05`  | Authorized Vehicles          | B     | `MTX-AUTH-UI-001`                         |
+| Authorization | `MTX-AUTH-UI-06`  | Conflict／Permission State   | B     | `MTX-AUTH-UI-001`                         |
+| Queue         | `MTX-QUEUE-UI-01` | Queue Overview               | C     | `MTX-QUEUE-003`                           |
+| Queue         | `MTX-QUEUE-UI-02` | Queue Entry Detail           | C     | `MTX-QUEUE-003`                           |
+| Queue         | `MTX-QUEUE-UI-03` | Non-Bypassable Legal Denial  | C     | `MTX-QUEUE-003`                           |
+| Rating        | `P5-RATE-UI-01`   | Rating Review Queue          | D     | `P5-RATE-003`／`P5-RATE-UI-001`           |
+| Rating        | `P5-RATE-UI-02`   | Rating Review Detail         | D     | `P5-RATE-003`／`P5-RATE-UI-001`           |
+| Rating        | `P5-RATE-UI-03`   | Driver Rating Authority      | D     | `P5-RATE-UI-001`                          |
+| Commerce      | `P5-COM-UI-01`    | Fare Anomaly Queue／Detail   | F     | `P5-FARE-ANOM-001`／`P5-FARE-ANOM-UI-001` |
+| Commerce      | `P5-COM-UI-02`    | Payment Exception Detail     | F     | `P5-PAY-001`／`P5-PAY-OPS-UI-001`         |
+| Commerce      | `P5-COM-UI-03`    | Certificate Support          | F     | `P5-RCT-001`／`P5-RCT-SUPPORT-UI-001`     |
+| Commerce      | `P5-COM-UI-04`    | Operational Record Query     | F     | `P5-RET-003`／`P5-RET-OPS-UI-001`         |
+| Commerce      | `P5-COM-UI-05`    | Controlled Export／Retention | F     | `P5-EXPORT-001`／`P5-HOLD-001`            |
 
 The screen count is exactly 17. Passenger ride and S-3 work remain in the
 program but are not counted as new screens because their canonical canvases
@@ -79,15 +80,15 @@ Rules:
 
 # 3. Existing Branch Claims
 
-| Task | Existing work | Dispatch decision |
-| ---- | ------------- | ----------------- |
-| `MTX-AUTH-UI-001` | `origin/gemini/mtx-auth-ui-001` has unmerged implementation commits | Fleet B resumes and rebases this branch; no duplicate implementation branch |
-| `MTX-QUEUE-003` | codex/gemini branches overlap | Fleet C uses `origin/gemini/mtx-queue-003` as the review candidate and stops duplicate branch work |
-| `P5-RET-UI-001` | #1130 squash-merged | Fleet F starts expanded record/export work from latest `dev`, not stale branches |
-| `S3-VERIFY-001` | codex/gemini evidence branches exist | Fleet G consolidates evidence; no second S-3 product implementation |
-| Rating governance | no matching open PR found at approval time | Fleet D starts after preflight |
-| Passenger UI delta | no matching open PR found at approval time | Fleet E starts after preflight |
-| Full commerce suite | only minimum records baseline landed | Fleet F starts feature modules after preflight |
+| Task                | Existing work                                                       | Dispatch decision                                                                                  |
+| ------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `MTX-AUTH-UI-001`   | `origin/gemini/mtx-auth-ui-001` has unmerged implementation commits | Fleet B resumes and rebases this branch; no duplicate implementation branch                        |
+| `MTX-QUEUE-003`     | codex/gemini branches overlap                                       | Fleet C uses `origin/gemini/mtx-queue-003` as the review candidate and stops duplicate branch work |
+| `P5-RET-UI-001`     | #1130 squash-merged                                                 | Fleet F starts expanded record/export work from latest `dev`, not stale branches                   |
+| `S3-VERIFY-001`     | codex/gemini evidence branches exist                                | Fleet G consolidates evidence; no second S-3 product implementation                                |
+| Rating governance   | no matching open PR found at approval time                          | Fleet D starts after preflight                                                                     |
+| Passenger UI delta  | no matching open PR found at approval time                          | Fleet E starts after preflight                                                                     |
+| Full commerce suite | only minimum records baseline landed                                | Fleet F starts feature modules after preflight                                                     |
 
 Open PR #1126 is an older `MTX-QUEUE-001` backend candidate and does not satisfy
 the three queue UI screens.
@@ -307,7 +308,8 @@ apps/platform-admin-web commerce routes
 - search and open existing certificate;
 - available/generating/unavailable/failed/access-denied/superseded states;
 - all legal certificate fields;
-- regeneration remains disabled until a canonical command exists.
+- completed-trip writer, authenticated HTML/PDF artifacts, and audited,
+  idempotent regeneration are available through canonical commands.
 
 ## `P5-COM-UI-04` Operational Records
 
@@ -323,7 +325,8 @@ apps/platform-admin-web commerce routes
 - required export purpose, sensitivity/audit notice, actor;
 - pending/running/completed/failed and controlled download;
 - legal hold display/filter separate from retention;
-- hold create/release controls disabled until evidence-governance commands land.
+- hold create/release use the existing evidence-governance authority with
+  confirmation, permission, conflict, and unavailable handling.
 
 **Acceptance evidence:**
 
@@ -339,7 +342,7 @@ apps/platform-admin-web commerce routes
 # 9. Fleet G: S-3 Verification
 
 **Primary Task:** `S3-VERIFY-UI-001`
-**Status:** `consolidate_evidence_only`
+**Status:** `repository_verified_external_evidence_pending`
 **Depends on:** current `dev`
 
 Consolidate existing Driver/Ops evidence branches. Do not rebuild S-3 screens.
@@ -358,7 +361,7 @@ Required evidence:
 # 10. Fleet H: Full-Suite Acceptance
 
 **Primary Task:** `E2E-MTX-UI-FULL-001`
-**Status:** `waiting`
+**Status:** `repository_gate_verified`
 **Depends on:** B, C, D, E, F complete; G report available
 
 **Owned surface:** shared E2E harness and final evidence matrix.
@@ -474,16 +477,49 @@ migration, or disabled button.
 
 # 13. Supervisor Dispatch Register
 
-| Order | Fleet | Task | Dispatch action |
-| ----- | ----- | ---- | --------------- |
-| 1 | B | `MTX-AUTH-UI-001` | resume/rebase existing Gemini branch; implement six screens |
-| 1 | C | `MTX-QUEUE-003` | consolidate queue branches; implement three screens |
-| 1 | E | `P5-PAX-WEB-001` | start from latest `dev`; preserve passenger legal flow |
-| 1 | G | `S3-VERIFY-UI-001` | consolidate evidence only |
-| 2 | D | `P5-RATE-003`／`P5-RATE-UI-001` | start feature work; merge shared shell after B |
-| 3 | F | commerce task set | start feature modules; merge shared shell after D |
-| 4 | H | `E2E-MTX-UI-FULL-001` | start after feature merges and G report |
+| Order | Fleet | Task                            | Dispatch action                                             |
+| ----- | ----- | ------------------------------- | ----------------------------------------------------------- |
+| 1     | B     | `MTX-AUTH-UI-001`               | resume/rebase existing Gemini branch; implement six screens |
+| 1     | C     | `MTX-QUEUE-003`                 | consolidate queue branches; implement three screens         |
+| 1     | E     | `P5-PAX-WEB-001`                | start from latest `dev`; preserve passenger legal flow      |
+| 1     | G     | `S3-VERIFY-UI-001`              | consolidate evidence only                                   |
+| 2     | D     | `P5-RATE-003`／`P5-RATE-UI-001` | start feature work; merge shared shell after B              |
+| 3     | F     | commerce task set               | start feature modules; merge shared shell after D           |
+| 4     | H     | `E2E-MTX-UI-FULL-001`           | start after feature merges and G report                     |
 
 The execution packet is ready for Fleet claims once its PR is merged or the
 Supervisor explicitly authorizes work against the PR head. Production release
 remains a separate decision.
+
+---
+
+# 14. Repository Closeout Delta
+
+This section records the implementation wave completed after the original
+17-screen dispatch. It supersedes earlier `blocked_command` and
+repository-gap statements, but does not convert external-provider or
+physical-device evidence into a pass.
+
+| Task                       | Fleet | Repository result                                                                                                                                        | Verification boundary                                                             |
+| -------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `P5-FARE-PRODUCER-001`     | F     | Multi-taxi assignment records canonical fare anomalies and resolves prior anomalies after a valid assignment                                             | Live fare-provider execution remains `blocked_ext`                                |
+| `P5-CERT-WRITER-001`       | F     | Completed trips create idempotent receipts; authenticated HTML/PDF artifacts and audited regeneration are implemented in `V0062`                         | Production delivery/load evidence remains environment work                        |
+| `P5-PAY-RECOVERY-001`      | F     | `billing:write` commands, durable idempotency, audit receipts, provider port, and UI execution are implemented in `V0063`; `mark paid` remains forbidden | Default provider is fail-closed; live PSP adapter execution remains `blocked_ext` |
+| `P5-HOLD-ACTIONS-001`      | F     | Records UI now creates and releases canonical evidence-governance holds with case, reason, actor, confirmation, and refresh                              | No new retention or four-eyes rule was invented                                   |
+| `S3-PROVIDER-ADAPTERS-001` | G     | S3-compatible presigned PUT, provider-side SHA-256 inspection, HTTPS scanner contract, timeout, auth, and fail-closed configuration are implemented      | Credentials and real provider execution remain `blocked_ext`                      |
+| `S3-VERIFY-004`            | G     | Persisted alert latency count, p50, p95, maximum, and within-five-second rate are exposed to Ops                                                         | Production traces are still required before an SLO claim                          |
+| `E2E-MTX-UI-FULL-001`      | H     | Exact 17-screen census, command boundaries, migration order through `V0063`, API/UI regression, and controlled browser flows pass                        | One persisted, no-interception, cross-surface journey remains `partial`           |
+
+## Remaining Fleets Execution Tasks
+
+| Priority | Fleet | Task                              | Required completion evidence                                                                                                                    |
+| -------- | ----- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0       | G     | `S3-PHYSICAL-DEVICE-EVIDENCE-001` | Android and iOS offline SOS replay on physical devices, including reconnect, attachment, and duplicate suppression                              |
+| P0       | G     | `S3-LIVE-PROVIDER-EVIDENCE-001`   | Real S3-compatible upload/readback, actual scanner response, and production alert-render traces with measured p95                               |
+| P0       | F     | `P5-LIVE-COMMERCE-EVIDENCE-001`   | Approved fare-provider and PSP adapters, credentials supplied outside Git, retry/readback, and provider audit references                        |
+| P1       | E/H   | `P5-PAX-PERSISTED-BROWSER-001`    | Passenger disclosure, payment, certificate, and rating browser flow using the same persisted order/trip identity without `page.route()` success |
+| P1       | H     | `E2E-MTX-PERSISTED-JOURNEY-001`   | One identity across authorization, vehicle, queue, Passenger, fare/payment/certificate, rating, record, hold, and export with restart/readback  |
+
+Fleets must not replace these external or persisted-evidence tasks with mock
+screenshots. The repository candidate can proceed through CI and staging, but
+an unconditional production approval still requires the P0 evidence above.

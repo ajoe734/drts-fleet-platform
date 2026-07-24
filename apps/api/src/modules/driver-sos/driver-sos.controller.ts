@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 
 import type {
   ConfirmDriverSosAttachmentUploadCommand,
@@ -11,6 +19,7 @@ import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import {
   CurrentIdentity,
   RequireRealms,
+  RequireScopes,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import { DriverSosService } from "./driver-sos.service";
@@ -115,6 +124,26 @@ export class OpsDriverSosController {
         command,
         identity,
         requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("metrics/alert-latency")
+  @RequireScopes("incident:read")
+  async getAlertLatencySummary(
+    @Query("from") from: string | undefined,
+    @Query("to") to: string | undefined,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.driverSosService.getOpsAlertLatencySummary(
+        {
+          ...(from !== undefined ? { from } : {}),
+          ...(to !== undefined ? { to } : {}),
+        },
+        identity,
       ),
       requestId,
     );

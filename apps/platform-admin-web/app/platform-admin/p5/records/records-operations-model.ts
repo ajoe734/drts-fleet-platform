@@ -161,6 +161,32 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+export type LegalHoldActionErrorStatus = 403 | 409 | 503 | null;
+
+export function getLegalHoldActionError(
+  error: unknown,
+  fallback: string,
+): {
+  status: LegalHoldActionErrorStatus;
+  message: string;
+} {
+  const statusCode =
+    error &&
+    typeof error === "object" &&
+    "statusCode" in error &&
+    typeof error.statusCode === "number"
+      ? error.statusCode
+      : null;
+
+  return {
+    status:
+      statusCode === 403 || statusCode === 409 || statusCode === 503
+        ? statusCode
+        : null,
+    message: getApiErrorMessage(error, fallback),
+  };
+}
+
 export function isPermissionError(error: unknown) {
   return Boolean(
     error &&

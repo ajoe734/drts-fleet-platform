@@ -33,8 +33,20 @@ export interface CertificateSupportView {
   pdfUrl: string | null;
   supersededByCertificateId: string | null;
   regeneration: {
-    enabled: false;
-    reasonCode: "certificate_regeneration_command_pending";
+    enabled: boolean;
+    reasonCode: string | null;
+  };
+}
+
+export interface CertificateRegenerationResult {
+  certificate: CertificateSupportView;
+  actionReceipt: {
+    actionId: string;
+    auditId: string;
+    resourceType: string;
+    resourceId: string;
+    status: "accepted" | "completed" | "failed";
+    message: string;
   };
 }
 
@@ -51,6 +63,10 @@ export type CertificateSupportErrorKind =
 
 export function hasCertificateReadScope(scopes: readonly string[]) {
   return scopes.includes("foundation:read");
+}
+
+export function hasCertificateWriteScope(scopes: readonly string[]) {
+  return scopes.includes("foundation:write");
 }
 
 export function parseCertificateSupportList(
@@ -100,12 +116,38 @@ export function parseCertificateSupportView(
     !isNullableString(value.pdfUrl) ||
     !isNullableString(value.supersededByCertificateId) ||
     !isObject(value.regeneration) ||
-    value.regeneration.enabled !== false ||
-    value.regeneration.reasonCode !== "certificate_regeneration_command_pending"
+    typeof value.regeneration.enabled !== "boolean" ||
+    !isNullableString(value.regeneration.reasonCode) ||
+    (value.regeneration.enabled && value.regeneration.reasonCode !== null)
   ) {
     throw new Error("CERTIFICATE_SUPPORT_VIEW_INVALID");
   }
   return structuredClone(value) as unknown as CertificateSupportView;
+}
+
+export function parseCertificateRegenerationResult(
+  value: unknown,
+): CertificateRegenerationResult {
+  if (
+    !isObject(value) ||
+    !isObject(value.actionReceipt) ||
+    typeof value.actionReceipt.actionId !== "string" ||
+    typeof value.actionReceipt.auditId !== "string" ||
+    typeof value.actionReceipt.resourceType !== "string" ||
+    typeof value.actionReceipt.resourceId !== "string" ||
+    !["accepted", "completed", "failed"].includes(
+      String(value.actionReceipt.status),
+    ) ||
+    typeof value.actionReceipt.message !== "string"
+  ) {
+    throw new Error("CERTIFICATE_REGENERATION_RESULT_INVALID");
+  }
+  return {
+    certificate: parseCertificateSupportView(value.certificate),
+    actionReceipt: structuredClone(
+      value.actionReceipt,
+    ) as CertificateRegenerationResult["actionReceipt"],
+  };
 }
 
 export function classifyCertificateSupportError(

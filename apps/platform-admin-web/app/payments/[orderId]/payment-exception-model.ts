@@ -1,4 +1,5 @@
 import type { CanvasTone } from "@drts/ui-web";
+import type { ActionReceipt } from "@drts/contracts";
 
 export const PAYMENT_STATUSES = [
   "not_selected",
@@ -11,8 +12,20 @@ export const PAYMENT_STATUSES = [
 
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
+export const PAYMENT_RECOVERY_ACTIONS = [
+  "retry_capture",
+  "begin_manual_recovery",
+] as const;
+
+export type PaymentRecoveryAction = (typeof PAYMENT_RECOVERY_ACTIONS)[number];
+export type PaymentRecoveryState =
+  | "processing"
+  | "accepted"
+  | "completed"
+  | "failed";
+
 export type PaymentActionDescriptor = {
-  action: string;
+  action: PaymentRecoveryAction;
   enabled: boolean;
   disabledReasonCode?: string;
   requiresReason?: boolean;
@@ -39,6 +52,8 @@ export type PaymentExceptionView = {
   } | null;
   safeProviderReference: string | null;
   attemptCount: number;
+  recoveryState: PaymentRecoveryState | null;
+  lastRecoveryAction: PaymentRecoveryAction | null;
   updatedAt: string;
   availableActions: PaymentActionDescriptor[];
   auditTimeline: PaymentAuditEvent[];
@@ -52,6 +67,13 @@ export type PaymentExceptionErrorKind =
 
 const statusSet = new Set<string>(PAYMENT_STATUSES);
 const riskLevelSet = new Set(["low", "medium", "high"]);
+const recoveryActionSet = new Set<string>(PAYMENT_RECOVERY_ACTIONS);
+const recoveryStateSet = new Set([
+  "processing",
+  "accepted",
+  "completed",
+  "failed",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -74,7 +96,7 @@ function parseAvailableActions(value: unknown): PaymentActionDescriptor[] {
     if (
       !isRecord(candidate) ||
       typeof candidate.action !== "string" ||
-      normalizedAction === "mark_paid" ||
+      !recoveryActionSet.has(normalizedAction) ||
       typeof candidate.enabled !== "boolean" ||
       typeof candidate.riskLevel !== "string" ||
       !riskLevelSet.has(candidate.riskLevel)
@@ -84,7 +106,7 @@ function parseAvailableActions(value: unknown): PaymentActionDescriptor[] {
 
     return [
       {
-        action: candidate.action,
+        action: normalizedAction as PaymentRecoveryAction,
         enabled: candidate.enabled,
         riskLevel: candidate.riskLevel as PaymentActionDescriptor["riskLevel"],
         ...(typeof candidate.disabledReasonCode === "string"
@@ -155,6 +177,16 @@ export function parsePaymentExceptionView(
         }
       : null;
   const providerReference = readNullableText(value.safeProviderReference);
+  const recoveryState =
+    typeof value.recoveryState === "string" &&
+    recoveryStateSet.has(value.recoveryState)
+      ? (value.recoveryState as PaymentRecoveryState)
+      : null;
+  const lastRecoveryAction =
+    typeof value.lastRecoveryAction === "string" &&
+    recoveryActionSet.has(value.lastRecoveryAction)
+      ? (value.lastRecoveryAction as PaymentRecoveryAction)
+      : null;
 
   return {
     paymentId: value.paymentId,
@@ -168,10 +200,43 @@ export function parsePaymentExceptionView(
         ? providerReference
         : null,
     attemptCount: value.attemptCount,
+    recoveryState,
+    lastRecoveryAction,
     updatedAt: value.updatedAt,
     availableActions: parseAvailableActions(value.availableActions),
     auditTimeline: parseAuditTimeline(value.auditTimeline),
   };
+}
+
+export function paymentRecoveryCommandPath(
+  orderId: string,
+  action: string,
+): string | null {
+  const normalizedAction = action
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, "_");
+  if (!recoveryActionSet.has(normalizedAction)) {
+    return null;
+  }
+  return `/api/payment-exceptions/${encodeURIComponent(orderId)}/actions/${normalizedAction.replaceAll("_", "-")}`;
+}
+
+export function parsePaymentRecoveryReceipt(
+  value: unknown,
+): ActionReceipt | null {
+  if (
+    !isRecord(value) ||
+    typeof value.actionId !== "string" ||
+    typeof value.auditId !== "string" ||
+    value.resourceType !== "multi_taxi_payment_exception" ||
+    typeof value.resourceId !== "string" ||
+    !["accepted", "completed"].includes(String(value.status)) ||
+    typeof value.message !== "string"
+  ) {
+    return null;
+  }
+  return value as unknown as ActionReceipt;
 }
 
 export function paymentStatusTone(status: PaymentStatus): CanvasTone {

@@ -4,7 +4,7 @@ import {
   FARE_QUOTE_ANOMALIES,
   type ActionReceipt,
   type FareQuoteAnomaly,
-  type RouteFareDisclosureSnapshot,
+  type FareQuoteAnomalySnapshot,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -15,7 +15,7 @@ type FareAnomalyRow = {
 
 export interface PersistedFareQuoteAnomaly {
   reason: FareQuoteAnomaly;
-  snapshot: RouteFareDisclosureSnapshot;
+  snapshot: FareQuoteAnomalySnapshot;
   recoveryPending: boolean;
   lastRecoveryRequestedAt: string | null;
   lastRecoveryIdempotencyKey: string | null;
@@ -122,6 +122,26 @@ export class FareAnomalyRepository {
     }
 
     this.records.delete(quoteSnapshotId);
+  }
+
+  async resolveByOrderId(orderId: string, resolvedAt: string) {
+    if (this.databaseService?.isEnabled()) {
+      await this.databaseService.query(
+        `
+          UPDATE ops.fare_quote_anomalies
+          SET resolved_at = $2
+          WHERE order_id = $1
+            AND resolved_at IS NULL
+        `,
+        [orderId, resolvedAt],
+      );
+    }
+
+    for (const [quoteSnapshotId, record] of this.records) {
+      if (record.snapshot.orderId === orderId) {
+        this.records.delete(quoteSnapshotId);
+      }
+    }
   }
 
   private normalize(value: unknown): PersistedFareQuoteAnomaly {

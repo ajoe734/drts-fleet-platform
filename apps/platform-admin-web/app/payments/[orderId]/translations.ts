@@ -47,6 +47,15 @@ const copy = {
       "Card numbers, payment method tokens, and raw provider payloads are never returned to this screen.",
     pendingCommand:
       "Recovery command pending canonical contract and mutation authority.",
+    confirmAction: "Confirm payment recovery action:",
+    reasonPrompt:
+      "Enter the operational reason for this payment recovery action.",
+    executing: "Submitting recovery",
+    commandAccepted: "Recovery command recorded",
+    auditReceipt: "Audit receipt",
+    commandFailed: "Recovery command was not accepted",
+    commandFailedBody:
+      "No payment state was inferred. Review the authoritative status and retry with a new request only when appropriate.",
     actor: "Actor",
     request: "Request",
   },
@@ -92,6 +101,14 @@ const copy = {
       "此畫面永遠不會收到卡號、payment method token 或原始 provider payload。",
     pendingCommand:
       "Recovery command 尚待 canonical contract 與 mutation authority。",
+    confirmAction: "確認執行付款回復動作：",
+    reasonPrompt: "請輸入此次付款回復動作的營運原因。",
+    executing: "正在送出回復命令",
+    commandAccepted: "回復命令已留存",
+    auditReceipt: "稽核收據",
+    commandFailed: "回復命令未被接受",
+    commandFailedBody:
+      "系統未推定付款狀態；請先確認 authoritative status，必要時再以新 request 重試。",
     actor: "執行者",
     request: "Request",
   },
@@ -132,6 +149,9 @@ export function paymentStatusLabel(locale: Locale, status: PaymentStatus) {
 export function paymentActionLabel(locale: Locale, action: string) {
   if (action === "retry_capture") {
     return locale === "zh" ? "重試請款" : "Retry capture";
+  }
+  if (action === "begin_manual_recovery") {
+    return locale === "zh" ? "開始人工處理" : "Begin manual recovery";
   }
   return action;
 }

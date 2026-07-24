@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiClientError } from "@drts/api-client";
 import type {
   DriverRegistryRecord,
+  DriverSosAlertLatencySummary,
   IdentityContext,
   IncidentRecord,
   RecordDriverSosOpsAlertRenderedResult,
@@ -109,6 +110,8 @@ export default function SosQueuePage() {
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
+  const [latencySummary, setLatencySummary] =
+    useState<DriverSosAlertLatencySummary | null>(null);
   const [renderReceiptRetry, setRenderReceiptRetry] = useState(0);
   const reportedAlertIdsRef = useRef(new Set<string>());
 
@@ -131,7 +134,7 @@ export default function SosQueuePage() {
   const fetchRuntime = async () => {
     try {
       const client = getOpsClient();
-      const [incidentRes, driverRes, vehicleRes, identityRes] =
+      const [incidentRes, driverRes, vehicleRes, identityRes, latencyRes] =
         await Promise.all([
           client.get<any>("/api/incidents"),
           client.get<any>("/api/regulatory-registry/drivers").catch(() => []),
@@ -139,6 +142,11 @@ export default function SosQueuePage() {
           client
             .get<IdentityContext>("/api/identity/context")
             .catch(() => null as IdentityContext | null),
+          client
+            .get<DriverSosAlertLatencySummary>(
+              "/api/ops/driver-sos/metrics/alert-latency",
+            )
+            .catch(() => null as DriverSosAlertLatencySummary | null),
         ]);
 
       setIncidents(
@@ -149,6 +157,7 @@ export default function SosQueuePage() {
       setDrivers(unwrapListItems<DriverRegistryRecord>(driverRes));
       setVehicles(unwrapListItems<VehicleRegistryRecord>(vehicleRes));
       setIdentity(identityRes);
+      setLatencySummary(latencyRes);
       setLoadError(null);
     } catch (error) {
       console.error("Failed to load SOS incidents", error);
@@ -356,6 +365,18 @@ export default function SosQueuePage() {
           body: "啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。",
         }
       : null;
+  const latencyHasSamples =
+    latencySummary !== null && latencySummary.sampleCount > 0;
+  const latencyWithinTarget =
+    latencySummary?.p95LatencyMs !== null &&
+    latencySummary?.p95LatencyMs !== undefined &&
+    latencySummary.p95LatencyMs <= latencySummary.targetLatencyMs;
+  const formatLatency = (value: number | null | undefined) =>
+    value === null || value === undefined ? "—" : `${Math.round(value)} ms`;
+  const formatRate = (value: number | null | undefined) =>
+    value === null || value === undefined
+      ? "—"
+      : `${(value * 100).toFixed(1)}%`;
 
   return (
     <div
@@ -432,6 +453,65 @@ export default function SosQueuePage() {
               body={notice.body}
             />
           ) : null}
+
+          <Card
+            theme={theme}
+            title={t("sos.latency.title")}
+            subtitle={t("sos.latency.subtitle")}
+            actions={
+              <Pill
+                theme={theme}
+                tone={
+                  !latencyHasSamples
+                    ? "neutral"
+                    : latencyWithinTarget
+                      ? "success"
+                      : "danger"
+                }
+                dot
+              >
+                {t(
+                  !latencyHasSamples
+                    ? "sos.latency.noEvidence"
+                    : latencyWithinTarget
+                      ? "sos.latency.withinTarget"
+                      : "sos.latency.overTarget",
+                )}
+              </Pill>
+            }
+          >
+            <DL
+              theme={theme}
+              cols={5}
+              items={[
+                {
+                  k: t("sos.latency.samples"),
+                  v: latencySummary?.sampleCount ?? 0,
+                  mono: true,
+                },
+                {
+                  k: "p50",
+                  v: formatLatency(latencySummary?.p50LatencyMs),
+                  mono: true,
+                },
+                {
+                  k: "p95",
+                  v: formatLatency(latencySummary?.p95LatencyMs),
+                  mono: true,
+                },
+                {
+                  k: t("sos.latency.maximum"),
+                  v: formatLatency(latencySummary?.maxLatencyMs),
+                  mono: true,
+                },
+                {
+                  k: t("sos.latency.targetRate"),
+                  v: formatRate(latencySummary?.withinTargetRate),
+                  mono: true,
+                },
+              ]}
+            />
+          </Card>
 
           <Card
             theme={theme}

@@ -5,6 +5,7 @@ import { OnEvent } from "@nestjs/event-emitter";
 
 import type {
   AddReconciliationIssueCommentCommand,
+  ActionReceipt,
   ApproveReimbursementBatchCommand,
   AssignReconciliationIssueCommand,
   AuditLogRecord,
@@ -44,6 +45,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
@@ -51,8 +53,16 @@ import {
   type LiveSettlementTripRecord,
   type MultiTaxiPaymentAuditRecord,
   type MultiTaxiPaymentExceptionRecord,
+  type PaymentRecoveryState,
   type PersistBillingSettlementChanges,
 } from "./billing-settlement.repository";
+import {
+  InjectPaymentRecoveryPort,
+  PAYMENT_RECOVERY_ACTIONS,
+  type PaymentRecoveryAction,
+  type PaymentRecoveryPort,
+  UnavailablePaymentRecoveryPort,
+} from "./payment-recovery.port";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -92,7 +102,12 @@ const DEFAULT_CURRENCY = "NTD";
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 const TENANT_REFRESH_INTERVAL_MS = 30_000;
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
-const PAYMENT_RECOVERY_COMMAND_PENDING = "payment_recovery_command_pending";
+const PAYMENT_RECOVERY_PROVIDER_NOT_PROVISIONED =
+  "payment_recovery_provider_not_provisioned";
+const PAYMENT_RECOVERY_PENDING = "payment_recovery_pending";
+const PAYMENT_RECOVERY_WRITE_AUTHORITY_REQUIRED =
+  "payment_recovery_write_authority_required";
+const PAYMENT_RECOVERY_ACTION_SET = new Set<string>(PAYMENT_RECOVERY_ACTIONS);
 
 export type MultiTaxiPaymentExceptionView = {
   paymentId: string;
@@ -105,6 +120,8 @@ export type MultiTaxiPaymentExceptionView = {
   } | null;
   safeProviderReference: string | null;
   attemptCount: number;
+  recoveryState: PaymentRecoveryState | null;
+  lastRecoveryAction: PaymentRecoveryAction | null;
   updatedAt: string;
   availableActions: ResourceActionDescriptor[];
   auditTimeline: Array<{
@@ -451,6 +468,9 @@ export class BillingSettlementService implements OnModuleInit {
     @Optional()
     private readonly billingSettlementRepository?: BillingSettlementRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
+    @Optional()
+    @InjectPaymentRecoveryPort()
+    private readonly paymentRecoveryPort: PaymentRecoveryPort = new UnavailablePaymentRecoveryPort(),
   ) {}
 
   async getMultiTaxiPaymentException(
@@ -496,7 +516,11 @@ export class BillingSettlementService implements OnModuleInit {
         payment.orderId,
         payment.paymentId,
       );
-    const view = this.buildMultiTaxiPaymentExceptionView(payment, auditTrail);
+    const view = this.buildMultiTaxiPaymentExceptionView(
+      payment,
+      auditTrail,
+      identity,
+    );
 
     this.recordAudit(
       {
@@ -520,6 +544,305 @@ export class BillingSettlementService implements OnModuleInit {
     );
 
     return view;
+  }
+
+  async executeMultiTaxiPaymentRecovery(
+    orderId: string,
+    actionValue: string,
+    command: unknown,
+    identity: BootstrapRequestIdentity | null,
+    context: {
+      idempotencyKey?: string;
+      requestId?: string;
+    },
+  ): Promise<ActionReceipt> {
+    const normalizedOrderId = orderId.trim();
+    if (!normalizedOrderId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PAYMENT_EXCEPTION_ORDER_ID_REQUIRED",
+        "orderId is required.",
+      );
+    }
+    const action = this.requirePaymentRecoveryAction(actionValue);
+    const actorId = identity?.actorId?.trim();
+    if (
+      !actorId ||
+      identity?.realm !== "platform" ||
+      !identity.scopes.includes("billing:write")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PAYMENT_RECOVERY_WRITE_AUTHORITY_REQUIRED",
+        "Platform billing:write authority is required for payment recovery.",
+      );
+    }
+    const idempotencyKey = context.idempotencyKey?.trim();
+    if (!idempotencyKey) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "Idempotency-Key is required for payment recovery.",
+      );
+    }
+    if (idempotencyKey.length > 255) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "IDEMPOTENCY_KEY_INVALID",
+        "Idempotency-Key must not exceed 255 characters.",
+      );
+    }
+    const { reason } = this.parsePaymentRecoveryCommand(command);
+
+    if (
+      !this.billingSettlementRepository ||
+      !this.billingSettlementRepository.isEnabled()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PAYMENT_RECOVERY_AUTHORITY_UNAVAILABLE",
+        "Payment recovery requires the billing database.",
+        { orderId: normalizedOrderId },
+        true,
+      );
+    }
+
+    const payment =
+      await this.billingSettlementRepository.findMultiTaxiPaymentException(
+        normalizedOrderId,
+      );
+    if (!payment) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PAYMENT_EXCEPTION_NOT_FOUND",
+        "Payment exception was not found.",
+        { orderId: normalizedOrderId },
+      );
+    }
+
+    const existingCommand = await this.billingSettlementRepository
+      .findMultiTaxiPaymentRecoveryCommand(
+        payment.paymentId,
+        action,
+        idempotencyKey,
+      )
+      .catch(() => {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "PAYMENT_RECOVERY_PERSISTENCE_UNAVAILABLE",
+          "Payment recovery idempotency ledger is unavailable.",
+          { orderId: normalizedOrderId, action },
+          true,
+        );
+      });
+    if (existingCommand) {
+      if (existingCommand.receipt) {
+        return existingCommand.receipt;
+      }
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        existingCommand.state === "processing"
+          ? "PAYMENT_RECOVERY_IN_PROGRESS"
+          : "PAYMENT_RECOVERY_IDEMPOTENCY_KEY_TERMINAL",
+        "The idempotent payment recovery command has no successful receipt.",
+        {
+          orderId: normalizedOrderId,
+          action,
+          state: existingCommand.state,
+        },
+      );
+    }
+
+    const descriptor = this.buildPaymentRecoveryDescriptors(
+      payment,
+      identity,
+    ).find((candidate) => candidate.action === action);
+    if (!descriptor?.enabled) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        descriptor?.disabledReasonCode ?? "PAYMENT_RECOVERY_NOT_AVAILABLE",
+        "Payment recovery is not available for this payment.",
+        {
+          orderId: normalizedOrderId,
+          action,
+          status: payment.status,
+        },
+      );
+    }
+    if (descriptor.requiresReason && !reason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PAYMENT_RECOVERY_REASON_REQUIRED",
+        "A reason is required for this payment recovery action.",
+      );
+    }
+
+    const recoveryCommandId = randomUUID();
+    let claim;
+    try {
+      claim =
+        await this.billingSettlementRepository.claimMultiTaxiPaymentRecoveryCommand(
+          {
+            recoveryCommandId,
+            paymentId: payment.paymentId,
+            orderId: payment.orderId,
+            action,
+            idempotencyKey,
+            actorId,
+            ...(context.requestId ? { requestId: context.requestId } : {}),
+            ...(reason ? { reason } : {}),
+          },
+        );
+    } catch {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PAYMENT_RECOVERY_PERSISTENCE_UNAVAILABLE",
+        "Payment recovery command could not be durably claimed.",
+        { orderId: normalizedOrderId, action },
+        true,
+      );
+    }
+    if (!claim.claimed) {
+      if (claim.command.receipt) {
+        return claim.command.receipt;
+      }
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        claim.command.state === "processing"
+          ? "PAYMENT_RECOVERY_IN_PROGRESS"
+          : "PAYMENT_RECOVERY_IDEMPOTENCY_KEY_TERMINAL",
+        "The idempotent payment recovery command has no successful receipt.",
+        {
+          orderId: normalizedOrderId,
+          action,
+          state: claim.command.state,
+        },
+      );
+    }
+
+    let providerResult;
+    try {
+      providerResult = await this.paymentRecoveryPort.recover(
+        action,
+        {
+          paymentId: payment.paymentId,
+          orderId: payment.orderId,
+          status: payment.status,
+          amountMinor: payment.amountMinor,
+          currency: payment.currency,
+          attemptCount: payment.attemptCount,
+        },
+        {
+          actorId,
+          idempotencyKey,
+          ...(context.requestId ? { requestId: context.requestId } : {}),
+          ...(reason ? { reason } : {}),
+        },
+      );
+    } catch {
+      await this.billingSettlementRepository
+        .failMultiTaxiPaymentRecoveryCommand(recoveryCommandId)
+        .catch(() => undefined);
+      this.recordAudit(
+        {
+          actorId,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "billing-settlement",
+          actionName: `${action}_failed`,
+          resourceType: "multi_taxi_payment_exception",
+          resourceId: payment.paymentId,
+          oldValuesSummary: {
+            status: payment.status,
+            attemptCount: payment.attemptCount,
+          },
+          newValuesSummary: {
+            recoveryState: "failed",
+            action,
+          },
+        },
+        context.requestId,
+      );
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE",
+        "The configured payment recovery provider did not accept the command.",
+        { orderId: normalizedOrderId, action },
+        true,
+      );
+    }
+    if (
+      providerResult.status !== "accepted" &&
+      providerResult.status !== "completed"
+    ) {
+      await this.billingSettlementRepository
+        .failMultiTaxiPaymentRecoveryCommand(recoveryCommandId)
+        .catch(() => undefined);
+      throw new ApiRequestError(
+        HttpStatus.BAD_GATEWAY,
+        "PAYMENT_RECOVERY_PROVIDER_RESPONSE_INVALID",
+        "The payment recovery provider returned an invalid result.",
+        { orderId: normalizedOrderId, action },
+        true,
+      );
+    }
+
+    const auditLog = this.auditNotificationService.recordAuditLog({
+      actorId,
+      actorType: "platform_admin",
+      tenantId: null,
+      moduleName: "billing-settlement",
+      actionName: action,
+      resourceType: "multi_taxi_payment_exception",
+      resourceId: payment.paymentId,
+      oldValuesSummary: {
+        status: payment.status,
+        attemptCount: payment.attemptCount,
+        recoveryState: payment.recoveryState,
+      },
+      newValuesSummary: {
+        action,
+        recoveryState: providerResult.status,
+        paymentStatus:
+          action === "begin_manual_recovery"
+            ? "manual_recovery"
+            : providerResult.status === "completed"
+              ? "captured"
+              : payment.status,
+      },
+      ...(context.requestId ? { requestId: context.requestId } : {}),
+    });
+    const receipt = toActionReceipt({
+      auditLog,
+      actionId: idempotencyKey,
+      status: providerResult.status,
+      message: this.paymentRecoveryReceiptMessage(
+        action,
+        providerResult.status,
+      ),
+    });
+
+    try {
+      await this.billingSettlementRepository.completeMultiTaxiPaymentRecoveryCommand(
+        {
+          recoveryCommandId,
+          paymentId: payment.paymentId,
+          action,
+          state: providerResult.status,
+          receipt,
+        },
+      );
+    } catch {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PAYMENT_RECOVERY_PERSISTENCE_UNAVAILABLE",
+        "Payment recovery was accepted but its receipt could not be durably persisted.",
+        { orderId: normalizedOrderId, action, auditId: auditLog.auditId },
+        true,
+      );
+    }
+
+    return receipt;
   }
 
   @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
@@ -3261,6 +3584,71 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
+  private requirePaymentRecoveryAction(
+    actionValue: string,
+  ): PaymentRecoveryAction {
+    const normalizedAction = actionValue
+      .trim()
+      .toLowerCase()
+      .replace(/[-\s]+/g, "_");
+    if (!PAYMENT_RECOVERY_ACTION_SET.has(normalizedAction)) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PAYMENT_RECOVERY_ACTION_NOT_SUPPORTED",
+        "Payment recovery action is not supported.",
+      );
+    }
+    return normalizedAction as PaymentRecoveryAction;
+  }
+
+  private parsePaymentRecoveryCommand(command: unknown): { reason?: string } {
+    if (command === undefined || command === null) {
+      return {};
+    }
+    if (
+      typeof command !== "object" ||
+      Array.isArray(command) ||
+      Object.keys(command).some((key) => key !== "reason")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PAYMENT_RECOVERY_PAYLOAD_NOT_ALLOWED",
+        "Payment recovery accepts only an optional reason.",
+      );
+    }
+    const reasonValue = (command as { reason?: unknown }).reason;
+    if (reasonValue === undefined || reasonValue === null) {
+      return {};
+    }
+    if (typeof reasonValue !== "string") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PAYMENT_RECOVERY_REASON_INVALID",
+        "Payment recovery reason must be text.",
+      );
+    }
+    const reason = reasonValue.trim();
+    if (!reason || reason.length > 500) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PAYMENT_RECOVERY_REASON_INVALID",
+        "Payment recovery reason must contain 1 to 500 characters.",
+      );
+    }
+    return { reason };
+  }
+
+  private paymentRecoveryReceiptMessage(
+    action: PaymentRecoveryAction,
+    status: "accepted" | "completed",
+  ) {
+    const label =
+      action === "retry_capture"
+        ? "Payment capture retry"
+        : "Manual payment recovery";
+    return `${label} ${status}.`;
+  }
+
   private recordAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
       requestId?: string;
@@ -3279,6 +3667,7 @@ export class BillingSettlementService implements OnModuleInit {
   private buildMultiTaxiPaymentExceptionView(
     payment: MultiTaxiPaymentExceptionRecord,
     auditTrail: MultiTaxiPaymentAuditRecord[],
+    identity: BootstrapRequestIdentity | null,
   ): MultiTaxiPaymentExceptionView {
     return {
       paymentId: payment.paymentId,
@@ -3294,14 +3683,80 @@ export class BillingSettlementService implements OnModuleInit {
             },
       safeProviderReference: maskOpaqueToken(payment.providerPaymentRef, 4, 4),
       attemptCount: payment.attemptCount,
+      recoveryState: payment.recoveryState,
+      lastRecoveryAction: payment.lastRecoveryAction,
       updatedAt: payment.updatedAt,
-      availableActions: payment.availableActions.map((descriptor) => ({
-        ...descriptor,
-        enabled: false,
-        disabledReasonCode: PAYMENT_RECOVERY_COMMAND_PENDING,
-      })),
+      availableActions: this.buildPaymentRecoveryDescriptors(payment, identity),
       auditTimeline: auditTrail.map((event) => ({ ...event })),
     };
+  }
+
+  private buildPaymentRecoveryDescriptors(
+    payment: MultiTaxiPaymentExceptionRecord,
+    identity: BootstrapRequestIdentity | null,
+  ): ResourceActionDescriptor[] {
+    const hasWriteAuthority =
+      identity?.realm === "platform" &&
+      identity.scopes.includes("billing:write");
+    const recoveryPending =
+      payment.recoveryState === "processing" ||
+      payment.recoveryState === "accepted";
+
+    return payment.availableActions.flatMap((descriptor) => {
+      const normalizedAction = descriptor.action
+        .trim()
+        .toLowerCase()
+        .replace(/[-\s]+/g, "_");
+      if (!PAYMENT_RECOVERY_ACTION_SET.has(normalizedAction)) {
+        return [];
+      }
+      const action = normalizedAction as PaymentRecoveryAction;
+      const normalizedDescriptor = {
+        ...descriptor,
+        action,
+      };
+
+      if (!descriptor.enabled) {
+        return [normalizedDescriptor];
+      }
+      if (payment.status !== "failed") {
+        return [
+          {
+            ...normalizedDescriptor,
+            enabled: false,
+            disabledReasonCode: "payment_recovery_status_not_eligible",
+          },
+        ];
+      }
+      if (recoveryPending) {
+        return [
+          {
+            ...normalizedDescriptor,
+            enabled: false,
+            disabledReasonCode: PAYMENT_RECOVERY_PENDING,
+          },
+        ];
+      }
+      if (!hasWriteAuthority) {
+        return [
+          {
+            ...normalizedDescriptor,
+            enabled: false,
+            disabledReasonCode: PAYMENT_RECOVERY_WRITE_AUTHORITY_REQUIRED,
+          },
+        ];
+      }
+      if (!this.paymentRecoveryPort.isAvailable(action)) {
+        return [
+          {
+            ...normalizedDescriptor,
+            enabled: false,
+            disabledReasonCode: PAYMENT_RECOVERY_PROVIDER_NOT_PROVISIONED,
+          },
+        ];
+      }
+      return [normalizedDescriptor];
+    });
   }
 
   private persistChanges(

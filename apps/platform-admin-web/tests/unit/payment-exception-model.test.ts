@@ -5,6 +5,8 @@ import {
   classifyPaymentExceptionError,
   isPaidPaymentStatus,
   parsePaymentExceptionView,
+  parsePaymentRecoveryReceipt,
+  paymentRecoveryCommandPath,
 } from "../../app/payments/[orderId]/payment-exception-model";
 
 const fixture = {
@@ -61,6 +63,46 @@ describe("payment exception presentation model", () => {
         enabled: false,
       }),
     ]);
+  });
+
+  it("maps only the two approved backend recovery actions to command paths", () => {
+    expect(paymentRecoveryCommandPath("ZX/240720", "retry_capture")).toBe(
+      "/api/payment-exceptions/ZX%2F240720/actions/retry-capture",
+    );
+    expect(
+      paymentRecoveryCommandPath("ZX-240720-0186", "begin_manual_recovery"),
+    ).toBe(
+      "/api/payment-exceptions/ZX-240720-0186/actions/begin-manual-recovery",
+    );
+    expect(
+      paymentRecoveryCommandPath("ZX-240720-0186", "mark_paid"),
+    ).toBeNull();
+  });
+
+  it("accepts only audit-backed successful recovery receipts", () => {
+    expect(
+      parsePaymentRecoveryReceipt({
+        actionId: "idem-payment-001",
+        auditId: "audit-payment-001",
+        resourceType: "multi_taxi_payment_exception",
+        resourceId: "payment-001",
+        status: "accepted",
+        message: "Payment capture retry accepted.",
+      }),
+    ).toMatchObject({
+      actionId: "idem-payment-001",
+      auditId: "audit-payment-001",
+    });
+    expect(
+      parsePaymentRecoveryReceipt({
+        actionId: "idem-payment-001",
+        auditId: "audit-payment-001",
+        resourceType: "multi_taxi_payment_exception",
+        resourceId: "payment-001",
+        status: "failed",
+        message: "not accepted",
+      }),
+    ).toBeNull();
   });
 
   it("classifies permission, not-found, and unavailable failures", () => {

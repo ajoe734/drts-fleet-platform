@@ -65,6 +65,32 @@ export class BillingSettlementController {
     );
   }
 
+  @Post("payment-exceptions/:orderId/actions/:action")
+  @RequireRealms("platform")
+  @RequireScopes("billing:write")
+  async executeMultiTaxiPaymentRecovery(
+    @Param("orderId") orderId: string,
+    @Param("action") action: string,
+    @Body() command: unknown,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.executeMultiTaxiPaymentRecovery(
+        orderId,
+        action,
+        command,
+        identity,
+        {
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+          ...(requestId ? { requestId } : {}),
+        },
+      ),
+      requestId,
+    );
+  }
+
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();
     if (!normalizedTenantId) {

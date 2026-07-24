@@ -299,4 +299,65 @@ describe("DriverSosService attachment verification", () => {
       }),
     );
   });
+
+  it("summarizes persisted Ops render latency without manufacturing samples", async () => {
+    const { service } = buildService();
+    const first = await submit(service);
+    const firstRenderedAt = new Date(
+      Date.parse(first.receipt.fleetReportConfirmedAt) + 1_000,
+    ).toISOString();
+    await service.recordOpsAlertsRendered(
+      {
+        incidentIds: [first.receipt.incidentId],
+        renderedAt: firstRenderedAt,
+      },
+      identity("ops", "ops-sos-001"),
+    );
+
+    const second = await submit(service);
+    const secondRenderedAt = new Date(
+      Date.parse(second.receipt.fleetReportConfirmedAt) + 6_000,
+    ).toISOString();
+    await service.recordOpsAlertsRendered(
+      {
+        incidentIds: [second.receipt.incidentId],
+        renderedAt: secondRenderedAt,
+      },
+      identity("ops", "ops-sos-001"),
+    );
+
+    await expect(
+      service.getOpsAlertLatencySummary({}, identity("driver", "drv-001")),
+    ).rejects.toMatchObject({
+      response: { error: { code: "OPS_REALM_REQUIRED" } },
+    });
+    await expect(
+      service.getOpsAlertLatencySummary(
+        {
+          from: "2026-07-24T10:00:00.000Z",
+          to: "2026-07-24T09:00:00.000Z",
+        },
+        identity("ops", "ops-sos-001"),
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: "VALIDATION_ERROR" } },
+    });
+
+    expect(
+      await service.getOpsAlertLatencySummary(
+        {},
+        identity("ops", "ops-sos-001"),
+      ),
+    ).toEqual({
+      from: null,
+      to: null,
+      targetLatencyMs: 5_000,
+      sampleCount: 2,
+      withinTargetCount: 1,
+      withinTargetRate: 0.5,
+      p50LatencyMs: 3_500,
+      p95LatencyMs: 5_750,
+      maxLatencyMs: 6_000,
+    });
+  });
 });

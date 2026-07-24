@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
 
 import type {
+  DriverSosAlertLatencySummary,
   DriverSosAlertRenderObservation,
   DriverSosAttachmentRecord,
   DriverSosAttachmentType,
@@ -72,6 +73,14 @@ type AlertObservationRow = QueryResultRow & {
   ops_alert_rendered_at: Date | string;
   ops_alert_receipt_recorded_at: Date | string;
   alert_to_ops_latency_ms: number | string;
+};
+
+type AlertLatencySummaryRow = QueryResultRow & {
+  sample_count: number | string;
+  within_target_count: number | string;
+  p50_latency_ms: number | string | null;
+  p95_latency_ms: number | string | null;
+  max_latency_ms: number | string | null;
 };
 
 @Injectable()
@@ -353,6 +362,64 @@ export class DriverSosVerificationRepository {
     }
   }
 
+  async summarizeAlertLatency(
+    from: string | null,
+    to: string | null,
+    targetLatencyMs: number,
+  ): Promise<DriverSosAlertLatencySummary> {
+    if (!this.isEnabled()) {
+      return {
+        from,
+        to,
+        targetLatencyMs,
+        sampleCount: 0,
+        withinTargetCount: 0,
+        withinTargetRate: null,
+        p50LatencyMs: null,
+        p95LatencyMs: null,
+        maxLatencyMs: null,
+      };
+    }
+
+    const result = await this.databaseService!.query<AlertLatencySummaryRow>(
+      `
+          SELECT
+            count(*)::integer AS sample_count,
+            count(*) FILTER (
+              WHERE alert_to_ops_latency_ms <= $3
+            )::integer AS within_target_count,
+            percentile_cont(0.50) WITHIN GROUP (
+              ORDER BY alert_to_ops_latency_ms
+            ) AS p50_latency_ms,
+            percentile_cont(0.95) WITHIN GROUP (
+              ORDER BY alert_to_ops_latency_ms
+            ) AS p95_latency_ms,
+            max(alert_to_ops_latency_ms) AS max_latency_ms
+          FROM safety.driver_sos_urgent_alert_outbox
+          WHERE alert_to_ops_latency_ms IS NOT NULL
+            AND ($1::timestamptz IS NULL OR fleet_report_confirmed_at >= $1)
+            AND ($2::timestamptz IS NULL OR fleet_report_confirmed_at <= $2)
+        `,
+      [from, to, targetLatencyMs],
+    );
+    const row = result.rows[0];
+    const sampleCount = Number(row?.sample_count ?? 0);
+    const withinTargetCount = Number(row?.within_target_count ?? 0);
+
+    return {
+      from,
+      to,
+      targetLatencyMs,
+      sampleCount,
+      withinTargetCount,
+      withinTargetRate:
+        sampleCount === 0 ? null : withinTargetCount / sampleCount,
+      p50LatencyMs: this.toNullableNumber(row?.p50_latency_ms),
+      p95LatencyMs: this.toNullableNumber(row?.p95_latency_ms),
+      maxLatencyMs: this.toNullableNumber(row?.max_latency_ms),
+    };
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -496,5 +563,13 @@ export class DriverSosVerificationRepository {
     return value instanceof Date
       ? value.toISOString()
       : new Date(value).toISOString();
+  }
+
+  private toNullableNumber(value: number | string | null | undefined) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
   }
 }
