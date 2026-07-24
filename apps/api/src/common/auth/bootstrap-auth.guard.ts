@@ -132,33 +132,6 @@ export class BootstrapAuthGuard implements CanActivate {
       return true;
     }
 
-    // JWT fast-path: verify Bearer token if present
-    if (this.jwtAuthService) {
-      const token = extractBearerToken(baseHeaders);
-      if (token) {
-        const payload = this.jwtAuthService.verify(token);
-        if (payload) {
-          this.assertDriverBindingActive(payload, requestUrl);
-          request.identity = this.jwtAuthService.toRequestIdentity(payload);
-          return true;
-        }
-        throw new ApiRequestError(
-          401,
-          "JWT_INVALID",
-          "Bearer token is invalid or expired.",
-          { route: requestUrl },
-        );
-      }
-    }
-    const headers = isSseBootstrapQueryRoute(
-      request.method ?? "GET",
-      requestUrl,
-    )
-      ? mergeSseBootstrapQueryIdentity(
-          baseHeaders,
-          asQueryRecord((request as { query?: unknown }).query),
-        )
-      : baseHeaders;
     const routePolicy = resolveRouteAuthPolicy(
       request.method ?? "GET",
       requestUrl,
@@ -192,6 +165,48 @@ export class BootstrapAuthGuard implements CanActivate {
             routeKey: routePolicy?.routeKey ?? "decorator",
           }
         : null;
+
+    // JWT fast-path: verify Bearer token if present
+    if (this.jwtAuthService) {
+      const token = extractBearerToken(baseHeaders);
+      if (token) {
+        const payload = this.jwtAuthService.verify(token);
+        if (payload) {
+          this.assertDriverBindingActive(payload, requestUrl);
+          const identity = this.jwtAuthService.toRequestIdentity(payload);
+          request.identity = identity;
+          if (policy) {
+            try {
+              this.assertRealmAllowed(identity, policy.allowedRealms, request);
+              this.assertScopesAllowed(
+                identity,
+                policy.requiredScopes,
+                request,
+              );
+            } catch (error) {
+              this.recordAuthorizationDenialAudit(identity, request, error);
+              throw error;
+            }
+          }
+          return true;
+        }
+        throw new ApiRequestError(
+          401,
+          "JWT_INVALID",
+          "Bearer token is invalid or expired.",
+          { route: requestUrl },
+        );
+      }
+    }
+    const headers = isSseBootstrapQueryRoute(
+      request.method ?? "GET",
+      requestUrl,
+    )
+      ? mergeSseBootstrapQueryIdentity(
+          baseHeaders,
+          asQueryRecord((request as { query?: unknown }).query),
+        )
+      : baseHeaders;
 
     if (!policy) {
       const anonymousIdentity = extractBootstrapRequestIdentity(headers, {

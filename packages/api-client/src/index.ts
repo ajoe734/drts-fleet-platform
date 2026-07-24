@@ -76,6 +76,7 @@ import type {
   DeleteTenantWebhookEndpointCommand,
   DispatchCandidate,
   DispatchJobRecord,
+  DispatchQueueEntryReadRecord,
   DispatchTraceLogRecord,
   DisableTenantCostCenterCommand,
   DriverAcceptTaskCommand,
@@ -141,6 +142,8 @@ import type {
   OpenCallSessionCommand,
   OperationalObservabilitySnapshot,
   OwnedOrderRecord,
+  QueueCheckInCommand,
+  QueueCheckOutCommand,
   PartnerChannelEntryRecord,
   ReferralRevenueShareRule,
   PartnerBootstrapSession,
@@ -1362,11 +1365,23 @@ export class ApiClient {
     return this.post("/api/dispatch/reassign", { body: command });
   }
 
-  async queueCheckIn(command: { vehicleId: string; siteId: string }) {
+  async listDispatchQueueEntries(): Promise<DispatchQueueEntryReadRecord[]> {
+    return this.getList<DispatchQueueEntryReadRecord>("/api/dispatch/queue");
+  }
+
+  async getDispatchQueueEntry(
+    queueEntryId: string,
+  ): Promise<DispatchQueueEntryReadRecord> {
+    return this.get<DispatchQueueEntryReadRecord>(
+      `/api/dispatch/queue/${encodeURIComponent(queueEntryId)}`,
+    );
+  }
+
+  async queueCheckIn(command: QueueCheckInCommand) {
     return this.post("/api/dispatch/queue/check-in", { body: command });
   }
 
-  async queueCheckOut(command: { vehicleId: string; siteId: string }) {
+  async queueCheckOut(command: QueueCheckOutCommand) {
     return this.post("/api/dispatch/queue/check-out", { body: command });
   }
 

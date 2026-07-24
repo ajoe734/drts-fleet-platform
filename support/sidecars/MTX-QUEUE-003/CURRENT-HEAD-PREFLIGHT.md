@@ -1,4 +1,4 @@
-# MTX-QUEUE-003 Current-Head Preflight
+# MTX-QUEUE-003 Current-Head Preflight and Integration Evidence
 
 Date: 2026-07-24
 Task ID: `MTX-QUEUE-003`
@@ -9,7 +9,8 @@ Reviewer: Codex
 ## Authority
 
 - Authoritative requirement head:
-  `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f` (PR #1131)
+  `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f` (PR #1131, merged
+  2026-07-24T04:12:18Z)
 - Requirement:
   `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/08_multi_taxi_operations_ui_design_requirements_20260723.md`
   v1.2
@@ -23,34 +24,70 @@ The requirement and design files are read-only inputs for this branch.
 
 ## Branch Reconciliation
 
-| Ref                           | Head at preflight                          | Classification                    |
-| ----------------------------- | ------------------------------------------ | --------------------------------- |
-| `origin/dev`                  | `2711c366f2e103ae9556d5afaf4558dfd9b0bb4c` | current landed execution baseline |
-| `origin/gemini/mtx-queue-003` | `ae2f94e3d3c6f21d526b5b728a81b059b295a91c` | selected implementation candidate |
-| `origin/codex/mtx-queue-003`  | `018a75408e4182554c0e7e8114f3483cd04c1966` | overlapping reviewer candidate    |
+| Ref                          | Head at integration                        | Classification                              |
+| ---------------------------- | ------------------------------------------ | ------------------------------------------- |
+| `origin/dev`                 | `53ab9718dff55e81ae6cd02853e3fcf535285007` | landed #1131/#1133 execution baseline       |
+| `gemini/mtx-queue-003`       | current task commit                        | selected implementation plus queue read API |
+| `origin/codex/mtx-queue-003` | `018a75408e4182554c0e7e8114f3483cd04c1966` | overlapping reviewer candidate              |
 
-Both candidates share implementation history through `50b742e868596fb689356dc755eae6887e212e8f`.
-The Gemini branch has six production-fallback/mock-server fixes after that
-point. The Codex-only commit aligns the reviewer Playwright base URL and
-prebuild flow; the selected Gemini branch already covers those outcomes via
-`getTargetBaseUrl()` and `scripts/run-map-geofence-ops-ui-dev.mjs`. No third
-implementation branch is created.
+Both implementation candidates shared history through
+`50b742e868596fb689356dc755eae6887e212e8f`. The Gemini branch was retained as
+the selected superset; no third implementation branch was created.
+
+After PR #1131 landed, the selected Gemini branch was rebased onto
+`origin/dev@53ab9718dff55e81ae6cd02853e3fcf535285007`. The branch and the new
+`dev` commits had no overlapping changed paths, and the rebase completed
+without conflicts.
 
 ## Current-Head Acceptance Classification
 
-| Acceptance item                               | Initial state     | Current action                                                                                                                                                                           |
-| --------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Existing `/dispatch` list/detail queue labels | `verified`        | retain and regression-test                                                                                                                                                               |
-| Existing statutory refusal copy               | `verified`        | retain and regression-test                                                                                                                                                               |
-| No override or force check-in on refusal      | `verified`        | retain and extend DOM scan                                                                                                                                                               |
-| `MTX-QUEUE-UI-01` queue overview route        | `missing`         | implement `/dispatch/queue`                                                                                                                                                              |
-| Required overview columns and filters         | `missing`         | implement from server queue read model only                                                                                                                                              |
-| `MTX-QUEUE-UI-02` queue entry detail          | `missing`         | implement `/dispatch/queue/{queueEntryId}`                                                                                                                                               |
-| `MTX-QUEUE-UI-03` dedicated legal denial      | `partial`         | implement server-denied physical-rank/taxi-stand state                                                                                                                                   |
-| Ordinary taxi isolation                       | `partial`         | add view-model and negative E2E coverage                                                                                                                                                 |
-| Safe next actions from `availableActions`     | `partial`         | allowlist enabled read-navigation descriptors only                                                                                                                                       |
-| Queue list/detail read API on current `dev`   | `partial`         | UI consumes `GET /api/dispatch/queue[/{id}]`; current backend exposes only check-in/check-out commands, so runtime integration remains open until the dependency supplies the read model |
-| Queue mutation                                | `blocked_command` | no mutation control is added by this task                                                                                                                                                |
+| Acceptance item                               | Final state       | Evidence                                                        |
+| --------------------------------------------- | ----------------- | --------------------------------------------------------------- |
+| Existing `/dispatch` list/detail queue labels | `verified`        | retained and regression-tested                                  |
+| Existing statutory refusal copy               | `verified`        | retained and regression-tested                                  |
+| No override or force check-in on refusal      | `verified`        | API and DOM scans reject override/approval/force actions        |
+| `MTX-QUEUE-UI-01` queue overview route        | `implemented`     | `/dispatch/queue`                                               |
+| Required overview columns and filters         | `implemented`     | server queue read model only                                    |
+| `MTX-QUEUE-UI-02` queue entry detail          | `implemented`     | `/dispatch/queue/{queueEntryId}`                                |
+| `MTX-QUEUE-UI-03` dedicated legal denial      | `implemented`     | server-denied physical-rank/taxi-stand states                   |
+| Ordinary taxi isolation                       | `verified`        | ordinary physical-rank remains eligible in API integration test |
+| Safe next actions from `availableActions`     | `verified`        | low-risk read navigation descriptors only                       |
+| Queue list/detail read API                    | `implemented`     | canonical authenticated list/detail endpoints below             |
+| Queue mutation                                | `blocked_command` | no mutation control was added by this task                      |
+
+## Canonical Read API
+
+### Endpoints
+
+- `GET /api/dispatch/queue`
+  returns `ApiSuccessEnvelope<{ items, pageInfo }>` with
+  `DispatchQueueEntryReadRecord[]`.
+- `GET /api/dispatch/queue/:queueEntryId`
+  returns `ApiSuccessEnvelope<DispatchQueueEntryReadRecord>`.
+- Unknown detail IDs return `404 QUEUE_ENTRY_NOT_FOUND`.
+
+Both endpoints require authenticated `dispatch:read` access under the Ops
+queue-read policy. Anonymous requests return `401`; tenant realm requests
+return `403`. JWT and bootstrap-header identities are evaluated against the
+same realm and scope policy.
+
+### Server-Owned Projection
+
+- Queue identity, status, position, runtime profile, queue mode, authorization,
+  and timestamps come from existing queue entries reconstructed from persisted
+  `queue.entry.created` and `queue.entry.closed` dispatch traces.
+- Driver, vehicle plate, and operating area come from the regulatory registry's
+  vehicle, driver, and supply-pair records.
+- Eligibility reuses the same `assertQueueEligibility` authority used by queue
+  check-in: profile queue policy plus registry vehicle dispatchability.
+- Missing context, missing vehicles, unavailable registry authority, prohibited
+  queue modes, absent multi-taxi authorization context, and non-dispatchable
+  vehicles all return `eligibility.decision = denied`.
+- `ordinary_taxi` physical-rank and taxi-stand entries retain their independent
+  policy and are not converted into multi-taxi statutory denials.
+- `availableActions` contains only low-risk read navigation. No fixture,
+  client-side eligibility inference, override, approval, queue mutation, or
+  force check-in path was added.
 
 ## Server Authority Boundary
 
@@ -65,9 +102,31 @@ implementation branch is created.
 5. Unknown, disabled, override, approval, and force-check-in descriptors are
    not rendered as controls.
 
+## Verification Evidence
+
+- Rebase baseline:
+  `origin/dev@53ab9718dff55e81ae6cd02853e3fcf535285007`; no conflicts.
+- `pnpm test` from `apps/api`: `129` files, `870` tests passed after rebase.
+- API/auth targeted suite covered service projection, controller envelopes,
+  bootstrap/JWT policy, and HTTP list/detail integration.
+- `pnpm --filter @drts/api build`: passed.
+- `pnpm --filter @drts/api-client typecheck`: passed.
+- Queue contract/client test: `1` file, `2` tests passed.
+- Ops queue view-model regression: `2` files, `10` tests passed.
+- Targeted ESLint and `git diff --check`: passed.
+- No deployment or publication was performed.
+
 ## Owned Write Set
 
 ```text
+apps/api/src/common/auth/auth.policy.ts
+apps/api/src/common/auth/bootstrap-auth.guard.ts
+apps/api/src/modules/owned-mobility/owned-mobility.controller.ts
+apps/api/src/modules/owned-mobility/owned-mobility.service.ts
+apps/api/tests/integration/int-mtx-queue-read-api.test.ts
+apps/api/tests/unit/auth-bootstrap.test.ts
+apps/api/tests/unit/owned-mobility.controller.test.ts
+apps/api/tests/unit/owned-mobility.service.test.ts
 apps/ops-console-web/app/dispatch/queue/
 apps/ops-console-web/app/dispatch/page.tsx
 apps/ops-console-web/lib/queue-operations.ts
@@ -75,8 +134,11 @@ apps/ops-console-web/lib/queue-semantics.ts
 apps/ops-console-web/lib/translations.ts
 apps/ops-console-web/tests/unit/queue-operations.test.ts
 apps/ops-console-web/tests/unit/queue-semantics.test.ts
-tests/e2e/ops-queue-semantics.spec.ts
+packages/api-client/src/index.ts
+packages/contracts/src/index.ts
 playwright.ops-queue-semantics.config.ts
 scripts/serve-map-geofence-ops-mock-api.mjs
 support/sidecars/MTX-QUEUE-003/
+tests/e2e/ops-queue-semantics.spec.ts
+tests/unit/api-client-dispatch-queue.test.ts
 ```
