@@ -22,6 +22,8 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  DriverRatingSummary,
+  InvalidatePassengerRatingCommand,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiOperatingAuthorizationRecord,
   MultiTaxiTripOperationalAdminView,
@@ -36,8 +38,10 @@ import type {
   PassengerRideSseEventEnvelope,
   PassengerRideTokenScope,
   PassengerTripRatingRecord,
+  PassengerRatingModerationRecord,
   QueueCheckInCommand,
   QueueCheckOutCommand,
+  RatingModerationQuery,
   SubmitPassengerTripRatingCommand,
   UpdateMultiTaxiOperatingAuthorizationCommand,
 } from "@drts/contracts";
@@ -288,7 +292,8 @@ export class MultiTaxiService implements OnModuleInit {
     rows: MultiTaxiTripOperationalExportRow[];
   }> {
     const records = await this.listTripOperationalRecords(query);
-    const suffix = this.normalizeMonthFilter(query.month)?.replace("-", "") ?? "all";
+    const suffix =
+      this.normalizeMonthFilter(query.month)?.replace("-", "") ?? "all";
 
     return {
       exportedAt: new Date().toISOString(),
@@ -480,6 +485,172 @@ export class MultiTaxiService implements OnModuleInit {
       persisted.rating,
     );
     return persisted.rating;
+  }
+
+  async listRatingsForModeration(
+    query: RatingModerationQuery,
+  ): Promise<PassengerRatingModerationRecord[]> {
+    let filtered = Array.from(this.ratingsByPassengerOrder.values());
+
+    if (query.status) {
+      filtered = filtered.filter((r) => r.status === query.status);
+    }
+    if (query.score !== undefined && query.score !== null) {
+      const scoreNum = Number(query.score);
+      if (Number.isFinite(scoreNum)) {
+        filtered = filtered.filter((r) => r.score === scoreNum);
+      }
+    }
+    if (query.tag?.trim()) {
+      const tagLower = query.tag.trim().toLowerCase();
+      filtered = filtered.filter((r) =>
+        r.tags.some((t) => t.toLowerCase().includes(tagLower)),
+      );
+    }
+    if (query.driverId?.trim()) {
+      const driver = query.driverId.trim();
+      filtered = filtered.filter((r) => r.driverId === driver);
+    }
+    if (query.orderId?.trim()) {
+      const order = query.orderId.trim();
+      filtered = filtered.filter((r) => r.orderId === order);
+    }
+    if (query.startDate) {
+      filtered = filtered.filter((r) => r.submittedAt >= query.startDate!);
+    }
+    if (query.endDate) {
+      filtered = filtered.filter((r) => r.submittedAt <= query.endDate!);
+    }
+
+    return filtered.map((rating) => this.mapModerationRecord(rating));
+  }
+
+  async getRatingForModeration(ratingId: string) {
+    const rating = Array.from(this.ratingsByPassengerOrder.values()).find(
+      (r) => r.ratingId === ratingId,
+    );
+    if (!rating) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "P5_RATING_NOT_FOUND",
+        "The requested rating record was not found.",
+        { ratingId },
+      );
+    }
+    const driverSummary = this.getDriverRatingAuthority(rating.driverId);
+    return {
+      rating: this.mapModerationRecord(rating),
+      driverSummary,
+    };
+  }
+
+  async invalidatePassengerRating(
+    ratingId: string,
+    command: InvalidatePassengerRatingCommand,
+    operatorId?: string,
+  ) {
+    const reason = command.reason?.trim();
+    if (!reason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "P5_RATING_INVALIDATE_REASON_REQUIRED",
+        "A mandatory reason is required to invalidate a passenger rating.",
+      );
+    }
+
+    const rating = Array.from(this.ratingsByPassengerOrder.values()).find(
+      (r) => r.ratingId === ratingId,
+    );
+    if (!rating) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "P5_RATING_NOT_FOUND",
+        "The rating record to invalidate was not found.",
+        { ratingId },
+      );
+    }
+
+    if (rating.status === "invalidated") {
+      return {
+        rating: this.mapModerationRecord(rating),
+        driverSummary: this.getDriverRatingAuthority(rating.driverId),
+      };
+    }
+
+    const now = new Date().toISOString();
+    rating.status = "invalidated";
+    rating.updatedAt = now;
+    const moderationRecord = rating as PassengerRatingModerationRecord;
+    moderationRecord.invalidationReason = reason;
+    moderationRecord.invalidatedAt = now;
+    moderationRecord.invalidatedByOperatorId =
+      command.operatorId ?? operatorId ?? "system";
+
+    await this.repository?.invalidatePassengerRating(ratingId);
+
+    const driverSummary = this.recalculateDriverRatingSummary(rating.driverId);
+
+    return {
+      rating: this.mapModerationRecord(rating),
+      driverSummary,
+    };
+  }
+
+  getDriverRatingAuthority(driverId: string): DriverRatingSummary {
+    const activeRatings = Array.from(
+      this.ratingsByPassengerOrder.values(),
+    ).filter((r) => r.driverId === driverId && r.status === "active");
+
+    const now = new Date().toISOString();
+    if (activeRatings.length === 0) {
+      return {
+        driverId,
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+        lastRatedAt: null,
+        aggregateVersion: 1,
+        calculatedAt: now,
+      };
+    }
+
+    const total = activeRatings.reduce((sum, r) => sum + r.score, 0);
+    const avg = Number((total / activeRatings.length).toFixed(2));
+    const lastRatedAt = activeRatings
+      .map((r) => r.submittedAt)
+      .sort()
+      .pop()!;
+
+    return {
+      driverId,
+      displayState: "rated",
+      averageRating: avg,
+      ratingCount: activeRatings.length,
+      lastRatedAt,
+      aggregateVersion: 2,
+      calculatedAt: now,
+    };
+  }
+
+  private recalculateDriverRatingSummary(
+    driverId: string,
+  ): DriverRatingSummary {
+    return this.getDriverRatingAuthority(driverId);
+  }
+
+  private mapModerationRecord(
+    rating: PassengerTripRatingRecord,
+  ): PassengerRatingModerationRecord {
+    const ref = rating.passengerSubjectRef;
+    const masked = ref.startsWith("phone_sha256:")
+      ? `sha256:${ref.slice(13, 21)}...`
+      : ref.length > 4
+        ? `${ref.slice(0, 2)}***${ref.slice(-2)}`
+        : "***";
+    return {
+      ...rating,
+      maskedPassengerSubjectRef: masked,
+    };
   }
 
   async getPassengerContact(
@@ -845,9 +1016,10 @@ export class MultiTaxiService implements OnModuleInit {
   private async mapOrderToOperationalRecord(
     order: OwnedOrderRecord,
   ): Promise<MultiTaxiTripOperationalAdminView> {
-    const assignment = this.ownedMobilityService.findPassengerAssignmentDisclosure(
-      order.orderId,
-    );
+    const assignment =
+      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+        order.orderId,
+      );
     const receipt =
       (await this.repository?.findElectronicReceipt(order.orderId)) ?? null;
     const payableFareMinor = order.quotedFare?.amountMinor ?? 0;

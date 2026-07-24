@@ -2884,6 +2884,7 @@ export interface RedispatchOrderCommand {
   reasonNote?: string;
   operatorId?: string;
   escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+  expectedAssignmentVersion?: number | null;
 }
 
 export interface CancelOwnedOrderCommand {

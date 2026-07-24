@@ -152,6 +152,12 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.multiTaxiAuthorizations",
   },
   {
+    key: "p5-ratings",
+    icon: Star,
+    section: "fleet",
+    labelKey: "adminShell.route.p5Ratings",
+  },
+  {
     key: "vehicle-eligibility",
     icon: Truck,
     section: "fleet",

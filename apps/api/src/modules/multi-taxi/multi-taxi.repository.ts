@@ -374,6 +374,81 @@ export class MultiTaxiRepository {
     }
   }
 
+  async invalidatePassengerRating(ratingId: string) {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const ratingResult = await client.query<PassengerTripRatingRow>(
+        `
+          UPDATE ops.passenger_trip_ratings
+          SET
+            status = 'invalidated',
+            updated_at = now()
+          WHERE rating_id = $1
+          RETURNING *
+        `,
+        [ratingId],
+      );
+      const row = ratingResult.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const rating = this.mapPassengerRating(row);
+      const calculatedAt = new Date().toISOString();
+      const summaryResult = await client.query<DriverRatingSummaryRow>(
+        `
+          INSERT INTO ops.driver_rating_summaries (
+            driver_id,
+            display_state,
+            average_rating,
+            rating_count,
+            last_rated_at,
+            aggregate_version,
+            calculated_at
+          )
+          SELECT
+            $1,
+            CASE WHEN count(*) = 0 THEN 'new_driver' ELSE 'rated' END,
+            CASE
+              WHEN count(*) = 0 THEN NULL
+              ELSE round(avg(score)::numeric, 2)
+            END,
+            count(*)::integer,
+            max(submitted_at),
+            1,
+            $2
+          FROM ops.passenger_trip_ratings
+          WHERE driver_id = $1
+            AND status = 'active'
+          ON CONFLICT (driver_id) DO UPDATE SET
+            display_state = EXCLUDED.display_state,
+            average_rating = EXCLUDED.average_rating,
+            rating_count = EXCLUDED.rating_count,
+            last_rated_at = EXCLUDED.last_rated_at,
+            aggregate_version =
+              ops.driver_rating_summaries.aggregate_version + 1,
+            calculated_at = EXCLUDED.calculated_at
+          RETURNING *
+        `,
+        [rating.driverId, calculatedAt],
+      );
+      await client.query("COMMIT");
+      return {
+        rating,
+        summary: this.mapDriverRatingSummary(summaryResult.rows[0]!),
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async findPassengerPayment(orderId: string) {
     if (!this.isEnabled()) {
       return null;

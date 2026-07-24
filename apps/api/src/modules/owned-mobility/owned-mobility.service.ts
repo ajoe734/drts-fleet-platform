@@ -287,6 +287,19 @@ const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
 // reasons keep the existing anti-stranding fallback behaviour.
 const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
   "MISSING_AIRPORT_ELIGIBILITY",
+  "P5_VEHICLE_MAKE_MISSING",
+  "P5_VEHICLE_MODEL_MISSING",
+  "P5_VEHICLE_YEAR_MISSING",
+  "P5_VEHICLE_DOOR_COUNT_MISSING",
+  "P5_DRIVER_REGISTRATION_MISSING",
+  "P5_DRIVER_REGISTRATION_EXPIRED",
+  "P5_DRIVER_REGISTRATION_UNVERIFIED",
+  "P5_RATING_STATE_UNINITIALIZED",
+  "P5_RUNTIME_PROFILE_MISMATCH",
+  "P5_VEHICLE_DISCLOSURE_INCOMPLETE",
+  "P5_DRIVER_REGISTRATION_NOT_ACTIVE",
+  "P5_VEHICLE_REGISTRY_MISSING",
+  "P5_ROUTE_SNAPSHOT_UNRESOLVED",
 ]);
 
 @Injectable()
@@ -2310,6 +2323,23 @@ export class OwnedMobilityService implements OnModuleInit {
         assignment.orderId === orderId &&
         ["assigned", "accepted"].includes(assignment.status),
     );
+    if (
+      command.expectedAssignmentVersion !== undefined &&
+      command.expectedAssignmentVersion !== null &&
+      latestAssignment &&
+      latestAssignment.assignmentVersion > command.expectedAssignmentVersion
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "STALE_REDISPATCH_EVENT",
+        "The redispatch request is stale and cannot replace a newer assignment.",
+        {
+          orderId,
+          currentAssignmentVersion: latestAssignment.assignmentVersion,
+          expectedAssignmentVersion: command.expectedAssignmentVersion,
+        },
+      );
+    }
     const latestTask = latestAssignment
       ? this.driverTasks.find(
           (task) =>

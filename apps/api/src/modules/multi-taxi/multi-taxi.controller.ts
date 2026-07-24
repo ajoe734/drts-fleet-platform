@@ -17,9 +17,11 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  InvalidatePassengerRatingCommand,
   MultiTaxiTripOperationalRecordQuery,
   QueueCheckInCommand,
   QueueCheckOutCommand,
+  RatingModerationQuery,
   SubmitPassengerTripRatingCommand,
   UpdateMultiTaxiOperatingAuthorizationCommand,
 } from "@drts/contracts";
@@ -296,6 +298,66 @@ export class MultiTaxiController {
   ) {
     return toApiSuccessEnvelope(
       await this.multiTaxiService.exportTripOperationalRecords(query),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/p5-ratings")
+  @RequireRealms("platform")
+  async listRatingsForModeration(
+    @Query() query: RatingModerationQuery,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = await this.multiTaxiService.listRatingsForModeration(query);
+    return toApiSuccessEnvelope(
+      toApiListData(items, {
+        page: 1,
+        pageSize: items.length,
+        totalItems: items.length,
+        totalPages: items.length === 0 ? 0 : 1,
+      }),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/p5-ratings/:ratingId")
+  @RequireRealms("platform")
+  async getRatingForModeration(
+    @Param("ratingId") ratingId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getRatingForModeration(ratingId),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/p5-ratings/:ratingId/invalidate")
+  @RequireRealms("platform")
+  async invalidatePassengerRating(
+    @Param("ratingId") ratingId: string,
+    @Body() command: InvalidatePassengerRatingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.invalidatePassengerRating(
+        ratingId,
+        command,
+        identity?.actorId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi/drivers/:driverId/rating-authority")
+  @RequireRealms("platform")
+  getDriverRatingAuthority(
+    @Param("driverId") driverId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.multiTaxiService.getDriverRatingAuthority(driverId),
       requestId,
     );
   }
