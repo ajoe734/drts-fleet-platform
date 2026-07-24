@@ -4,6 +4,7 @@ import {
   Get,
   Headers,
   HttpStatus,
+  Optional,
   Param,
   Post,
   Query,
@@ -18,6 +19,7 @@ import type {
   CreateCallCenterMultiTaxiRideCommand,
   CreateMultiTaxiOperatingAuthorizationCommand,
   CreateMultiTaxiRideCommand,
+  CreateMultiTaxiTripOperationalExportJobCommand,
   InvalidatePassengerTripRatingCommand,
   PassengerRatingReviewQuery,
   MultiTaxiTripOperationalRecordQuery,
@@ -39,11 +41,16 @@ import {
   RequireScopes,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import { MultiTaxiService } from "./multi-taxi.service";
 
 @Controller()
 export class MultiTaxiController {
-  constructor(private readonly multiTaxiService: MultiTaxiService) {}
+  constructor(
+    private readonly multiTaxiService: MultiTaxiService,
+    @Optional()
+    private readonly reportingFilingService?: ReportingFilingService,
+  ) {}
 
   @Post("multi-taxi/rides")
   @OpenRoute()
@@ -380,5 +387,92 @@ export class MultiTaxiController {
       );
     }
     return actorId;
+  }
+
+  @Post("platform-admin/multi-taxi-trip-records/export-jobs/preview")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  async previewTripOperationalExport(
+    @Body() query: MultiTaxiTripOperationalRecordQuery,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scope = query ?? {};
+    const payload =
+      await this.multiTaxiService.exportTripOperationalRecords(scope);
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().previewMultiTaxiTripExport(
+        scope,
+        payload.rows.length,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/multi-taxi-trip-records/export-jobs")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  async createTripOperationalExportJob(
+    @Body() command: CreateMultiTaxiTripOperationalExportJobCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const payload = await this.multiTaxiService.exportTripOperationalRecords(
+      command.scope ?? {},
+    );
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().createMultiTaxiTripExportJob(
+        command,
+        payload.rows,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-trip-records/export-jobs/:jobId")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  getTripOperationalExportJob(
+    @Param("jobId") jobId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().getMultiTaxiTripExportJob(
+        jobId,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/multi-taxi-trip-records/export-jobs/:jobId/download")
+  @RequireRealms("platform")
+  @RequireScopes("multi_taxi_records:export")
+  downloadTripOperationalExport(
+    @Param("jobId") jobId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.requireReportingFilingService().issueMultiTaxiTripExportDownload(
+        jobId,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  private requireReportingFilingService() {
+    if (!this.reportingFilingService) {
+      throw new Error("ReportingFilingService is required for export jobs.");
+    }
+    return this.reportingFilingService;
   }
 }
