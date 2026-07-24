@@ -237,6 +237,117 @@ const drivers = [
   },
 ];
 
+const queueEntries = [
+  {
+    queueEntryId: "QE-MTX-VIRTUAL-001",
+    vehicleId: "VEH-MTX-001",
+    vehiclePlateNo: "BKR-2208",
+    driverId: "DRV-MTX-001",
+    driverName: "吳明翰",
+    siteId: "VIRTUAL-TPE",
+    serviceAreaCode: "TPE",
+    runtimeProfileCode: "multi_taxi_direct",
+    queueMode: "virtual_matching",
+    operatingAuthorizationId: "MTX-TPE-2026-001",
+    status: "checked_in",
+    position: 1,
+    checkedInAt: "2026-07-24T05:58:04.000Z",
+    checkedOutAt: null,
+    lastUpdatedAt: "2026-07-24T06:29:12.000Z",
+    eligibility: {
+      decision: "eligible",
+      reasonCode: null,
+      evaluatedAt: "2026-07-24T06:29:12.000Z",
+    },
+    availableActions: [
+      { action: "open_driver", enabled: true, riskLevel: "low" },
+      { action: "open_vehicle", enabled: true, riskLevel: "low" },
+    ],
+  },
+  {
+    queueEntryId: "QE-MTX-PHYSICAL-DENIED",
+    vehicleId: "VEH-MTX-0186",
+    vehiclePlateNo: "MTX-0186",
+    driverId: "DRV-MTX-0186",
+    driverName: "陳大明",
+    siteId: "STN-TAIPEI-EAST",
+    serviceAreaCode: "TPE",
+    runtimeProfileCode: "multi_taxi_direct",
+    queueMode: "physical_rank",
+    operatingAuthorizationId: "MTX-TPE-2026-001",
+    status: "checked_out",
+    position: 0,
+    checkedInAt: "2026-07-24T06:30:00.000Z",
+    checkedOutAt: "2026-07-24T06:30:01.000Z",
+    lastUpdatedAt: "2026-07-24T06:30:01.000Z",
+    eligibility: {
+      decision: "denied",
+      reasonCode: "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+      evaluatedAt: "2026-07-24T06:30:01.000Z",
+    },
+    availableActions: [
+      { action: "open_driver", enabled: true, riskLevel: "low" },
+      { action: "force_checkin", enabled: true, riskLevel: "high" },
+      {
+        action: "request_exception_override",
+        enabled: true,
+        riskLevel: "high",
+      },
+    ],
+  },
+  {
+    queueEntryId: "QE-MTX-STAND-DENIED",
+    vehicleId: "VEH-MTX-0199",
+    vehiclePlateNo: "MTX-0199",
+    driverId: "DRV-MTX-0199",
+    driverName: "林建成",
+    siteId: "STD-CITY-HALL",
+    serviceAreaCode: "TPE",
+    runtimeProfileCode: "multi_taxi_direct",
+    queueMode: "taxi_stand",
+    operatingAuthorizationId: "MTX-TPE-2026-001",
+    status: "checked_out",
+    position: 0,
+    checkedInAt: "2026-07-24T06:31:00.000Z",
+    checkedOutAt: "2026-07-24T06:31:01.000Z",
+    lastUpdatedAt: "2026-07-24T06:31:01.000Z",
+    eligibility: {
+      decision: "denied",
+      reasonCode: "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+      evaluatedAt: "2026-07-24T06:31:01.000Z",
+    },
+    availableActions: [
+      { action: "open_vehicle", enabled: true, riskLevel: "low" },
+      { action: "approve_override", enabled: true, riskLevel: "high" },
+    ],
+  },
+  {
+    queueEntryId: "QE-ORDINARY-PHYSICAL-001",
+    vehicleId: "VEH-ORD-001",
+    vehiclePlateNo: "AKQ-5566",
+    driverId: "DRV-ORD-001",
+    driverName: "張志豪",
+    siteId: "STN-TAIPEI-EAST",
+    serviceAreaCode: "TPE",
+    runtimeProfileCode: "ordinary_taxi",
+    queueMode: "physical_rank",
+    operatingAuthorizationId: null,
+    status: "checked_in",
+    position: 3,
+    checkedInAt: "2026-07-24T06:10:00.000Z",
+    checkedOutAt: null,
+    lastUpdatedAt: "2026-07-24T06:30:00.000Z",
+    eligibility: {
+      decision: "eligible",
+      reasonCode: null,
+      evaluatedAt: "2026-07-24T06:30:00.000Z",
+    },
+    availableActions: [
+      { action: "open_driver", enabled: true, riskLevel: "low" },
+    ],
+  },
+];
+
 const identityContext = {
   actorType: "ops_user",
   actorId: "ops-map-closeout",
@@ -296,6 +407,27 @@ const server = createServer((request, response) => {
 
   if (url.pathname === "/api/dispatch/tasks") {
     sendJson(response, envelope(listEnvelope(dispatchJobs)));
+    return;
+  }
+
+  if (url.pathname === "/api/dispatch/queue") {
+    sendJson(response, envelope(listEnvelope(queueEntries)));
+    return;
+  }
+
+  const queueEntryMatch = url.pathname.match(
+    /^\/api\/dispatch\/queue\/([^/]+)$/,
+  );
+  if (queueEntryMatch) {
+    const queueEntryId = decodeURIComponent(queueEntryMatch[1]);
+    const found = queueEntries.find(
+      (entry) => entry.queueEntryId === queueEntryId,
+    );
+    if (found) {
+      sendJson(response, envelope(found));
+    } else {
+      sendJson(response, notFoundEnvelope(url.pathname), 404);
+    }
     return;
   }
 

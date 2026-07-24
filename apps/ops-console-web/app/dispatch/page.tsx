@@ -3870,6 +3870,24 @@ export default async function DispatchPage({
               </Link>
             );
           })}
+          <Link
+            href="/dispatch/queue"
+            style={{ ...boardNavLinkStyle, marginLeft: "auto" }}
+            data-screen-link="MTX-QUEUE-UI-01"
+          >
+            <div
+              style={{
+                ...boardNavItemStyle,
+                color: theme.accent,
+                fontWeight: 650,
+              }}
+            >
+              <Pill theme={theme} tone="info" dot>
+                MTX
+              </Pill>
+              <span>{t("dispatch.queue.action.openOperations", locale)}</span>
+            </div>
+          </Link>
         </div>
 
         <div style={boardContentStyle}>
