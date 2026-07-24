@@ -69,13 +69,14 @@ describe("MultiTaxiController ride intake", () => {
     const controller = new MultiTaxiController(service);
 
     const response = await controller.listTripOperationalRecords(
-      { month: "2026-07" },
+      { month: "2026-07", legalHold: "active" },
       "req-records-001",
     );
 
     expect(response.data.items).toEqual(result);
     expect(service.listTripOperationalRecords).toHaveBeenCalledWith({
       month: "2026-07",
+      legalHold: "active",
     });
   });
 

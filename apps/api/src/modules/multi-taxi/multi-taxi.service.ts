@@ -30,6 +30,8 @@ import type {
   MultiTaxiOperatingAuthorizationRecord,
   MultiTaxiTripOperationalAdminView,
   MultiTaxiTripOperationalExportRow,
+  MultiTaxiTripOperationalLegalHoldFilter,
+  MultiTaxiTripOperationalLegalHoldView,
   MultiTaxiTripOperationalRecordQuery,
   OwnedOrderRecord,
   PassengerRideAccessGrant,
@@ -55,6 +57,7 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../service-product/service-product.service";
 import {
@@ -93,6 +96,8 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly ownedMobilityService: OwnedMobilityService,
     @Optional() private readonly repository?: MultiTaxiRepository,
     @Optional() private readonly serviceProductService?: ServiceProductService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   async onModuleInit() {
@@ -281,6 +286,7 @@ export class MultiTaxiService implements OnModuleInit {
     query: MultiTaxiTripOperationalRecordQuery,
   ): Promise<MultiTaxiTripOperationalAdminView[]> {
     const month = this.normalizeMonthFilter(query.month);
+    const legalHold = this.normalizeLegalHoldFilter(query.legalHold);
     const needle = query.q?.trim().toLowerCase() ?? "";
     const records = await Promise.all(
       this.ownedMobilityService
@@ -303,6 +309,9 @@ export class MultiTaxiService implements OnModuleInit {
               record.tripId,
               record.farePolicyVersion,
             ].some((value) => value.toLowerCase().includes(needle)),
+      )
+      .filter((record) =>
+        legalHold === "all" ? true : record.legalHold.state === legalHold,
       )
       .sort((left, right) => right.reservedAt.localeCompare(left.reservedAt));
   }
@@ -1121,6 +1130,65 @@ export class MultiTaxiService implements OnModuleInit {
     return normalized;
   }
 
+  private normalizeLegalHoldFilter(
+    legalHold: MultiTaxiTripOperationalLegalHoldFilter | undefined,
+  ): MultiTaxiTripOperationalLegalHoldFilter {
+    if (legalHold === undefined || legalHold === "all") {
+      return "all";
+    }
+    if (legalHold === "active" || legalHold === "none") {
+      return legalHold;
+    }
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "MULTI_TAXI_RECORDS_LEGAL_HOLD_INVALID",
+      "legalHold must be all, active, or none.",
+    );
+  }
+
+  private readOperationalRecordLegalHold(
+    orderId: string,
+  ): MultiTaxiTripOperationalLegalHoldView {
+    const unavailable: MultiTaxiTripOperationalLegalHoldView = {
+      state: "unavailable",
+      family: "proof_bundle",
+      subjectId: orderId,
+      activeHoldCount: null,
+      activeHolds: null,
+    };
+    if (!this.auditNotificationService) {
+      return unavailable;
+    }
+
+    try {
+      const governance =
+        this.auditNotificationService.getEvidenceSubjectGovernance(
+          "proof_bundle",
+          orderId,
+        );
+      if (!Array.isArray(governance.activeLegalHolds)) {
+        return unavailable;
+      }
+      const activeHolds = governance.activeLegalHolds.map((hold) => ({
+        holdId: hold.holdId,
+        caseNumber: hold.caseNumber,
+        reasonCode: hold.reasonCode,
+        reasonNote: hold.reasonNote,
+        placedByActorId: hold.placedByActorId,
+        placedAt: hold.placedAt,
+      }));
+      return {
+        state: activeHolds.length > 0 ? "active" : "none",
+        family: "proof_bundle",
+        subjectId: orderId,
+        activeHoldCount: activeHolds.length,
+        activeHolds,
+      };
+    } catch {
+      return unavailable;
+    }
+  }
+
   private async mapOrderToOperationalRecord(
     order: OwnedOrderRecord,
   ): Promise<MultiTaxiTripOperationalAdminView> {
@@ -1165,6 +1233,7 @@ export class MultiTaxiService implements OnModuleInit {
       chargingMode: order.fixedPrice ? "platform_quote" : "meter",
       generatedAt,
       retainUntil: this.plusRetentionDays(generatedAt, 730),
+      legalHold: this.readOperationalRecordLegalHold(order.orderId),
     };
   }
 
