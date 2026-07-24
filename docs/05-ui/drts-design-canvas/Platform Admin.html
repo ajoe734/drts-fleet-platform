@@ -48,6 +48,8 @@
 <script type="text/babel" src="platform-regulator.jsx"></script>
 <script type="text/babel" src="platform-service-area.jsx"></script>
 <script type="text/babel" src="platform-p5.jsx"></script>
+<script type="text/babel" src="platform-mtx-auth.jsx"></script>
+<script type="text/babel" src="platform-mtx-commerce.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -131,6 +133,33 @@ function App() {
           <DCArtboard id="p5-a02" label="P5-A02 · 補正佇列 · 查看/退件/核准" width={W} height={H}><Bare><PA_P5Queue theme={th} /></Bare></DCArtboard>
           <DCArtboard id="p5-a03b" label="公開車資版本 · 草稿/備查/生效/停用 + 預覽" width={W} height={H}><Bare><PA_P5Fare theme={th} /></Bare></DCArtboard>
           <DCArtboard id="p5-a05" label="P5-A05 · 行程營運紀錄（730 天）+ 匯出" width={W} height={H}><Bare><PA_P5Records theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="mtx-auth" title="03i · 多元計程車營運許可 · MTX-AUTH-UI-01..06" subtitle="draft→approved→suspended→expired/revoked · 能力驅動 · 智行示範車隊 MTX-TPE-2026-001">
+          <DCArtboard id="mtx-01" label="UI-01 · Registry · 篩選+到期警示" width={W} height={H}><Hero url="/multi-taxi-authorizations"><MTX_Registry theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="mtx-02" label="UI-02 · Detail approved · 8 區塊+動作矩陣" width={W} height={H}><Bare><MTX_Detail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-02b" label="UI-02 · Detail revoked · 唯讀無撤销/還原" width={W} height={H}><Bare><MTX_Detail theme={th} status="revoked" /></Bare></DCArtboard>
+          <DCArtboard id="mtx-03" label="UI-03 · Draft Editor" width={W} height={H}><Bare><MTX_Draft theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-03b" label="UI-03 · 驗證錯誤 · 欄位+摘要兩層" width={W} height={H}><Bare><MTX_Draft theme={th} error /></Bare></DCArtboard>
+          <DCArtboard id="mtx-04" label="UI-04 · 啟用確認 · 後端車輛數、不推估影響數" width={W} height={H}><Bare><MTX_Confirm theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-05" label="UI-05 · 授權車輛名單 · 暫停=design-only" width={W} height={H}><Bare><MTX_Vehicles theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mtx-06" label="UI-06 · 衝突/權限態 ×8" width={W} height={H}><Bare><MTX_States theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-rating" title="03j · 評價治理 · P5-RATE-UI-01..03" subtitle="active/under_review/invalidated · 彙總 server-owned 不可編輯 · unavailable 不得假冒">
+          <DCArtboard id="rate-01" label="UI-01 · 審查佇列" width={W} height={H}><Hero url="/p5-ratings"><P5R_Queue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="rate-02" label="UI-02 · 審查詳情 · 治理歷程" width={W} height={H}><Bare><P5R_Detail theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="rate-02b" label="UI-02 · 作廢確認 · 必填理由+彙總重建" width={W} height={H}><Bare><P5R_Detail theme={th} confirm /></Bare></DCArtboard>
+          <DCArtboard id="rate-03" label="UI-03 · 駕駛評價權威 · rated/new/unavailable" width={W} height={H}><Bare><P5R_Authority theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="p5-commerce" title="03k · 商務與紀錄 · P5-COM-UI-01..05" subtitle="fail-closed · 無 mark-paid · 保存與法律保留分離 · 匯出伺服器端產生">
+          <DCArtboard id="com-01" label="UI-01 · 費率異常佇列 · 5 種原因" width={W} height={H}><Hero url="/p5-fare-anomalies"><P5C_Anomaly theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="com-02" label="UI-02 · 付款例外 · 6 狀態" width={W} height={H}><Bare><P5C_Payment theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-03" label="UI-03 · 乘車證明支援 · 6 支援態" width={W} height={H}><Bare><P5C_Cert theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-04" label="UI-04 · 營運紀錄查詢 · 缺值=未取得" width={W} height={H}><Bare><P5C_Records theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-05" label="UI-05 · 受控匯出 · 範圍確認" width={W} height={H}><Bare><P5C_Export theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="com-05b" label="UI-05 · 匯出執行中 running 64%" width={W} height={H}><Bare><P5C_Export theme={th} phase="running" /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>

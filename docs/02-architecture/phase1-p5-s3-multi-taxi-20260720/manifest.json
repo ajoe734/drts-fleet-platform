@@ -1,14 +1,16 @@
 {
   "pack": "phase1-p5-s3-multi-taxi",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "archivedDate": "2026-07-20",
-  "currentDesignReconciliationDate": "2026-07-23",
+  "currentDesignReconciliationDate": "2026-07-24",
   "currentUploadedDesignArchiveDate": "2026-07-23",
+  "currentExecutionBaselineCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
+  "full17ScreenApprovalDate": "2026-07-24",
   "runtimeProfile": "multi_taxi_direct",
   "productName": "智行叫車",
   "serviceCategory": "多元化計程車",
   "baseBranch": "dev",
-  "verifiedBaselineCommit": "ff16b7131bee4594ec56b195d43539a8d65ce379",
+  "verifiedBaselineCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
   "sourceOfTruth": "source_specs/",
   "sourceDocs": [
     {
@@ -68,26 +70,32 @@
     {
       "path": "06_multi_taxi_runtime_execution_register_20260723.md",
       "role": "execution register",
-      "reviewedCommit": "bf3990d9c",
+      "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
       "status": "current"
     },
     {
       "path": "07_fleets_execution_tasks_20260723.md",
       "role": "Fleets execution packet",
-      "reviewedCommit": "b8f1f56b20a77c8abeabf0ac3c51b8443d5616af",
-      "status": "current"
+      "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
+      "status": "framework_current_scope_superseded_by_10"
     },
     {
       "path": "08_multi_taxi_operations_ui_design_requirements_20260723.md",
       "role": "operations UI design requirements",
-      "reviewedCommit": "b8f1f56b20a77c8abeabf0ac3c51b8443d5616af",
-      "status": "ready_for_design"
+      "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
+      "status": "approved_for_full_suite_implementation"
     },
     {
       "path": "09_uploaded_system_design_archive_execution_tasks_20260723.md",
-      "role": "uploaded design archive reconciliation and Fleets execution addendum",
+      "role": "uploaded design provenance and historical minimal-scope reconciliation",
       "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
-      "status": "ready_for_execution"
+      "status": "scope_superseded"
+    },
+    {
+      "path": "10_full_17_screen_fleets_execution_tasks_20260724.md",
+      "role": "current full 17-screen Fleets execution register",
+      "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c",
+      "status": "approved_for_dispatch"
     }
   ],
   "deliverables": [
@@ -100,6 +108,7 @@
     "07_fleets_execution_tasks_20260723.md",
     "08_multi_taxi_operations_ui_design_requirements_20260723.md",
     "09_uploaded_system_design_archive_execution_tasks_20260723.md",
+    "10_full_17_screen_fleets_execution_tasks_20260724.md",
     "manifest.json"
   ],
   "mergedMigrations": [
@@ -111,7 +120,7 @@
     "V0056__multi_taxi_runtime_compliance_closure.sql",
     "V0057__runtime_profile_service_product_policy.sql"
   ],
-  "nextMigrationPolicy": "reserve next unused number on implementation branch; suggested V0056-V0058 if still free",
+  "nextMigrationPolicy": "reserve the next unused migration number on each implementation branch; do not reuse a number already present on current dev",
   "architectureDecisions": {
     "runtimeProfiles": [
       "ordinary_taxi",
@@ -129,20 +138,29 @@
   "designStatus": {
     "systemUiBriefApproved": true,
     "canonicalCanvasAvailable": true,
-    "designReadyForImplementation": false,
-    "remainingGates": [
+    "designReadyForImplementation": true,
+    "approvedScreenCount": 17,
+    "legalMinimumDeltas": [
       "existing_authorization_page_minimum_delta",
       "existing_dispatch_queue_labels_and_denial_copy",
       "existing_passenger_rating_payment_receipt_states",
       "two_year_record_query_download"
     ],
-    "executionPacket": "07_fleets_execution_tasks_20260723.md",
+    "productApprovedScreenGroups": {
+      "authorization": 6,
+      "queueOperations": 3,
+      "ratingGovernance": 3,
+      "commerceRecords": 5
+    },
+    "executionFramework": "07_fleets_execution_tasks_20260723.md",
+    "executionPacket": "10_full_17_screen_fleets_execution_tasks_20260724.md",
     "requirementsDocument": "08_multi_taxi_operations_ui_design_requirements_20260723.md",
-    "executionAddendum": "09_uploaded_system_design_archive_execution_tasks_20260723.md",
-    "archiveOverlay": {
+    "historicalMinimalDecision": "09_uploaded_system_design_archive_execution_tasks_20260723.md",
+    "sourceSnapshot": {
       "path": "../../05-ui/drts-design-canvas/archive/20260723-driver-app-15/",
       "sourceZipSha256": "634f27855d141633a1c1de102a2fee1c2a03850949f43b927c5fb6dea859a915",
-      "authority": "non_canonical_visual_reference",
+      "authority": "approved_design_source_provenance",
+      "canonicalPromotionDate": "2026-07-24",
       "archivedFiles": 8,
       "filesDifferentFromReviewedCommit": 7,
       "reviewedCommit": "2711c366f2e103ae9556d5afaf4558dfd9b0bb4c"
@@ -169,21 +187,41 @@
       "atomic_disclosure_snapshot",
       "live_passenger_api_sse",
       "production_passenger_fixture_gate",
-      "multi_taxi_authorization_admin_ui"
+      "multi_taxi_authorization_admin_ui_minimum"
     ],
     "remainingWorkflowClosure": [
       "current_head_multi_taxi_e2e",
-      "minimum_queue_labels_and_denial_copy",
+      "authorization_six_screen_suite",
+      "queue_three_screen_suite",
+      "rating_governance_three_screen_suite",
       "passenger_rating_payment_receipt_state_verification",
-      "two_year_operational_record_query_download",
+      "fare_anomaly_console",
+      "payment_exception_detail",
+      "certificate_support",
+      "full_operational_record_query_detail",
+      "server_controlled_export",
+      "legal_hold_read_filter",
       "s3_production_verification"
     ],
-    "deferredOutsideLegalMvp": [
+    "productApprovedExpandedScope": [
       "rating_moderation_console",
       "payment_exception_console",
       "fare_anomaly_triage_console",
-      "legal_hold",
+      "certificate_support_console",
+      "dedicated_queue_operations",
+      "six_screen_authorization_suite",
+      "legal_hold_read_filter",
       "export_job_orchestration",
+      "full_records_query_detail"
+    ],
+    "commandPending": [
+      "authorization_revoke_restore_delete",
+      "vehicle_suspend_remove",
+      "rating_restore",
+      "certificate_regeneration",
+      "legal_hold_create_release"
+    ],
+    "stillNotRequiredDeliverables": [
       "mandatory_figma_png_design_qa_package"
     ]
   }

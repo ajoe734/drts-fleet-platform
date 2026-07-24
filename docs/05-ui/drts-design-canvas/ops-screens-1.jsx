@@ -8,6 +8,7 @@ const OPS_NAV = [
   { divider: '即時派遣 · Live Ops' },
   { key: 'dispatch',   icon: 'dispatch',    label: '派車調度 · Dispatch', badge: '23', badgeTone: 'accent' },
   { key: 'av-fallback',icon: 'incidents',   label: 'AV Fallback · 沙盒例外', badge: '2', badgeTone: 'warn' },
+  { key: 'queue-ops',  icon: 'tracking',    label: '佇列營運 · Queue Ops', badge: '1', badgeTone: 'danger' },
   { key: 'callcenter', icon: 'callcenter',  label: '客服中心 · Callcenter' },
   { divider: '案件處理 · Casework' },
   { key: 'complaints', icon: 'complaints',  label: '客訴 · Complaints', badge: '3', badgeTone: 'danger' },

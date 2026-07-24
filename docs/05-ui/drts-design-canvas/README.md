@@ -64,19 +64,26 @@ The source bundle also included three nested directories that are NOT brought ac
 - `export/` — older self-contained Driver App export artifact, superseded by the current `Driver App.html`.
 - `.scratch/` — debug screenshot from the design session.
 
-## Submitted overlay: 2026-07-23
+## Approved 17-screen update: 2026-07-24
 
 The later `driver app (15).zip` submission is preserved under
-[`archive/20260723-driver-app-15/`](./archive/20260723-driver-app-15/). It is an
-eight-file, byte-exact audit overlay rather than a replacement for this
-canonical canvas. Seven files differ from `dev@2711c366f`; the submitted
-`Driver App.html` already matches the canonical file.
+[`archive/20260723-driver-app-15/`](./archive/20260723-driver-app-15/) as an
+eight-file, byte-exact source snapshot. Product Owner approved the complete
+17-screen update on 2026-07-24, and its seven files that differed from
+`dev@2711c366f` are promoted into this canonical canvas. The submitted
+`Driver App.html` already matched.
 
-Only the authorization, existing-dispatch labels/denial copy, minimum records
-query/download, and S-3 verification references may be adapted. Requirement
-v1.1 and the linked Fleets execution addendum reject the overlay's dedicated
-queue pages, extra lifecycle commands, moderation/exception consoles, legal
-hold, and export-job orchestration.
+Canonical coverage added:
+
+```text
+platform-mtx-auth.jsx       MTX-AUTH-UI-01..06
+ops-mtx-queue.jsx           MTX-QUEUE-UI-01..03
+platform-mtx-commerce.jsx   P5-RATE-UI-01..03 + P5-COM-UI-01..05
+```
+
+The full suite is product-approved, not entirely law-mandated. Prototype
+actions labeled `design-only / command pending` remain disabled until their
+backend command, capability, audit, and tests land.
 
 ## Relationship to the predecessor stub
 

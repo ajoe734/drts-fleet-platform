@@ -1,7 +1,8 @@
-# 上傳系統設計封存與 Fleets Execution Tasks
+# 上傳系統設計來源 Snapshot 與歷史最小任務
 
-**文件版本：** v1.0
+**文件版本：** v1.1
 **日期：** 2026-07-23
+**範圍狀態：** Superseded by full 17-screen decision on 2026-07-24
 **執行基準：** `dev@2711c366f2e103ae9556d5afaf4558dfd9b0bb4c`
 **來源：** `driver app (15).zip`
 **來源 SHA-256：**
@@ -10,7 +11,14 @@
 `docs/05-ui/drts-design-canvas/archive/20260723-driver-app-15/`
 **目的：** 保存上傳設計、裁決與 v1.1 的差異，並把可採用部分轉成
 Fleets 可直接執行的最小任務。
-**邊界：** 本文件不授權發布、部署，也不授權任何 v1.1 已延後的功能。
+**邊界：** 本文件保留 ZIP provenance、hash 與 2026-07-23 分析歷史。
+2026-07-24 起不得再以本文件的「不派工」裁決阻擋 17 頁開發。
+
+> **Current scope authority:** Product Owner 已核准全部 17 頁。
+> 開發範圍與派工一律依
+> `08_multi_taxi_operations_ui_design_requirements_20260723.md` v1.2 及
+> `10_full_17_screen_fleets_execution_tasks_20260724.md`。本文件其餘 minimal
+> scope／不派工段落只作決策歷史。
 
 ---
 
@@ -298,7 +306,7 @@ retention editor、payment exception console、certificate support console。
 payment failed 與未授權 records access。Fleet H 可提出 release readiness，
 不得自行發布或部署。
 
-# 7. 不派工清單
+# 7. 2026-07-23 歷史不派工清單（已 superseded）
 
 下列內容雖存在於 archive，這一輪不得建立 execution task：
 
@@ -351,7 +359,8 @@ Baseline-SHA: <preflight dev SHA>
 Requirement: 08_multi_taxi_operations_ui_design_requirements_20260723.md
 Design-Source: docs/05-ui/drts-design-canvas/archive/20260723-driver-app-15/
 Archive-SHA256: 634f27855d141633a1c1de102a2fee1c2a03850949f43b927c5fb6dea859a915
-Deferred-Scope-Added: no
+Historical-Minimal-Scope-Only: yes
+Current-Dispatch-Authority: 10_full_17_screen_fleets_execution_tasks_20260724.md
 ```
 
 PR 必須附 preflight、變更範圍、測試、實際 UI screenshot、API/contract

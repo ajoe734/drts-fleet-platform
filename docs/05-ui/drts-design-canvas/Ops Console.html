@@ -44,6 +44,7 @@
 <script type="text/babel" src="ops-supply.jsx"></script>
 <script type="text/babel" src="ops-av-fallback.jsx"></script>
 <script type="text/babel" src="ops-sos.jsx"></script>
+<script type="text/babel" src="ops-mtx-queue.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -116,6 +117,13 @@ function App() {
           <DCArtboard id="s3-o04" label="S3-O04 · 已由 王小明 於 14:31 確認（他人無主確認鈕）" width={W} height={H}><Bare><S3O_Detail theme={th} phase="acked" /></Bare></DCArtboard>
           <DCArtboard id="s3-o05" label="S3-O05 · 調查時間軸 · 補充/附件/結案" width={W} height={H}><Bare><S3O_Detail theme={th} phase="inv" /></Bare></DCArtboard>
           <DCArtboard id="s3-o06" label="S3-O06 · 提示音未啟用健康警示（視覺等效不只靠聲音）" width={W} height={H}><Bare><S3O_Queue theme={th} soundOff /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="queue-ops" title="04c · 佇列營運 Queue Operations · MTX-QUEUE-UI-01..03" subtitle="queue mode 文字標示 · multi_taxi_direct 禁實體排班/招呼站 · 無 override">
+          <DCArtboard id="queue-01" label="UI-01 · 佇列總覽 · 含被拒列" width={W} height={H}><Hero url="/dispatch/queue"><OC_QueueOverview theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="queue-02" label="UI-02 · 佇列項目詳情 · 虛擬媒合" width={W} height={H}><Bare><OC_QueueEntry theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="queue-03" label="UI-03 · 實體排班拒絕 · 不可繞過" width={W} height={H}><Bare><OC_QueueDenial theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="queue-03b" label="UI-03 · 招呼站拒絕文案變體" width={W} height={H}><Bare><OC_QueueDenial theme={th} stand /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="monitor" title="06 · 營運監控">
