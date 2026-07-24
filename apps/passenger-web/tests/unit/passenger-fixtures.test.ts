@@ -18,6 +18,10 @@ describe("passenger fixtures", () => {
     expect(resolvePassengerScreenId(undefined, "fares")).toBe("A03");
   });
 
+  it("resolves receipt route to P5-10 by default", () => {
+    expect(resolvePassengerScreenId(undefined, "receipt")).toBe("P5-10");
+  });
+
   it("resolves fixture mode unless live is explicit", () => {
     expect(resolvePassengerDataMode(undefined)).toBe("fixture");
     expect(resolvePassengerDataMode("live")).toBe("live");

@@ -71,7 +71,7 @@ export function getToneRamp(tone: PassengerBadgeTone): ToneRamp {
 
 export function resolvePassengerScreenId(
   value: string | string[] | undefined,
-  kind: "ride" | "fares",
+  kind: "ride" | "fares" | "receipt",
 ): PassengerScreenId {
   const normalized = Array.isArray(value) ? value[0] : value;
   if (
@@ -81,12 +81,13 @@ export function resolvePassengerScreenId(
     return normalized as PassengerScreenId;
   }
 
-  return kind === "fares" ? "A03" : "P5-01";
+  if (kind === "fares") return "A03";
+  return kind === "receipt" ? "P5-10" : "P5-01";
 }
 
 export function resolvePassengerRideFixture(
   token: string,
-  kind: "ride" | "fares",
+  kind: "ride" | "fares" | "receipt",
   screenParam: string | string[] | undefined,
 ): PassengerRideFixture {
   const screenId = resolvePassengerScreenId(screenParam, kind);
