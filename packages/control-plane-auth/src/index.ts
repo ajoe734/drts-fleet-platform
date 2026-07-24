@@ -93,6 +93,8 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "reports:read",
     "reports:write",
     "forwarder:read",
+    "multi_taxi_ratings:read",
+    "multi_taxi_ratings:moderate",
   ],
   ops_user: [
     "identity:read",
