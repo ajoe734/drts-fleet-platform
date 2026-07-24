@@ -1,11 +1,14 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const ORDER_ID = "ZX-240720-0186";
-const screenshotDir = resolve(
-  process.cwd(),
-  "support/sidecars/P5-PAY-OPS-UI-001/screenshots",
+const screenshotDir = fileURLToPath(
+  new URL(
+    "../../../../support/sidecars/P5-PAY-OPS-UI-001/screenshots/",
+    import.meta.url,
+  ),
 );
 
 mkdirSync(screenshotDir, { recursive: true });

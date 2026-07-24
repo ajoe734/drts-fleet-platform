@@ -4,8 +4,9 @@
 
 - Task ID: `P5-PAY-OPS-UI-001`
 - Screen ID: `P5-COM-UI-02`
-- Branch: `codex/p5-pay-ops-ui-001`
-- Required base: `8f0a8cf3bfcfb11a6afece2ccf28bf592d56941f`
+- Branch: `codex/p5-pay-ops-ui-001-final`
+- Merged requirements base: `c5df24a41ba8ed9c790649719dd731b560cde6fd`
+- Clean integration base: `54675de25`
 - Route: `/payments/{orderId}`
 - API read authority: `GET /api/payment-exceptions/{orderId}`
 - Status: implemented and verified locally; not pushed, deployed, or released
@@ -65,21 +66,21 @@ command contract was invented in this branch.
 ## Persistence
 
 Migration
-`infra/migrations/V0059__multi_taxi_payment_exception_read_authority.sql`
+`infra/migrations/V0060__multi_taxi_payment_exception_read_authority.sql`
 adds:
 
 - non-negative `attempt_count`;
 - JSON-array `available_actions`.
 
-The migration number assumes `P5-RATE-003` migration `V0058` merges before this
-task, matching the approved Platform Admin merge order. The API query joins the
-existing operational record only to obtain `trip_id`; no reporting-filing
-source file was changed.
+The final migration allocation reserves `V0058` for rating invalidation and
+`V0059` for fare anomaly authority, so this task uses `V0060`. The API query
+joins the existing operational record only to obtain `trip_id`; no
+reporting-filing source file was changed.
 
 ## Evidence
 
-- `screenshots/01-payment-failed-detail.png` SHA-256 `21f6079f9b1d01f54922949cc40599c3c4d7b38da4738e43ef117382f58a84ff`
-- `screenshots/02-payment-manual-recovery.png` SHA-256 `5f2aa686a620be0c2fcb1135d9526c5d091607042ed41a1cf2088e3cd1284d4d`
+- `screenshots/01-payment-failed-detail.png` SHA-256 `946d96c123125636ecd759f7e2d896962756672e4794fe8f29d746580fa811b5`
+- `screenshots/02-payment-manual-recovery.png` SHA-256 `b870140b95fd8f7f2dada02771f595a93f1a6e653521f2b55c1a1ebc0e7a858f`
 
 Both screenshots were captured from the routed Platform Admin application at
 1280 x 720 through the feature Playwright suite.
