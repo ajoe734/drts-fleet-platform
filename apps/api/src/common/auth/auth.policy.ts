@@ -261,6 +261,19 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    upperMethod === "GET" &&
+    (routePath === "dispatch/queue" ||
+      /^dispatch\/queue\/[^/]+$/.test(routePath))
+  ) {
+    return {
+      routeKey: `dispatch:queue:read:${routePath}`,
+      requiredScopes: ["dispatch:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops dispatch queue read access",
+    };
+  }
+
   if (routePath.startsWith("orders") || routePath.startsWith("dispatch/")) {
     const readRoute = isReadMethod(upperMethod);
     const scope = routePath.startsWith("dispatch/")

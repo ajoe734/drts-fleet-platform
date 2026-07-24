@@ -123,10 +123,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       status: "assigned",
       taskId: "task-e2e-001",
     });
-    expect(service.assignDispatch).toHaveBeenCalledWith(
-      {},
-      "req-e2e-assign",
-    );
+    expect(service.assignDispatch).toHaveBeenCalledWith({}, "req-e2e-assign");
   });
 
   it("awaits dispatch reassignment before wrapping the API envelope", async () => {
@@ -153,5 +150,54 @@ describe("OwnedMobilityController tenant booking routes", () => {
       {},
       "req-e2e-reassign",
     );
+  });
+
+  it("wraps canonical queue list and detail reads without changing records", () => {
+    const queueEntry = {
+      queueEntryId: "queue-entry-001",
+      vehicleId: "veh-demo-001",
+      siteId: "north-station",
+      runtimeProfileCode: "ordinary_taxi",
+      queueMode: "physical_rank",
+      operatingAuthorizationId: null,
+      status: "checked_in",
+      position: 1,
+      checkedInAt: "2026-07-24T09:00:00.000Z",
+      checkedOutAt: null,
+      driverId: "drv-demo-001",
+      driverName: "Driver One",
+      vehiclePlateNo: "TAXI-001",
+      serviceAreaCode: "TPE",
+      lastUpdatedAt: "2026-07-24T09:00:00.000Z",
+      eligibility: {
+        decision: "eligible",
+        reasonCode: null,
+        evaluatedAt: "2026-07-24T09:00:01.000Z",
+      },
+      availableActions: [],
+    };
+    const service = {
+      listQueueEntries: vi.fn(() => [queueEntry]),
+      getQueueEntry: vi.fn(() => queueEntry),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const listResponse = controller.listQueueEntries("req-queue-list");
+    const detailResponse = controller.getQueueEntry(
+      queueEntry.queueEntryId,
+      "req-queue-detail",
+    );
+
+    expect(listResponse.data).toMatchObject({
+      items: [queueEntry],
+      pageInfo: {
+        page: 1,
+        pageSize: 1,
+        totalItems: 1,
+        totalPages: 1,
+      },
+    });
+    expect(detailResponse.data).toEqual(queueEntry);
+    expect(service.getQueueEntry).toHaveBeenCalledWith(queueEntry.queueEntryId);
   });
 });

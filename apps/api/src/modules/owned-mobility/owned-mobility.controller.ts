@@ -43,7 +43,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { CurrentIdentity } from "../../common/auth";
+import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { OwnedMobilityService } from "./owned-mobility.service";
@@ -483,6 +483,29 @@ export class OwnedMobilityController {
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.reassignDispatch(command, requestId),
+      requestId,
+    );
+  }
+
+  @Get("dispatch/queue")
+  @RequireRealms("ops")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listQueueEntries(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      toApiListData(this.ownedMobilityService.listQueueEntries()),
+      requestId,
+    );
+  }
+
+  @Get("dispatch/queue/:queueEntryId")
+  @RequireRealms("ops")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getQueueEntry(
+    @Param("queueEntryId") queueEntryId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getQueueEntry(queueEntryId),
       requestId,
     );
   }
