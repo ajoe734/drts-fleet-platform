@@ -524,7 +524,9 @@ describe("MultiTaxiService passenger ride authority", () => {
     expect(vehicle.vehicleId).toBe("VEH-TPE-888");
 
     // Query vehicles via service
-    const vehiclesList = service.listAuthorizedVehicles(created.authorizationId);
+    const vehiclesList = service.listAuthorizedVehicles(
+      created.authorizationId,
+    );
     expect(vehiclesList).toHaveLength(1);
     expect(vehiclesList[0]?.vehicleId).toBe("VEH-TPE-888");
 
