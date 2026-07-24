@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
 import type { MultiTaxiService } from "../../src/modules/multi-taxi/multi-taxi.service";
+import type { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
 
 describe("MultiTaxiController ride intake", () => {
   it("awaits passenger ride creation before wrapping the API envelope", async () => {
@@ -281,5 +282,78 @@ describe("MultiTaxiController ride intake", () => {
 
     expect(response.data).toEqual(result);
     expect(service.getDriverRatingAuthority).toHaveBeenCalledWith("driver-001");
+  });
+
+  it("routes controlled export preview, creation, status, and download through reporting authority", async () => {
+    const rows = [{ orderNoMasked: "ZX...86", plateNoMasked: "BK...08" }];
+    const service = {
+      exportTripOperationalRecords: vi.fn().mockResolvedValue({
+        exportedAt: "2026-07-23T00:00:00.000Z",
+        filename: "multi-taxi-trip-records-202607.csv",
+        rows,
+      }),
+    } as unknown as MultiTaxiService;
+    const reporting = {
+      previewMultiTaxiTripExport: vi.fn().mockReturnValue({
+        scope: { month: "2026-07" },
+        recordCount: 1,
+      }),
+      createMultiTaxiTripExportJob: vi.fn().mockReturnValue({
+        jobId: "JOB-001",
+        status: "pending",
+        idempotentReplay: false,
+      }),
+      getMultiTaxiTripExportJob: vi.fn().mockReturnValue({
+        jobId: "JOB-001",
+        status: "completed",
+      }),
+      issueMultiTaxiTripExportDownload: vi.fn().mockReturnValue({
+        jobId: "JOB-001",
+        download: { downloadUrl: "https://downloads.example.test/JOB-001" },
+      }),
+    } as unknown as ReportingFilingService;
+    const identity = {
+      actorId: "platform-admin-001",
+      actorType: "platform_admin",
+      realm: "platform",
+      scopes: ["multi_taxi_records:export"],
+    } as never;
+    const controller = new MultiTaxiController(service, reporting);
+
+    const preview = await controller.previewTripOperationalExport(
+      { month: "2026-07" },
+      identity,
+      "req-preview-001",
+    );
+    const created = await controller.createTripOperationalExportJob(
+      {
+        scope: { month: "2026-07" },
+        purpose: "Monthly review",
+        idempotencyKey: "monthly-review-202607",
+      },
+      identity,
+      "req-create-001",
+    );
+    const status = controller.getTripOperationalExportJob(
+      "JOB-001",
+      identity,
+      "req-status-001",
+    );
+    const download = controller.downloadTripOperationalExport(
+      "JOB-001",
+      identity,
+      "req-download-001",
+    );
+
+    expect(preview.data).toMatchObject({ recordCount: 1 });
+    expect(created.data).toMatchObject({ jobId: "JOB-001" });
+    expect(status.data).toMatchObject({ status: "completed" });
+    expect(download.data).toMatchObject({ jobId: "JOB-001" });
+    expect(reporting.createMultiTaxiTripExportJob).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "Monthly review" }),
+      rows,
+      identity,
+      "req-create-001",
+    );
   });
 });

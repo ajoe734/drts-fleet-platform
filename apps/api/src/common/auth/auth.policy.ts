@@ -104,6 +104,18 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "platform-admin/multi-taxi-trip-records/export-jobs" ||
+    routePath.startsWith("platform-admin/multi-taxi-trip-records/export-jobs/")
+  ) {
+    return {
+      routeKey: `multi-taxi-records:export:${upperMethod}`,
+      requiredScopes: ["multi_taxi_records:export"],
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Controlled multi-taxi operational-record export",
+    };
+  }
+
   if (routePath.startsWith("platform-admin/")) {
     return {
       routeKey: `platform-admin:${upperMethod}`,

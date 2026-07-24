@@ -4884,6 +4884,7 @@ export const OPERATIONAL_REPORT_JOB_TYPES = [
   "revenue_summary",
   "incident_register",
   "maintenance_overview",
+  "multi_taxi_trip_records",
   // Phase 1 delta (SD §1.6): daily dispatch record + six-month operations summary.
   "daily_dispatch_record",
   "six_month_operations_summary",
@@ -4896,6 +4897,7 @@ export const REPORT_JOB_TYPES = [
 export type ReportJobType = (typeof REPORT_JOB_TYPES)[number];
 
 export const REPORT_JOB_STATUSES = [
+  "pending",
   "queued",
   "running",
   "completed",
@@ -6482,3 +6484,4 @@ export * from "./ui-runtime";
 export * from "./phase1-delta-supply-eligibility";
 export * from "./phase2-tesla-fsd-sandbox";
 export * from "./phase1-p5-s3-multi-taxi";
+export * from "./p5-fare-anomaly-admin";

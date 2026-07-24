@@ -17,6 +17,7 @@
 
 import type {
   AddressPayload,
+  ControlledDownloadRecord,
   MoneyAmount,
   OwnedOrderStatus,
   PassengerProfile,
@@ -688,6 +689,51 @@ export interface MultiTaxiTripOperationalExportRow {
   chargingMode: "meter" | "platform_quote";
   generatedAt: string;
   retainUntil: string;
+}
+
+export type MultiTaxiTripOperationalExportJobStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
+
+export interface MultiTaxiTripOperationalExportPreview {
+  scope: MultiTaxiTripOperationalRecordQuery;
+  recordCount: number;
+  format: "csv";
+  purposeRequired: true;
+  previewedAt: string;
+}
+
+export interface CreateMultiTaxiTripOperationalExportJobCommand {
+  scope?: MultiTaxiTripOperationalRecordQuery;
+  purpose: string;
+  idempotencyKey: string;
+}
+
+export interface MultiTaxiTripOperationalExportJobAccepted {
+  jobId: string;
+  status: MultiTaxiTripOperationalExportJobStatus;
+  idempotentReplay: boolean;
+}
+
+export interface MultiTaxiTripOperationalExportJobView {
+  jobId: string;
+  status: MultiTaxiTripOperationalExportJobStatus;
+  scope: MultiTaxiTripOperationalRecordQuery;
+  purpose: string;
+  recordCount: number;
+  requestedByActorId: string;
+  downloadAvailable: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MultiTaxiTripOperationalExportDownload {
+  jobId: string;
+  recordCount: number;
+  manifestHash: string;
+  download: ControlledDownloadRecord;
 }
 
 // ===========================================================================
