@@ -11,6 +11,11 @@ import {
   parseCertificateSupportList,
   parseCertificateSupportView,
 } from "../../app/multi-taxi-certificates/certificate-support-model";
+import {
+  certificateStateCopy,
+  certificateSupportCopy,
+  displayCertificateValue,
+} from "../../app/multi-taxi-certificates/translations";
 
 const baseView = {
   certificateId: "receipt-001",
@@ -102,5 +107,9 @@ describe("certificate support model", () => {
   it("uses the existing platform read authority", () => {
     expect(hasCertificateReadScope(["foundation:read"])).toBe(true);
     expect(hasCertificateReadScope(["billing:read"])).toBe(false);
+    expect(certificateSupportCopy("zh", "retryRead")).toBe("重新讀取");
+    expect(certificateSupportCopy("en", "retryRead")).toBe("Retry read");
+    expect(certificateStateCopy("en", "superseded").label).toBe("Superseded");
+    expect(displayCertificateValue("en", null)).toBe("Unavailable");
   });
 });

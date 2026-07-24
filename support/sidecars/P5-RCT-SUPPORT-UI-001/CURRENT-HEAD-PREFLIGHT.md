@@ -52,17 +52,32 @@ change is importing that module from `apps/api/src/app.module.ts`.
 
 ## Automated verification
 
-| Check                           | Result                   |
-| ------------------------------- | ------------------------ |
-| API full Vitest                 | `129 files / 873 passed` |
-| Platform Admin workspace Vitest | `1 file / 11 passed`     |
-| Certificate Support Playwright  | `7 passed`               |
-| API typecheck                   | passed                   |
-| Platform Admin typecheck        | passed                   |
-| API lint                        | passed                   |
-| Platform Admin lint             | passed                   |
-| API production build            | passed                   |
-| Platform Admin production build | passed                   |
+| Check                           | Result                                    |
+| ------------------------------- | ----------------------------------------- |
+| API full Vitest                 | `129 files / 873 passed`                  |
+| Platform Admin workspace Vitest | `1 file / 11 passed`                      |
+| Certificate Support Playwright  | `7 passed`                                |
+| Repository i18n guard           | `432 files / 0 violations / 0 exemptions` |
+| API typecheck                   | passed                                    |
+| Platform Admin typecheck        | passed                                    |
+| API lint                        | passed                                    |
+| Platform Admin lint             | passed                                    |
+| API production build            | passed                                    |
+| Platform Admin production build | passed                                    |
+
+### PR #1142 i18n CI repair
+
+- Removed all 34 inline JSX/attribute copy violations from
+  `certificate-support-screen.tsx`.
+- Added feature-local `translations.ts` with independently maintainable
+  Traditional Chinese and English copy, state labels, and value/date/money
+  formatters.
+- Kept Traditional Chinese as the current default through the existing locale
+  context; no global translation, navigation, or shell file changed.
+- Added no i18n exemption.
+- Re-ran all seven Playwright cases against the formal sidecar screenshot path.
+  Existing screenshot files remain the canonical visual evidence because the
+  rendered default-language content did not change.
 
 Playwright uses controlled API responses and is not represented as live
 production evidence. It verifies:
