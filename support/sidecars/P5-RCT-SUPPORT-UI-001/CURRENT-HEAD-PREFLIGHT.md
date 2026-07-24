@@ -1,8 +1,9 @@
 # P5-RCT-SUPPORT-UI-001 Current-Head Preflight
 
 - Task: `P5-COM-UI-03` / `P5-RCT-SUPPORT-UI-001`
-- Branch: `codex/p5-rct-support-ui-001`
-- Required baseline: `c5df24a41ba8ed9c790649719dd731b560cde6fd`
+- Branch: `codex/p5-rct-support-ui-001-final`
+- Merged requirements baseline: `c5df24a41ba8ed9c790649719dd731b560cde6fd`
+- Clean integration baseline: `54675de25`
 - Status: `implementation_complete_upstream_producer_blocked`
 - Evidence date: `2026-07-24`
 
