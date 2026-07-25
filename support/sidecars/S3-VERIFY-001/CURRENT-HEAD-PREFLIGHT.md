@@ -5,95 +5,125 @@
 - Task: `S3-VERIFY-001`
 - Owner: `Codex`
 - Reviewer: `Claude2`
-- Inspected commit: `18762ec51b4d65e71cc5b4e11fe7ca57ad85af69`
+- Inspected product/runtime commit: `b5e35eccab8150d8069213f6708254b1ce939872`
 - Inspection date: `2026-07-25`
 
 ## Current-Head Inventory
 
-| Acceptance slice | Status | Evidence anchors |
-| --- | --- | --- |
-| current-head driver/API E2E | `verified_repo_local` | `tests/e2e/E2E-017-driver-sos-incident.sh` passed on `2026-07-25` against repo-local API runtime `http://localhost:3011` (health `200 OK`); evidence: `incidentId=INC-000002`, `sosEventId=a384287d-8ea1-4ea6-88a1-0cbc7e998b26`, `eventNo=SOS-20260725020324-2B72D9`, driver incident-list still `403` |
-| API SOS create + replay idempotency | `verified` | `apps/api/tests/integration/int-s3-001-driver-sos-idempotency.test.ts:225-295` |
-| Driver offline durable outbox + replay state | `verified` | `apps/driver-app/tests/unit/driver-sos-outbox.test.ts:38-168` |
-| Driver SOS screen flow + forwarded-context projection | `verified` | `apps/driver-app/tests/unit/incident-screen.test.ts:101-224`, `apps/driver-app/app/incident.tsx:180-216` |
-| Ops incident list/timeline/service-recovery projection | `verified` | `apps/api/tests/unit/incident.controller.test.ts:20-274` |
-| Ops incident event stream publish | `verified` | `apps/api/tests/unit/ops-dispatch-events.service.test.ts:59-216` |
-| Screenshot evidence with runtime source label | `partial` | `support/sidecars/DRV-UI-010/DRV-UI-010-VERIFICATION-PACKET.md:71-72,91-94`, `support/sidecars/DRV-UI-010/ui-text-snapshots.md:83-95` |
-| Android / iOS physical offline replay | `blocked_ext` | No emulator / device execution in this worker; task brief forbids replacing device evidence with local mock. |
-| Attachment security scan | `missing_evidence` | `infra/migrations/V0052__s3_driver_sos.sql:83-103` creates `safety.driver_sos_attachments`, but `packages/contracts/src/phase1-p5-s3-multi-taxi.ts:627-639` defines `SubmitDriverSosEventCommand` without attachment fields, `apps/api/src/modules/driver-sos/driver-sos.controller.ts:12-25` exposes only `POST /driver/sos-events`, and `apps/api/src/modules/driver-sos/driver-sos.repository.ts:80-92,389-501` persists only events/timelines/outbox. `apps/driver-app/app/sos.tsx:334-361,672-761,1086-1196` plus `apps/driver-app/lib/driver-sos-outbox.ts:131-218,348-364` still show attachment drafts staying local, while `buildDriverSosSubmitCommand` at `apps/driver-app/lib/driver-sos-outbox.ts:208-220` sends no attachment metadata. |
-| Alert p95 measured in production | `blocked_ext` | No production observability access in this worker; local unit/integration timings are not acceptable production proof. |
-| Forbidden-vocabulary scan | `verified_with_gap` | Android incident text snapshot is clean for the forbidden list, but mirrored/forwarded wording still exists outside the incident surface. |
+| Acceptance slice                                    | Status                        | Evidence anchors                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| current-head driver/API E2E                         | `verified_repo_local`         | `tests/e2e/E2E-017-driver-sos-incident.sh` passed on `2026-07-25` against repo-local current-head API runtime `http://127.0.0.1:3013` with attachment providers disabled; evidence: `incidentId=INC-000001`, `sosEventId=df0ce043-3a63-4dcb-8223-e55dbbb045e5`, `eventNo=SOS-20260725022718-15B2A8`, fail-closed attachment intent `state=unavailable`, driver incident-list still `403`.              |
+| attachment upload / checksum / scan / retry runtime | `verified_repo_local_nonprod` | `support/sidecars/S3-VERIFY-001/verify-attachment-scan.sh` passed on `2026-07-25` against repo-local current-head API runtime `http://127.0.0.1:3012` plus local controlled providers `127.0.0.1:3923/3924`; verifies presigned PUT, provider-computed SHA-256, infected verdict, retryable error -> clean rescan, and content-type rejection.                                                         |
+| attachment adapter / repository tests               | `verified`                    | `apps/api/tests/unit/driver-sos-attachment.service.test.ts`, `apps/api/tests/unit/driver-sos-provider-adapters.test.ts`, `apps/api/tests/unit/driver-sos-verification.repository.test.ts` passed (`3` files / `20` tests).                                                                                                                                                                             |
+| driver offline durable outbox + replay state        | `verified`                    | `apps/driver-app/tests/unit/driver-sos-attachment-upload.test.ts`, `apps/driver-app/tests/unit/driver-sos-outbox.test.ts` passed (`2` files / `7` tests).                                                                                                                                                                                                                                              |
+| alert latency measurement surface                   | `measured_repo_local_nonprod` | `support/sidecars/S3-VERIFY-001/measure-alert-latency.sh` against `http://127.0.0.1:3012` measured `n=20`, `min=25ms`, `p50=26ms`, `p90=28ms`, `p95=29ms`, `max=30ms`; explicitly local hermetic loopback only, not production.                                                                                                                                                                        |
+| screenshot evidence with runtime source label       | `partial`                     | `support/sidecars/DRV-UI-010/DRV-UI-010-VERIFICATION-PACKET.md:71-72,91-94`, `support/sidecars/DRV-UI-010/ui-text-snapshots.md:83-95`.                                                                                                                                                                                                                                                                 |
+| Android / iOS physical offline replay               | `blocked_ext`                 | No device or emulator execution in this worker; task brief forbids replacing device evidence with local mock.                                                                                                                                                                                                                                                                                          |
+| production alert p95                                | `blocked_ext`                 | Current head now exposes a measurable latency surface, but this worker has no production observability path; only local hermetic numbers were produced.                                                                                                                                                                                                                                                |
+| forbidden-vocabulary scan                           | `failed_current_head`         | Current head is not green. `forwarded` / `mirror` remain on SOS-adjacent and broader driver-app surfaces (`apps/driver-app/app/incident.tsx:202,799,804,808`, `apps/driver-app/app/sos.tsx:1145-1159`) and `FSD` / `Tesla` / `sandbox` remain on safety-operator surfaces (`apps/driver-app/app/safety-operator.tsx:1015,1103,1222,1246`, `apps/driver-app/lib/safety-operator-fixtures.ts:12,28,63`). |
 
 ## Commands Executed
 
 ```bash
-pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
+python3 scripts/ensure-local-node-modules.py repair
+pnpm db:init
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/api build
 ```
 
-Executed in: `apps/api`
+Executed at repo root on `2026-07-25`.
 
-Result: `PASS` (`6` files, `45` tests) on inspected commit `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc`
+Result: local worktree dependencies repaired, migrations/seeds verified, and the
+rebased current-head API build artifacts were regenerated for repo-local
+verification.
 
 ```bash
-pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
+env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform \
+  DRTS_ENV=local NODE_ENV=development JWT_SECRET=ci-e2e-secret \
+  CONTROLLED_DOWNLOAD_SIGNING_SECRET=ci-e2e-controlled-download-secret \
+  API_HOST=127.0.0.1 API_PORT=3013 node apps/api/dist/main.js
+env E2E_API_URL=http://127.0.0.1:3013 E2E_API_PATH_PREFIX=/api \
+  bash tests/e2e/E2E-017-driver-sos-incident.sh
 ```
 
-Executed in: `apps/driver-app`
+Executed on `2026-07-25`.
 
-Result: `PASS` (`2` files, `6` tests) on inspected commit `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc`
-
-Note: the driver-app run emitted `react-test-renderer` deprecation plus `act(...)` environment warnings, but the process still exited `0` and all assertions passed.
+Result: `E2E-017` passed against repo-local current head with attachment
+providers disabled, proving the fail-closed attachment-intent branch still
+returns `state=unavailable` and no fabricated upload URL.
 
 ```bash
-source /tmp/drts-s3v-env.sh
-curl -sS -m 5 -D - http://localhost:3011/health
-bash tests/e2e/E2E-017-driver-sos-incident.sh
+node support/sidecars/S3-VERIFY-001/attachment-provider-stubs.mjs 3923 3924
+env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform \
+  DRTS_ENV=local NODE_ENV=development JWT_SECRET=ci-e2e-secret \
+  CONTROLLED_DOWNLOAD_SIGNING_SECRET=ci-e2e-controlled-download-secret \
+  DRIVER_SOS_PROVIDER_ALLOW_HTTP_LOCAL=true \
+  DRIVER_SOS_ATTACHMENT_STORAGE_PROVIDER=s3-compatible \
+  DRIVER_SOS_S3_PROVIDER_NAME=s3-compatible \
+  DRIVER_SOS_S3_BUCKET=driver-sos-local \
+  DRIVER_SOS_S3_REGION=us-east-1 \
+  DRIVER_SOS_S3_ENDPOINT=http://127.0.0.1:3923 \
+  DRIVER_SOS_S3_FORCE_PATH_STYLE=true \
+  DRIVER_SOS_S3_ACCESS_KEY_ID=test \
+  DRIVER_SOS_S3_SECRET_ACCESS_KEY=test \
+  DRIVER_SOS_ATTACHMENT_SCANNER_PROVIDER=https-json \
+  DRIVER_SOS_SCANNER_PROVIDER_NAME=https-json-malware-scanner \
+  DRIVER_SOS_SCANNER_URL=http://127.0.0.1:3924 \
+  DRIVER_SOS_SCANNER_AUTH_TOKEN=s3-verify-001-scanner-token \
+  DRIVER_SOS_SCANNER_TIMEOUT_MS=5000 \
+  API_HOST=127.0.0.1 API_PORT=3012 node apps/api/dist/main.js
+env E2E_API_URL=http://127.0.0.1:3012 E2E_API_PATH_PREFIX=/api \
+  bash support/sidecars/S3-VERIFY-001/verify-attachment-scan.sh
+env E2E_API_URL=http://127.0.0.1:3012 E2E_API_PATH_PREFIX=/api SAMPLES=20 \
+  bash support/sidecars/S3-VERIFY-001/measure-alert-latency.sh
 ```
 
-Executed at repo root.
+Executed on `2026-07-25`.
 
-Result: repo-local current-head API runtime on `http://localhost:3011` returned
-health `200 OK` with `map_provider.environment=local` and
-`map_provider.effective_backend=mock`, and `E2E-017` passed with `incidentId=INC-000002`,
-`sosEventId=a384287d-8ea1-4ea6-88a1-0cbc7e998b26`,
-`eventNo=SOS-20260725020324-2B72D9`; driver incident-list access remained
-forbidden (`403`).
+Result: attachment runtime verification passed against current head on a local
+controlled-provider stack, and the local hermetic alert-latency sampler
+measured `p95=29ms` (`n=20`).
 
 ```bash
-git grep -nE "attachment|attachments|presign|checksum|malware|clam|virus|content-type|mime|scan" -- apps/api/src/modules/driver-sos apps/api/src/modules/incident apps/api/tests apps/driver-app support/sidecars/DRV-UI-010 support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
+env CI=true pnpm --dir apps/api exec vitest run \
+  tests/unit/driver-sos-attachment.service.test.ts \
+  tests/unit/driver-sos-provider-adapters.test.ts \
+  tests/unit/driver-sos-verification.repository.test.ts --reporter=dot
+
+env CI=true pnpm --dir apps/driver-app exec vitest run \
+  tests/unit/driver-sos-attachment-upload.test.ts \
+  tests/unit/driver-sos-outbox.test.ts --reporter=dot
 ```
 
-Executed at repo root.
+Executed on `2026-07-25`.
 
-Result: matches again confirm only local driver-app attachment draft
-persistence under `apps/driver-app/app/sos.tsx` and
-`apps/driver-app/lib/driver-sos-outbox.ts`, plus non-S3 attachment checksum
-flows in other domains such as Fleet Partner onboarding / accident
-investigation. Current head does contain the attachment schema in
-`infra/migrations/V0052__s3_driver_sos.sql`, but no S-3-specific presign /
-checksum / malware-scan runtime path was found under `apps/api/src/modules/driver-sos`,
-`apps/api/src/modules/incident`, or related tests.
+Result: API `3` files / `20` tests `PASS`; driver-app `2` files / `7` tests
+`PASS`.
 
 ```bash
-git grep -nE "FSD|自駕|Tesla|sandbox|safety operator|external platform badge|forwarded|mirror" -- apps/driver-app support/sidecars/DRV-UI-010 tests/e2e support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
+git grep -nE 'FSD|自駕|Tesla|sandbox|safety operator|external platform badge' -- \
+  apps/driver-app support/sidecars/DRV-UI-010 tests/e2e support/sidecars/S3-VERIFY-001
+git grep -nE 'forwarded|mirror' -- \
+  apps/driver-app support/sidecars/DRV-UI-010 tests/e2e support/sidecars/S3-VERIFY-001
 ```
 
-Executed at repo root.
+Executed on `2026-07-25`.
 
-Result: the captured incident surface still stays clean for `FSD`, `自駕`, `Tesla`, `sandbox`, `safety operator`, and `external platform badge`, but broader current-head driver-app surfaces still contain `forwarded` / `mirror` strings in SOS-adjacent context and other screens.
+Result: current head is not forbidden-vocabulary green; `forwarded` / `mirror`
+remain widespread and `FSD` / `Tesla` / `sandbox` remain present on
+safety-operator surfaces.
 
 ## Remaining Delta
 
-Current `HEAD` was re-audited on `2026-07-25`. Relative to
-`b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`, this branch only refreshed
-task-local evidence files through
-`18762ec51b4d65e71cc5b4e11fe7ca57ad85af69`
-(`wip(S3-VERIFY-001): anchor refreshed current-head verification evidence`);
-no product/runtime files changed, so the verification conclusions below still
-apply at `18762ec51b4d65e71cc5b4e11fe7ca57ad85af69`.
-
-1. `S3-VERIFY-001` itself is satisfied by the current-head repo-local E2E plus API / Driver test reruns above.
-2. `S3-VERIFY-002` physical-device offline replay evidence is still required for Android and iOS. This worker cannot produce honest device proof.
-3. `S3-VERIFY-003` attachment security verification is not yet evidenced for S-3. Current head exposes local attachment draft / supplement UX in `apps/driver-app/app/sos.tsx` and durable local persistence in `apps/driver-app/lib/driver-sos-outbox.ts`, but the submit command still omits attachment fields and the repo scan did not locate a driver-SOS upload / presign / malware-scan verification path.
-4. `S3-VERIFY-004` requires production-grade latency measurement for `fleetReportConfirmedAt -> opsAlertRenderedAt`; local test output is insufficient.
-5. `S3-VERIFY-005` is only partially satisfied here: the Android incident screenshot text is clean, but broader driver-app vocabulary still contains `forwarded` / `mirror` on non-SOS surfaces such as `support/sidecars/DRV-UI-010/ui-text-snapshots.md:52`.
+1. `current-head E2E green` is satisfied, but only by splitting the current
+   head into two honest local runtime modes:
+   provider-disabled for `E2E-017` fail-closed behavior, and provider-enabled
+   for attachment verification.
+2. Android and iOS offline replay remain honest `blocked_ext`.
+3. Attachment scan is now verified repo-locally against the landed runtime, but
+   the evidence is explicitly local controlled-provider proof, not external S3
+   or external malware-provider proof.
+4. Alert latency is now measured repo-locally; production p95 remains
+   `blocked_ext`.
+5. Forbidden-vocabulary acceptance is currently failing on current head, so
+   `S3-VERIFY-001` cannot honestly close as fully accepted verification.
