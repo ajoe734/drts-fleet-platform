@@ -6,6 +6,18 @@ Current head `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f` already contains substan
 
 ## Verified Locally
 
+### Repo-local E2E
+
+- `tests/e2e/E2E-017-driver-sos-incident.sh`
+  executed on `2026-07-25` against repo-local current-head API runtime
+  `http://localhost:3011` (health check `200 OK`, runtime source: local worker
+  stack, not production).
+  verifies:
+  - driver realm can `POST /api/driver/sos-events`
+  - spoofed `driverId` is overwritten by authenticated driver context
+  - correlated `incidentId`, `sosEventId`, and `eventNo` are returned
+  - driver realm remains blocked from `GET /api/incidents` with `403`
+
 ### API
 
 - `apps/api/tests/integration/int-s3-001-driver-sos-idempotency.test.ts:225-295`
@@ -86,9 +98,24 @@ This means the broad Fleet-G forbidden-vocabulary requirement is not fully green
 
 The task brief requires real device or simulator evidence for Android and iOS offline replay. This worker has no such execution evidence and must not substitute local mocks.
 
-### `missing_evidence`: Attachment security
+### `missing_evidence`: Attachment security runtime
 
-Repo scan did not find S-3-specific proof for:
+Current-head does contain an S-3 attachment schema, but this worker did not
+find a corresponding current-head runtime/API path to honestly verify:
+
+- `infra/migrations/V0052__s3_driver_sos.sql:83-103`
+  creates `safety.driver_sos_attachments` with `checksum_sha256` and
+  `scan_status`.
+- `packages/contracts/src/phase1-p5-s3-multi-taxi.ts:627-639`
+  defines `SubmitDriverSosEventCommand` without any attachment fields.
+- `apps/api/src/modules/driver-sos/driver-sos.controller.ts:12-25`
+  exposes only `POST /driver/sos-events`.
+- `apps/api/src/modules/driver-sos/driver-sos.repository.ts:80-92,389-501`
+  persists only the SOS event, timeline, and urgent-alert outbox; it does not
+  insert into `safety.driver_sos_attachments`.
+
+That means the schema foundation is landed, but this worker still did not find
+S-3-specific runtime proof for:
 
 - pre-signed attachment upload
 - checksum enforcement
@@ -97,7 +124,12 @@ Repo scan did not find S-3-specific proof for:
 - malware scan
 - per-file retry audit
 
-The repo does contain attachment upload / checksum enforcement for other domains such as Fleet Partner supply onboarding, but no equivalent current-head path was found for Driver SOS under `apps/api/src/modules/driver-sos`, `apps/api/src/modules/incident`, or related tests. That negative result matters here because it distinguishes "not yet cited" from "not present in the S-3 implementation slice."
+The repo does contain attachment upload / checksum enforcement for other domains
+such as Fleet Partner supply onboarding, but no equivalent current-head runtime
+path was found for Driver SOS under `apps/api/src/modules/driver-sos`,
+`apps/api/src/modules/incident`, or related tests. That negative result matters
+here because it distinguishes "schema landed" from "runtime verification
+available in the S-3 implementation slice."
 
 Current-head evidence instead shows only local attachment handling:
 
@@ -135,10 +167,26 @@ Executed in `apps/driver-app` on `2026-07-25`: all passed on `ca74e40740fb8ba397
 The driver-app run emitted `react-test-renderer` deprecation and `act(...)` environment warnings, but still exited `0` with all six assertions passing. Those warnings are pre-existing test-environment noise, not S-3 acceptance failures.
 
 ```bash
+source /tmp/drts-s3v-env.sh
+curl -sS -m 5 -D - http://localhost:3011/health
+bash tests/e2e/E2E-017-driver-sos-incident.sh
+```
+
+Executed at repo root on `2026-07-25`: repo-local current-head API runtime on
+`http://localhost:3011` returned health `200 OK`, and `E2E-017` passed with:
+
+- `incidentId=INC-000002`
+- `sosEventId=a384287d-8ea1-4ea6-88a1-0cbc7e998b26`
+- `eventNo=SOS-20260725020324-2B72D9`
+- driver incident-list access still forbidden (`403`)
+
+```bash
 git grep -nE "attachment|attachments|presign|checksum|malware|clam|virus|content-type|mime|scan" -- apps/api/src/modules/driver-sos apps/api/src/modules/incident apps/api/tests apps/driver-app support/sidecars/DRV-UI-010 support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
 ```
 
-Executed at repo root on `2026-07-25`: no S-3-specific attachment upload / presign / checksum / malware-scan path was found beyond the local driver-app draft/outbox handling already cited above.
+Executed at repo root on `2026-07-25`: no S-3-specific attachment upload /
+presign / checksum / malware-scan runtime path was found beyond the local
+driver-app draft/outbox handling already cited above.
 
 ```bash
 git grep -nE "FSD|自駕|Tesla|sandbox|safety operator|external platform badge|forwarded|mirror" -- apps/driver-app support/sidecars/DRV-UI-010 tests/e2e support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
