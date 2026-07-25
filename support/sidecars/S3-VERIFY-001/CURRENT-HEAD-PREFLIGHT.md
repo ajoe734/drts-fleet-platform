@@ -5,7 +5,7 @@
 - Task: `S3-VERIFY-001`
 - Owner: `Codex`
 - Reviewer: `Claude2`
-- Inspected commit: `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f`
+- Inspected commit: `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`
 - Inspection date: `2026-07-25`
 
 ## Current-Head Inventory
@@ -32,7 +32,7 @@ pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts
 
 Executed in: `apps/api`
 
-Result: `PASS` (`6` files, `45` tests) on inspected commit `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f`
+Result: `PASS` (`6` files, `45` tests) on inspected commit `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`
 
 ```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
@@ -40,7 +40,7 @@ pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-sc
 
 Executed in: `apps/driver-app`
 
-Result: `PASS` (`2` files, `6` tests) on inspected commit `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f`
+Result: `PASS` (`2` files, `6` tests) on inspected commit `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`
 
 Note: the driver-app run emitted `react-test-renderer` deprecation plus `act(...)` environment warnings, but the process still exited `0` and all assertions passed.
 
@@ -82,6 +82,11 @@ Executed at repo root.
 Result: the captured incident surface still stays clean for `FSD`, `自駕`, `Tesla`, `sandbox`, `safety operator`, and `external platform badge`, but broader current-head driver-app surfaces still contain `forwarded` / `mirror` strings in SOS-adjacent context and other screens.
 
 ## Remaining Delta
+
+Current `HEAD` was re-audited on `2026-07-25`. Relative to
+`ca74e40740fb8ba397b5a742b6f889c21b7e0c6f`, the branch only added
+task-local sidecar evidence commits; no product/runtime files changed, so the
+verification conclusions below still apply to `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`.
 
 1. `S3-VERIFY-002` physical-device offline replay evidence is still required for Android and iOS. This worker cannot produce honest device proof.
 2. `S3-VERIFY-003` attachment security verification is not yet evidenced for S-3. Current head exposes local attachment draft / supplement UX in `apps/driver-app/app/sos.tsx` and durable local persistence in `apps/driver-app/lib/driver-sos-outbox.ts`, but the submit command still omits attachment fields and the repo scan did not locate a driver-SOS upload / presign / malware-scan verification path.

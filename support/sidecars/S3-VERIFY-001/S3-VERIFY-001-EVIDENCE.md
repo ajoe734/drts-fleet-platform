@@ -2,7 +2,7 @@
 
 ## Summary
 
-Current head `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-25`, and recorded the external blockers that remain for full Fleet G closure.
+Current head `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-25`, and recorded the external blockers that remain for full Fleet G closure. Relative to `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f`, the branch only added task-local sidecar evidence commits; no product/runtime files changed, so the same verification conclusions still apply at current `HEAD`.
 
 ## Verified Locally
 
@@ -156,13 +156,13 @@ pnpm exec vitest run tests/unit/incident.controller.test.ts tests/unit/ops-dispa
 pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
 ```
 
-Executed in `apps/api` on `2026-07-25`: all passed. The combined rerun on `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f` passed `6` files / `45` tests.
+Executed in `apps/api` on `2026-07-25`: all passed. The combined rerun on `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c` passed `6` files / `45` tests.
 
 ```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
 ```
 
-Executed in `apps/driver-app` on `2026-07-25`: all passed on `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f` (`2` files / `6` tests).
+Executed in `apps/driver-app` on `2026-07-25`: all passed on `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c` (`2` files / `6` tests).
 
 The driver-app run emitted `react-test-renderer` deprecation and `act(...)` environment warnings, but still exited `0` with all six assertions passing. Those warnings are pre-existing test-environment noise, not S-3 acceptance failures.
 
