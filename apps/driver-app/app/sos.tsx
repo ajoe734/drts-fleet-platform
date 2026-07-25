@@ -57,6 +57,7 @@ import {
 } from "@/lib/driver-sos-outbox";
 import { syncDriverSosAttachments } from "@/lib/driver-sos-attachment-upload";
 import { getLatestDriverLocationUpdate } from "@/lib/driver-location-heartbeat";
+import { isDriverCapabilityForbidden } from "@/lib/driver-runtime-profile";
 import {
   buildFallbackUnifiedDriverTaskView,
   isUnifiedTaskPlatformClosed,
@@ -76,14 +77,22 @@ const MAX_ATTACHMENTS = 4;
 const FLEET_DUTY_PHONE_NUMBER = "02-2191-7788";
 
 type SosSituationId = (typeof driverIncidentSituations)[number]["id"];
-type SosTaskContext = {
-  taskId: string | null;
-  orderId: string | null;
+// S3-FIX-DRIVER-SOS-VOCAB-001: the cross-platform fields live in their own
+// optional group rather than inline on the context, so the multi_taxi_direct
+// gate can drop them as a unit. When `crossPlatform` is null there is nothing
+// for the card to render from — the rows cannot be reintroduced by accident.
+type SosCrossPlatformContext = {
   platformCode: string | null;
   platformLabel: string;
   externalOrderId: string | null;
-  nativeStatus: string | null;
-  forwarded: boolean;
+  platformStatus: string | null;
+  aggregated: boolean;
+};
+type SosTaskContext = {
+  taskId: string | null;
+  orderId: string | null;
+  localStatus: string | null;
+  crossPlatform: SosCrossPlatformContext | null;
 };
 type SyncChipModel = {
   tone: "danger" | "warn" | "info" | "success";
@@ -162,6 +171,10 @@ function formatPlatformStatusLabel(status: string | null) {
   );
 }
 
+function isOwnedDomainTask(task: UnifiedDriverTaskView) {
+  return task.orderDomain === "owned" || isOwnedPlatformCode(task.sourcePlatform);
+}
+
 function pickSosTaskContext(
   tasks: ReadonlyArray<UnifiedDriverTaskView>,
 ): SosTaskContext | null {
@@ -169,6 +182,7 @@ function pickSosTaskContext(
     return null;
   }
 
+  const aggregationForbidden = isDriverCapabilityForbidden("forwarded_order_ui");
   const summary = summarizeWorkspaceTasks(tasks);
   const prioritizedTasks = [
     summary.activeTripTask,
@@ -180,14 +194,23 @@ function pickSosTaskContext(
       task != null && list.indexOf(task) === index,
   );
 
-  const selectedTask =
-    prioritizedTasks.find(
-      (task) =>
-        !isOwnedPlatformCode(task.sourcePlatform) &&
-        !isUnifiedTaskPlatformClosed(task),
-    ) ??
-    prioritizedTasks[0] ??
-    null;
+  // S3-FIX-DRIVER-SOS-VOCAB-001: the selection itself is realm-conditional, not
+  // just the labels. multi_taxi_direct declares orderDomains: ["owned"], so a
+  // cross-platform task is not part of that realm and must never become the SOS
+  // context — previously the screen actively PREFERRED one, which is what put
+  // cross-platform identifiers in front of a multi_taxi_direct driver.
+  const candidates = aggregationForbidden
+    ? prioritizedTasks.filter(isOwnedDomainTask)
+    : prioritizedTasks;
+
+  const selectedTask = aggregationForbidden
+    ? (candidates[0] ?? null)
+    : (candidates.find(
+        (task) =>
+          !isOwnedDomainTask(task) && !isUnifiedTaskPlatformClosed(task),
+      ) ??
+      candidates[0] ??
+      null);
 
   if (!selectedTask) {
     return null;
@@ -196,13 +219,19 @@ function pickSosTaskContext(
   return {
     taskId: selectedTask.taskId,
     orderId: selectedTask.orderId,
-    platformCode: selectedTask.sourcePlatform,
-    platformLabel:
-      selectedTask.platformDisplayName ||
-      getPlatformDisplayLabel(selectedTask.sourcePlatform),
-    externalOrderId: selectedTask.externalOrderId,
-    nativeStatus: selectedTask.nativeStatus,
-    forwarded: !isOwnedPlatformCode(selectedTask.sourcePlatform),
+    localStatus: selectedTask.localStatus,
+    crossPlatform:
+      aggregationForbidden || isOwnedDomainTask(selectedTask)
+        ? null
+        : {
+            platformCode: selectedTask.sourcePlatform,
+            platformLabel:
+              selectedTask.platformDisplayName ||
+              getPlatformDisplayLabel(selectedTask.sourcePlatform),
+            externalOrderId: selectedTask.externalOrderId,
+            platformStatus: selectedTask.nativeStatus,
+            aggregated: true,
+          },
   };
 }
 
@@ -1142,8 +1171,12 @@ export default function DriverSosScreen() {
             {context ? (
               <View style={styles.contextStack}>
                 <View style={styles.contextPills}>
-                  <Pill theme={THEME} tone={context.forwarded ? "warn" : "info"} dot>
-                    {context.forwarded ? "forwarded order" : "owned trip"}
+                  <Pill
+                    theme={THEME}
+                    tone={context.crossPlatform ? "warn" : "info"}
+                    dot
+                  >
+                    {context.crossPlatform ? "聚合行程" : "本平台行程"}
                   </Pill>
                   {selectedSituationLabel ? (
                     <Pill theme={THEME} tone="danger">
@@ -1155,27 +1188,46 @@ export default function DriverSosScreen() {
                   theme={THEME}
                   cols={2}
                   items={[
-                    { label: "platform", value: context.platformLabel },
-                    { label: "mirror order", value: context.orderId ?? "—", mono: true },
-                    { label: "taskId", value: context.taskId ?? "—", mono: true },
+                    // Owned-domain rows, per the S3-03 canvas
+                    // (docs/05-ui/drts-design-canvas/driver-sos.jsx SosCtx).
+                    { label: "行程編號", value: context.orderId ?? "—", mono: true },
+                    { label: "任務編號", value: context.taskId ?? "—", mono: true },
                     {
-                      label: "native status",
-                      value:
-                        formatPlatformStatusLabel(context.nativeStatus) ??
-                        "未提供",
+                      label: "目前狀態",
+                      value: formatDriverTaskStatusLabel(context.localStatus),
                     },
                     {
-                      label: "external order",
-                      value: context.externalOrderId ?? "未提供",
-                      mono: Boolean(context.externalOrderId),
-                    },
-                    {
-                      label: "latest location",
+                      label: "目前位置",
                       value: currentLocation
                         ? `${currentLocation.lat.toFixed(5)}, ${currentLocation.lng.toFixed(5)}`
                         : "尚無定位快照",
                       mono: true,
                     },
+                    // S3-FIX-DRIVER-SOS-VOCAB-001: aggregation rows are SPREAD IN
+                    // only for profiles that permit forwarded_order_ui. Under
+                    // multi_taxi_direct `crossPlatform` is null, so these rows are
+                    // never constructed — §1.3 forbids shipping them hidden
+                    // ("不得以 CSS 隱藏既有多平台元件後交稿").
+                    ...(context.crossPlatform
+                      ? [
+                          {
+                            label: "來源平台",
+                            value: context.crossPlatform.platformLabel,
+                          },
+                          {
+                            label: "平台狀態",
+                            value:
+                              formatPlatformStatusLabel(
+                                context.crossPlatform.platformStatus,
+                              ) ?? "未提供",
+                          },
+                          {
+                            label: "平台訂單編號",
+                            value: context.crossPlatform.externalOrderId ?? "未提供",
+                            mono: Boolean(context.crossPlatform.externalOrderId),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               </View>
