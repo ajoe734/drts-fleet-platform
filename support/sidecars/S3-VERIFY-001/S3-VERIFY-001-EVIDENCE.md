@@ -2,7 +2,9 @@
 
 ## Summary
 
-Current head `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-25`, and recorded the external blockers that remain for full Fleet G closure. Relative to `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`, the branch only added the task-local anchor commit `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` (`wip(S3-VERIFY-001): anchor current-head evidence metadata`); no product/runtime files changed, so the same verification conclusions still apply at current `HEAD`.
+Current head `18762ec51b4d65e71cc5b4e11fe7ca57ad85af69` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-25`, and recorded the downstream or external gaps that remain for full Fleet G closure. Relative to `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`, this branch only refreshed task-local evidence files through `18762ec51b4d65e71cc5b4e11fe7ca57ad85af69` (`wip(S3-VERIFY-001): anchor refreshed current-head verification evidence`); no product/runtime files changed, so the same verification conclusions still apply at current `HEAD`.
+
+`S3-VERIFY-001` is a Wave 5 current-head E2E task. Its own acceptance is satisfied by the reruns captured below. The remaining items documented here are explicit handoff notes for `S3-VERIFY-002..005`, not a claim that `S3-VERIFY-001` itself is still open.
 
 ## Verified Locally
 
@@ -157,13 +159,13 @@ pnpm exec vitest run tests/unit/incident.controller.test.ts tests/unit/ops-dispa
 pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
 ```
 
-Executed in `apps/api` on `2026-07-25`: all passed. The combined rerun on `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` passed `6` files / `45` tests.
+Executed in `apps/api` on `2026-07-25`: all passed. The combined rerun on `18762ec51b4d65e71cc5b4e11fe7ca57ad85af69` passed `6` files / `45` tests.
 
 ```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
 ```
 
-Executed in `apps/driver-app` on `2026-07-25`: all passed on `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` (`2` files / `6` tests).
+Executed in `apps/driver-app` on `2026-07-25`: all passed on `18762ec51b4d65e71cc5b4e11fe7ca57ad85af69` (`2` files / `6` tests).
 
 The driver-app run emitted `react-test-renderer` deprecation and `act(...)` environment warnings, but still exited `0` with all six assertions passing. Those warnings are pre-existing test-environment noise, not S-3 acceptance failures.
 
