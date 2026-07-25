@@ -2312,17 +2312,38 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+    const latestAssignment = this.dispatchAssignments.find(
+      (assignment) =>
+        assignment.orderId === orderId &&
+        ["assigned", "accepted"].includes(assignment.status),
+    );
+
+    // Version-safe redispatch. The guard runs before any mutation below so a
+    // rejected stale event leaves the order completely untouched.
+    const currentAssignmentVersion = this.currentAssignmentVersion(orderId);
+    if (
+      command.expectedAssignmentVersion !== undefined &&
+      command.expectedAssignmentVersion !== null &&
+      currentAssignmentVersion > command.expectedAssignmentVersion
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "STALE_REDISPATCH_EVENT",
+        "The redispatch request is stale and cannot replace a newer assignment.",
+        {
+          orderId,
+          currentAssignmentVersion,
+          expectedAssignmentVersion: command.expectedAssignmentVersion,
+        },
+      );
+    }
+
     const now = new Date().toISOString();
     order.status = "redispatch_required";
     order.dispatchAttemptCount += 1;
     order.lastDispatchFailureReason = command.reasonCode;
     order.updatedAt = now;
 
-    const latestAssignment = this.dispatchAssignments.find(
-      (assignment) =>
-        assignment.orderId === orderId &&
-        ["assigned", "accepted"].includes(assignment.status),
-    );
     const latestTask = latestAssignment
       ? this.driverTasks.find(
           (task) =>
@@ -6343,6 +6364,22 @@ export class OwnedMobilityService implements OnModuleInit {
     snapshot: PassengerDispatchDisclosureSnapshot,
   ): PassengerDispatchDisclosureSnapshot {
     return structuredClone(snapshot);
+  }
+
+  // How many assignments this order has ever had. This is the same quantity the
+  // passenger sees as `assignmentVersion` on the disclosure snapshot and the
+  // notification outbox: `buildPassengerAssignmentAuthority` derives that from
+  // the snapshot count *before* the new assignment is applied, and every
+  // multi_taxi_direct assignment produces exactly one snapshot, so the two stay
+  // in step. Deriving it here — rather than reading a field off
+  // `DispatchAssignmentRecord`, which has none — keeps the guard working for
+  // non-multi-taxi orders (no snapshots) and for assignments hydrated from
+  // persistence, and needs no schema change. Cancelled assignments stay in the
+  // array, so the counter is monotonic per order.
+  private currentAssignmentVersion(orderId: string): number {
+    return this.dispatchAssignments.filter(
+      (assignment) => assignment.orderId === orderId,
+    ).length;
   }
 
   private applyDispatchAssignmentBundle(

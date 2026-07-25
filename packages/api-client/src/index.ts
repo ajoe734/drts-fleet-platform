@@ -1266,6 +1266,10 @@ export class ApiClient {
       reasonNote?: string;
       operatorId?: string;
       escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+      // Optimistic-concurrency guard. The server rejects the call with
+      // STALE_REDISPATCH_EVENT when the order has already advanced past this
+      // assignment version. Omit to redispatch unconditionally.
+      expectedAssignmentVersion?: number | null;
     },
   ) {
     return this.post(`/api/orders/${orderId}/redispatch`, {
@@ -1274,6 +1278,7 @@ export class ApiClient {
         reasonNote: options?.reasonNote,
         operatorId: options?.operatorId,
         escalationTarget: options?.escalationTarget,
+        expectedAssignmentVersion: options?.expectedAssignmentVersion,
       },
     });
   }

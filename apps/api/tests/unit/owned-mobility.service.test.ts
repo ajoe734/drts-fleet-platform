@@ -8,7 +8,10 @@ import {
   RESERVATION_HOLD_VALID_TRANSITIONS,
   EXCEPTION_HOLD_REASON_CODES,
 } from "@drts/contracts";
-import type { ServiceAreaEvaluationResult } from "@drts/contracts";
+import type {
+  DriverRatingSummary,
+  ServiceAreaEvaluationResult,
+} from "@drts/contracts";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
@@ -72,6 +75,12 @@ function createOwnedMobilityService(options?: {
     persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
     reportPersistenceFailure: (...args: any[]) => void;
+    // Only the transactional assignment path reaches these, so stubs that never
+    // enable a repository can keep omitting them.
+    isActiveMultiTaxiAuthorizedVehicle?: (...args: any[]) => Promise<boolean>;
+    getOrInitializeDriverRatingSummary?: (
+      ...args: any[]
+    ) => Promise<DriverRatingSummary>;
   };
 }) {
   const regulatoryRegistryService = {
@@ -5250,5 +5259,339 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
     expect(order.partnerEntrySlug).toBeNull();
     const order2 = service.createPassengerOrder(baseCommand as any, null);
     expect(order2.partnerEntrySlug).toBeNull();
+  });
+});
+
+// P5-RATE-001 (Fleet D) acceptance. Three criteria had no test at any level
+// before this suite: the disclosure gate, assignment rollback, and version-safe
+// redispatch. "scarcity cannot bypass a legal gate" is already covered by
+// "never offers an airport-permit-failing vehicle even under scarcity" above,
+// and the rating criteria are covered by the multi-taxi rating governance suites.
+//
+// Every case below drives the real production path — createMultiTaxiRide →
+// dispatchOrder → assignDispatch → redispatchOrder. None of them pushes a
+// hand-built record into private service state, because a fabricated shape can
+// make a guard look alive when production never produces the field it reads.
+describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
+  const COMPLETE_DISCLOSURE = {
+    vehicleId: "veh-demo-001",
+    make: "Toyota",
+    model: "Sienta",
+    modelYear: 2024,
+    doorCount: 5,
+    color: "Silver",
+    status: "complete",
+    missingFieldCodes: [] as string[],
+    version: 2,
+  };
+  const ACTIVE_CREDENTIAL = {
+    driverId: "drv-demo-001",
+    effectiveUntil: "2027-01-01",
+    status: "verified_active",
+    maskedDisplay: "RE***01",
+    version: 3,
+  };
+
+  function createFleetDService(options?: {
+    vehicleDisclosureProfile?: Record<string, unknown> | null;
+    repository?: NonNullable<
+      Parameters<typeof createOwnedMobilityService>[0]
+    >["repository"];
+    fareAnomalyService?: FareAnomalyService;
+  }) {
+    return createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "TPE",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+      vehicleDisclosureProfile:
+        options?.vehicleDisclosureProfile === undefined
+          ? COMPLETE_DISCLOSURE
+          : options.vehicleDisclosureProfile,
+      driverRegistrationCredential: ACTIVE_CREDENTIAL,
+      // Spread rather than assign: `exactOptionalPropertyTypes` rejects an
+      // explicit `undefined` for an optional property.
+      ...(options?.fareAnomalyService
+        ? { fareAnomalyService: options.fareAnomalyService }
+        : {}),
+      ...(options?.repository ? { repository: options.repository } : {}),
+    });
+  }
+
+  // Read-only view of state that has no public accessor. Asserting on it is not
+  // the same as fabricating it: nothing here writes into the service.
+  function readOutbox(service: OwnedMobilityService) {
+    return (service as unknown as { consumerNotificationOutbox: unknown[] })
+      .consumerNotificationOutbox;
+  }
+
+  async function assignOnce(
+    service: OwnedMobilityService,
+    orderId: string,
+  ): Promise<void> {
+    const dispatch = service.dispatchOrder(orderId, { mode: "auto" });
+    await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+    });
+  }
+
+  // `assignDispatch` returns MaybePromise: it throws synchronously on the
+  // in-memory path and rejects on the transactional one. Capture both so each
+  // assertion is about the gate that fired, not about which path ran.
+  async function captureApiError(run: () => unknown): Promise<ApiRequestError> {
+    let caught: unknown;
+    let threw = false;
+    try {
+      await run();
+    } catch (error) {
+      threw = true;
+      caught = error;
+    }
+    expect(threw, "expected the call to be rejected").toBe(true);
+    expect(caught).toBeInstanceOf(ApiRequestError);
+    return caught as ApiRequestError;
+  }
+
+  it("refuses assignment when the vehicle passenger disclosure is incomplete", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const { service } = createFleetDService({
+      fareAnomalyService,
+      vehicleDisclosureProfile: {
+        ...COMPLETE_DISCLOSURE,
+        status: "incomplete",
+        missingFieldCodes: ["color", "doorCount"],
+      },
+    });
+    const order = createFareProducerOrder(service);
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    const error = await captureApiError(() =>
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    );
+
+    expect(error.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(error.getResponse()).toMatchObject({
+      error: {
+        code: "P5_VEHICLE_DISCLOSURE_INCOMPLETE",
+        details: {
+          vehicleId: "veh-demo-001",
+          missingFieldCodes: ["color", "doorCount"],
+        },
+      },
+    });
+    // The gate is not advisory: the order stays unassigned.
+    expect(service.getOrder(order.orderId).status).not.toBe("assigned");
+  });
+
+  it("leaves no partial snapshot, assignment, or outbox row when assignment rolls back", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: <T>(work: (tx: unknown) => Promise<T>) => work({}),
+      reportPersistenceFailure: vi.fn(),
+      isActiveMultiTaxiAuthorizedVehicle: vi.fn(async () => true),
+      // Mirrors what the real repository's INSERT ... ON CONFLICT returns for a
+      // driver with no ratings, so the rating authority is satisfied and the
+      // disclosure gate below is the only thing that fails.
+      getOrInitializeDriverRatingSummary: vi.fn(
+        async (
+          _tx: unknown,
+          driverId: string,
+          calculatedAt: string,
+        ): Promise<DriverRatingSummary> => ({
+          driverId,
+          displayState: "new_driver",
+          averageRating: null,
+          ratingCount: 0,
+          lastRatedAt: null,
+          aggregateVersion: 1,
+          calculatedAt,
+        }),
+      ),
+    };
+    const { service } = createFleetDService({
+      fareAnomalyService,
+      repository,
+      // Fails inside buildPassengerAssignmentAuthority — i.e. after the order,
+      // dispatch job, assignment, task, and trace logs for the bundle have all
+      // been built. This is precisely the window where a partial write could
+      // escape, so it is the right place to prove none does.
+      vehicleDisclosureProfile: {
+        ...COMPLETE_DISCLOSURE,
+        status: "incomplete",
+        missingFieldCodes: ["color"],
+      },
+    });
+    const order = createFareProducerOrder(service);
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+    const outboxBefore = readOutbox(service).length;
+
+    const error = await captureApiError(() =>
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    );
+    expect(error.getResponse()).toMatchObject({
+      error: { code: "P5_VEHICLE_DISCLOSURE_INCOMPLETE" },
+    });
+    // The failure happened inside the transaction, which is the only window a
+    // partial write could have escaped through.
+    expect(repository.isActiveMultiTaxiAuthorizedVehicle).toHaveBeenCalledTimes(
+      1,
+    );
+
+    // No disclosure snapshot.
+    expect(service.findPassengerAssignmentDisclosure(order.orderId)).toBeNull();
+    // No notification outbox row.
+    expect(readOutbox(service)).toHaveLength(outboxBefore);
+    // No assignment and no driver task.
+    const snapshot = service.getReportingSnapshot();
+    expect(
+      snapshot.dispatchAssignments.filter(
+        (assignment) => assignment.orderId === order.orderId,
+      ),
+    ).toHaveLength(0);
+    expect(
+      snapshot.driverTasks.filter((task) => task.orderId === order.orderId),
+    ).toHaveLength(0);
+    // The order never advanced to assigned.
+    expect(service.getOrder(order.orderId).status).not.toBe("assigned");
+    // Nothing was written through the transactional workflow path.
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale redispatch that would replace a newer assignment", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const { service } = createFleetDService({ fareAnomalyService });
+    const order = createFareProducerOrder(service);
+
+    // Assignment v1. The version the passenger is told is the one the guard
+    // must compare against, so read it from the disclosure snapshot rather
+    // than assuming it.
+    await assignOnce(service, order.orderId);
+    const firstVersion = service.findPassengerAssignmentDisclosure(
+      order.orderId,
+    )!.assignmentVersion;
+    expect(firstVersion).toBe(1);
+
+    // A caller holding v1 is current, so its redispatch is accepted.
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "driver_unreachable",
+      expectedAssignmentVersion: firstVersion,
+    });
+
+    // Assignment v2 supersedes it.
+    await assignOnce(service, order.orderId);
+    const secondVersion = service.findPassengerAssignmentDisclosure(
+      order.orderId,
+    )!.assignmentVersion;
+    expect(secondVersion).toBe(2);
+
+    const before = service.getOrder(order.orderId);
+    expect(before.status).toBe("assigned");
+
+    // The v1 event arrives late. It must not cancel the v2 assignment.
+    expect(() =>
+      service.redispatchOrder(order.orderId, {
+        reasonCode: "driver_unreachable",
+        expectedAssignmentVersion: firstVersion,
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.redispatchOrder(order.orderId, {
+        reasonCode: "driver_unreachable",
+        expectedAssignmentVersion: firstVersion,
+      });
+      expect.unreachable("stale redispatch must be rejected");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(HttpStatus.CONFLICT);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "STALE_REDISPATCH_EVENT",
+          details: {
+            orderId: order.orderId,
+            currentAssignmentVersion: secondVersion,
+            expectedAssignmentVersion: firstVersion,
+          },
+        },
+      });
+    }
+
+    // The rejection is total: the guard runs before any mutation, so neither the
+    // order nor the newer assignment moved.
+    const after = service.getOrder(order.orderId);
+    expect(after.status).toBe("assigned");
+    expect(after.dispatchAttemptCount).toBe(before.dispatchAttemptCount);
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.lastDispatchFailureReason).toBe(
+      before.lastDispatchFailureReason,
+    );
+    const live = service
+      .getReportingSnapshot()
+      .dispatchAssignments.filter(
+        (assignment) =>
+          assignment.orderId === order.orderId &&
+          ["assigned", "accepted"].includes(assignment.status),
+      );
+    expect(live).toHaveLength(1);
+  });
+
+  it("still redispatches unconditionally when no expected version is supplied", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const { service } = createFleetDService({ fareAnomalyService });
+    const order = createFareProducerOrder(service);
+
+    // Reach assignment version 2 the only way production allows: assign,
+    // redispatch, assign again.
+    await assignOnce(service, order.orderId);
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "driver_unreachable",
+    });
+    await assignOnce(service, order.orderId);
+    expect(
+      service.findPassengerAssignmentDisclosure(order.orderId)!
+        .assignmentVersion,
+    ).toBe(2);
+
+    // A caller still holding v1 is now stale...
+    expect(() =>
+      service.redispatchOrder(order.orderId, {
+        reasonCode: "driver_unreachable",
+        expectedAssignmentVersion: 1,
+      }),
+    ).toThrowError(ApiRequestError);
+
+    // ...but omitting the version keeps the pre-existing unconditional
+    // behaviour, so the guard is opt-in and cannot strand callers that were
+    // written before it existed.
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "driver_unreachable",
+    });
+    expect(service.getOrder(order.orderId).status).toBe("redispatch_required");
   });
 });
