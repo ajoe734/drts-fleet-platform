@@ -13,12 +13,10 @@ import {
   getPassengerSourceCallout,
   getToneRamp,
   passengerChrome,
-  resolvePassengerRideFixture,
 } from "@/lib/passenger-presentation";
-import {
-  resolvePassengerDataMode,
-  type PassengerRideFixture,
-} from "@/lib/passenger-fixtures";
+import { loadPassengerRideFixture } from "@/lib/passenger-fixture-loader";
+import { resolvePassengerDataMode } from "@/lib/runtime-config";
+import type { PassengerRideFixture } from "@/lib/passenger-view-model";
 import {
   fetchPassengerRideAuthority,
   fetchPassengerReceipt,
@@ -1977,7 +1975,29 @@ export function PassengerRidePage({
   const [liveFixture, setLiveFixture] = useState<PassengerRideFixture | null>(
     null,
   );
+  const [previewFixture, setPreviewFixture] =
+    useState<PassengerRideFixture | null>(null);
   const [authorityError, setAuthorityError] = useState<string | null>(null);
+
+  // Fixture payloads load through a production-gated dynamic import, so they
+  // arrive asynchronously and are absent from a production bundle entirely.
+  useEffect(() => {
+    if (sourceMode !== "fixture") {
+      setPreviewFixture(null);
+      return;
+    }
+    let active = true;
+    void loadPassengerRideFixture(token, kind, searchParams.screen).then(
+      (fixture) => {
+        if (active) {
+          setPreviewFixture(fixture);
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [kind, searchParams.screen, sourceMode, token]);
 
   useEffect(() => {
     if (sourceMode !== "live") {
@@ -2019,10 +2039,7 @@ export function PassengerRidePage({
     };
   }, [kind, sourceMode, token]);
 
-  const fixture =
-    sourceMode === "fixture"
-      ? resolvePassengerRideFixture(token, kind, searchParams.screen)
-      : liveFixture;
+  const fixture = sourceMode === "fixture" ? previewFixture : liveFixture;
 
   if (!fixture) {
     return (

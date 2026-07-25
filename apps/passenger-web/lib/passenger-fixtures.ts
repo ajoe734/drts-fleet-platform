@@ -1,120 +1,26 @@
+/**
+ * Non-production fixture payloads for the passenger screens.
+ *
+ * IMPORTANT: nothing in the statically reachable production graph may import
+ * this module. It is reached only through `loadPassengerRideFixture()` in
+ * `passenger-fixture-loader.ts`, whose dynamic `import()` is gated on a
+ * non-production build, so the fixture chunk is never part of the production
+ * entry bundle. `getPassengerRideFixture` additionally fails closed at runtime,
+ * so even a bundler change that pulled the chunk in cannot serve demo data to a
+ * passenger (P5-PAX-GATE-001).
+ */
 import type {
-  DriverRatingDisplayState,
   MultiTaxiPublicFareVersion,
   PassengerDispatchDisclosureSnapshot,
-  PassengerPaymentStatus,
-  PassengerRideSseEvent,
   ResolvedAddressPayload,
 } from "@drts/contracts";
-import type { PassengerDataMode } from "./runtime-config";
 
-export const PASSENGER_SCREEN_IDS = [
-  "P5-01",
-  "P5-02",
-  "P5-03",
-  "P5-04",
-  "P5-05",
-  "P5-06",
-  "P5-07",
-  "P5-08",
-  "P5-09",
-  "P5-10",
-  "P5-11",
-  "P5-12",
-  "A03",
-  "A04",
-] as const;
+import type {
+  PassengerRideFixture,
+  PassengerScreenId,
+  PassengerTimelineEvent,
+} from "./passenger-view-model";
 
-export type PassengerScreenId = (typeof PASSENGER_SCREEN_IDS)[number];
-
-export type PassengerMapState = "fresh" | "stale" | "missing";
-
-export type PassengerActionMode = "driver_contact_ready" | "support_only";
-
-export type PassengerBadgeTone = "info" | "success" | "warning" | "danger";
-
-export interface PassengerPaymentPresentation {
-  status: PassengerPaymentStatus;
-  label: string;
-  detail: string;
-  tone: PassengerBadgeTone;
-  amountText?: string;
-}
-
-export interface PassengerCertificateRow {
-  label: string;
-  value: string;
-  mono?: boolean;
-}
-
-export interface PassengerCertificatePresentation {
-  state: "pending" | "available" | "error";
-  receiptNo?: string;
-  rows?: PassengerCertificateRow[];
-  errorCode?: string;
-}
-
-export interface PassengerTimelineEvent {
-  eventType: PassengerRideSseEvent;
-  happenedAt: string;
-  summary: string;
-}
-
-export interface PassengerRideFixture {
-  token: string;
-  orderNo?: string;
-  screenId: PassengerScreenId;
-  title: string;
-  status: string;
-  statusSubline?: string;
-  etaMain?: string;
-  etaSub?: string;
-  etaTone?: "accent" | "success";
-  routeDistanceKm?: string;
-  routeDurationMinutes?: string;
-  routeFareMode?: "range" | "anomaly";
-  routeFareText?: string;
-  routeFareHint?: string;
-  pickupLabel: string;
-  dropoffLabel?: string;
-  mapState: PassengerMapState;
-  actionMode: PassengerActionMode;
-  canCancel?: boolean;
-  canRate?: boolean;
-  canContact?: boolean;
-  canReadReceipt?: boolean;
-  cancelNote?: string;
-  actionLabel?: string;
-  banner?: {
-    tone: PassengerBadgeTone;
-    title: string;
-    detail?: string;
-    meta?: string;
-  };
-  disclosureBlockReason?: string;
-  contactSafetyNote?: string;
-  seatbeltNotice?: boolean;
-  payment?: PassengerPaymentPresentation;
-  certificate?: PassengerCertificatePresentation;
-  ratingSummary?: {
-    state: DriverRatingDisplayState | "unavailable";
-    scoreText?: string;
-    countText?: string;
-    chips?: string[];
-  };
-  driver: {
-    name: string;
-    vehicle: string;
-    plateNo: string;
-    color: string;
-    registrationMaskedDisplay: string;
-    registrationEffectiveUntil: string;
-    ratingState: DriverRatingDisplayState | "unavailable";
-  };
-  assignment: PassengerDispatchDisclosureSnapshot | null;
-  fareVersion?: MultiTaxiPublicFareVersion;
-  timeline: PassengerTimelineEvent[];
-}
 
 const assignmentBase: PassengerDispatchDisclosureSnapshot = {
   snapshotId: "snap-p5-demo-001",
@@ -269,10 +175,18 @@ function cloneAssignment(
   };
 }
 
+export const PASSENGER_PRODUCTION_FIXTURE_FORBIDDEN =
+  "PASSENGER_PRODUCTION_FIXTURE_FORBIDDEN";
+
 export function getPassengerRideFixture(
   screenId: PassengerScreenId,
   token: string,
 ): PassengerRideFixture {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      `${PASSENGER_PRODUCTION_FIXTURE_FORBIDDEN}: production must render live passenger authority data.`,
+    );
+  }
   const base = {
     token,
     pickupLabel: "臺北市信義區松仁路 100 號",
@@ -554,11 +468,3 @@ export function getPassengerRideFixture(
   }
 }
 
-export function resolvePassengerDataMode(
-  queryMode: string | null | undefined,
-): PassengerDataMode {
-  if (process.env.NODE_ENV === "production") {
-    return "live";
-  }
-  return queryMode === "live" ? "live" : "fixture";
-}

@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  getPassengerRideFixture,
-  resolvePassengerDataMode,
-} from "../../lib/passenger-fixtures";
+import { getPassengerRideFixture } from "../../lib/passenger-fixtures";
 import { resolvePassengerScreenId } from "../../lib/passenger-presentation";
+import { resolvePassengerDataMode } from "../../lib/runtime-config";
 
 describe("passenger fixtures", () => {
   it("fails closed when disclosure is unavailable", () => {
