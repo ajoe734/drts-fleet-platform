@@ -1155,9 +1155,14 @@ export class MultiTaxiService implements OnModuleInit {
       this.failRideAccessCreation(order, passengerAccess, requestId);
     }
     try {
+      // Strip the raw token before it crosses the persistence boundary. The
+      // grant object carries it for the response only; handing the whole grant
+      // to the repository would put the secret one logged error or one added
+      // column away from being written down.
+      const { accessToken, ...tokenRecord } = passengerAccess;
       await this.repository?.persistRideAccessToken(
-        passengerAccess,
-        this.digestAccessToken(passengerAccess.accessToken),
+        tokenRecord,
+        this.digestAccessToken(accessToken),
       );
     } catch {
       this.failRideAccessCreation(order, passengerAccess, requestId);
