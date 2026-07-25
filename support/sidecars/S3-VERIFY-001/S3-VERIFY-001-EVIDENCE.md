@@ -291,7 +291,15 @@ unconditionally, so a `multi_taxi_direct` driver sees multi-platform vocabulary.
 **Not fixed here, deliberately.** Closing it requires deciding whether the card
 should be realm-conditional or the labels renamed — an S-3 design decision, and
 the brief forbids this task from making one. Recorded as a board-level gap, per
-the alternative stated in R1's "Required for re-review" item 4.
+the alternative stated in R1's "Required for re-review" item 4:
+
+```
+S3-FIX-DRIVER-SOS-VOCAB-001   backlog   owner=Codex   reviewer=Claude
+```
+
+Its acceptance explicitly refuses a cosmetic rename as closure and requires the
+scanner to reach 0 BLOCKING, so the gap cannot be retired by relabelling alone.
+This is on `ai-status.json`, not only in this file.
 
 ### Scope honesty
 
@@ -382,7 +390,12 @@ adopted as this task's evidence.
 `/sos/board` calls `GET /api/driver/tasks` under the Ops bootstrap identity and
 receives `403 AUTH_SCOPE_DENIED` (`required: driver:read`, not granted to
 `ops_user`). Visible as `reject_authorization` rows in
-`S3-O05-sos-records.png`. Not fixed — it needs a scope-boundary decision.
+`S3-O05-sos-records.png`. Not fixed — it needs a scope-boundary decision, so it
+is on the board rather than only here:
+
+```
+S3-FIX-OPS-SOS-BOARD-SCOPE-001   backlog   owner=Codex   reviewer=Claude
+```
 
 ---
 
@@ -405,7 +418,12 @@ resolve that by narrowing scope in prose. All seven items are reported above
 under `S3-VERIFY-001`, with the two genuinely external ones marked `blocked_ext`
 and the one failing item marked FAIL.
 
-Creating `S3-VERIFY-002..005` remains a supervisor/chair action.
+Creating `S3-VERIFY-002..005` remains a supervisor/chair action. It is no longer
+needed to carry this task's findings, though: the two things this round found but
+was not allowed to fix are now their own board tasks
+(`S3-FIX-DRIVER-SOS-VOCAB-001`, `S3-FIX-OPS-SOS-BOARD-SCOPE-001`), so no
+official remaining work is parked in sidecar prose — the condition
+`AI_COLLABORATION_GUIDE.md` §0.5 actually cares about.
 
 ---
 
