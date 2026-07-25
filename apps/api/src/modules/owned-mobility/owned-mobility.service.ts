@@ -103,6 +103,7 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
+import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
@@ -6142,8 +6143,9 @@ export class OwnedMobilityService implements OnModuleInit {
       createdAt: now,
       supersededAt: null,
     };
-    const passengerSubjectRef =
-      order.passenger.passengerId?.trim() || order.passenger.phone.trim();
+    // Must match the passenger-authority derivation: a phone-only passenger is
+    // peppered and hashed, never stored as a raw number on an outbox row.
+    const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
     const outbox: ConsumerNotificationOutboxRecord = {
       outboxId: randomUUID(),
       orderId: order.orderId,

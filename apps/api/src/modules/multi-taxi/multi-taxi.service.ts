@@ -33,7 +33,11 @@ import type {
   MultiTaxiTripOperationalLegalHoldFilter,
   MultiTaxiTripOperationalLegalHoldView,
   MultiTaxiTripOperationalRecordQuery,
+  ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
+  PassengerContactUnavailableReason,
+  PassengerPushDeliveryOutcome,
+  PassengerPushDeliveryResult,
   PassengerRideAccessGrant,
   PassengerRideAccessToken,
   PassengerRideAuthorityView,
@@ -55,16 +59,27 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
-import { maskOpaqueToken } from "../../common/sensitive-data-policy";
+import {
+  maskOpaqueToken,
+  resolvePassengerSubjectRef,
+} from "../../common/sensitive-data-policy";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../service-product/service-product.service";
 import {
+  InjectMaskedCallPort,
+  type MaskedCallPort,
+} from "./masked-call.port";
+import {
   MultiTaxiRepository,
   type PassengerRatingReviewRepositoryDetail,
   type PassengerRatingReviewRepositoryQuery,
 } from "./multi-taxi.repository";
+import {
+  InjectPassengerPushPort,
+  type PassengerPushPort,
+} from "./passenger-push.port";
 
 @Injectable()
 export class MultiTaxiService implements OnModuleInit {
@@ -91,6 +106,12 @@ export class MultiTaxiService implements OnModuleInit {
     string,
     PassengerRatingModerationAuditRecord[]
   >();
+  /**
+   * Highest passenger SSE sequence already emitted per order. Kept separately
+   * from `assignmentVersion` because that value resets to 1 for an unassigned
+   * ride and stays flat across status transitions, so it cannot order a stream.
+   */
+  private readonly passengerEventSequenceByOrder = new Map<string, number>();
 
   constructor(
     private readonly ownedMobilityService: OwnedMobilityService,
@@ -98,6 +119,12 @@ export class MultiTaxiService implements OnModuleInit {
     @Optional() private readonly serviceProductService?: ServiceProductService,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    @InjectMaskedCallPort()
+    private readonly maskedCallPort?: MaskedCallPort,
+    @Optional()
+    @InjectPassengerPushPort()
+    private readonly passengerPushPort?: PassengerPushPort,
   ) {}
 
   async onModuleInit() {
@@ -772,6 +799,7 @@ export class MultiTaxiService implements OnModuleInit {
 
   async getPassengerContact(
     accessToken: string,
+    requestId?: string,
   ): Promise<PassengerRideContactOption> {
     const token = await this.requireAccessToken(accessToken, "ride:contact");
     const order = this.requireMultiTaxiOrder(token.orderId);
@@ -788,19 +816,171 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
 
+    const masked = await this.tryCreateMaskedCallSession(
+      order.orderId,
+      assignment.assignmentId,
+      assignment.driver.driverId,
+      token.passengerSubjectRef,
+      requestId,
+    );
+    if (masked.session) {
+      return {
+        mode: "masked_call",
+        contactUri: masked.session.contactUri,
+        expiresAt: masked.session.expiresAt,
+        unavailableReason: null,
+      };
+    }
+
+    // No masked leg: degrade to the platform support number when one is
+    // configured, but keep carrying why the masked provider produced nothing so
+    // the passenger surface reports absence instead of implying a driver call.
     const supportUri = process.env.MULTI_TAXI_SUPPORT_TEL_URI?.trim() || null;
     if (supportUri?.startsWith("tel:")) {
       return {
         mode: "support_fallback",
         contactUri: supportUri,
         expiresAt: null,
+        unavailableReason: masked.reason,
       };
     }
     return {
       mode: "unavailable",
       contactUri: null,
       expiresAt: null,
+      unavailableReason: masked.reason,
     };
+  }
+
+  /**
+   * Asks the masked-call provider for a proxy leg. Never throws: an absent or
+   * failing provider is a reportable state on the passenger surface, not a 500,
+   * and must not be replaced with a fabricated proxy number.
+   */
+  private async tryCreateMaskedCallSession(
+    orderId: string,
+    assignmentId: string,
+    driverId: string,
+    passengerSubjectRef: string,
+    requestId?: string,
+  ): Promise<{
+    session: { contactUri: string; expiresAt: string } | null;
+    reason: PassengerContactUnavailableReason;
+  }> {
+    if (!this.maskedCallPort?.isAvailable()) {
+      return { session: null, reason: "masked_call_provider_not_configured" };
+    }
+    try {
+      const session = await this.maskedCallPort.createSession(
+        { orderId, assignmentId, driverId, passengerSubjectRef },
+        { requestId },
+      );
+      return {
+        session: {
+          contactUri: session.contactUri,
+          expiresAt: session.expiresAt,
+        },
+        reason: "masked_call_provider_error",
+      };
+    } catch (error) {
+      // Record the failure class only. A provider payload may carry the real
+      // driver leg, so it never reaches the audit trail or the response.
+      this.auditNotificationService?.recordAuditLog({
+        actorId: "system",
+        actorType: "system",
+        tenantId: null,
+        moduleName: "multi-taxi",
+        actionName: "masked_call_session_failed",
+        resourceType: "multi_taxi_order",
+        resourceId: orderId,
+        newValuesSummary: {
+          assignmentId,
+          failureClass:
+            error instanceof Error ? error.name : "masked_call_provider_error",
+        },
+        ...(requestId !== undefined ? { requestId } : {}),
+      });
+      return { session: null, reason: "masked_call_provider_error" };
+    }
+  }
+
+  /**
+   * Hands one consumer-notification outbox row to the push provider.
+   * An unconfigured or failing provider leaves the row undelivered with an
+   * explicit result rather than stamping `delivered`.
+   */
+  async deliverPassengerNotification(
+    record: ConsumerNotificationOutboxRecord,
+    requestId?: string,
+  ): Promise<PassengerPushDeliveryOutcome> {
+    const attemptCount = record.attemptCount + 1;
+    const attemptedAt = new Date();
+    const failure = (
+      result: Exclude<PassengerPushDeliveryResult, "delivered">,
+    ): PassengerPushDeliveryOutcome => ({
+      outboxId: record.outboxId,
+      status: "failed",
+      result,
+      attemptCount,
+      nextAttemptAt: new Date(
+        attemptedAt.getTime() + this.passengerPushRetryDelayMs(attemptCount),
+      ).toISOString(),
+      deliveredAt: null,
+      providerName: null,
+    });
+
+    if (!this.passengerPushPort?.isAvailable()) {
+      return this.persistPassengerNotificationOutcome(
+        failure("provider_not_configured"),
+      );
+    }
+
+    try {
+      const receipt = await this.passengerPushPort.send(
+        {
+          outboxId: record.outboxId,
+          orderId: record.orderId,
+          passengerSubjectRef: record.passengerSubjectRef,
+          eventType: record.eventType,
+          assignmentVersion: record.assignmentVersion,
+          payload: { ...record.payload },
+        },
+        { requestId },
+      );
+      return this.persistPassengerNotificationOutcome({
+        outboxId: record.outboxId,
+        status: "delivered",
+        result: "delivered",
+        attemptCount,
+        nextAttemptAt: attemptedAt.toISOString(),
+        deliveredAt: attemptedAt.toISOString(),
+        providerName: receipt.providerName,
+      });
+    } catch {
+      return this.persistPassengerNotificationOutcome(
+        failure("provider_error"),
+      );
+    }
+  }
+
+  private async persistPassengerNotificationOutcome(
+    outcome: PassengerPushDeliveryOutcome,
+  ) {
+    try {
+      await this.repository?.updateConsumerNotificationOutboxDelivery(outcome);
+    } catch (error) {
+      this.repository?.reportPersistenceFailure(
+        error,
+        "consumer notification outbox delivery",
+      );
+    }
+    return outcome;
+  }
+
+  private passengerPushRetryDelayMs(attemptCount: number) {
+    const base = 60_000;
+    const capped = Math.min(attemptCount, 6);
+    return base * 2 ** (capped - 1);
   }
 
   async getPassengerReceipt(accessToken: string) {
@@ -843,7 +1023,8 @@ export class MultiTaxiService implements OnModuleInit {
         const envelope: PassengerRideSseEventEnvelope = {
           eventId: randomUUID(),
           eventType,
-          eventVersion: view.assignment?.assignmentVersion ?? 1,
+          eventVersion: this.nextPassengerEventVersion(view.order.orderId),
+          assignmentVersion: view.assignment?.assignmentVersion ?? null,
           orderId: view.order.orderId,
           occurredAt: new Date().toISOString(),
           data: view,
@@ -855,6 +1036,17 @@ export class MultiTaxiService implements OnModuleInit {
         };
       }),
     );
+  }
+
+  /**
+   * Allocates the next strictly increasing sequence for an order's passenger
+   * stream. Shared across concurrent subscribers and reconnects so a consumer
+   * that keeps the highest applied version can drop anything out of order.
+   */
+  private nextPassengerEventVersion(orderId: string) {
+    const next = (this.passengerEventSequenceByOrder.get(orderId) ?? 0) + 1;
+    this.passengerEventSequenceByOrder.set(orderId, next);
+    return next;
   }
 
   queueCheckIn(command: QueueCheckInCommand, requestId?: string) {
@@ -1029,18 +1221,7 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
   private resolvePassengerSubjectRef(order: OwnedOrderRecord) {
-    const passengerId = order.passenger.passengerId?.trim();
-    if (passengerId) {
-      return passengerId;
-    }
-    const pepper =
-      process.env.PASSENGER_SUBJECT_PEPPER?.trim() ||
-      process.env.PASSENGER_RIDE_TOKEN_PEPPER?.trim() ||
-      "";
-    const digest = createHash("sha256")
-      .update(`phone\0${pepper}\0${order.passenger.phone.trim()}`)
-      .digest("hex");
-    return `phone_sha256:${digest}`;
+    return resolvePassengerSubjectRef(order.passenger);
   }
 
   private async requireAccessToken(
