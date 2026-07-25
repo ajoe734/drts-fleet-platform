@@ -5,7 +5,7 @@
 - Task: `S3-VERIFY-001`
 - Owner: `Codex`
 - Reviewer: `Claude2`
-- Inspected commit: `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`
+- Inspected commit: `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc`
 - Inspection date: `2026-07-25`
 
 ## Current-Head Inventory
@@ -32,7 +32,7 @@ pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts
 
 Executed in: `apps/api`
 
-Result: `PASS` (`6` files, `45` tests) on inspected commit `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`
+Result: `PASS` (`6` files, `45` tests) on inspected commit `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc`
 
 ```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
@@ -40,7 +40,7 @@ pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-sc
 
 Executed in: `apps/driver-app`
 
-Result: `PASS` (`2` files, `6` tests) on inspected commit `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`
+Result: `PASS` (`2` files, `6` tests) on inspected commit `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc`
 
 Note: the driver-app run emitted `react-test-renderer` deprecation plus `act(...)` environment warnings, but the process still exited `0` and all assertions passed.
 
@@ -53,7 +53,8 @@ bash tests/e2e/E2E-017-driver-sos-incident.sh
 Executed at repo root.
 
 Result: repo-local current-head API runtime on `http://localhost:3011` returned
-health `200 OK`, and `E2E-017` passed with `incidentId=INC-000002`,
+health `200 OK` with `map_provider.environment=local` and
+`map_provider.effective_backend=mock`, and `E2E-017` passed with `incidentId=INC-000002`,
 `sosEventId=a384287d-8ea1-4ea6-88a1-0cbc7e998b26`,
 `eventNo=SOS-20260725020324-2B72D9`; driver incident-list access remained
 forbidden (`403`).
@@ -84,9 +85,11 @@ Result: the captured incident surface still stays clean for `FSD`, `自駕`, `Te
 ## Remaining Delta
 
 Current `HEAD` was re-audited on `2026-07-25`. Relative to
-`ca74e40740fb8ba397b5a742b6f889c21b7e0c6f`, the branch only added
-task-local sidecar evidence commits; no product/runtime files changed, so the
-verification conclusions below still apply to `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`.
+`b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`, the branch only added the
+task-local anchor commit `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc`
+(`wip(S3-VERIFY-001): anchor current-head evidence metadata`); no
+product/runtime files changed, so the verification conclusions below still
+apply at `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc`.
 
 1. `S3-VERIFY-002` physical-device offline replay evidence is still required for Android and iOS. This worker cannot produce honest device proof.
 2. `S3-VERIFY-003` attachment security verification is not yet evidenced for S-3. Current head exposes local attachment draft / supplement UX in `apps/driver-app/app/sos.tsx` and durable local persistence in `apps/driver-app/lib/driver-sos-outbox.ts`, but the submit command still omits attachment fields and the repo scan did not locate a driver-SOS upload / presign / malware-scan verification path.

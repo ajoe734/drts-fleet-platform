@@ -2,7 +2,7 @@
 
 ## Summary
 
-Current head `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-25`, and recorded the external blockers that remain for full Fleet G closure. Relative to `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f`, the branch only added task-local sidecar evidence commits; no product/runtime files changed, so the same verification conclusions still apply at current `HEAD`.
+Current head `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-25`, and recorded the external blockers that remain for full Fleet G closure. Relative to `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c`, the branch only added the task-local anchor commit `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` (`wip(S3-VERIFY-001): anchor current-head evidence metadata`); no product/runtime files changed, so the same verification conclusions still apply at current `HEAD`.
 
 ## Verified Locally
 
@@ -11,7 +11,8 @@ Current head `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c` already contains substan
 - `tests/e2e/E2E-017-driver-sos-incident.sh`
   executed on `2026-07-25` against repo-local current-head API runtime
   `http://localhost:3011` (health check `200 OK`, runtime source: local worker
-  stack, not production).
+  stack, not production; `/health` also reported
+  `map_provider.environment=local` and `map_provider.effective_backend=mock`).
   verifies:
   - driver realm can `POST /api/driver/sos-events`
   - spoofed `driverId` is overwritten by authenticated driver context
@@ -156,13 +157,13 @@ pnpm exec vitest run tests/unit/incident.controller.test.ts tests/unit/ops-dispa
 pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
 ```
 
-Executed in `apps/api` on `2026-07-25`: all passed. The combined rerun on `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c` passed `6` files / `45` tests.
+Executed in `apps/api` on `2026-07-25`: all passed. The combined rerun on `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` passed `6` files / `45` tests.
 
 ```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
 ```
 
-Executed in `apps/driver-app` on `2026-07-25`: all passed on `b2128bfe34a8c48469e7db9286cc94d8f7cc6c0c` (`2` files / `6` tests).
+Executed in `apps/driver-app` on `2026-07-25`: all passed on `814d867f5bc6687ba36a2b7bd1067e0934f5d8bc` (`2` files / `6` tests).
 
 The driver-app run emitted `react-test-renderer` deprecation and `act(...)` environment warnings, but still exited `0` with all six assertions passing. Those warnings are pre-existing test-environment noise, not S-3 acceptance failures.
 
