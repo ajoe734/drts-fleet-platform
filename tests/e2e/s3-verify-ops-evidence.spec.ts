@@ -43,6 +43,17 @@ test.afterAll(() => {
   );
 });
 
+// Every one of these screens paints a "載入中…" skeleton first and fills in
+// after a client fetch. `networkidle` alone still catches the skeleton, and a
+// screenshot of a skeleton is not evidence of anything. Wait for the loading
+// state to clear so the captured frame is a settled state — rows, empty, or
+// error — and let the caller assert which one it should be.
+async function settle(page: Page) {
+  await expect(page.locator("body")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("載入中")).toHaveCount(0, { timeout: 60_000 });
+}
+
 async function capture(page: Page, file: string, screen: string, url: string) {
   // Stamp the runtime source INTO the image, so a screenshot that gets copied
   // out of the repo cannot be mistaken for production evidence.
@@ -79,25 +90,23 @@ test("S3-O02 SOS queue renders real current-head incident rows", async ({
   page,
 }) => {
   await page.goto("/sos");
-  await expect(page.locator("body")).toBeVisible();
+  await settle(page);
 
-  // `networkidle` is NOT sufficient here: the queue fetches GET /api/incidents
-  // after hydration, so an early capture yields a "載入中…" skeleton with zero
-  // rows. Screenshotting that and calling it evidence is exactly the vacuous
-  // pass this task exists to prevent. Wait for a real SOS event number
-  // (SOS-<14 digits>-<hex>) to be painted, and assert it, so the PNG cannot be
-  // green while the table is empty.
-  const eventNo = page.getByText(/SOS-\d{14}-[0-9A-F]+/);
-  await expect(eventNo.first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText("載入中")).toHaveCount(0);
+  // Beyond settling, this screen must show a REAL event number
+  // (SOS-<14 digits>-<6 hex>) written by this task's own runtime run. Asserting
+  // it is what makes the PNG evidence rather than decoration: before the
+  // sos-view-model pattern fix this expectation failed, because the queue
+  // filtered out every real incident and settled to an empty table.
+  await expect(page.getByText(/SOS-\d{14}-[0-9A-F]{6}/).first()).toBeVisible({
+    timeout: 60_000,
+  });
 
   await capture(page, "S3-O02-sos-queue.png", "S3-O02 SOS Queue", "/sos");
 });
 
-test("S3-O05 SOS records surface renders", async ({ page }) => {
+test("S3-O05 SOS records surface reaches a settled state", async ({ page }) => {
   await page.goto("/sos/records");
-  await expect(page.locator("body")).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  await settle(page);
   await capture(
     page,
     "S3-O05-sos-records.png",
@@ -106,9 +115,8 @@ test("S3-O05 SOS records surface renders", async ({ page }) => {
   );
 });
 
-test("S3-O03 SOS board renders", async ({ page }) => {
+test("S3-O03 SOS board reaches a settled state", async ({ page }) => {
   await page.goto("/sos/board");
-  await expect(page.locator("body")).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  await settle(page);
   await capture(page, "S3-O03-sos-board.png", "S3-O03 SOS board", "/sos/board");
 });
