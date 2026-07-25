@@ -2884,6 +2884,11 @@ export interface RedispatchOrderCommand {
   reasonNote?: string;
   operatorId?: string;
   escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+  // Optimistic-concurrency guard. When supplied, the redispatch is rejected if
+  // the order has already advanced past this assignment version, so a stale
+  // event cannot cancel an assignment the caller never saw. Omit to redispatch
+  // unconditionally.
+  expectedAssignmentVersion?: number | null;
 }
 
 export interface CancelOwnedOrderCommand {
