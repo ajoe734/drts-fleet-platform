@@ -93,6 +93,38 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "reports:read",
     "reports:write",
     "forwarder:read",
+    // S3-FIX-PLATFORM-ADMIN-SANDBOX-SCOPE-001: mirrors
+    // `SANDBOX_COMPLIANCE_SCOPES` from the API preset, in the same order.
+    //
+    // These are minted into `x-scopes` (or the JWT `scopes` claim) by
+    // `apps/platform-admin-web/app/control-plane-proxy`, and the API's
+    // `deriveScopes()` honours explicit scopes verbatim — so for a browser
+    // request this list REPLACES, rather than supplements,
+    // `AUTH_SCOPE_PRESETS.platform_admin`. Omitting them 403'd every
+    // platform-admin sandbox compliance / investigation / evidence /
+    // legal-hold / regulatory-report surface with `AUTH_SCOPE_DENIED`.
+    //
+    // The two dual-control approve rights are included deliberately.
+    // Separation of duties for those flows is NOT enforced by withholding the
+    // scope: `platform-admin-compliance.service.ts` compares the requesting
+    // and approving `actorId` and raises `SANDBOX_EXPORT_SELF_APPROVAL_-
+    // FORBIDDEN` / `SANDBOX_LEGAL_HOLD_SELF_APPROVAL_FORBIDDEN`. The proxy
+    // derives `actorId` from the IAP-authenticated email, so two humans still
+    // mint two actor ids and the maker-checker rule holds end to end; without
+    // IAP every caller collapses onto the same default actor id and the same
+    // guard blocks the approval, so the failure mode is closed either way.
+    "sandbox.compliance.read",
+    "sandbox.compliance.manage",
+    "sandbox.investigation.read",
+    "sandbox.investigation.manage",
+    "sandbox.evidence.preview",
+    "sandbox.evidence.export.request",
+    "sandbox.evidence.export.approve",
+    "sandbox.legal_hold.place",
+    "sandbox.legal_hold.release.request",
+    "sandbox.legal_hold.release.approve",
+    "sandbox.regulatory_report.review",
+    "sandbox.regulatory_report.submit",
     "multi_taxi_ratings:read",
     "multi_taxi_ratings:moderate",
   ],
