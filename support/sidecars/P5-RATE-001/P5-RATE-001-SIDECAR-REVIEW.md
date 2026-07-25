@@ -2,9 +2,16 @@
 
 **Sidecar task:** `P5-RATE-001-SIDECAR-REVIEW` (helper_kind `review_packet`, `mutates_canonical: false`)
 **Parent task:** `P5-RATE-001` — Fleet D rating+gate+atomic assignment
-**Packet author:** Claude2 (sidecar owner) · **Packet reviewer:** Copilot
-**Prepared:** 2026-07-25
-**Parent owner:** Gemini · **Parent reviewer:** Codex2 · **Parent status at packet time:** `in_progress` (review failed, R1)
+**Packet author:** Claude2 (sidecar owner) · **Packet reviewer:** Codex
+**Prepared:** 2026-07-25 · **Closed out:** 2026-07-25
+**Parent owner:** Claude2 · **Parent reviewer:** Codex2 · **Parent status at packet time:** `in_progress` (review failed, R1)
+
+> Ownership note: sections 1–7 were written while `P5-RATE-001` was owned by the
+> Gemini lane and this sidecar was routed to reviewer Copilot. The chair's
+> 2026-07-25T01:19Z reassignment moved the parent owner to Claude2 and this
+> sidecar's reviewer to Codex. The header above states the post-reassignment
+> machine truth; the findings themselves are unchanged and still target the
+> Gemini-lane tip `6f6e9827a`, which is the head they were executed against.
 
 This is a support artifact. It does not change canonical truth, does not modify
 parent implementation files, and does not decide the parent verdict. It exists so
@@ -387,3 +394,78 @@ src/modules/multi-taxi/multi-taxi.controller.ts(347,9):    error TS2345: Argumen
 src/modules/owned-mobility/owned-mobility.service.ts(2330,24): error TS2339: Property 'assignmentVersion' does not exist on type 'DispatchAssignmentRecord'.
 src/modules/owned-mobility/owned-mobility.service.ts(2338,54): error TS2339: Property 'assignmentVersion' does not exist on type 'DispatchAssignmentRecord'.
 ```
+
+---
+
+## 8. Review Disposition and Packet Reconciliation
+
+The sidecar reviewer (`Codex`) approved this task at `2026-07-25T01:42:10Z`. The
+approval note reads: *"Reviewer repaired the missing sidecar artifact, recorded
+the intake gap honestly, and approved the support-only packet. Branch anchor
+pushed: 09cba5cf6. No canonical truth changed."*
+
+That approval was issued against a **second, independently authored copy** of this
+artifact. Both copies are real; neither is a fabrication. This section reconciles
+them so the record is unambiguous.
+
+### 8.1 What actually happened
+
+| Time (UTC) | Event | Ref |
+| --- | --- | --- |
+| 2026-07-25T01:37:32Z | Owner (Claude2) commits this 389-line packet and pushes it | `188e756ee` on `origin/claude2/p5-rate-001-sidecar-review` |
+| 2026-07-25T01:40:12Z | Reviewer (Codex) dispatched into isolated worktree `codex-p5-rate-001-sidecar-review` | branch `codex/p5-rate-001-sidecar-review`, based on `29769289c` |
+| 2026-07-25T01:41:59Z | Reviewer commits its own 109-line packet at the same path | `09cba5cf6` |
+| 2026-07-25T01:42:10Z | Reviewer approves | — |
+
+`git merge-base --is-ancestor 188e756ee origin/codex/p5-rate-001-sidecar-review`
+returns false: the reviewer's branch never contained the owner's commit.
+
+### 8.2 Correction to the reviewer's F-01
+
+The reviewer's packet records finding **F-01 "Missing owner-authored packet at
+review intake" (severity medium)**, concluding that the artifact path named in
+machine truth did not exist on disk and that the reviewer had to repair it.
+
+That finding does not hold as written. The owner-authored packet existed and was
+pushed **2 minutes 40 seconds before the reviewer was dispatched**. What the
+reviewer observed was an artifact of worker isolation: its worktree was branched
+from `dev`, and the owner's work lived on the owner's task branch, which the
+reviewer's branch is not a descendant of. The gap is in **reviewer intake
+wiring** — a review lane must fetch and check out `origin/<owner>/<branch>`
+before concluding an artifact is absent — not in owner delivery.
+
+The reviewer's related conclusion that *"no `P5-RATE-001` implementation evidence
+file was found in this worktree"* is correct **for that worktree** and does not
+generalize; sections 1–7 above are executed evidence against `6f6e9827a`.
+
+### 8.3 Which copy is authoritative
+
+**This file is.** Rationale:
+
+- It is owner-authored, per the sidecar's `helper_kind: review_packet` acceptance
+  ("Create support artifacts only" / "Hand off the packet to the assigned
+  reviewer"), and it is the copy that was handed off.
+- It carries the executed evidence the sidecar exists to produce: `tsc --noEmit`
+  and `vitest` runs at the parent tip and at the `origin/dev` baseline, plus the
+  six findings F1–F6 including the F3 blocker.
+- The reviewer's copy contains no parent-task evidence — by its own statement it
+  deliberately declines to claim any — and its substantive finding (F-01) is
+  corrected above.
+
+The reviewer's copy remains preserved and reachable at
+`origin/codex/p5-rate-001-sidecar-review:support/sidecars/P5-RATE-001/P5-RATE-001-SIDECAR-REVIEW.md`.
+It is **not** merged into this branch: keeping it addressable rather than
+overwriting either copy preserves both records. Anyone auditing this sidecar
+should read this file as the packet and that ref as the reviewer's parallel note.
+
+### 8.4 Closeout state
+
+- Sidecar acceptance: all three items met. Support artifact only; no L1/L2 doc,
+  runtime, contract, registry, or governance file was touched on this branch —
+  the branch's entire diff versus `dev` is this one file.
+- Integration: `not_applicable`. This is support-only sidecar work that is not
+  destined for `dev` on its own; the packet lives on
+  `origin/claude2/p5-rate-001-sidecar-review`. No PR, no CI run, and no dev
+  deployment is claimed.
+- The parent task `P5-RATE-001` remains `in_progress` and is **not** closed by
+  this sidecar. The F1–F6 fix list in §4 is the open work there.
