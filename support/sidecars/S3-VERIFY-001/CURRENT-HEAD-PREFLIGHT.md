@@ -12,6 +12,7 @@
 
 | Acceptance slice | Status | Evidence anchors |
 | --- | --- | --- |
+| current-head driver/API E2E | `verified_repo_local` | `tests/e2e/E2E-017-driver-sos-incident.sh` passed on `2026-07-25` against repo-local API runtime `http://localhost:3011` (health `200 OK`); evidence: `incidentId=INC-000002`, `sosEventId=a384287d-8ea1-4ea6-88a1-0cbc7e998b26`, `eventNo=SOS-20260725020324-2B72D9`, driver incident-list still `403` |
 | API SOS create + replay idempotency | `verified` | `apps/api/tests/integration/int-s3-001-driver-sos-idempotency.test.ts:225-295` |
 | Driver offline durable outbox + replay state | `verified` | `apps/driver-app/tests/unit/driver-sos-outbox.test.ts:38-168` |
 | Driver SOS screen flow + forwarded-context projection | `verified` | `apps/driver-app/tests/unit/incident-screen.test.ts:101-224`, `apps/driver-app/app/incident.tsx:180-216` |
@@ -19,7 +20,7 @@
 | Ops incident event stream publish | `verified` | `apps/api/tests/unit/ops-dispatch-events.service.test.ts:59-216` |
 | Screenshot evidence with runtime source label | `partial` | `support/sidecars/DRV-UI-010/DRV-UI-010-VERIFICATION-PACKET.md:71-72,91-94`, `support/sidecars/DRV-UI-010/ui-text-snapshots.md:83-95` |
 | Android / iOS physical offline replay | `blocked_ext` | No emulator / device execution in this worker; task brief forbids replacing device evidence with local mock. |
-| Attachment security scan | `missing_evidence` | `apps/driver-app/app/sos.tsx:334-361,672-761,1086-1196` and `apps/driver-app/lib/driver-sos-outbox.ts:131-218,348-364` show attachment drafts stay in local state / durable outbox, while `buildDriverSosSubmitCommand` at `apps/driver-app/lib/driver-sos-outbox.ts:208-220` sends no attachment metadata. The repo does contain attachment upload / checksum flows for other domains such as Fleet Partner supply onboarding, but no S-3-specific upload / presign / malware-scan path was found under `apps/api/src/modules/driver-sos`, `apps/api/src/modules/incident`, or related tests during this repo scan. |
+| Attachment security scan | `missing_evidence` | `infra/migrations/V0052__s3_driver_sos.sql:83-103` creates `safety.driver_sos_attachments`, but `packages/contracts/src/phase1-p5-s3-multi-taxi.ts:627-639` defines `SubmitDriverSosEventCommand` without attachment fields, `apps/api/src/modules/driver-sos/driver-sos.controller.ts:12-25` exposes only `POST /driver/sos-events`, and `apps/api/src/modules/driver-sos/driver-sos.repository.ts:80-92,389-501` persists only events/timelines/outbox. `apps/driver-app/app/sos.tsx:334-361,672-761,1086-1196` plus `apps/driver-app/lib/driver-sos-outbox.ts:131-218,348-364` still show attachment drafts staying local, while `buildDriverSosSubmitCommand` at `apps/driver-app/lib/driver-sos-outbox.ts:208-220` sends no attachment metadata. |
 | Alert p95 measured in production | `blocked_ext` | No production observability access in this worker; local unit/integration timings are not acceptable production proof. |
 | Forbidden-vocabulary scan | `verified_with_gap` | Android incident text snapshot is clean for the forbidden list, but mirrored/forwarded wording still exists outside the incident surface. |
 
@@ -44,12 +45,33 @@ Result: `PASS` (`2` files, `6` tests) on inspected commit `ca74e40740fb8ba397b5a
 Note: the driver-app run emitted `react-test-renderer` deprecation plus `act(...)` environment warnings, but the process still exited `0` and all assertions passed.
 
 ```bash
+source /tmp/drts-s3v-env.sh
+curl -sS -m 5 -D - http://localhost:3011/health
+bash tests/e2e/E2E-017-driver-sos-incident.sh
+```
+
+Executed at repo root.
+
+Result: repo-local current-head API runtime on `http://localhost:3011` returned
+health `200 OK`, and `E2E-017` passed with `incidentId=INC-000002`,
+`sosEventId=a384287d-8ea1-4ea6-88a1-0cbc7e998b26`,
+`eventNo=SOS-20260725020324-2B72D9`; driver incident-list access remained
+forbidden (`403`).
+
+```bash
 git grep -nE "attachment|attachments|presign|checksum|malware|clam|virus|content-type|mime|scan" -- apps/api/src/modules/driver-sos apps/api/src/modules/incident apps/api/tests apps/driver-app support/sidecars/DRV-UI-010 support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
 ```
 
 Executed at repo root.
 
-Result: matches again confirm only local driver-app attachment draft persistence under `apps/driver-app/app/sos.tsx` and `apps/driver-app/lib/driver-sos-outbox.ts`, plus non-S3 attachment checksum flows in other domains such as Fleet Partner onboarding / accident investigation. No S-3-specific presign / checksum / malware-scan proof was found under current head.
+Result: matches again confirm only local driver-app attachment draft
+persistence under `apps/driver-app/app/sos.tsx` and
+`apps/driver-app/lib/driver-sos-outbox.ts`, plus non-S3 attachment checksum
+flows in other domains such as Fleet Partner onboarding / accident
+investigation. Current head does contain the attachment schema in
+`infra/migrations/V0052__s3_driver_sos.sql`, but no S-3-specific presign /
+checksum / malware-scan runtime path was found under `apps/api/src/modules/driver-sos`,
+`apps/api/src/modules/incident`, or related tests.
 
 ```bash
 git grep -nE "FSD|自駕|Tesla|sandbox|safety operator|external platform badge|forwarded|mirror" -- apps/driver-app support/sidecars/DRV-UI-010 tests/e2e support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
