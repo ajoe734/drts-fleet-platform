@@ -5,6 +5,7 @@ import {
   buildSosQueueRows,
   collectUnreportedSosIncidentIds,
   buildVehiclePlateMap,
+  getSosSupplementText,
   isSosIncident,
 } from "../../lib/sos-view-model";
 
@@ -218,12 +219,23 @@ describe("SOS event number contract with the API generator", () => {
           description: `Driver SOS ${eventNo} submitted from the driver app.`,
         }),
       ],
-      { driverNamesById: new Map(), platesByVehicleId: new Map() },
+      { nowMs: Date.parse("2026-07-25T12:30:00.000Z") },
     );
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.eventNo).toBe(eventNo);
-    expect(rows[0]?.note ?? null).toBeNull();
+
+    // The API's own boilerplate must not surface as a driver-written
+    // supplement. With the old pattern this string failed the
+    // generated-description check and was shown to Ops as if it were a note.
+    expect(
+      getSosSupplementText({
+        description: `Driver SOS ${eventNo} submitted from the driver app.`,
+      }),
+    ).toBeNull();
+    expect(
+      getSosSupplementText({ description: "駕駛補充：車輛被追撞。" }),
+    ).toBe("駕駛補充：車輛被追撞。");
   });
 
   it("does not recognise the legacy shape the API never emitted", () => {
