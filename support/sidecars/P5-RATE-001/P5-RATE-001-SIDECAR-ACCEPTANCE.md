@@ -5,7 +5,7 @@
 **Current Owner:** `Codex`  
 **Assigned Reviewer:** `Claude2`  
 **Last Revised:** `2026-07-25 (UTC)`  
-**Status:** `READY FOR REVIEW`
+**Status:** `REVIEW_APPROVED / OWNER_CLOSEOUT`
 
 ---
 
@@ -51,7 +51,7 @@ P5-RATE-001
 ├── depends_on: MTX-AUTH-001
 │   ├── status: done
 │   ├── provides: operating authorization, vehicle membership, effective-window gating
-│   └── integration: merged_to_dev via 824ca683bdd4abb06418af54818c5877618fd768
+│   └── integration: machine truth records merged_to_dev via 824ca683bdd4abb06418af54818c5877618fd768, but that SHA is not reachable from current refs; the capability is present on `dev`, yet this packet does not treat that recorded SHA as trustworthy merge evidence
 ├── depends_on: MTX-QUEUE-001
 │   ├── status: done
 │   ├── provides: queue semantics and non-bypassable virtual_matching policy
@@ -97,15 +97,15 @@ Legend:
 ### Runtime / Contract Anchors
 
 - `new_driver` aggregate state:
-  - `apps/api/src/modules/multi-taxi/multi-taxi.service.ts:1360`
+  - `apps/api/src/modules/multi-taxi/multi-taxi.service.ts:1366`
   - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:6333`
 - Passenger disclosure gate before assignment:
-  - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:6021`
+  - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:6026`
 - Assignment snapshot carries immutable `assignmentVersion` and rating/disclosure payload:
-  - `packages/contracts/src/phase1-p5-s3-multi-taxi.ts:442`
+  - `packages/contracts/src/phase1-p5-s3-multi-taxi.ts:453`
   - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:6064`
 - Assignment outbox uses `assignment_disclosure_ready` / `assignment_replaced` with `assignmentVersion`:
-  - `packages/contracts/src/phase1-p5-s3-multi-taxi.ts:589`
+  - `packages/contracts/src/phase1-p5-s3-multi-taxi.ts:596`
   - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:6131`
 - Scarcity fallback cannot re-admit hard legal denials:
   - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:291`
@@ -116,9 +116,9 @@ Legend:
 ### Moderation UI Anchors
 
 - Screen ownership and read-only aggregate authority checks:
-  - `apps/platform-admin-web/app/p5-ratings/__tests__/rating-ui-contract.test.ts:11`
-  - `apps/platform-admin-web/app/p5-ratings/__tests__/rating-ui-contract.test.ts:19`
-  - `apps/platform-admin-web/app/p5-ratings/__tests__/rating-ui-contract.test.ts:28`
+  - `apps/platform-admin-web/app/p5-ratings/__tests__/rating-ui-contract.test.ts:14`
+  - `apps/platform-admin-web/app/p5-ratings/__tests__/rating-ui-contract.test.ts:24`
+  - `apps/platform-admin-web/app/p5-ratings/__tests__/rating-ui-contract.test.ts:26`
 - Production e2e screenshot harness for `P5-RATE-UI-01..03`:
   - `apps/platform-admin-web/app/p5-ratings/e2e/rating-governance.spec.ts:1`
   - `apps/platform-admin-web/app/p5-ratings/evidence/README.md:1`
@@ -153,3 +153,5 @@ Support-packet preparation used:
 - repo inspection of the anchors listed in §5
 
 No runtime code was changed, so no new implementation test run was required for this sidecar slice.
+
+Reviewer approval at task level confirmed that the packet scope remains support-only, and this closeout refresh only corrects evidence wording / anchors without changing any canonical implementation claim.
