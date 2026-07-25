@@ -9,6 +9,7 @@ import type {
   PassengerPaymentStatus,
   PassengerRatingModerationAuditRecord,
   PassengerRatingReviewListItem,
+  PassengerPushDeliveryOutcome,
   PassengerRideAccessToken,
   PassengerTripRatingRecord,
 } from "@drts/contracts";
@@ -342,6 +343,38 @@ export class MultiTaxiRepository {
       );
     const row = result.rows[0];
     return row ? this.mapRideAccessToken(row) : null;
+  }
+
+  /**
+   * Records the result of one push-delivery attempt. `delivered_at` is only set
+   * for a `delivered` outcome, so a row whose provider was never provisioned
+   * stays queryable as undelivered instead of looking like a sent notification.
+   */
+  async updateConsumerNotificationOutboxDelivery(
+    outcome: PassengerPushDeliveryOutcome,
+  ) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        UPDATE ops.consumer_notification_outbox
+        SET
+          status = $2,
+          attempt_count = $3,
+          next_attempt_at = $4,
+          delivered_at = $5
+        WHERE outbox_id = $1
+      `,
+      [
+        outcome.outboxId,
+        outcome.status,
+        outcome.attemptCount,
+        outcome.nextAttemptAt,
+        outcome.status === "delivered" ? outcome.deliveredAt : null,
+      ],
+    );
   }
 
   async findPassengerRating(orderId: string, passengerSubjectRef: string) {

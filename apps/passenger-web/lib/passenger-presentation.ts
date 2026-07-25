@@ -1,13 +1,12 @@
 import { REALM_COLORS, STATUS_TONES, type ToneRamp } from "@drts/ui-tokens";
 import { buildCanvasTheme } from "@drts/ui-web";
-import {
-  getPassengerRideFixture,
-  PASSENGER_SCREEN_IDS,
-  type PassengerBadgeTone,
-  type PassengerRideFixture,
-  type PassengerScreenId,
-} from "./passenger-fixtures";
 import { type PassengerDataMode } from "./runtime-config";
+import {
+  resolvePassengerScreenId,
+  type PassengerBadgeTone,
+} from "./passenger-view-model";
+
+export { resolvePassengerScreenId };
 
 export const passengerTheme = buildCanvasTheme({
   surface: "enterprise",
@@ -67,29 +66,4 @@ export function getToneRamp(tone: PassengerBadgeTone): ToneRamp {
     default:
       return passengerChrome.info;
   }
-}
-
-export function resolvePassengerScreenId(
-  value: string | string[] | undefined,
-  kind: "ride" | "fares" | "receipt",
-): PassengerScreenId {
-  const normalized = Array.isArray(value) ? value[0] : value;
-  if (
-    normalized &&
-    PASSENGER_SCREEN_IDS.includes(normalized as PassengerScreenId)
-  ) {
-    return normalized as PassengerScreenId;
-  }
-
-  if (kind === "fares") return "A03";
-  return kind === "receipt" ? "P5-10" : "P5-01";
-}
-
-export function resolvePassengerRideFixture(
-  token: string,
-  kind: "ride" | "fares" | "receipt",
-  screenParam: string | string[] | undefined,
-): PassengerRideFixture {
-  const screenId = resolvePassengerScreenId(screenParam, kind);
-  return getPassengerRideFixture(screenId, token);
 }

@@ -12,10 +12,8 @@ import {
   mapPassengerPayment,
   mapPassengerRideAuthorityToFixture,
 } from "../../lib/passenger-live";
-import {
-  getPassengerRideFixture,
-  resolvePassengerDataMode,
-} from "../../lib/passenger-fixtures";
+import { getPassengerRideFixture } from "../../lib/passenger-fixtures";
+import { resolvePassengerDataMode } from "../../lib/runtime-config";
 
 function createAuthorityView(): PassengerRideAuthorityView {
   return {

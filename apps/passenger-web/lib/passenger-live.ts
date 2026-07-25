@@ -10,7 +10,7 @@ import type {
   PassengerPaymentPresentation,
   PassengerRideFixture,
   PassengerScreenId,
-} from "./passenger-fixtures";
+} from "./passenger-view-model";
 
 const PASSENGER_PROXY_BASE = "/control-plane-proxy";
 
@@ -109,11 +109,19 @@ export function subscribePassengerRideAuthority(
     "trip_cancelled",
     "receipt_ready",
   ];
+  // Highest `eventVersion` already applied. The server allocates this strictly
+  // increasing per order, so anything at or below it is a replay or a
+  // late-arriving earlier event and must not overwrite newer ride state.
+  let appliedEventVersion = 0;
   const listener = (event: Event) => {
     try {
       const envelope = camelizeKeys(
         JSON.parse((event as MessageEvent<string>).data),
       ) as PassengerRideSseEventEnvelope;
+      if (!isFreshPassengerEvent(envelope, appliedEventVersion)) {
+        return;
+      }
+      appliedEventVersion = envelope.eventVersion;
       onView(envelope.data);
     } catch {
       onError();
@@ -124,6 +132,23 @@ export function subscribePassengerRideAuthority(
   }
   source.onerror = onError;
   return () => source.close();
+}
+
+/**
+ * True only for an envelope that advances the stream. An envelope without a
+ * usable numeric version is rejected as well: without an ordering key there is
+ * no way to tell it apart from a stale replay.
+ */
+export function isFreshPassengerEvent(
+  envelope: Pick<PassengerRideSseEventEnvelope, "eventVersion">,
+  appliedEventVersion: number,
+) {
+  const version = envelope.eventVersion;
+  return (
+    typeof version === "number" &&
+    Number.isFinite(version) &&
+    version > appliedEventVersion
+  );
 }
 
 export function mapPassengerRideAuthorityToFixture(

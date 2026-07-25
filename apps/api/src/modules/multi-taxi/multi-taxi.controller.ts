@@ -134,7 +134,7 @@ export class MultiTaxiController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.multiTaxiService.getPassengerContact(accessToken),
+      await this.multiTaxiService.getPassengerContact(accessToken, requestId),
       requestId,
     );
   }

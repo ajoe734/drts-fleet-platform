@@ -556,10 +556,29 @@ export interface SubmitPassengerTripRatingCommand {
   comment?: string | null;
 }
 
+export const PASSENGER_CONTACT_UNAVAILABLE_REASONS = [
+  "masked_call_provider_not_configured",
+  "masked_call_provider_error",
+] as const;
+export type PassengerContactUnavailableReason =
+  (typeof PASSENGER_CONTACT_UNAVAILABLE_REASONS)[number];
+
 export interface PassengerRideContactOption {
   mode: "masked_call" | "support_fallback" | "unavailable";
+  /**
+   * Either a provider-issued masked proxy URI or the platform support number.
+   * A raw driver phone number must never be placed here: the masked-call port
+   * receives the driver number and returns a proxy leg, so the passenger only
+   * ever dials the provider.
+   */
   contactUri: string | null;
   expiresAt: string | null;
+  /**
+   * `null` only when `mode` is `masked_call`. For `support_fallback` and
+   * `unavailable` this states why no masked session exists, so provider
+   * absence is reported explicitly instead of being simulated as success.
+   */
+  unavailableReason: PassengerContactUnavailableReason | null;
 }
 
 export const PASSENGER_RIDE_SSE_EVENTS = [
@@ -578,7 +597,16 @@ export type PassengerRideSseEvent = (typeof PASSENGER_RIDE_SSE_EVENTS)[number];
 export interface PassengerRideSseEventEnvelope {
   eventId: string;
   eventType: PassengerRideSseEvent;
+  /**
+   * Strictly increasing per order across the whole passenger stream, including
+   * reconnects. It is the only field a consumer may order on: a consumer must
+   * drop any envelope whose `eventVersion` is not greater than the highest it
+   * has already applied. Do not derive it from `assignmentVersion`, which
+   * resets to 1 for an unassigned ride and stays flat across status changes.
+   */
   eventVersion: number;
+  /** Assignment generation this view was built from; null when unassigned. */
+  assignmentVersion: number | null;
   orderId: string;
   occurredAt: string;
   data: PassengerRideAuthorityView;
@@ -605,6 +633,30 @@ export interface ConsumerNotificationOutboxRecord {
   nextAttemptAt: string;
   createdAt: string;
   deliveredAt: string | null;
+}
+
+export const PASSENGER_PUSH_DELIVERY_RESULTS = [
+  "delivered",
+  "provider_not_configured",
+  "provider_error",
+] as const;
+export type PassengerPushDeliveryResult =
+  (typeof PASSENGER_PUSH_DELIVERY_RESULTS)[number];
+
+/**
+ * Outcome of one attempt to hand a notification to the push provider.
+ * `status` is only `delivered` when `result` is `delivered`; an absent provider
+ * must surface as `failed` + `provider_not_configured` rather than a simulated
+ * success.
+ */
+export interface PassengerPushDeliveryOutcome {
+  outboxId: string;
+  status: ConsumerNotificationOutboxRecord["status"];
+  result: PassengerPushDeliveryResult;
+  attemptCount: number;
+  nextAttemptAt: string;
+  deliveredAt: string | null;
+  providerName: string | null;
 }
 
 // ===========================================================================
