@@ -66,6 +66,17 @@ const CONTROL_PLANE_REALMS: Record<ControlPlaneActorType, AuthRealm> = {
   ops_user: "ops",
 };
 
+// These presets are minted into `x-scopes` (or the JWT `scopes` claim) by the
+// control-plane proxy, and the API's `deriveScopes()` honours explicit scopes
+// verbatim — so for a browser request these REPLACE, rather than supplement,
+// `AUTH_SCOPE_PRESETS` in `apps/api/src/common/auth/auth.constants.ts`.
+//
+// Source of truth for the grant per actor type is that API table; this copy
+// exists only because the package must stay dependency-free. Any scope added
+// there for `ops_user` / `platform_admin` must be mirrored here or the surface
+// that needs it 403s with `AUTH_SCOPE_DENIED` from the browser while passing
+// every server-side test. Parity is pinned by
+// `apps/api/tests/unit/ops-driver-tasks-scope.test.ts`.
 const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
   platform_admin: [
     "identity:read",
@@ -115,12 +126,16 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "owned:write",
     "dispatch:read",
     "dispatch:write",
+    "driver:read",
     "billing:read",
     "billing:write",
     "reports:read",
     "reports:write",
     "forwarder:read",
     "forwarder:write",
+    "sandbox.compliance.read",
+    "sandbox.investigation.read",
+    "sandbox.evidence.preview",
   ],
 };
 
