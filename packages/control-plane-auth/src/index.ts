@@ -104,7 +104,9 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     // platform-admin sandbox compliance / investigation / evidence /
     // legal-hold / regulatory-report surface with `AUTH_SCOPE_DENIED`.
     //
-    // The two dual-control approve rights are included deliberately.
+    // The two dual-control approve rights are included deliberately; the full
+    // boundary decision is recorded in
+    // `docs/01-decisions/SD-DP-20260725-008-control-plane-proxy-scope-parity.md`.
     // Separation of duties for those flows is NOT enforced by withholding the
     // scope: `platform-admin-compliance.service.ts` compares the requesting
     // and approving `actorId` and raises `SANDBOX_EXPORT_SELF_APPROVAL_-

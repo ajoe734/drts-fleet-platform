@@ -32,7 +32,9 @@ import { VehicleEvidenceController } from "../../src/modules/vehicle-evidence/ve
 // in S3-FIX-OPS-SOS-BOARD-SCOPE-001 — while every server-side test stayed green
 // because they all assert `AUTH_SCOPE_PRESETS` directly.
 //
-// BOUNDARY DECISION recorded by this suite: the proxy-minted `platform_admin`
+// BOUNDARY DECISION — recorded in
+// `docs/01-decisions/SD-DP-20260725-008-control-plane-proxy-scope-parity.md` and
+// pinned by this suite: the proxy-minted `platform_admin`
 // identity carries the full API grant, INCLUDING the two dual-control approve
 // rights (`sandbox.evidence.export.approve`,
 // `sandbox.legal_hold.release.approve`). Rationale:
