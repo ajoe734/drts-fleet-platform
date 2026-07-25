@@ -2,7 +2,7 @@
 
 ## Summary
 
-Current head `cf82c7a436484d493dca45db6d8a0af50cc524b6` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-23`, and recorded the external blockers that remain for full Fleet G closure.
+Current head `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f` already contains substantial S-3 implementation. This pass re-verified the local API, Driver, and Ops acceptance slices that can be honestly exercised in the worker on `2026-07-25`, and recorded the external blockers that remain for full Fleet G closure.
 
 ## Verified Locally
 
@@ -124,18 +124,24 @@ pnpm exec vitest run tests/unit/incident.controller.test.ts tests/unit/ops-dispa
 pnpm exec vitest run tests/integration/int-s3-001-driver-sos-idempotency.test.ts tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/incident.controller.test.ts tests/unit/ops-dispatch-events.service.test.ts tests/unit/incident-escalation-service-recovery.test.ts --reporter=dot
 ```
 
-Executed in `apps/api` on `2026-07-23`: all passed. The combined rerun on `cf82c7a436484d493dca45db6d8a0af50cc524b6` passed `6` files / `45` tests.
+Executed in `apps/api` on `2026-07-25`: all passed. The combined rerun on `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f` passed `6` files / `45` tests.
 
 ```bash
 pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/incident-screen.test.ts --reporter=dot
 ```
 
-Executed in `apps/driver-app` on `2026-07-23`: all passed on `cf82c7a436484d493dca45db6d8a0af50cc524b6` (`2` files / `6` tests).
+Executed in `apps/driver-app` on `2026-07-25`: all passed on `ca74e40740fb8ba397b5a742b6f889c21b7e0c6f` (`2` files / `6` tests).
 
 The driver-app run emitted `react-test-renderer` deprecation and `act(...)` environment warnings, but still exited `0` with all six assertions passing. Those warnings are pre-existing test-environment noise, not S-3 acceptance failures.
 
 ```bash
-grep -RInE --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=coverage "(attachment|attachments|presign|checksum|malware|clam|virus|content-type|mime|scan)" apps/api/src/modules/driver-sos apps/api/src/modules/incident apps/api/tests apps/driver-app support/sidecars/DRV-UI-010 support/sidecars/S3-VERIFY-001 | head -n 250
+git grep -nE "attachment|attachments|presign|checksum|malware|clam|virus|content-type|mime|scan" -- apps/api/src/modules/driver-sos apps/api/src/modules/incident apps/api/tests apps/driver-app support/sidecars/DRV-UI-010 support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
 ```
 
-Executed at repo root on `2026-07-23`: no S-3-specific attachment upload / presign / checksum / malware-scan path was found beyond the local driver-app draft/outbox handling already cited above.
+Executed at repo root on `2026-07-25`: no S-3-specific attachment upload / presign / checksum / malware-scan path was found beyond the local driver-app draft/outbox handling already cited above.
+
+```bash
+git grep -nE "FSD|自駕|Tesla|sandbox|safety operator|external platform badge|forwarded|mirror" -- apps/driver-app support/sidecars/DRV-UI-010 tests/e2e support/sidecars/S3-VERIFY-001 | sed -n '1,260p'
+```
+
+Executed at repo root on `2026-07-25`: the captured incident surface remained clean for the core forbidden list, while broader current-head driver-app surfaces still exposed `forwarded` / `mirror` vocabulary and unrelated safety-operator screens still contained `FSD`, `sandbox`, and `Tesla`, so the task-level forbidden-vocabulary gate cannot be claimed fully green.
