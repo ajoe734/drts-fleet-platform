@@ -1,0 +1,24 @@
+{
+  "task": "S3-VERIFY-001",
+  "runtimeSource": "local hermetic — current-head ops-console-web + @drts/api + Postgres (NOT production)",
+  "apiUrl": "http://localhost:3972",
+  "capturedAtNote": "Timestamp intentionally omitted; the commit that adds these files is the time anchor.",
+  "productionEvidence": false,
+  "screenshots": [
+    {
+      "file": "S3-O02-sos-queue.png",
+      "url": "/sos",
+      "screen": "S3-O02 SOS Queue"
+    },
+    {
+      "file": "S3-O05-sos-records.png",
+      "url": "/sos/records",
+      "screen": "S3-O05 Investigation / records"
+    },
+    {
+      "file": "S3-O03-sos-board.png",
+      "url": "/sos/board",
+      "screen": "S3-O03 SOS board"
+    }
+  ]
+}

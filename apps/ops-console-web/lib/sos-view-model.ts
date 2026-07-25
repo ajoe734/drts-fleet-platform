@@ -7,9 +7,23 @@ import type {
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web";
 
-const SOS_EVENT_NO_PATTERN = /SOS-\d{8}-\d{4}/;
-const GENERATED_DESCRIPTION_PATTERN =
-  /^Driver SOS SOS-\d{8}-\d{4} submitted from the driver app\.$/;
+// Canonical Driver SOS event number, as produced by `nextEventNo` in
+// apps/api/src/modules/driver-sos/driver-sos.service.ts:
+//   `SOS-` + 14-digit compact UTC timestamp + `-` + 6 uppercase hex chars,
+// e.g. SOS-20260725122716-F67B15.
+//
+// The previous pattern was /SOS-\d{8}-\d{4}/, which matches neither segment:
+// the timestamp is 14 digits, not 8, and the suffix is hex, not digits. Because
+// `isSosIncident` gates the entire Ops SOS queue on this pattern, every real
+// incident was filtered out and the queue rendered permanently empty. The unit
+// test did not catch it because its fixture was hand-written in the same wrong
+// shape, so the view model and its test agreed with each other and both
+// disagreed with the API.
+const SOS_EVENT_NO_SEGMENT = String.raw`SOS-\d{14}-[0-9A-F]{6}`;
+const SOS_EVENT_NO_PATTERN = new RegExp(SOS_EVENT_NO_SEGMENT);
+const GENERATED_DESCRIPTION_PATTERN = new RegExp(
+  String.raw`^Driver SOS ${SOS_EVENT_NO_SEGMENT} submitted from the driver app\.$`,
+);
 
 export type SosPillTone = Exclude<CanvasTone, "neutral">;
 

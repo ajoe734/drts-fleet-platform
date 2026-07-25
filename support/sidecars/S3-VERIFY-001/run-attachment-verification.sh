@@ -88,14 +88,21 @@ run_admin_psql() {
   docker exec -i -e PGPASSWORD="$DB_PASS" "$(postgres_container_name)" psql -U "$DB_USER" -d postgres "$@"
 }
 
-echo "[bringup] resetting isolated database ${DB_NAME}"
-run_admin_psql -v ON_ERROR_STOP=1 -c \
-  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
-run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME}\";" >/dev/null
-run_admin_psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME}\";" >/dev/null
-pnpm db:migrate >/dev/null
-pnpm db:seed >/dev/null
-echo "[bringup] database migrated and seeded"
+# SKIP_DB_RESET=1 keeps rows written by a previous run. Used by the screenshot
+# capture, which needs the SOS events/attachments an earlier `attachments` run
+# persisted to still be there when the Ops console reads them.
+if [[ "${SKIP_DB_RESET:-0}" == "1" ]]; then
+  echo "[bringup] SKIP_DB_RESET=1 — reusing existing ${DB_NAME} contents"
+else
+  echo "[bringup] resetting isolated database ${DB_NAME}"
+  run_admin_psql -v ON_ERROR_STOP=1 -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
+  run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME}\";" >/dev/null
+  run_admin_psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME}\";" >/dev/null
+  pnpm db:migrate >/dev/null
+  pnpm db:seed >/dev/null
+  echo "[bringup] database migrated and seeded"
+fi
 
 echo "[bringup] starting local controlled provider endpoints"
 node "${ROOT_DIR}/support/sidecars/S3-VERIFY-001/attachment-provider-stubs.mjs" \
