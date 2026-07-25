@@ -95,7 +95,10 @@ function createHarness(options?: {
   return { service, order, ownedMobilityService };
 }
 
-async function issueAccessToken(service: MultiTaxiService, order: MutableOrder) {
+async function issueAccessToken(
+  service: MultiTaxiService,
+  order: MutableOrder,
+) {
   const ride = await service.createRide(
     {
       pickup: { address: "台北車站" },
@@ -170,9 +173,9 @@ describe("P5-PAX-001 passenger SSE version authority", () => {
     expect(
       envelopes.every((envelope) => envelope.assignmentVersion === 1),
     ).toBe(true);
-    expect(new Set(envelopes.map((envelope) => envelope.eventVersion)).size).toBe(
-      envelopes.length,
-    );
+    expect(
+      new Set(envelopes.map((envelope) => envelope.eventVersion)).size,
+    ).toBe(envelopes.length);
   });
 
   it("keeps the sequence increasing for a second subscriber so a reconnect cannot replay a lower version", async () => {

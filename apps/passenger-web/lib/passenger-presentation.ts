@@ -67,4 +67,3 @@ export function getToneRamp(tone: PassengerBadgeTone): ToneRamp {
       return passengerChrome.info;
   }
 }
-

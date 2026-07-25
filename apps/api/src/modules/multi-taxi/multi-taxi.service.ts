@@ -67,10 +67,7 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../service-product/service-product.service";
-import {
-  InjectMaskedCallPort,
-  type MaskedCallPort,
-} from "./masked-call.port";
+import { InjectMaskedCallPort, type MaskedCallPort } from "./masked-call.port";
 import {
   MultiTaxiRepository,
   type PassengerRatingReviewRepositoryDetail,

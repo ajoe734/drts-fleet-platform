@@ -59,7 +59,10 @@ describe("production fixture prohibition", () => {
 
     expect(loader).toContain(`await import("./${FIXTURE_MODULE}")`);
     expect(loader).not.toMatch(
-      new RegExp(String.raw`^\s*import\s[^;]*?["']\./${FIXTURE_MODULE}["']`, "m"),
+      new RegExp(
+        String.raw`^\s*import\s[^;]*?["']\./${FIXTURE_MODULE}["']`,
+        "m",
+      ),
     );
   });
 

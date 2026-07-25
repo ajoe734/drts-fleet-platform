@@ -21,7 +21,6 @@ import type {
   PassengerTimelineEvent,
 } from "./passenger-view-model";
 
-
 const assignmentBase: PassengerDispatchDisclosureSnapshot = {
   snapshotId: "snap-p5-demo-001",
   runtimeProfileCode: "multi_taxi_direct",
@@ -467,4 +466,3 @@ export function getPassengerRideFixture(
       };
   }
 }
-
