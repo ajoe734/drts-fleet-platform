@@ -98,8 +98,11 @@ describe("partner-booking i18n dictionary", () => {
     expect(programSiteScreenPage).toContain("getServerLocale");
     expect(programSiteScreenPage).toContain("locale={locale}");
     expect(programSiteScreenPage).toContain('surface="site"');
+    expect(programEmbedPage).toContain("getServerLocale");
+    expect(programEmbedPage).toContain("ProgramBookingFlow");
     expect(programEmbedPage).toContain("AirportTransferSite");
     expect(programEmbedPage).toContain('mode="embed"');
+    expect(programEmbedPage).toContain('surface="embed"');
     expect(programEmbedPage).toContain("onSubmitBooking={submitBooking}");
     expect(programEmbedScreenPage).toContain("getServerLocale");
     expect(programEmbedScreenPage).toContain("locale={locale}");
@@ -150,8 +153,10 @@ describe("partner-booking i18n dictionary", () => {
       'listProgramScreensForTheme(theme, "site")',
     );
     expect(programEmbedPage).toContain("AirportTransferSite");
+    expect(programEmbedPage).toContain("ProgramBookingFlow");
     expect(programEmbedPage).toContain('mode="embed"');
     expect(programEmbedPage).toContain("submitEmbeddedAirportBooking");
+    expect(programEmbedPage).toContain('screen="embed_fallback"');
     expect(programEmbedPage).toContain('theme.kind !== "card"');
     expect(programEmbedScreenPage).toContain("resolveEmbedScreen");
     expect(programEmbedScreenPage).toContain(

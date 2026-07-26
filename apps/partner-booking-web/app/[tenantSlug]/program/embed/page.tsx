@@ -6,6 +6,8 @@ import {
 import { submitEmbeddedAirportBooking } from "@/lib/embed-airport-booking";
 import { getTenantProgramRouteContext } from "@/lib/program-route-context";
 import { getAirportBank } from "@/lib/airport-site-data";
+import { ProgramBookingFlow } from "@/lib/program-screens";
+import { getServerLocale } from "@/lib/server-locale";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +34,9 @@ export default async function ProgramEmbedFlowPage({
   searchParams,
 }: PageProps) {
   const { tenantSlug } = await params;
+  const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
-  const { entry, theme } = await getTenantProgramRouteContext(tenantSlug);
+  const { entry, inactive, theme } = await getTenantProgramRouteContext(tenantSlug);
   const bank = getAirportBank(tenantSlug);
 
   if (theme.kind !== "card" || !bank) {
@@ -56,6 +59,23 @@ export default async function ProgramEmbedFlowPage({
   const existingEligibilityVerificationId =
     getSingleValue(resolvedSearchParams.eligibilityVerificationId)?.trim() ??
     null;
+  const embedSessionReady = Boolean(apiKey && partnerUserRef);
+
+  if (!entry || inactive) {
+    notFound();
+  }
+
+  if (!embedSessionReady) {
+    return (
+      <ProgramBookingFlow
+        theme={theme}
+        screen="embed_fallback"
+        basePath={`/${tenantSlug}/program/embed`}
+        locale={locale}
+        surface="embed"
+      />
+    );
+  }
 
   async function submitBooking(submission: AirportTransferBookingSubmission) {
     "use server";
@@ -71,6 +91,7 @@ export default async function ProgramEmbedFlowPage({
       benefitReference,
       flightNo,
       existingEligibilityVerificationId,
+      locale,
       submission,
     });
   }
@@ -80,10 +101,15 @@ export default async function ProgramEmbedFlowPage({
       bank={bank}
       mode="embed"
       onSubmitBooking={submitBooking}
-      embedSessionReady={Boolean(apiKey && partnerUserRef)}
+      embedSessionReady={embedSessionReady}
       embeddedPassengerName={cardholderName ?? partnerUserRef}
       embeddedCardLast4={cardLast4}
       initialFlightNo={flightNo}
+      embedReferenceToken={referenceToken}
+      embedBenefitReference={benefitReference}
+      defaultRideDate={new Date(Date.now() + 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10)}
     />
   );
 }

@@ -110,6 +110,7 @@ describe("submitEmbeddedAirportBooking", () => {
         tenantSlug: "ctbc",
         apiKey: "pk_live_001",
         partnerUserRef: "user-001",
+        locale: "zh",
         referenceToken: "token-001",
         cardLast4: "1234",
         cardholderName: "王小明",
@@ -231,6 +232,7 @@ describe("submitEmbeddedAirportBooking", () => {
         tenantSlug: "ctbc",
         apiKey: "pk_live_001",
         partnerUserRef: "user-001",
+        locale: "zh",
         referenceToken: null,
         cardLast4: null,
         cardholderName: null,
@@ -271,7 +273,7 @@ describe("submitEmbeddedAirportBooking", () => {
     );
   });
 
-  it("falls back to the handoff identity when route context is unavailable", async () => {
+  it("rejects booking when route context is unavailable", async () => {
     const getPartnerRouteContext = vi.fn().mockResolvedValue({
       entry: null,
     });
@@ -281,70 +283,50 @@ describe("submitEmbeddedAirportBooking", () => {
     const getPartnerConfirmation = vi.fn().mockResolvedValue(confirmation);
     const getPartnerReceipt = vi.fn().mockResolvedValue(receipt);
 
-    await submitEmbeddedAirportBooking(
-      {
-        tenantSlug: "ctbc",
-        apiKey: "pk_live_001",
-        partnerUserRef: "user-001",
-        referenceToken: "token-001",
-        cardLast4: "1234",
-        cardholderName: "王小明",
-        benefitReference: "benefit-001",
-        flightNo: "CI-100",
-        existingEligibilityVerificationId: null,
-        submission: {
-          address: "台北市信義區松仁路 100 號",
-          date: "2026-07-28",
-          direction: "out",
-          flightNo: "",
-          luggageCount: 2,
-          passengerName: "王小明",
-          phone: "0912345678",
-          terminal: "桃園 T2 · 第二航廈",
-          time: "05:30",
-          vehicleId: "sedan",
-          vehicleName: "尊榮轎車",
+    await expect(
+      submitEmbeddedAirportBooking(
+        {
+          tenantSlug: "ctbc",
+          apiKey: "pk_live_001",
+          partnerUserRef: "user-001",
+          locale: "zh",
+          referenceToken: "token-001",
+          cardLast4: "1234",
+          cardholderName: "王小明",
+          benefitReference: "benefit-001",
+          flightNo: "CI-100",
+          existingEligibilityVerificationId: null,
+          submission: {
+            address: "台北市信義區松仁路 100 號",
+            date: "2026-07-28",
+            direction: "out",
+            flightNo: "",
+            luggageCount: 2,
+            passengerName: "王小明",
+            phone: "0912345678",
+            terminal: "桃園 T2 · 第二航廈",
+            time: "05:30",
+            vehicleId: "sedan",
+            vehicleName: "尊榮轎車",
+          },
         },
-      },
-      {
-        createPartnerBooking,
-        createPartnerIngressHandoff,
-        getPartnerConfirmation,
-        getPartnerReceipt,
-        getPartnerRouteContext,
-        verifyPartnerEligibility,
-      },
-    );
+        {
+          createPartnerBooking,
+          createPartnerIngressHandoff,
+          getPartnerConfirmation,
+          getPartnerReceipt,
+          getPartnerRouteContext,
+          verifyPartnerEligibility,
+        },
+      ),
+    ).rejects.toThrow("此內嵌預約方案目前無法使用。");
 
     expect(createPartnerIngressHandoff).toHaveBeenCalledWith({
       entrySlug: "ctbc",
       apiKey: "pk_live_001",
       partnerUserRef: "user-001",
     });
-    expect(verifyPartnerEligibility).toHaveBeenCalledWith(
-      expect.objectContaining({
-        partnerEntry: expect.objectContaining({
-          entrySlug: "ctbc",
-          tenantId: "tenant-001",
-          partnerId: "partner-001",
-          programId: "program-001",
-          eligibilityMode: "bank_card_inline",
-        }),
-      }),
-      expect.objectContaining({
-        referenceToken: "token-001",
-      }),
-    );
-    expect(createPartnerBooking).toHaveBeenCalledWith(
-      expect.objectContaining({
-        partnerEntry: expect.objectContaining({
-          entrySlug: "ctbc",
-          tenantId: "tenant-001",
-        }),
-      }),
-      expect.objectContaining({
-        partnerEntrySlug: "ctbc",
-      }),
-    );
+    expect(verifyPartnerEligibility).not.toHaveBeenCalled();
+    expect(createPartnerBooking).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,6 @@ import type {
   CreateTenantBookingCommand,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
-  PartnerIngressHandoffSession,
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
 import type {
@@ -19,6 +18,7 @@ import {
   getPartnerRouteContext,
   verifyPartnerEligibility,
 } from "@/lib/api-client";
+import { t, type Locale } from "@/lib/translations";
 
 type EmbedBookingDependencies = {
   createPartnerBooking: typeof createPartnerBooking;
@@ -38,47 +38,6 @@ const defaultDependencies: EmbedBookingDependencies = {
   verifyPartnerEligibility,
 };
 
-function buildFallbackPartnerEntry(
-  tenantSlug: string,
-  handoff: PartnerIngressHandoffSession,
-): PartnerChannelEntryRecord {
-  const entrySlug = handoff.partnerEntrySlug || tenantSlug;
-
-  return {
-    partnerId: handoff.identity.partnerId ?? `partner-${entrySlug}`,
-    partnerCode: entrySlug.toUpperCase(),
-    partnerType: "bank",
-    programId:
-      handoff.identity.partnerProgramId ?? `program-${entrySlug}-embed`,
-    programCode: entrySlug.toUpperCase(),
-    tenantId: handoff.identity.tenantId ?? `tenant-${entrySlug}`,
-    bankCode: entrySlug.toUpperCase(),
-    entrySlug,
-    displayName: `${entrySlug.toUpperCase()} Embedded Booking`,
-    businessDispatchSubtype: "credit_card_airport_transfer",
-    authMode: "partner_api_key",
-    eligibilityMode: "bank_card_inline",
-    entryHost: null,
-    entryPath: null,
-    themeAccent: null,
-    brandingMetadata: null,
-    eligibilityContract: null,
-    status: "active",
-    activeFlag: true,
-    revokedAt: null,
-    revokedBy: null,
-    revokeReason: null,
-    createdAt: "",
-    updatedAt: "",
-    auditMetadata: {
-      source: "partner_embed_fallback",
-      requestId: null,
-      createdBy: "partner-booking-web",
-      updatedBy: "partner-booking-web",
-    },
-  };
-}
-
 type SubmitEmbeddedAirportBookingInput = {
   tenantSlug: string;
   partnerEntry?: PartnerChannelEntryRecord | null;
@@ -90,6 +49,7 @@ type SubmitEmbeddedAirportBookingInput = {
   benefitReference: string | null;
   flightNo: string | null;
   existingEligibilityVerificationId: string | null;
+  locale: Locale;
   submission: AirportTransferBookingSubmission;
 };
 
@@ -165,9 +125,7 @@ export async function submitEmbeddedAirportBooking(
   dependencies: EmbedBookingDependencies = defaultDependencies,
 ): Promise<AirportTransferBookingResult> {
   if (!input.apiKey || !input.partnerUserRef) {
-    throw new Error(
-      "Embedded booking is missing handoff credentials. Reopen from the banking app.",
-    );
+    throw new Error(t("airport.embed.error.missingCredentials", undefined, input.locale));
   }
 
   let entry = input.partnerEntry;
@@ -180,7 +138,11 @@ export async function submitEmbeddedAirportBooking(
     apiKey: input.apiKey,
     partnerUserRef: input.partnerUserRef,
   });
-  entry ??= buildFallbackPartnerEntry(input.tenantSlug, handoff);
+
+  if (!entry || entry.status !== "active" || !entry.activeFlag) {
+    throw new Error(t("airport.embed.error.programUnavailable", undefined, input.locale));
+  }
+
   const session = createPartnerSessionFromIngressHandoff(handoff, entry);
 
   let eligibility: PartnerEligibilityVerificationRecord | null = null;
@@ -206,8 +168,8 @@ export async function submitEmbeddedAirportBooking(
     if (eligibility.verificationStatus !== "eligible") {
       throw new Error(
         eligibility.verificationStatus === "manual_review"
-          ? "Eligibility is under manual review. Booking cannot be created yet."
-          : "Eligibility verification failed. Booking was not created.",
+          ? t("airport.embed.error.manualReview", undefined, input.locale)
+          : t("airport.embed.error.eligibilityFailed", undefined, input.locale),
       );
     }
   }
