@@ -48,6 +48,7 @@ HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS="${HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS:-300}
 HERMETIC_DB_SEED_TIMEOUT_SECONDS="${HERMETIC_DB_SEED_TIMEOUT_SECONDS:-180}"
 HERMETIC_API_BUILD_TIMEOUT_SECONDS="${HERMETIC_API_BUILD_TIMEOUT_SECONDS:-600}"
 HERMETIC_SUITE_TIMEOUT_SECONDS="${HERMETIC_SUITE_TIMEOUT_SECONDS:-300}"
+HERMETIC_AUTO_REPAIR_NODE_MODULES="${HERMETIC_AUTO_REPAIR_NODE_MODULES:-1}"
 
 mkdir -p "$HERMETIC_LOG_DIR"
 
@@ -188,6 +189,24 @@ maybe_timeout() { # seconds cmd...
   "$@"
 }
 
+ensure_local_node_modules() {
+  if [[ ! -f "$ROOT_DIR/scripts/ensure-local-node-modules.py" ]]; then
+    return 0
+  fi
+
+  if python3 "$ROOT_DIR/scripts/ensure-local-node-modules.py" check >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$HERMETIC_AUTO_REPAIR_NODE_MODULES" != "1" ]]; then
+    echo "[hermetic] local node_modules health check failed; set HERMETIC_AUTO_REPAIR_NODE_MODULES=1 to repair automatically"
+    return 1
+  fi
+
+  echo "[hermetic] repairing local node_modules for this worktree"
+  python3 "$ROOT_DIR/scripts/ensure-local-node-modules.py" repair || return 1
+}
+
 run_logged_timeout() { # label timeout logfile cmd...
   local label="$1"
   local timeout_seconds="$2"
@@ -258,6 +277,11 @@ start_api() {
 }
 
 trap stop_api EXIT
+
+if ! ensure_local_node_modules; then
+  echo "[hermetic] local node_modules repair failed; aborting run"
+  exit 1
+fi
 
 if ! ensure_api_build; then
   echo "[hermetic] API build failed; aborting run"
