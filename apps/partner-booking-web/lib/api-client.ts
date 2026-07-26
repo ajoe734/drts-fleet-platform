@@ -707,9 +707,7 @@ export async function createEmbedPartnerBooking(
   let verifiedEligibilityId = params.eligibilityVerificationId?.trim() ?? null;
 
   if (!verifiedEligibilityId) {
-    const verification = await verifyPartnerEligibility(session, {
-      entrySlug: tenantSlug,
-    });
+    const verification = await verifyPartnerEligibility(session, {});
     verifiedEligibilityId = verification.eligibilityVerificationId;
   }
 
@@ -753,9 +751,9 @@ export async function createEmbedPartnerBooking(
     reservationWindowStart,
     reservationWindowEnd,
     passenger,
-    notes: params.notes,
-    flightNumber: params.flightNumber,
-    vehicleClass: params.vehicleClass,
+    notes: params.notes ?? null,
+    flightNumber: params.flightNumber ?? null,
+    vehicleClass: params.vehicleClass ?? null,
   });
 
   const booking = await createPartnerBooking(session, bookingCommand);

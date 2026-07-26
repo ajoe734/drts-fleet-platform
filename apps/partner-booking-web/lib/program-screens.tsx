@@ -2847,13 +2847,12 @@ function renderScreen(
             tenantSlug={theme.slug}
             successHref={successHref}
             label={s("確認預約", "Confirm booking")}
-            eligibilityVerificationId={eligibilityVerificationId}
+            eligibilityVerificationId={eligibilityVerificationId ?? null}
             pickup={{ address: demo.pickup }}
             dropoff={{ address: demo.dropoff }}
             reservationWindowStart={demo.departureTime}
-            reservationWindowEnd={demo.arrivalTime}
-            passenger={{ name: demo.passengerName, phone: demo.passengerPhone }}
-            flightNumber={demo.flightNumber}
+            reservationWindowEnd={null}
+            passenger={{ name: demo.riderName, phone: "0900000000" }}
           />
         ) : (
           <Button
