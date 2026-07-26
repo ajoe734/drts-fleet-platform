@@ -203,3 +203,15 @@ the merged evidence.
 
 No runtime or package tests were run in this helper task. This repair is
 branch-history and machine-truth triage only.
+
+## Closeout Evidence
+
+- Branch: `origin/codex/airport-embed-order-001-unblock-history-repair`
+- Prior review-approved artifact commit:
+  `24ee5d30bdac26d9ad17cf59da0674f377e73c23`
+- Parent task machine truth already points to merged canonical delivery:
+  `AIRPORT-EMBED-ORDER-001.next` directs owner closeout to
+  `origin/dev @ ef8d1979d3e36c926d04af0e28d6832fb0af16a3` / PR `#1163`
+- This owner closeout commit exists only to add the required finalization
+  trailer/evidence on the helper task branch before marking the helper task
+  `done`
