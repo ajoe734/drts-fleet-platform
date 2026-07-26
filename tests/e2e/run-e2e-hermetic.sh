@@ -29,7 +29,6 @@ cd "$ROOT_DIR"
 # shellcheck source=../../scripts/db-common.sh
 source "$ROOT_DIR/scripts/db-common.sh"
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/drts_fleet_platform}"
 export E2E_API_URL="${E2E_API_URL:-http://localhost:3001}"
 export API_HOST="${API_HOST:-0.0.0.0}"
 export JWT_SECRET="${JWT_SECRET:-ci-e2e-secret}"
@@ -51,6 +50,20 @@ HERMETIC_SUITE_TIMEOUT_SECONDS="${HERMETIC_SUITE_TIMEOUT_SECONDS:-300}"
 HERMETIC_AUTO_REPAIR_NODE_MODULES="${HERMETIC_AUTO_REPAIR_NODE_MODULES:-1}"
 
 mkdir -p "$HERMETIC_LOG_DIR"
+
+worktree_db_name() {
+  local hash_suffix
+  if command -v sha1sum >/dev/null 2>&1; then
+    hash_suffix="$(printf '%s' "$ROOT_DIR" | sha1sum | cut -c1-8)"
+  else
+    hash_suffix="$(printf '%s' "$ROOT_DIR" | cksum | awk '{print $1}')"
+  fi
+  printf 'drts_fleet_platform_%s\n' "$hash_suffix"
+}
+
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/$(worktree_db_name)"
+fi
 
 # Parse the db name/user/host/port from DATABASE_URL for the reset step.
 db_field() { node -e "const u=new URL(process.env.DATABASE_URL); process.stdout.write(({name:u.pathname.slice(1),user:u.username,pass:u.password,host:u.hostname,port:u.port||'5432'})['$1'])"; }
