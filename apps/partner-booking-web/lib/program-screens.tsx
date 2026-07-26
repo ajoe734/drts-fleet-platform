@@ -1165,6 +1165,9 @@ function renderScreen(
   const trackingHref = getProgramScreenHref(siteBasePath, "tracking");
   const landingHref = getProgramScreenHref(siteBasePath, "landing");
   const eligibilityHref = getProgramScreenHref(siteBasePath, "eligibility");
+  const bookingHref = basePath.endsWith("/embed")
+    ? `${basePath.slice(0, -"/program/embed".length)}/book`
+    : reviewHref;
 
   if (screen === "landing") {
     if (theme.kind === "travel") {
@@ -1867,7 +1870,7 @@ function renderScreen(
             <Button
               theme={theme}
               label={t("program.embed.handoff.cta")}
-              href={reviewHref}
+              href={bookingHref}
               primary
             />
           }

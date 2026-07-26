@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { BookingRecord, OwnedOrderRecord } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
 
 export const partnerBookingScreens = [
@@ -60,6 +61,18 @@ type TripItem = {
   tone: "neutral" | "primary" | "accent" | "success";
   amount: string;
   benefit: string;
+};
+
+type PartnerBookingLiveData = {
+  bookingId: string;
+  personName: string;
+  pickup: string;
+  pickupDetail: string;
+  dropoff: string;
+  dropoffDetail: string;
+  departureTime: string;
+  benefitId: string;
+  receiptId: string;
 };
 
 const screenMeta: ReadonlyArray<ScreenMeta> = [
@@ -559,7 +572,13 @@ function screenToneStyle(
 function metaForBrand(
   brand: PartnerBrandTemplate,
   locale: PartnerBookingLocale = "zh",
-) {
+): PartnerBookingLiveData & {
+  remainingBenefits: number;
+  totalBenefits: number;
+  usedBenefits: number;
+  riderName: string;
+  trips: TripItem[];
+} {
   const remainingBenefits = 9;
   const totalBenefits = 12;
   const usedBenefits = totalBenefits - remainingBenefits;
@@ -620,6 +639,57 @@ function metaForBrand(
     receiptId: "rcp_8821a912",
     bookingId: "bk_5512",
     trips,
+  };
+}
+
+function formatDateTime(
+  value: string | null | undefined,
+  locale: PartnerBookingLocale,
+) {
+  if (!value) {
+    return locale === "en" ? "Pending" : "待確認";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(locale === "en" ? "en-US" : "zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+function deriveLiveData(
+  brand: PartnerBrandTemplate,
+  locale: PartnerBookingLocale,
+  booking?: BookingRecord,
+  order?: OwnedOrderRecord,
+): PartnerBookingLiveData | null {
+  if (!booking || !order) {
+    return null;
+  }
+
+  return {
+    bookingId: booking.bookingId,
+    personName: booking.passenger.name,
+    pickup: booking.pickup.address,
+    pickupDetail: order.terminal
+      ? `${locale === "en" ? "Terminal" : "航廈"} ${order.terminal}`
+      : booking.pickup.address,
+    dropoff: booking.dropoff.address,
+    dropoffDetail: order.flightNo
+      ? `${locale === "en" ? "Flight" : "航班"} ${order.flightNo}`
+      : booking.dropoff.address,
+    departureTime: formatDateTime(booking.reservationWindowStart, locale),
+    benefitId: order.benefitReference ?? `${brand.code}-${booking.bookingId}`,
+    receiptId: order.orderNo,
   };
 }
 
@@ -1806,7 +1876,7 @@ export function PartnerBookingPhoneScreen({
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "14px", fontWeight: 800 }}>
-                  {demo.personName}
+                  {liveData?.personName ?? demo.personName}
                 </div>
                 <div style={{ fontSize: "11px", color: "#56657f" }}>
                   {copy.driverStats}
@@ -1922,7 +1992,11 @@ export function PartnerBookingPhoneScreen({
             </div>
           </PhoneCard>
           <PhoneCard title={copy.tripInfo}>
-            <DetailRow label={copy.bookingNo} value={demo.bookingId} mono />
+            <DetailRow
+              label={copy.bookingNo}
+              value={liveData?.bookingId ?? demo.bookingId}
+              mono
+            />
             <DetailRow
               label={copy.benefit}
               value={`${brand.programName} · ${copy.rideNumber}`}
@@ -2058,7 +2132,7 @@ export function PartnerBookingPhoneScreen({
         <PhoneHeader
           brand={brand}
           title={copy.receiptTitle}
-          subtitle={copy.receiptSubtitle(demo.bookingId)}
+          subtitle={copy.receiptSubtitle(liveData?.bookingId ?? demo.bookingId)}
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
           <PhoneCard>
@@ -2108,8 +2182,16 @@ export function PartnerBookingPhoneScreen({
               label={copy.statementPeriod}
               value={copy.statementPeriodValue}
             />
-            <DetailRow label={copy.benefitSerial} value={demo.benefitId} mono />
-            <DetailRow label={copy.receiptNo} value={demo.receiptId} mono />
+            <DetailRow
+              label={copy.benefitSerial}
+              value={liveData?.benefitId ?? demo.benefitId}
+              mono
+            />
+            <DetailRow
+              label={copy.receiptNo}
+              value={liveData?.receiptId ?? demo.receiptId}
+              mono
+            />
           </PhoneCard>
           <div
             style={{
@@ -2236,14 +2318,19 @@ export function PartnerBookingReferenceFunnel({
   brand,
   activeScreen,
   basePath,
+  booking,
+  order,
   locale = "zh",
 }: {
   brand: PartnerBrandTemplate;
   activeScreen: PartnerBookingScreenId;
   basePath: string;
+  booking?: BookingRecord;
+  order?: OwnedOrderRecord;
   locale?: PartnerBookingLocale;
 }) {
   const demo = metaForBrand(brand, locale);
+  const liveData = deriveLiveData(brand, locale, booking, order);
   const copy = {
     ...copyForLocale(locale),
     ...programVariant(funnelProgramKind(brand.code), locale),

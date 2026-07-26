@@ -47,6 +47,7 @@ export default async function PartnerBookPage({
       <PartnerBookingForm
         brand={brand}
         entry={entry}
+        tenantSlug={tenantSlug}
         eligibilityVerificationId={eligibilityVerificationId}
         initialDraft={createDefaultPartnerBookingDraft()}
       />

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, type CSSProperties } from "react";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
@@ -149,6 +150,7 @@ function gateTone(
 export function PartnerBookingForm({
   brand,
   entry,
+  tenantSlug,
   eligibilityVerificationId,
   initialDraft,
 }: {
@@ -157,13 +159,17 @@ export function PartnerBookingForm({
     PartnerChannelEntryRecord,
     "businessDispatchSubtype" | "eligibilityMode" | "entrySlug" | "programCode"
   >;
+  tenantSlug: string;
   eligibilityVerificationId: string | null;
   initialDraft: PartnerBookingDraftValues;
 }) {
+  const router = useRouter();
   const { locale, t } = useTranslation();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(initialDraft);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
     pickup: null,
     dropoff: null,
@@ -284,9 +290,50 @@ export function PartnerBookingForm({
     );
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitted(true);
+    setSubmitError(null);
+
+    if (!ready || mapGate.blocking) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/program-booking", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenantSlug,
+          businessDispatchSubtype: entry.businessDispatchSubtype,
+          eligibilityVerificationId,
+          draft,
+          pickup: mapSelection.pickup,
+          dropoff: mapSelection.dropoff,
+        }),
+      });
+      const payload = (await response.json()) as {
+        data?: {
+          booking: { bookingId: string; orderId: string };
+        };
+        error?: { message?: string };
+      };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error?.message ?? t("book.notReady"));
+      }
+
+      const { bookingId, orderId } = payload.data.booking;
+      const query = new URLSearchParams({ bookingId, orderId }).toString();
+      router.push(`/${tenantSlug}/confirmed?${query}`);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : t("book.notReady"));
+      setSubmitting(false);
+      return;
+    }
   }
 
   const programLabel = getPartnerProgramLabel(
@@ -793,10 +840,13 @@ export function PartnerBookingForm({
           <div style={actionRowStyle}>
             <button
               type="submit"
-              style={submitButtonStyle(theme, !ready || mapGate.blocking)}
-              disabled={!ready || mapGate.blocking}
+              style={submitButtonStyle(
+                theme,
+                !ready || mapGate.blocking || submitting,
+              )}
+              disabled={!ready || mapGate.blocking || submitting}
             >
-              {t("book.submit")}
+              {submitting ? t("book.success") : t("book.submit")}
             </button>
             {entry.programCode ? (
               <span style={{ color: theme.textMuted }}>
@@ -804,6 +854,14 @@ export function PartnerBookingForm({
               </span>
             ) : null}
           </div>
+          {submitError ? (
+            <CanvasBanner
+              theme={theme}
+              tone="danger"
+              title={t("book.submit")}
+              body={submitError}
+            />
+          ) : null}
           {submitted && ready && !mapGate.blocking ? (
             <CanvasBanner
               theme={theme}
