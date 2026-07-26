@@ -26,46 +26,50 @@ function createPlatformExportIdentity(
 
 describe("P5-FARE-001 Acceptance Verification Suite", () => {
   it("1. fare version is immutable per confirmed ride and does not change when active fare authority changes", async () => {
-    const order = {
-      orderId: "order-fare-001",
-      orderNo: "MTX-FARE-001",
-      runtimeProfileCode: "multi_taxi_direct",
-      status: "completed",
-      passenger: { name: "測試乘客", phone: "0912345678" },
-      pickup: { address: "台北車站" },
-      dropoff: { address: "南港車站" },
-      fixedPrice: true,
-      quotedFare: { amountMinor: 35000 },
-      quotedFareRuleVersion: "FARE-V1-202607",
-      createdAt: "2026-07-25T10:00:00.000Z",
-      updatedAt: "2026-07-25T10:30:00.000Z",
-    };
+    const createdOrders: any[] = [];
 
     const ownedMobilityService = {
-      createMultiTaxiRide: vi.fn((input) => ({
-        ...order,
-        passenger: input.passenger,
-        pickup: input.pickup,
-        dropoff: input.dropoff,
-      })),
-      getOrder: vi.fn(() => order),
-      listOrders: vi.fn(() => [order]),
-      findPassengerAssignmentDisclosure: vi.fn(() => ({
-        assignmentId: "assignment-001",
-        assignmentVersion: 1,
-        driver: { driverId: "driver-001" },
-        vehicle: { vehicleId: "veh-001", plateNo: "BKR-2208" },
-        routeFare: {
-          farePolicyVersion: "FARE-V1-202607",
-          estimatedDistanceMeters: 10000,
-          estimatedDurationSeconds: 1800,
-        },
-      })),
+      createMultiTaxiRide: vi.fn((input, auth) => {
+        const orderId = `order-fare-00${createdOrders.length + 1}`;
+        const order = {
+          orderId,
+          orderNo: `MTX-FARE-00${createdOrders.length + 1}`,
+          runtimeProfileCode: "multi_taxi_direct",
+          status: "completed",
+          passenger: input.passenger,
+          pickup: input.pickup,
+          dropoff: input.dropoff,
+          fixedPrice: true,
+          quotedFare: { amountMinor: 35000 },
+          quotedFareRuleVersion: auth.activeFareVersionId,
+          createdAt: "2026-07-25T10:00:00.000Z",
+          updatedAt: "2026-07-25T10:30:00.000Z",
+        };
+        createdOrders.push(order);
+        return order;
+      }),
+      getOrder: vi.fn((id) => createdOrders.find((o) => o.orderId === id) ?? null),
+      listOrders: vi.fn(() => [...createdOrders]),
+      findPassengerAssignmentDisclosure: vi.fn((orderId) => {
+        const order = createdOrders.find((o) => o.orderId === orderId);
+        if (!order) return null;
+        return {
+          assignmentId: `assign-${orderId}`,
+          assignmentVersion: 1,
+          driver: { driverId: "driver-001" },
+          vehicle: { vehicleId: "veh-001", plateNo: "BKR-2208" },
+          routeFare: {
+            farePolicyVersion: order.quotedFareRuleVersion,
+            estimatedDistanceMeters: 10000,
+            estimatedDurationSeconds: 1800,
+          },
+        };
+      }),
     };
 
     const service = new MultiTaxiService(ownedMobilityService as never);
 
-    // Initial authorization version FARE-V1-202607
+    // Initial active authorization version FARE-V1-202607
     const auth1 = service.createAuthorization({
       operatorId: "operator-001",
       authorityCode: "TPE-MTX-001",
@@ -77,39 +81,89 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
     });
     service.activateAuthorization(auth1.authorizationId);
 
-    const ride = await service.createRide(
+    // Create Ride 1 under FARE-V1-202607
+    const ride1 = await service.createRide(
       {
         pickup: { address: "台北車站" },
         dropoff: { address: "南港車站" },
-        passenger: { name: "測試乘客", phone: "0912345678" },
+        passenger: { name: "測試乘客1", phone: "0912345678" },
         requestedPickupAt: "2026-07-25T10:00:00.000Z",
         timingMode: "on_demand",
         paymentMethodTokenRef: null,
       },
       null,
     );
-    expect(ride.passengerAccess.accessToken).toBeDefined();
+    expect(ride1.passengerAccess.accessToken).toBeDefined();
 
-    // Now update active fare authority to FARE-V2-202608
-    auth1.activeFareVersionId = "FARE-V2-202608";
+    // Suspend auth1 and activate a new active authorization version FARE-V2-202608
+    service.suspendAuthorization(auth1.authorizationId);
 
-    // Operational record for the confirmed ride must retain the original fare policy version FARE-V1-202607
+    const auth2 = service.createAuthorization({
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-002",
+      businessPlanVersion: "2026.2",
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "FARE-V2-202608",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+    });
+    service.activateAuthorization(auth2.authorizationId);
+
+    // Create Ride 2 under FARE-V2-202608
+    const ride2 = await service.createRide(
+      {
+        pickup: { address: "信義區" },
+        dropoff: { address: "板橋車站" },
+        passenger: { name: "測試乘客2", phone: "0987654321" },
+        requestedPickupAt: "2026-07-25T11:00:00.000Z",
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+      null,
+    );
+    expect(ride2.passengerAccess.accessToken).toBeDefined();
+
+    // Verify operational records: Ride 1 retains FARE-V1-202607 while Ride 2 has FARE-V2-202608
     const records = await service.listTripOperationalRecords({});
-    expect(records).toHaveLength(1);
-    expect(records[0]?.farePolicyVersion).toBe("FARE-V1-202607");
+    expect(records).toHaveLength(2);
+
+    const rec1 = records.find((r) => r.orderId === "order-fare-001");
+    const rec2 = records.find((r) => r.orderId === "order-fare-002");
+
+    expect(rec1?.farePolicyVersion).toBe("FARE-V1-202607");
+    expect(rec2?.farePolicyVersion).toBe("FARE-V2-202608");
+    expect(rec1?.farePolicyVersion).not.toBe(rec2?.farePolicyVersion);
   });
 
   it("2. fare-change rule is visible before confirmation and passenger-confirmed quote anomalies cannot be mutated", async () => {
-    const repository = { isEnabled: () => true };
+    const store = new Map<string, any>();
+    const repository = {
+      isEnabled: () => true,
+      loadUnresolved: vi.fn(async () => []),
+      list: vi.fn(() => Array.from(store.values())),
+      get: vi.fn((id: string) => store.get(id) ?? null),
+      save: vi.fn(async (record) => {
+        store.set(record.snapshot.quoteSnapshotId, record);
+        return record;
+      }),
+      resolve: vi.fn(async () => {}),
+      resolveByOrderId: vi.fn(async () => {}),
+    };
     const auditNotificationService = { recordAuditLog: vi.fn() };
+    const recoveryPort = {
+      isAvailable: () => true,
+      recover: vi.fn(),
+    };
+
     const fareAnomalyService = new FareAnomalyService(
       repository as never,
       auditNotificationService as never,
+      recoveryPort as never,
     );
     await fareAnomalyService.onModuleInit();
 
-    // Fare anomaly with passengerConfirmedAt must be rejected from being recorded as unresolved anomaly
-    const confirmedSnapshot = {
+    // Base fare snapshot with visible fare-change rule
+    const baseSnapshot = {
       routeSnapshotId: "route-001",
       quoteSnapshotId: "quote-001",
       orderId: "order-001",
@@ -141,8 +195,31 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
       fareChangeRuleId: "rule-1",
       fareChangeRuleVersion: "1",
       fareChangeRuleDisplayText: "Fare changes require passenger confirmation.",
-      passengerConfirmedAt: "2026-07-25T00:02:00.000Z", // Already confirmed!
       generatedAt: "2026-07-25T00:00:00Z",
+    };
+
+    // Positive case: unconfirmed snapshot (passengerConfirmedAt is null) can be recorded as quote anomaly
+    const unconfirmedSnapshot = {
+      ...baseSnapshot,
+      quoteSnapshotId: "quote-unconfirmed-001",
+      orderId: "order-unconfirmed-001",
+      passengerConfirmedAt: null,
+    };
+    const recorded = await fareAnomalyService.recordQuoteAnomaly({
+      reason: "calculation_mismatch",
+      snapshot: unconfirmedSnapshot,
+    });
+    expect(recorded.reason).toBe("calculation_mismatch");
+    expect(recorded.snapshot.fareChangeRuleDisplayText).toBe(
+      "Fare changes require passenger confirmation.",
+    );
+
+    // Negative case: passenger-confirmed snapshot must throw FARE_ANOMALY_ALREADY_CONFIRMED specifically
+    const confirmedSnapshot = {
+      ...baseSnapshot,
+      quoteSnapshotId: "quote-confirmed-002",
+      orderId: "order-confirmed-002",
+      passengerConfirmedAt: "2026-07-25T00:02:00.000Z", // Already confirmed!
     };
 
     await expect(
@@ -150,7 +227,11 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
         reason: "calculation_mismatch",
         snapshot: confirmedSnapshot,
       }),
-    ).rejects.toThrowError(ApiRequestError);
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "FARE_ANOMALY_ALREADY_CONFIRMED" },
+      },
+    });
   });
 
   it("3. payment unavailable / failed / manual_recovery never appears as paid", async () => {
@@ -194,21 +275,67 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
   });
 
   it("4. certificate is token-scoped and denies invalid or expired tokens with opaque error", async () => {
+    const createdOrders = new Map<string, any>();
+
     const ownedMobilityService = {
-      createMultiTaxiRide: vi.fn(() => ({
-        orderId: "order-cert-001",
-        status: "completed",
-        passenger: { name: "測試乘客", phone: "0912345678" },
-        pickup: { address: "A" },
-        dropoff: { address: "B" },
-        createdAt: "2026-07-25T10:00:00.000Z",
-        updatedAt: "2026-07-25T10:30:00.000Z",
-      })),
-      getOrder: vi.fn(() => null),
-      findPassengerAssignmentDisclosure: vi.fn(() => null),
+      createMultiTaxiRide: vi.fn((input, auth) => {
+        const orderId = `order-cert-${createdOrders.size + 1}`;
+        const order = {
+          orderId,
+          orderNo: `MTX-CERT-${createdOrders.size + 1}`,
+          runtimeProfileCode: "multi_taxi_direct",
+          status: "completed",
+          passenger: input.passenger,
+          pickup: input.pickup,
+          dropoff: input.dropoff,
+          fixedPrice: true,
+          quotedFare: { amountMinor: 35000 },
+          quotedFareRuleVersion: auth.activeFareVersionId,
+          createdAt: "2026-07-25T10:00:00.000Z",
+          updatedAt: "2026-07-25T10:30:00.000Z",
+        };
+        createdOrders.set(orderId, order);
+        return order;
+      }),
+      getOrder: vi.fn((id) => createdOrders.get(id) ?? null),
+      findPassengerAssignmentDisclosure: vi.fn((orderId) => {
+        if (!createdOrders.has(orderId)) return null;
+        return {
+          assignmentId: `assign-${orderId}`,
+          assignmentVersion: 1,
+          driver: { driverId: "driver-001" },
+          vehicle: { vehicleId: "veh-001", plateNo: "BKR-2208" },
+          routeFare: {
+            farePolicyVersion: "fare-001",
+            estimatedDistanceMeters: 10000,
+            estimatedDurationSeconds: 1800,
+          },
+        };
+      }),
     };
 
-    const service = new MultiTaxiService(ownedMobilityService as never);
+    const mockRepo = {
+      persistAuthorization: vi.fn(async () => {}),
+      persistRideAccessToken: vi.fn(async () => {}),
+      findRideAccessTokenByDigest: vi.fn(async () => null),
+      findElectronicReceipt: vi.fn(async (orderId) => ({
+        receiptId: `rcpt-${orderId}`,
+        orderId,
+        orderNo: `MTX-${orderId}`,
+        issuedAt: "2026-07-25T10:30:00.000Z",
+        amountMinor: 35000,
+        currency: "NTD",
+        certificate: {
+          certificateId: `cert-${orderId}`,
+          status: "valid",
+        },
+      })),
+    };
+
+    const service = new MultiTaxiService(
+      ownedMobilityService as never,
+      mockRepo as never,
+    );
     const auth = service.createAuthorization({
       operatorId: "operator-001",
       authorityCode: "TPE-MTX-001",
@@ -219,6 +346,44 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
       effectiveUntil: "2027-01-01T00:00:00.000Z",
     });
     service.activateAuthorization(auth.authorizationId);
+
+    // Create Ride A and Ride B
+    const rideA = await service.createRide(
+      {
+        pickup: { address: "A" },
+        dropoff: { address: "B" },
+        passenger: { name: "乘客A", phone: "0911111111" },
+        requestedPickupAt: "2026-07-25T10:00:00.000Z",
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+      null,
+    );
+
+    const rideB = await service.createRide(
+      {
+        pickup: { address: "C" },
+        dropoff: { address: "D" },
+        passenger: { name: "乘客B", phone: "0922222222" },
+        requestedPickupAt: "2026-07-25T11:00:00.000Z",
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+      null,
+    );
+
+    // Ride A access token retrieves Ride A receipt
+    const receiptA = await service.getPassengerReceipt(
+      rideA.passengerAccess.accessToken,
+    );
+    expect(receiptA.orderId).toBe("order-cert-1");
+    expect(receiptA.certificate.status).toBe("valid");
+
+    // Ride B access token retrieves Ride B receipt
+    const receiptB = await service.getPassengerReceipt(
+      rideB.passengerAccess.accessToken,
+    );
+    expect(receiptB.orderId).toBe("order-cert-2");
 
     // Invalid token request throws PASSENGER_RIDE_TOKEN_INVALID
     await expect(
@@ -246,26 +411,64 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
       updatedAt: "2026-07-25T12:30:00.000Z",
     };
 
+    const inProgressOrder = {
+      orderId: "order-rec-101",
+      orderNo: "MTX-REC-101",
+      runtimeProfileCode: "multi_taxi_direct",
+      status: "on_trip",
+      passenger: { name: "進行中乘客", phone: "0988888888" },
+      pickup: { address: "起點2" },
+      dropoff: { address: "終點2" },
+      fixedPrice: true,
+      quotedFare: { amountMinor: 30000 },
+      quotedFareRuleVersion: "FARE-V1",
+      createdAt: "2026-07-25T13:00:00.000Z",
+      updatedAt: "2026-07-25T13:10:00.000Z",
+    };
+
+    const cancelledOrder = {
+      orderId: "order-rec-102",
+      orderNo: "MTX-REC-102",
+      runtimeProfileCode: "multi_taxi_direct",
+      status: "cancelled",
+      passenger: { name: "已取消乘客", phone: "0977777777" },
+      pickup: { address: "起點3" },
+      dropoff: { address: "終點3" },
+      fixedPrice: true,
+      quotedFare: { amountMinor: 30000 },
+      quotedFareRuleVersion: "FARE-V1",
+      createdAt: "2026-07-25T14:00:00.000Z",
+      updatedAt: "2026-07-25T14:05:00.000Z",
+    };
+
     const ownedMobilityService = {
       createMultiTaxiRide: vi.fn(),
-      listOrders: vi.fn(() => [completedOrder]),
-      getOrder: vi.fn(() => completedOrder),
-      findPassengerAssignmentDisclosure: vi.fn(() => ({
-        assignmentId: "assign-100",
-        assignmentVersion: 1,
-        driver: { driverId: "drv-100" },
-        vehicle: { vehicleId: "veh-100", plateNo: "ABC-1234" },
-        routeFare: {
-          farePolicyVersion: "FARE-V1",
-          estimatedDistanceMeters: 12000,
-          estimatedDurationSeconds: 1800,
-        },
-        createdAt: "2026-07-25T12:05:00.000Z",
-      })),
+      listOrders: vi.fn(() => [completedOrder, inProgressOrder, cancelledOrder]),
+      getOrder: vi.fn((id) =>
+        [completedOrder, inProgressOrder, cancelledOrder].find(
+          (o) => o.orderId === id,
+        ),
+      ),
+      findPassengerAssignmentDisclosure: vi.fn((orderId) => {
+        if (orderId !== "order-rec-100") return null;
+        return {
+          assignmentId: "assign-100",
+          assignmentVersion: 1,
+          driver: { driverId: "drv-100" },
+          vehicle: { vehicleId: "veh-100", plateNo: "ABC-1234" },
+          routeFare: {
+            farePolicyVersion: "FARE-V1",
+            estimatedDistanceMeters: 12000,
+            estimatedDurationSeconds: 1800,
+          },
+          createdAt: "2026-07-25T12:05:00.000Z",
+        };
+      }),
     };
 
     const service = new MultiTaxiService(ownedMobilityService as never);
 
+    // Verified: listTripOperationalRecords maps 100% of completed orders (1 of 1) and excludes non-completed orders
     const records = await service.listTripOperationalRecords({});
     expect(records).toHaveLength(1);
 
@@ -285,6 +488,7 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
     const auditService = new AuditNotificationService();
     const reportingService = new ReportingFilingService(auditService);
 
+    // 1. Controlled export preview & audit trail
     const preview = reportingService.previewMultiTaxiTripExport(
       { month: "2026-07" },
       10,
@@ -301,5 +505,73 @@ describe("P5-FARE-001 Acceptance Verification Suite", () => {
     );
     expect(exportLog).toBeDefined();
     expect(exportLog?.actorId).toBe("platform-admin-001");
+
+    // 2. Legal hold filtering in MultiTaxiService via evidence governance
+    const completedOrder = {
+      orderId: "order-hold-001",
+      orderNo: "MTX-HOLD-001",
+      runtimeProfileCode: "multi_taxi_direct",
+      status: "completed",
+      passenger: { name: "保全乘客", phone: "0912345678" },
+      pickup: { address: "起點" },
+      dropoff: { address: "終點" },
+      fixedPrice: true,
+      quotedFare: { amountMinor: 25000 },
+      quotedFareRuleVersion: "FARE-V1",
+      createdAt: "2026-07-25T12:00:00.000Z",
+      updatedAt: "2026-07-25T12:30:00.000Z",
+    };
+
+    const mockAuditWithHold = {
+      getEvidenceSubjectGovernance: vi.fn(() => ({
+        family: "proof_bundle",
+        subjectId: "order-hold-001",
+        tenantId: null,
+        manifestHash: null,
+        activeLegalHolds: [
+          {
+            holdId: "hold-001",
+            caseNumber: "CASE-2026-001",
+            reasonCode: "regulatory_inquiry",
+            reasonNote: "Legal hold active for trip proof.",
+            placedByActorId: "platform-admin-001",
+            placedAt: "2026-07-25T12:00:00.000Z",
+          },
+        ],
+        activeDeletionExceptions: [],
+        deletionSuppressed: true,
+      })),
+    };
+
+    const mockRepo = {
+      findElectronicReceipt: vi.fn(async () => null),
+    };
+
+    const ownedMobilityService = {
+      createMultiTaxiRide: vi.fn(),
+      listOrders: vi.fn(() => [completedOrder]),
+      getOrder: vi.fn(() => completedOrder),
+      findPassengerAssignmentDisclosure: vi.fn(() => null),
+    };
+
+    const multiTaxiService = new MultiTaxiService(
+      ownedMobilityService as never,
+      mockRepo as never,
+      null as never,
+      mockAuditWithHold as never,
+    );
+
+    const activeRecords = await multiTaxiService.listTripOperationalRecords({
+      legalHold: "active",
+    });
+    expect(activeRecords).toHaveLength(1);
+    expect(activeRecords[0]?.legalHold.state).toBe("active");
+    expect(activeRecords[0]?.legalHold.activeHoldCount).toBe(1);
+
+    const emptyRecords = await multiTaxiService.listTripOperationalRecords({
+      legalHold: "none",
+    });
+    expect(emptyRecords).toHaveLength(0);
   });
 });
+
