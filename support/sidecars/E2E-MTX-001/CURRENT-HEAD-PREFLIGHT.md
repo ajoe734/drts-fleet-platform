@@ -56,14 +56,14 @@ blockers only.
 
 ## Current-head classification before edits
 
-| Acceptance slice                              | Status                      | Basis                                                                                                 |
-| --------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Single matrix mapping Fleet H evidence inputs | `missing`                   | No `support/sidecars/E2E-MTX-001/` sidecar existed on entry.                                          |
-| §33 DoD item inventory                        | `implemented_elsewhere`     | Canonical items exist in source spec §33, but were not yet mapped into a Fleet H matrix.              |
-| Fleet acceptance evidence reuse               | `partial`                   | Multiple fleet sidecars exist, but no single current-head aggregator ties them to the release matrix. |
-| Shared hermetic runner                        | `implemented`               | `tests/e2e/run-e2e-hermetic.sh` exists.                                                               |
-| All hermetic suites green on current head     | `not_verified_current_head` | This worktree could not complete a full hermetic pass on `2026-07-26`.                                |
-| Final unresolved-blocker list                 | `missing`                   | No `E2E-MTX-001` blocker summary existed.                                                             |
+| Acceptance slice                              | Status                  | Basis                                                                                                                                   |
+| --------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Single matrix mapping Fleet H evidence inputs | `missing`               | No `support/sidecars/E2E-MTX-001/` sidecar existed on entry.                                                                            |
+| §33 DoD item inventory                        | `implemented_elsewhere` | Canonical items exist in source spec §33, but were not yet mapped into a Fleet H matrix.                                                |
+| Fleet acceptance evidence reuse               | `partial`               | Multiple fleet sidecars exist, but no single current-head aggregator ties them to the release matrix.                                   |
+| Shared hermetic runner                        | `implemented`           | `tests/e2e/run-e2e-hermetic.sh` exists.                                                                                                 |
+| All hermetic suites green on current head     | `partial_current_head`  | This worktree now reaches `E2E-008` on an isolated database, but still lacks an uninterrupted full-suite green summary on `2026-07-26`. |
+| Final unresolved-blocker list                 | `missing`               | No `E2E-MTX-001` blocker summary existed.                                                                                               |
 
 ## Commands executed on 2026-07-26
 
@@ -73,6 +73,8 @@ AI_NAME=Codex scripts/ai-status.sh start E2E-MTX-001 \
 python3 scripts/ensure-local-node-modules.py repair
 ./tests/e2e/run-e2e-hermetic.sh
 HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=1 ./tests/e2e/run-e2e-hermetic.sh 001
+./tests/e2e/run-e2e-hermetic.sh 001
+./tests/e2e/run-e2e-hermetic.sh
 ```
 
 ## Current-head verification result
@@ -95,8 +97,9 @@ HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=1 ./tests/e2e/run-e2e-hermetic.sh 001
     `pnpm db:migrate` remaining active for more than two minutes and no
     scenario-level pass/fail output.
 
-This means Fleet H cannot honestly claim "all hermetic suites green" from this
-worktree on `2026-07-26`.
+This means Fleet H still cannot honestly claim "all hermetic suites green" from
+this worktree on `2026-07-26`, but the blocker has narrowed from shared-reset
+contamination to missing uninterrupted end-to-end completion evidence.
 
 ### Shared harness diagnosability hardening
 
@@ -108,6 +111,8 @@ worktree on `2026-07-26`.
   - added per-run/per-suite log file output under `/tmp/drts-e2e-hermetic/`;
   - fixed the timeout wrapper so reset failures stop the scenario instead of
     incorrectly continuing into `db:seed`.
+  - changed the default hermetic `DATABASE_URL` to a worktree-local database
+    name so parallel worktrees do not share `drts_fleet_platform`.
 - Controlled verification:
   - after rerunning `python3 scripts/ensure-local-node-modules.py repair`, the
     command `HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=1 ./tests/e2e/run-e2e-hermetic.sh 001`
@@ -121,6 +126,13 @@ worktree on `2026-07-26`.
     `HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=600 HERMETIC_SUITE_TIMEOUT_SECONDS=120 ./tests/e2e/run-e2e-hermetic.sh 001`
     was operator-interrupted during `db:migrate`, so it is diagnostic only and
     not acceptance evidence.
+  - after switching the harness default to a worktree-local database, the
+    command `./tests/e2e/run-e2e-hermetic.sh 001` passed and wrote
+    `/tmp/drts-e2e-hermetic/20260726T181059Z-E2E-001-suite.log`.
+  - a later full-suite rerun with `./tests/e2e/run-e2e-hermetic.sh` on the
+    same isolated database produced suite logs through `E2E-007` and entered
+    `E2E-008`; it was operator-interrupted during `E2E-008` reset, so it is
+    still diagnostic rather than acceptance-grade evidence.
 
 ## Honest release posture at current head
 
@@ -128,16 +140,17 @@ worktree on `2026-07-26`.
    can be mapped into a single current-head matrix.
 2. The single matrix itself was missing and is created by this task.
 3. The Fleet H global hermetic rerun is still unresolved at current head. The
-   harness now has bounded reset and suite diagnostics, but no uncontaminated
-   full green rerun exists.
+   harness now uses a worktree-local database and has bounded reset and suite
+   diagnostics, but no uninterrupted full green rerun exists yet.
 4. S-3 still carries existing external evidence blockers and one direct
    current-head failure from `S3-VERIFY-001`.
 
 ## Final unresolved blockers as of 2026-07-26
 
 1. `all hermetic suites green` is not satisfied from this worktree because the
-   shared `run-e2e-hermetic.sh` full rerun still lacks an uncontaminated green
-   pass artifact after dependency repair.
+   isolated `run-e2e-hermetic.sh` full rerun now reaches `E2E-008`, but still
+   lacks an uninterrupted green summary artifact after dependency repair and
+   worktree-local DB isolation.
 2. `S3-VERIFY-001` still reports honest `blocked_ext` evidence gaps for Android
    and iOS offline replay.
 3. `S3-VERIFY-001` still reports honest `blocked_ext` evidence gap for
