@@ -4,7 +4,7 @@ import {
   type AirportTransferBookingSubmission,
 } from "@/components/airport-transfer-site";
 import { submitEmbeddedAirportBooking } from "@/lib/embed-airport-booking";
-import { getTenantProgramTheme } from "@/lib/program-route-context";
+import { getTenantProgramRouteContext } from "@/lib/program-route-context";
 import { getAirportBank } from "@/lib/airport-site-data";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export default async function ProgramEmbedFlowPage({
 }: PageProps) {
   const { tenantSlug } = await params;
   const resolvedSearchParams = await searchParams;
-  const theme = await getTenantProgramTheme(tenantSlug);
+  const { entry, theme } = await getTenantProgramRouteContext(tenantSlug);
   const bank = getAirportBank(tenantSlug);
 
   if (theme.kind !== "card" || !bank) {
@@ -62,6 +62,7 @@ export default async function ProgramEmbedFlowPage({
 
     return submitEmbeddedAirportBooking({
       tenantSlug,
+      partnerEntry: entry,
       apiKey,
       partnerUserRef,
       referenceToken,

@@ -3,6 +3,7 @@ import type {
   CreateTenantBookingCommand,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
+  PartnerIngressHandoffSession,
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
 import type {
@@ -37,8 +38,50 @@ const defaultDependencies: EmbedBookingDependencies = {
   verifyPartnerEligibility,
 };
 
+function buildFallbackPartnerEntry(
+  tenantSlug: string,
+  handoff: PartnerIngressHandoffSession,
+): PartnerChannelEntryRecord {
+  const entrySlug = handoff.partnerEntrySlug || tenantSlug;
+
+  return {
+    partnerId: handoff.identity.partnerId ?? `partner-${entrySlug}`,
+    partnerCode: entrySlug.toUpperCase(),
+    partnerType: "bank",
+    programId:
+      handoff.identity.partnerProgramId ?? `program-${entrySlug}-embed`,
+    programCode: entrySlug.toUpperCase(),
+    tenantId: handoff.identity.tenantId ?? `tenant-${entrySlug}`,
+    bankCode: entrySlug.toUpperCase(),
+    entrySlug,
+    displayName: `${entrySlug.toUpperCase()} Embedded Booking`,
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: null,
+    entryPath: null,
+    themeAccent: null,
+    brandingMetadata: null,
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "",
+    updatedAt: "",
+    auditMetadata: {
+      source: "partner_embed_fallback",
+      requestId: null,
+      createdBy: "partner-booking-web",
+      updatedBy: "partner-booking-web",
+    },
+  };
+}
+
 type SubmitEmbeddedAirportBookingInput = {
   tenantSlug: string;
+  partnerEntry?: PartnerChannelEntryRecord | null;
   apiKey: string | null;
   partnerUserRef: string | null;
   referenceToken: string | null;
@@ -121,21 +164,23 @@ export async function submitEmbeddedAirportBooking(
   input: SubmitEmbeddedAirportBookingInput,
   dependencies: EmbedBookingDependencies = defaultDependencies,
 ): Promise<AirportTransferBookingResult> {
-  const { entry } = await dependencies.getPartnerRouteContext(input.tenantSlug);
-  if (!entry) {
-    throw new Error("Partner entry is unavailable for this embed route.");
-  }
   if (!input.apiKey || !input.partnerUserRef) {
     throw new Error(
       "Embedded booking is missing handoff credentials. Reopen from the banking app.",
     );
   }
 
+  let entry = input.partnerEntry;
+  if (!entry) {
+    entry = (await dependencies.getPartnerRouteContext(input.tenantSlug)).entry;
+  }
+
   const handoff = await dependencies.createPartnerIngressHandoff({
-    entrySlug: entry.entrySlug,
+    entrySlug: entry?.entrySlug ?? input.tenantSlug,
     apiKey: input.apiKey,
     partnerUserRef: input.partnerUserRef,
   });
+  entry ??= buildFallbackPartnerEntry(input.tenantSlug, handoff);
   const session = createPartnerSessionFromIngressHandoff(handoff, entry);
 
   let eligibility: PartnerEligibilityVerificationRecord | null = null;

@@ -49,6 +49,88 @@ const ctbcEntry = {
   },
 };
 
+const fubonEntry = {
+  partnerId: "partner-fubon",
+  partnerCode: "FUBON",
+  partnerType: "insurance",
+  programId: "program-fubon-claim",
+  programCode: "FUBON-CLAIM",
+  tenantId: "tenant-fubon",
+  bankCode: null,
+  entrySlug: "fubon",
+  displayName: "富邦產險理賠代步",
+  businessDispatchSubtype: "insurance_claim_replacement_transport",
+  authMode: "partner_session",
+  eligibilityMode: "none",
+  entryHost: "claim.fubon-ins.com.tw",
+  entryPath: "/fubon",
+  themeAccent: "#0F766E",
+  brandingMetadata: {
+    displayName: "富邦產險理賠代步",
+    themeAccent: "#0F766E",
+    supportEmail: "claim-service@fubon.invalid",
+    supportPhone: "0800-009-888",
+  },
+  eligibilityContract: null,
+  status: "active",
+  activeFlag: true,
+  revokedAt: null,
+  revokedBy: null,
+  revokeReason: null,
+  createdAt: "2026-07-01T00:00:00.000Z",
+  updatedAt: "2026-07-03T00:00:00.000Z",
+  auditMetadata: {
+    source: "mock_map_booking_authority",
+    requestId: "req-mock-partner-entry-fubon",
+    createdBy: "codex2",
+    updatedBy: "codex2",
+  },
+};
+
+const lionEntry = {
+  partnerId: "partner-lion",
+  partnerCode: "LION",
+  partnerType: "travel",
+  programId: "program-lion-group",
+  programCode: "LION-GROUP",
+  tenantId: "tenant-lion",
+  bankCode: null,
+  entrySlug: "lion",
+  displayName: "雄獅旅遊團體接送",
+  businessDispatchSubtype: "travel_group_transfer",
+  authMode: "partner_session",
+  eligibilityMode: "none",
+  entryHost: "booking.liontravel.com",
+  entryPath: "/lion",
+  themeAccent: "#C2410C",
+  brandingMetadata: {
+    displayName: "雄獅旅遊團體接送",
+    themeAccent: "#C2410C",
+    supportEmail: "group-transfer@lion.invalid",
+    supportPhone: "0800-070-777",
+  },
+  eligibilityContract: null,
+  status: "active",
+  activeFlag: true,
+  revokedAt: null,
+  revokedBy: null,
+  revokeReason: null,
+  createdAt: "2026-07-01T00:00:00.000Z",
+  updatedAt: "2026-07-03T00:00:00.000Z",
+  auditMetadata: {
+    source: "mock_map_booking_authority",
+    requestId: "req-mock-partner-entry-lion",
+    createdBy: "codex2",
+    updatedBy: "codex2",
+  },
+};
+
+const entries = {
+  ctbc: ctbcEntry,
+  fubon: fubonEntry,
+  lion: lionEntry,
+};
+
 let lastTenantBookingCommand = null;
 
 const server = http.createServer((req, res) => {
@@ -59,11 +141,28 @@ const server = http.createServer((req, res) => {
 
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
 
-  if (req.method === "GET" && url.pathname === "/api/partner/entries/ctbc") {
+  if (
+    req.method === "GET" &&
+    url.pathname.startsWith("/api/partner/entries/")
+  ) {
+    const entrySlug = url.pathname.split("/").at(-1);
+    const entry = entrySlug ? entries[entrySlug] : null;
+
+    if (!entry) {
+      json(res, 404, {
+        error: {
+          code: "NOT_FOUND",
+          message: `GET ${url.pathname} is not mocked.`,
+          retryable: false,
+        },
+      });
+      return;
+    }
+
     json(res, 200, {
-      data: ctbcEntry,
+      data: entry,
       meta: {
-        requestId: "req-mock-partner-entry",
+        requestId: `req-mock-partner-entry-${entry.entrySlug}`,
         timestamp: "2026-07-03T00:00:00.000Z",
       },
     });
