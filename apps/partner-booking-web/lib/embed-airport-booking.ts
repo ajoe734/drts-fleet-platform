@@ -41,7 +41,6 @@ const defaultDependencies: EmbedBookingDependencies = {
 type SubmitEmbeddedAirportBookingInput = {
   tenantSlug: string;
   partnerEntry?: PartnerChannelEntryRecord | null;
-  apiKey: string | null;
   partnerUserRef: string | null;
   referenceToken: string | null;
   cardLast4: string | null;
@@ -158,7 +157,7 @@ export async function submitEmbeddedAirportBooking(
   input: SubmitEmbeddedAirportBookingInput,
   dependencies: EmbedBookingDependencies = defaultDependencies,
 ): Promise<AirportTransferBookingResult> {
-  if (!input.apiKey || !input.partnerUserRef) {
+  if (!input.partnerUserRef) {
     throw new Error(t("airport.embed.error.missingCredentials", undefined, input.locale));
   }
 
@@ -173,7 +172,6 @@ export async function submitEmbeddedAirportBooking(
 
   const handoff = await dependencies.createPartnerIngressHandoff({
     entrySlug: entry.entrySlug,
-    apiKey: input.apiKey,
     partnerUserRef: input.partnerUserRef,
   });
 

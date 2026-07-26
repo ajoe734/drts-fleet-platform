@@ -14,7 +14,6 @@ export const dynamic = "force-dynamic";
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
   searchParams: Promise<{
-    apiKey?: string | string[];
     benefitReference?: string | string[];
     cardLast4?: string | string[];
     cardholderName?: string | string[];
@@ -43,7 +42,6 @@ export default async function ProgramEmbedFlowPage({
     notFound();
   }
 
-  const apiKey = getSingleValue(resolvedSearchParams.apiKey)?.trim() ?? null;
   const partnerUserRef =
     getSingleValue(resolvedSearchParams.partnerUserRef)?.trim() ?? null;
   const referenceToken =
@@ -59,7 +57,7 @@ export default async function ProgramEmbedFlowPage({
   const existingEligibilityVerificationId =
     getSingleValue(resolvedSearchParams.eligibilityVerificationId)?.trim() ??
     null;
-  const embedSessionReady = Boolean(apiKey && partnerUserRef);
+  const embedSessionReady = Boolean(partnerUserRef);
 
   if (!entry || inactive) {
     notFound();
@@ -83,7 +81,6 @@ export default async function ProgramEmbedFlowPage({
     return submitEmbeddedAirportBooking({
       tenantSlug,
       partnerEntry: entry,
-      apiKey,
       partnerUserRef,
       referenceToken,
       cardLast4,

@@ -30,6 +30,7 @@ describe("tenant partner ingress handoff controller", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+    delete process.env.DRTS_INTERNAL_KEY;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
   });
 
@@ -48,6 +49,7 @@ describe("tenant partner ingress handoff controller", () => {
         apiKey: "pk_demo_alpha_airport_20260428",
         partnerUserRef: "partner-user-001",
       },
+      undefined,
       "req-partner-handoff-001",
     );
     const second = await controller.issuePartnerIngressHandoff(
@@ -56,6 +58,7 @@ describe("tenant partner ingress handoff controller", () => {
         apiKey: "pk_demo_alpha_airport_20260428",
         partnerUserRef: "partner-user-001",
       },
+      undefined,
       "req-partner-handoff-002",
     );
 
@@ -106,8 +109,44 @@ describe("tenant partner ingress handoff controller", () => {
           apiKey: "wrong-demo-key",
           partnerUserRef: "partner-user-001",
         },
+        undefined,
         "req-partner-handoff-003",
       ),
     ).rejects.toThrowError(ApiRequestError);
+  });
+
+  it("allows internal callers to resolve the credential server-side", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "internal-dev-key";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const { controller } = createController();
+
+    const response = await controller.issuePartnerIngressHandoff(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        partnerUserRef: "partner-user-002",
+      },
+      {
+        headers: {
+          "x-drts-internal-key": "internal-dev-key",
+        },
+        method: "POST",
+        originalUrl: "/api/partner/ingress/handoff",
+      },
+      "req-partner-handoff-004",
+    );
+
+    expect(response.data).toMatchObject({
+      tokenType: "Bearer",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      identity: {
+        actorType: "referral_passenger",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+      },
+    });
   });
 });
