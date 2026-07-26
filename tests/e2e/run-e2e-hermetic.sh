@@ -163,6 +163,14 @@ stop_api() {
 }
 
 run_admin_psql() {
+  if postgres_container_running; then
+    docker exec -i \
+      -e PGPASSWORD="$DB_PASS" \
+      "$(postgres_container_name)" \
+      psql -U "$DB_USER" -d postgres "$@"
+    return
+  fi
+
   if use_local_psql; then
     PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" "$@"
     return
@@ -172,14 +180,6 @@ run_admin_psql() {
     docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
       -e PGPASSWORD="$DB_PASS" \
       postgres \
-      psql -U "$DB_USER" -d postgres "$@"
-    return
-  fi
-
-  if postgres_container_running; then
-    docker exec -i \
-      -e PGPASSWORD="$DB_PASS" \
-      "$(postgres_container_name)" \
       psql -U "$DB_USER" -d postgres "$@"
     return
   fi
