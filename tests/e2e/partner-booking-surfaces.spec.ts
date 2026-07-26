@@ -95,6 +95,29 @@ test.describe("partner booking program surfaces", () => {
     await expect(page.getByText("ref_token")).toHaveCount(0);
   });
 
+  test("creates a real booking from the airport embed flow", async ({
+    page,
+  }) => {
+    const response = await page.goto(
+      "/ctbc/program/embed?apiKey=pk_live_embed&partnerUserRef=user-001&referenceToken=token-001&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-001&flightNo=CI100",
+    );
+    expect(response?.status()).toBe(200);
+
+    await page.getByRole("button", { name: "開始預約" }).click();
+    await page.getByRole("button", { name: "前往確認" }).click();
+    await page.getByRole("button", { name: "確認送出預約" }).click();
+
+    await expect(page.getByText("預約已建立")).toBeVisible();
+    await expect(page.getByText("booking-embed-001")).toBeVisible();
+    await expect(page.getByText("order-embed-001")).toBeVisible();
+    await expect(page.getByText("elig-embed-001")).toBeVisible();
+
+    await page.getByRole("button", { name: "追蹤行程" }).click();
+    await expect(page.getByText("ORD-EMBED-001")).toBeVisible();
+    await expect(page.getByText("台北市信義區松仁路 100 號")).toBeVisible();
+    await expect(page.getByText("桃園 T2 · 第二航廈 出發接送區")).toBeVisible();
+  });
+
   test("keeps insurance and travel on site funnel states while blocking embed", async ({
     page,
   }) => {

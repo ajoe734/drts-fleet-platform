@@ -8,6 +8,8 @@ const partnerBookingBaseURL =
 const shouldStartLocalPartnerBooking =
   partnerBookingBaseURL === localPartnerBookingBaseURL ||
   partnerBookingBaseURL === "http://127.0.0.1:3007";
+const skipLocalPartnerBookingWebServer =
+  process.env.PARTNER_BOOKING_SKIP_WEBSERVER === "1";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -20,7 +22,7 @@ export default defineConfig({
     baseURL: partnerBookingBaseURL,
     trace: "retain-on-failure",
   },
-  ...(shouldStartLocalPartnerBooking
+  ...(shouldStartLocalPartnerBooking && !skipLocalPartnerBookingWebServer
     ? {
         webServer: [
           {
