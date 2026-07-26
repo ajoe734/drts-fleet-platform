@@ -47,6 +47,7 @@ HERMETIC_LOG_DIR="${HERMETIC_LOG_DIR:-/tmp/drts-e2e-hermetic}"
 HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS="${HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS:-300}"
 HERMETIC_DB_SEED_TIMEOUT_SECONDS="${HERMETIC_DB_SEED_TIMEOUT_SECONDS:-180}"
 HERMETIC_API_BUILD_TIMEOUT_SECONDS="${HERMETIC_API_BUILD_TIMEOUT_SECONDS:-600}"
+HERMETIC_SUITE_TIMEOUT_SECONDS="${HERMETIC_SUITE_TIMEOUT_SECONDS:-300}"
 
 mkdir -p "$HERMETIC_LOG_DIR"
 
@@ -272,7 +273,15 @@ for s in "${SUITES[@]}"; do
   export HERMETIC_SUITE_LABEL="$s"
   if ! reset_db; then FAIL+=("$s"); continue; fi
   if ! start_api; then FAIL+=("$s"); continue; fi
-  if ./tests/e2e/run-e2e.sh --suite "$s"; then PASS+=("$s"); else FAIL+=("$s"); fi
+  if run_logged_timeout \
+    "E2E-${s}" \
+    "$HERMETIC_SUITE_TIMEOUT_SECONDS" \
+    "$HERMETIC_LOG_DIR/${RUN_STAMP}-E2E-${s}-suite.log" \
+    ./tests/e2e/run-e2e.sh --suite "$s"; then
+    PASS+=("$s")
+  else
+    FAIL+=("$s")
+  fi
 done
 
 echo "════════════════════════════════════════"
