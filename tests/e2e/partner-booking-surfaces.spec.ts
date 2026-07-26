@@ -51,13 +51,17 @@ test.describe("partner booking program surfaces", () => {
     const embedResponse = await page.goto("/ctbc/program/embed");
     expect(embedResponse?.status()).toBe(200);
     await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
-    await expect(page.getByText("program: card · embed")).toBeVisible();
-    await expect(page.getByText("issuer_signature")).toBeVisible();
-    await expect(page.getByText("ref_token")).toBeVisible();
-    await expect(page.getByText("網銀 APP 內嵌 webview")).toHaveCount(0);
-    await expect(page.getByText("原始卡資料")).toHaveCount(0);
+    await expect(
+      page.getByText("未取得有效網銀身分，改導向 standalone 官方站點。"),
+    ).toBeVisible();
+    await expect(page.getByText("未偵測到銀行登入")).toBeVisible();
+    await expect(page.getByText("no_embed_session · 改用官網")).toBeVisible();
+    await expect(page.getByText("不在此頁輸入原始卡資料")).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: /卡號|信用卡|card/i }),
+    ).toHaveCount(0);
 
-    const reauthResponse = await page.goto("/ctbc/program/embed/reauth");
+    const reauthResponse = await page.goto("/ctbc/program/embed/embed-reauth");
     expect(reauthResponse?.status()).toBe(200);
     await expect(page.getByText("issuer_session")).toBeVisible();
     await expect(page.getByText("expired", { exact: true })).toBeVisible();
@@ -93,6 +97,33 @@ test.describe("partner booking program surfaces", () => {
     await expect(page.getByText("末四碼 / 網銀帳號")).toBeVisible();
     await expect(page.getByText("不在此頁輸入原始卡資料")).toBeVisible();
     await expect(page.getByText("ref_token")).toHaveCount(0);
+  });
+
+  test("creates a real booking from the airport embed flow", async ({
+    page,
+  }) => {
+    const response = await page.goto(
+      "/ctbc/program/embed?apiKey=pk_live_embed&partnerUserRef=user-001&referenceToken=token-001&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-001&flightNo=CI100",
+    );
+    expect(response?.status()).toBe(200);
+
+    await page.getByRole("button", { name: "開始預約" }).click();
+    await page.getByRole("button", { name: "前往確認" }).click();
+    await page.getByRole("button", { name: "確認送出預約" }).click();
+
+    await expect(page.getByText("預約已建立")).toBeVisible();
+    await expect(page.getByText("booking-embed-001")).toBeVisible();
+    await expect(page.getByText("order-embed-001")).toBeVisible();
+    await expect(page.getByText("elig-embed-001")).toBeVisible();
+
+    await page.getByRole("button", { name: "追蹤行程" }).click();
+    await expect(page.getByText("ORD-EMBED-001")).toBeVisible();
+    await expect(
+      page.getByText(
+        "台北市信義區松仁路 100 號 -> 桃園 T2 · 第二航廈 出發接送區",
+        { exact: true },
+      ),
+    ).toBeVisible();
   });
 
   test("keeps insurance and travel on site funnel states while blocking embed", async ({

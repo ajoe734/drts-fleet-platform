@@ -151,6 +151,63 @@ export function validateInternalKey(
   );
 }
 
+export function requireInternalKey(
+  request: RequestLike,
+  expectedKey: string | undefined,
+): void {
+  const requestPath = request.originalUrl ?? request.url ?? "";
+  const requestMethod = request.method ?? "GET";
+  const configuredKey = expectedKey?.trim();
+
+  if (!configuredKey) {
+    throw new ApiRequestError(
+      503,
+      "INTERNAL_KEY_NOT_CONFIGURED",
+      "x-drts-internal-key validation is not configured for this environment.",
+      {
+        route: requestPath,
+        method: requestMethod,
+        requiredEnv: "DRTS_INTERNAL_KEY",
+      },
+    );
+  }
+
+  const providedKey = normalizeHeaderValue(
+    request.headers?.[INTERNAL_KEY_HEADER],
+  );
+  if (!providedKey) {
+    throw new ApiRequestError(
+      401,
+      "INTERNAL_KEY_REQUIRED",
+      "x-drts-internal-key header is required for this environment.",
+      {
+        route: requestPath,
+        method: requestMethod,
+      },
+    );
+  }
+
+  const expectedBuffer = Buffer.from(configuredKey, "utf8");
+  const providedBuffer = Buffer.from(providedKey, "utf8");
+  const matches =
+    expectedBuffer.length === providedBuffer.length &&
+    timingSafeEqual(expectedBuffer, providedBuffer);
+
+  if (matches) {
+    return;
+  }
+
+  throw new ApiRequestError(
+    401,
+    "INTERNAL_KEY_INVALID",
+    "x-drts-internal-key header is invalid for this environment.",
+    {
+      route: requestPath,
+      method: requestMethod,
+    },
+  );
+}
+
 @Injectable()
 export class InternalKeyMiddleware implements NestMiddleware {
   use(request: RequestLike, _response: unknown, next: () => void) {

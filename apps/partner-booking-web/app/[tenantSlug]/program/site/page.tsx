@@ -18,7 +18,15 @@ export default async function ProgramSiteFlowPage({ params }: PageProps) {
   // (insurance / travel) keep the shared themed funnel.
   const bank = getAirportBank(tenantSlug);
   if (bank) {
-    return <AirportTransferSite bank={bank} mode="site" />;
+    return (
+      <AirportTransferSite
+        bank={bank}
+        mode="site"
+        defaultRideDate={new Date(Date.now() + 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10)}
+      />
+    );
   }
 
   const locale = await getServerLocale();
