@@ -10,7 +10,8 @@
 | Reviewer                              | `Claude`                                                                                                                                       |
 | Inspection date                       | `2026-07-26`                                                                                                                                   |
 | Worktree branch                       | `codex/e2e-mtx-001`                                                                                                                            |
-| Current head                          | `db02c3d01903addaa535ed05eaab73b067ade52d`                                                                                                     |
+| Current head                          | `bfa0b85daa5cc67eb8be341475f021d295361eb9`                                                                                                     |
+| Hermetic PASS(22) producing head      | `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`                                                                                                     |
 | Execution packet                      | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md`                                                  |
 | Source DoD                            | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/source_specs/01_system_development_team_spec_20260720.md#33-definition-of-done--system` |
 | Prior Fleet H sidecar reused as input | `support/sidecars/E2E-MTX-UI-FULL-001/`                                                                                                        |
@@ -56,14 +57,25 @@ blockers only.
 
 ## Current-head classification before edits
 
-| Acceptance slice                              | Status                  | Basis                                                                                                                            |
-| --------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Single matrix mapping Fleet H evidence inputs | `missing`               | No `support/sidecars/E2E-MTX-001/` sidecar existed on entry.                                                                     |
-| §33 DoD item inventory                        | `implemented_elsewhere` | Canonical items exist in source spec §33, but were not yet mapped into a Fleet H matrix.                                         |
-| Fleet acceptance evidence reuse               | `partial`               | Multiple fleet sidecars exist, but no single current-head aggregator ties them to the release matrix.                            |
-| Shared hermetic runner                        | `implemented`           | `tests/e2e/run-e2e-hermetic.sh` exists.                                                                                          |
-| All hermetic suites green on current head     | `verified_current_head` | The isolated worktree-local rerun completed `E2E-001` through `E2E-022` and emitted a final `PASS (22)` summary on `2026-07-26`. |
-| Final unresolved-blocker list                 | `missing`               | No `E2E-MTX-001` blocker summary existed.                                                                                        |
+| Acceptance slice                              | Status                  | Basis                                                                                                                                   |
+| --------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Single matrix mapping Fleet H evidence inputs | `missing`               | No `support/sidecars/E2E-MTX-001/` sidecar existed on entry.                                                                            |
+| §33 DoD item inventory                        | `implemented_elsewhere` | Canonical items exist in source spec §33, but were not yet mapped into a Fleet H matrix.                                                |
+| Fleet acceptance evidence reuse               | `partial`               | Multiple fleet sidecars exist, but no single current-head aggregator ties them to the release matrix.                                   |
+| Shared hermetic runner                        | `implemented`           | `tests/e2e/run-e2e-hermetic.sh` exists.                                                                                                 |
+| All hermetic suites green on current head     | `partial_current_head`  | On entry, this worktree had harness diagnostics and isolated DB hardening work in progress, but no uninterrupted full-suite green summary. |
+| Final unresolved-blocker list                 | `missing`               | No `E2E-MTX-001` blocker summary existed.                                                                                               |
+
+## Post-edit verification snapshot
+
+| Acceptance slice                              | Status                  | Basis                                                                                                                                                                 |
+| --------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Single matrix mapping Fleet H evidence inputs | `verified_current_head` | This task now provides the missing Fleet H aggregator sidecar.                                                                                                       |
+| §33 DoD item inventory                        | `verified_current_head` | The matrix maps all 20 §33 items verbatim to scenario and evidence references.                                                                                       |
+| Fleet acceptance evidence reuse               | `verified_current_head` | The matrix now ties Fleets A-H evidence into one release packet.                                                                                                     |
+| Shared hermetic runner                        | `verified_current_head` | `tests/e2e/run-e2e-hermetic.sh` on current head still contains the isolated DB, auto-repair, timeout, and log-capture changes that produced the recorded rerun.    |
+| All hermetic suites green on current head     | `verified_current_head` | The uninterrupted PASS(22) rerun was produced on `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`; current head `bfa0b85daa5cc67eb8be341475f021d295361eb9` is docs-only. |
+| Final unresolved-blocker list                 | `verified_current_head` | This sidecar and `EVIDENCE-MATRIX.md` now record the unresolved blockers explicitly.                                                                                 |
 
 ## Commands executed on 2026-07-26
 
@@ -97,9 +109,10 @@ HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=1 ./tests/e2e/run-e2e-hermetic.sh 001
     `pnpm db:migrate` remaining active for more than two minutes and no
     scenario-level pass/fail output.
 
-This means Fleet H still cannot honestly claim "all hermetic suites green" from
-this worktree on `2026-07-26`, but the blocker has narrowed from shared-reset
-contamination to missing uninterrupted end-to-end completion evidence.
+At that stage, Fleet H still could not honestly claim "all hermetic suites
+green" from this worktree on `2026-07-26`, but the blocker had narrowed from
+shared-reset contamination to missing uninterrupted end-to-end completion
+evidence.
 
 ### Shared harness diagnosability hardening
 
@@ -133,7 +146,9 @@ contamination to missing uninterrupted end-to-end completion evidence.
     same isolated database produced suite logs through `E2E-007` and entered
     `E2E-008`; it was operator-interrupted during `E2E-008` reset, so it is
     still diagnostic rather than acceptance-grade evidence.
-  - the latest full-suite rerun with `./tests/e2e/run-e2e-hermetic.sh`
+  - the latest uninterrupted full-suite rerun with
+    `./tests/e2e/run-e2e-hermetic.sh` on
+    `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`
     completed `E2E-001` through `E2E-022` and emitted the summary
     `[hermetic] PASS (22): 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 016 017 018 019 020 021 022`
     with `FAIL (0): none`; task-local artifacts include
@@ -146,10 +161,11 @@ contamination to missing uninterrupted end-to-end completion evidence.
 1. The repository already contains substantial Fleet B/C/D/E/F/G evidence that
    can be mapped into a single current-head matrix.
 2. The single matrix itself was missing and is created by this task.
-3. The Fleet H global hermetic rerun is green at current head. The harness now
-   uses a worktree-local database, produces bounded reset and suite
-   diagnostics, and emitted an uninterrupted 22-scenario green summary on
-   `2026-07-26`.
+3. The Fleet H global hermetic rerun is green for the current harness state.
+   The PASS(22) evidence was produced on
+   `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`, and current head
+   `bfa0b85daa5cc67eb8be341475f021d295361eb9` only finalizes documentation for
+   that same harness state.
 4. S-3 still carries existing external evidence blockers and one direct
    current-head failure from `S3-VERIFY-001`.
 
