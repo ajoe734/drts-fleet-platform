@@ -50,17 +50,18 @@ test.describe("partner booking program surfaces", () => {
 
     const embedResponse = await page.goto("/ctbc/program/embed");
     expect(embedResponse?.status()).toBe(200);
+    await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
     await expect(
-      page.getByText(
-        "Embedded session handoff is missing. Reopen this page from the banking app.",
-      ),
+      page.getByText("未取得有效網銀身分，改導向 standalone 官方站點。"),
     ).toBeVisible();
-    await expect(page.getByText("驗證接送資格")).toBeVisible();
-    await expect(page.getByRole("button", { name: "開始預約" })).toBeVisible();
-    await expect(page.getByText("網銀 APP 內嵌 webview")).toBeVisible();
-    await expect(page.getByText("原始卡資料")).toHaveCount(0);
+    await expect(page.getByText("未偵測到銀行登入")).toBeVisible();
+    await expect(page.getByText("no_embed_session · 改用官網")).toBeVisible();
+    await expect(page.getByText("不在此頁輸入原始卡資料")).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: /卡號|信用卡|card/i }),
+    ).toHaveCount(0);
 
-    const reauthResponse = await page.goto("/ctbc/program/embed/reauth");
+    const reauthResponse = await page.goto("/ctbc/program/embed/embed-reauth");
     expect(reauthResponse?.status()).toBe(200);
     await expect(page.getByText("issuer_session")).toBeVisible();
     await expect(page.getByText("expired", { exact: true })).toBeVisible();
@@ -118,10 +119,10 @@ test.describe("partner booking program surfaces", () => {
     await page.getByRole("button", { name: "追蹤行程" }).click();
     await expect(page.getByText("ORD-EMBED-001")).toBeVisible();
     await expect(
-      page.getByText("台北市信義區松仁路 100 號", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByText("桃園 T2 · 第二航廈 出發接送區", { exact: true }),
+      page.getByText(
+        "台北市信義區松仁路 100 號 -> 桃園 T2 · 第二航廈 出發接送區",
+        { exact: true },
+      ),
     ).toBeVisible();
   });
 
