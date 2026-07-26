@@ -39,9 +39,13 @@ export default async function PartnerReceiptPage({
         brand={brand}
         activeScreen="receipt"
         basePath={`/${tenantSlug}`}
-        booking={bookingArtifacts?.booking}
         locale={locale}
-        order={bookingArtifacts?.receipt}
+        {...(bookingArtifacts
+          ? {
+              booking: bookingArtifacts.booking,
+              order: bookingArtifacts.receipt,
+            }
+          : {})}
       />
     );
   } catch (error) {

@@ -6,13 +6,14 @@ import type {
   BookingRecord,
   CreateTenantBookingCommand,
   OwnedOrderRecord,
+  PartnerChannelEntryRecord,
 } from "@drts/contracts";
 import {
   createPartnerBooking,
   createPartnerBootstrapSession,
   getPartnerConfirmation,
+  getPartnerRouteContext,
   getPartnerReceipt,
-  getPublicPartnerEntry,
   type PartnerSessionRecord,
 } from "@/lib/api-client";
 
@@ -39,10 +40,9 @@ function resolvePartnerIngressKey(entrySlug: string, tenantSlug: string) {
 }
 
 async function createPartnerSession(
-  tenantSlug: string,
+  entry: PartnerChannelEntryRecord,
 ): Promise<PartnerSessionRecord> {
-  const entry = await getPublicPartnerEntry(tenantSlug);
-  const apiKey = resolvePartnerIngressKey(entry.entrySlug, tenantSlug);
+  const apiKey = resolvePartnerIngressKey(entry.entrySlug, entry.entrySlug);
   const session = await createPartnerBootstrapSession({
     entrySlug: entry.entrySlug,
     apiKey,
@@ -56,6 +56,36 @@ async function createPartnerSession(
   };
 }
 
+async function getActivePartnerEntry(tenantSlug: string) {
+  const { entry, provenance } = await getPartnerRouteContext(tenantSlug);
+  if (!entry) {
+    throw new Error(
+      provenance.fallbackCode
+        ? `Partner entry unavailable for tenant "${tenantSlug}".`
+        : `Missing partner entry for tenant "${tenantSlug}".`,
+    );
+  }
+  return entry;
+}
+
+function requireEligibilityVerificationId(
+  entry: Pick<
+    PartnerChannelEntryRecord,
+    "businessDispatchSubtype" | "eligibilityMode" | "entrySlug"
+  >,
+  command: CreateTenantBookingCommand,
+) {
+  if (
+    entry.businessDispatchSubtype === "credit_card_airport_transfer" &&
+    entry.eligibilityMode !== "none" &&
+    !command.eligibilityVerificationId?.trim()
+  ) {
+    throw new Error(
+      `eligibilityVerificationId is required for partner entry "${entry.entrySlug}".`,
+    );
+  }
+}
+
 export async function createProgramBooking(params: {
   tenantSlug: string;
   command: CreateTenantBookingCommand;
@@ -63,7 +93,9 @@ export async function createProgramBooking(params: {
   booking: BookingRecord;
   receipt: OwnedOrderRecord;
 }> {
-  const session = await createPartnerSession(params.tenantSlug);
+  const entry = await getActivePartnerEntry(params.tenantSlug);
+  requireEligibilityVerificationId(entry, params.command);
+  const session = await createPartnerSession(entry);
   const created = await createPartnerBooking(session, {
     ...params.command,
     partnerEntrySlug: session.partnerEntry.entrySlug,
@@ -82,7 +114,8 @@ export async function getProgramBookingArtifacts(params: {
   booking: BookingRecord;
   receipt: OwnedOrderRecord;
 }> {
-  const session = await createPartnerSession(params.tenantSlug);
+  const entry = await getActivePartnerEntry(params.tenantSlug);
+  const session = await createPartnerSession(entry);
   const booking = await getPartnerConfirmation(session, params.bookingId);
   const receipt = await getPartnerReceipt(session, params.orderId);
 

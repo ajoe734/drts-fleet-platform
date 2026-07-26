@@ -6,10 +6,18 @@ import {
 
 export async function getTenantProgramTheme(
   tenantSlug: string,
+  options?: {
+    requireActiveEntry?: boolean;
+  },
 ): Promise<PartnerProgramTheme> {
-  const { brand } = await getPartnerRouteContext(tenantSlug, {
-    allowInactive: true,
-    allowMissing: true,
-  });
+  const { brand } = await getPartnerRouteContext(
+    tenantSlug,
+    options?.requireActiveEntry
+      ? undefined
+      : {
+          allowInactive: true,
+          allowMissing: true,
+        },
+  );
   return getProgramThemeForTenantSlug(tenantSlug, brand);
 }

@@ -1398,13 +1398,18 @@ function appendQueryString(href: string, persistentQuery?: string) {
 export function PartnerBookingPhoneScreen({
   brand,
   screen,
+  booking,
+  order,
   locale = "zh",
 }: {
   brand: PartnerBrandTemplate;
   screen: PartnerBookingScreenId;
+  booking?: BookingRecord;
+  order?: OwnedOrderRecord;
   locale?: PartnerBookingLocale;
 }) {
   const demo = metaForBrand(brand, locale);
+  const liveData = deriveLiveData(brand, locale, booking, order);
   const copy = {
     ...copyForLocale(locale),
     ...programVariant(funnelProgramKind(brand.code), locale),

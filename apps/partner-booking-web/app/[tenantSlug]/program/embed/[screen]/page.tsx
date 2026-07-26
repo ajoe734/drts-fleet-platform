@@ -11,6 +11,9 @@ export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string; screen: string }>;
+  searchParams: Promise<{
+    eligibilityVerificationId?: string | string[];
+  }>;
 };
 
 function resolveEmbedScreen(segment: string) {
@@ -20,11 +23,27 @@ function resolveEmbedScreen(segment: string) {
   );
 }
 
-export default async function ProgramEmbedScreenPage({ params }: PageProps) {
+function readFirst(value?: string | string[]) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function ProgramEmbedScreenPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { tenantSlug, screen: screenSegment } = await params;
+  const resolvedSearchParams = await searchParams;
   const locale = await getServerLocale();
-  const theme = await getTenantProgramTheme(tenantSlug);
+  const theme = await getTenantProgramTheme(tenantSlug, {
+    requireActiveEntry: true,
+  });
   const screen = resolveEmbedScreen(screenSegment);
+  const eligibilityVerificationId = readFirst(
+    resolvedSearchParams.eligibilityVerificationId,
+  );
+  const persistentQuery = eligibilityVerificationId
+    ? new URLSearchParams({ eligibilityVerificationId }).toString()
+    : null;
 
   if (
     theme.kind !== "card" ||
@@ -42,6 +61,7 @@ export default async function ProgramEmbedScreenPage({ params }: PageProps) {
       screen={screen}
       basePath={`/${tenantSlug}/program/embed`}
       locale={locale}
+      {...(persistentQuery ? { persistentQuery } : {})}
       surface="embed"
     />
   );

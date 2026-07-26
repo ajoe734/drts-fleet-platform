@@ -7,12 +7,31 @@ export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
+  searchParams: Promise<{
+    eligibilityVerificationId?: string | string[];
+  }>;
 };
 
-export default async function ProgramEmbedFlowPage({ params }: PageProps) {
+function readFirst(value?: string | string[]) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function ProgramEmbedFlowPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { tenantSlug } = await params;
+  const resolvedSearchParams = await searchParams;
   const locale = await getServerLocale();
-  const theme = await getTenantProgramTheme(tenantSlug);
+  const theme = await getTenantProgramTheme(tenantSlug, {
+    requireActiveEntry: true,
+  });
+  const eligibilityVerificationId = readFirst(
+    resolvedSearchParams.eligibilityVerificationId,
+  );
+  const persistentQuery = eligibilityVerificationId
+    ? new URLSearchParams({ eligibilityVerificationId }).toString()
+    : null;
 
   if (theme.kind !== "card") {
     notFound();
@@ -24,6 +43,7 @@ export default async function ProgramEmbedFlowPage({ params }: PageProps) {
       screen="embed_handoff"
       basePath={`/${tenantSlug}/program/embed`}
       locale={locale}
+      {...(persistentQuery ? { persistentQuery } : {})}
       surface="embed"
     />
   );

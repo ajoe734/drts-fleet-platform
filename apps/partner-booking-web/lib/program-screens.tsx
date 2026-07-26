@@ -1151,6 +1151,7 @@ function renderScreen(
   screen: PartnerProgramScreenId,
   basePath: string,
   locale: Locale,
+  persistentQuery?: string,
 ): ReactNode {
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(key, params, locale);
@@ -1168,6 +1169,8 @@ function renderScreen(
   const bookingHref = basePath.endsWith("/embed")
     ? `${basePath.slice(0, -"/program/embed".length)}/book`
     : reviewHref;
+  const appendQuery = (href: string) =>
+    persistentQuery ? `${href}?${persistentQuery}` : href;
 
   if (screen === "landing") {
     if (theme.kind === "travel") {
@@ -1870,7 +1873,7 @@ function renderScreen(
             <Button
               theme={theme}
               label={t("program.embed.handoff.cta")}
-              href={bookingHref}
+              href={appendQuery(bookingHref)}
               primary
             />
           }
@@ -3201,12 +3204,14 @@ export function ProgramBookingFlow({
   screen,
   basePath,
   locale,
+  persistentQuery,
   surface = "site",
 }: {
   theme: PartnerProgramTheme;
   screen: PartnerProgramScreenId;
   basePath: string;
   locale: Locale;
+  persistentQuery?: string;
   surface?: PartnerProgramSurfaceKind;
 }) {
   const localizedTheme = getLocalizedProgramTheme(theme, locale);
@@ -3313,7 +3318,13 @@ export function ProgramBookingFlow({
           width: "100%",
         }}
       >
-        {renderScreen(localizedTheme, screen, basePath, locale)}
+        {renderScreen(
+          localizedTheme,
+          screen,
+          basePath,
+          locale,
+          persistentQuery,
+        )}
       </div>
     </div>
   );

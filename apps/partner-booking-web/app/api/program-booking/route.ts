@@ -40,6 +40,14 @@ function getOptionalNumber(value: unknown) {
   return undefined;
 }
 
+function requireText(value: unknown, field: string) {
+  const normalized = getText(value);
+  if (!normalized) {
+    throw new Error(`${field} is required.`);
+  }
+  return normalized;
+}
+
 function buildAddress(
   fallbackAddress: string,
   payload: AddressPayload | null | undefined,
@@ -55,30 +63,36 @@ function toCreateCommand(body: BookingDraftPayload): {
   tenantSlug: string;
   command: CreateTenantBookingCommand;
 } {
-  const tenantSlug = getText(body.tenantSlug);
+  const tenantSlug = requireText(body.tenantSlug, "tenantSlug");
   const draft = body.draft ?? {};
-
-  if (!tenantSlug) {
-    throw new Error("tenantSlug is required.");
-  }
+  const businessDispatchSubtype = requireText(
+    body.businessDispatchSubtype,
+    "businessDispatchSubtype",
+  ) as BusinessDispatchSubtype;
+  const luggageCount = getOptionalNumber(draft.luggageCount);
 
   const command: CreateTenantBookingCommand = {
-    businessDispatchSubtype:
-      getText(body.businessDispatchSubtype) as BusinessDispatchSubtype,
+    businessDispatchSubtype,
     ...(getOptionalText(body.eligibilityVerificationId)
       ? { eligibilityVerificationId: getText(body.eligibilityVerificationId) }
       : {}),
-    pickup: buildAddress(getText(draft.pickupAddress), body.pickup),
-    dropoff: buildAddress(getText(draft.dropoffAddress), body.dropoff),
+    pickup: buildAddress(
+      requireText(draft.pickupAddress, "draft.pickupAddress"),
+      body.pickup,
+    ),
+    dropoff: buildAddress(
+      requireText(draft.dropoffAddress, "draft.dropoffAddress"),
+      body.dropoff,
+    ),
     reservationWindowStart: new Date(
-      getText(draft.reservationWindowStart),
+      requireText(draft.reservationWindowStart, "draft.reservationWindowStart"),
     ).toISOString(),
     reservationWindowEnd: new Date(
-      getText(draft.reservationWindowEnd),
+      requireText(draft.reservationWindowEnd, "draft.reservationWindowEnd"),
     ).toISOString(),
     passenger: {
-      name: getText(draft.passengerName),
-      phone: getText(draft.passengerPhone),
+      name: requireText(draft.passengerName, "draft.passengerName"),
+      phone: requireText(draft.passengerPhone, "draft.passengerPhone"),
     },
     ...(getOptionalText(draft.direction)
       ? {
@@ -93,9 +107,7 @@ function toCreateCommand(body: BookingDraftPayload): {
     ...(getOptionalText(draft.terminal)
       ? { terminal: getText(draft.terminal) }
       : {}),
-    ...(getOptionalNumber(draft.luggageCount) !== undefined
-      ? { luggageCount: getOptionalNumber(draft.luggageCount) }
-      : {}),
+    ...(luggageCount !== undefined ? { luggageCount } : {}),
     ...(getOptionalText(draft.notes) ? { notes: getText(draft.notes) } : {}),
     ...(getOptionalText(draft.claimReference ?? draft.groupCode ?? draft.cardTier)
       ? {
