@@ -10,7 +10,7 @@
 | Reviewer                              | `Claude`                                                                                                                                       |
 | Inspection date                       | `2026-07-26`                                                                                                                                   |
 | Worktree branch                       | `codex/e2e-mtx-001`                                                                                                                            |
-| Current head                          | `9648aed6dbbee00bd7614087309222b1fd76b821`                                                                                                     |
+| Current head                          | `db02c3d01903addaa535ed05eaab73b067ade52d`                                                                                                     |
 | Execution packet                      | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md`                                                  |
 | Source DoD                            | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/source_specs/01_system_development_team_spec_20260720.md#33-definition-of-done--system` |
 | Prior Fleet H sidecar reused as input | `support/sidecars/E2E-MTX-UI-FULL-001/`                                                                                                        |
@@ -103,6 +103,8 @@ worktree on `2026-07-26`.
 - `tests/e2e/run-e2e-hermetic.sh`: `UPDATED_CURRENT_HEAD`
 - Changes made in this task:
   - added bounded timeout controls for `db:migrate`, `db:seed`, and API build;
+  - added bounded timeout control and per-suite log capture for
+    `./tests/e2e/run-e2e.sh --suite ...`;
   - added per-run/per-suite log file output under `/tmp/drts-e2e-hermetic/`;
   - fixed the timeout wrapper so reset failures stop the scenario instead of
     incorrectly continuing into `db:seed`.
@@ -112,6 +114,13 @@ worktree on `2026-07-26`.
     now fails fast and emits
     `/tmp/drts-e2e-hermetic/20260726T161150Z-E2E-001-db-migrate.log`
     instead of hanging without a bounded artifact.
+  - a later current-head rerun showed `db:migrate` progressing well beyond
+    `V0010__views_triggers_and_guardrails.sql`; the earlier apparent
+    `reg.insurance_policies` failure is not the stable blocker on current head.
+  - a later current-head rerun with
+    `HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=600 HERMETIC_SUITE_TIMEOUT_SECONDS=120 ./tests/e2e/run-e2e-hermetic.sh 001`
+    was operator-interrupted during `db:migrate`, so it is diagnostic only and
+    not acceptance evidence.
 
 ## Honest release posture at current head
 
@@ -119,15 +128,16 @@ worktree on `2026-07-26`.
    can be mapped into a single current-head matrix.
 2. The single matrix itself was missing and is created by this task.
 3. The Fleet H global hermetic rerun is still unresolved at current head. The
-   harness now fails with bounded diagnostics, but no full green rerun exists.
+   harness now has bounded reset and suite diagnostics, but no uncontaminated
+   full green rerun exists.
 4. S-3 still carries existing external evidence blockers and one direct
    current-head failure from `S3-VERIFY-001`.
 
 ## Final unresolved blockers as of 2026-07-26
 
 1. `all hermetic suites green` is not satisfied from this worktree because the
-   shared `run-e2e-hermetic.sh` full rerun did not finish after dependency
-   repair.
+   shared `run-e2e-hermetic.sh` full rerun still lacks an uncontaminated green
+   pass artifact after dependency repair.
 2. `S3-VERIFY-001` still reports honest `blocked_ext` evidence gaps for Android
    and iOS offline replay.
 3. `S3-VERIFY-001` still reports honest `blocked_ext` evidence gap for
