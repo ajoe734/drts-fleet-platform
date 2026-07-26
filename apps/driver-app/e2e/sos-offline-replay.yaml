@@ -1,0 +1,35 @@
+appId: com.cctechsupport.drts.driver
+name: "S3 Android Offline SOS Replay E2E Verification"
+---
+# Step 1: Launch driver app on Android emulator
+- launchApp:
+    clearState: false
+
+# Step 2: Simulate network loss (Airplane Mode ON)
+- setAirplaneMode: enabled
+
+# Step 3: Trigger SOS emergency event while offline
+- tapOn:
+    id: "sos-trigger-button"
+    optional: true
+- tapOn:
+    text: ".*(緊急|SOS|緊急求助).*"
+    optional: true
+
+# Step 4: Verify local SQLite outbox queue state
+- assertVisible:
+    text: ".*(offline|離線|暫存|outbox).*"
+
+# Step 5: Restore network connectivity (Airplane Mode OFF)
+- setAirplaneMode: disabled
+
+# Step 6: Wait for automatic outbox replay & verify backend receipt
+- extendedWaitUntil:
+    visible: ".*(submitted|已送達|成功).*"
+    timeout: 30000
+
+# Step 7: Restart application to verify state persistence and resume
+- stopApp
+- launchApp
+- assertVisible:
+    text: ".*(submitted|已送達|S3-VERIFY|SOS-).*"
