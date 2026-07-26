@@ -56,6 +56,7 @@ L1 wording without rewriting the canonical PRD / SA in the same execution wave.
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 - `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
+- `docs/01-decisions/SD-DP-20260725-008-control-plane-proxy-scope-parity.md`
 
 ## Current System Truth
 
