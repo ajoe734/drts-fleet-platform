@@ -78,16 +78,6 @@ function isAllowedPartnerPath(path: string[], method: string) {
 
   if (
     path[0] === "partner" &&
-    path[1] === "ingress" &&
-    path[2] === "handoff" &&
-    path.length === 3 &&
-    method === "POST"
-  ) {
-    return true;
-  }
-
-  if (
-    path[0] === "partner" &&
     path[1] === "eligibility" &&
     path[2] === "verify" &&
     path.length === 3 &&

@@ -149,4 +149,104 @@ describe("tenant partner ingress handoff controller", () => {
       },
     });
   });
+
+  it("rejects internal bootstrap when the internal key header is missing", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-dev-key";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const { controller } = createController();
+
+    try {
+      await controller.issuePartnerIngressHandoff(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          partnerUserRef: "partner-user-003",
+        },
+        {
+          headers: {},
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+        },
+        "req-partner-handoff-005",
+      );
+      expect.fail("expected internal bootstrap without key to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(401);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "INTERNAL_KEY_REQUIRED",
+        },
+      });
+    }
+  });
+
+  it("rejects internal bootstrap when only a bearer token is present", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-dev-key";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const { controller } = createController();
+
+    try {
+      await controller.issuePartnerIngressHandoff(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          partnerUserRef: "partner-user-004",
+        },
+        {
+          headers: {
+            authorization: "Bearer forged-browser-token",
+          },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+        },
+        "req-partner-handoff-006",
+      );
+      expect.fail("expected bearer-only internal bootstrap to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(401);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "INTERNAL_KEY_REQUIRED",
+        },
+      });
+    }
+  });
+
+  it("fails closed when internal bootstrap is requested without DRTS_INTERNAL_KEY configured", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const { controller } = createController();
+
+    try {
+      await controller.issuePartnerIngressHandoff(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          partnerUserRef: "partner-user-005",
+        },
+        {
+          headers: {},
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+        },
+        "req-partner-handoff-007",
+      );
+      expect.fail("expected missing internal-key config to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(503);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "INTERNAL_KEY_NOT_CONFIGURED",
+        },
+      });
+    }
+  });
 });

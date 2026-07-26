@@ -123,29 +123,8 @@ describe("partner-booking control-plane proxy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("allows partner ingress handoff creation", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: {
-            accessToken: "handoff-token",
-            tokenType: "Bearer",
-            expiresIn: "15m",
-            partnerEntrySlug: "ctbc",
-            drtsPassengerId: "passenger-001",
-            identity: {
-              actorType: "referral_passenger",
-              actorId: "passenger-001",
-              realm: "partner",
-            },
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    );
+  it("blocks partner ingress handoff before it reaches the API", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(
@@ -159,10 +138,7 @@ describe("partner-booking control-plane proxy", () => {
       contextFor(["partner", "ingress", "handoff"]),
     );
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
-      "http://localhost:3001/api/partner/ingress/handoff",
-    );
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

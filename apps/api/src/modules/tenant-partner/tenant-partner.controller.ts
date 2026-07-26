@@ -84,7 +84,7 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
-import { validateInternalKey } from "../../common/auth/internal-key.middleware";
+import { requireInternalKey } from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -206,7 +206,7 @@ export class TenantPartnerController {
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
     if (allowInternalBootstrap) {
-      validateInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+      requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
     }
     const resolved = await this.tenantPartnerService.issuePartnerIngressHandoff(
       command,
