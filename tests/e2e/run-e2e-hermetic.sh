@@ -87,14 +87,79 @@ if [[ ${#SUITES[@]} -eq 0 ]]; then
 fi
 
 API_PID=""
+port_in_use() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:"${API_PORT}" -sTCP:LISTEN >/dev/null 2>&1
+    return
+  fi
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "( sport = :${API_PORT} )" | tail -n +2 | grep -q .
+    return
+  fi
+
+  if command -v fuser >/dev/null 2>&1; then
+    fuser "${API_PORT}/tcp" >/dev/null 2>&1
+    return
+  fi
+
+  return 1
+}
+
+force_clear_api_port() {
+  local pids
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -tiTCP:"${API_PORT}" -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser "${API_PORT}/tcp" 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+$' | tr '\n' ' ' || true)"
+  else
+    pids=""
+  fi
+
+  if [[ -n "${pids// }" ]]; then
+    # Some environments keep the child listener after the launcher exits.
+    kill ${pids} >/dev/null 2>&1 || true
+    sleep 1
+    kill -9 ${pids} >/dev/null 2>&1 || true
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser -k "${API_PORT}/tcp" >/dev/null 2>&1 || true
+  fi
+}
+
+wait_for_api_port_state() { # desired: free|listening
+  local desired="$1"
+  local attempt in_use
+
+  for attempt in $(seq 1 40); do
+    if port_in_use; then
+      in_use=1
+    else
+      in_use=0
+    fi
+
+    if [[ "$desired" == "free" && "$in_use" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "$desired" == "listening" && "$in_use" -eq 1 ]]; then
+      return 0
+    fi
+
+    sleep 1
+  done
+
+  echo "[hermetic] API port ${API_PORT} did not become ${desired}" >&2
+  return 1
+}
+
 stop_api() {
   if [[ -n "$API_PID" ]]; then
     # Kill the whole process group of the API launcher (npm/pnpm spawns children).
     kill -- "-${API_PID}" >/dev/null 2>&1 || kill "$API_PID" >/dev/null 2>&1 || true
     API_PID=""
   fi
-  if command -v fuser >/dev/null 2>&1; then fuser -k "${API_PORT}/tcp" >/dev/null 2>&1 || true; fi
-  sleep 2
+  force_clear_api_port
+  wait_for_api_port_state free || return 1
 }
 
 run_admin_psql() {
@@ -195,8 +260,13 @@ ensure_api_build() {
 }
 
 start_api() {
+  stop_api || return 1
   setsid bash -c "$API_START_CMD" > "$API_LOG" 2>&1 &
   API_PID=$!
+  wait_for_api_port_state listening || {
+    tail -n 40 "$API_LOG" || true
+    return 1
+  }
   for _ in $(seq 1 60); do
     [ "$(curl -s -o /dev/null -w '%{http_code}' "${E2E_API_URL}/health" 2>/dev/null)" = "200" ] && return 0
     sleep 2
