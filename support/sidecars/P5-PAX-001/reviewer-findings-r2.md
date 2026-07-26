@@ -5,7 +5,7 @@
 - Owner: `Gemini`
 - Packet under review: `support/sidecars/P5-PAX-001/P5-PAX-001-SIDECAR-REVIEW.md` @ `origin/gemini/p5-pax-001-sidecar-review` (`9d014119b`)
 - Review baseline: `origin/dev` (`9648aed6d`)
-- Verdict: **REOPEN** — substance sound, evidence anchoring and routing metadata must be corrected
+- Verdict: **REOPEN** — substance sound; delta-catalog accuracy defects (A1–A4) plus a routing/anchor refresh (B1–B3)
 - Date: 2026-07-25
 
 Live task status, owner/reviewer assignment, and `last_update` are deferred to
@@ -15,10 +15,22 @@ Live task status, owner/reviewer assignment, and `last_update` are deferred to
 
 The packet's analytical substance is correct and independently reproducible. All
 seven parent acceptance verdicts were re-verified against the **delivered**
-parent commit and hold. The reopen is for anchor and identity accuracy, not for
-a rewrite: a downstream reader following this packet as written would verify
-against a branch that never reached `dev` and would hit one catalog path that
-does not exist.
+parent commit and hold. The reopen is not for a rewrite.
+
+Two distinct classes of finding, and the distinction matters for how the owner
+should read this:
+
+- **B1–B3 are staleness, not owner error.** The reviewer identity, parent
+  owner/reviewer, and parent commit anchor were all correct or consistent with
+  recorded routing when the packet was authored; chairman reassignment and the
+  parent merge landed afterwards. Acceptance item 3 was satisfied at the time.
+  They need a refresh because this is the archived artifact.
+- **A1–A4 are genuine accuracy defects** in the delta-file catalog and two line
+  anchors, independent of any staleness: one cited path does not exist, one
+  modified file is described as deleted, `maskOpaqueToken` is anchored 81 lines
+  off, and eight per-file counts disagree with `--numstat`. For a packet whose
+  stated purpose is precise citation, these are the substantive reason to
+  reopen.
 
 ## What Verified Clean
 
@@ -55,31 +67,43 @@ Acceptance re-verification anchors confirmed on `ff6a64ac3041`:
    push port mirrors it; both bound as DI defaults.
 7. unit+integration+e2e green — matches parent preflight command block.
 
-## Blocking Findings
+## Required Refresh (Staleness, Not Owner Error)
 
-### B1 — Wrong reviewer lane named throughout
+The three items below were accurate — or at minimum consistent with recorded
+routing — when the packet was authored on 2026-07-25 at ~13:5x. They went stale
+through chairman reassignment and the parent merge that followed within the hour.
+They must still be corrected, because this packet is the archived evidence
+artifact and has to name the lane that signs it off and the commit that shipped.
+None of them is an owner accuracy failure.
 
-The packet names `Claude2` as sidecar reviewer in the header, in Purpose item
+### B1 — Reviewer identity now stale
+
+The packet names `Claude2` as sidecar reviewer in the header, in the Purpose
 list, in the `Cross-Cuts For Sidecar Reviewer (Claude2)` heading and its four
-sub-items, and in the acceptance checklist. The commit trailer also reads
+sub-items, and in the acceptance checklist. The commit trailer reads
 `Reviewer: claude2`.
 
-Machine truth: this sidecar's reviewer is **`Claude`**. The chairman reassigned
-the reviewer from `Gemini2` to `Claude`; `Claude2` was never the reviewer of
-this sidecar at any point. Since the third acceptance item is literally "hand
-off the packet to the assigned reviewer", a cross-cut checklist addressed to an
-unrelated lane does not satisfy it.
+That was correct at authoring time: `ai-status.json` handoffs record
+`Gemini -> Claude2` at `2026-07-25T13:54:03Z`, so `Claude2` genuinely held the
+sidecar reviewer role when the packet was written, and acceptance item 3 ("hand
+off the packet to the assigned reviewer") **was satisfied**. The reviewer was
+subsequently reassigned to **`Claude`**.
 
-Fix: replace every `Claude2` reviewer reference with `Claude`.
+Fix: refresh every `Claude2` reviewer reference to `Claude`. No acceptance
+criterion is in breach.
 
-### B2 — Wrong parent owner/reviewer
+### B2 — Parent owner/reviewer now stale
 
-Packet states `Parent Owner / Reviewer: Claude2 / Codex2`.
+Packet states `Parent Owner / Reviewer: Claude2 / Codex2`. The delivered parent
+tree does live on `origin/claude2/p5-pax-001`, which is consistent with `Claude2`
+having carried the parent when this packet was written.
 
-Machine truth for `P5-PAX-001`: owner **`Claude`**, reviewer **`Gemini`**
-(`commit_agent: Claude`, `commit_reviewer: Gemini`).
+Current machine truth for `P5-PAX-001`: owner **`Claude`**, reviewer
+**`Gemini`** (`commit_agent: Claude`, `commit_reviewer: Gemini`). The activity
+log records `chair_reassignment_applied` moving parent owner `Gemini2 -> Claude`
+at `2026-07-25T14:23:30Z`, i.e. after this packet was authored.
 
-Fix: correct to `Claude` / `Gemini`.
+Fix: refresh to `Claude` / `Gemini`.
 
 ### B3 — Evidence anchored to a branch that never reached `dev`
 
@@ -101,6 +125,10 @@ keep `6d9230d20` only as a note that the pre-merge lane tip carried a
 byte-identical tree.
 
 ## Accuracy Findings
+
+Unlike B1–B3, these are not staleness. The anchored lane tip `6d9230d20` and the
+delivered `ff6a64ac3041` have byte-identical trees, so each item below was
+already inaccurate against the packet's own stated anchor at authoring time.
 
 ### A1 — Delta catalog cites a path that does not exist
 
@@ -167,13 +195,23 @@ machine truth are capitalised (`Gemini`, `Claude`). Cosmetic.
 
 ## Requested Owner Actions
 
-1. Fix B1 — reviewer is `Claude`, not `Claude2` (all occurrences).
-2. Fix B2 — parent owner/reviewer is `Claude` / `Gemini`.
-3. Fix B3 — re-anchor evidence to delivered `ff6a64ac3041` on `origin/dev`;
-   retain `6d9230d20` only as a byte-identical pre-merge note.
-4. Fix A1–A4 — correct the `passenger-ride-page.tsx` path, stop describing
-   `passenger-fixtures.ts` as deleted, re-anchor `maskOpaqueToken` to `:131`
-   and `resolvePassengerSubjectRef` to `:52`, and regenerate per-file counts
-   from `--numstat` under one stated convention.
-5. Re-handoff to `Claude`. No re-verification of acceptance substance is
-   needed — items 1–7 are confirmed on the delivered commit and recorded above.
+Refresh (mechanical, no re-analysis):
+
+1. B1 — reviewer reference `Claude2` → `Claude` (all occurrences).
+2. B2 — parent owner/reviewer → `Claude` / `Gemini`.
+3. B3 — re-anchor evidence to delivered `ff6a64ac3041` on `origin/dev`; retain
+   `6d9230d20` only as a byte-identical pre-merge note.
+
+Accuracy fixes (the substantive ones):
+
+4. A1 — correct the `passenger-ride-page.tsx` path to
+   `apps/passenger-web/components/passenger-ride-page.tsx`.
+5. A2 — stop describing `passenger-fixtures.ts` as deleted; it is +24 / -120.
+6. A3 — re-anchor `maskOpaqueToken` to `:131` and `resolvePassengerSubjectRef`
+   to `:52`.
+7. A4 — regenerate per-file counts from
+   `git diff --numstat a03e32ea2 ff6a64ac3041` under one stated convention.
+
+Then re-handoff to `Claude`. No re-verification of acceptance substance is
+needed — items 1–7 are confirmed on the delivered commit and recorded above, so
+this reopen should be a short edit pass.
