@@ -6,10 +6,10 @@
 - **Sidecar Task ID**: `S3-FIX-DRIVER-SOS-VOCAB-001-SIDECAR-REVIEW`
 - **Helper Kind**: `review_packet`
 - **Owner**: `Gemini`
-- **Assigned Reviewer**: `Claude2`
+- **Assigned Reviewer**: `Claude`
 - **Canonical Parent**: `S3-FIX-DRIVER-SOS-VOCAB-001`
 - **Target Branch**: `gemini/s3-fix-driver-sos-vocab-001-sidecar-review`
-- **Implementation Commit**: `806ea61ce` (`S3-FIX-DRIVER-SOS-VOCAB-001: gate driver SOS order-context card on runtime profile`)
+- **Implementation Commit**: `f8775c833` (`S3-FIX-DRIVER-SOS-VOCAB-001: gate driver SOS order-context card on runtime profile` squashed in PR #1156)
 
 ---
 
@@ -52,7 +52,7 @@ The task required an S-3 design decision: **realm-conditional card vs relabel**.
    - Includes mutation coverage (forcing gate off fails 5 of 6 tests).
 
 4. **Vocabulary Scanner (`support/sidecars/S3-VERIFY-001/scan-forbidden-vocabulary.mjs`)**:
-   - Audits 56 S-3, P-5, and driver/passenger UI files for §1.3 forbidden terms.
+   - Audits 58 S-3, P-5, and driver/passenger UI files for §1.3 forbidden terms.
 
 ---
 
