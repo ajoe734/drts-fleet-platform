@@ -72,6 +72,7 @@ AI_NAME=Codex scripts/ai-status.sh start E2E-MTX-001 \
   "Inspect existing Fleet H hermetic E2E coverage and evidence matrix gaps"
 python3 scripts/ensure-local-node-modules.py repair
 ./tests/e2e/run-e2e-hermetic.sh
+HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=1 ./tests/e2e/run-e2e-hermetic.sh 001
 ```
 
 ## Current-head verification result
@@ -97,13 +98,28 @@ python3 scripts/ensure-local-node-modules.py repair
 This means Fleet H cannot honestly claim "all hermetic suites green" from this
 worktree on `2026-07-26`.
 
+### Shared harness diagnosability hardening
+
+- `tests/e2e/run-e2e-hermetic.sh`: `UPDATED_CURRENT_HEAD`
+- Changes made in this task:
+  - added bounded timeout controls for `db:migrate`, `db:seed`, and API build;
+  - added per-run/per-suite log file output under `/tmp/drts-e2e-hermetic/`;
+  - fixed the timeout wrapper so reset failures stop the scenario instead of
+    incorrectly continuing into `db:seed`.
+- Controlled verification:
+  - after rerunning `python3 scripts/ensure-local-node-modules.py repair`, the
+    command `HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS=1 ./tests/e2e/run-e2e-hermetic.sh 001`
+    now fails fast and emits
+    `/tmp/drts-e2e-hermetic/20260726T161150Z-E2E-001-db-migrate.log`
+    instead of hanging without a bounded artifact.
+
 ## Honest release posture at current head
 
 1. The repository already contains substantial Fleet B/C/D/E/F/G evidence that
    can be mapped into a single current-head matrix.
 2. The single matrix itself was missing and is created by this task.
-3. The Fleet H global hermetic rerun is still unresolved at current head due to
-   the stalled reset/migration cycle described above.
+3. The Fleet H global hermetic rerun is still unresolved at current head. The
+   harness now fails with bounded diagnostics, but no full green rerun exists.
 4. S-3 still carries existing external evidence blockers and one direct
    current-head failure from `S3-VERIFY-001`.
 
