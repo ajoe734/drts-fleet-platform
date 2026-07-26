@@ -43,6 +43,12 @@ API_BUILD_CMD="${API_BUILD_CMD:-pnpm --filter @drts/api build}"
 API_START_CMD="${API_START_CMD:-$DEFAULT_API_START_CMD}"
 API_PORT="${API_PORT:-3001}"
 API_LOG="${API_LOG:-/tmp/drts-e2e-api.log}"
+HERMETIC_LOG_DIR="${HERMETIC_LOG_DIR:-/tmp/drts-e2e-hermetic}"
+HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS="${HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS:-300}"
+HERMETIC_DB_SEED_TIMEOUT_SECONDS="${HERMETIC_DB_SEED_TIMEOUT_SECONDS:-180}"
+HERMETIC_API_BUILD_TIMEOUT_SECONDS="${HERMETIC_API_BUILD_TIMEOUT_SECONDS:-600}"
+
+mkdir -p "$HERMETIC_LOG_DIR"
 
 # Parse the db name/user/host/port from DATABASE_URL for the reset step.
 db_field() { node -e "const u=new URL(process.env.DATABASE_URL); process.stdout.write(({name:u.pathname.slice(1),user:u.username,pass:u.password,host:u.hostname,port:u.port||'5432'})['$1'])"; }
@@ -156,29 +162,73 @@ run_with_retry() { # label cmd...
   done
 }
 
-run_logged() { # label cmd...
+run_logged() { # label logfile cmd...
   local label="$1"
+  local log_file_path="$2"
   shift
-  local log_file
-  log_file="$(mktemp)"
-  if "$@" >"$log_file" 2>&1; then
-    rm -f "$log_file"
+  shift
+  mkdir -p "$(dirname "$log_file_path")"
+  : >"$log_file_path"
+  if "$@" >"$log_file_path" 2>&1; then
     return 0
   fi
-  echo "[hermetic] ${label} failed"
-  cat "$log_file"
-  rm -f "$log_file"
+  echo "[hermetic] ${label} failed; log: ${log_file_path}"
+  tail -n 200 "$log_file_path"
   return 1
 }
 
+maybe_timeout() { # seconds cmd...
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --foreground "${seconds}s" "$@"
+    return
+  fi
+  "$@"
+}
+
+run_logged_timeout() { # label timeout logfile cmd...
+  local label="$1"
+  local timeout_seconds="$2"
+  local log_file_path="$3"
+  local status
+  shift 3
+  mkdir -p "$(dirname "$log_file_path")"
+  : >"$log_file_path"
+  maybe_timeout "$timeout_seconds" "$@" >"$log_file_path" 2>&1
+  status=$?
+  if [[ "$status" -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "$status" -eq 124 ]]; then
+    echo "[hermetic] ${label} timed out after ${timeout_seconds}s; log: ${log_file_path}"
+  else
+    echo "[hermetic] ${label} failed with exit ${status}; log: ${log_file_path}"
+  fi
+  tail -n 200 "$log_file_path"
+  return "$status"
+}
+
 reset_db() {
+  local run_stamp suite_label
+  run_stamp="${HERMETIC_RUN_STAMP:-manual}"
+  suite_label="${HERMETIC_SUITE_LABEL:-reset}"
   run_admin_psql -v ON_ERROR_STOP=1 -c \
     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME_SQL_LITERAL}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
   run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
   run_admin_psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
   wait_for_db || return 1
-  run_logged "db:migrate" pnpm db:migrate || return 1
-  run_logged "db:seed" pnpm db:seed || return 1
+  run_logged_timeout \
+    "db:migrate" \
+    "$HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS" \
+    "$HERMETIC_LOG_DIR/${run_stamp}-E2E-${suite_label}-db-migrate.log" \
+    pnpm db:migrate || return 1
+  run_logged_timeout \
+    "db:seed" \
+    "$HERMETIC_DB_SEED_TIMEOUT_SECONDS" \
+    "$HERMETIC_LOG_DIR/${run_stamp}-E2E-${suite_label}-db-seed.log" \
+    pnpm db:seed || return 1
 }
 
 ensure_api_build() {
@@ -191,7 +241,9 @@ ensure_api_build() {
   fi
 
   echo "[hermetic] building @drts/api because apps/api/dist/main.js is missing"
-  run_with_retry "api build" bash -lc "$API_BUILD_CMD" || return 1
+  run_with_retry \
+    "api build" \
+    bash -lc "maybe_timeout() { timeout --foreground ${HERMETIC_API_BUILD_TIMEOUT_SECONDS}s \"\$@\"; }; maybe_timeout ${API_BUILD_CMD}" || return 1
 }
 
 start_api() {
@@ -212,9 +264,12 @@ if ! ensure_api_build; then
 fi
 
 PASS=(); FAIL=()
+RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 for s in "${SUITES[@]}"; do
   echo "──────── hermetic E2E-${s} ────────"
   stop_api
+  export HERMETIC_RUN_STAMP="$RUN_STAMP"
+  export HERMETIC_SUITE_LABEL="$s"
   if ! reset_db; then FAIL+=("$s"); continue; fi
   if ! start_api; then FAIL+=("$s"); continue; fi
   if ./tests/e2e/run-e2e.sh --suite "$s"; then PASS+=("$s"); else FAIL+=("$s"); fi
