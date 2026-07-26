@@ -36,11 +36,12 @@ describe("resetDriverAppToOnboarding", () => {
 });
 
 describe("allowUnprovisionedDriverRoute", () => {
-  it("keeps onboarding, index, and safety-operator routes accessible before provisioning", () => {
+  it("keeps onboarding, index, safety-operator, and sos routes accessible before provisioning", () => {
     expect(allowUnprovisionedDriverRoute([])).toBe(true);
     expect(allowUnprovisionedDriverRoute(["index"])).toBe(true);
     expect(allowUnprovisionedDriverRoute(["onboarding"])).toBe(true);
     expect(allowUnprovisionedDriverRoute(["safety-operator"])).toBe(true);
+    expect(allowUnprovisionedDriverRoute(["sos"])).toBe(true);
   });
 
   it("rejects other driver routes until provisioning is complete", () => {

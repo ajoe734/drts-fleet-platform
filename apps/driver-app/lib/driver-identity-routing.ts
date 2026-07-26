@@ -11,7 +11,8 @@ export function allowUnprovisionedDriverRoute(segments: string[]): boolean {
     topLevelRoute == null ||
     topLevelRoute === "index" ||
     topLevelRoute === "onboarding" ||
-    topLevelRoute === "safety-operator"
+    topLevelRoute === "safety-operator" ||
+    topLevelRoute === "sos"
   );
 }
 

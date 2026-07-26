@@ -1,22 +1,20 @@
 appId: com.cctechsupport.drts.driver
 name: "S3 Android Offline SOS Replay E2E Verification"
 ---
-# Step 1: Launch driver app on Android emulator
+# Step 1: Launch driver app on Android emulator and navigate to emergency SOS screen
 - launchApp:
     clearState: false
+- openLink: "drts-driver://sos"
+- assertVisible:
+    id: "sos-confirm-button"
 
 # Step 2: Simulate network loss (Airplane Mode ON)
 - setAirplaneMode: enabled
 
-# Step 3: Trigger SOS emergency event via 2-second long press while offline
+# Step 3: Trigger SOS emergency event via mandatory 2-second long press on SosHoldButton while offline
 - longPressOn:
     id: "sos-confirm-button"
     duration: 2500
-    optional: true
-- longPressOn:
-    text: ".*(長按 2 秒確認求援|長按確認求援|緊急求援|SOS).*"
-    duration: 2500
-    optional: true
 
 # Step 4: Verify local SecureStore durable outbox state (drts.driver.sos.activeCase)
 - assertVisible:
@@ -33,5 +31,6 @@ name: "S3 Android Offline SOS Replay E2E Verification"
 # Step 7: Restart application to verify state persistence and resume
 - stopApp
 - launchApp
+- openLink: "drts-driver://sos"
 - assertVisible:
     text: ".*(submitted|已送達|S3-VERIFY|SOS-).*"

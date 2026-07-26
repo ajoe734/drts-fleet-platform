@@ -17,6 +17,8 @@
     "prebuild": "expo prebuild",
     "start": "expo start",
     "test": "vitest run --passWithNoTests",
+    "test:e2e": "bash e2e/run-e2e.sh",
+    "test:e2e:sos": "bash e2e/run-e2e.sh",
     "typecheck": "tsc --noEmit",
     "web": "expo start --web"
   },
