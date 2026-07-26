@@ -28,6 +28,7 @@ export type AirportTransferBookingSubmission = {
   passengerName: string;
   phone: string;
   terminal: string;
+  time: string;
   vehicleId: string;
   vehicleName: string;
 };
@@ -139,6 +140,7 @@ export function AirportTransferSite({
       passengerName,
       phone: form.phone,
       terminal: form.terminal,
+      time: form.time,
       vehicleId: veh.id,
       vehicleName: veh.name,
     };
@@ -184,15 +186,15 @@ export function AirportTransferSite({
   const receipt = bookingResult?.receipt ?? null;
   const confirmation = bookingResult?.confirmation ?? null;
   const receiptDistance =
-    receipt?.estimatedDistanceKm != null
-      ? `${receipt.estimatedDistanceKm} km`
+    receipt?.pickup.address && receipt?.dropoff.address
+      ? `${receipt.pickup.address} -> ${receipt.dropoff.address}`
       : "—";
   const receiptStatus =
     receipt?.status ?? confirmation?.orderStatus ?? "created";
   const receiptEta =
-    receipt?.estimatedDurationMin != null
-      ? `${receipt.estimatedDurationMin}`
-      : "2";
+    receipt?.etaSnapshot?.etaMinutes != null
+      ? `${receipt.etaSnapshot.etaMinutes}`
+      : null;
 
   const site = (
     <div className="site" id="top">
@@ -898,6 +900,12 @@ export function AirportTransferSite({
                       <span className="k">Route</span>
                       <span className="v">
                         {receipt?.dropoff.address ?? form.terminal}
+                      </span>
+                    </div>
+                    <div className="sr">
+                      <span className="k">{t("airport.success.eta")}</span>
+                      <span className="v">
+                        {receiptEta ?? t("airport.success.within2min")}
                       </span>
                     </div>
                   </div>

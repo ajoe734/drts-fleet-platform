@@ -151,7 +151,7 @@ describe("partner-booking i18n dictionary", () => {
     );
     expect(programEmbedPage).toContain("AirportTransferSite");
     expect(programEmbedPage).toContain('mode="embed"');
-    expect(programEmbedPage).toContain("createPartnerIngressHandoff");
+    expect(programEmbedPage).toContain("submitEmbeddedAirportBooking");
     expect(programEmbedPage).toContain('theme.kind !== "card"');
     expect(programEmbedScreenPage).toContain("resolveEmbedScreen");
     expect(programEmbedScreenPage).toContain(
