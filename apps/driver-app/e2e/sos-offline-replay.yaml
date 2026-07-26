@@ -8,15 +8,17 @@ name: "S3 Android Offline SOS Replay E2E Verification"
 # Step 2: Simulate network loss (Airplane Mode ON)
 - setAirplaneMode: enabled
 
-# Step 3: Trigger SOS emergency event while offline
-- tapOn:
-    id: "sos-trigger-button"
+# Step 3: Trigger SOS emergency event via 2-second long press while offline
+- longPressOn:
+    id: "sos-confirm-button"
+    duration: 2500
     optional: true
-- tapOn:
-    text: ".*(緊急|SOS|緊急求助).*"
+- longPressOn:
+    text: ".*(長按 2 秒確認求援|長按確認求援|緊急求援|SOS).*"
+    duration: 2500
     optional: true
 
-# Step 4: Verify local SQLite outbox queue state
+# Step 4: Verify local SecureStore durable outbox state (drts.driver.sos.activeCase)
 - assertVisible:
     text: ".*(offline|離線|暫存|outbox).*"
 

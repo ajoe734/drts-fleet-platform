@@ -439,6 +439,7 @@ function SosHoldButton({
 }) {
   return (
     <Pressable
+      testID="sos-confirm-button"
       accessibilityLabel="長按確認求援"
       accessibilityHint="需長按 2 秒才會正式送出 SOS"
       accessibilityRole="button"

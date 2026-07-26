@@ -19,12 +19,12 @@
 - **Result**: **PASS**. Emulator active under `/dev/kvm`.
 
 ### Test Case 3: SOS Offline Outbox & Replay
-- **Objective**: Trigger SOS under flight mode, store in SQLite outbox, auto-replay upon network restoration, enforce idempotency on duplicate replay attempts, and verify state persistence across app restarts.
+- **Objective**: Trigger SOS via 2-second long press (`longPressOn` / `onLongPress`) under flight mode, store in Expo SecureStore durable outbox (`drts.driver.sos.activeCase`), auto-replay upon network restoration, enforce idempotency on duplicate replay attempts, and verify state persistence across app restarts.
 - **Result**: **PASS**.
-  - Flight mode trigger -> SQLite outbox (`drts.driver.sos.activeCase`)
+  - Flight mode 2s long-press trigger -> SecureStore outbox (`drts.driver.sos.activeCase`)
   - Auto-replay -> `POST /api/driver/sos-events`
   - Idempotency -> Existing incident returned, no duplicate incident created
-  - Restart resume -> `syncState=submitted` retained from SQLite outbox
+  - Restart resume -> `syncState=submitted` retained from SecureStore outbox
 
 ## Sign-off Summary
 

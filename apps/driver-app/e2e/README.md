@@ -10,7 +10,7 @@ This directory contains End-to-End (E2E) test flows for `@drts/driver-app` runni
 
 ## Test Flows
 
-- `sos-offline-replay.yaml`: Verifies offline SOS event capture into local SQLite outbox during flight mode, automatic replay upon network restoration, idempotency check (no duplicate incident creation), and restart resume behavior.
+- `sos-offline-replay.yaml`: Verifies offline SOS event capture into Expo SecureStore durable outbox (`drts.driver.sos.activeCase`) via 2-second long press (`longPressOn`) during flight mode, automatic replay upon network restoration, idempotency check (no duplicate incident creation), and restart resume behavior.
 
 ## Execution
 
