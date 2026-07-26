@@ -7,7 +7,9 @@ import type {
 import {
   API_URL,
   clearPartnerEntryAuthorityCacheForTests,
+  createEmbedPartnerBooking,
   createPartnerBooking,
+  getEmbedPartnerBooking,
   getPartnerConfirmation,
   getPartnerReceipt,
   getPartnerRouteContext,
@@ -829,5 +831,68 @@ describe("partner-booking-web BFF wiring", () => {
         }),
       }),
     );
+  });
+
+  it("creates real backend booking via embed partner flow and fetches confirmation", async () => {
+    clearPartnerEntryAuthorityCacheForTests();
+    const embedMock = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: activeEntry,
+          meta: { requestId: "r1", timestamp: "t1" },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: {
+            accessToken: "token-embed",
+            tokenType: "Bearer",
+            expiresIn: "1h",
+            partnerEntry: activeEntry,
+            identity: {
+              authMode: "partner_api_key",
+              actorType: "partner_channel_entry",
+              actorId: "actor-001",
+              realm: "partner",
+              tenantId: "tenant-001",
+            },
+          },
+          meta: { requestId: "r2", timestamp: "t2" },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: {
+            bookingId: "booking-001",
+            orderId: "order-001",
+            status: "confirmed",
+          },
+          meta: { requestId: "r3", timestamp: "t3" },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: {
+            bookingId: "booking-001",
+            orderId: "order-001",
+            status: "confirmed",
+          },
+          meta: { requestId: "r4", timestamp: "t4" },
+        }),
+      );
+
+    vi.stubGlobal("fetch", embedMock);
+
+    const result = await createEmbedPartnerBooking({
+      tenantSlug: "ctbc",
+      eligibilityVerificationId: "elig-embed-001",
+    });
+
+    expect(result.booking.bookingId).toBe("booking-001");
+    expect(result.booking.status).toBe("confirmed");
+
+    const fetchedBooking = await getEmbedPartnerBooking("ctbc", "booking-001");
+    expect(fetchedBooking.bookingId).toBe("booking-001");
   });
 });

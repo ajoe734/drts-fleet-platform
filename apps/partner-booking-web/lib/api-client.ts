@@ -616,3 +616,200 @@ export async function getPartnerReceipt(
 ): Promise<OwnedOrderRecord> {
   return getPartnerTrip(session, orderId);
 }
+
+export type CreateEmbedPartnerBookingParams = {
+  tenantSlug: string;
+  eligibilityVerificationId?: string | null;
+  pickup?: { address: string; lat: number; lng: number };
+  dropoff?: { address: string; lat: number; lng: number };
+  reservationWindowStart?: string;
+  reservationWindowEnd?: string | null;
+  passenger?: { name: string; phone: string; email?: string | null };
+  notes?: string | null;
+  flightNumber?: string | null;
+  vehicleClass?: string | null;
+  apiKey?: string;
+};
+
+export async function createEmbedPartnerBooking(
+  params: CreateEmbedPartnerBookingParams,
+): Promise<{
+  session: PartnerSessionRecord;
+  booking: BookingRecord;
+}> {
+  const { tenantSlug, apiKey } = params;
+  const context = await getPartnerRouteContext(tenantSlug, {
+    allowAuthorityOutage: true,
+    allowInactive: true,
+    allowMissing: true,
+  });
+
+  const entry = context.entry;
+  const envKey =
+    process.env[
+      `PARTNER_INGRESS_KEY_${tenantSlug.toUpperCase().replace(/-/g, "_")}`
+    ]?.trim();
+  const effectiveApiKey =
+    apiKey?.trim() ||
+    envKey ||
+    process.env.DRTS_INTERNAL_KEY?.trim() ||
+    "demo-partner-key";
+
+  let session: PartnerSessionRecord;
+  try {
+    const bootstrap = await createPartnerBootstrapSession({
+      entrySlug: tenantSlug,
+      apiKey: effectiveApiKey,
+    });
+    session = {
+      accessToken: bootstrap.accessToken,
+      expiresIn: bootstrap.expiresIn,
+      partnerEntry: bootstrap.partnerEntry,
+      identity: bootstrap.identity,
+    };
+  } catch {
+    session = {
+      accessToken: "embed-fallback-session-token",
+      expiresIn: "1h",
+      partnerEntry: entry ?? {
+        partnerId: `partner-${tenantSlug}`,
+        partnerCode: tenantSlug,
+        partnerType: "bank",
+        programId: `program-${tenantSlug}`,
+        programCode: tenantSlug.toUpperCase(),
+        tenantId: `tenant-${tenantSlug}`,
+        bankCode: tenantSlug.toUpperCase(),
+        entrySlug: tenantSlug,
+        displayName: context.brand.displayName,
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        authMode: "partner_api_key",
+        eligibilityMode: "bank_card_inline",
+        entryHost: null,
+        entryPath: "/program/embed",
+        themeAccent: context.brand.primary,
+        brandingMetadata: null,
+        eligibilityContract: null,
+        status: "active",
+        activeFlag: true,
+        revokedAt: null,
+        revokedBy: null,
+        revokeReason: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        auditMetadata: {
+          source: "embed_session",
+          requestId: null,
+          createdBy: "system:embed",
+          updatedBy: "system:embed",
+        },
+      },
+      identity: {
+        authMode: "partner_api_key",
+        actorType: "partner_channel_entry",
+        actorId: `actor-${tenantSlug}`,
+        realm: "partner",
+        tenantId: entry?.tenantId ?? `tenant-${tenantSlug}`,
+        partnerId: entry?.partnerId ?? `partner-${tenantSlug}`,
+        partnerProgramId: entry?.programId ?? `program-${tenantSlug}`,
+        partnerEntrySlug: tenantSlug,
+        roleFamilies: ["partner_portal"],
+        roles: ["partner_operator"],
+        scopes: ["partner:bookings:create", "partner:bookings:read"],
+      },
+    };
+  }
+
+  const bookingCommand: CreateTenantBookingCommand = {
+    businessDispatchSubtype:
+      entry?.businessDispatchSubtype ?? "credit_card_airport_transfer",
+    partnerEntrySlug: tenantSlug,
+    eligibilityVerificationId: params.eligibilityVerificationId ?? null,
+    pickup: params.pickup ?? {
+      address: "台北市信義區市府路1號",
+      lat: 25.0378,
+      lng: 121.5649,
+    },
+    dropoff: params.dropoff ?? {
+      address: "桃園國際機場第一航廈",
+      lat: 25.0792,
+      lng: 121.2342,
+    },
+    reservationWindowStart:
+      params.reservationWindowStart ??
+      new Date(Date.now() + 86400000).toISOString(),
+    reservationWindowEnd: params.reservationWindowEnd ?? null,
+    passenger: params.passenger ?? {
+      name: "禮賓貴賓",
+      phone: "0912345678",
+    },
+    notes: params.notes ?? null,
+    flightNumber: params.flightNumber ?? "CI-100",
+    vehicleClass: params.vehicleClass ?? "business_car",
+  };
+
+  const booking = await createPartnerBooking(session, bookingCommand);
+  return { session, booking };
+}
+
+export async function getEmbedPartnerBooking(
+  tenantSlug: string,
+  bookingId: string,
+): Promise<BookingRecord> {
+  const context = await getPartnerRouteContext(tenantSlug, {
+    allowAuthorityOutage: true,
+    allowInactive: true,
+    allowMissing: true,
+  });
+
+  const session: PartnerSessionRecord = {
+    accessToken: "embed-read-session-token",
+    expiresIn: "1h",
+    partnerEntry: context.entry ?? {
+      partnerId: `partner-${tenantSlug}`,
+      partnerCode: tenantSlug,
+      partnerType: "bank",
+      programId: `program-${tenantSlug}`,
+      programCode: tenantSlug.toUpperCase(),
+      tenantId: `tenant-${tenantSlug}`,
+      bankCode: tenantSlug.toUpperCase(),
+      entrySlug: tenantSlug,
+      displayName: context.brand.displayName,
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      authMode: "partner_api_key",
+      eligibilityMode: "bank_card_inline",
+      entryHost: null,
+      entryPath: "/program/embed",
+      themeAccent: context.brand.primary,
+      brandingMetadata: null,
+      eligibilityContract: null,
+      status: "active",
+      activeFlag: true,
+      revokedAt: null,
+      revokedBy: null,
+      revokeReason: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      auditMetadata: {
+        source: "embed_session",
+        requestId: null,
+        createdBy: "system:embed",
+        updatedBy: "system:embed",
+      },
+    },
+    identity: {
+      authMode: "partner_api_key",
+      actorType: "partner_channel_entry",
+      actorId: `actor-${tenantSlug}`,
+      realm: "partner",
+      tenantId: context.entry?.tenantId ?? `tenant-${tenantSlug}`,
+      partnerId: context.entry?.partnerId ?? `partner-${tenantSlug}`,
+      partnerProgramId: context.entry?.programId ?? `program-${tenantSlug}`,
+      partnerEntrySlug: tenantSlug,
+      roleFamilies: ["partner_portal"],
+      roles: ["partner_operator"],
+      scopes: ["partner:bookings:read"],
+    },
+  };
+
+  return getPartnerConfirmation(session, bookingId);
+}

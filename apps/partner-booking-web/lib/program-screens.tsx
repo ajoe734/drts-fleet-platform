@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { BookingRecord } from "@drts/contracts";
 import {
   getProgramChromeVars,
   type PartnerProgramTheme,
@@ -197,8 +198,14 @@ export function listProgramScreensForTheme(
     if (theme.kind !== "card") {
       return [];
     }
-    return PARTNER_PROGRAM_SCREENS.filter((screen) =>
-      CARD_ONLY_SCREEN_IDS.has(screen.id),
+    return PARTNER_PROGRAM_SCREENS.filter(
+      (screen) =>
+        CARD_ONLY_SCREEN_IDS.has(screen.id) ||
+        screen.id === "review" ||
+        screen.id === "success" ||
+        screen.id === "tracking" ||
+        screen.id === "error" ||
+        screen.id === "manual_review",
     );
   }
 
@@ -1151,6 +1158,7 @@ function renderScreen(
   screen: PartnerProgramScreenId,
   basePath: string,
   locale: Locale,
+  booking?: BookingRecord | null,
 ): ReactNode {
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(key, params, locale);
@@ -2864,14 +2872,26 @@ function renderScreen(
           <div style={{ paddingTop: "12px" }}>
             <Row
               label={s("訂單編號", "Booking ref")}
-              value={demo.bookingRef}
+              value={booking?.bookingId ?? demo.bookingRef}
               mono
             />
             <Row
               label={s("預估出發", "Estimated departure")}
-              value={demo.departureTime}
+              value={booking?.reservationWindowStart ?? demo.departureTime}
               mono
             />
+            {booking?.pickup?.address ? (
+              <Row
+                label={s("上車地點", "Pickup location")}
+                value={booking.pickup.address}
+              />
+            ) : null}
+            {booking?.dropoff?.address ? (
+              <Row
+                label={s("下車地點", "Dropoff location")}
+                value={booking.dropoff.address}
+              />
+            ) : null}
             <Row label={s("您將支付", "You pay")} value={s("免費", "Free")} />
           </div>
         </Card>
@@ -3199,12 +3219,14 @@ export function ProgramBookingFlow({
   basePath,
   locale,
   surface = "site",
+  booking = null,
 }: {
   theme: PartnerProgramTheme;
   screen: PartnerProgramScreenId;
   basePath: string;
   locale: Locale;
   surface?: PartnerProgramSurfaceKind;
+  booking?: BookingRecord | null;
 }) {
   const localizedTheme = getLocalizedProgramTheme(theme, locale);
   const visibleScreens = listProgramScreensForTheme(localizedTheme, surface);
@@ -3310,7 +3332,7 @@ export function ProgramBookingFlow({
           width: "100%",
         }}
       >
-        {renderScreen(localizedTheme, screen, basePath, locale)}
+        {renderScreen(localizedTheme, screen, basePath, locale, booking)}
       </div>
     </div>
   );
