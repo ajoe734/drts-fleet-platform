@@ -4,6 +4,7 @@ import { createBearerClient, type ApiClient } from "@drts/api-client";
 import type {
   ApiSuccessEnvelope,
   BookingRecord,
+  CreatePartnerIngressHandoffCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateTenantBookingCommand,
   IdentityContext,
@@ -13,6 +14,7 @@ import type {
   PartnerBootstrapSession,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
+  PartnerIngressHandoffSession,
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 import {
@@ -549,6 +551,18 @@ export async function createPartnerBootstrapSession(
 ): Promise<PartnerBootstrapSession> {
   return requestAuthority<PartnerBootstrapSession>(
     "/api/auth/partner/bootstrap-session",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function createPartnerIngressHandoff(
+  command: CreatePartnerIngressHandoffCommand,
+): Promise<PartnerIngressHandoffSession> {
+  return requestAuthority<PartnerIngressHandoffSession>(
+    "/api/partner/ingress/handoff",
     {
       method: "POST",
       body: JSON.stringify(command),

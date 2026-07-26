@@ -1,6 +1,7 @@
 "use client";
 
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useState, useTransition } from "react";
+import type { BookingRecord, OwnedOrderRecord } from "@drts/contracts";
 import {
   AIRPORT_FAQ,
   AIRPORT_FEATURES,
@@ -17,6 +18,27 @@ import "./airport-transfer-site.css";
 // `mode="embed"` = the same site inside the bank's online-banking app webview.
 
 type Mode = "site" | "embed";
+
+export type AirportTransferBookingSubmission = {
+  address: string;
+  date: string;
+  direction: "out" | "in";
+  flightNo: string;
+  luggageCount: number;
+  passengerName: string;
+  phone: string;
+  terminal: string;
+  vehicleId: string;
+  vehicleName: string;
+};
+
+export type AirportTransferBookingResult = {
+  bookingId: string;
+  orderId: string;
+  eligibilityVerificationId: string | null;
+  confirmation: BookingRecord;
+  receipt: OwnedOrderRecord;
+};
 
 function Ic({ d, s = 20, sw = 1.9 }: { d: string; s?: number; sw?: number }) {
   return (
@@ -38,24 +60,47 @@ function Ic({ d, s = 20, sw = 1.9 }: { d: string; s?: number; sw?: number }) {
 
 const nf = (n: number) => "NT$ " + n.toLocaleString("en-US");
 
+function getDefaultAirportRideDate() {
+  const nextDay = new Date();
+  nextDay.setDate(nextDay.getDate() + 1);
+  return nextDay.toISOString().slice(0, 10);
+}
+
 export function AirportTransferSite({
   bank,
   mode = "site",
+  onSubmitBooking,
+  embedSessionReady = true,
+  embeddedPassengerName,
+  embeddedCardLast4,
+  initialFlightNo,
 }: {
   bank: AirportBank;
   mode?: Mode;
+  onSubmitBooking?: (
+    submission: AirportTransferBookingSubmission,
+  ) => Promise<AirportTransferBookingResult>;
+  embedSessionReady?: boolean;
+  embeddedPassengerName?: string | null;
+  embeddedCardLast4?: string | null;
+  initialFlightNo?: string | null;
 }) {
   const { t } = useTranslation();
+  const [isPending, startTransition] = useTransition();
   const [step, setStep] = useState(1);
   const [dir, setDir] = useState<"out" | "in">("out");
   const [vehId, setVehId] = useState("sedan");
   const [faqOpen, setFaqOpen] = useState<number | null>(null);
-  const [bkId, setBkId] = useState("bk_5512");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [bookingResult, setBookingResult] =
+    useState<AirportTransferBookingResult | null>(null);
+  const passengerName =
+    embeddedPassengerName?.trim() || bank.holder.name || "Passenger";
   const [form, setForm] = useState({
     terminal: "桃園 T2 · 第二航廈",
-    flight: "BR198",
+    flight: initialFlightNo?.trim() || "BR198",
     addr: "台北市信義區松仁路 100 號",
-    date: "2026-06-18",
+    date: getDefaultAirportRideDate(),
     time: "05:30",
     bags: "2 件",
     phone: "0912-555-401",
@@ -81,8 +126,22 @@ export function AirportTransferSite({
   const out = dir === "out";
 
   function goStep(n: number) {
-    if (n === 4) setBkId("bk_" + Math.floor(1000 + Math.random() * 8999));
     setStep(n);
+  }
+
+  function buildSubmission(): AirportTransferBookingSubmission {
+    return {
+      address: form.addr,
+      date: form.date,
+      direction: dir,
+      flightNo: form.flight,
+      luggageCount: Number.parseInt(form.bags.replace(/[^0-9]/g, ""), 10) || 0,
+      passengerName,
+      phone: form.phone,
+      terminal: form.terminal,
+      vehicleId: veh.id,
+      vehicleName: veh.name,
+    };
   }
 
   const themeVars = {
@@ -121,6 +180,19 @@ export function AirportTransferSite({
     [t("airport.confirm.time"), form.date + " " + form.time],
     [t("airport.confirm.vehiclePassenger"), veh.name + " · " + form.phone],
   ];
+  const bookingId = bookingResult?.bookingId ?? "—";
+  const receipt = bookingResult?.receipt ?? null;
+  const confirmation = bookingResult?.confirmation ?? null;
+  const receiptDistance =
+    receipt?.estimatedDistanceKm != null
+      ? `${receipt.estimatedDistanceKm} km`
+      : "—";
+  const receiptStatus =
+    receipt?.status ?? confirmation?.orderStatus ?? "created";
+  const receiptEta =
+    receipt?.estimatedDurationMin != null
+      ? `${receipt.estimatedDurationMin}`
+      : "2";
 
   const site = (
     <div className="site" id="top">
@@ -146,7 +218,7 @@ export function AirportTransferSite({
           <div className="nav-right">
             <span className="holder-chip">
               <span className="dot" />
-              {bank.holder.name} · {bank.card}
+              {passengerName} · {bank.card}
             </span>
             <a href="#book" className="btn btn-primary">
               {t("airport.nav.book")}
@@ -203,10 +275,12 @@ export function AirportTransferSite({
               </div>
               <div>
                 <div className="chip" />
-                <div className="num">5412 •••• •••• {bank.holder.last4}</div>
+                <div className="num">
+                  5412 •••• •••• {embeddedCardLast4 ?? bank.holder.last4}
+                </div>
               </div>
               <div className="cb">
-                <span className="nm">{bank.holder.nameEn}</span>
+                <span className="nm">{passengerName}</span>
                 <span className="vt">{bank.card}</span>
               </div>
             </div>
@@ -447,7 +521,9 @@ export function AirportTransferSite({
                     </div>
                     <div className="sr">
                       <span className="k">{t("airport.nav.coverage")}</span>
-                      <span className="v">{t("airport.book.coverageValue")}</span>
+                      <span className="v">
+                        {t("airport.book.coverageValue")}
+                      </span>
                     </div>
                   </div>
                   <p className="fineprint">
@@ -650,6 +726,14 @@ export function AirportTransferSite({
                     {t("airport.book.step3.fineprintLead")} {bank.nameZh}{" "}
                     {t("airport.book.step3.fineprintTail")}
                   </p>
+                  {submitError ? (
+                    <p
+                      className="fineprint"
+                      style={{ color: "var(--primary-dark)" }}
+                    >
+                      {submitError}
+                    </p>
+                  ) : null}
                   <div className="bfoot">
                     <button
                       className="btn btn-outline"
@@ -659,9 +743,31 @@ export function AirportTransferSite({
                     </button>
                     <button
                       className="btn btn-primary btn-block"
-                      onClick={() => goStep(4)}
+                      onClick={() => {
+                        if (!onSubmitBooking) {
+                          setSubmitError(
+                            "Booking submission is unavailable on this surface.",
+                          );
+                          return;
+                        }
+                        setSubmitError(null);
+                        startTransition(async () => {
+                          try {
+                            const result =
+                              await onSubmitBooking(buildSubmission());
+                            setBookingResult(result);
+                            setStep(4);
+                          } catch (error) {
+                            setSubmitError(
+                              error instanceof Error
+                                ? error.message
+                                : "Booking submission failed.",
+                            );
+                          }
+                        });
+                      }}
                     >
-                      {t("airport.btn.submit")}
+                      {isPending ? "Submitting..." : t("airport.btn.submit")}
                     </button>
                   </div>
                 </div>
@@ -686,17 +792,28 @@ export function AirportTransferSite({
                       </svg>
                     </div>
                     <h3>{t("airport.success.title")}</h3>
-                    <div className="bk">{bkId}</div>
+                    <div className="bk">{bookingId}</div>
                   </div>
                   <div className="summ">
                     <div className="sr">
                       <span className="k">{t("airport.label.status")}</span>
-                      <span className="v">{t("airport.success.matching")}</span>
+                      <span className="v">{receiptStatus}</span>
+                    </div>
+                    <div className="sr">
+                      <span className="k">Order ID</span>
+                      <span className="v">{bookingResult?.orderId ?? "—"}</span>
+                    </div>
+                    <div className="sr">
+                      <span className="k">Eligibility</span>
+                      <span className="v">
+                        {bookingResult?.eligibilityVerificationId ?? "—"}
+                      </span>
                     </div>
                     <div className="sr">
                       <span className="k">{t("airport.success.eta")}</span>
                       <span className="v">
-                        {t("airport.success.within2min")}
+                        {confirmation?.reservationWindowStart ??
+                          t("airport.success.within2min")}
                       </span>
                     </div>
                     <div className="sr">
@@ -757,23 +874,31 @@ export function AirportTransferSite({
                     <div className="av">{t("airport.track.driverInitial")}</div>
                     <div className="ti">
                       <div className="a">
-                        {t("airport.track.driverName")} · 4.86 ★
+                        {receipt?.orderNo ?? bookingResult?.orderId ?? "—"}
                       </div>
-                      <div className="b">{veh.carName}</div>
+                      <div className="b">
+                        {receipt?.pickup.address ?? form.addr}
+                      </div>
                     </div>
                     <div className="eta">
-                      <b>8</b>
+                      <b>{receiptEta}</b>
                       <span>{t("airport.track.minutesToArrival")}</span>
                     </div>
                   </div>
                   <div className="summ">
                     <div className="sr">
                       <span className="k">{t("airport.label.distance")}</span>
-                      <span className="v">2.4 km</span>
+                      <span className="v">{receiptDistance}</span>
                     </div>
                     <div className="sr">
                       <span className="k">{t("airport.label.status")}</span>
-                      <span className="v">{t("airport.track.dispatched")}</span>
+                      <span className="v">{receiptStatus}</span>
+                    </div>
+                    <div className="sr">
+                      <span className="k">Route</span>
+                      <span className="v">
+                        {receipt?.dropoff.address ?? form.terminal}
+                      </span>
                     </div>
                   </div>
                   <div className="bfoot">
@@ -886,8 +1011,8 @@ export function AirportTransferSite({
               © 2026 {bank.nameZh} · {t("airport.footer.copyrightTail")}
             </span>
             <span className="op">
-              {t("airport.footer.poweredBy")}{" "}
-              <b>{t("airport.operator")}</b> {t("airport.footer.operatorEn")}
+              {t("airport.footer.poweredBy")} <b>{t("airport.operator")}</b>{" "}
+              {t("airport.footer.operatorEn")}
             </span>
           </div>
         </div>
@@ -940,6 +1065,21 @@ export function AirportTransferSite({
                 <span>{bank.host}</span>
               </div>
             </div>
+            {!embedSessionReady ? (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  background: "var(--accent-soft)",
+                  borderBottom: "1px solid var(--accent)",
+                  color: "var(--primary-dark)",
+                  fontSize: "12px",
+                  lineHeight: 1.6,
+                }}
+              >
+                Embedded session handoff is missing. Reopen this page from the
+                banking app.
+              </div>
+            ) : null}
             <div className="webview">{site}</div>
           </div>
           <div className="embed-hint">{t("airport.embed.hint")}</div>
