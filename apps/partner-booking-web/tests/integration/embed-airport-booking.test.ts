@@ -125,6 +125,8 @@ describe("submitEmbeddedAirportBooking", () => {
           luggageCount: 2,
           passengerName: "王小明",
           phone: "0912345678",
+          reservationWindowStart: "2026-07-27T21:30:00.000Z",
+          reservationWindowEnd: "2026-07-27T23:30:00.000Z",
           terminal: "桃園 T2 · 第二航廈",
           time: "05:30",
           vehicleId: "sedan",
@@ -189,7 +191,8 @@ describe("submitEmbeddedAirportBooking", () => {
           name: "王小明",
           phone: "0912345678",
         },
-        benefitReference: "sedan",
+        benefitReference: "benefit-001",
+        vehiclePreference: "sedan",
         direction: "dropoff",
         flightNo: "CI-100",
         terminal: "桃園 T2 · 第二航廈",
@@ -247,6 +250,8 @@ describe("submitEmbeddedAirportBooking", () => {
           luggageCount: 1,
           passengerName: "王小明",
           phone: "0912345678",
+          reservationWindowStart: "2026-07-27T21:30:00.000Z",
+          reservationWindowEnd: "2026-07-27T23:30:00.000Z",
           terminal: "桃園 T2 · 第二航廈",
           time: "05:30",
           vehicleId: "sedan",
@@ -304,6 +309,8 @@ describe("submitEmbeddedAirportBooking", () => {
             luggageCount: 2,
             passengerName: "王小明",
             phone: "0912345678",
+            reservationWindowStart: "2026-07-27T21:30:00.000Z",
+            reservationWindowEnd: "2026-07-27T23:30:00.000Z",
             terminal: "桃園 T2 · 第二航廈",
             time: "05:30",
             vehicleId: "sedan",
@@ -321,11 +328,7 @@ describe("submitEmbeddedAirportBooking", () => {
       ),
     ).rejects.toThrow("此內嵌預約方案目前無法使用。");
 
-    expect(createPartnerIngressHandoff).toHaveBeenCalledWith({
-      entrySlug: "ctbc",
-      apiKey: "pk_live_001",
-      partnerUserRef: "user-001",
-    });
+    expect(createPartnerIngressHandoff).not.toHaveBeenCalled();
     expect(verifyPartnerEligibility).not.toHaveBeenCalled();
     expect(createPartnerBooking).not.toHaveBeenCalled();
   });

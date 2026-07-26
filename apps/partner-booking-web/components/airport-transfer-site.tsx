@@ -33,6 +33,8 @@ export type AirportTransferBookingSubmission = {
   phone: string;
   terminal: string;
   time: string;
+  reservationWindowStart?: string;
+  reservationWindowEnd?: string;
   vehicleId: string;
   vehicleName: string;
 };
@@ -81,6 +83,32 @@ function formatReceiptEta(iso: string | null, locale: "en-US" | "zh-TW") {
     hour: "2-digit",
     minute: "2-digit",
   }).format(parsed);
+}
+
+function buildReservationWindowIso(
+  date: string,
+  time: string,
+): {
+  reservationWindowStart: string;
+  reservationWindowEnd: string;
+} {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const start = new Date(
+    year || 1970,
+    (month || 1) - 1,
+    day || 1,
+    hour || 0,
+    minute || 0,
+    0,
+    0,
+  );
+  const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+
+  return {
+    reservationWindowStart: start.toISOString(),
+    reservationWindowEnd: end.toISOString(),
+  };
 }
 
 function formatStatusLabel(
@@ -166,6 +194,8 @@ export function AirportTransferSite({
   }
 
   function buildSubmission(): AirportTransferBookingSubmission {
+    const reservationWindow = buildReservationWindowIso(form.date, form.time);
+
     return {
       address: form.addr,
       date: form.date,
@@ -174,6 +204,8 @@ export function AirportTransferSite({
       luggageCount: Number.parseInt(form.bags.replace(/[^0-9]/g, ""), 10) || 0,
       passengerName,
       phone: form.phone,
+      reservationWindowStart: reservationWindow.reservationWindowStart,
+      reservationWindowEnd: reservationWindow.reservationWindowEnd,
       terminal: form.terminal,
       time: form.time,
       vehicleId: veh.id,
@@ -807,7 +839,7 @@ export function AirportTransferSite({
                   {submitError ? (
                     <p
                       className="fineprint"
-                      style={{ color: "#b42318" }}
+                      style={{ color: "var(--primary-dark)" }}
                     >
                       {submitError}
                     </p>

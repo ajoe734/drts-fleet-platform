@@ -53,8 +53,40 @@ type SubmitEmbeddedAirportBookingInput = {
   submission: AirportTransferBookingSubmission;
 };
 
-function buildReservationWindow(date: string, time: string) {
-  const start = new Date(`${date}T${time}:00+08:00`);
+function hasValidDateTime(value: string | null | undefined) {
+  return typeof value === "string" && Number.isFinite(new Date(value).getTime());
+}
+
+function buildReservationWindow(
+  submission: AirportTransferBookingSubmission,
+): {
+  reservationWindowStart: string;
+  reservationWindowEnd: string;
+} {
+  if (
+    hasValidDateTime(submission.reservationWindowStart) &&
+    hasValidDateTime(submission.reservationWindowEnd)
+  ) {
+    const reservationWindowStart = submission.reservationWindowStart!;
+    const reservationWindowEnd = submission.reservationWindowEnd!;
+
+    return {
+      reservationWindowStart,
+      reservationWindowEnd,
+    };
+  }
+
+  const [year, month, day] = submission.date.split("-").map(Number);
+  const [hour, minute] = submission.time.split(":").map(Number);
+  const start = new Date(
+    year || 1970,
+    (month || 1) - 1,
+    day || 1,
+    hour || 0,
+    minute || 0,
+    0,
+    0,
+  );
   const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
   return {
     reservationWindowStart: start.toISOString(),
@@ -65,10 +97,11 @@ function buildReservationWindow(date: string, time: string) {
 export function buildAirportTransferBookingCommand(
   entry: PartnerChannelEntryRecord,
   submission: AirportTransferBookingSubmission,
+  benefitReference: string | null,
   eligibilityVerificationId: string | null,
 ): CreateTenantBookingCommand {
   const { reservationWindowStart, reservationWindowEnd } =
-    buildReservationWindow(submission.date, submission.time);
+    buildReservationWindow(submission);
   const terminalAddress = `${submission.terminal} ${submission.direction === "out" ? "出發" : "抵達"}接送區`;
   const pickupAddress =
     submission.direction === "out" ? submission.address : terminalAddress;
@@ -93,7 +126,8 @@ export function buildAirportTransferBookingCommand(
       name: submission.passengerName,
       phone: submission.phone,
     },
-    benefitReference: submission.vehicleId,
+    ...(benefitReference ? { benefitReference } : {}),
+    vehiclePreference: submission.vehicleId,
     direction: submission.direction === "out" ? "dropoff" : "pickup",
     flightNo: submission.flightNo,
     terminal: submission.terminal,
@@ -133,15 +167,15 @@ export async function submitEmbeddedAirportBooking(
     entry = (await dependencies.getPartnerRouteContext(input.tenantSlug)).entry;
   }
 
-  const handoff = await dependencies.createPartnerIngressHandoff({
-    entrySlug: entry?.entrySlug ?? input.tenantSlug,
-    apiKey: input.apiKey,
-    partnerUserRef: input.partnerUserRef,
-  });
-
   if (!entry || entry.status !== "active" || !entry.activeFlag) {
     throw new Error(t("airport.embed.error.programUnavailable", undefined, input.locale));
   }
+
+  const handoff = await dependencies.createPartnerIngressHandoff({
+    entrySlug: entry.entrySlug,
+    apiKey: input.apiKey,
+    partnerUserRef: input.partnerUserRef,
+  });
 
   const session = createPartnerSessionFromIngressHandoff(handoff, entry);
 
@@ -182,6 +216,7 @@ export async function submitEmbeddedAirportBooking(
         ...input.submission,
         flightNo: input.submission.flightNo || input.flightNo || "",
       },
+      input.benefitReference,
       eligibilityVerificationId,
     ),
   );
