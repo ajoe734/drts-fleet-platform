@@ -20,6 +20,7 @@ import {
   type PartnerBrandTemplate,
   PARTNER_DEFAULT_THEME,
 } from "@drts/ui-tokens";
+import { buildPartnerBookingCreateCommand } from "./partner-booking-form";
 import { getServerApiBaseUrl } from "./runtime-config";
 
 export const API_URL = getServerApiBaseUrl();
@@ -615,4 +616,177 @@ export async function getPartnerReceipt(
   orderId: string,
 ): Promise<OwnedOrderRecord> {
   return getPartnerTrip(session, orderId);
+}
+
+export type CreateEmbedPartnerBookingParams = {
+  tenantSlug: string;
+  eligibilityVerificationId?: string | null;
+  pickup?: { address: string; lat?: number | null; lng?: number | null };
+  dropoff?: { address: string; lat?: number | null; lng?: number | null };
+  reservationWindowStart?: string;
+  reservationWindowEnd?: string | null;
+  passenger?: { name: string; phone: string; email?: string | null };
+  notes?: string | null;
+  flightNumber?: string | null;
+  vehicleClass?: string | null;
+};
+
+async function bootstrapEmbedPartnerSession(tenantSlug: string): Promise<{
+  session: PartnerSessionRecord;
+  entry: PartnerChannelEntryRecord;
+}> {
+  if (!tenantSlug || typeof tenantSlug !== "string" || !tenantSlug.trim()) {
+    throw new PartnerAuthorityError(
+      400,
+      "TENANT_SLUG_REQUIRED",
+      "tenantSlug is required for partner ingress operations.",
+    );
+  }
+
+  const context = await getPartnerRouteContext(tenantSlug);
+
+  if (
+    !context.entry ||
+    context.inactive ||
+    context.entry.activeFlag === false ||
+    context.entry.status !== "active" ||
+    Boolean(context.entry.revokedAt)
+  ) {
+    throw new PartnerAuthorityError(
+      403,
+      "PARTNER_ENTRY_INACTIVE",
+      `Partner entry '${tenantSlug}' is inactive, disabled, or revoked.`,
+      { tenantSlug },
+    );
+  }
+
+  const entry = context.entry;
+  const envKey =
+    process.env[
+      `PARTNER_INGRESS_KEY_${tenantSlug.toUpperCase().replace(/-/g, "_")}`
+    ]?.trim();
+  const effectiveApiKey =
+    envKey ||
+    process.env.DRTS_INTERNAL_KEY?.trim() ||
+    (process.env.NODE_ENV === "test" ? "test-partner-key" : undefined);
+
+  if (!effectiveApiKey) {
+    throw new PartnerAuthorityError(
+      401,
+      "PARTNER_API_KEY_REQUIRED",
+      `API key is required to bootstrap partner session for '${tenantSlug}'.`,
+      { tenantSlug },
+    );
+  }
+
+  const bootstrap = await createPartnerBootstrapSession({
+    entrySlug: tenantSlug,
+    apiKey: effectiveApiKey,
+  });
+
+  const session: PartnerSessionRecord = {
+    accessToken: bootstrap.accessToken,
+    expiresIn: bootstrap.expiresIn,
+    partnerEntry: bootstrap.partnerEntry,
+    identity: bootstrap.identity,
+  };
+
+  return { session, entry };
+}
+
+export async function createEmbedPartnerBooking(
+  params: CreateEmbedPartnerBookingParams,
+): Promise<{
+  session: PartnerSessionRecord;
+  booking: BookingRecord;
+}> {
+  const { tenantSlug, pickup, dropoff, passenger } = params;
+
+  const { session, entry } = await bootstrapEmbedPartnerSession(tenantSlug);
+
+  let verifiedEligibilityId = params.eligibilityVerificationId?.trim() ?? null;
+
+  if (!verifiedEligibilityId) {
+    const verification = await verifyPartnerEligibility(session, {
+      entrySlug: tenantSlug,
+    });
+    verifiedEligibilityId = verification.eligibilityVerificationId;
+  }
+
+  if (
+    !pickup ||
+    !pickup.address ||
+    !pickup.address.trim() ||
+    !dropoff ||
+    !dropoff.address ||
+    !dropoff.address.trim() ||
+    !passenger ||
+    !passenger.name ||
+    !passenger.name.trim() ||
+    !passenger.phone ||
+    !passenger.phone.trim()
+  ) {
+    throw new PartnerAuthorityError(
+      400,
+      "MISSING_REQUIRED_BOOKING_DATA",
+      "Pickup address, dropoff address, passenger name, and passenger phone are required for creating an embed partner booking.",
+      { tenantSlug },
+    );
+  }
+
+  const now = Date.now();
+  const reservationWindowStart =
+    params.reservationWindowStart ?? new Date(now + 86400000).toISOString();
+  const reservationWindowEnd =
+    params.reservationWindowEnd ??
+    new Date(
+      new Date(reservationWindowStart).getTime() + 3600000,
+    ).toISOString();
+
+  const bookingCommand = buildPartnerBookingCreateCommand({
+    tenantSlug,
+    businessDispatchSubtype:
+      entry.businessDispatchSubtype ?? "credit_card_airport_transfer",
+    eligibilityVerificationId: verifiedEligibilityId,
+    pickup,
+    dropoff,
+    reservationWindowStart,
+    reservationWindowEnd,
+    passenger,
+    notes: params.notes,
+    flightNumber: params.flightNumber,
+    vehicleClass: params.vehicleClass,
+  });
+
+  const booking = await createPartnerBooking(session, bookingCommand);
+  return { session, booking };
+}
+
+export async function getEmbedPartnerBooking(
+  tenantSlug: string,
+  bookingId: string,
+): Promise<BookingRecord> {
+  const { session } = await bootstrapEmbedPartnerSession(tenantSlug);
+
+  const booking = await getPartnerConfirmation(session, bookingId);
+
+  if (!booking) {
+    throw new PartnerAuthorityError(
+      404,
+      "BOOKING_NOT_FOUND",
+      `Booking '${bookingId}' was not found.`,
+      { tenantSlug, bookingId },
+    );
+  }
+
+  if (booking.partnerEntrySlug && booking.partnerEntrySlug !== tenantSlug) {
+    throw new PartnerAuthorityError(
+      403,
+      "FORBIDDEN",
+      `Booking '${bookingId}' does not belong to partner '${tenantSlug}'.`,
+      { tenantSlug, bookingId },
+    );
+  }
+
+  return booking;
 }

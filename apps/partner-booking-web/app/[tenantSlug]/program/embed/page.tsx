@@ -7,10 +7,22 @@ export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
+  searchParams?: Promise<{
+    eligibilityVerificationId?: string | string[];
+  }>;
 };
 
-export default async function ProgramEmbedFlowPage({ params }: PageProps) {
+export default async function ProgramEmbedFlowPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { tenantSlug } = await params;
+  const resolvedSearchParams = await searchParams;
+  const eligibilityVerificationId = Array.isArray(
+    resolvedSearchParams?.eligibilityVerificationId,
+  )
+    ? resolvedSearchParams.eligibilityVerificationId[0]
+    : resolvedSearchParams?.eligibilityVerificationId;
   const locale = await getServerLocale();
   const theme = await getTenantProgramTheme(tenantSlug);
 
@@ -25,6 +37,7 @@ export default async function ProgramEmbedFlowPage({ params }: PageProps) {
       basePath={`/${tenantSlug}/program/embed`}
       locale={locale}
       surface="embed"
+      eligibilityVerificationId={eligibilityVerificationId ?? null}
     />
   );
 }

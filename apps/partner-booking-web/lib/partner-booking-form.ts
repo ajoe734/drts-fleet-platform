@@ -1,5 +1,6 @@
 import type {
   BusinessDispatchSubtype,
+  CreateTenantBookingCommand,
   PartnerChannelEntryRecord,
 } from "@drts/contracts";
 import {
@@ -480,4 +481,61 @@ export function getPartnerMapSubmitGate(params: {
   }
 
   return baseGate;
+}
+
+export function buildPartnerBookingCreateCommand(params: {
+  tenantSlug: string;
+  businessDispatchSubtype?: BusinessDispatchSubtype;
+  eligibilityVerificationId: string;
+  pickup: { address: string; lat?: number | null; lng?: number | null };
+  dropoff: { address: string; lat?: number | null; lng?: number | null };
+  reservationWindowStart: string;
+  reservationWindowEnd?: string | null;
+  passenger: { name: string; phone: string; email?: string | null };
+  notes?: string | null;
+  flightNumber?: string | null;
+  vehicleClass?: string | null;
+  direction?: "pickup" | "dropoff";
+  luggageCount?: number | null;
+}): CreateTenantBookingCommand {
+  const now = Date.now();
+  const start =
+    params.reservationWindowStart || new Date(now + 86400000).toISOString();
+  const end =
+    params.reservationWindowEnd ||
+    new Date(new Date(start).getTime() + 3600000).toISOString();
+
+  return {
+    businessDispatchSubtype:
+      params.businessDispatchSubtype ?? "credit_card_airport_transfer",
+    partnerEntrySlug: params.tenantSlug,
+    eligibilityVerificationId: params.eligibilityVerificationId,
+    pickup: {
+      address: params.pickup.address.trim(),
+      lat: params.pickup.lat ?? null,
+      lng: params.pickup.lng ?? null,
+    },
+    dropoff: {
+      address: params.dropoff.address.trim(),
+      lat: params.dropoff.lat ?? null,
+      lng: params.dropoff.lng ?? null,
+    },
+    reservationWindowStart: start,
+    reservationWindowEnd: end,
+    passenger: {
+      name: params.passenger.name.trim(),
+      phone: params.passenger.phone.trim(),
+    },
+    ...(params.notes?.trim() ? { notes: params.notes.trim() } : {}),
+    ...(params.flightNumber?.trim()
+      ? { flightNo: params.flightNumber.trim() }
+      : {}),
+    ...(params.vehicleClass?.trim()
+      ? { vehiclePreference: params.vehicleClass.trim() }
+      : {}),
+    ...(params.direction ? { direction: params.direction } : {}),
+    ...(typeof params.luggageCount === "number"
+      ? { luggageCount: params.luggageCount }
+      : {}),
+  };
 }

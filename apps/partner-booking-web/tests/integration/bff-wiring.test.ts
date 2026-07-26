@@ -7,7 +7,9 @@ import type {
 import {
   API_URL,
   clearPartnerEntryAuthorityCacheForTests,
+  createEmbedPartnerBooking,
   createPartnerBooking,
+  getEmbedPartnerBooking,
   getPartnerConfirmation,
   getPartnerReceipt,
   getPartnerRouteContext,
@@ -826,6 +828,121 @@ describe("partner-booking-web BFF wiring", () => {
         method: "GET",
         headers: expect.objectContaining({
           Authorization: "Bearer partner-token",
+        }),
+      }),
+    );
+  });
+
+  it("creates real backend booking via embed partner flow and fetches confirmation", async () => {
+    clearPartnerEntryAuthorityCacheForTests();
+    const embedMock = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: activeEntry,
+          meta: { requestId: "r1", timestamp: "t1" },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: {
+            accessToken: "token-embed",
+            tokenType: "Bearer",
+            expiresIn: "1h",
+            partnerEntry: activeEntry,
+            identity: {
+              authMode: "partner_api_key",
+              actorType: "partner_channel_entry",
+              actorId: "actor-001",
+              realm: "partner",
+              tenantId: "tenant-001",
+            },
+          },
+          meta: { requestId: "r2", timestamp: "t2" },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: {
+            bookingId: "booking-001",
+            orderId: "order-001",
+            status: "confirmed",
+          },
+          meta: { requestId: "r3", timestamp: "t3" },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: {
+            accessToken: "token-embed-read",
+            tokenType: "Bearer",
+            expiresIn: "1h",
+            partnerEntry: activeEntry,
+            identity: {
+              authMode: "partner_api_key",
+              actorType: "partner_channel_entry",
+              actorId: "actor-001",
+              realm: "partner",
+              tenantId: "tenant-001",
+            },
+          },
+          meta: { requestId: "r4", timestamp: "t4" },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        jsonResponse({
+          data: {
+            bookingId: "booking-001",
+            orderId: "order-001",
+            status: "confirmed",
+          },
+          meta: { requestId: "r5", timestamp: "t5" },
+        }),
+      );
+
+    vi.stubGlobal("fetch", embedMock);
+
+    const result = await createEmbedPartnerBooking({
+      tenantSlug: "ctbc",
+      eligibilityVerificationId: "elig-embed-001",
+      pickup: { address: "台北市信義區市府路1號" },
+      dropoff: { address: "桃園國際機場第一航廈" },
+      passenger: { name: "張大明", phone: "0912345678" },
+    });
+
+    expect(result.booking.bookingId).toBe("booking-001");
+    expect(result.booking.status).toBe("confirmed");
+
+    const fetchedBooking = await getEmbedPartnerBooking("ctbc", "booking-001");
+    expect(fetchedBooking.bookingId).toBe("booking-001");
+
+    expect(embedMock).toHaveBeenNthCalledWith(
+      2,
+      `${API_URL}/api/auth/partner/bootstrap-session`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(embedMock).toHaveBeenNthCalledWith(
+      3,
+      `${API_URL}/api/tenant/bookings`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-embed",
+        }),
+      }),
+    );
+    expect(embedMock).toHaveBeenNthCalledWith(
+      4,
+      `${API_URL}/api/auth/partner/bootstrap-session`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(embedMock).toHaveBeenNthCalledWith(
+      5,
+      `${API_URL}/api/tenant/bookings/booking-001`,
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-embed-read",
         }),
       }),
     );

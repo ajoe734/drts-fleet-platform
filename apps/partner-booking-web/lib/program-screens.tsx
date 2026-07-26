@@ -1,4 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { BookingRecord } from "@drts/contracts";
+import { EmbedBookingSubmitButton } from "@/components/embed-booking-submit-button";
 import {
   getProgramChromeVars,
   type PartnerProgramTheme,
@@ -197,8 +199,14 @@ export function listProgramScreensForTheme(
     if (theme.kind !== "card") {
       return [];
     }
-    return PARTNER_PROGRAM_SCREENS.filter((screen) =>
-      CARD_ONLY_SCREEN_IDS.has(screen.id),
+    return PARTNER_PROGRAM_SCREENS.filter(
+      (screen) =>
+        CARD_ONLY_SCREEN_IDS.has(screen.id) ||
+        screen.id === "review" ||
+        screen.id === "success" ||
+        screen.id === "tracking" ||
+        screen.id === "error" ||
+        screen.id === "manual_review",
     );
   }
 
@@ -253,8 +261,18 @@ export function resolveProgramScreenSegment(
 export function getProgramScreenHref(
   basePath: string,
   screen: PartnerProgramScreenId,
+  queryParams?: Record<string, string | null | undefined>,
 ): string {
-  return `${basePath}/${getProgramScreenMeta(screen).segment}`;
+  const base = `${basePath}/${getProgramScreenMeta(screen).segment}`;
+  if (!queryParams) return base;
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(queryParams)) {
+    if (value) {
+      searchParams.set(key, value);
+    }
+  }
+  const q = searchParams.toString();
+  return q ? `${base}?${q}` : base;
 }
 
 type ScreenTone = "neutral" | "primary" | "accent" | "success" | "danger";
@@ -1151,7 +1169,12 @@ function renderScreen(
   screen: PartnerProgramScreenId,
   basePath: string,
   locale: Locale,
+  booking?: BookingRecord | null,
+  surface: PartnerProgramSurfaceKind = "site",
+  eligibilityVerificationId?: string | null,
 ): ReactNode {
+  const effectiveSurface =
+    surface ?? (basePath.endsWith("/embed") ? "embed" : "site");
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(key, params, locale);
   const theme = getLocalizedProgramTheme(rawTheme, locale);
@@ -1160,11 +1183,36 @@ function renderScreen(
   const siteBasePath = basePath.endsWith("/embed")
     ? `${basePath.slice(0, -"/embed".length)}/site`
     : basePath;
-  const reviewHref = getProgramScreenHref(siteBasePath, "review");
-  const successHref = getProgramScreenHref(siteBasePath, "success");
-  const trackingHref = getProgramScreenHref(siteBasePath, "tracking");
-  const landingHref = getProgramScreenHref(siteBasePath, "landing");
-  const eligibilityHref = getProgramScreenHref(siteBasePath, "eligibility");
+  const activeBasePath = effectiveSurface === "embed" ? basePath : siteBasePath;
+  const queryParams = eligibilityVerificationId
+    ? { eligibilityVerificationId }
+    : undefined;
+  const reviewHref = getProgramScreenHref(
+    activeBasePath,
+    "review",
+    queryParams,
+  );
+  const successHref = getProgramScreenHref(
+    activeBasePath,
+    "success",
+    queryParams,
+  );
+  const trackingHref = getProgramScreenHref(
+    activeBasePath,
+    "tracking",
+    queryParams,
+  );
+  const landingHref = getProgramScreenHref(
+    activeBasePath,
+    "landing",
+    queryParams,
+  );
+  const eligibilityHref = getProgramScreenHref(
+    activeBasePath,
+    "eligibility",
+    queryParams,
+  );
+  const errorHref = getProgramScreenHref(activeBasePath, "error", queryParams);
 
   if (screen === "landing") {
     if (theme.kind === "travel") {
@@ -1764,7 +1812,7 @@ function renderScreen(
               "確認並建立代步行程",
               "Confirm and create replacement ride",
             )}
-            href={getProgramScreenHref(basePath, "review")}
+            href={reviewHref}
             primary
           />
           <Button
@@ -1841,7 +1889,7 @@ function renderScreen(
         <Button
           theme={theme}
           label={s("確認並繼續", "Confirm and continue")}
-          href={getProgramScreenHref(basePath, "review")}
+          href={reviewHref}
           primary
         />
         <Button
@@ -1864,11 +1912,12 @@ function renderScreen(
           locale={locale}
           state="live"
           footer={
-            <Button
+            <EmbedBookingSubmitButton
               theme={theme}
+              tenantSlug={theme.slug}
+              successHref={successHref}
               label={t("program.embed.handoff.cta")}
-              href={reviewHref}
-              primary
+              eligibilityVerificationId={eligibilityVerificationId ?? null}
             />
           }
         >
@@ -2792,12 +2841,28 @@ function renderScreen(
             </span>
           </div>
         </Card>
-        <Button
-          theme={theme}
-          label={s("確認預約", "Confirm booking")}
-          href={successHref}
-          primary
-        />
+        {effectiveSurface === "embed" ? (
+          <EmbedBookingSubmitButton
+            theme={theme}
+            tenantSlug={theme.slug}
+            successHref={successHref}
+            label={s("確認預約", "Confirm booking")}
+            eligibilityVerificationId={eligibilityVerificationId}
+            pickup={{ address: demo.pickup }}
+            dropoff={{ address: demo.dropoff }}
+            reservationWindowStart={demo.departureTime}
+            reservationWindowEnd={demo.arrivalTime}
+            passenger={{ name: demo.passengerName, phone: demo.passengerPhone }}
+            flightNumber={demo.flightNumber}
+          />
+        ) : (
+          <Button
+            theme={theme}
+            label={s("確認預約", "Confirm booking")}
+            href={successHref}
+            primary
+          />
+        )}
         <Button
           theme={theme}
           label={s("返回修改", "Back to edit")}
@@ -2808,6 +2873,52 @@ function renderScreen(
   }
 
   if (screen === "success") {
+    if (effectiveSurface === "embed" && !booking) {
+      return (
+        <>
+          <Band
+            theme={theme}
+            title={s("預約紀錄", "Booking status")}
+            subtitle={theme.programName}
+          />
+          <Card
+            style={{
+              borderColor: theme.surface.border,
+              background: theme.chrome.accentSoft,
+            }}
+          >
+            <div
+              style={{
+                color: theme.chrome.accentText,
+                fontWeight: 700,
+                fontSize: "14px",
+              }}
+            >
+              {s("無有效預約紀錄", "No valid booking record")}
+            </div>
+            <div
+              style={{
+                color: theme.chrome.pageMuted,
+                fontSize: "12px",
+                marginTop: "4px",
+              }}
+            >
+              {s(
+                "請從專屬權益頁面重新送出建單。",
+                "Please submit booking from your program page.",
+              )}
+            </div>
+          </Card>
+          <Button
+            theme={theme}
+            label={s("返回權益頁", "Back to program")}
+            href={landingHref}
+            primary
+          />
+        </>
+      );
+    }
+
     const steps = [
       s("我們已將您的需求送至派車中心。", "We sent your request to dispatch."),
       s(
@@ -2864,14 +2975,26 @@ function renderScreen(
           <div style={{ paddingTop: "12px" }}>
             <Row
               label={s("訂單編號", "Booking ref")}
-              value={demo.bookingRef}
+              value={booking?.bookingId ?? demo.bookingRef}
               mono
             />
             <Row
               label={s("預估出發", "Estimated departure")}
-              value={demo.departureTime}
+              value={booking?.reservationWindowStart ?? demo.departureTime}
               mono
             />
+            {booking?.pickup?.address ? (
+              <Row
+                label={s("上車地點", "Pickup location")}
+                value={booking.pickup.address}
+              />
+            ) : null}
+            {booking?.dropoff?.address ? (
+              <Row
+                label={s("下車地點", "Dropoff location")}
+                value={booking.dropoff.address}
+              />
+            ) : null}
             <Row label={s("您將支付", "You pay")} value={s("免費", "Free")} />
           </div>
         </Card>
@@ -3029,7 +3152,7 @@ function renderScreen(
         <Button
           theme={theme}
           label={s("聯絡客服", "Contact support")}
-          href={getProgramScreenHref(basePath, "error")}
+          href={errorHref}
         />
       </>
     );
@@ -3178,7 +3301,7 @@ function renderScreen(
       <Button
         theme={theme}
         label={s("聯絡客服", "Contact support")}
-        href={getProgramScreenHref(basePath, "error")}
+        href={errorHref}
       />
       <Button
         theme={theme}
@@ -3199,16 +3322,31 @@ export function ProgramBookingFlow({
   basePath,
   locale,
   surface = "site",
+  booking = null,
+  eligibilityVerificationId = null,
 }: {
   theme: PartnerProgramTheme;
   screen: PartnerProgramScreenId;
   basePath: string;
   locale: Locale;
   surface?: PartnerProgramSurfaceKind;
+  booking?: BookingRecord | null;
+  eligibilityVerificationId?: string | null;
 }) {
   const localizedTheme = getLocalizedProgramTheme(theme, locale);
   const visibleScreens = listProgramScreensForTheme(localizedTheme, surface);
   const activeCopy = getProgramScreenCopy(screen, locale);
+  const queryParams = eligibilityVerificationId
+    ? { eligibilityVerificationId }
+    : undefined;
+  const activeBasePath =
+    surface === "embed"
+      ? basePath.endsWith("/site")
+        ? `${basePath.slice(0, -"/site".length)}/embed`
+        : basePath
+      : basePath.endsWith("/embed")
+        ? `${basePath.slice(0, -"/embed".length)}/site`
+        : basePath;
 
   return (
     <div
@@ -3259,7 +3397,7 @@ export function ProgramBookingFlow({
           return (
             <a
               key={meta.id}
-              href={getProgramScreenHref(basePath, meta.id)}
+              href={getProgramScreenHref(activeBasePath, meta.id, queryParams)}
               style={{
                 textDecoration: "none",
                 display: "grid",
@@ -3310,7 +3448,15 @@ export function ProgramBookingFlow({
           width: "100%",
         }}
       >
-        {renderScreen(localizedTheme, screen, basePath, locale)}
+        {renderScreen(
+          localizedTheme,
+          screen,
+          basePath,
+          locale,
+          booking,
+          surface,
+          eligibilityVerificationId,
+        )}
       </div>
     </div>
   );
