@@ -1,0 +1,17 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 1831927
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-006-driver-multi-platform
+  ✓ PASS  E2E-006-driver-multi-platform
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-1831927.json
+  Evidence log:  /tmp/drts-e2e-evidence-1831927.log
+════════════════════════════════════════════════════════

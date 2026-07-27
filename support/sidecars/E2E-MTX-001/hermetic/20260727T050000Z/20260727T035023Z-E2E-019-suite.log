@@ -1,0 +1,22 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 2150502
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-019-fleet-supply-onboarding
+  ✓ PASS  E2E-019-fleet-supply-onboarding
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-2150502.json
+  Evidence log:  /tmp/drts-e2e-evidence-2150502.log
+
+Evidence capture:
+2026-07-27T04:20:41Z | E2E-019 | fleet-partner | driver_submission_id=22fcb455-4c8c-499f-a4da-142627a0b844
+2026-07-27T04:20:42Z | E2E-019 | fleet-partner | vehicle_submission_id=0e09044e-7587-4e1a-b024-ac325152e63e
+2026-07-27T04:20:43Z | E2E-019 | regulatory-registry | canonical_vehicle_id=veh_b1b543b2-dc92-4fc2-941c-78bc34c65489
+════════════════════════════════════════════════════════

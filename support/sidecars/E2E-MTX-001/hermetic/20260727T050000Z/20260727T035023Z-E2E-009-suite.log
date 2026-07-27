@@ -1,0 +1,27 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 1904248
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-009-prod-rail-dry-run
+  ✓ PASS  E2E-009-prod-rail-dry-run
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-1904248.json
+  Evidence log:  /tmp/drts-e2e-evidence-1904248.log
+
+Evidence capture:
+2026-07-27T04:04:43Z | E2E-009 | validate_config | status=pass
+2026-07-27T04:04:43Z | E2E-009 | validate_config | mode=static_contract_check
+2026-07-27T04:04:44Z | E2E-009 | build_push | status=pass
+2026-07-27T04:04:44Z | E2E-009 | build_push | mode=real_implementation
+2026-07-27T04:04:44Z | E2E-009 | deploy_dry_run | status=pass
+2026-07-27T04:04:44Z | E2E-009 | deploy_dry_run | mode=real_workflow_dispatch_contract
+2026-07-27T04:04:44Z | E2E-009 | rollback | status=pass
+2026-07-27T04:04:44Z | E2E-009 | rollback | mode=tag_redeploy_contract
+════════════════════════════════════════════════════════
