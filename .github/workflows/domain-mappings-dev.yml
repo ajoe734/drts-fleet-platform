@@ -1,0 +1,76 @@
+name: Domain Mappings — Dev (smarttransport.tw)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'apply' to create Cloud Run domain mappings for smarttransport.tw"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
+  DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+  WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+  WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+jobs:
+  map:
+    if: ${{ inputs.confirm == 'apply' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+
+      - name: Show acting identity
+        run: |
+          echo "Active account (this is the identity that must be a verified owner of smarttransport.tw):"
+          gcloud config get-value account 2>/dev/null || true
+          gcloud auth list --format="value(account)" 2>/dev/null || true
+
+      - name: Create domain mappings
+        run: |
+          set +e
+          PROJECT="${{ env.DEV_GCP_PROJECT_ID }}"
+          REGION="${{ env.DEV_GCP_REGION }}"
+
+          map() {  # map <subdomain> <service>
+            echo "::group::$1 -> $2"
+            gcloud beta run domain-mappings create \
+              --service "$2" --domain "$1" \
+              --region "$REGION" --project "$PROJECT" 2>&1
+            echo "::endgroup::"
+          }
+
+          map fleets.smarttransport.tw     drts-platform-admin-web
+          map ops.smarttransport.tw        drts-ops-console-web
+          map partners.smarttransport.tw   drts-fleet-partner-portal-web
+          map dispatch.smarttransport.tw   drts-enterprise-dispatch-web
+          map ride.smarttransport.tw       drts-passenger-web
+          map book.smarttransport.tw       drts-partner-booking-web
+          map bank.smarttransport.tw       drts-bank-console-web
+          map channel.smarttransport.tw    drts-channel-partner-portal-web
+          map tenant.smarttransport.tw     drts-tenant-console-web
+          map concierge.smarttransport.tw  drts-concierge-portal-web
+          map refer.smarttransport.tw      drts-referral-embed-web
+          map api.smarttransport.tw        drts-api
+
+      - name: List mappings
+        run: |
+          gcloud beta run domain-mappings list \
+            --region "${{ env.DEV_GCP_REGION }}" --project "${{ env.DEV_GCP_PROJECT_ID }}" 2>&1 || true
