@@ -1,0 +1,26 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 211402
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-004-tenant-attribution
+  ✓ PASS  E2E-004-tenant-attribution
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-211402.json
+  Evidence log:  /tmp/drts-e2e-evidence-211402.log
+
+Evidence capture:
+2026-07-27T01:44:39Z | E2E-004 | platform_admin | newTenantId=tenant-e2e-attr-5116679
+2026-07-27T01:44:39Z | E2E-004 | tenant_newco | bookingId=booking-000001
+2026-07-27T01:44:39Z | E2E-004 | tenant_newco | bookingTenantId=tenant-e2e-attr-5116679
+2026-07-27T01:44:39Z | E2E-004 | tenant_newco | orderId=806896b8-e67b-42f1-938b-2bb964ae013d
+2026-07-27T01:44:39Z | E2E-004 | safety | crossTenantLeakDetected=false
+2026-07-27T01:44:39Z | E2E-004 | safety | directDetailStatus=404
+════════════════════════════════════════════════════════
+

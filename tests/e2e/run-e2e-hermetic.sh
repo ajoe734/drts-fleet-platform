@@ -177,21 +177,6 @@ run_with_retry() { # label cmd...
   done
 }
 
-run_logged() { # label logfile cmd...
-  local label="$1"
-  local log_file_path="$2"
-  shift
-  shift
-  mkdir -p "$(dirname "$log_file_path")"
-  : >"$log_file_path"
-  if "$@" >"$log_file_path" 2>&1; then
-    return 0
-  fi
-  echo "[hermetic] ${label} failed; log: ${log_file_path}"
-  tail -n 200 "$log_file_path"
-  return 1
-}
-
 maybe_timeout() { # seconds cmd...
   local seconds="$1"
   shift
@@ -276,7 +261,9 @@ ensure_api_build() {
   echo "[hermetic] building @drts/api because apps/api/dist/main.js is missing"
   run_with_retry \
     "api build" \
-    bash -lc "maybe_timeout() { timeout --foreground ${HERMETIC_API_BUILD_TIMEOUT_SECONDS}s \"\$@\"; }; maybe_timeout ${API_BUILD_CMD}" || return 1
+    maybe_timeout \
+    "$HERMETIC_API_BUILD_TIMEOUT_SECONDS" \
+    bash -lc "$API_BUILD_CMD" || return 1
 }
 
 start_api() {

@@ -1,0 +1,75 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 478982
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-010-governance-aware-billing-reporting
+  ✓ PASS  E2E-010-governance-aware-billing-reporting
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-478982.json
+  Evidence log:  /tmp/drts-e2e-evidence-478982.log
+
+Evidence capture:
+2026-07-27T01:57:20Z | E2E-010 | setup | tenantAdminUserId=10000000-0000-0000-0000-000000000901
+2026-07-27T01:57:20Z | E2E-010 | setup | tenantFinanceUserId=10000000-0000-0000-0000-000000000903
+2026-07-27T01:57:20Z | E2E-010 | setup | quotaPolicyStatus=201
+2026-07-27T01:57:20Z | E2E-010 | setup | approvalRuleStatus=201
+2026-07-27T01:57:20Z | E2E-010 | FG-01 | bookingId=booking-000001
+2026-07-27T01:57:20Z | E2E-010 | FG-01 | costCenter=CC-GOV-117440
+2026-07-27T01:57:20Z | E2E-010 | FG-01 | orderId=f916d533-c645-47a6-8914-5f9835abadd3
+2026-07-27T01:57:20Z | E2E-010 | FG-01 | approvalState=pending
+2026-07-27T01:57:20Z | E2E-010 | FG-02 | quotaBookingCountUsed=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-02 | quotaBookingCountLimit=100
+2026-07-27T01:57:20Z | E2E-010 | FG-02 | ledgerEntryCount=2
+2026-07-27T01:57:20Z | E2E-010 | FG-02 | quotaPeriodKey=2026-07
+2026-07-27T01:57:20Z | E2E-010 | FG-02 | quotaUsageDelta=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-03 | approvalRequestId=approval-request-5348571f-cb69-4cbd-b00a-a18ea5eed1f0
+2026-07-27T01:57:20Z | E2E-010 | FG-03 | approvalRequestState=pending
+2026-07-27T01:57:20Z | E2E-010 | FG-03 | evaluatedAt=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-03 | decision=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-03 | approveStatus=201
+2026-07-27T01:57:20Z | E2E-010 | FG-03 | approvalStateAfterApprove=approved
+2026-07-27T01:57:20Z | E2E-010 | lifecycle | skipped=/dispatch/assign returned 409; cannot exercise driver leg
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportJobId=JOB-b5908191-5bb1-49cb-a890-0c271d8445b4
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportJobInitialStatus=queued
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportCostCenterField=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportApprovalStateField=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportQuotaImpactField=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportPartnerProgramField=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportLegacyUnmappedField=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-04 | reportArtifactId=ART-5c57bb20-cd39-4f53-b427-9e008e2467dd
+2026-07-27T01:57:20Z | E2E-010 | FG-01 | skipped=lifecycle did not reach completion; invoice binding cannot be exercised
+2026-07-27T01:57:20Z | E2E-010 | FG-08 | skipped=lifecycle did not reach completion; audit binding cannot be exercised
+2026-07-27T01:57:20Z | E2E-010 | FG-05 | settlementPartnerRowCount=0
+2026-07-27T01:57:20Z | E2E-010 | FG-05 | settlementPartnerProgramId=NOT_POPULATED
+2026-07-27T01:57:20Z | E2E-010 | FG-06 | platformItemCount=3
+2026-07-27T01:57:20Z | E2E-010 | FG-06 | platformCodes=uber,grab,forwarder_sandbox
+2026-07-27T01:57:20Z | E2E-010 | FG-06 | platformEarningsRef=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | FG-07 | coverageTotalBookings=1
+2026-07-27T01:57:21Z | E2E-010 | FG-07 | coverageResolvedCount=1
+2026-07-27T01:57:21Z | E2E-010 | FG-07 | coverageUnresolvedCount=0
+2026-07-27T01:57:21Z | E2E-010 | FG-07 | coverageDisabledHits=0
+2026-07-27T01:57:21Z | E2E-010 | FG-07 | coverageUnresolvedSample=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | FG-09 | skipped=no invoice was generated this run; cross-tenant probe needs a real invoiceId
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | fieldCount=13
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | costCenterCode=CC-GOV-117440
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | costCenterName=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | ownerUserId=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | legacy_unmapped=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | approvalRequestId=approval-request-5348571f-cb69-4cbd-b00a-a18ea5eed1f0
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | approvalState=approved
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | quotaPeriodKey=2026-07
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | quotaUsageDelta=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | partnerProgramCode=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | eligibilityVerificationId=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | platformEarningsRef=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | auditId=NOT_POPULATED
+2026-07-27T01:57:21Z | E2E-010 | VERIFY | reportArtifactId=ART-5c57bb20-cd39-4f53-b427-9e008e2467dd
+════════════════════════════════════════════════════════
+

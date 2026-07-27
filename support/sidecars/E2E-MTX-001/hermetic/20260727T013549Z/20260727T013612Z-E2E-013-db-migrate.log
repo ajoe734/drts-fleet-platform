@@ -1,0 +1,712 @@
+
+> drts-fleet-platform@0.1.0 db:migrate /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-e2e-mtx-001
+> ./scripts/db-apply.sh
+
+[apply] V0001__bootstrap_extensions_and_schemas.sql
+CREATE EXTENSION
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+[ok] V0001__bootstrap_extensions_and_schemas.sql
+INSERT 0 1
+[apply] V0002__enum_types.sql
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+[ok] V0002__enum_types.sql
+INSERT 0 1
+[apply] V0003__core_master_data.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0003__core_master_data.sql
+INSERT 0 1
+[apply] V0004__regulatory_registry.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+[ok] V0004__regulatory_registry.sql
+INSERT 0 1
+[apply] V0005__ops_rules_and_mappings.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+[ok] V0005__ops_rules_and_mappings.sql
+INSERT 0 1
+[apply] V0006__ops_orders_dispatch_and_trips.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0006__ops_orders_dispatch_and_trips.sql
+INSERT 0 1
+[apply] V0007__crm_callcenter_and_complaints.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0007__crm_callcenter_and_complaints.sql
+INSERT 0 1
+[apply] V0008__billing_and_settlement.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+[ok] V0008__billing_and_settlement.sql
+INSERT 0 1
+[apply] V0009__admin_reporting_audit_and_integrations.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0009__admin_reporting_audit_and_integrations.sql
+INSERT 0 1
+[apply] V0010__views_triggers_and_guardrails.sql
+CREATE FUNCTION
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+[ok] V0010__views_triggers_and_guardrails.sql
+INSERT 0 1
+[apply] V0011__phase1_runtime_snapshots.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0011__phase1_runtime_snapshots.sql
+INSERT 0 1
+[apply] V0012__phase1_remaining_runtime_snapshots.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0012__phase1_remaining_runtime_snapshots.sql
+INSERT 0 1
+[apply] V0013__phase1_source_of_truth_snapshots.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0013__phase1_source_of_truth_snapshots.sql
+INSERT 0 1
+[apply] V0014__feature_flags.sql
+CREATE TABLE
+INSERT 0 14
+[ok] V0014__feature_flags.sql
+INSERT 0 1
+[apply] V0015__ops_driver_domains.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0015__ops_driver_domains.sql
+INSERT 0 1
+[apply] V0016__driver_attendance_settings.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+[ok] V0016__driver_attendance_settings.sql
+INSERT 0 1
+[apply] V0017__platform_presence.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0017__platform_presence.sql
+INSERT 0 1
+[apply] V0018A__driver_profiles.sql
+CREATE TABLE
+CREATE INDEX
+[ok] V0018A__driver_profiles.sql
+INSERT 0 1
+[apply] V0018__platform_earnings.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+COMMENT
+[ok] V0018__platform_earnings.sql
+INSERT 0 1
+[apply] V0019__driver_locations.sql
+CREATE TABLE
+CREATE INDEX
+[ok] V0019__driver_locations.sql
+INSERT 0 1
+[apply] V0020__settlement_driver_index.sql
+CREATE INDEX
+[ok] V0020__settlement_driver_index.sql
+INSERT 0 1
+[apply] V0021__partner_registry_and_eligibility_persistence.sql
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0021__partner_registry_and_eligibility_persistence.sql
+INSERT 0 1
+[apply] V0022__partner_ingress_credential_persistence.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0022__partner_ingress_credential_persistence.sql
+INSERT 0 1
+[apply] V0023__tenant_quota_persistence.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0023__tenant_quota_persistence.sql
+INSERT 0 1
+[apply] V0024__tenant_approval_workflow.sql
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0024__tenant_approval_workflow.sql
+INSERT 0 1
+[apply] V0025__vehicle_eligibility_matrix.sql
+CREATE TABLE
+CREATE INDEX
+[ok] V0025__vehicle_eligibility_matrix.sql
+INSERT 0 1
+[apply] V0026__fleet_partner_revenue_share_runtime_snapshots.sql
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0026__fleet_partner_revenue_share_runtime_snapshots.sql
+INSERT 0 1
+[apply] V0027__service_product_and_vehicle_eligibility_extensions.sql
+CREATE TABLE
+NOTICE:  column "allowed_license_types" of relation "phase1_service_products" already exists, skipping
+NOTICE:  column "meter_required" of relation "phase1_service_products" already exists, skipping
+NOTICE:  column "fixed_fare_allowed" of relation "phase1_service_products" already exists, skipping
+ALTER TABLE
+ALTER TABLE
+UPDATE 0
+UPDATE 0
+[ok] V0027__service_product_and_vehicle_eligibility_extensions.sql
+INSERT 0 1
+[apply] V0028__fleet_partner_statement_sponsor_attribution_columns.sql
+ALTER TABLE
+[ok] V0028__fleet_partner_statement_sponsor_attribution_columns.sql
+INSERT 0 1
+[apply] V0029__tenant_user_roles_demo_seed.sql
+INSERT 0 4
+[ok] V0029__tenant_user_roles_demo_seed.sql
+INSERT 0 1
+[apply] V0030__partner_user_identity_link_persistence.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0030__partner_user_identity_link_persistence.sql
+INSERT 0 1
+[apply] V0031__feature_flags_tenant_override_constraint_fix.sql
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0031__feature_flags_tenant_override_constraint_fix.sql
+INSERT 0 1
+[apply] V0032__tenant_approval_rules_table.sql
+CREATE TABLE
+CREATE INDEX
+[ok] V0032__tenant_approval_rules_table.sql
+INSERT 0 1
+[apply] V0033__missing_phase1_persistence_tables.sql
+CREATE SCHEMA
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0033__missing_phase1_persistence_tables.sql
+INSERT 0 1
+[apply] V0034__phase1_delta_supply_eligibility_mobile_reporting.sql
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+[ok] V0034__phase1_delta_supply_eligibility_mobile_reporting.sql
+INSERT 0 1
+[apply] V0035__driver_location_event_id_text.sql
+ALTER TABLE
+[ok] V0035__driver_location_event_id_text.sql
+INSERT 0 1
+[apply] V0036__service_area_geofence_authority.sql
+CREATE EXTENSION
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0036__service_area_geofence_authority.sql
+INSERT 0 1
+[apply] V0037__phase2_av_sandbox_evidence_skeleton.sql
+CREATE EXTENSION
+NOTICE:  extension "pgcrypto" already exists, skipping
+CREATE SCHEMA
+CREATE SCHEMA
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0037__phase2_av_sandbox_evidence_skeleton.sql
+INSERT 0 1
+[apply] V0038__phase2_av_sandbox_governance_postgis.sql
+CREATE EXTENSION
+NOTICE:  extension "postgis" already exists, skipping
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+[ok] V0038__phase2_av_sandbox_governance_postgis.sql
+INSERT 0 1
+[apply] V0039__phase2_av_sandbox_governance_versioned_keys.sql
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+[ok] V0039__phase2_av_sandbox_governance_versioned_keys.sql
+INSERT 0 1
+[apply] V0042__passenger_disclosure_policy_catalog_acknowledgements.sql
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+INSERT 0 2
+[ok] V0042__passenger_disclosure_policy_catalog_acknowledgements.sql
+INSERT 0 1
+[apply] V0043__phase2_safety_operator_runtime.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0043__phase2_safety_operator_runtime.sql
+INSERT 0 1
+[apply] V0044__phase2_sandbox_governance_versions.sql
+NOTICE:  extension "pgcrypto" already exists, skipping
+CREATE EXTENSION
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+[ok] V0044__phase2_sandbox_governance_versions.sql
+INSERT 0 1
+[apply] V0045__phase2_sandbox_billing_ledger.sql
+NOTICE:  schema "av_sandbox" already exists, skipping
+CREATE SCHEMA
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0045__phase2_sandbox_billing_ledger.sql
+INSERT 0 1
+[apply] V0046__phase2_av_sandbox_skeleton_schema_gaps.sql
+ALTER TABLE
+ALTER TABLE
+[ok] V0046__phase2_av_sandbox_skeleton_schema_gaps.sql
+INSERT 0 1
+[skip] V0047 already applied
+[apply] V0048__service_area_review_lifecycle.sql
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+[ok] V0048__service_area_review_lifecycle.sql
+INSERT 0 1
+[apply] V0049__service_area_baseline_seed.sql
+INSERT 0 2
+INSERT 0 2
+[ok] V0049__service_area_baseline_seed.sql
+INSERT 0 1
+[apply] V0050__supply_external_ids_as_varchar.sql
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+[ok] V0050__supply_external_ids_as_varchar.sql
+INSERT 0 1
+[apply] V0051__p5_vehicle_disclosure_and_driver_credentials.sql
+ALTER TABLE
+ALTER TABLE
+DO
+CREATE TABLE
+CREATE TABLE
+[ok] V0051__p5_vehicle_disclosure_and_driver_credentials.sql
+INSERT 0 1
+[apply] V0052__s3_driver_sos.sql
+CREATE SCHEMA
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+[ok] V0052__s3_driver_sos.sql
+INSERT 0 1
+[apply] V0053__s3_driver_sos_urgent_alert_outbox.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0053__s3_driver_sos_urgent_alert_outbox.sql
+INSERT 0 1
+[apply] V0054__make_driver_credentials_columns_nullable.sql
+ALTER TABLE
+[ok] V0054__make_driver_credentials_columns_nullable.sql
+INSERT 0 1
+[apply] V0055__p5_disclosure_ids_as_varchar.sql
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+[ok] V0055__p5_disclosure_ids_as_varchar.sql
+INSERT 0 1
+[apply] V0056__multi_taxi_runtime_compliance_closure.sql
+NOTICE:  column "service_product_code" of relation "phase1_owned_orders" already exists, skipping
+ALTER TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+[ok] V0056__multi_taxi_runtime_compliance_closure.sql
+INSERT 0 1
+[apply] V0057__runtime_profile_service_product_policy.sql
+CREATE TABLE
+INSERT 0 1
+[ok] V0057__runtime_profile_service_product_policy.sql
+INSERT 0 1
+[apply] V0058__passenger_rating_invalidation_authority.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0058__passenger_rating_invalidation_authority.sql
+INSERT 0 1
+[apply] V0059__fare_quote_anomaly_authority.sql
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+[ok] V0059__fare_quote_anomaly_authority.sql
+INSERT 0 1
+[apply] V0060__multi_taxi_payment_exception_read_authority.sql
+ALTER TABLE
+NOTICE:  constraint "multi_taxi_payment_attempt_count_chk" of relation "multi_taxi_passenger_payments" does not exist, skipping
+ALTER TABLE
+ALTER TABLE
+NOTICE:  constraint "multi_taxi_payment_available_actions_array_chk" of relation "multi_taxi_passenger_payments" does not exist, skipping
+ALTER TABLE
+ALTER TABLE
+[ok] V0060__multi_taxi_payment_exception_read_authority.sql
+INSERT 0 1
+[apply] V0061__s3_attachment_scan_and_alert_latency.sql
+ALTER TABLE
+UPDATE 0
+ALTER TABLE
+ALTER TABLE
+UPDATE 0
+ALTER TABLE
+ALTER TABLE
+UPDATE 0
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+[ok] V0061__s3_attachment_scan_and_alert_latency.sql
+INSERT 0 1
+[apply] V0062__multi_taxi_electronic_certificate_writer.sql
+ALTER TABLE
+ALTER TABLE
+DO
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[ok] V0062__multi_taxi_electronic_certificate_writer.sql
+INSERT 0 1
+[apply] V0063__multi_taxi_payment_recovery_commands.sql
+CREATE TABLE
+CREATE INDEX
+NOTICE:  constraint "multi_taxi_payment_recovery_receipt_state_chk" of relation "multi_taxi_payment_recovery_commands" does not exist, skipping
+ALTER TABLE
+ALTER TABLE
+[ok] V0063__multi_taxi_payment_recovery_commands.sql
+INSERT 0 1
+[done] migrations applied from infra/migrations

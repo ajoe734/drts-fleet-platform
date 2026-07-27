@@ -1,0 +1,33 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 935856
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-020-service-product-runtime-eligibility
+  ✓ PASS  E2E-020-service-product-runtime-eligibility
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-935856.json
+  Evidence log:  /tmp/drts-e2e-evidence-935856.log
+
+Evidence capture:
+2026-07-27T02:18:34Z | E2E-020 | platform_admin | serviceProductActive=true
+2026-07-27T02:18:34Z | E2E-020 | platform_admin | serviceProductId=SVP-000001
+2026-07-27T02:18:34Z | E2E-020 | platform_admin | matrixConfigured=taxi_rejected_multi_purpose_taxi_accepted
+2026-07-27T02:18:34Z | E2E-020 | tenant | bookingId=booking-000001
+2026-07-27T02:18:34Z | E2E-020 | tenant | orderId=d317dd3a-29db-4d7a-b4b8-ae537db1f36f
+2026-07-27T02:18:34Z | E2E-020 | tenant | businessDispatchSubtype=credit_card_airport_transfer
+2026-07-27T02:18:34Z | E2E-020 | ops | dispatchJobId=9b46a608-f110-49dc-ab3f-5abc966a98df
+2026-07-27T02:18:34Z | E2E-020 | ops | eligibleVehicleId=veh-demo-001
+2026-07-27T02:18:34Z | E2E-020 | ops | ineligibleTaxiCode=ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT
+2026-07-27T02:18:34Z | E2E-020 | ops | ineligibleTaxiReasonCode=VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT
+2026-07-27T02:18:34Z | E2E-020 | ops | taskId=b4aa0666-600d-4968-9c78-76de3b612239
+2026-07-27T02:18:34Z | E2E-020 | driver | taskId=b4aa0666-600d-4968-9c78-76de3b612239
+2026-07-27T02:18:34Z | E2E-020 | driver | serviceProductCode=credit_card_airport_transfer
+════════════════════════════════════════════════════════
+
