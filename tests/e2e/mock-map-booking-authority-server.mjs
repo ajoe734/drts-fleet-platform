@@ -49,6 +49,63 @@ const ctbcEntry = {
   },
 };
 
+function createAirportCardEntry({
+  slug,
+  bankCode,
+  displayName,
+  programCode,
+  themeAccent,
+}) {
+  return {
+    ...ctbcEntry,
+    partnerId: `partner-${slug}`,
+    partnerCode: bankCode,
+    programId: `program-${slug}-airport`,
+    programCode,
+    tenantId: `tenant-${slug}`,
+    bankCode,
+    entrySlug: slug,
+    displayName,
+    entryHost: `${slug}.partner.invalid`,
+    entryPath: `/${slug}/program/site`,
+    themeAccent,
+    brandingMetadata: {
+      ...ctbcEntry.brandingMetadata,
+      displayName,
+      themeAccent,
+      supportEmail: `airport-service@${slug}.invalid`,
+    },
+    auditMetadata: {
+      ...ctbcEntry.auditMetadata,
+      requestId: `req-mock-partner-entry-${slug}`,
+    },
+  };
+}
+
+const cathayEntry = createAirportCardEntry({
+  slug: "cathay",
+  bankCode: "CATHAY",
+  displayName: "國泰世華 CUBE World 機場接送",
+  programCode: "CUBE-WORLD",
+  themeAccent: "#0A3621",
+});
+
+const taishinEntry = createAirportCardEntry({
+  slug: "taishin",
+  bankCode: "TAISHIN",
+  displayName: "台新銀行 Infinite 機場接送",
+  programCode: "TAISHIN-INFINITE",
+  themeAccent: "#7C2241",
+});
+
+const dbsEntry = createAirportCardEntry({
+  slug: "dbs",
+  bankCode: "DBS",
+  displayName: "星展銀行 Insignia 機場接送",
+  programCode: "DBS-INSIGNIA",
+  themeAccent: "#9B1B22",
+});
+
 const fubonEntry = {
   partnerId: "partner-fubon",
   partnerCode: "FUBON",
@@ -127,6 +184,9 @@ const lionEntry = {
 
 const entries = {
   ctbc: ctbcEntry,
+  cathay: cathayEntry,
+  taishin: taishinEntry,
+  dbs: dbsEntry,
   fubon: fubonEntry,
   lion: lionEntry,
 };

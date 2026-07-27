@@ -781,6 +781,117 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     },
   },
   {
+    partnerId: "partner-cathay-card-001",
+    partnerCode: "cathay",
+    partnerType: "bank_partner",
+    programId: "program-cathay-cube-world",
+    programCode: "CUBE_WORLD",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "CATHAY",
+    entrySlug: "cathay",
+    displayName: "Cathay CUBE World",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: "ride.cathaybk.com.tw",
+    entryPath: "/cathay/program/site",
+    themeAccent: "#0A3621",
+    brandingMetadata: {
+      displayName: "Cathay CUBE World",
+      themeAccent: "#0A3621",
+      supportEmail: "cube-world@cathay.example",
+      supportPhone: "0800-818-001",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-07-27T00:00:00.000Z",
+    updatedAt: "2026-07-27T00:00:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-cathay",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
+    partnerId: "partner-taishin-card-001",
+    partnerCode: "taishin",
+    partnerType: "bank_partner",
+    programId: "program-taishin-infinite",
+    programCode: "TAISHIN_INFINITE",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "TAISHIN",
+    entrySlug: "taishin",
+    displayName: "Taishin Infinite",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: "ride.taishinbank.com.tw",
+    entryPath: "/taishin/program/site",
+    themeAccent: "#7C2241",
+    brandingMetadata: {
+      displayName: "Taishin Infinite",
+      themeAccent: "#7C2241",
+      supportEmail: "infinite@taishin.example",
+      supportPhone: "0800-023-123",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-07-27T00:05:00.000Z",
+    updatedAt: "2026-07-27T00:05:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-taishin",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
+    partnerId: "partner-dbs-card-001",
+    partnerCode: "dbs",
+    partnerType: "bank_partner",
+    programId: "program-dbs-insignia",
+    programCode: "DBS_INSIGNIA",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "DBS",
+    entrySlug: "dbs",
+    displayName: "DBS Insignia",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: "ride.dbs.com.tw",
+    entryPath: "/dbs/program/site",
+    themeAccent: "#9B1B22",
+    brandingMetadata: {
+      displayName: "DBS Insignia",
+      themeAccent: "#9B1B22",
+      supportEmail: "insignia@dbs.example",
+      supportPhone: "0800-808-889",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-07-27T00:10:00.000Z",
+    updatedAt: "2026-07-27T00:10:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-dbs",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
     partnerId: "partner-fubon-claim-001",
     partnerCode: "fubon",
     partnerType: "bank_partner",
@@ -867,6 +978,26 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       entrySlug: "bank-demo-beta-airport",
       keyId: "partner-key-beta-demo",
       envVarName: "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT",
+    },
+    {
+      entrySlug: "ctbc",
+      keyId: "partner-key-ctbc-dev",
+      envVarName: "PARTNER_INGRESS_KEY_CTBC",
+    },
+    {
+      entrySlug: "cathay",
+      keyId: "partner-key-cathay-dev",
+      envVarName: "PARTNER_INGRESS_KEY_CATHAY",
+    },
+    {
+      entrySlug: "taishin",
+      keyId: "partner-key-taishin-dev",
+      envVarName: "PARTNER_INGRESS_KEY_TAISHIN",
+    },
+    {
+      entrySlug: "dbs",
+      keyId: "partner-key-dbs-dev",
+      envVarName: "PARTNER_INGRESS_KEY_DBS",
     },
   ];
 
@@ -3908,7 +4039,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
 
-  listReferralRevenueShareRules(entrySlug?: string): ReferralRevenueShareRule[] {
+  listReferralRevenueShareRules(
+    entrySlug?: string,
+  ): ReferralRevenueShareRule[] {
     const slug = entrySlug?.trim();
     return this.referralRevenueShareRules
       .filter((rule) => !slug || rule.partnerEntrySlug === slug)
@@ -4106,7 +4239,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       entry.entrySlug,
     );
     const period =
-      periodMonth?.trim() || statements[0]?.period || new Date().toISOString().slice(0, 7);
+      periodMonth?.trim() ||
+      statements[0]?.period ||
+      new Date().toISOString().slice(0, 7);
     const statement = billingSettlementService.getReferralStatement(
       entry.entrySlug,
       period,
@@ -4137,7 +4272,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const statements = await billingSettlementService.listReferralStatements(
       entry.entrySlug,
     );
-    return statements.map((statement) => this.toPartnerReferralUsage(statement));
+    return statements.map((statement) =>
+      this.toPartnerReferralUsage(statement),
+    );
   }
 
   async listPartnerReferralRevenue(

@@ -634,10 +634,21 @@ jobs:
           fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
 
-          if gcloud secrets describe "${secret_prefix}-internal-key" --project "$project_id" >/dev/null 2>&1; then
-            secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
-            web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
+          internal_key_secret="${secret_prefix}-internal-key"
+          if ! gcloud secrets describe "$internal_key_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${internal_key_secret} not found in project ${project_id}."
+            exit 1
           fi
+          secret_args="${secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+          web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+
+          # Dev embeds use server-to-server handoff. Map the existing internal
+          # secret to issuer-scoped credential slots without exposing it to the
+          # browser or accepting API keys from query parameters.
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_CTBC=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_CATHAY=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_TAISHIN=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_DBS=${internal_key_secret}:latest"
 
           geocoding_secret="${secret_prefix}-google-maps-geocoding-api-key"
           routes_secret="${secret_prefix}-google-maps-routes-api-key"
@@ -1108,6 +1119,10 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.referral_embed }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc/program" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc/program/embed" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/cathay/program/embed" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/taishin/program/embed" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/dbs/program/embed" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.concierge_portal }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.passenger_web }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
