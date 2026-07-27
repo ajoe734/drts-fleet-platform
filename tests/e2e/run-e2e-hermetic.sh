@@ -162,6 +162,12 @@ stop_api() {
   wait_for_api_port_state free || return 1
 }
 
+stop_api_on_exit() {
+  if ! stop_api; then
+    echo "[hermetic] cleanup warning: API port ${API_PORT} did not become free before process exit" >&2
+  fi
+}
+
 run_admin_psql() {
   if postgres_container_running; then
     docker exec -i \
@@ -274,7 +280,7 @@ start_api() {
   echo "[hermetic] API failed to become healthy"; tail -n 40 "$API_LOG"; return 1
 }
 
-trap stop_api EXIT
+trap stop_api_on_exit EXIT
 
 if ! ensure_api_build; then
   echo "[hermetic] API build failed; aborting run"
