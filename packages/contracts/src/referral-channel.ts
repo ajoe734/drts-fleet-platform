@@ -65,7 +65,7 @@ export interface PartnerUserIdentityLinkRecord {
 
 export interface CreatePartnerIngressHandoffCommand {
   entrySlug: string;
-  apiKey: string;
+  apiKey?: string;
   partnerUserRef: string;
   consentScope?: PartnerUserIdentityConsentScope;
 }

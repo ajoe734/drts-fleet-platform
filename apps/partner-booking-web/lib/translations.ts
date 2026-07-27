@@ -442,6 +442,26 @@ const en = {
   "airport.track.driverName": "Chen J.",
   "airport.track.minutesToArrival": "min to arrival",
   "airport.track.dispatched": "Dispatched · heading to pickup",
+  "airport.label.orderId": "Order ID",
+  "airport.label.eligibility": "Eligibility",
+  "airport.label.route": "Route",
+  "airport.embed.submitting": "Submitting...",
+  "airport.embed.error.missingCredentials":
+    "Embedded session handoff is missing. Reopen this page from the banking app.",
+  "airport.embed.error.programUnavailable":
+    "This embedded booking program is unavailable right now.",
+  "airport.embed.error.manualReview":
+    "Eligibility is under manual review. Booking cannot be created yet.",
+  "airport.embed.error.eligibilityFailed":
+    "Eligibility verification failed. Booking was not created.",
+  "airport.embed.error.submitUnavailable":
+    "Booking submission is unavailable on this surface.",
+  "airport.embed.error.submitFailed": "Booking submission failed.",
+  "airport.status.created": "Created",
+  "airport.status.ready_for_dispatch": "Ready for dispatch",
+  "airport.status.assigned": "Driver assigned",
+  "airport.status.completed": "Completed",
+  "airport.status.cancelled": "Cancelled",
   "airport.btn.doneBack": "Done · back",
   "airport.faq.title": "FAQ",
   "airport.cta.title": "Ready to go?",
@@ -879,6 +899,25 @@ const zh = {
   "airport.track.driverName": "陳俊宏",
   "airport.track.minutesToArrival": "分鐘抵達",
   "airport.track.dispatched": "已派車 · 前往上車點",
+  "airport.label.orderId": "訂單編號",
+  "airport.label.eligibility": "資格驗證",
+  "airport.label.route": "路線",
+  "airport.embed.submitting": "送出中...",
+  "airport.embed.error.missingCredentials":
+    "缺少內嵌登入交接資訊，請回到銀行 App 重新開啟此頁。",
+  "airport.embed.error.programUnavailable":
+    "此內嵌預約方案目前無法使用。",
+  "airport.embed.error.manualReview":
+    "資格正在人工審查中，暫時無法建立預約。",
+  "airport.embed.error.eligibilityFailed":
+    "資格驗證未通過，尚未建立預約。",
+  "airport.embed.error.submitUnavailable": "此頁面目前無法送出預約。",
+  "airport.embed.error.submitFailed": "預約送出失敗。",
+  "airport.status.created": "已建立",
+  "airport.status.ready_for_dispatch": "待派車",
+  "airport.status.assigned": "已指派司機",
+  "airport.status.completed": "已完成",
+  "airport.status.cancelled": "已取消",
   "airport.btn.doneBack": "完成 · 返回",
   "airport.faq.title": "常見問題",
   "airport.cta.title": "準備好出發了嗎？",
