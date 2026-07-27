@@ -634,16 +634,14 @@ jobs:
           fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
 
-          internal_key_secret="${secret_prefix}-internal-key"
-          if ! gcloud secrets describe "$internal_key_secret" --project "$project_id" >/dev/null 2>&1; then
-            echo "::error::Required secret ${internal_key_secret} not found in project ${project_id}."
-            exit 1
-          fi
+          # Dev reuses the already-managed JWT secret for internal handoff.
+          # Production environments can map these slots to distinct secrets.
+          internal_key_secret="${secret_prefix}-jwt-secret"
           secret_args="${secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
           web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
 
-          # Dev embeds use server-to-server handoff. Map the existing internal
-          # secret to issuer-scoped credential slots without exposing it to the
+          # Dev embeds use server-to-server handoff. Map the managed secret to
+          # issuer-scoped credential slots without exposing it to the
           # browser or accepting API keys from query parameters.
           secret_args="${secret_args},PARTNER_INGRESS_KEY_CTBC=${internal_key_secret}:latest"
           secret_args="${secret_args},PARTNER_INGRESS_KEY_CATHAY=${internal_key_secret}:latest"
