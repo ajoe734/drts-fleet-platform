@@ -10,16 +10,17 @@
 | Reviewer                              | `Claude`                                                                                                                                       |
 | Inspection date                       | `2026-07-27`                                                                                                                                   |
 | Worktree branch                       | `codex/e2e-mtx-001`                                                                                                                            |
-| Evidence-producing runtime head       | `07b476f6f99f18be7857fb957611a498d4fb643a`                                                                                                     |
+| Evidence-producing runtime head       | `525e1488d15efa398728636205ba938820b85505`                                                                                                     |
 | Durable hermetic evidence directory   | `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/`                                                                                      |
 | Execution packet                      | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md`                                                  |
 | Source DoD                            | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/source_specs/01_system_development_team_spec_20260720.md#33-definition-of-done--system` |
 | Prior Fleet H sidecar reused as input | `support/sidecars/E2E-MTX-UI-FULL-001/`                                                                                                        |
 
 This sidecar distinguishes the runtime head that produced the hermetic evidence
-from later documentation-only follow-up commits. Reviewer verification should
-anchor PASS(22) provenance on the runtime head above plus the committed log
-bundle under `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/`.
+from later follow-up commits on the reviewed branch head
+`e99c647b125beeda0357c265f4ff739666a86232`. Reviewer verification should anchor
+PASS(22) provenance on the runtime head above plus the committed log bundle
+under `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/`.
 
 ## Task interpretation
 
@@ -83,7 +84,7 @@ blockers only.
 | §33 DoD item inventory                        | `verified_current_head` | The matrix maps all 20 §33 items verbatim to scenario IDs and evidence references, and now discloses which scenario IDs are planned-only.                              |
 | Fleet acceptance evidence reuse               | `verified_current_head` | The matrix now ties Fleets A-H evidence into one release packet.                                                                                                       |
 | Shared hermetic runner                        | `verified_current_head` | `tests/e2e/run-e2e-hermetic.sh` now uses the shared `maybe_timeout` helper for API builds and no longer leaves the unused `run_logged` path behind.                    |
-| All hermetic suites green on current head     | `verified_current_head` | Runtime head `07b476f6f99f18be7857fb957611a498d4fb643a` completed `E2E-001` through `E2E-022`; all suite, migrate, and seed logs are committed under the task sidecar. |
+| All hermetic suites green on current head     | `partial_current_head`  | Full-suite green evidence is committed for runtime head `525e1488d15efa398728636205ba938820b85505`; the later reviewed branch head `e99c647b125beeda0357c265f4ff739666a86232` was not rerun after its harness cleanup and disclosure edits. |
 | Final unresolved-blocker list                 | `verified_current_head` | This sidecar and `EVIDENCE-MATRIX.md` now record the unresolved blockers explicitly.                                                                                   |
 
 ## Commands executed on 2026-07-27
@@ -128,9 +129,12 @@ HERMETIC_LOG_DIR=support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z \
 2. This task now adds the missing single Fleet H matrix plus committed durable
    PASS(22) evidence.
 3. The Fleet H global hermetic rerun is green on evidence-producing runtime
-   head `07b476f6f99f18be7857fb957611a498d4fb643a`, and the proof is no longer
+   head `525e1488d15efa398728636205ba938820b85505`, and the proof is no longer
    left under `/tmp`.
-4. S-3 still carries existing external evidence blockers and one direct
+4. The later reviewed branch head `e99c647b125beeda0357c265f4ff739666a86232`
+   includes shared-harness cleanup and sidecar disclosure edits, but no new
+   full-suite rerun is claimed for that head.
+5. S-3 still carries existing external evidence blockers and one direct
    current-head failure from `S3-VERIFY-001`.
 
 ## Final unresolved blockers as of 2026-07-27

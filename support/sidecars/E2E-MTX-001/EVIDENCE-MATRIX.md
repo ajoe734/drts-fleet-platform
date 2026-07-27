@@ -12,13 +12,19 @@ This matrix maps three layers into one Fleet H release packet:
 
 Status vocabulary:
 
-- `verified_current_head`: repo-local evidence exists and is explicit.
+- `verified_current_head`: repo-local evidence exists and is explicit on the
+  reviewed branch head.
+- `verified_runtime_head`: repo-local evidence exists and is explicit on the
+  recorded evidence-producing runtime head, with later branch-head deltas
+  disclosed.
 - `partial`: evidence exists but does not satisfy the whole acceptance chain.
 - `blocked_current_head`: current-head rerun or gate did not complete.
 - `blocked_ext`: requires external, device, provider, or production evidence.
 - `failed_current_head`: direct current-head failure is already recorded.
 
-Evidence-producing runtime head: `07b476f6f99f18be7857fb957611a498d4fb643a`.
+Evidence-producing runtime head: `525e1488d15efa398728636205ba938820b85505`.
+Reviewed branch head with post-run documentation cleanup:
+`e99c647b125beeda0357c265f4ff739666a86232`.
 Durable hermetic evidence directory:
 `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/`.
 
@@ -68,14 +74,14 @@ fleet's current-head sidecar explicitly.
 | Fleet F certificates and records       | `support/sidecars/P5-RCT-SUPPORT-UI-001/CURRENT-HEAD-PREFLIGHT.md`; `support/sidecars/P5-HOLD-001/CURRENT-HEAD-PREFLIGHT.md`                                                                                                                                                                                           | `partial`               | Read surfaces are verified; producer/regeneration/full persisted journey remain incomplete.                                                                                                             |
 | Fleet G S-3 verification               | `support/sidecars/S3-VERIFY-001/CURRENT-HEAD-PREFLIGHT.md`; `support/sidecars/S3-VERIFY-001/S3-VERIFY-001-EVIDENCE.md`                                                                                                                                                                                                 | `partial`               | Repo-local verification exists, but external/device and vocabulary blockers remain.                                                                                                                     |
 | Fleet H 17-screen cross-surface census | `support/sidecars/E2E-MTX-UI-FULL-001/CURRENT-HEAD-PREFLIGHT.md`; `support/sidecars/E2E-MTX-UI-FULL-001/EVIDENCE-MATRIX.md`                                                                                                                                                                                            | `partial`               | The 17-screen census is verified, but it still documents missing single persisted cross-surface journey evidence.                                                                                       |
-| Fleet H full hermetic rerun            | `tests/e2e/run-e2e-hermetic.sh`; `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/20260727T013612Z-E2E-001-suite.log`; `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/20260727T013612Z-E2E-008-suite.log`; `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/20260727T013612Z-E2E-022-suite.log` | `verified_current_head` | The 2026-07-27 isolated worktree-local rerun completed `E2E-001` through `E2E-022` and emitted `[hermetic] PASS (22)` with `FAIL (0): none` on runtime head `07b476f6f99f18be7857fb957611a498d4fb643a`. |
+| Fleet H full hermetic rerun            | `tests/e2e/run-e2e-hermetic.sh`; `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/20260727T013612Z-E2E-001-suite.log`; `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/20260727T013612Z-E2E-008-suite.log`; `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/20260727T013612Z-E2E-022-suite.log` | `verified_runtime_head` | The 2026-07-27 isolated worktree-local rerun completed `E2E-001` through `E2E-022` and emitted `[hermetic] PASS (22)` with `FAIL (0): none` on runtime head `525e1488d15efa398728636205ba938820b85505`; later branch-head commits only adjusted sidecar disclosures and the shared harness helper path. |
 
 ## Shared Harness Result
 
 | Command                                                                                                   | Date         | Result | Evidence                                                                                                                                                                                                                                                                                                                                                     |
 | --------------------------------------------------------------------------------------------------------- | ------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `python3 scripts/ensure-local-node-modules.py repair`                                                     | `2026-07-27` | `PASS` | Restored worktree-local pnpm install and local `.pnpm` virtual store.                                                                                                                                                                                                                                                                                        |
-| `HERMETIC_LOG_DIR=support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z ./tests/e2e/run-e2e-hermetic.sh` | `2026-07-27` | `PASS` | Runtime head `07b476f6f99f18be7857fb957611a498d4fb643a` completed `E2E-001` through `E2E-022` and emitted `[hermetic] PASS (22): 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 016 017 018 019 020 021 022` with `FAIL (0): none`; durable task-local artifacts are committed under `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/`. |
+| `HERMETIC_LOG_DIR=support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z ./tests/e2e/run-e2e-hermetic.sh` | `2026-07-27` | `PASS` | Runtime head `525e1488d15efa398728636205ba938820b85505` completed `E2E-001` through `E2E-022` and emitted `[hermetic] PASS (22): 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 016 017 018 019 020 021 022` with `FAIL (0): none`; durable task-local artifacts are committed under `support/sidecars/E2E-MTX-001/hermetic/20260727T013549Z/`. The later reviewed branch head `e99c647b125beeda0357c265f4ff739666a86232` was not rerun after its shared-harness cleanup and disclosure edits. |
 
 ## Final unresolved blockers
 
