@@ -13,6 +13,7 @@ permissions:
   id-token: write
 
 env:
+  CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
   DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
   DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
   DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
@@ -36,6 +37,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+          install_components: beta
 
       - name: Show acting identity
         run: |
@@ -51,7 +53,7 @@ jobs:
 
           map() {  # map <subdomain> <service>
             echo "::group::$1 -> $2"
-            gcloud beta run domain-mappings create \
+            gcloud --quiet beta run domain-mappings create \
               --service "$2" --domain "$1" \
               --region "$REGION" --project "$PROJECT" 2>&1
             echo "::endgroup::"
@@ -72,5 +74,5 @@ jobs:
 
       - name: List mappings
         run: |
-          gcloud beta run domain-mappings list \
+          gcloud --quiet beta run domain-mappings list \
             --region "${{ env.DEV_GCP_REGION }}" --project "${{ env.DEV_GCP_PROJECT_ID }}" 2>&1 || true
