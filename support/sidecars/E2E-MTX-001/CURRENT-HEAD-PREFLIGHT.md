@@ -10,7 +10,7 @@
 | Reviewer                              | `Claude`                                                                                                                                       |
 | Inspection date                       | `2026-07-26`                                                                                                                                   |
 | Worktree branch                       | `codex/e2e-mtx-001`                                                                                                                            |
-| Current head                          | `bfa0b85daa5cc67eb8be341475f021d295361eb9`                                                                                                     |
+| Current head                          | `331056b29c694ee0e94bca3ee4060b8cf16f4e90`                                                                                                     |
 | Hermetic PASS(22) producing head      | `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`                                                                                                     |
 | Execution packet                      | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/07_fleets_execution_tasks_20260723.md`                                                  |
 | Source DoD                            | `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/source_specs/01_system_development_team_spec_20260720.md#33-definition-of-done--system` |
@@ -74,7 +74,7 @@ blockers only.
 | §33 DoD item inventory                        | `verified_current_head` | The matrix maps all 20 §33 items verbatim to scenario and evidence references.                                                                                       |
 | Fleet acceptance evidence reuse               | `verified_current_head` | The matrix now ties Fleets A-H evidence into one release packet.                                                                                                     |
 | Shared hermetic runner                        | `verified_current_head` | `tests/e2e/run-e2e-hermetic.sh` on current head still contains the isolated DB, auto-repair, timeout, and log-capture changes that produced the recorded rerun.    |
-| All hermetic suites green on current head     | `verified_current_head` | The uninterrupted PASS(22) rerun was produced on `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`; current head `bfa0b85daa5cc67eb8be341475f021d295361eb9` is docs-only. |
+| All hermetic suites green on current head     | `verified_current_head` | The uninterrupted PASS(22) rerun was produced on `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`; current head `331056b29c694ee0e94bca3ee4060b8cf16f4e90` is docs-only. |
 | Final unresolved-blocker list                 | `verified_current_head` | This sidecar and `EVIDENCE-MATRIX.md` now record the unresolved blockers explicitly.                                                                                 |
 
 ## Commands executed on 2026-07-26
@@ -164,7 +164,7 @@ evidence.
 3. The Fleet H global hermetic rerun is green for the current harness state.
    The PASS(22) evidence was produced on
    `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`, and current head
-   `bfa0b85daa5cc67eb8be341475f021d295361eb9` only finalizes documentation for
+   `331056b29c694ee0e94bca3ee4060b8cf16f4e90` only finalizes documentation for
    that same harness state.
 4. S-3 still carries existing external evidence blockers and one direct
    current-head failure from `S3-VERIFY-001`.
