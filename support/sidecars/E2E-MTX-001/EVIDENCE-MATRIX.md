@@ -17,7 +17,7 @@ Status vocabulary:
 - `blocked_ext`: requires external, device, provider, or production evidence.
 - `failed_current_head`: direct current-head failure is already recorded.
 
-Current head for this matrix: `bfa0b85daa5cc67eb8be341475f021d295361eb9`.
+Current head for this matrix: `331056b29c694ee0e94bca3ee4060b8cf16f4e90`.
 Hermetic PASS(22) producing head: `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`.
 
 ## §33 DoD Matrix
@@ -58,7 +58,7 @@ Hermetic PASS(22) producing head: `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`.
 | Fleet F certificates and records       | `support/sidecars/P5-RCT-SUPPORT-UI-001/CURRENT-HEAD-PREFLIGHT.md`; `support/sidecars/P5-HOLD-001/CURRENT-HEAD-PREFLIGHT.md`                                                                                           | `partial`               | Read surfaces are verified; producer/regeneration/full persisted journey remain incomplete.                                                       |
 | Fleet G S-3 verification               | `support/sidecars/S3-VERIFY-001/CURRENT-HEAD-PREFLIGHT.md`; `support/sidecars/S3-VERIFY-001/S3-VERIFY-001-EVIDENCE.md`                                                                                                 | `partial`               | Repo-local verification exists, but external/device and vocabulary blockers remain.                                                               |
 | Fleet H 17-screen cross-surface census | `support/sidecars/E2E-MTX-UI-FULL-001/CURRENT-HEAD-PREFLIGHT.md`; `support/sidecars/E2E-MTX-UI-FULL-001/EVIDENCE-MATRIX.md`                                                                                            | `partial`               | The 17-screen census is verified, but it still documents missing single persisted cross-surface journey evidence.                                 |
-| Fleet H full hermetic rerun            | `tests/e2e/run-e2e-hermetic.sh`; `/tmp/drts-e2e-hermetic/20260726T183257Z-E2E-001-suite.log`; `/tmp/drts-e2e-hermetic/20260726T183257Z-E2E-008-suite.log`; `/tmp/drts-e2e-hermetic/20260726T183257Z-E2E-022-suite.log` | `verified_current_head` | The isolated worktree-local rerun completed `E2E-001` through `E2E-022` and emitted `[hermetic] PASS (22)` with `FAIL (0): none` on `2026-07-26`; the rerun was produced on `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`, and current head `bfa0b85daa5cc67eb8be341475f021d295361eb9` is docs-only. |
+| Fleet H full hermetic rerun            | `tests/e2e/run-e2e-hermetic.sh`; `/tmp/drts-e2e-hermetic/20260726T183257Z-E2E-001-suite.log`; `/tmp/drts-e2e-hermetic/20260726T183257Z-E2E-008-suite.log`; `/tmp/drts-e2e-hermetic/20260726T183257Z-E2E-022-suite.log` | `verified_current_head` | The isolated worktree-local rerun completed `E2E-001` through `E2E-022` and emitted `[hermetic] PASS (22)` with `FAIL (0): none` on `2026-07-26`; the rerun was produced on `371cc59cd29ef5a4a93c9b0977ea3a7438fdfcf3`, and current head `331056b29c694ee0e94bca3ee4060b8cf16f4e90` is docs-only. |
 
 ## Shared Harness Result
 
