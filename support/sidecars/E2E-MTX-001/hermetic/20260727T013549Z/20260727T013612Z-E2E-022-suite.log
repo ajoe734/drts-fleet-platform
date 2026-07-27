@@ -1,0 +1,47 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 1021001
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-022-operations-reporting
+  ✓ PASS  E2E-022-operations-reporting
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-1021001.json
+  Evidence log:  /tmp/drts-e2e-evidence-1021001.log
+
+Evidence capture:
+2026-07-27T02:22:44Z | E2E-022 | app | orderId=c6e9462e-d1e9-438b-9aab-483291f880f6
+2026-07-27T02:22:44Z | E2E-022 | app | dispatchJobId=083318f5-b546-4f7e-a1ec-9440b5fcc52c
+2026-07-27T02:22:45Z | E2E-022 | dispatch | 083318f5-b546-4f7e-a1ec-9440b5fcc52c.candidateCount=1
+2026-07-27T02:22:45Z | E2E-022 | app | taskId=39d25ec6-b181-42a3-9490-d7d088026afa
+2026-07-27T02:22:45Z | E2E-022 | driver | app.taskId=39d25ec6-b181-42a3-9490-d7d088026afa
+2026-07-27T02:22:45Z | E2E-022 | driver | app.driverId=drv-demo-001
+2026-07-27T02:22:45Z | E2E-022 | app | complaintCaseNo=C-20260727-000001
+2026-07-27T02:22:45Z | E2E-022 | phone | orderId=0db36334-03ab-42d6-b8d8-d6f124c4d2d4
+2026-07-27T02:22:45Z | E2E-022 | phone | dispatchJobId=55666d2c-df0c-4387-ac21-9d7eb057e2d1
+2026-07-27T02:22:45Z | E2E-022 | dispatch | 55666d2c-df0c-4387-ac21-9d7eb057e2d1.candidateCount=1
+2026-07-27T02:22:45Z | E2E-022 | phone | initialTaskId=5368162b-ace5-4a6b-afc4-dfcb3f7cb7a4
+2026-07-27T02:22:45Z | E2E-022 | phone | redispatchJobId=dcd13c88-298f-4cec-a87d-b42ce3e48798
+2026-07-27T02:22:45Z | E2E-022 | dispatch | dcd13c88-298f-4cec-a87d-b42ce3e48798.candidateCount=1
+2026-07-27T02:22:45Z | E2E-022 | phone | taskId=4d1b26b5-de02-42d5-b646-5d8288756b1c
+2026-07-27T02:22:45Z | E2E-022 | phone | complaintCaseNo=C-20260727-000002
+2026-07-27T02:22:45Z | E2E-022 | portal | bookingId=booking-000001
+2026-07-27T02:22:45Z | E2E-022 | portal | orderId=2337d79c-4c02-4e4b-adf0-7338f90bd336
+2026-07-27T02:22:45Z | E2E-022 | portal | dispatchJobId=2199756a-e524-4fb3-a85f-1fba444543d9
+2026-07-27T02:22:45Z | E2E-022 | dispatch | 2199756a-e524-4fb3-a85f-1fba444543d9.candidateCount=2
+2026-07-27T02:22:45Z | E2E-022 | portal | taskId=ebbdfce1-e380-4fb8-a697-6bd27885c596
+2026-07-27T02:22:45Z | E2E-022 | driver | portal.taskId=ebbdfce1-e380-4fb8-a697-6bd27885c596
+2026-07-27T02:22:45Z | E2E-022 | driver | portal.driverId=drv-demo-001
+2026-07-27T02:22:46Z | E2E-022 | reporting | dailyReportJobId=JOB-82955603-c0c8-433d-af69-a1c47a0711d7
+2026-07-27T02:22:46Z | E2E-022 | snapshot | capturedAt=2026-07-27T12:00:00.000Z
+2026-07-27T02:22:46Z | E2E-022 | snapshot | capturedAt=2026-07-27T12:05:00.000Z
+2026-07-27T02:22:46Z | E2E-022 | snapshot | capturedAt=2026-07-27T12:10:00.000Z
+2026-07-27T02:22:46Z | E2E-022 | reporting | summaryReportJobId=JOB-fc734844-a93e-4d0a-b391-47b00f7b4a96
+════════════════════════════════════════════════════════
+

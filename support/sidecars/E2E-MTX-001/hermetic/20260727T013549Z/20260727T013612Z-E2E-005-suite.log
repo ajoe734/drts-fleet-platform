@@ -1,0 +1,18 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 253472
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-005-tenant-governance
+  ✓ PASS  E2E-005-tenant-governance
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-253472.json
+  Evidence log:  /tmp/drts-e2e-evidence-253472.log
+════════════════════════════════════════════════════════
+

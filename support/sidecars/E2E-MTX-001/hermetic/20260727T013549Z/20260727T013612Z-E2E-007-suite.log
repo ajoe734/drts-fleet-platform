@@ -1,0 +1,40 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 338020
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-007-partner-airport-transfer
+  ✓ PASS  E2E-007-partner-airport-transfer
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-338020.json
+  Evidence log:  /tmp/drts-e2e-evidence-338020.log
+
+Evidence capture:
+2026-07-27T01:50:56Z | E2E-007 | partner | entrySlug=bank-demo-beta-airport
+2026-07-27T01:50:56Z | E2E-007 | partner | eligibilityMode=reference_required
+2026-07-27T01:50:56Z | E2E-007 | partner | partnerId=partner-bank-demo-002
+2026-07-27T01:50:56Z | E2E-007 | partner | partnerProgramId=program-airport-beta
+2026-07-27T01:50:57Z | E2E-007 | partner | eligibilityVerificationId=elig_71cc3512-45de-4e7a-88b6-8d1cad2b809a
+2026-07-27T01:50:57Z | E2E-007 | partner | benefitReference=benefit-bank_demo_beta-ed256f06
+2026-07-27T01:50:57Z | E2E-007 | partner | issuerAuthorizationRef=issuer-ref-ed256f06
+2026-07-27T01:50:57Z | E2E-007 | tenant | bookingId=booking-000001
+2026-07-27T01:50:57Z | E2E-007 | tenant | orderId=ad2926b4-7bc2-4862-9095-a1e404a73793
+2026-07-27T01:50:57Z | E2E-007 | tenant | bookingStatusAfterCreate=active
+2026-07-27T01:50:57Z | E2E-007 | tenant | benefitReference=benefit-bank_demo_beta-ed256f06
+2026-07-27T01:50:57Z | E2E-007 | ops | dispatchJobIdAfterTrigger=afedc4ba-8c2d-4b31-83fb-99d577360e28
+2026-07-27T01:50:57Z | E2E-007 | ops | dispatchJobId=afedc4ba-8c2d-4b31-83fb-99d577360e28
+2026-07-27T01:50:57Z | E2E-007 | ops | taskId=c0bc410c-7752-4030-8fb3-1597a46e6276
+2026-07-27T01:50:57Z | E2E-007 | ops | driverId=drv-demo-001
+2026-07-27T01:50:57Z | E2E-007 | driver | completedAt=2026-07-27T01:50:57Z
+2026-07-27T01:50:57Z | E2E-007 | tenant | bookingStatusFinal=completed
+2026-07-27T01:50:59Z | E2E-007 | billing | invoiceId=invoice-ff4b978b-6526-4db4-878e-f546ddf0696b
+2026-07-27T01:50:59Z | E2E-007 | billing | invoiceChannelKey=partner_airport
+2026-07-27T01:50:59Z | E2E-007 | billing | invoiceBenefitReference=benefit-bank_demo_beta-ed256f06
+════════════════════════════════════════════════════════
+

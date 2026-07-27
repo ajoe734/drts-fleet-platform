@@ -1,0 +1,33 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 168517
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-003-phone-recording-filing
+  ✓ PASS  E2E-003-phone-recording-filing
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-168517.json
+  Evidence log:  /tmp/drts-e2e-evidence-168517.log
+
+Evidence capture:
+2026-07-27T01:42:33Z | E2E-003 | callcenter | callId=CALL-20260410-000001
+2026-07-27T01:42:33Z | E2E-003 | callcenter | recordingStateBeforeOrder=pending
+2026-07-27T01:42:33Z | E2E-003 | callcenter | orderId=a0cd3d80-8d67-4d91-8e73-9ea1d56e070f
+2026-07-27T01:42:33Z | E2E-003 | callcenter | orderStatusAfterCreate=recording_pending
+2026-07-27T01:42:33Z | E2E-003 | callcenter | recordingId=REC-E2E-1785116553
+2026-07-27T01:42:33Z | E2E-003 | reporting | reportJobId=JOB-1a055396-645b-48c6-8950-35e0ba19eb7c
+2026-07-27T01:42:33Z | E2E-003 | reporting | reportArtifactId=ART-9ca88a15-d6dc-4f6d-9577-0a166b4fc6dd
+2026-07-27T01:42:33Z | E2E-003 | reporting | packageId=PKG-29e41aa6-1c8b-48e3-a31f-00373b0d9dff
+2026-07-27T01:42:33Z | E2E-003 | reporting | packageManifestHash=21ccd5215c85dfb24679666ec16ef6922401a1db353871e227c01bfb91f79dce
+2026-07-27T01:42:33Z | E2E-003 | audit | reportArtifactRetention=30/365
+2026-07-27T01:42:33Z | E2E-003 | audit | filingPackageRetention=90/2555
+2026-07-27T01:42:33Z | E2E-003 | audit | reportArtifactAudit=issue_report_artifact_download
+2026-07-27T01:42:33Z | E2E-003 | audit | filingPackageAudit=issue_filing_package_download
+════════════════════════════════════════════════════════
+
