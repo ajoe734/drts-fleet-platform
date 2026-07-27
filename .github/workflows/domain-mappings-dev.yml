@@ -41,9 +41,9 @@ jobs:
 
       - name: Show acting identity
         run: |
-          echo "Active account (this is the identity that must be a verified owner of smarttransport.tw):"
-          gcloud config get-value account 2>/dev/null || true
-          gcloud auth list --format="value(account)" 2>/dev/null || true
+          echo "Acting account (base64, decode to get the SA email to add as a Search Console owner):"
+          gcloud config get-value account 2>/dev/null | base64 || true
+          gcloud auth list --format="value(account)" 2>/dev/null | base64 || true
 
       - name: Create domain mappings
         run: |
