@@ -8,6 +8,7 @@
 **Parent Owner / Reviewer:** `Codex` / `Claude`  
 **Last Revised:** `2026-07-27 (UTC)`  
 **Status at Draft Time:** `in_progress`
+**Current Task Status:** `review_approved`
 
 ---
 
@@ -52,6 +53,7 @@ Practical meaning:
 - this sidecar packet does not claim the parent is complete
 - it only restores the missing reviewer packet required by the helper task
 - reviewer should judge packet accuracy against current machine truth, not infer a parent status upgrade
+- reviewer approval has already confirmed the packet matches the `2026-07-27` helper/parent machine-truth snapshot
 
 ---
 
