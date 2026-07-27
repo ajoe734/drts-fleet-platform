@@ -310,6 +310,10 @@ describe("TenantPartnerService sensitive-data governance", () => {
   afterEach(() => {
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT;
+    delete process.env.PARTNER_INGRESS_KEY_CTBC;
+    delete process.env.PARTNER_INGRESS_KEY_CATHAY;
+    delete process.env.PARTNER_INGRESS_KEY_TAISHIN;
+    delete process.env.PARTNER_INGRESS_KEY_DBS;
   });
 
   it("reconciles canonical partner-booking route seeds without duplicating persisted entries", async () => {
@@ -336,6 +340,21 @@ describe("TenantPartnerService sensitive-data governance", () => {
         requestId: "seed-partner-booking-ctbc",
       },
     });
+    expect(service.getPartnerEntry("cathay")).toMatchObject({
+      entrySlug: "cathay",
+      bankCode: "CATHAY",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+    });
+    expect(service.getPartnerEntry("taishin")).toMatchObject({
+      entrySlug: "taishin",
+      bankCode: "TAISHIN",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+    });
+    expect(service.getPartnerEntry("dbs")).toMatchObject({
+      entrySlug: "dbs",
+      bankCode: "DBS",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+    });
     expect(service.getPartnerEntry("fubon")).toMatchObject({
       entrySlug: "fubon",
       businessDispatchSubtype: "insurance_replacement_vehicle",
@@ -349,7 +368,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
       .flatMap(([changes]) => changes.partnerEntries ?? [])
       .map((entry) => entry.entrySlug);
     expect(persistedPartnerEntries).toEqual(
-      expect.arrayContaining(["ctbc", "fubon", "lion"]),
+      expect.arrayContaining([
+        "ctbc",
+        "cathay",
+        "taishin",
+        "dbs",
+        "fubon",
+        "lion",
+      ]),
     );
     expect(
       persistedPartnerEntries.filter(
@@ -377,6 +403,27 @@ describe("TenantPartnerService sensitive-data governance", () => {
       realm: "partner",
       tenantId: "tenant-demo-001",
       partnerEntrySlug: "bank-demo-alpha-airport",
+    });
+  });
+
+  it("loads canonical airport issuer ingress credentials from environment secrets", () => {
+    process.env.PARTNER_INGRESS_KEY_CATHAY = "pk_test_cathay_ingress_secret";
+
+    const service = new TenantPartnerService(new AuditNotificationService());
+    const resolution = service.authenticatePartnerBootstrap(
+      {
+        entrySlug: "cathay",
+        apiKey: "pk_test_cathay_ingress_secret",
+      },
+      "req-partner-cathay-001",
+    );
+
+    expect(resolution.identity).toMatchObject({
+      actorType: "partner_api_key",
+      actorId: "partner-key-cathay-dev",
+      realm: "partner",
+      tenantId: "tenant-demo-001",
+      partnerEntrySlug: "cathay",
     });
   });
 

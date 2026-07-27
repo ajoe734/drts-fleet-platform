@@ -38,7 +38,33 @@ const insuranceBlockedStates = [
   },
 ] as const;
 
+const cardAirportEmbedIssuers = [
+  { slug: "ctbc", name: /中信|CTBC/i },
+  { slug: "cathay", name: /國泰|Cathay/i },
+  { slug: "taishin", name: /台新|Taishin/i },
+  { slug: "dbs", name: /星展|DBS/i },
+] as const;
+
 test.describe("partner booking program surfaces", () => {
+  test("keeps every airport issuer embed backed by partner authority", async ({
+    page,
+  }) => {
+    for (const issuer of cardAirportEmbedIssuers) {
+      const response = await page.goto(`/${issuer.slug}/program/embed`);
+      expect(response?.status(), issuer.slug).toBe(200);
+      await expect(
+        page.locator("[data-program-surface='embed']"),
+        issuer.slug,
+      ).toBeVisible();
+      await expect(page.locator("body"), issuer.slug).toContainText(
+        issuer.name,
+      );
+      await expect(page.locator("body"), issuer.slug).toContainText(
+        /未偵測到銀行登入|Bank sign-in not detected/i,
+      );
+    }
+  });
+
   test("keeps card website booking and bank-app embed identity states distinct", async ({
     page,
   }) => {

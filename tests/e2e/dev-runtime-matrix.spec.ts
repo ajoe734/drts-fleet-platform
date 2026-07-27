@@ -274,7 +274,7 @@ const surfaces: RuntimeSurface[] = [
         key: "card-embed",
         path: "/ctbc/program/embed",
         operation: "credit-card bank-app embed handoff",
-        marker: /reference token|issuer_signature|cardholder_resolved/i,
+        marker: /未偵測到銀行登入|no_embed_session|Bank sign-in not detected/i,
       },
       {
         key: "card-embed-reauth",
