@@ -64,20 +64,8 @@ docker_available() {
   command -v docker >/dev/null 2>&1
 }
 
-docker_cmd_with_timeout() {
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "${DOCKER_STATUS_TIMEOUT_SECONDS:-10}" "$@"
-    return
-  fi
-
-  "$@"
-}
-
 postgres_service_running() {
-  docker_available \
-    && [[ -f "$DOCKER_COMPOSE_FILE" ]] \
-    && docker_cmd_with_timeout docker compose -f "$DOCKER_COMPOSE_FILE" ps --status running postgres 2>/dev/null \
-      | grep -q postgres
+  docker_available && docker compose -f "$DOCKER_COMPOSE_FILE" ps --status running postgres 2>/dev/null | grep -q postgres
 }
 
 postgres_container_name() {
@@ -92,18 +80,18 @@ run_container_psql() {
   local database="$1"
   shift
 
-  if postgres_container_running; then
-    docker exec -i \
-      -e PGPASSWORD="$(database_password)" \
-      "$(postgres_container_name)" \
-      psql -U "$(database_user)" -d "$database" "$@"
-    return
-  fi
-
   if postgres_service_running; then
     docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
       -e PGPASSWORD="$(database_password)" \
       postgres \
+      psql -U "$(database_user)" -d "$database" "$@"
+    return
+  fi
+
+  if postgres_container_running; then
+    docker exec -i \
+      -e PGPASSWORD="$(database_password)" \
+      "$(postgres_container_name)" \
       psql -U "$(database_user)" -d "$database" "$@"
     return
   fi
@@ -132,18 +120,18 @@ run_psql_file() {
     return
   fi
 
-  if postgres_container_running; then
-    docker exec -i \
-      -e PGPASSWORD="$(database_password)" \
-      "$(postgres_container_name)" \
-      psql -U "$(database_user)" -d "$(database_name)" -v ON_ERROR_STOP=1 "$@" < "$file"
-    return
-  fi
-
   if postgres_service_running; then
     docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
       -e PGPASSWORD="$(database_password)" \
       postgres \
+      psql -U "$(database_user)" -d "$(database_name)" -v ON_ERROR_STOP=1 "$@" < "$file"
+    return
+  fi
+
+  if postgres_container_running; then
+    docker exec -i \
+      -e PGPASSWORD="$(database_password)" \
+      "$(postgres_container_name)" \
       psql -U "$(database_user)" -d "$(database_name)" -v ON_ERROR_STOP=1 "$@" < "$file"
     return
   fi

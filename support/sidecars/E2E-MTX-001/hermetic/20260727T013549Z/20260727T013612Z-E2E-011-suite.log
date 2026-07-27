@@ -1,0 +1,46 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 529785
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-011-platform-admin-control-plane
+  ✓ PASS  E2E-011-platform-admin-control-plane
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-529785.json
+  Evidence log:  /tmp/drts-e2e-evidence-529785.log
+
+Evidence capture:
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | tenantId=tenant-adm-e2e-117567
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | enabledModules=enterprise_dispatch,billing,reporting,webhooks
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | monthlyBookingsQuota=500
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | partnerEntrySlug=adm-e2e-entry-117567
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | credentialKeyId=partner_key_845899ff-8ecd-4373-a032-4090404fa0dd
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | credentialRevokedAt=2026-07-27T01:59:28.167Z
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | credentialMaskedSuffix=****ac8e
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | adapterHealthReadable=true
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | pricingRuleId=rule_393b971e-8cef-4418-8a1a-04b1f0de4262
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | pricingVersion=adm-e2e-117567
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | pricingReadBackStatus=active
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | pricingReadBackVersion=adm-e2e-117567
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | featureFlagTenantId=tenant-adm-e2e-117567
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | featureFlagEnabled=true
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | featureFlagTenantId=tenant-adm-e2e-117567
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | featureFlagEnabled=false
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | rolloutReadBackStage=pilot
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | rolloutReadBackProductionStatus=pending
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | rolloutReadBackStage=pilot
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | rolloutReadBackProductionStatus=blocked
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | rollbackHoldReasonCode=TENANT_IN_ROLLBACK_HOLD
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | rolloutReadBackStage=pilot
+2026-07-27T01:59:28Z | E2E-011 | platform_admin | rolloutReadBackProductionStatus=blocked
+2026-07-27T01:59:28Z | E2E-011 | rbac | tenantCreateDeniedCode=AUTH_REALM_DENIED
+2026-07-27T01:59:28Z | E2E-011 | rbac | pricingWriteDeniedCode=AUTH_REALM_DENIED
+2026-07-27T01:59:29Z | E2E-011 | platform_admin | auditEntryCount=20
+════════════════════════════════════════════════════════
+

@@ -3908,9 +3908,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
 
-  listReferralRevenueShareRules(
-    entrySlug?: string,
-  ): ReferralRevenueShareRule[] {
+  listReferralRevenueShareRules(entrySlug?: string): ReferralRevenueShareRule[] {
     const slug = entrySlug?.trim();
     return this.referralRevenueShareRules
       .filter((rule) => !slug || rule.partnerEntrySlug === slug)
@@ -4108,9 +4106,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       entry.entrySlug,
     );
     const period =
-      periodMonth?.trim() ||
-      statements[0]?.period ||
-      new Date().toISOString().slice(0, 7);
+      periodMonth?.trim() || statements[0]?.period || new Date().toISOString().slice(0, 7);
     const statement = billingSettlementService.getReferralStatement(
       entry.entrySlug,
       period,
@@ -4141,9 +4137,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const statements = await billingSettlementService.listReferralStatements(
       entry.entrySlug,
     );
-    return statements.map((statement) =>
-      this.toPartnerReferralUsage(statement),
-    );
+    return statements.map((statement) => this.toPartnerReferralUsage(statement));
   }
 
   async listPartnerReferralRevenue(

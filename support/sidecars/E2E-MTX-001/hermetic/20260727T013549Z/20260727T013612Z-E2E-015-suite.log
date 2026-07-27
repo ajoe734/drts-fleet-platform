@@ -1,0 +1,102 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 720025
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-015-partner-program-variants
+  ✓ PASS  E2E-015-partner-program-variants
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-720025.json
+  Evidence log:  /tmp/drts-e2e-evidence-720025.log
+
+Evidence capture:
+2026-07-27T02:07:56Z | E2E-015 | insurance | serviceProductId=SVP-000001
+2026-07-27T02:07:56Z | E2E-015 | insurance | serviceProductActive=true
+2026-07-27T02:07:56Z | E2E-015 | insurance | entrySlug=e2e-insurance-replacement-1785118076-720100
+2026-07-27T02:07:56Z | E2E-015 | insurance | partnerId=partner_12cc7ca5-36bd-4688-a062-e858d8ff83bc
+2026-07-27T02:07:56Z | E2E-015 | insurance | partnerProgramId=program-e2e-insurance-1785118076-720100
+2026-07-27T02:07:56Z | E2E-015 | insurance | businessDispatchSubtype=insurance_replacement_vehicle
+2026-07-27T02:07:56Z | E2E-015 | insurance | missingReferenceCode=REFERENCE_TOKEN_REQUIRED
+2026-07-27T02:07:56Z | E2E-015 | insurance | reference-pending-reviewStatus=manual_review
+2026-07-27T02:07:56Z | E2E-015 | insurance | reference-pending-reviewReason=REFERENCE_PENDING_REVIEW
+2026-07-27T02:07:56Z | E2E-015 | insurance | reference-pending-reviewBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-not-foundStatus=ineligible
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-not-foundReason=REFERENCE_NOT_FOUND
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-not-foundBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-expiredStatus=ineligible
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-expiredReason=REFERENCE_EXPIRED
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-expiredBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-cancelledStatus=ineligible
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-cancelledReason=REFERENCE_CANCELLED
+2026-07-27T02:07:57Z | E2E-015 | insurance | reference-cancelledBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:07:57Z | E2E-015 | insurance | eligibilityVerificationId=elig_dd9d1137-4376-4a97-b0a8-9e99d1122404
+2026-07-27T02:07:57Z | E2E-015 | insurance | benefitReference=benefit-insurance-1785118076-720100
+2026-07-27T02:07:57Z | E2E-015 | insurance | issuerAuthorizationRef=issuer-ref-688b7c52
+2026-07-27T02:07:57Z | E2E-015 | insurance | wrongSubtypeCode=PARTNER_ENTRY_SUBTYPE_MISMATCH
+2026-07-27T02:07:57Z | E2E-015 | insurance | bookingId=booking-000001
+2026-07-27T02:07:57Z | E2E-015 | insurance | orderId=18a74467-aa2b-4173-98a8-304875ab7de8
+2026-07-27T02:07:57Z | E2E-015 | insurance | dispatchJobId=d6d3f74b-0c70-496b-b6a9-f196835c77a1
+2026-07-27T02:07:57Z | E2E-015 | insurance | taskId=4d8c050b-1a49-4369-ad5c-e7ae0b98b9b5
+2026-07-27T02:07:57Z | E2E-015 | insurance | driverId=drv-demo-004
+2026-07-27T02:07:57Z | E2E-015 | insurance | vehicleId=veh-demo-004
+2026-07-27T02:07:58Z | E2E-015 | insurance | completedAt=2026-07-27T02:07:57Z
+2026-07-27T02:07:58Z | E2E-015 | insurance | bookingStatusFinal=completed
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoiceId=invoice-66389dba-fe50-42d9-8ae5-8918f21afb43
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoiceLineCountForOrderId=1
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.channelKey=partner_airport
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.businessDispatchSubtype=insurance_replacement_vehicle
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.partnerEntrySlug=e2e-insurance-replacement-1785118076-720100
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.partnerId=partner_12cc7ca5-36bd-4688-a062-e858d8ff83bc
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.partnerProgramId=program-e2e-insurance-1785118076-720100
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.eligibilityVerificationId=elig_dd9d1137-4376-4a97-b0a8-9e99d1122404
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.benefitReference=benefit-insurance-1785118076-720100
+2026-07-27T02:08:00Z | E2E-015 | insurance | invoice.issuerAuthorizationRef=issuer-ref-688b7c52
+2026-07-27T02:08:00Z | E2E-015 | travel | serviceProductId=SVP-000002
+2026-07-27T02:08:00Z | E2E-015 | travel | serviceProductActive=true
+2026-07-27T02:08:00Z | E2E-015 | travel | entrySlug=e2e-travel-agency-1785118076-720100
+2026-07-27T02:08:00Z | E2E-015 | travel | partnerId=partner_aff3e6e4-6526-490e-bd04-006e2f090d3f
+2026-07-27T02:08:00Z | E2E-015 | travel | partnerProgramId=program-e2e-travel-1785118076-720100
+2026-07-27T02:08:00Z | E2E-015 | travel | businessDispatchSubtype=travel_agency_transfer
+2026-07-27T02:08:00Z | E2E-015 | travel | missingReferenceCode=REFERENCE_TOKEN_REQUIRED
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-pending-reviewStatus=manual_review
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-pending-reviewReason=REFERENCE_PENDING_REVIEW
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-pending-reviewBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-not-foundStatus=ineligible
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-not-foundReason=REFERENCE_NOT_FOUND
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-not-foundBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-expiredStatus=ineligible
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-expiredReason=REFERENCE_EXPIRED
+2026-07-27T02:08:00Z | E2E-015 | travel | reference-expiredBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:08:01Z | E2E-015 | travel | reference-cancelledStatus=ineligible
+2026-07-27T02:08:01Z | E2E-015 | travel | reference-cancelledReason=REFERENCE_CANCELLED
+2026-07-27T02:08:01Z | E2E-015 | travel | reference-cancelledBookingCode=ELIGIBILITY_NOT_APPROVED
+2026-07-27T02:08:01Z | E2E-015 | travel | eligibilityVerificationId=elig_4e1aa8c5-f5ad-46b1-976c-5e0940bd16c6
+2026-07-27T02:08:01Z | E2E-015 | travel | benefitReference=benefit-travel-1785118076-720100
+2026-07-27T02:08:01Z | E2E-015 | travel | issuerAuthorizationRef=issuer-ref-d4fc27d6
+2026-07-27T02:08:01Z | E2E-015 | travel | wrongSubtypeCode=PARTNER_ENTRY_SUBTYPE_MISMATCH
+2026-07-27T02:08:01Z | E2E-015 | travel | bookingId=booking-000002
+2026-07-27T02:08:01Z | E2E-015 | travel | orderId=c40e040b-3115-496b-a3d8-e0848f1fe408
+2026-07-27T02:08:01Z | E2E-015 | travel | dispatchJobId=cbabd900-7188-4c86-b075-3f2bacdf4367
+2026-07-27T02:08:01Z | E2E-015 | travel | taskId=7625f89a-c459-49b6-8f3a-5ee3e52208b7
+2026-07-27T02:08:01Z | E2E-015 | travel | driverId=drv-demo-004
+2026-07-27T02:08:01Z | E2E-015 | travel | vehicleId=veh-demo-004
+2026-07-27T02:08:01Z | E2E-015 | travel | completedAt=2026-07-27T02:08:01Z
+2026-07-27T02:08:01Z | E2E-015 | travel | bookingStatusFinal=completed
+2026-07-27T02:08:04Z | E2E-015 | travel | invoiceId=invoice-0259e253-12a8-414c-ba50-5e48fd41c3cc
+2026-07-27T02:08:04Z | E2E-015 | travel | invoiceLineCountForOrderId=1
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.channelKey=partner_airport
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.businessDispatchSubtype=travel_agency_transfer
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.partnerEntrySlug=e2e-travel-agency-1785118076-720100
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.partnerId=partner_aff3e6e4-6526-490e-bd04-006e2f090d3f
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.partnerProgramId=program-e2e-travel-1785118076-720100
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.eligibilityVerificationId=elig_4e1aa8c5-f5ad-46b1-976c-5e0940bd16c6
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.benefitReference=benefit-travel-1785118076-720100
+2026-07-27T02:08:04Z | E2E-015 | travel | invoice.issuerAuthorizationRef=issuer-ref-d4fc27d6
+════════════════════════════════════════════════════════
+

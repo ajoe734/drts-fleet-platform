@@ -1,0 +1,41 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 125737
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-002-forwarded-order
+  ✓ PASS  E2E-002-forwarded-order
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-125737.json
+  Evidence log:  /tmp/drts-e2e-evidence-125737.log
+
+Evidence capture:
+2026-07-27T01:40:26Z | E2E-002 | ops | primaryMirrorOrderId=FWD-587e4fb3-cb50-4163-bb32-bd6e079add10
+2026-07-27T01:40:26Z | E2E-002 | ops | primaryExternalOrderId=SBX-E2E-002-PRIMARY-125737
+2026-07-27T01:40:26Z | E2E-002 | ops | primaryMirrorStatus=broadcasted
+2026-07-27T01:40:26Z | E2E-002 | driver | forwardedTaskId=FWD-587e4fb3-cb50-4163-bb32-bd6e079add10
+2026-07-27T01:40:26Z | E2E-002 | driver | routeLocked=true
+2026-07-27T01:40:26Z | E2E-002 | driver | sourcePlatform=forwarder_sandbox
+2026-07-27T01:40:26Z | E2E-002 | driver | initialDriverActionState=action_required
+2026-07-27T01:40:26Z | E2E-002 | driver | acceptOutcome=accept_pending
+2026-07-27T01:40:26Z | E2E-002 | ops | primaryStatusAfterConfirmedSync=confirmed_by_platform
+2026-07-27T01:40:26Z | E2E-002 | driver | primaryDriverConfirmedStatus=confirmed_by_platform
+2026-07-27T01:40:26Z | E2E-002 | ops | primaryStatusAfterCompletedSync=completed_synced
+2026-07-27T01:40:26Z | E2E-002 | driver | primaryDriverCompletedStatus=completed_synced
+2026-07-27T01:40:26Z | E2E-002 | driver | primaryDriverCompletedActionState=completed
+2026-07-27T01:40:26Z | E2E-002 | ops | secondaryMirrorOrderId=FWD-186bd1cd-4252-4117-b1ca-9088f9c8aaf4
+2026-07-27T01:40:26Z | E2E-002 | ops | secondaryExternalOrderId=SBX-E2E-002-CANCEL-125737
+2026-07-27T01:40:26Z | E2E-002 | driver | secondaryForwardedTaskId=FWD-186bd1cd-4252-4117-b1ca-9088f9c8aaf4
+2026-07-27T01:40:27Z | E2E-002 | ops | secondaryStatusAfterCancelSync=cancelled_by_platform
+2026-07-27T01:40:27Z | E2E-002 | driver | secondaryDriverCancelledStatus=cancelled_by_platform
+2026-07-27T01:40:27Z | E2E-002 | finance | settlementChannelKey=forwarded_shadow
+2026-07-27T01:40:27Z | E2E-002 | finance | settlementLedgerMode=shadow_only
+2026-07-27T01:40:27Z | E2E-002 | ops | ownedDispatchAssignmentCreated=false
+════════════════════════════════════════════════════════
+

@@ -35,8 +35,7 @@ export default async function ProgramEmbedFlowPage({
   const { tenantSlug } = await params;
   const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
-  const { entry, inactive, theme } =
-    await getTenantProgramRouteContext(tenantSlug);
+  const { entry, inactive, theme } = await getTenantProgramRouteContext(tenantSlug);
   const bank = getAirportBank(tenantSlug);
 
   if (theme.kind !== "card" || !bank) {

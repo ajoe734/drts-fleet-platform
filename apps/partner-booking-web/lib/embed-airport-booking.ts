@@ -53,12 +53,12 @@ type SubmitEmbeddedAirportBookingInput = {
 };
 
 function hasValidDateTime(value: string | null | undefined) {
-  return (
-    typeof value === "string" && Number.isFinite(new Date(value).getTime())
-  );
+  return typeof value === "string" && Number.isFinite(new Date(value).getTime());
 }
 
-function buildReservationWindow(submission: AirportTransferBookingSubmission): {
+function buildReservationWindow(
+  submission: AirportTransferBookingSubmission,
+): {
   reservationWindowStart: string;
   reservationWindowEnd: string;
 } {
@@ -158,9 +158,7 @@ export async function submitEmbeddedAirportBooking(
   dependencies: EmbedBookingDependencies = defaultDependencies,
 ): Promise<AirportTransferBookingResult> {
   if (!input.partnerUserRef) {
-    throw new Error(
-      t("airport.embed.error.missingCredentials", undefined, input.locale),
-    );
+    throw new Error(t("airport.embed.error.missingCredentials", undefined, input.locale));
   }
 
   let entry = input.partnerEntry;
@@ -169,9 +167,7 @@ export async function submitEmbeddedAirportBooking(
   }
 
   if (!entry || entry.status !== "active" || !entry.activeFlag) {
-    throw new Error(
-      t("airport.embed.error.programUnavailable", undefined, input.locale),
-    );
+    throw new Error(t("airport.embed.error.programUnavailable", undefined, input.locale));
   }
 
   const handoff = await dependencies.createPartnerIngressHandoff({

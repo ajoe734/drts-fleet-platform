@@ -905,9 +905,12 @@ const zh = {
   "airport.embed.submitting": "送出中...",
   "airport.embed.error.missingCredentials":
     "缺少內嵌登入交接資訊，請回到銀行 App 重新開啟此頁。",
-  "airport.embed.error.programUnavailable": "此內嵌預約方案目前無法使用。",
-  "airport.embed.error.manualReview": "資格正在人工審查中，暫時無法建立預約。",
-  "airport.embed.error.eligibilityFailed": "資格驗證未通過，尚未建立預約。",
+  "airport.embed.error.programUnavailable":
+    "此內嵌預約方案目前無法使用。",
+  "airport.embed.error.manualReview":
+    "資格正在人工審查中，暫時無法建立預約。",
+  "airport.embed.error.eligibilityFailed":
+    "資格驗證未通過，尚未建立預約。",
   "airport.embed.error.submitUnavailable": "此頁面目前無法送出預約。",
   "airport.embed.error.submitFailed": "預約送出失敗。",
   "airport.status.created": "已建立",

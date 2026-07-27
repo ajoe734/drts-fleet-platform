@@ -1,0 +1,33 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 380905
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-008-partner-booking-cutover
+  ✓ PASS  E2E-008-partner-booking-cutover
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-380905.json
+  Evidence log:  /tmp/drts-e2e-evidence-380905.log
+
+Evidence capture:
+2026-07-27T01:53:05Z | E2E-008 | platform_admin | entryBaselineStatus=active
+2026-07-27T01:53:05Z | E2E-008 | platform_admin | entryStatusAfterDeactivate=inactive
+2026-07-27T01:53:05Z | E2E-008 | partner | inactiveBootstrapCode=PARTNER_ENTRY_INACTIVE
+2026-07-27T01:53:05Z | E2E-008 | platform_admin | entryStatusAfterRollback=active
+2026-07-27T01:53:05Z | E2E-008 | partner | bootstrapEntryStatus=active
+2026-07-27T01:53:05Z | E2E-008 | partner | eligibilityVerificationId=elig_8be4b45b-383a-46fb-9cae-8791ab459f9e
+2026-07-27T01:53:05Z | E2E-008 | partner | eligibilityStatus=eligible
+2026-07-27T01:53:05Z | E2E-008 | tenant | bookingId=booking-000001
+2026-07-27T01:53:05Z | E2E-008 | tenant | bookingStatus=active
+2026-07-27T01:53:05Z | E2E-008 | tenant | orderId=644a10b9-458e-42a5-a6f1-7feaa333035f
+2026-07-27T01:53:05Z | E2E-008 | finance | receiptOwner=credit-card / service platform / partner channel
+2026-07-27T01:53:05Z | E2E-008 | finance | invoiceId=invoice-195df67c-755c-4c92-be62-4388998db097
+2026-07-27T01:53:05Z | E2E-008 | finance | invoiceStatus=issued
+════════════════════════════════════════════════════════
+

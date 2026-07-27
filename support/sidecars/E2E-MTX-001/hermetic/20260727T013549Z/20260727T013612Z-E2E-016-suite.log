@@ -1,0 +1,29 @@
+
+════════════════════════════════════════════════════════
+  DRTS Cross-Surface E2E Suite
+  API: http://localhost:3001
+  Bearer auth: disabled
+  Run ID: 764647
+════════════════════════════════════════════════════════
+
+▶ Running: E2E-016-referral-channel
+  ✓ PASS  E2E-016-referral-channel
+
+════════════════════════════════════════════════════════
+  E2E Results: 1/1 passed
+
+  Chain file:    /tmp/drts-e2e-chain-764647.json
+  Evidence log:  /tmp/drts-e2e-evidence-764647.log
+
+Evidence capture:
+2026-07-27T02:10:09Z | E2E-016 | platform_admin | entrySlug=referral-demo-community
+2026-07-27T02:10:09Z | E2E-016 | platform_admin | partnerType=referral_channel
+2026-07-27T02:10:09Z | E2E-016 | platform_admin | rateType=percent
+2026-07-27T02:10:09Z | E2E-016 | platform_admin | rateValue=15
+2026-07-27T02:10:09Z | E2E-016 | ingress | drtsPassengerId=passenger_c66dfff3-f565-4de3-bbe3-682e2ec22978
+2026-07-27T02:10:09Z | E2E-016 | ingress | partnerUserRef=e2e-referral-user-764647
+2026-07-27T02:10:09Z | E2E-016 | settlement | gmvMinor=150000
+2026-07-27T02:10:09Z | E2E-016 | settlement | shareMinor=22500
+2026-07-27T02:10:09Z | E2E-016 | settlement | period=2026-06
+════════════════════════════════════════════════════════
+

@@ -29,7 +29,6 @@ cd "$ROOT_DIR"
 # shellcheck source=../../scripts/db-common.sh
 source "$ROOT_DIR/scripts/db-common.sh"
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/drts_fleet_platform}"
 export E2E_API_URL="${E2E_API_URL:-http://localhost:3001}"
 export API_HOST="${API_HOST:-0.0.0.0}"
 export JWT_SECRET="${JWT_SECRET:-ci-e2e-secret}"
@@ -51,6 +50,20 @@ HERMETIC_SUITE_TIMEOUT_SECONDS="${HERMETIC_SUITE_TIMEOUT_SECONDS:-300}"
 HERMETIC_AUTO_REPAIR_NODE_MODULES="${HERMETIC_AUTO_REPAIR_NODE_MODULES:-1}"
 
 mkdir -p "$HERMETIC_LOG_DIR"
+
+worktree_db_name() {
+  local hash_suffix
+  if command -v sha1sum >/dev/null 2>&1; then
+    hash_suffix="$(printf '%s' "$ROOT_DIR" | sha1sum | cut -c1-8)"
+  else
+    hash_suffix="$(printf '%s' "$ROOT_DIR" | cksum | awk '{print $1}')"
+  fi
+  printf 'drts_fleet_platform_%s\n' "$hash_suffix"
+}
+
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/$(worktree_db_name)"
+fi
 
 # Parse the db name/user/host/port from DATABASE_URL for the reset step.
 db_field() { node -e "const u=new URL(process.env.DATABASE_URL); process.stdout.write(({name:u.pathname.slice(1),user:u.username,pass:u.password,host:u.hostname,port:u.port||'5432'})['$1'])"; }
@@ -95,96 +108,17 @@ if [[ ${#SUITES[@]} -eq 0 ]]; then
 fi
 
 API_PID=""
-port_in_use() {
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -tiTCP:"${API_PORT}" -sTCP:LISTEN >/dev/null 2>&1
-    return
-  fi
-
-  if command -v ss >/dev/null 2>&1; then
-    ss -ltn "( sport = :${API_PORT} )" | tail -n +2 | grep -q .
-    return
-  fi
-
-  if command -v fuser >/dev/null 2>&1; then
-    fuser "${API_PORT}/tcp" >/dev/null 2>&1
-    return
-  fi
-
-  return 1
-}
-
-force_clear_api_port() {
-  local pids
-
-  if command -v lsof >/dev/null 2>&1; then
-    pids="$(lsof -tiTCP:"${API_PORT}" -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' || true)"
-  elif command -v fuser >/dev/null 2>&1; then
-    pids="$(fuser "${API_PORT}/tcp" 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+$' | tr '\n' ' ' || true)"
-  else
-    pids=""
-  fi
-
-  if [[ -n "${pids// }" ]]; then
-    # Some environments keep the child listener after the launcher exits.
-    kill ${pids} >/dev/null 2>&1 || true
-    sleep 1
-    kill -9 ${pids} >/dev/null 2>&1 || true
-  elif command -v fuser >/dev/null 2>&1; then
-    fuser -k "${API_PORT}/tcp" >/dev/null 2>&1 || true
-  fi
-}
-
-wait_for_api_port_state() { # desired: free|listening
-  local desired="$1"
-  local attempt in_use
-
-  for attempt in $(seq 1 40); do
-    if port_in_use; then
-      in_use=1
-    else
-      in_use=0
-    fi
-
-    if [[ "$desired" == "free" && "$in_use" -eq 0 ]]; then
-      return 0
-    fi
-    if [[ "$desired" == "listening" && "$in_use" -eq 1 ]]; then
-      return 0
-    fi
-
-    sleep 1
-  done
-
-  echo "[hermetic] API port ${API_PORT} did not become ${desired}" >&2
-  return 1
-}
-
 stop_api() {
   if [[ -n "$API_PID" ]]; then
     # Kill the whole process group of the API launcher (npm/pnpm spawns children).
     kill -- "-${API_PID}" >/dev/null 2>&1 || kill "$API_PID" >/dev/null 2>&1 || true
     API_PID=""
   fi
-  force_clear_api_port
-  wait_for_api_port_state free || return 1
-}
-
-stop_api_on_exit() {
-  if ! stop_api; then
-    echo "[hermetic] cleanup warning: API port ${API_PORT} did not become free before process exit" >&2
-  fi
+  if command -v fuser >/dev/null 2>&1; then fuser -k "${API_PORT}/tcp" >/dev/null 2>&1 || true; fi
+  sleep 2
 }
 
 run_admin_psql() {
-  if postgres_container_running; then
-    docker exec -i \
-      -e PGPASSWORD="$DB_PASS" \
-      "$(postgres_container_name)" \
-      psql -U "$DB_USER" -d postgres "$@"
-    return
-  fi
-
   if use_local_psql; then
     PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" "$@"
     return
@@ -194,6 +128,14 @@ run_admin_psql() {
     docker compose -f "$DOCKER_COMPOSE_FILE" exec -T \
       -e PGPASSWORD="$DB_PASS" \
       postgres \
+      psql -U "$DB_USER" -d postgres "$@"
+    return
+  fi
+
+  if postgres_container_running; then
+    docker exec -i \
+      -e PGPASSWORD="$DB_PASS" \
+      "$(postgres_container_name)" \
       psql -U "$DB_USER" -d postgres "$@"
     return
   fi
@@ -286,21 +228,6 @@ run_logged_timeout() { # label timeout logfile cmd...
   return "$status"
 }
 
-run_logged() { # label cmd...
-  local label="$1"
-  shift
-  local log_file
-  log_file="$(mktemp)"
-  if "$@" >"$log_file" 2>&1; then
-    rm -f "$log_file"
-    return 0
-  fi
-  echo "[hermetic] ${label} failed"
-  cat "$log_file"
-  rm -f "$log_file"
-  return 1
-}
-
 reset_db() {
   local run_stamp suite_label
   run_stamp="${HERMETIC_RUN_STAMP:-manual}"
@@ -332,17 +259,16 @@ ensure_api_build() {
   fi
 
   echo "[hermetic] building @drts/api because apps/api/dist/main.js is missing"
-  run_with_retry "api build" maybe_timeout "$HERMETIC_API_BUILD_TIMEOUT_SECONDS" bash -lc "$API_BUILD_CMD" || return 1
+  run_with_retry \
+    "api build" \
+    maybe_timeout \
+    "$HERMETIC_API_BUILD_TIMEOUT_SECONDS" \
+    bash -lc "$API_BUILD_CMD" || return 1
 }
 
 start_api() {
-  stop_api || return 1
   setsid bash -c "$API_START_CMD" > "$API_LOG" 2>&1 &
   API_PID=$!
-  wait_for_api_port_state listening || {
-    tail -n 40 "$API_LOG" || true
-    return 1
-  }
   for _ in $(seq 1 60); do
     [ "$(curl -s -o /dev/null -w '%{http_code}' "${E2E_API_URL}/health" 2>/dev/null)" = "200" ] && return 0
     sleep 2
@@ -350,7 +276,7 @@ start_api() {
   echo "[hermetic] API failed to become healthy"; tail -n 40 "$API_LOG"; return 1
 }
 
-trap stop_api_on_exit EXIT
+trap stop_api EXIT
 
 if ! ensure_local_node_modules; then
   echo "[hermetic] local node_modules repair failed; aborting run"
