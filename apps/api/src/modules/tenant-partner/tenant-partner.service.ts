@@ -3908,7 +3908,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
 
-  listReferralRevenueShareRules(entrySlug?: string): ReferralRevenueShareRule[] {
+  listReferralRevenueShareRules(
+    entrySlug?: string,
+  ): ReferralRevenueShareRule[] {
     const slug = entrySlug?.trim();
     return this.referralRevenueShareRules
       .filter((rule) => !slug || rule.partnerEntrySlug === slug)
@@ -4106,7 +4108,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       entry.entrySlug,
     );
     const period =
-      periodMonth?.trim() || statements[0]?.period || new Date().toISOString().slice(0, 7);
+      periodMonth?.trim() ||
+      statements[0]?.period ||
+      new Date().toISOString().slice(0, 7);
     const statement = billingSettlementService.getReferralStatement(
       entry.entrySlug,
       period,
@@ -4137,7 +4141,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const statements = await billingSettlementService.listReferralStatements(
       entry.entrySlug,
     );
-    return statements.map((statement) => this.toPartnerReferralUsage(statement));
+    return statements.map((statement) =>
+      this.toPartnerReferralUsage(statement),
+    );
   }
 
   async listPartnerReferralRevenue(
@@ -4716,17 +4722,91 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private authenticatePartnerBootstrapWithResolvedCredential(
+    entrySlug: string,
+    requestId?: string,
+  ): PartnerIngressResolution {
+    const entry = this.requireAccessiblePartnerEntry(
+      entrySlug,
+      requestId,
+      "authenticate",
+    );
+    const credential = this.resolvePartnerIngressCredential(entry.entrySlug);
+    if (!credential) {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "credential_not_configured",
+      });
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_AUTH_NOT_CONFIGURED",
+        "Partner ingress authentication is not configured for this entry.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    const identity: IdentityContext = {
+      actorType: "partner_api_key",
+      actorId: credential.keyId,
+      realm: "partner",
+      authMode: "bootstrap_headers",
+      roleFamilies: ["partner"],
+      roles: ["partner_ingress"],
+      scopes: [
+        "partner:entries:read",
+        "partner:eligibility:read",
+        "partner:eligibility:write",
+      ],
+      tenantId: entry.tenantId,
+      partnerId: entry.partnerId,
+      partnerProgramId: entry.programId,
+      partnerEntrySlug: entry.entrySlug,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPartnerIngressAttempt(entry, requestId, "accepted", {
+      keyId: credential.keyId,
+      authSource: "internal_resolved_credential",
+    });
+    credential.lastUsedAt = new Date().toISOString();
+
+    return {
+      partnerEntry: this.clonePartnerEntry(entry),
+      identity,
+    };
+  }
+
   async issuePartnerIngressHandoff(
     command: CreatePartnerIngressHandoffCommand,
     requestId?: string,
+    options?: {
+      allowInternalBootstrap?: boolean;
+    },
   ): Promise<PartnerIngressHandoffResolution> {
-    const bootstrap = this.authenticatePartnerBootstrap(
-      {
-        entrySlug: command.entrySlug,
-        apiKey: command.apiKey,
-      },
-      requestId,
-    );
+    const bootstrap = command.apiKey?.trim()
+      ? this.authenticatePartnerBootstrap(
+          {
+            entrySlug: command.entrySlug,
+            apiKey: command.apiKey,
+          },
+          requestId,
+        )
+      : options?.allowInternalBootstrap
+        ? this.authenticatePartnerBootstrapWithResolvedCredential(
+            command.entrySlug,
+            requestId,
+          )
+        : this.authenticatePartnerBootstrap(
+            {
+              entrySlug: command.entrySlug,
+              apiKey: command.apiKey ?? "",
+            },
+            requestId,
+          );
     const partnerUserRef = command.partnerUserRef?.trim();
     if (!partnerUserRef) {
       throw new ApiRequestError(

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 
 import { createBearerClient, type ApiClient } from "@drts/api-client";
+import { SUPERVISOR_EXECUTION_MODES } from "@drts/contracts";
 import type {
   ApiSuccessEnvelope,
   BookingRecord,
+  CreatePartnerIngressHandoffCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateTenantBookingCommand,
   IdentityContext,
@@ -13,6 +15,7 @@ import type {
   PartnerBootstrapSession,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
+  PartnerIngressHandoffSession,
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 import {
@@ -81,6 +84,27 @@ export type PartnerSessionRecord = {
   partnerEntry: PartnerChannelEntryRecord;
   identity: IdentityContext;
 };
+
+function normalizePartnerIngressIdentity(
+  identity: PartnerIngressHandoffSession["identity"],
+): IdentityContext {
+  return {
+    ...identity,
+    supportedExecutionModes: [...SUPERVISOR_EXECUTION_MODES],
+  };
+}
+
+export function createPartnerSessionFromIngressHandoff(
+  handoff: PartnerIngressHandoffSession,
+  partnerEntry: PartnerChannelEntryRecord,
+): PartnerSessionRecord {
+  return {
+    accessToken: handoff.accessToken,
+    expiresIn: handoff.expiresIn,
+    partnerEntry,
+    identity: normalizePartnerIngressIdentity(handoff.identity),
+  };
+}
 
 export type PartnerRouteProvenance = {
   source: "authority" | "authority_cache" | "local_fallback";
@@ -549,6 +573,18 @@ export async function createPartnerBootstrapSession(
 ): Promise<PartnerBootstrapSession> {
   return requestAuthority<PartnerBootstrapSession>(
     "/api/auth/partner/bootstrap-session",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function createPartnerIngressHandoff(
+  command: CreatePartnerIngressHandoffCommand,
+): Promise<PartnerIngressHandoffSession> {
+  return requestAuthority<PartnerIngressHandoffSession>(
+    "/api/partner/ingress/handoff",
     {
       method: "POST",
       body: JSON.stringify(command),

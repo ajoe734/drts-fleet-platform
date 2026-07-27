@@ -8,6 +8,8 @@ const partnerBookingBaseURL =
 const shouldStartLocalPartnerBooking =
   partnerBookingBaseURL === localPartnerBookingBaseURL ||
   partnerBookingBaseURL === "http://127.0.0.1:3007";
+const skipLocalPartnerBookingWebServer =
+  process.env.PARTNER_BOOKING_SKIP_WEBSERVER === "1";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -20,18 +22,19 @@ export default defineConfig({
     baseURL: partnerBookingBaseURL,
     trace: "retain-on-failure",
   },
-  ...(shouldStartLocalPartnerBooking
+  ...(shouldStartLocalPartnerBooking && !skipLocalPartnerBookingWebServer
     ? {
         webServer: [
           {
-            command: "node tests/e2e/mock-map-booking-authority-server.mjs",
-            url: "http://127.0.0.1:3001/api/partner/entries/ctbc",
+            command:
+              "MAP_BOOKING_AUTHORITY_PORT=3901 node tests/e2e/mock-map-booking-authority-server.mjs",
+            url: "http://127.0.0.1:3901/api/partner/entries/ctbc",
             reuseExistingServer: !process.env.CI,
             timeout: 30_000,
           },
           {
             command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=http://127.0.0.1:3001 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=http://127.0.0.1:3901 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
             url: localPartnerBookingBaseURL,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
