@@ -1,6 +1,6 @@
 # AIRPORT-PARTNER-DEV-DEPLOY-001 Evidence
 
-Last updated: 2026-07-28T14:52:00Z
+Last updated: 2026-07-28T15:05:00Z
 Owner: Codex
 Reviewer: Codex2
 
@@ -18,7 +18,15 @@ Reviewer: Codex2
 - Started: `2026-07-28T11:08:58Z`
 - Completed: `2026-07-28T11:30:09Z`
 
-Job results from `gh run view 30353618827 --repo ajoe734/drts-fleet-platform --json ...`:
+Public GitHub run page for `30353618827` confirms:
+
+- run title `Deploy — Dev #333`
+- manual trigger at `2026-07-28 11:08 UTC`
+- source SHA `ff30413`
+- overall status `Failure`
+- total duration `21m 11s`
+
+The visible job breakdown on the public run page shows:
 
 - `Prepare dev deploy`: `success`
 - `Build & push images`: `success`
@@ -70,9 +78,18 @@ Failing Playwright case from GitHub job `90259587243`:
 
 Local repro against the deployed dev URL used the same test path as the workflow:
 
-- Command:
-  `DRTS_DEV_PARTNER_BOOKING_BASE_URL='https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app' PARTNER_BOOKING_SKIP_WEBSERVER=1 pnpm exec playwright test tests/e2e/partner-booking-surfaces.spec.ts -g 'creates a real booking from the airport embed flow' --config playwright.partner-booking-surfaces.config.ts`
-- Result: `1 failed`
+- Full-spec command:
+  `DRTS_DEV_PARTNER_BOOKING_BASE_URL='https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app' pnpm exec playwright test tests/e2e/partner-booking-surfaces.spec.ts --config playwright.partner-booking-surfaces.config.ts`
+- Result: `6 passed`, `1 failed`
+- Passing cases:
+  - airport issuer embed reachability
+  - card site vs embed identity-state split
+  - embed consent and fallback states
+  - insurance/travel site-only funnels with embed blocked
+  - insurance eligibility blocked states
+  - card-only embed selector contract
+- Failing case:
+  - `partner booking program surfaces › creates a real booking from the airport embed flow`
 
 Observed deployed path:
 
@@ -84,9 +101,11 @@ Observed post-submit page state on deployed dev:
 
 - The page stayed on the embed flow URL.
 - The success title `預約已建立` never rendered.
-- The page rendered the user-visible error copy `預約送出失敗。`
+- The confirmation step rendered a production server-render failure message:
+  `An error occurred in the Server Components render. The specific message is omitted in production builds to avoid leaking sensitive details.`
+- Playwright timed out waiting for `getByText('預約已建立')` at `tests/e2e/partner-booking-surfaces.spec.ts:140`.
 
-This means the current public dev deploy is not failing with an outer HTTP 5xx on submit; it is failing inside the booking submit action and returning an error state to the page.
+This means the current public dev deploy is not failing with an outer HTTP 5xx on submit; it is failing inside the live booking create/submit path after the confirmation screen is rendered.
 
 `gh run view 30364460014 --repo ajoe734/drts-fleet-platform --log-failed` shows the same failure signature on the later public-dev deploy:
 
@@ -100,7 +119,7 @@ This means the current public dev deploy is not failing with an outer HTTP 5xx o
 
 Re-checked from this task worktree on `2026-07-28` with `curl -L -s -o /dev/null -w '%{http_code}'`:
 
-- `https://drts-dev-api-ne55h7sy3a-uc.a.run.app/health` -> `200`
+- `https://drts-dev-api-ne55h7sy3a-uc.a.run.app/api/health` -> `200`
 - `https://drts-dev-platform-admin-web-ne55h7sy3a-uc.a.run.app` -> `200`
 - `https://drts-dev-ops-console-web-ne55h7sy3a-uc.a.run.app` -> `200`
 - `https://drts-dev-fleet-partner-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
@@ -118,17 +137,20 @@ Re-checked from this task worktree on `2026-07-28` with `curl -L -s -o /dev/null
 - `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app` -> `200`
 - `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app/bookings/new` -> `200`
 - `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app/embed/unsupported-host` -> `200`
-- `https://drts-channel-partner-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-channel-partner-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
 
-Spot-check re-run at `2026-07-28T14:30Z` still matches the public-dev state:
+Spot-check re-run at `2026-07-28T15:00Z` still matches the public-dev state:
 
-- `https://drts-dev-api-ne55h7sy3a-uc.a.run.app/health` -> `200`
+- `https://drts-dev-api-ne55h7sy3a-uc.a.run.app/api/health` -> `200`
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/ctbc/program/embed` -> `200`
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/fubon/program/embed` -> `404`
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/lion/program/embed/embed-handoff` -> `404`
 - `https://drts-dev-passenger-web-ne55h7sy3a-uc.a.run.app` -> `404`
+- `https://drts-dev-concierge-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
 
 Per [docs/02-architecture/app-entry-url-index-20260616.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-airport-partner-dev-deploy-001/docs/02-architecture/app-entry-url-index-20260616.md:1) and [tests/e2e/partner-booking-surfaces.spec.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-airport-partner-dev-deploy-001/tests/e2e/partner-booking-surfaces.spec.ts:153), `fubon` and `lion` are site-only funnels and their embed routes are expected to return `404`. The retired `passenger-web` `404` is also expected per the same app-entry index. These probes therefore support the same conclusion as the workflow health job: the deploy is broadly reachable and not blocked by outer 5xx at the entry-origin level. The release remains blocked by the real airport booking create smoke.
+
+One current-environment drift is now explicit: the older app-entry index still says `concierge-portal-web` is not deployed (`404`), but the live `ne55h7sy3a` concierge origin currently returns `200`. That discrepancy does not unblock acceptance because the workflow failure remains the CTBC real booking create smoke, but it should be treated as current-state evidence rather than assuming the older index is still exact.
 
 ## Commit relationship
 
