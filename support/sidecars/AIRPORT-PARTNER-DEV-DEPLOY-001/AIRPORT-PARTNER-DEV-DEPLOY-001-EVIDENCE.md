@@ -1,6 +1,6 @@
 # AIRPORT-PARTNER-DEV-DEPLOY-001 Evidence
 
-Last updated: 2026-07-28T15:05:00Z
+Last updated: 2026-07-28T14:29:30Z
 Owner: Codex
 Reviewer: Codex2
 
@@ -42,7 +42,7 @@ The visible job breakdown on the public run page shows:
 
 ## Later workflow runs on 2026-07-28
 
-Additional `Deploy — Dev` runs after `30353618827` show the task is still blocked, and the blocker is now split between a functional smoke failure and an infra quota failure:
+Additional `Deploy — Dev` runs after `30353618827` show the task is still blocked, and the blocker is now split across a functional smoke failure, an infra quota failure, and a source-ref-specific deploy script failure:
 
 - `30357846786` on branch `codex2/airport-partner-dev-deploy-001-unblock-manual-unblock` at SHA `ff304139a401685e8901cf27ee1b419cebefd929`
   - completed `failure`
@@ -61,8 +61,16 @@ Additional `Deploy — Dev` runs after `30353618827` show the task is still bloc
   - `Deploy services` failed before health/smoke at job `90279892827`
   - the failing step was `Deploy — api`
   - failed log message: Cloud Run `Quota exceeded for total allowable CPU per project per region.`
+- `30367939638` dispatched on `2026-07-28` at `14:21 UTC` from workflow branch `dev` with explicit `source_ref` `0ea57990557d5ec14c01fe79850c7bad49c36eba`
+  - completed `failure`
+  - `Prepare dev deploy`, `Build & push images`, and `DB migration` all passed
+  - `Deploy services` failed before health/smoke at job `90305427670`
+  - the failing step was `Deploy — api`
+  - failed log message: `/home/runner/work/_temp/...sh: line 3: scripts/deploy-cloud-run-service.sh: No such file or directory`
 
 The most recent run that actually reached public dev (`30364460014`) still failed on the same partner-booking UI smoke as `30353618827`, so acceptance remains blocked even when build, migration, deploy, and health are green.
+
+The newest branch-validation run (`30367939638`) confirmed the task branch source ref can build and migrate successfully, but it did not reach any public-dev validation because the workflow content attached to that source ref still invoked a missing deploy helper script during `Deploy — api`.
 
 ## Failing acceptance point
 
@@ -167,7 +175,7 @@ So the failed workflow validates the older deployed SHA, not the latest branch h
 ## Current verdict
 
 - `workflow run 30353618827 completes successfully`: no
-- `all build migration deploy and health jobs pass`: no, UI smoke failed
+- `all build migration deploy and health jobs pass`: no; `30353618827` failed UI smoke, and the newer branch-validation run `30367939638` failed earlier in `Deploy services`
 - `all configured dev entry origins return expected non-5xx responses`: yes for the active dev entry surfaces; expected `404`s remain on retired or intentionally unsupported routes (`passenger-web`, `fubon` embed, `lion` embed handoff)
 - `CTBC Cathay Taishin DBS airport entries pass`: entry pages load, but CTBC real create flow fails
 - `Fubon and Lion partner entries pass`: site funnels pass and embed `404`s match the repo acceptance test contract
@@ -179,5 +187,6 @@ So the failed workflow validates the older deployed SHA, not the latest branch h
 Acceptance is blocked pending:
 
 - a GitHub `Deploy — Dev` run that completes without the Cloud Run CPU quota failure seen in `30359910655`
+- a GitHub `Deploy — Dev` run for a source SHA that includes the task branch fixes and no longer references the missing `scripts/deploy-cloud-run-service.sh` helper seen in `30367939638`
 - a public dev deploy whose `Dev UI smoke (playwright vs deployed)` no longer fails the real airport embed booking create assertion seen in `30353618827`, `30357846786`, `30362221809`, and `30364460014`
 - a deploy source SHA that actually includes the task branch fixes rather than the older SHAs already observed failing on public dev
