@@ -1225,19 +1225,28 @@ jobs:
           DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
         run: |
           set -euo pipefail
-          pnpm exec playwright test --retries=1 --config playwright.bank-console-depth.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.bank-console-auth.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.ops-console-parity.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.ops-assistant.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.fleet-partner-portal.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.partner-booking-surfaces.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.enterprise-dispatch.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.channel-partner-portal.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.referral-embed.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.platform-admin-service-area.config.ts
+          smoke_status=0
+          run_suite() {
+            local config="$1"
+            echo "::group::Playwright ${config}"
+            pnpm exec playwright test --retries=1 --config "${config}" || smoke_status=1
+            echo "::endgroup::"
+          }
+
+          run_suite playwright.bank-console-depth.config.ts
+          run_suite playwright.bank-console-auth.config.ts
+          run_suite playwright.ops-console-parity.config.ts
+          run_suite playwright.ops-assistant.config.ts
+          run_suite playwright.fleet-partner-portal.config.ts
+          run_suite playwright.partner-booking-surfaces.config.ts
+          run_suite playwright.enterprise-dispatch.config.ts
+          run_suite playwright.channel-partner-portal.config.ts
+          run_suite playwright.referral-embed.config.ts
+          run_suite playwright.platform-admin-service-area.config.ts
           # Run the high-volume matrix after business-flow suites so load
           # coverage cannot starve or mask airport and operations regressions.
-          pnpm exec playwright test --retries=1 --config playwright.dev-runtime-matrix.config.ts
+          run_suite playwright.dev-runtime-matrix.config.ts
+          exit "${smoke_status}"
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

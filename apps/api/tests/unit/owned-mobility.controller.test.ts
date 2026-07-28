@@ -116,6 +116,9 @@ describe("OwnedMobilityController tenant booking routes", () => {
       tenantPartnerService.hydratePartnerEligibilityVerification,
     ).toHaveBeenCalledWith("eligibility-e2e-001", identity);
     expect(createResponse.data).toEqual({
+      bookingId: "booking-e2e-001",
+      orderId: "order-e2e-001",
+      status: "created",
       booking: { bookingId: "booking-e2e-001" },
       order: { orderId: "order-e2e-001" },
     });

@@ -192,6 +192,12 @@ describe("Cloud Run deploy quota retry", () => {
     expect(matrixIndex).toBeGreaterThan(
       uiSmoke.indexOf("playwright.partner-booking-surfaces.config.ts"),
     );
+    expect(uiSmoke).toContain("smoke_status=0");
+    expect(uiSmoke).toContain(
+      'pnpm exec playwright test --retries=1 --config "${config}" || smoke_status=1',
+    );
+    expect(uiSmoke).toContain('exit "${smoke_status}"');
+    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(11);
     expect(workflow).not.toContain(
       "Authenticate to GCP for failure diagnostics",
     );

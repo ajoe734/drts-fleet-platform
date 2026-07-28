@@ -296,8 +296,39 @@ const server = http.createServer((req, res) => {
         data: {
           bookingId: "booking-embed-001",
           orderId: "order-embed-001",
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype: "airport_transfer",
+          dispatchSemantics: "reservation",
+          status: "created",
           eligibilityVerificationId:
             lastTenantBookingCommand.eligibilityVerificationId ?? null,
+          booking: {
+            bookingId: "booking-embed-001",
+            orderId: "order-embed-001",
+            eligibilityVerificationId:
+              lastTenantBookingCommand.eligibilityVerificationId ?? null,
+            orderStatus: "created",
+            reservationWindowStart:
+              lastTenantBookingCommand.reservationWindowStart ??
+              "2026-07-27T21:30:00.000Z",
+          },
+          order: {
+            orderId: "order-embed-001",
+            orderNo: "ORD-EMBED-001",
+            status: "created",
+            pickup: lastTenantBookingCommand.pickup ?? {
+              address: "台北市信義區松仁路 100 號",
+              surface: "partner_booking",
+            },
+            dropoff: lastTenantBookingCommand.dropoff ?? {
+              address: "桃園 T2 · 第二航廈 出發接送區",
+              surface: "partner_booking",
+            },
+            etaSnapshot: {
+              etaMinutes: 12,
+              calculatedAt: "2026-07-26T00:00:04.000Z",
+            },
+          },
         },
         meta: {
           requestId: "req-mock-create-booking",

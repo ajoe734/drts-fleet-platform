@@ -234,6 +234,7 @@ export class OwnedMobilityController {
     );
     return toApiSuccessEnvelope(
       {
+        ...result,
         booking: this.ownedMobilityService.getTenantBooking(
           resolvedTenantId,
           result.bookingId,
