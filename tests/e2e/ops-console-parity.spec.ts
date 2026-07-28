@@ -6,6 +6,14 @@ const baseUrl =
   process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
   process.env.OPS_CONSOLE_BASE_URL ??
   "http://localhost:3003";
+const usesDeployedOpsConsole = (() => {
+  try {
+    const hostname = new URL(baseUrl).hostname;
+    return hostname !== "localhost" && hostname !== "127.0.0.1";
+  } catch {
+    return false;
+  }
+})();
 
 const sourceResolveAttempts = 8;
 const sourceResolveBackoffMs = 10_000;
@@ -1039,20 +1047,27 @@ test.describe("ops console parity smoke", () => {
         await board.getAttribute("data-ops-map-route-count"),
       );
       expect(routeCount).toBeGreaterThan(0);
-      await expect(board.locator("[data-ops-map-render-mode]")).toHaveAttribute(
-        "data-ops-map-render-mode",
-        "tile",
-      );
-      await expect(
-        board.locator("[data-ops-map-tile-template]"),
-      ).toHaveAttribute("data-ops-map-tile-template", "configured");
+      if (usesDeployedOpsConsole) {
+        await expect(
+          board.locator("[data-google-map-base-layer]"),
+        ).toHaveAttribute("data-google-map-status", "ready", {
+          timeout: 45_000,
+        });
+      } else {
+        await expect(
+          board.locator("[data-ops-map-render-mode]"),
+        ).toHaveAttribute("data-ops-map-render-mode", "tile");
+        await expect(
+          board.locator("[data-ops-map-tile-template]"),
+        ).toHaveAttribute("data-ops-map-tile-template", "configured");
+        await expect(
+          board.locator('img[src*="/mock-map-tiles/"]').first(),
+        ).toBeVisible();
+      }
       await expect(board.locator("[data-ops-map-zoom]")).toHaveAttribute(
         "data-ops-map-zoom",
         /^\d+$/,
       );
-      await expect(
-        board.locator('img[src*="/mock-map-tiles/"]').first(),
-      ).toBeVisible();
       await expect(
         board.locator("[data-ops-map-route-line]").first(),
       ).toBeVisible();

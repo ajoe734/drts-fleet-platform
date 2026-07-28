@@ -8,11 +8,14 @@ import {
   API_URL,
   clearPartnerEntryAuthorityCacheForTests,
   createPartnerBooking,
+  createPartnerIngressHandoff,
+  createPartnerSessionFromIngressHandoff,
   getPartnerConfirmation,
   getPartnerReceipt,
   getPartnerRouteContext,
   getPartnerTrip,
   getPublicPartnerEntry,
+  PartnerAuthorityError,
   resolvePartnerBrand,
   verifyPartnerEligibility,
   type PartnerSessionRecord,
@@ -269,6 +272,116 @@ describe("partner-booking-web BFF wiring", () => {
         requestId: "req-127",
         timestamp: "2026-06-12T00:00:01.000Z",
       }),
+    });
+  });
+
+  it("normalizes a dev handoff token before the next authenticated authority call", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            access_token: "signed-partner-token",
+            token_type: "Bearer",
+            expires_in: "15m",
+            partner_entry_slug: "ctbc",
+            drts_passenger_id: "passenger-001",
+            identity: {
+              actor_type: "referral_passenger",
+              actor_id: "passenger-001",
+              realm: "partner",
+              auth_mode: "jwt_bearer",
+              role_families: ["partner"],
+              roles: ["partner_booking"],
+              scopes: ["partner:book"],
+              tenant_id: "tenant-001",
+              partner_id: "partner-001",
+              partner_program_id: "program-001",
+              partner_entry_slug: "ctbc",
+              drts_passenger_id: "passenger-001",
+            },
+          },
+          meta: {
+            request_id: "handoff-request",
+            timestamp: "2026-07-28T00:00:00Z",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            eligibility_verification_id: "elig-001",
+            verification_status: "eligible",
+          },
+          meta: {
+            request_id: "eligibility-request",
+            timestamp: "2026-07-28T00:00:01Z",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const handoff = await createPartnerIngressHandoff({
+      entrySlug: "ctbc",
+      partnerUserRef: "partner-user-001",
+    });
+    const normalizedSession = createPartnerSessionFromIngressHandoff(
+      handoff,
+      activeEntry,
+    );
+
+    expect(normalizedSession.accessToken).toBe("signed-partner-token");
+    await expect(
+      verifyPartnerEligibility(normalizedSession, {
+        referenceToken: "reference-token",
+      }),
+    ).resolves.toMatchObject({
+      eligibilityVerificationId: "elig-001",
+      verificationStatus: "eligible",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${API_URL}/api/partner/eligibility/verify`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer signed-partner-token",
+        }),
+      }),
+    );
+  });
+
+  it("normalizes nested authority error details at the wire boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: {
+              code: "PARTNER_ELIGIBILITY_REJECTED",
+              message: "Eligibility was rejected.",
+              details: {
+                verification_id: "elig-001",
+                decision_context: { reason_code: "BENEFIT_EXHAUSTED" },
+              },
+              retryable: false,
+            },
+          },
+          409,
+        ),
+      ),
+    );
+
+    const error = await verifyPartnerEligibility(session, {
+      referenceToken: "reference-token",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PartnerAuthorityError);
+    expect(error).toMatchObject({
+      code: "PARTNER_ELIGIBILITY_REJECTED",
+      details: {
+        verificationId: "elig-001",
+        decisionContext: { reasonCode: "BENEFIT_EXHAUSTED" },
+      },
     });
   });
 

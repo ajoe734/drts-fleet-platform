@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
+const partnerBookingBaseUrl =
+  process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL ??
+  process.env.PARTNER_BOOKING_BASE_URL ??
+  "http://localhost:3007";
+const usesLocalPartnerBookingAuthority = (() => {
+  try {
+    const hostname = new URL(partnerBookingBaseUrl).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+})();
+
 const insuranceBlockedStates = [
   {
     segment: "insurance_policy",
@@ -161,6 +174,11 @@ test.describe("partner booking program surfaces", () => {
   test("shows a safe reference code when airport booking fails", async ({
     page,
   }) => {
+    test.skip(
+      !usesLocalPartnerBookingAuthority,
+      "The force-error authority hook is available only in the local mock.",
+    );
+
     const response = await page.goto(
       "/ctbc/program/embed?partnerUserRef=failure-user&referenceToken=failure-token&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=force-error&flightNo=CI100",
     );

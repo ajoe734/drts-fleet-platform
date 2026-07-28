@@ -1215,6 +1215,7 @@ jobs:
           DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
           DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ needs.health-check.outputs.platform_admin }}
           DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
+          LIVE_GOOGLE_MAP_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
           DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
           DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
           DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
@@ -1243,6 +1244,7 @@ jobs:
           run_suite playwright.bank-console-depth.config.ts
           run_suite playwright.bank-console-auth.config.ts
           run_suite playwright.ops-console-parity.config.ts
+          run_suite playwright.google-map-live.config.ts
           run_suite playwright.ops-assistant.config.ts
           run_suite playwright.fleet-partner-portal.config.ts
           run_suite playwright.partner-booking-surfaces.config.ts

@@ -185,13 +185,18 @@ describe("Cloud Run deploy quota retry", () => {
     const matrixIndex = uiSmoke.indexOf(
       "playwright.dev-runtime-matrix.config.ts",
     );
+    const googleMapIndex = uiSmoke.indexOf(
+      "playwright.google-map-live.config.ts",
+    );
 
+    expect(googleMapIndex).toBeGreaterThan(-1);
     expect(matrixIndex).toBeGreaterThan(
       uiSmoke.indexOf("playwright.ops-console-parity.config.ts"),
     );
     expect(matrixIndex).toBeGreaterThan(
       uiSmoke.indexOf("playwright.partner-booking-surfaces.config.ts"),
     );
+    expect(matrixIndex).toBeGreaterThan(googleMapIndex);
     expect(uiSmoke).toContain("smoke_status=0");
     expect(uiSmoke).toContain(
       'PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}"',
@@ -199,7 +204,7 @@ describe("Cloud Run deploy quota retry", () => {
     expect(uiSmoke).toContain("--reporter=list,html");
     expect(uiSmoke).toContain('--output "test-results/${suite}"');
     expect(uiSmoke).toContain('exit "${smoke_status}"');
-    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(11);
+    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(12);
     expect(workflow).not.toContain(
       "Authenticate to GCP for failure diagnostics",
     );
