@@ -43,8 +43,8 @@ export type AirportTransferBookingResult = {
   bookingId: string;
   orderId: string;
   eligibilityVerificationId: string | null;
-  confirmation: BookingRecord;
-  receipt: OwnedOrderRecord;
+  confirmation: BookingRecord | null;
+  receipt: OwnedOrderRecord | null;
 };
 
 function Ic({ d, s = 20, sw = 1.9 }: { d: string; s?: number; sw?: number }) {
@@ -128,6 +128,7 @@ export function AirportTransferSite({
   bank,
   mode = "site",
   onSubmitBooking,
+  onLoadTracking,
   embedSessionReady = true,
   embeddedPassengerName,
   embeddedCardLast4,
@@ -141,6 +142,7 @@ export function AirportTransferSite({
   onSubmitBooking?: (
     submission: AirportTransferBookingSubmission,
   ) => Promise<AirportTransferBookingResult>;
+  onLoadTracking?: (orderId: string) => Promise<OwnedOrderRecord>;
   embedSessionReady?: boolean;
   embeddedPassengerName?: string | null;
   embeddedCardLast4?: string | null;
@@ -947,7 +949,34 @@ export function AirportTransferSite({
                   <div className="bfoot">
                     <button
                       className="btn btn-primary btn-block btn-lg"
-                      onClick={() => goStep(5)}
+                      onClick={() => {
+                        if (!bookingResult?.orderId) {
+                          return;
+                        }
+                        if (!onLoadTracking || bookingResult.receipt) {
+                          goStep(5);
+                          return;
+                        }
+                        setSubmitError(null);
+                        startTransition(async () => {
+                          try {
+                            const receipt = await onLoadTracking(
+                              bookingResult.orderId,
+                            );
+                            setBookingResult({
+                              ...bookingResult,
+                              receipt,
+                            });
+                            setStep(5);
+                          } catch (error) {
+                            setSubmitError(
+                              error instanceof Error
+                                ? error.message
+                                : t("airport.embed.error.submitFailed"),
+                            );
+                          }
+                        });
+                      }}
                     >
                       {t("airport.btn.track")}
                     </button>

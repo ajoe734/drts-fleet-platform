@@ -5,7 +5,10 @@ import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
-import { submitEmbeddedAirportBooking } from "@/lib/embed-airport-booking";
+import {
+  loadEmbeddedAirportTracking,
+  submitEmbeddedAirportBooking,
+} from "@/lib/embed-airport-booking";
 
 const activeEntry = {
   partnerId: "partner-001",
@@ -198,21 +201,51 @@ describe("submitEmbeddedAirportBooking", () => {
         notes: "尊榮轎車",
       }),
     );
-    expect(getPartnerConfirmation).toHaveBeenCalledWith(
-      expect.any(Object),
-      "booking-001",
-    );
-    expect(getPartnerReceipt).toHaveBeenCalledWith(
-      expect.any(Object),
-      "order-001",
-    );
+    expect(getPartnerConfirmation).not.toHaveBeenCalled();
+    expect(getPartnerReceipt).not.toHaveBeenCalled();
     expect(result).toEqual({
       bookingId: "booking-001",
       orderId: "order-001",
       eligibilityVerificationId: "elig-001",
-      confirmation,
-      receipt,
+      confirmation: null,
+      receipt: null,
     });
+  });
+
+  it("loads tracking receipt on demand through a fresh partner handoff", async () => {
+    const getPartnerRouteContext = vi.fn().mockResolvedValue({
+      entry: activeEntry,
+    });
+    const createPartnerIngressHandoff = vi.fn().mockResolvedValue(handoff);
+    const getPartnerReceipt = vi.fn().mockResolvedValue(receipt);
+
+    const result = await loadEmbeddedAirportTracking(
+      {
+        tenantSlug: "ctbc",
+        partnerEntry: activeEntry,
+        partnerUserRef: "user-001",
+        locale: "zh",
+        orderId: "order-001",
+      },
+      {
+        createPartnerBooking: vi.fn(),
+        createPartnerIngressHandoff,
+        getPartnerConfirmation: vi.fn(),
+        getPartnerReceipt,
+        getPartnerRouteContext,
+        verifyPartnerEligibility: vi.fn(),
+      },
+    );
+
+    expect(createPartnerIngressHandoff).toHaveBeenCalledWith({
+      entrySlug: "ctbc",
+      partnerUserRef: "user-001",
+    });
+    expect(getPartnerReceipt).toHaveBeenCalledWith(
+      expect.any(Object),
+      "order-001",
+    );
+    expect(result).toEqual(receipt);
   });
 
   it("skips eligibility verification when a verified id is already provided", async () => {
