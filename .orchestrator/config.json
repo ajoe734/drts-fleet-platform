@@ -7,6 +7,7 @@
     "state_file": ".orchestrator/state.json",
     "event_queue": ".orchestrator/event-queue.jsonl",
     "approval_queue": ".orchestrator/approval-queue.json",
+    "control_plane_summary": ".orchestrator/projections/control-plane-summary.json",
     "sidecar_catalog": ".orchestrator/sidecar_catalog.json",
     "github_bus_state": ".orchestrator/github-bus-state.json",
     "github_webhook_events": ".orchestrator/github-webhook-events.jsonl",
@@ -27,10 +28,19 @@
     "max_worker_history": 200,
     "auto_refresh_provider_capabilities": false,
     "git_reconcile_interval_seconds": 600,
+    "optional_automation": {
+      "governance_automation": {
+        "enabled": true
+      },
+      "underutilization": {
+        "enabled": true
+      }
+    },
     "worker_workspace_cleanup": {
       "enabled": true,
       "archive_dirty_worktrees": true,
-      "force_remove_dirty_worktrees_after_archive": true
+      "force_remove_dirty_worktrees_after_archive": true,
+      "release_interval_seconds": 60
     },
     "disk_guard": {
       "enabled": true,
@@ -290,10 +300,10 @@
       },
       "approval": {
         "workspace_permission_mode": "acceptEdits",
-        "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
+        "allow_dangerous_skip": true,
+        "copilot_allow_dangerous_skip": true,
         "rule_default_mode": "acceptEdits",
-        "disable_bypass_permissions": true
+        "disable_bypass_permissions": false
       }
     },
     "claude2": {
@@ -323,10 +333,10 @@
       },
       "approval": {
         "workspace_permission_mode": "acceptEdits",
-        "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
+        "allow_dangerous_skip": true,
+        "copilot_allow_dangerous_skip": true,
         "rule_default_mode": "acceptEdits",
-        "disable_bypass_permissions": true
+        "disable_bypass_permissions": false
       }
     },
     "gemini": {

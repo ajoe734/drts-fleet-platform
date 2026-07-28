@@ -62,7 +62,11 @@ class WatcherBookkeepingTests(unittest.TestCase):
             changed = watch_events.run_scan(config, state, replay=False, provider_capabilities={})
 
         self.assertTrue(changed)
-        self.assertEqual(state["tasks"]["P3-001"]["status"], "review")
+        self.assertNotIn("tasks", state)
+        self.assertEqual(
+            state["watcher"]["task_snapshots"]["P3-001"]["status"],
+            "review",
+        )
         self.assertEqual(state["pending_handoff_keys"], [])
         self.assertIsNotNone(state["last_scan_at"])
 

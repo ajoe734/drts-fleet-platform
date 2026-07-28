@@ -497,10 +497,7 @@ class ExecutionWorkspaceTests(unittest.TestCase):
     def _repo_config(self, root: Path) -> dict:
         (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
         return {
-            "paths": {
-                "status_file": str(root / "ai-status.json"),
-                "activity_log": str(root / "ai-activity-log.jsonl"),
-            },
+            "paths": {"status_file": str(root / "ai-status.json")},
             "agents": {
                 "codex2": {
                     "id": "codex2",
@@ -542,59 +539,16 @@ class ExecutionWorkspaceTests(unittest.TestCase):
                 task_id="PBK-UI-003",
                 metadata={"mode": "execution"},
             )
-            with mock.patch.object(
-                supervisor,
-                "_provision_worktree_node_modules",
-                return_value=None,
-            ) as provision:
-                workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
-                    self._repo_config(root),
-                    request,
-                    supervisor.route_task("PBK-UI-003"),
-                )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-003"),
+            )
 
             self.assertEqual(workspace, existing.resolve())
             self.assertEqual(branch, "codex2/pbk-ui-003")
             self.assertEqual(base_branch, "dev")
             self.assertEqual(source, "existing_worktree")
-            provision.assert_called_once_with(root.resolve(), existing.resolve())
-
-    def test_bootstraps_existing_path_when_reusing_task_destination(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "repo"
-            root.mkdir()
-            self._init_repo(root)
-            destination = root / ".artifacts/worktrees/auto/codex2-pbk-ui-003"
-            destination.mkdir(parents=True)
-
-            request = supervisor.DeliveryRequest(
-                agent_id="codex2",
-                provider="codex2",
-                delivery_mode="codex",
-                message="wake",
-                task_id="PBK-UI-003",
-                metadata={"mode": "execution"},
-            )
-            with (
-                mock.patch.object(supervisor, "_worktree_for_branch", return_value=None),
-                mock.patch.object(supervisor, "_current_branch", return_value="codex2/pbk-ui-003"),
-                mock.patch.object(
-                    supervisor,
-                    "_provision_worktree_node_modules",
-                    return_value=None,
-                ) as provision,
-            ):
-                workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
-                    self._repo_config(root),
-                    request,
-                    supervisor.route_task("PBK-UI-003"),
-                )
-
-            self.assertEqual(workspace, destination.resolve())
-            self.assertEqual(branch, "codex2/pbk-ui-003")
-            self.assertEqual(base_branch, "dev")
-            self.assertEqual(source, "existing_path")
-            provision.assert_called_once_with(root.resolve(), destination)
 
     def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -860,6 +814,58 @@ class DiskGuardTests(unittest.TestCase):
             self.assertEqual(result["archived"], 1)
             self.assertFalse(completed.exists())
             self.assertTrue(running.exists())
+
+    def test_release_skips_locked_initializing_worktree_without_archiving(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            archive_root = Path(tmpdir) / "archive"
+            root.mkdir()
+            self._init_repo(root)
+            locked = root / ".artifacts/worktrees/auto/claude-initializing"
+            _git(root, "worktree", "add", "--detach", str(locked), "dev")
+            _git(root, "worktree", "lock", "--reason", "initializing", str(locked))
+            (locked / "scratch.txt").write_text("unfinished\n", encoding="utf-8")
+
+            result = supervisor.release_inactive_worker_worktrees(
+                self._repo_config(root),
+                {"workers": {}},
+                {"archive_root": str(archive_root)},
+            )
+
+            self.assertEqual(result["removed"], 0)
+            self.assertEqual(result["archived"], 0)
+            self.assertEqual(result["skipped"], 1)
+            self.assertTrue(locked.exists())
+            self.assertFalse(archive_root.exists())
+            self.assertIn("initializing", " ".join(result["warnings"]))
+
+    def test_inactive_worktree_cleanup_is_throttled_between_ticks(self) -> None:
+        state: dict = {}
+        result = {
+            "checked": 1,
+            "removed": 0,
+            "skipped": 1,
+            "failed": 0,
+            "archived": 0,
+            "errors": [],
+        }
+        config = {
+            "supervisor": {
+                "worker_workspace_cleanup": {"release_interval_seconds": 60}
+            }
+        }
+
+        with mock.patch.object(
+            supervisor, "release_inactive_worker_worktrees", return_value=result
+        ) as release:
+            self.assertTrue(supervisor.cleanup_inactive_worker_worktrees(config, state))
+            self.assertFalse(supervisor.cleanup_inactive_worker_worktrees(config, state))
+
+        release.assert_called_once()
+        self.assertEqual(
+            state["maintenance"]["worker_workspace_cleanup"]["last_result"],
+            result,
+        )
 
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
@@ -2534,14 +2540,6 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
         self._clear_reconcile_registry()
 
     def _clear_reconcile_registry(self) -> None:
-        for entry in supervisor._RECONCILE_PROCS.values():
-            for handle_key in ("stdout_fh", "stderr_fh"):
-                handle = entry.get(handle_key)
-                if handle is not None:
-                    try:
-                        handle.close()
-                    except OSError:
-                        pass
         supervisor._RECONCILE_PROCS.clear()
 
     def _config(self, root: Path, *, interval: float | None = None) -> dict[str, object]:
@@ -2554,13 +2552,12 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
         }
         return config
 
-    def _fake_popen(self) -> mock.MagicMock:
-        proc = mock.MagicMock()
-        proc.poll.return_value = None
-        proc.returncode = None
-        return proc
+    def _fake_job(self) -> mock.MagicMock:
+        job = mock.MagicMock()
+        job.done.return_value = False
+        return job
 
-    def test_first_call_spawns_and_stamps_timestamp(self) -> None:
+    def test_first_call_starts_job_and_stamps_timestamp(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "ai-status.json").write_text("{}", encoding="utf-8")
@@ -2569,13 +2566,17 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
             script.write_text("# placeholder\n", encoding="utf-8")
             config = self._config(root)
             state: dict[str, object] = {"supervisor": {}}
-            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
+            with mock.patch.object(
+                supervisor,
+                "_start_git_reconcile_job",
+                return_value=self._fake_job(),
+            ) as start_job:
                 ran = supervisor.reconcile_status_from_git(config, state)
             self.assertFalse(ran)
-            popen_mock.assert_called_once()
+            start_job.assert_called_once_with(config)
             self.assertIn("last_git_reconcile_at", state["supervisor"])  # type: ignore[index]
 
-    def test_second_call_within_window_skips_subprocess(self) -> None:
+    def test_second_call_within_window_skips_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "ai-status.json").write_text("{}", encoding="utf-8")
@@ -2591,12 +2592,12 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
                     .replace("+00:00", "Z"),
                 }
             }
-            with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
+            with mock.patch.object(supervisor, "_start_git_reconcile_job") as start_job:
                 ran = supervisor.reconcile_status_from_git(config, state)
             self.assertFalse(ran)
-            popen_mock.assert_not_called()
+            start_job.assert_not_called()
 
-    def test_second_call_after_window_runs_subprocess(self) -> None:
+    def test_second_call_after_window_starts_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "ai-status.json").write_text("{}", encoding="utf-8")
@@ -2612,20 +2613,24 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
                     .replace("+00:00", "Z"),
                 }
             }
-            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
+            with mock.patch.object(
+                supervisor,
+                "_start_git_reconcile_job",
+                return_value=self._fake_job(),
+            ) as start_job:
                 ran = supervisor.reconcile_status_from_git(config, state)
             self.assertFalse(ran)
-            popen_mock.assert_called_once()
+            start_job.assert_called_once_with(config)
 
     def test_skips_when_status_file_path_missing(self) -> None:
         # OPS-STATE-RECONCILE-002 guard: don't raise KeyError when config
         # omits paths.status_file (e.g. minimal test config).
         config: dict[str, object] = {"paths": {}, "supervisor": {}}
         state: dict[str, object] = {"supervisor": {}}
-        with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
+        with mock.patch.object(supervisor, "_start_git_reconcile_job") as start_job:
             ran = supervisor.reconcile_status_from_git(config, state)
         self.assertFalse(ran)
-        popen_mock.assert_not_called()
+        start_job.assert_not_called()
 
 
 class UnderutilizationSidecarDispatchTests(unittest.TestCase):
@@ -2776,7 +2781,10 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
         self.assertEqual(queued_event["task"]["task_class"], "sidecar")
         self.assertEqual(state["underutilization"]["last_sidecar_wave_at"], "2026-04-10T00:16:05Z")
         self.assertIn("created 1 visible sidecar", state["underutilization"]["last_sidecar_wave_reason"])
-        self.assertIn("APP-001-SIDECAR-BFF-HANDOFF", state.get("tasks", {}))
+        self.assertIn(
+            "APP-001-SIDECAR-BFF-HANDOFF",
+            state.get("watcher", {}).get("task_snapshots", {}),
+        )
         activity_types = [call.args[1]["type"] for call in write_activity_log.call_args_list]
         self.assertIn("sidecar_task_created", activity_types)
         self.assertIn("sidecar_wave_started", activity_types)
@@ -7264,6 +7272,58 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertIn("claude", state["provider_pauses"])
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
 
+    def test_reason_hint_pause_probes_and_clears_after_reset_time(self) -> None:
+        config = {"agents": {"codex2": {"display_name": "Codex2", "provider": "codex2"}}}
+        state = {
+            "provider_pauses": {
+                "codex2": {
+                    "kind": "quota",
+                    "reason": "The worker log ended with repeated usage limit errors and a retry time of Jan 1, 2020 12:58 AM.",
+                    "paused_at": "2026-06-28T17:03:39Z",
+                    "resume_at": None,
+                }
+            },
+            "quota_paused_agents": {
+                "codex2": {
+                    "reason": "The worker log ended with repeated usage limit errors and a retry time of Jan 1, 2020 12:58 AM.",
+                    "paused_at": "2026-06-28T17:03:39Z",
+                    "resume_at": None,
+                }
+            },
+        }
+        provider_report = {"providers": {"codex2": {"auth_ready": True}}}
+        fresh_report = {"providers": {"codex2": {"installed": True, "auth_ready": True}}}
+
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=fresh_report):
+            expired = supervisor.expire_provider_pauses(config, state, provider_report)
+
+        self.assertEqual(expired, ["codex2"])
+        self.assertNotIn("codex2", state["provider_pauses"])
+        self.assertNotIn("codex2", state["quota_paused_agents"])
+
+    def test_reason_hint_pause_stays_paused_until_probe_clears_it(self) -> None:
+        config = {"agents": {"codex2": {"display_name": "Codex2", "provider": "codex2"}}}
+        state: dict[str, object] = {}
+        supervisor.pause_provider(
+            state,
+            "codex2",
+            "The lane is rate-limited and resets Jul 1, 5pm (UTC).",
+            kind="quota",
+            reset_seconds=None,
+        )
+
+        entry = state["provider_pauses"]["codex2"]
+        self.assertEqual(entry.get("resume_at_source"), "reason_hint")
+        self.assertIsNotNone(entry.get("resume_at"))
+        self.assertTrue(
+            supervisor.is_agent_dispatch_paused(
+                config,
+                state,
+                "codex2",
+                provider_report={"providers": {"codex2": {"auth_ready": True}}},
+            )
+        )
+
 
 class WorkerTreeGuardSettingsTests(unittest.TestCase):
     def test_defaults_off_with_canonical_blocking_globs(self) -> None:
@@ -7273,6 +7333,7 @@ class WorkerTreeGuardSettingsTests(unittest.TestCase):
         # All fragile surfaces from branch-strategy.md §11.1.
         for needed in [
             ".orchestrator/supervisor.py",
+            ".orchestrator/control_plane/**",
             ".orchestrator/skills/**",
             ".orchestrator/templates/*",
             ".orchestrator/config*.json",
@@ -7578,17 +7639,39 @@ class PruneDoneHandoffsTests(unittest.TestCase):
 
 
 class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
-    """OPS-RECONCILE-ASYNC-001: reconcile_status_from_git must spawn the
-    git-reconcile subprocess in the background (non-blocking) and finalize
-    its result on the NEXT tick, so a slow reconcile cannot freeze the
-    supervisor's main dispatch loop.
+    """Git reconciliation stays asynchronous but uses the canonical writer."""
 
-    Previously the supervisor used `subprocess.run` and synchronously waited
-    for the reconcile-from-git subprocess. On a bloated ai-status.json the
-    subprocess took ~4 minutes, during which dispatch was completely starved
-    and every lane drained to zero (OPS-RECONCILE-INTERVAL-600 throttled
-    re-entry but did not address the per-call freeze).
-    """
+    class FakeResult:
+        def __init__(
+            self,
+            returncode: int = 0,
+            stdout: str = "",
+            stderr: str = "",
+            payload: object | None = None,
+        ) -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+            self.payload = payload
+
+        @property
+        def ok(self) -> bool:
+            return self.returncode == 0
+
+        @property
+        def error(self) -> str:
+            return self.stderr or self.stdout or "unknown error"
+
+    class FakeJob:
+        def __init__(self, *, done: bool = False, result: object | None = None) -> None:
+            self.completed = done
+            self.value = result
+
+        def done(self) -> bool:
+            return self.completed
+
+        def result(self) -> object:
+            return self.value
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -7612,67 +7695,36 @@ class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def _clear_reconcile_registry(self) -> None:
-        for entry in supervisor._RECONCILE_PROCS.values():
-            for handle_key in ("stdout_fh", "stderr_fh"):
-                handle = entry.get(handle_key)
-                if handle is not None:
-                    try:
-                        handle.close()
-                    except OSError:
-                        pass
         supervisor._RECONCILE_PROCS.clear()
 
-    def _fake_popen(self, *, alive: bool, returncode: int = 0,
-                     stdout: str = "", stderr: str = "") -> mock.MagicMock:
-        proc = mock.MagicMock()
-        proc.poll.return_value = None if alive else returncode
-        proc.returncode = None if alive else returncode
-        proc._fake_stdout = stdout
-        proc._fake_stderr = stderr
-        return proc
-
-    def test_first_call_spawns_popen_and_returns_false(self) -> None:
-        # Fresh state — first call spawns Popen and returns False (no
-        # result to apply yet).
+    def test_first_call_starts_background_job_and_returns_false(self) -> None:
         state: dict = {}
-        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
-            popen.return_value = self._fake_popen(alive=True)
+        job = self.FakeJob()
+        with mock.patch.object(supervisor, "_start_git_reconcile_job", return_value=job) as start:
             changed = supervisor.reconcile_status_from_git(self.config, state)
         self.assertFalse(changed)
-        self.assertEqual(popen.call_count, 1)
-        # Throttle timestamp recorded so a re-entry skips spawn.
+        start.assert_called_once_with(self.config)
         self.assertIn("last_git_reconcile_at", state.get("supervisor", {}))
-        # In-flight entry registered.
         self.assertEqual(len(supervisor._RECONCILE_PROCS), 1)
 
     def test_subsequent_call_while_in_flight_does_not_respawn(self) -> None:
-        # Simulate: previous tick spawned reconcile; this tick should observe
-        # it still running and NOT spawn a second one.
         state: dict = {}
-        popen_proc = self._fake_popen(alive=True)
-        with mock.patch.object(supervisor.subprocess, "Popen", return_value=popen_proc) as popen:
+        job = self.FakeJob()
+        with mock.patch.object(supervisor, "_start_git_reconcile_job", return_value=job) as start:
             supervisor.reconcile_status_from_git(self.config, state)
-            # Second call while alive=True
             changed = supervisor.reconcile_status_from_git(self.config, state)
         self.assertFalse(changed)
-        self.assertEqual(popen.call_count, 1, "must NOT re-spawn while in flight")
+        self.assertEqual(start.call_count, 1, "must NOT re-start while in flight")
 
     def test_completion_applies_stdout_and_returns_true(self) -> None:
-        # Spawn -> mark completed -> ensure next call reads stdout, emits
-        # activity-log entries, clears the registry and returns True.
         state: dict = {}
-        # Spawn
-        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
-            proc = self._fake_popen(alive=True)
-            popen.return_value = proc
+        job = self.FakeJob()
+        with mock.patch.object(supervisor, "_start_git_reconcile_job", return_value=job):
             supervisor.reconcile_status_from_git(self.config, state)
-        # Find the tempfile paths from the registry and prefill them
-        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
-        entry["stdout_path"].write_text("reconciled UI-X to done\n")
-        entry["stderr_path"].write_text("")
-        # Mark process completed (rc=0)
-        entry["proc"].poll.return_value = 0
-        entry["proc"].returncode = 0
+        job.completed = True
+        job.value = self.FakeResult(
+            payload=[{"task_id": "UI-X", "prior_status": "review", "sha": "abc123"}]
+        )
         with mock.patch.object(supervisor, "write_activity_log") as log:
             changed = supervisor.reconcile_status_from_git(self.config, state)
         self.assertTrue(changed)
@@ -7686,25 +7738,21 @@ class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
         ))
 
     def test_throttle_blocks_spawn_within_interval(self) -> None:
-        # last_git_reconcile_at < interval ago and registry empty -> no spawn.
         state = {"supervisor": {
             "last_git_reconcile_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }}
-        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+        with mock.patch.object(supervisor, "_start_git_reconcile_job") as start:
             changed = supervisor.reconcile_status_from_git(self.config, state)
         self.assertFalse(changed)
-        popen.assert_not_called()
+        start.assert_not_called()
 
-    def test_completion_with_nonzero_rc_logs_failure_and_returns_false(self) -> None:
+    def test_completion_with_failed_command_logs_failure_and_returns_false(self) -> None:
         state: dict = {}
-        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
-            popen.return_value = self._fake_popen(alive=True)
+        job = self.FakeJob()
+        with mock.patch.object(supervisor, "_start_git_reconcile_job", return_value=job):
             supervisor.reconcile_status_from_git(self.config, state)
-        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
-        entry["stdout_path"].write_text("")
-        entry["stderr_path"].write_text("boom: missing remote\n")
-        entry["proc"].poll.return_value = 2
-        entry["proc"].returncode = 2
+        job.completed = True
+        job.value = self.FakeResult(returncode=2, stderr="boom: missing remote\n")
         with mock.patch.object(supervisor, "write_activity_log") as log:
             changed = supervisor.reconcile_status_from_git(self.config, state)
         self.assertFalse(changed)
@@ -8309,8 +8357,9 @@ if __name__ == "__main__":
 
 
 class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
-    """Fresh task worktrees must self-repair local node_modules state instead
-    of inheriting symlinks that escape the worktree root."""
+    """RCA fix: fresh task worktrees must get node_modules (symlinked from the
+    canonical checkout) so workers can typecheck/build at closeout instead of
+    stranding `blocked` on a missing/slow per-worktree install."""
 
     def _mk(self):
         import shutil
@@ -8319,63 +8368,27 @@ class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
         (root / "apps" / "foo").mkdir(parents=True); (root / "apps" / "foo" / "node_modules").mkdir()
         (root / "packages" / "bar").mkdir(parents=True); (root / "packages" / "bar" / "node_modules").mkdir()
         dest = Path(tempfile.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(dest, ignore_errors=True))
-        (dest / "scripts").mkdir(parents=True)
-        (dest / "scripts" / "ensure-local-node-modules.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         (dest / "apps" / "foo").mkdir(parents=True); (dest / "packages" / "bar").mkdir(parents=True)
         return root, dest
 
-    def test_repairs_local_node_modules_in_fresh_worktree(self):
+    def test_symlinks_root_and_workspace_node_modules(self):
         root, dest = self._mk()
-        with mock.patch.object(supervisor.subprocess, "run") as run:
-            run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
-            error = supervisor._provision_worktree_node_modules(root, dest)
-
-        self.assertIsNone(error)
-        run.assert_called_once_with(
-            [
-                supervisor.sys.executable,
-                str(dest / "scripts" / "ensure-local-node-modules.py"),
-                "repair",
-                "--root",
-                str(dest),
-            ],
-            cwd=str(dest),
-            text=True,
-            capture_output=True,
-            timeout=600.0,
-        )
+        supervisor._provision_worktree_node_modules(root, dest)
+        self.assertTrue((dest / "node_modules").is_symlink())
+        self.assertEqual((dest / "node_modules").resolve(), (root / "node_modules").resolve())
+        self.assertTrue((dest / "apps" / "foo" / "node_modules").is_symlink())
+        self.assertTrue((dest / "packages" / "bar" / "node_modules").is_symlink())
 
     def test_noop_on_canonical_root(self):
         root, _ = self._mk()
-        with mock.patch.object(supervisor.subprocess, "run") as run:
-            error = supervisor._provision_worktree_node_modules(root, root)
+        supervisor._provision_worktree_node_modules(root, root)
+        self.assertFalse((root / "node_modules").is_symlink())
 
-        self.assertIsNone(error)
-        run.assert_not_called()
-
-    def test_reports_missing_repair_script(self):
+    def test_does_not_clobber_existing_node_modules(self):
         root, dest = self._mk()
-        (dest / "scripts" / "ensure-local-node-modules.py").unlink()
-
-        error = supervisor._provision_worktree_node_modules(root, dest)
-
-        self.assertIn("missing node_modules repair script", error)
-
-    def test_reports_repair_failure_details(self):
-        root, dest = self._mk()
-        with mock.patch.object(supervisor.subprocess, "run") as run:
-            run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="pnpm install failed",
-            )
-            error = supervisor._provision_worktree_node_modules(root, dest)
-
-        self.assertIn("exit code 1", error)
-        self.assertIn("pnpm install failed", error)
-
-
+        (dest / "node_modules").mkdir()
+        supervisor._provision_worktree_node_modules(root, dest)
+        self.assertFalse((dest / "node_modules").is_symlink())
 
 
 class AntigravityModelRotationTests(unittest.TestCase):

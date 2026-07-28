@@ -7,7 +7,7 @@ Use this checklist **during** task work (between dispatch and closeout) whenever
 Anchor commit at the first describable middle state — do **not** wait for completion — when **any** of the following hold:
 
 1. The change touches a **fragile surface**:
-   - `.orchestrator/supervisor.py` (especially routing / dispatch / chair-review)
+   - `.orchestrator/supervisor.py` and `.orchestrator/control_plane/**` (especially routing / dispatch / chair-review)
    - `.orchestrator/skills/*.md`
    - `.orchestrator/templates/*`
    - `.orchestrator/config*.json`
