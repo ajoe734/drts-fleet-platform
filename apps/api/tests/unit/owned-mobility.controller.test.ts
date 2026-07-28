@@ -60,42 +60,64 @@ describe("OwnedMobilityController tenant booking routes", () => {
         bookingId: "booking-e2e-001",
         status: "created",
       }),
-      getTenantBooking: vi.fn().mockReturnValue({
+      resolvePersistedTenantBooking: vi.fn().mockResolvedValue({
         bookingId: "booking-e2e-001",
       }),
-      getOrder: vi.fn().mockReturnValue({
+      resolvePersistedOrder: vi.fn().mockResolvedValue({
         orderId: "order-e2e-001",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const tenantPartnerService = {
+      hydratePartnerEligibilityVerification: vi.fn().mockResolvedValue({
+        eligibilityVerificationId: "eligibility-e2e-001",
+      }),
+    };
+    const controller = new OwnedMobilityController(
+      service,
+      tenantPartnerService as never,
+    );
 
     await controller.createPartnerBooking(
-      {} as never,
+      {
+        eligibilityVerificationId: "eligibility-e2e-001",
+      } as never,
       identity,
       "tenant-e2e-001",
       "req-e2e-partner",
     );
-    controller.getPartnerBooking(
+    await controller.getPartnerBooking(
       "booking-e2e-001",
       identity,
       "tenant-e2e-001",
       "req-e2e-partner",
     );
-    controller.getPartnerOrder("order-e2e-001", identity, "req-e2e-partner");
+    await controller.getPartnerOrder(
+      "order-e2e-001",
+      identity,
+      "req-e2e-partner",
+    );
 
     expect(service.createTenantBooking).toHaveBeenCalledWith(
-      {},
+      {
+        eligibilityVerificationId: "eligibility-e2e-001",
+      },
       "tenant-e2e-001",
       identity,
       "req-e2e-partner",
       undefined,
     );
-    expect(service.getTenantBooking).toHaveBeenCalledWith(
+    expect(
+      tenantPartnerService.hydratePartnerEligibilityVerification,
+    ).toHaveBeenCalledWith("eligibility-e2e-001", identity);
+    expect(service.resolvePersistedTenantBooking).toHaveBeenCalledWith(
       "tenant-e2e-001",
       "booking-e2e-001",
       identity,
     );
-    expect(service.getOrder).toHaveBeenCalledWith("order-e2e-001", identity);
+    expect(service.resolvePersistedOrder).toHaveBeenCalledWith(
+      "order-e2e-001",
+      identity,
+    );
   });
 
   it("awaits tenant booking updates before wrapping the API envelope", async () => {

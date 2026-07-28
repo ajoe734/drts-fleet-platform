@@ -8,6 +8,37 @@ import type {
 import { OwnedMobilityRepository } from "../../src/modules/owned-mobility/owned-mobility.repository";
 
 describe("OwnedMobilityRepository", () => {
+  it("loads partner orders by order and tenant-scoped booking ids", async () => {
+    const record = {
+      orderId: "order-cross-instance-001",
+      bookingId: "booking-cross-instance-001",
+      tenantId: "tenant-demo-001",
+    };
+    const query = vi.fn().mockResolvedValue({ rows: [{ record }] });
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(repository.findOrderById(record.orderId)).resolves.toEqual(
+      record,
+    );
+    await expect(
+      repository.findOrderByBookingId(record.bookingId, record.tenantId),
+    ).resolves.toEqual(record);
+
+    expect(query).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("WHERE order_id = $1"),
+      [record.orderId],
+    );
+    expect(query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("booking_id = $1"),
+      [record.bookingId, record.tenantId],
+    );
+  });
+
   it("hydrates each owned-mobility record from its matching authority table", async () => {
     const recordsByTable = new Map<string, unknown>([
       ["ops.phase1_owned_orders", { orderId: "order-1" }],

@@ -1201,3 +1201,31 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+      - name: Authenticate to GCP for failure diagnostics
+        if: failure()
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+      - name: Set up Cloud SDK for failure diagnostics
+        if: failure()
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+      - name: Print partner booking failure diagnostics
+        if: failure()
+        run: |
+          set -euo pipefail
+
+          since="$(date -u -d '60 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')"
+          filter="resource.type=\"cloud_run_revision\" AND resource.labels.location=\"${{ needs.prepare.outputs.region }}\" AND resource.labels.service_name=\"${{ needs.prepare.outputs.partner_booking_service }}\" AND jsonPayload.event=\"partner_authority_request_failed\" AND timestamp>=\"${since}\""
+
+          echo "::group::Sanitized partner-booking authority failures"
+          gcloud logging read "$filter" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --order=desc \
+            --limit 100 \
+            --format='table(timestamp,severity,jsonPayload.path,jsonPayload.method,jsonPayload.status,jsonPayload.code,jsonPayload.retryable,jsonPayload.requestId)' \
+            || true
+          echo "::endgroup::"

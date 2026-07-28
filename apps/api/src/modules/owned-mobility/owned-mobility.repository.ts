@@ -68,6 +68,57 @@ export class OwnedMobilityRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async findOrderById(orderId: string): Promise<OwnedOrderRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_owned_orders
+        WHERE order_id = $1
+        LIMIT 1
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    return row
+      ? this.parseRecord<OwnedOrderRecord>(
+          row.record,
+          "ops.phase1_owned_orders",
+        )
+      : null;
+  }
+
+  async findOrderByBookingId(
+    bookingId: string,
+    tenantId: string,
+  ): Promise<OwnedOrderRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_owned_orders
+        WHERE booking_id = $1
+          AND tenant_id = $2
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+      [bookingId, tenantId],
+    );
+    const row = result.rows[0];
+    return row
+      ? this.parseRecord<OwnedOrderRecord>(
+          row.record,
+          "ops.phase1_owned_orders",
+        )
+      : null;
+  }
+
   async loadState(): Promise<OwnedMobilityState> {
     if (!this.isEnabled()) {
       return {

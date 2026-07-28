@@ -660,13 +660,13 @@ export class TenantPartnerController {
   @Get("partner/eligibility/:eligibilityVerificationId")
   @RequireRealms("partner", "tenant", "platform", "ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerEligibilityVerification(
+  async getPartnerEligibilityVerification(
     @Param("eligibilityVerificationId") eligibilityVerificationId: string,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getPartnerEligibilityVerification(
+      await this.tenantPartnerService.resolvePartnerEligibilityVerification(
         eligibilityVerificationId,
         requestId,
         identity,
@@ -678,12 +678,12 @@ export class TenantPartnerController {
   @Get("ops/partner/eligibility/reviews")
   @RequireRealms("platform", "ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listPartnerEligibilityReviewQueue(
+  async listPartnerEligibilityReviewQueue(
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items: PartnerEligibilityReviewQueueItem[] =
-      this.tenantPartnerService.listPartnerEligibilityReviewQueue(
+      await this.tenantPartnerService.resolvePartnerEligibilityReviewQueue(
         requestId,
         identity,
       );
@@ -692,13 +692,13 @@ export class TenantPartnerController {
 
   @Post("ops/partner/eligibility/reviews/resolve")
   @RequireRealms("platform", "ops")
-  resolvePartnerEligibilityReview(
+  async resolvePartnerEligibilityReview(
     @Body() command: ResolvePartnerEligibilityReviewCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     const resolution: PartnerEligibilityReviewResolution =
-      this.tenantPartnerService.resolvePartnerEligibilityReview(
+      await this.tenantPartnerService.resolvePartnerEligibilityReview(
         command,
         requestId,
         identity,

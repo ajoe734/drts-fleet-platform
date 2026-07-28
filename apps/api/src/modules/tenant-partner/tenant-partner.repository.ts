@@ -159,15 +159,94 @@ export class TenantPartnerRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async findPartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+  ): Promise<PartnerEligibilityVerificationRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_partner_eligibility_verifications
+        WHERE eligibility_verification_id = $1
+        LIMIT 1
+      `,
+      [eligibilityVerificationId],
+    );
+    const row = result.rows[0];
+    return row
+      ? this.parseRecord<PartnerEligibilityVerificationRecord>(
+          row.record,
+          "admin.phase1_partner_eligibility_verifications",
+        )
+      : null;
+  }
+
+  async listPartnerEligibilityReviewQueue(): Promise<
+    PartnerEligibilityVerificationRecord[]
+  > {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_partner_eligibility_verifications
+        WHERE verification_status IN ('manual_review', 'ineligible')
+        ORDER BY
+          CASE WHEN verification_status = 'manual_review' THEN 0 ELSE 1 END,
+          updated_at DESC
+      `,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<PartnerEligibilityVerificationRecord>(
+        row.record,
+        "admin.phase1_partner_eligibility_verifications",
+      ),
+    );
+  }
+
+  async compareAndSetPartnerEligibilityVerification(
+    verification: PartnerEligibilityVerificationRecord,
+    expectedUpdatedAt: string,
+  ) {
+    if (!this.isEnabled()) {
+      return false;
+    }
+
+    const result = await this.databaseService!.query<{ updated_at: Date }>(
+      `
+        UPDATE admin.phase1_partner_eligibility_verifications
+        SET
+          verification_status = $2,
+          updated_at = $3,
+          record = $4::jsonb
+        WHERE eligibility_verification_id = $1
+          AND updated_at = $5::timestamptz
+          AND verification_status IN ('manual_review', 'ineligible')
+        RETURNING updated_at
+      `,
+      [
+        verification.eligibilityVerificationId,
+        verification.verificationStatus,
+        verification.updatedAt,
+        JSON.stringify(verification),
+        expectedUpdatedAt,
+      ],
+    );
+    return result.rows.length === 1;
+  }
+
   // Load a JSONB-record table for state hydration, degrading gracefully when the
   // relation is absent. Phase-1 persistence is intentionally partial (several
   // tables are referenced-but-not-migrated), so a single missing relation must
   // NOT abort the entire tenant-partner load -- otherwise userRoles, cost
   // centers, quotas, etc. silently fall back to in-memory seeds even though
   // their tables exist and are populated.
-  private async loadRows(
-    text: string,
-  ): Promise<{ rows: JsonRecordRow[] }> {
+  private async loadRows(text: string): Promise<{ rows: JsonRecordRow[] }> {
     try {
       return await this.databaseService!.query<JsonRecordRow>(text);
     } catch (error) {

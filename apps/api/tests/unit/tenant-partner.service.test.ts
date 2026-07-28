@@ -1200,6 +1200,194 @@ describe("TenantPartnerService sensitive-data governance", () => {
     ]);
   });
 
+  it("does not expose an eligibility id before required persistence completes", async () => {
+    let releasePersistence!: () => void;
+    const persistence = new Promise<void>((resolvePersistence) => {
+      releasePersistence = resolvePersistence;
+    });
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      persistChanges: vi.fn(() => persistence),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    let settled = false;
+
+    const verificationPromise = service
+      .verifyPartnerEligibility({
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "1234",
+      })
+      .then((verification) => {
+        settled = true;
+        return verification;
+      });
+
+    await vi.waitFor(() => {
+      expect(repository.persistChanges).toHaveBeenCalledOnce();
+    });
+    expect(settled).toBe(false);
+
+    releasePersistence();
+    const verification = await verificationPromise;
+    expect(verification.verificationStatus).toBe("eligible");
+    expect(repository.persistChanges).toHaveBeenCalledWith({
+      partnerEligibilityVerifications: [
+        expect.objectContaining({
+          eligibilityVerificationId: verification.eligibilityVerificationId,
+        }),
+      ],
+    });
+  });
+
+  it("resolves eligibility persisted by another API instance", async () => {
+    const producer = new TenantPartnerService(new AuditNotificationService());
+    const persistedVerification = await producer.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "1234",
+    });
+    let authorityVerification = persistedVerification;
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findPartnerEligibilityVerification: vi.fn(
+        async () => authorityVerification,
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const consumer = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await expect(
+      consumer.hydratePartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+        {
+          actorType: "referral_passenger",
+          actorId: "passenger-cross-instance-001",
+          realm: "partner",
+          tenantId: persistedVerification.tenantId,
+          partnerId: persistedVerification.partnerId,
+          partnerProgramId: persistedVerification.partnerProgramId,
+          partnerEntrySlug: persistedVerification.partnerEntrySlug,
+          scopes: ["partner:book"],
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(
+      consumer.getPartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+      ),
+    ).toEqual(persistedVerification);
+    authorityVerification = {
+      ...persistedVerification,
+      verificationStatus: "ineligible",
+      updatedAt: new Date(
+        Date.parse(persistedVerification.updatedAt) + 1_000,
+      ).toISOString(),
+    };
+    await consumer.hydratePartnerEligibilityVerification(
+      persistedVerification.eligibilityVerificationId,
+      {
+        actorType: "referral_passenger",
+        actorId: "passenger-cross-instance-001",
+        realm: "partner",
+        tenantId: persistedVerification.tenantId,
+        partnerId: persistedVerification.partnerId,
+        partnerProgramId: persistedVerification.partnerProgramId,
+        partnerEntrySlug: persistedVerification.partnerEntrySlug,
+        scopes: ["partner:book"],
+      },
+    );
+    expect(
+      consumer.getPartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+      ).verificationStatus,
+    ).toBe("ineligible");
+    expect(repository.findPartnerEligibilityVerification).toHaveBeenCalledWith(
+      persistedVerification.eligibilityVerificationId,
+    );
+    await expect(
+      consumer.hydratePartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+        {
+          actorType: "referral_passenger",
+          actorId: "foreign-passenger-001",
+          realm: "partner",
+          tenantId: "tenant-foreign-001",
+          partnerId: persistedVerification.partnerId,
+          partnerProgramId: persistedVerification.partnerProgramId,
+          partnerEntrySlug: persistedVerification.partnerEntrySlug,
+          scopes: ["partner:book"],
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: "PARTNER_SCOPE_MISMATCH" } },
+    });
+  });
+
+  it("loads and atomically resolves a review created by another API instance", async () => {
+    const producer = new TenantPartnerService(new AuditNotificationService());
+    const verified = await producer.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "1234",
+    });
+    const persistedReview = {
+      ...verified,
+      verificationStatus: "manual_review" as const,
+      verificationReasonCode: "ISSUER_REVIEW_REQUIRED",
+    };
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      listPartnerEligibilityReviewQueue: vi
+        .fn()
+        .mockResolvedValue([persistedReview]),
+      findPartnerEligibilityVerification: vi
+        .fn()
+        .mockResolvedValue(persistedReview),
+      compareAndSetPartnerEligibilityVerification: vi
+        .fn()
+        .mockResolvedValue(true),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const consumer = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await expect(
+      consumer.resolvePartnerEligibilityReviewQueue(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        eligibilityVerificationId: persistedReview.eligibilityVerificationId,
+        verificationStatus: "manual_review",
+      }),
+    ]);
+    await expect(
+      consumer.resolvePartnerEligibilityReview({
+        eligibilityVerificationId: persistedReview.eligibilityVerificationId,
+        decision: "approve",
+        reasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+        notes: null,
+      }),
+    ).resolves.toMatchObject({
+      previousStatus: "manual_review",
+      resolvedStatus: "eligible",
+    });
+    expect(
+      repository.compareAndSetPartnerEligibilityVerification,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eligibilityVerificationId: persistedReview.eligibilityVerificationId,
+        verificationStatus: "eligible",
+      }),
+      persistedReview.updatedAt,
+    );
+  });
+
   it("applies passenger/address governance quality rules and masks export views", () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
@@ -1825,7 +2013,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       "req-eligibility-manual-resolve-001",
     );
 
-    const approveResolution = service.resolvePartnerEligibilityReview(
+    const approveResolution = await service.resolvePartnerEligibilityReview(
       {
         eligibilityVerificationId: manualReview.eligibilityVerificationId,
         decision: "approve",
@@ -1849,7 +2037,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       resolvedBy: "ops-reviewer-approve-001",
     });
 
-    const denyResolution = service.resolvePartnerEligibilityReview(
+    const denyResolution = await service.resolvePartnerEligibilityReview(
       {
         eligibilityVerificationId: denied.eligibilityVerificationId,
         decision: "deny",
@@ -1874,7 +2062,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
 
     try {
-      service.resolvePartnerEligibilityReview(
+      await service.resolvePartnerEligibilityReview(
         {
           eligibilityVerificationId: denied.eligibilityVerificationId,
           decision: "approve",
