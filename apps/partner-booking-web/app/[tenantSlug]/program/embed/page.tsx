@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import {
   AirportTransferSite,
+  type AirportTransferBookingActionResult,
   type AirportTransferBookingSubmission,
 } from "@/components/airport-transfer-site";
 import { submitEmbeddedAirportBooking } from "@/lib/embed-airport-booking";
@@ -8,6 +9,7 @@ import { getTenantProgramRouteContext } from "@/lib/program-route-context";
 import { getAirportBank } from "@/lib/airport-site-data";
 import { ProgramBookingFlow } from "@/lib/program-screens";
 import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +37,8 @@ export default async function ProgramEmbedFlowPage({
   const { tenantSlug } = await params;
   const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
-  const { entry, inactive, theme } = await getTenantProgramRouteContext(tenantSlug);
+  const { entry, inactive, theme } =
+    await getTenantProgramRouteContext(tenantSlug);
   const bank = getAirportBank(tenantSlug);
 
   if (theme.kind !== "card" || !bank) {
@@ -75,22 +78,34 @@ export default async function ProgramEmbedFlowPage({
     );
   }
 
-  async function submitBooking(submission: AirportTransferBookingSubmission) {
+  async function submitBooking(
+    submission: AirportTransferBookingSubmission,
+  ): Promise<AirportTransferBookingActionResult> {
     "use server";
 
-    return submitEmbeddedAirportBooking({
-      tenantSlug,
-      partnerEntry: entry,
-      partnerUserRef,
-      referenceToken,
-      cardLast4,
-      cardholderName,
-      benefitReference,
-      flightNo,
-      existingEligibilityVerificationId,
-      locale,
-      submission,
-    });
+    try {
+      return {
+        ok: true,
+        result: await submitEmbeddedAirportBooking({
+          tenantSlug,
+          partnerEntry: entry,
+          partnerUserRef,
+          referenceToken,
+          cardLast4,
+          cardholderName,
+          benefitReference,
+          flightNo,
+          existingEligibilityVerificationId,
+          locale,
+          submission,
+        }),
+      };
+    } catch {
+      return {
+        ok: false,
+        errorMessage: t("airport.embed.error.submitFailed", undefined, locale),
+      };
+    }
   }
 
   return (
