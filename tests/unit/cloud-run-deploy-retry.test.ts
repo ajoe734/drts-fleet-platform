@@ -129,4 +129,42 @@ describe("Cloud Run deploy quota retry", () => {
     ).toHaveLength(12);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
   });
+
+  it("keeps every dev web revision within the low-quota resource profile", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+
+    const webSteps = [
+      "platform-admin-web",
+      "ops-console-web",
+      "fleet-partner-portal-web",
+      "tenant-console-web",
+      "bank-console-web",
+      "referral-embed-web",
+      "concierge-portal-web",
+      "passenger-web",
+      "partner-booking-web",
+      "enterprise-dispatch-web",
+      "channel-partner-portal-web",
+    ];
+
+    for (const step of webSteps) {
+      const start = workflow.indexOf(`- name: Deploy — ${step}`);
+      const end = workflow.indexOf("\n      - name:", start + 1);
+      const block = workflow.slice(start, end);
+
+      expect(start, `${step} deploy step`).toBeGreaterThan(-1);
+      expect(block, step).toContain("--cpu 0.5");
+      expect(block, step).toContain("--concurrency 1");
+      expect(block, step).toContain("--execution-environment gen1");
+      expect(block, step).toContain("--no-cpu-boost");
+      expect(block, step).not.toContain("--no-deploy-health-check");
+    }
+
+    const apiStart = workflow.indexOf("- name: Deploy — api");
+    const apiEnd = workflow.indexOf("\n      - name:", apiStart + 1);
+    expect(workflow.slice(apiStart, apiEnd)).not.toContain("--cpu 0.5");
+  });
 });
