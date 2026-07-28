@@ -1,6 +1,6 @@
 # AIRPORT-PARTNER-DEV-DEPLOY-001 Evidence
 
-Last updated: 2026-07-28T14:32:00Z
+Last updated: 2026-07-28T14:52:00Z
 Owner: Codex
 Reviewer: Codex2
 
@@ -111,6 +111,8 @@ Re-checked from this task worktree on `2026-07-28` with `curl -L -s -o /dev/null
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/cathay/program/embed` -> `200`
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/taishin/program/embed` -> `200`
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/dbs/program/embed` -> `200`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/fubon/program/embed` -> `404`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/lion/program/embed/embed-handoff` -> `404`
 - `https://drts-dev-concierge-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
 - `https://drts-dev-passenger-web-ne55h7sy3a-uc.a.run.app` -> `404`
 - `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app` -> `200`
@@ -122,9 +124,11 @@ Spot-check re-run at `2026-07-28T14:30Z` still matches the public-dev state:
 
 - `https://drts-dev-api-ne55h7sy3a-uc.a.run.app/health` -> `200`
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/ctbc/program/embed` -> `200`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/fubon/program/embed` -> `404`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/lion/program/embed/embed-handoff` -> `404`
 - `https://drts-dev-passenger-web-ne55h7sy3a-uc.a.run.app` -> `404`
 
-These probes support the same conclusion as the workflow health job: the deploy is broadly reachable and not blocked by 5xx at the entry-origin level. The release remains blocked by the real airport booking create smoke.
+Per [docs/02-architecture/app-entry-url-index-20260616.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-airport-partner-dev-deploy-001/docs/02-architecture/app-entry-url-index-20260616.md:1) and [tests/e2e/partner-booking-surfaces.spec.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-airport-partner-dev-deploy-001/tests/e2e/partner-booking-surfaces.spec.ts:153), `fubon` and `lion` are site-only funnels and their embed routes are expected to return `404`. The retired `passenger-web` `404` is also expected per the same app-entry index. These probes therefore support the same conclusion as the workflow health job: the deploy is broadly reachable and not blocked by outer 5xx at the entry-origin level. The release remains blocked by the real airport booking create smoke.
 
 ## Commit relationship
 
@@ -142,9 +146,9 @@ So the failed workflow validates the older deployed SHA, not the latest branch h
 
 - `workflow run 30353618827 completes successfully`: no
 - `all build migration deploy and health jobs pass`: no, UI smoke failed
-- `all configured dev entry origins return expected non-5xx responses`: partially yes for the checked HTTP surfaces, but the real airport booking create flow still fails functionally
+- `all configured dev entry origins return expected non-5xx responses`: yes for the active dev entry surfaces; expected `404`s remain on retired or intentionally unsupported routes (`passenger-web`, `fubon` embed, `lion` embed handoff)
 - `CTBC Cathay Taishin DBS airport entries pass`: entry pages load, but CTBC real create flow fails
-- `Fubon and Lion partner entries pass`: not yet re-validated as final acceptance because deploy already failed
+- `Fubon and Lion partner entries pass`: site funnels pass and embed `404`s match the repo acceptance test contract
 - `real airport booking create and tracking smoke passes`: no
 - `deployment verdict and evidence are recorded`: yes, in this file
 
