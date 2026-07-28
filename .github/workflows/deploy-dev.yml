@@ -738,7 +738,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.api_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3001 \
@@ -786,7 +786,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.platform_admin_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.platform_admin_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3002 \
@@ -803,7 +803,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.ops_console_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.ops_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3003 \
@@ -820,7 +820,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3007 \
@@ -837,7 +837,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/tenant-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.tenant_console_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.tenant_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3004 \
@@ -854,7 +854,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/bank-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.bank_console_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.bank_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3008 \
@@ -871,7 +871,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.referral_embed_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.referral_embed_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3014 \
@@ -888,7 +888,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/concierge-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.concierge_portal_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.concierge_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3006 \
@@ -905,7 +905,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/passenger-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.passenger_web_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_web_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3016 \
@@ -922,7 +922,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/partner-booking-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.partner_booking_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.partner_booking_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3007 \
@@ -939,7 +939,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3010 \
@@ -956,7 +956,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3013 \
