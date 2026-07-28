@@ -753,7 +753,7 @@ describe("partner-booking-web BFF wiring", () => {
       .fn()
       .mockResolvedValueOnce(
         jsonResponse({
-          data: booking,
+          data: { booking, order },
           meta: { requestId: "r1", timestamp: "t1" },
         }),
       )
@@ -788,7 +788,7 @@ describe("partner-booking-web BFF wiring", () => {
         reservationWindowEnd: "2026-05-19T11:00:00.000Z",
         passenger: { name: "Test Rider", phone: "0912000000" },
       }),
-    ).resolves.toEqual(booking);
+    ).resolves.toEqual({ booking, order });
     await expect(
       getPartnerConfirmation(session, "booking-001"),
     ).resolves.toEqual(booking);

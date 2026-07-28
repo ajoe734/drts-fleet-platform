@@ -625,24 +625,15 @@ export async function verifyPartnerEligibility(
 export async function createPartnerBooking(
   session: PartnerSessionRecord,
   command: CreateTenantBookingCommand,
-): Promise<BookingRecord> {
-  const response = await requestAuthority<
-    BookingRecord | { booking?: BookingRecord }
-  >("/api/partner/bookings", {
-    method: "POST",
-    headers: buildPartnerHeaders(session),
-    body: JSON.stringify(command),
-  });
-
-  if (response && typeof response === "object" && "bookingId" in response) {
-    return response as BookingRecord;
-  }
-
-  const booking = (response as { booking?: BookingRecord }).booking;
-  if (!booking) {
-    throw new Error("Backend did not return a booking record.");
-  }
-  return booking;
+): Promise<{ booking: BookingRecord; order: OwnedOrderRecord }> {
+  return requestAuthority<{ booking: BookingRecord; order: OwnedOrderRecord }>(
+    "/api/partner/bookings",
+    {
+      method: "POST",
+      headers: buildPartnerHeaders(session),
+      body: JSON.stringify(command),
+    },
+  );
 }
 
 export async function getPartnerConfirmation(

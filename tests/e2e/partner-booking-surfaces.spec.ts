@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
 const insuranceBlockedStates = [
@@ -128,8 +129,9 @@ test.describe("partner booking program surfaces", () => {
   test("creates a real booking from the airport embed flow", async ({
     page,
   }) => {
+    const requestRef = randomUUID();
     const response = await page.goto(
-      "/ctbc/program/embed?partnerUserRef=user-001&referenceToken=token-001&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-001&flightNo=CI100",
+      `/ctbc/program/embed?partnerUserRef=user-${requestRef}&referenceToken=token-${requestRef}&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-${requestRef}&flightNo=CI100`,
     );
     expect(response?.status()).toBe(200);
 

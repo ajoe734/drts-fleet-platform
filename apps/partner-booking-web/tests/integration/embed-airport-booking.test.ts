@@ -72,15 +72,10 @@ const eligibility = {
   verificationStatus: "eligible",
 } as unknown as PartnerEligibilityVerificationRecord;
 
-const booking = {
-  bookingId: "booking-001",
-  orderId: "order-001",
-  eligibilityVerificationId: "elig-001",
-} as unknown as BookingRecord;
-
 const confirmation = {
   bookingId: "booking-001",
   orderId: "order-001",
+  eligibilityVerificationId: "elig-001",
   orderStatus: "created",
   reservationWindowStart: "2026-07-28T05:30:00.000Z",
 } as unknown as BookingRecord;
@@ -101,9 +96,10 @@ describe("submitEmbeddedAirportBooking", () => {
     });
     const createPartnerIngressHandoff = vi.fn().mockResolvedValue(handoff);
     const verifyPartnerEligibility = vi.fn().mockResolvedValue(eligibility);
-    const createPartnerBooking = vi.fn().mockResolvedValue(booking);
-    const getPartnerConfirmation = vi.fn().mockResolvedValue(confirmation);
-    const getPartnerReceipt = vi.fn().mockResolvedValue(receipt);
+    const createPartnerBooking = vi.fn().mockResolvedValue({
+      booking: confirmation,
+      order: receipt,
+    });
 
     const result = await submitEmbeddedAirportBooking(
       {
@@ -135,8 +131,6 @@ describe("submitEmbeddedAirportBooking", () => {
       {
         createPartnerBooking,
         createPartnerIngressHandoff,
-        getPartnerConfirmation,
-        getPartnerReceipt,
         getPartnerRouteContext,
         verifyPartnerEligibility,
       },
@@ -198,14 +192,6 @@ describe("submitEmbeddedAirportBooking", () => {
         notes: "尊榮轎車",
       }),
     );
-    expect(getPartnerConfirmation).toHaveBeenCalledWith(
-      expect.any(Object),
-      "booking-001",
-    );
-    expect(getPartnerReceipt).toHaveBeenCalledWith(
-      expect.any(Object),
-      "order-001",
-    );
     expect(result).toEqual({
       bookingId: "booking-001",
       orderId: "order-001",
@@ -224,9 +210,10 @@ describe("submitEmbeddedAirportBooking", () => {
     });
     const createPartnerIngressHandoff = vi.fn().mockResolvedValue(handoff);
     const verifyPartnerEligibility = vi.fn();
-    const createPartnerBooking = vi.fn().mockResolvedValue(booking);
-    const getPartnerConfirmation = vi.fn().mockResolvedValue(confirmation);
-    const getPartnerReceipt = vi.fn().mockResolvedValue(receipt);
+    const createPartnerBooking = vi.fn().mockResolvedValue({
+      booking: confirmation,
+      order: receipt,
+    });
 
     await submitEmbeddedAirportBooking(
       {
@@ -258,8 +245,6 @@ describe("submitEmbeddedAirportBooking", () => {
       {
         createPartnerBooking,
         createPartnerIngressHandoff,
-        getPartnerConfirmation,
-        getPartnerReceipt,
         getPartnerRouteContext,
         verifyPartnerEligibility,
       },
@@ -281,9 +266,10 @@ describe("submitEmbeddedAirportBooking", () => {
     });
     const createPartnerIngressHandoff = vi.fn().mockResolvedValue(handoff);
     const verifyPartnerEligibility = vi.fn().mockResolvedValue(eligibility);
-    const createPartnerBooking = vi.fn().mockResolvedValue(booking);
-    const getPartnerConfirmation = vi.fn().mockResolvedValue(confirmation);
-    const getPartnerReceipt = vi.fn().mockResolvedValue(receipt);
+    const createPartnerBooking = vi.fn().mockResolvedValue({
+      booking: confirmation,
+      order: receipt,
+    });
 
     await expect(
       submitEmbeddedAirportBooking(
@@ -316,8 +302,6 @@ describe("submitEmbeddedAirportBooking", () => {
         {
           createPartnerBooking,
           createPartnerIngressHandoff,
-          getPartnerConfirmation,
-          getPartnerReceipt,
           getPartnerRouteContext,
           verifyPartnerEligibility,
         },
