@@ -42,6 +42,7 @@ type SubmitEmbeddedAirportBookingInput = {
   tenantSlug: string;
   partnerEntry?: PartnerChannelEntryRecord | null;
   partnerUserRef: string | null;
+  apiKey: string | null;
   referenceToken: string | null;
   cardLast4: string | null;
   cardholderName: string | null;
@@ -172,6 +173,7 @@ export async function submitEmbeddedAirportBooking(
 
   const handoff = await dependencies.createPartnerIngressHandoff({
     entrySlug: entry.entrySlug,
+    ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     partnerUserRef: input.partnerUserRef,
   });
 
