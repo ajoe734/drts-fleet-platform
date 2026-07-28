@@ -4,7 +4,10 @@ import {
   type AirportTransferBookingActionResult,
   type AirportTransferBookingSubmission,
 } from "@/components/airport-transfer-site";
-import { submitEmbeddedAirportBooking } from "@/lib/embed-airport-booking";
+import {
+  submitEmbeddedAirportBooking,
+  toAirportBookingOperationalError,
+} from "@/lib/embed-airport-booking";
 import { getTenantProgramRouteContext } from "@/lib/program-route-context";
 import { getAirportBank } from "@/lib/airport-site-data";
 import { ProgramBookingFlow } from "@/lib/program-screens";
@@ -100,9 +103,14 @@ export default async function ProgramEmbedFlowPage({
           submission,
         }),
       };
-    } catch {
+    } catch (error) {
+      const operationalError = toAirportBookingOperationalError(error);
+
+      console.error("embedded_airport_booking_failed", operationalError);
+
       return {
         ok: false,
+        errorCode: operationalError.errorCode,
         errorMessage: t("airport.embed.error.submitFailed", undefined, locale),
       };
     }

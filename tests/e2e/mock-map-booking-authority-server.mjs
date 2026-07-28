@@ -292,6 +292,17 @@ const server = http.createServer((req, res) => {
     });
     req.on("end", () => {
       lastTenantBookingCommand = JSON.parse(body || "{}");
+      if (lastTenantBookingCommand.benefitReference === "force-error") {
+        json(res, 409, {
+          error: {
+            code: "PARTNER_BOOKING_CONFLICT",
+            message: "sensitive upstream booking detail",
+            details: { accessToken: "must-not-leak" },
+            retryable: true,
+          },
+        });
+        return;
+      }
       json(res, 200, {
         data: {
           bookingId: "booking-embed-001",

@@ -457,6 +457,7 @@ const en = {
   "airport.embed.error.submitUnavailable":
     "Booking submission is unavailable on this surface.",
   "airport.embed.error.submitFailed": "Booking submission failed.",
+  "airport.embed.error.reference": "Reference: {code}",
   "airport.status.created": "Created",
   "airport.status.ready_for_dispatch": "Ready for dispatch",
   "airport.status.assigned": "Driver assigned",
@@ -905,14 +906,12 @@ const zh = {
   "airport.embed.submitting": "送出中...",
   "airport.embed.error.missingCredentials":
     "缺少內嵌登入交接資訊，請回到銀行 App 重新開啟此頁。",
-  "airport.embed.error.programUnavailable":
-    "此內嵌預約方案目前無法使用。",
-  "airport.embed.error.manualReview":
-    "資格正在人工審查中，暫時無法建立預約。",
-  "airport.embed.error.eligibilityFailed":
-    "資格驗證未通過，尚未建立預約。",
+  "airport.embed.error.programUnavailable": "此內嵌預約方案目前無法使用。",
+  "airport.embed.error.manualReview": "資格正在人工審查中，暫時無法建立預約。",
+  "airport.embed.error.eligibilityFailed": "資格驗證未通過，尚未建立預約。",
   "airport.embed.error.submitUnavailable": "此頁面目前無法送出預約。",
   "airport.embed.error.submitFailed": "預約送出失敗。",
+  "airport.embed.error.reference": "錯誤代碼：{code}",
   "airport.status.created": "已建立",
   "airport.status.ready_for_dispatch": "待派車",
   "airport.status.assigned": "已指派司機",

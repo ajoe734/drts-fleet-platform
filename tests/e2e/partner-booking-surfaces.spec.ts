@@ -158,6 +158,28 @@ test.describe("partner booking program surfaces", () => {
     ).toBeVisible();
   });
 
+  test("shows a safe reference code when airport booking fails", async ({
+    page,
+  }) => {
+    const response = await page.goto(
+      "/ctbc/program/embed?partnerUserRef=failure-user&referenceToken=failure-token&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=force-error&flightNo=CI100",
+    );
+    expect(response?.status()).toBe(200);
+
+    await page.getByRole("button", { name: "開始預約" }).click();
+    await page.getByRole("button", { name: "前往確認" }).click();
+    await page.getByRole("button", { name: "確認送出預約" }).click();
+
+    await expect(page.getByText("預約送出失敗。")).toBeVisible();
+    await expect(page.getByTestId("partner-booking-error-code")).toHaveText(
+      "錯誤代碼：PARTNER_BOOKING_CONFLICT",
+    );
+    await expect(
+      page.getByText("sensitive upstream booking detail"),
+    ).toHaveCount(0);
+    await expect(page.getByText("must-not-leak")).toHaveCount(0);
+  });
+
   test("keeps insurance and travel on site funnel states while blocking embed", async ({
     page,
   }) => {

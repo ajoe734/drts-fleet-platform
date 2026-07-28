@@ -108,12 +108,29 @@ describe("partner-booking i18n dictionary", () => {
       "Promise<AirportTransferBookingActionResult>",
     );
     expect(programEmbedPage).toContain("ok: false");
+    expect(programEmbedPage).toContain("toAirportBookingOperationalError");
+    expect(programEmbedPage).toContain("errorCode");
     expect(programEmbedPage).not.toContain("apiKey");
     expect(programEmbedScreenPage).toContain("getServerLocale");
     expect(programEmbedScreenPage).toContain("locale={locale}");
     expect(programEmbedScreenPage).toContain('surface="embed"');
     expect(programScreens).toContain("getProgramScreenCopy(screen, locale)");
     expect(programScreens).toContain("translate(key, params, locale)");
+  });
+
+  it("localizes safe airport booking reference codes", () => {
+    expect(
+      translations.en["airport.embed.error.reference"].replace(
+        "{code}",
+        "PARTNER_BOOKING_CONFLICT",
+      ),
+    ).toBe("Reference: PARTNER_BOOKING_CONFLICT");
+    expect(
+      translations.zh["airport.embed.error.reference"].replace(
+        "{code}",
+        "PARTNER_BOOKING_CONFLICT",
+      ),
+    ).toBe("錯誤代碼：PARTNER_BOOKING_CONFLICT");
   });
 
   it("keeps website funnel routes separate from banking-app embed routes", () => {

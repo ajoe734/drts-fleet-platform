@@ -157,7 +157,7 @@ describe("Cloud Run deploy quota retry", () => {
 
       expect(start, `${step} deploy step`).toBeGreaterThan(-1);
       expect(block, step).toContain("--cpu 1");
-      expect(block, step).toContain("--concurrency 20");
+      expect(block, step).toContain("--concurrency 80");
       expect(block, step).toContain("--execution-environment gen1");
       expect(block, step).toContain("--no-cpu-boost");
       expect(block, step).toContain("--max-instances 1");
@@ -166,7 +166,7 @@ describe("Cloud Run deploy quota retry", () => {
 
     const apiStart = workflow.indexOf("- name: Deploy — api");
     const apiEnd = workflow.indexOf("\n      - name:", apiStart + 1);
-    expect(workflow.slice(apiStart, apiEnd)).not.toContain("--concurrency 20");
+    expect(workflow.slice(apiStart, apiEnd)).not.toContain("--concurrency 80");
   });
 
   it("runs focused business-flow smoke before the high-volume matrix", () => {
@@ -194,8 +194,10 @@ describe("Cloud Run deploy quota retry", () => {
     );
     expect(uiSmoke).toContain("smoke_status=0");
     expect(uiSmoke).toContain(
-      'pnpm exec playwright test --retries=1 --config "${config}" || smoke_status=1',
+      'PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}"',
     );
+    expect(uiSmoke).toContain("--reporter=list,html");
+    expect(uiSmoke).toContain('--output "test-results/${suite}"');
     expect(uiSmoke).toContain('exit "${smoke_status}"');
     expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(11);
     expect(workflow).not.toContain(

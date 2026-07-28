@@ -796,7 +796,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -817,7 +817,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -838,7 +838,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -859,7 +859,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.tenant_console_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -880,7 +880,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -901,7 +901,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true" \
             --allow-unauthenticated \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -922,7 +922,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             --allow-unauthenticated \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -943,7 +943,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             --allow-unauthenticated \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -964,7 +964,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.partner_booking_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -985,7 +985,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.enterprise_dispatch_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -1006,7 +1006,7 @@ jobs:
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag }} \
             --cpu 1 \
-            --concurrency 20 \
+            --concurrency 80 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
@@ -1228,8 +1228,15 @@ jobs:
           smoke_status=0
           run_suite() {
             local config="$1"
+            local suite="${config#playwright.}"
+            suite="${suite%.config.ts}"
             echo "::group::Playwright ${config}"
-            pnpm exec playwright test --retries=1 --config "${config}" || smoke_status=1
+            PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}" \
+              pnpm exec playwright test \
+                --retries=1 \
+                --config "${config}" \
+                --reporter=list,html \
+                --output "test-results/${suite}" || smoke_status=1
             echo "::endgroup::"
           }
 
