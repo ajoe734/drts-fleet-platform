@@ -5,7 +5,11 @@ import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
-import { submitEmbeddedAirportBooking } from "@/lib/embed-airport-booking";
+import {
+  submitEmbeddedAirportBooking,
+  toAirportBookingOperationalError,
+} from "@/lib/embed-airport-booking";
+import { PartnerAuthorityError } from "@/lib/api-client";
 
 const activeEntry = {
   partnerId: "partner-001",
@@ -90,6 +94,37 @@ const receipt = {
 } as unknown as OwnedOrderRecord;
 
 describe("submitEmbeddedAirportBooking", () => {
+  it("maps authority failures to safe operational metadata", () => {
+    const mapped = toAirportBookingOperationalError(
+      new PartnerAuthorityError(
+        409,
+        "PARTNER_BOOKING_CONFLICT",
+        "sensitive upstream message",
+        { accessToken: "must-not-leak" },
+        true,
+      ),
+    );
+
+    expect(mapped).toEqual({
+      errorCode: "PARTNER_BOOKING_CONFLICT",
+      retryable: true,
+      status: 409,
+    });
+    expect(JSON.stringify(mapped)).not.toContain("sensitive");
+    expect(JSON.stringify(mapped)).not.toContain("must-not-leak");
+  });
+
+  it.each([
+    new Error("internal database detail"),
+    new PartnerAuthorityError(400, "<script>alert(1)</script>", "unsafe code"),
+  ])("uses a stable fallback for non-operational errors", (error) => {
+    expect(toAirportBookingOperationalError(error)).toEqual({
+      errorCode: "PARTNER_BOOKING_SUBMIT_FAILED",
+      retryable: false,
+      status: error instanceof PartnerAuthorityError ? 400 : 500,
+    });
+  });
+
   it("creates a real partner booking through the shared booking path", async () => {
     const getPartnerRouteContext = vi.fn().mockResolvedValue({
       entry: activeEntry,

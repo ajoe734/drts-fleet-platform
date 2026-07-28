@@ -14,6 +14,7 @@ import {
   createPartnerIngressHandoff,
   createPartnerSessionFromIngressHandoff,
   getPartnerRouteContext,
+  PartnerAuthorityError,
   verifyPartnerEligibility,
 } from "@/lib/api-client";
 import { t, type Locale } from "@/lib/translations";
@@ -31,6 +32,30 @@ const defaultDependencies: EmbedBookingDependencies = {
   getPartnerRouteContext,
   verifyPartnerEligibility,
 };
+
+export type AirportBookingOperationalError = {
+  errorCode: string;
+  retryable: boolean;
+  status: number;
+};
+
+const SAFE_OPERATIONAL_ERROR_CODE = /^[A-Z0-9][A-Z0-9_]{1,63}$/;
+
+export function toAirportBookingOperationalError(
+  error: unknown,
+): AirportBookingOperationalError {
+  const authorityError = error instanceof PartnerAuthorityError ? error : null;
+  const authorityCode = authorityError?.code;
+
+  return {
+    errorCode:
+      authorityCode && SAFE_OPERATIONAL_ERROR_CODE.test(authorityCode)
+        ? authorityCode
+        : "PARTNER_BOOKING_SUBMIT_FAILED",
+    retryable: authorityError?.retryable ?? false,
+    status: authorityError?.status ?? 500,
+  };
+}
 
 type SubmitEmbeddedAirportBookingInput = {
   tenantSlug: string;

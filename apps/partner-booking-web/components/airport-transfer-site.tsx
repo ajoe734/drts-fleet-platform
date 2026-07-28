@@ -54,6 +54,7 @@ export type AirportTransferBookingActionResult =
     }
   | {
       ok: false;
+      errorCode: string;
       errorMessage: string;
     };
 
@@ -165,7 +166,10 @@ export function AirportTransferSite({
   const [dir, setDir] = useState<"out" | "in">("out");
   const [vehId, setVehId] = useState("sedan");
   const [faqOpen, setFaqOpen] = useState<number | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<{
+    code?: string;
+    message: string;
+  } | null>(null);
   const [bookingResult, setBookingResult] =
     useState<AirportTransferBookingResult | null>(null);
   const passengerName =
@@ -857,7 +861,17 @@ export function AirportTransferSite({
                       className="fineprint"
                       style={{ color: "var(--primary-dark)" }}
                     >
-                      {submitError}
+                      {submitError.message}
+                      {submitError.code ? (
+                        <>
+                          {" "}
+                          <span data-testid="partner-booking-error-code">
+                            {t("airport.embed.error.reference", {
+                              code: submitError.code,
+                            })}
+                          </span>
+                        </>
+                      ) : null}
                     </p>
                   ) : null}
                   <div className="bfoot">
@@ -871,9 +885,9 @@ export function AirportTransferSite({
                       className="btn btn-primary btn-block"
                       onClick={() => {
                         if (!onSubmitBooking) {
-                          setSubmitError(
-                            t("airport.embed.error.submitUnavailable"),
-                          );
+                          setSubmitError({
+                            message: t("airport.embed.error.submitUnavailable"),
+                          });
                           return;
                         }
                         setSubmitError(null);
@@ -882,15 +896,19 @@ export function AirportTransferSite({
                             const actionResult =
                               await onSubmitBooking(buildSubmission());
                             if (!actionResult.ok) {
-                              setSubmitError(actionResult.errorMessage);
+                              setSubmitError({
+                                code: actionResult.errorCode,
+                                message: actionResult.errorMessage,
+                              });
                               return;
                             }
                             setBookingResult(actionResult.result);
                             setStep(4);
                           } catch {
-                            setSubmitError(
-                              t("airport.embed.error.submitFailed"),
-                            );
+                            setSubmitError({
+                              code: "PARTNER_BOOKING_ACTION_FAILED",
+                              message: t("airport.embed.error.submitFailed"),
+                            });
                           }
                         });
                       }}
