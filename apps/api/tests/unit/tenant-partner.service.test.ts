@@ -455,6 +455,71 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
   });
 
+  it("does not resurrect revoked credentials or replace rotated credentials from seeds", async () => {
+    const persistedState = createEmptyRepositoryState();
+    persistedState.partnerIngressCredentials = [
+      {
+        keyId: "partner-key-ctbc-revoked",
+        entrySlug: "ctbc",
+        keyPrefix: "pk_revoked",
+        maskedSuffix: "0001",
+        source: "platform_issued",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: "2026-07-02T00:00:00.000Z",
+        issuedBy: "platform-admin-001",
+        revokedBy: "platform-admin-001",
+        rotationReason: null,
+        revokeReason: "partner_offboarding",
+        keyHash: "c".repeat(64),
+      },
+      {
+        keyId: "partner-key-cathay-rotated",
+        entrySlug: "cathay",
+        keyPrefix: "pk_rotated",
+        maskedSuffix: "0002",
+        source: "platform_issued",
+        createdAt: "2026-07-03T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: null,
+        issuedBy: "platform-admin-001",
+        revokedBy: null,
+        rotationReason: "scheduled_rotation",
+        revokeReason: null,
+        keyHash: "d".repeat(64),
+      },
+    ];
+    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+      undefined,
+      [
+        {
+          entrySlug: "ctbc",
+          keyId: "partner-key-ctbc-dev",
+          apiKeyHash: "e".repeat(64),
+        },
+        {
+          entrySlug: "cathay",
+          keyId: "partner-key-cathay-dev",
+          apiKeyHash: "f".repeat(64),
+        },
+      ],
+    );
+
+    await service.onModuleInit();
+
+    expect(repository.getState().partnerIngressCredentials).toEqual(
+      persistedState.partnerIngressCredentials,
+    );
+    expect(
+      repository.persistChanges.mock.calls.flatMap(
+        ([changes]) => changes.partnerIngressCredentials ?? [],
+      ),
+    ).toHaveLength(0);
+  });
+
   it("loads partner ingress credentials from environment secrets", () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";
