@@ -1,6 +1,6 @@
 # AIRPORT-PARTNER-DEV-DEPLOY-001 Evidence
 
-Last updated: 2026-07-28T14:29:30Z
+Last updated: 2026-07-28T14:40:00Z
 Owner: Codex
 Reviewer: Codex2
 
@@ -67,6 +67,15 @@ Additional `Deploy — Dev` runs after `30353618827` show the task is still bloc
   - `Deploy services` failed before health/smoke at job `90305427670`
   - the failing step was `Deploy — api`
   - failed log message: `/home/runner/work/_temp/...sh: line 3: scripts/deploy-cloud-run-service.sh: No such file or directory`
+
+Newest observed run while resuming this task:
+
+- `30368392706` on branch `dev` at SHA `ead1e4c8768b21ee0fc948ba236ac0edaa7e0652`
+  - observed at `2026-07-28T14:39Z` and still `in_progress`
+  - `Prepare dev deploy`, `Build & push images`, and `DB migration` had already completed `success`
+  - `Deploy services` was in progress, with `Deploy — api` through `Deploy — passenger-web` already completed `success`
+  - `Deploy — partner-booking-web` was the currently running step when last checked
+  - no new successful end-to-end dev deploy evidence exists yet from this run, so acceptance remains open pending its final conclusion
 
 The most recent run that actually reached public dev (`30364460014`) still failed on the same partner-booking UI smoke as `30353618827`, so acceptance remains blocked even when build, migration, deploy, and health are green.
 
@@ -147,7 +156,7 @@ Re-checked from this task worktree on `2026-07-28` with `curl -L -s -o /dev/null
 - `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app/embed/unsupported-host` -> `200`
 - `https://drts-dev-channel-partner-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
 
-Spot-check re-run at `2026-07-28T15:00Z` still matches the public-dev state:
+Spot-check re-run at `2026-07-28T14:37Z` still matches the public-dev state:
 
 - `https://drts-dev-api-ne55h7sy3a-uc.a.run.app/api/health` -> `200`
 - `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/ctbc/program/embed` -> `200`
