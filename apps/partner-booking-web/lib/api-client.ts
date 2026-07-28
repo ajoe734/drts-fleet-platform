@@ -39,6 +39,29 @@ type ApiSuccessMetaWire = ApiSuccessEnvelope<unknown>["meta"] & {
   request_id?: string | null;
 };
 
+function snakeToCamelKey(key: string) {
+  return key.replace(/_([a-z0-9])/g, (_match, character: string) =>
+    character.toUpperCase(),
+  );
+}
+
+function deepCamelize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(deepCamelize);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(
+        ([key, nestedValue]) => [
+          snakeToCamelKey(key),
+          deepCamelize(nestedValue),
+        ],
+      ),
+    );
+  }
+  return value;
+}
+
 function normalizeEnvelopeRequestId(meta: ApiSuccessMetaWire | undefined) {
   return meta?.requestId ?? meta?.request_id ?? null;
 }
@@ -373,7 +396,7 @@ async function requestAuthorityEnvelope<T>(
   if (!response.ok) {
     let envelope: ApiErrorEnvelope | null = null;
     try {
-      envelope = (await response.json()) as ApiErrorEnvelope;
+      envelope = deepCamelize(await response.json()) as ApiErrorEnvelope;
     } catch {
       envelope = null;
     }
@@ -403,7 +426,7 @@ async function requestAuthorityEnvelope<T>(
   }
 
   const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
-  return envelope;
+  return deepCamelize(envelope) as ApiSuccessEnvelope<T>;
 }
 
 async function requestAuthority<T>(
