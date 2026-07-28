@@ -130,7 +130,7 @@ describe("Cloud Run deploy quota retry", () => {
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
   });
 
-  it("keeps every dev web revision within the low-quota resource profile", () => {
+  it("keeps every dev web revision usable within the low-quota profile", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
       "utf8",
@@ -156,15 +156,51 @@ describe("Cloud Run deploy quota retry", () => {
       const block = workflow.slice(start, end);
 
       expect(start, `${step} deploy step`).toBeGreaterThan(-1);
-      expect(block, step).toContain("--cpu 0.5");
-      expect(block, step).toContain("--concurrency 1");
+      expect(block, step).toContain("--cpu 1");
+      expect(block, step).toContain("--concurrency 20");
       expect(block, step).toContain("--execution-environment gen1");
       expect(block, step).toContain("--no-cpu-boost");
+      expect(block, step).toContain("--max-instances 1");
       expect(block, step).not.toContain("--no-deploy-health-check");
     }
 
     const apiStart = workflow.indexOf("- name: Deploy — api");
     const apiEnd = workflow.indexOf("\n      - name:", apiStart + 1);
-    expect(workflow.slice(apiStart, apiEnd)).not.toContain("--cpu 0.5");
+    expect(workflow.slice(apiStart, apiEnd)).not.toContain("--concurrency 20");
+  });
+
+  it("runs focused business-flow smoke before the high-volume matrix", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const uiSmokeStart = workflow.indexOf(
+      "- name: Run UI smoke against deployed dev",
+    );
+    const uiSmokeEnd = workflow.indexOf(
+      "- name: Upload Playwright report on failure",
+      uiSmokeStart,
+    );
+    const uiSmoke = workflow.slice(uiSmokeStart, uiSmokeEnd);
+    const matrixIndex = uiSmoke.indexOf(
+      "playwright.dev-runtime-matrix.config.ts",
+    );
+
+    expect(matrixIndex).toBeGreaterThan(
+      uiSmoke.indexOf("playwright.ops-console-parity.config.ts"),
+    );
+    expect(matrixIndex).toBeGreaterThan(
+      uiSmoke.indexOf("playwright.partner-booking-surfaces.config.ts"),
+    );
+    expect(uiSmoke).toContain("smoke_status=0");
+    expect(uiSmoke).toContain(
+      'pnpm exec playwright test --retries=1 --config "${config}" || smoke_status=1',
+    );
+    expect(uiSmoke).toContain('exit "${smoke_status}"');
+    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(11);
+    expect(workflow).not.toContain(
+      "Authenticate to GCP for failure diagnostics",
+    );
+    expect(workflow).not.toContain("gcloud logging read");
   });
 });

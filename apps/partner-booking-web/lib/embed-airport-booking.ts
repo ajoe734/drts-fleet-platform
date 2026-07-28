@@ -13,8 +13,6 @@ import {
   createPartnerBooking,
   createPartnerIngressHandoff,
   createPartnerSessionFromIngressHandoff,
-  getPartnerConfirmation,
-  getPartnerReceipt,
   getPartnerRouteContext,
   verifyPartnerEligibility,
 } from "@/lib/api-client";
@@ -23,8 +21,6 @@ import { t, type Locale } from "@/lib/translations";
 type EmbedBookingDependencies = {
   createPartnerBooking: typeof createPartnerBooking;
   createPartnerIngressHandoff: typeof createPartnerIngressHandoff;
-  getPartnerConfirmation: typeof getPartnerConfirmation;
-  getPartnerReceipt: typeof getPartnerReceipt;
   getPartnerRouteContext: typeof getPartnerRouteContext;
   verifyPartnerEligibility: typeof verifyPartnerEligibility;
 };
@@ -32,8 +28,6 @@ type EmbedBookingDependencies = {
 const defaultDependencies: EmbedBookingDependencies = {
   createPartnerBooking,
   createPartnerIngressHandoff,
-  getPartnerConfirmation,
-  getPartnerReceipt,
   getPartnerRouteContext,
   verifyPartnerEligibility,
 };
@@ -53,12 +47,12 @@ type SubmitEmbeddedAirportBookingInput = {
 };
 
 function hasValidDateTime(value: string | null | undefined) {
-  return typeof value === "string" && Number.isFinite(new Date(value).getTime());
+  return (
+    typeof value === "string" && Number.isFinite(new Date(value).getTime())
+  );
 }
 
-function buildReservationWindow(
-  submission: AirportTransferBookingSubmission,
-): {
+function buildReservationWindow(submission: AirportTransferBookingSubmission): {
   reservationWindowStart: string;
   reservationWindowEnd: string;
 } {
@@ -158,7 +152,9 @@ export async function submitEmbeddedAirportBooking(
   dependencies: EmbedBookingDependencies = defaultDependencies,
 ): Promise<AirportTransferBookingResult> {
   if (!input.partnerUserRef) {
-    throw new Error(t("airport.embed.error.missingCredentials", undefined, input.locale));
+    throw new Error(
+      t("airport.embed.error.missingCredentials", undefined, input.locale),
+    );
   }
 
   let entry = input.partnerEntry;
@@ -167,7 +163,9 @@ export async function submitEmbeddedAirportBooking(
   }
 
   if (!entry || entry.status !== "active" || !entry.activeFlag) {
-    throw new Error(t("airport.embed.error.programUnavailable", undefined, input.locale));
+    throw new Error(
+      t("airport.embed.error.programUnavailable", undefined, input.locale),
+    );
   }
 
   const handoff = await dependencies.createPartnerIngressHandoff({
@@ -206,7 +204,7 @@ export async function submitEmbeddedAirportBooking(
     }
   }
 
-  const booking = await dependencies.createPartnerBooking(
+  const creation = await dependencies.createPartnerBooking(
     session,
     buildAirportTransferBookingCommand(
       entry,
@@ -218,19 +216,11 @@ export async function submitEmbeddedAirportBooking(
       eligibilityVerificationId,
     ),
   );
-  const confirmation = await dependencies.getPartnerConfirmation(
-    session,
-    booking.bookingId,
-  );
-  const receipt = await dependencies.getPartnerReceipt(
-    session,
-    booking.orderId,
-  );
 
   return buildResult({
-    booking,
-    confirmation,
-    receipt,
+    booking: creation.booking,
+    confirmation: creation.booking,
+    receipt: creation.order,
     eligibility,
   });
 }

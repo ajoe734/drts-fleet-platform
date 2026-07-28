@@ -218,6 +218,7 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
   ) {
+    const resolvedTenantId = this.requireTenantId(tenantId);
     if (command.eligibilityVerificationId && this.tenantPartnerService) {
       await this.tenantPartnerService.hydratePartnerEligibilityVerification(
         command.eligibilityVerificationId,
@@ -226,12 +227,23 @@ export class OwnedMobilityController {
     }
     const result = await this.ownedMobilityService.createTenantBooking(
       command,
-      this.requireTenantId(tenantId),
+      resolvedTenantId,
       identity,
       requestId,
       runtimeProfileCode,
     );
-    return toApiSuccessEnvelope(result, requestId);
+    return toApiSuccessEnvelope(
+      {
+        ...result,
+        booking: this.ownedMobilityService.getTenantBooking(
+          resolvedTenantId,
+          result.bookingId,
+          identity,
+        ),
+        order: this.ownedMobilityService.getOrder(result.orderId, identity),
+      },
+      requestId,
+    );
   }
 
   @Get("partner/bookings/:bookingId")

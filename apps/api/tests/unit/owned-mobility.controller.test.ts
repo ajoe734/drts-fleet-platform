@@ -66,6 +66,12 @@ describe("OwnedMobilityController tenant booking routes", () => {
       resolvePersistedOrder: vi.fn().mockResolvedValue({
         orderId: "order-e2e-001",
       }),
+      getTenantBooking: vi.fn().mockReturnValue({
+        bookingId: "booking-e2e-001",
+      }),
+      getOrder: vi.fn().mockReturnValue({
+        orderId: "order-e2e-001",
+      }),
     } as unknown as OwnedMobilityService;
     const tenantPartnerService = {
       hydratePartnerEligibilityVerification: vi.fn().mockResolvedValue({
@@ -77,7 +83,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       tenantPartnerService as never,
     );
 
-    await controller.createPartnerBooking(
+    const createResponse = await controller.createPartnerBooking(
       {
         eligibilityVerificationId: "eligibility-e2e-001",
       } as never,
@@ -109,6 +115,19 @@ describe("OwnedMobilityController tenant booking routes", () => {
     expect(
       tenantPartnerService.hydratePartnerEligibilityVerification,
     ).toHaveBeenCalledWith("eligibility-e2e-001", identity);
+    expect(createResponse.data).toEqual({
+      bookingId: "booking-e2e-001",
+      orderId: "order-e2e-001",
+      status: "created",
+      booking: { bookingId: "booking-e2e-001" },
+      order: { orderId: "order-e2e-001" },
+    });
+    expect(service.getTenantBooking).toHaveBeenCalledWith(
+      "tenant-e2e-001",
+      "booking-e2e-001",
+      identity,
+    );
+    expect(service.getOrder).toHaveBeenCalledWith("order-e2e-001", identity);
     expect(service.resolvePersistedTenantBooking).toHaveBeenCalledWith(
       "tenant-e2e-001",
       "booking-e2e-001",

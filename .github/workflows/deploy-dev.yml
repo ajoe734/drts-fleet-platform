@@ -795,12 +795,12 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — ops-console-web
@@ -816,12 +816,12 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — fleet-partner-portal-web
@@ -837,12 +837,12 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — tenant-console-web
@@ -858,12 +858,12 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,DRTS_PARTNER_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.tenant_console_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — bank-console-web
@@ -879,12 +879,12 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — referral-embed-web
@@ -900,12 +900,12 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true" \
             --allow-unauthenticated \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — concierge-portal-web
@@ -921,12 +921,12 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             --allow-unauthenticated \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — passenger-web
@@ -942,12 +942,12 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             --allow-unauthenticated \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — partner-booking-web
@@ -963,12 +963,12 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.partner_booking_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — enterprise-dispatch-web
@@ -984,12 +984,12 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.enterprise_dispatch_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — channel-partner-portal-web
@@ -1005,12 +1005,12 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag }} \
-            --cpu 0.5 \
-            --concurrency 1 \
+            --cpu 1 \
+            --concurrency 20 \
             --execution-environment gen1 \
             --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
   health-check:
@@ -1225,17 +1225,28 @@ jobs:
           DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
         run: |
           set -euo pipefail
-          pnpm exec playwright test --retries=1 --config playwright.dev-runtime-matrix.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.bank-console-depth.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.bank-console-auth.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.ops-console-parity.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.ops-assistant.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.fleet-partner-portal.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.partner-booking-surfaces.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.enterprise-dispatch.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.channel-partner-portal.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.referral-embed.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.platform-admin-service-area.config.ts
+          smoke_status=0
+          run_suite() {
+            local config="$1"
+            echo "::group::Playwright ${config}"
+            pnpm exec playwright test --retries=1 --config "${config}" || smoke_status=1
+            echo "::endgroup::"
+          }
+
+          run_suite playwright.bank-console-depth.config.ts
+          run_suite playwright.bank-console-auth.config.ts
+          run_suite playwright.ops-console-parity.config.ts
+          run_suite playwright.ops-assistant.config.ts
+          run_suite playwright.fleet-partner-portal.config.ts
+          run_suite playwright.partner-booking-surfaces.config.ts
+          run_suite playwright.enterprise-dispatch.config.ts
+          run_suite playwright.channel-partner-portal.config.ts
+          run_suite playwright.referral-embed.config.ts
+          run_suite playwright.platform-admin-service-area.config.ts
+          # Run the high-volume matrix after business-flow suites so load
+          # coverage cannot starve or mask airport and operations regressions.
+          run_suite playwright.dev-runtime-matrix.config.ts
+          exit "${smoke_status}"
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -1245,31 +1256,3 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
-      - name: Authenticate to GCP for failure diagnostics
-        if: failure()
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
-          project_id: ${{ needs.prepare.outputs.project_id }}
-      - name: Set up Cloud SDK for failure diagnostics
-        if: failure()
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ needs.prepare.outputs.project_id }}
-      - name: Print partner booking failure diagnostics
-        if: failure()
-        run: |
-          set -euo pipefail
-
-          since="$(date -u -d '60 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')"
-          filter="resource.type=\"cloud_run_revision\" AND resource.labels.location=\"${{ needs.prepare.outputs.region }}\" AND resource.labels.service_name=\"${{ needs.prepare.outputs.partner_booking_service }}\" AND jsonPayload.event=\"partner_authority_request_failed\" AND timestamp>=\"${since}\""
-
-          echo "::group::Sanitized partner-booking authority failures"
-          gcloud logging read "$filter" \
-            --project "${{ needs.prepare.outputs.project_id }}" \
-            --order=desc \
-            --limit 100 \
-            --format='table(timestamp,severity,jsonPayload.path,jsonPayload.method,jsonPayload.status,jsonPayload.code,jsonPayload.retryable,jsonPayload.requestId)' \
-            || true
-          echo "::endgroup::"
