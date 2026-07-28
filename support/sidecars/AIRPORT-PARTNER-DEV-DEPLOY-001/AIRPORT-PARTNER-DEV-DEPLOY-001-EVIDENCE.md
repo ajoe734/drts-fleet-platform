@@ -1,6 +1,6 @@
 # AIRPORT-PARTNER-DEV-DEPLOY-001 Evidence
 
-Last updated: 2026-07-28T15:25:00Z
+Last updated: 2026-07-28T16:05:00Z
 Owner: Codex
 Reviewer: Codex2
 
@@ -42,7 +42,7 @@ The visible job breakdown on the public run page shows:
 
 ## Later workflow runs on 2026-07-28
 
-Additional `Deploy — Dev` runs after `30353618827` show the task is still blocked, and the blocker is now split across a functional smoke failure, an infra quota failure, and a source-ref-specific deploy script failure:
+Additional `Deploy — Dev` runs after `30353618827` show the task is still blocked, and the blocker has shifted across multiple failure modes:
 
 - `30357846786` on branch `codex2/airport-partner-dev-deploy-001-unblock-manual-unblock` at SHA `ff304139a401685e8901cf27ee1b419cebefd929`
   - completed `failure`
@@ -80,6 +80,21 @@ Newest observed run while resuming this task:
     - `ERROR: (gcloud.run.deploy) Quota exceeded for total allowable CPU per project per region.`
   - the final failed revision attempt was `drts-dev-partner-booking-web-00031-hhq`
   - no new successful end-to-end dev deploy evidence exists yet from this run, so acceptance remains blocked
+
+Newest overall `Deploy — Dev` run observed after that:
+
+- `30372331792` at SHA `741d4ab4779ff38bdcf39df37af3dacde86b2fe9`
+  - completed `failure` at `2026-07-28T15:47:48Z`
+  - `Prepare dev deploy`, `Build & push images`, `DB migration`, `Deploy services`, and `Dev health check` all completed `success`
+  - this run confirms the temporary Cloud Run CPU quota blocker from `30368392706` was not present for this attempt
+  - `Dev UI smoke (playwright vs deployed)` failed at job `90327377311`
+  - `gh run view 30372331792 --log-failed` shows the failure moved to the dev runtime matrix:
+    - file `tests/e2e/dev-runtime-matrix.spec.ts`
+    - case `2012 ops-console-web home ops-maintenance en-US tablet search-demo`
+    - failing line `1010`
+    - expected HTTP `200`, received `429`
+  - the failure reproduced on both the primary attempt and retry
+  - the run still did not satisfy task acceptance because the workflow as a whole remained red
 
 The most recent run that actually reached public dev (`30364460014`) still failed on the same partner-booking UI smoke as `30353618827`, so acceptance remains blocked even when build, migration, deploy, and health are green.
 
@@ -199,9 +214,10 @@ So the failed workflow validates the older deployed SHA, not the latest branch h
 
 Acceptance is blocked pending:
 
-- a GitHub `Deploy — Dev` run that completes without the Cloud Run CPU quota failure seen in `30359910655`
 - a GitHub `Deploy — Dev` run for a source SHA that includes the task branch fixes and no longer references the missing `scripts/deploy-cloud-run-service.sh` helper seen in `30367939638`
-- a public dev deploy whose `Dev UI smoke (playwright vs deployed)` no longer fails the real airport embed booking create assertion seen in `30353618827`, `30357846786`, `30362221809`, and `30364460014`
+- a public dev deploy whose `Dev UI smoke (playwright vs deployed)` completes green instead of failing either:
+  - the real airport embed booking create assertion seen in `30353618827`, `30357846786`, `30362221809`, and `30364460014`
+  - or the later ops-console runtime matrix `429` seen in `30372331792`
 - a deploy source SHA that actually includes the task branch fixes rather than the older SHAs already observed failing on public dev
 
-As of `2026-07-28T15:25Z`, there is no active run to monitor for this task. The latest assigned workflow target `30353618827` is long since failed, and the newest follow-up validation run `30368392706` also failed before health and smoke due to Cloud Run regional CPU quota exhaustion on `partner-booking-web`.
+As of `2026-07-28T16:05Z`, there is no active run to monitor for this task. The latest assigned workflow target `30353618827` is long since failed. The latest overall follow-up run `30372331792` did reach deploy and health successfully, but the workflow still failed in `Dev UI smoke (playwright vs deployed)` because `ops-console-web` returned `429` for runtime-matrix case `2012`.
