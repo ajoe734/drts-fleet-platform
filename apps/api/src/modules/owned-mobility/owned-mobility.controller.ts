@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Optional,
   Param,
   Post,
   Put,
@@ -46,11 +47,16 @@ import {
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
 @Controller()
 export class OwnedMobilityController {
-  constructor(private readonly ownedMobilityService: OwnedMobilityService) {}
+  constructor(
+    private readonly ownedMobilityService: OwnedMobilityService,
+    @Optional()
+    private readonly tenantPartnerService?: TenantPartnerService,
+  ) {}
 
   private resolveDriverTaskStreamDriverId(
     identity: BootstrapRequestIdentity | null,
@@ -212,6 +218,12 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
   ) {
+    if (command.eligibilityVerificationId && this.tenantPartnerService) {
+      await this.tenantPartnerService.hydratePartnerEligibilityVerification(
+        command.eligibilityVerificationId,
+        identity,
+      );
+    }
     const result = await this.ownedMobilityService.createTenantBooking(
       command,
       this.requireTenantId(tenantId),
@@ -224,14 +236,14 @@ export class OwnedMobilityController {
 
   @Get("partner/bookings/:bookingId")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerBooking(
+  async getPartnerBooking(
     @Param("bookingId") bookingId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getTenantBooking(
+      await this.ownedMobilityService.resolvePersistedTenantBooking(
         this.requireTenantId(tenantId),
         bookingId,
         identity,
@@ -242,13 +254,13 @@ export class OwnedMobilityController {
 
   @Get("partner/orders/:orderId")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerOrder(
+  async getPartnerOrder(
     @Param("orderId") orderId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getOrder(orderId, identity),
+      await this.ownedMobilityService.resolvePersistedOrder(orderId, identity),
       requestId,
     );
   }

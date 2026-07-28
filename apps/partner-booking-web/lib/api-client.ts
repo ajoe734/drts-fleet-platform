@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { SUPERVISOR_EXECUTION_MODES } from "@drts/contracts";
 import type {
@@ -335,6 +335,7 @@ async function requestAuthorityEnvelope<T>(
   init?: RequestInit,
 ): Promise<ApiSuccessEnvelope<T>> {
   let response: Response;
+  const requestId = randomUUID();
   try {
     response = await fetch(`${API_URL}${path}`, {
       cache: "no-store",
@@ -343,9 +344,21 @@ async function requestAuthorityEnvelope<T>(
         "Content-Type": "application/json",
         ...getServerAuthorityHeaders(),
         ...(init?.headers ?? {}),
+        "x-request-id": requestId,
       },
     });
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "partner_authority_request_failed",
+        path,
+        method: init?.method ?? "GET",
+        status: 0,
+        code: "PARTNER_AUTHORITY_UNAVAILABLE",
+        retryable: true,
+        requestId,
+      }),
+    );
     throw new PartnerAuthorityError(
       503,
       "PARTNER_AUTHORITY_UNAVAILABLE",
@@ -369,6 +382,17 @@ async function requestAuthorityEnvelope<T>(
     const message =
       envelope?.error?.message ??
       `Authority request failed with HTTP ${response.status}.`;
+    console.error(
+      JSON.stringify({
+        event: "partner_authority_request_failed",
+        path,
+        method: init?.method ?? "GET",
+        status: response.status,
+        code,
+        retryable: envelope?.error?.retryable ?? false,
+        requestId,
+      }),
+    );
     throw new PartnerAuthorityError(
       response.status,
       code,

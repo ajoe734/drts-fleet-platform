@@ -75,6 +75,8 @@ function createOwnedMobilityService(options?: {
     persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
     reportPersistenceFailure: (...args: any[]) => void;
+    findOrderById?: (...args: any[]) => Promise<unknown>;
+    findOrderByBookingId?: (...args: any[]) => Promise<unknown>;
     // Only the transactional assignment path reaches these, so stubs that never
     // enable a repository can keep omitting them.
     isActiveMultiTaxiAuthorizedVehicle?: (...args: any[]) => Promise<boolean>;
@@ -1660,6 +1662,94 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       addressName: "Manual Override",
       address: "台北市中山區南京東路 100 號",
     });
+  });
+
+  it("resolves partner booking and order records persisted by another API instance", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const producer = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    }).service;
+    const booking = await producer.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2099-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2099-06-05T11:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const persistedOrder = producer.getOrder(booking.orderId);
+    const parallelProducer = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    }).service;
+    const parallelBooking = await parallelProducer.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2099-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2099-06-05T11:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider Two", phone: "0912000001" },
+      },
+      "tenant-demo-001",
+    );
+    const parallelOrder = parallelProducer.getOrder(parallelBooking.orderId);
+    expect(parallelBooking.bookingId).not.toBe(booking.bookingId);
+    expect(parallelOrder.orderNo).not.toBe(persistedOrder.orderNo);
+
+    let authorityOrder = persistedOrder;
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findOrderById: vi.fn(async () => authorityOrder),
+      findOrderByBookingId: vi.fn().mockResolvedValue(persistedOrder),
+    };
+    const orderConsumer = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    }).service;
+    const bookingConsumer = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    }).service;
+
+    await expect(
+      orderConsumer.resolvePersistedOrder(persistedOrder.orderId),
+    ).resolves.toEqual(persistedOrder);
+    authorityOrder = {
+      ...persistedOrder,
+      status: "cancelled",
+      updatedAt: new Date(
+        Date.parse(persistedOrder.updatedAt) + 1_000,
+      ).toISOString(),
+    };
+    await expect(
+      orderConsumer.resolvePersistedOrder(persistedOrder.orderId),
+    ).resolves.toMatchObject({
+      status: "cancelled",
+      updatedAt: authorityOrder.updatedAt,
+    });
+    await expect(
+      bookingConsumer.resolvePersistedTenantBooking(
+        "tenant-demo-001",
+        booking.bookingId,
+      ),
+    ).resolves.toMatchObject({
+      orderId: persistedOrder.orderId,
+      bookingId: booking.bookingId,
+    });
+    expect(repository.findOrderById).toHaveBeenCalledWith(
+      persistedOrder.orderId,
+    );
+    expect(repository.findOrderByBookingId).toHaveBeenCalledWith(
+      booking.bookingId,
+      "tenant-demo-001",
+    );
   });
 
   it("validates costCenter against the tenant cost-center directory on create and update", async () => {

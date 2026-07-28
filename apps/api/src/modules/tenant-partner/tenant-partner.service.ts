@@ -4157,6 +4157,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((credential) => this.toPartnerIngressCredentialResponse(credential));
   }
 
+  async resolvePartnerEligibilityReviewQueue(
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const persistedRecords =
+        await this.tenantPartnerRepository.listPartnerEligibilityReviewQueue();
+      for (const [id, verification] of this.partnerEligibilityVerifications) {
+        if (verification.verificationStatus !== "eligible") {
+          this.partnerEligibilityVerifications.delete(id);
+        }
+      }
+      for (const verification of persistedRecords) {
+        this.partnerEligibilityVerifications.set(
+          verification.eligibilityVerificationId,
+          this.clonePartnerEligibilityVerification(verification),
+        );
+      }
+    }
+    return this.listPartnerEligibilityReviewQueue(requestId, identity);
+  }
+
   listPartnerEligibilityReviewQueue(
     requestId?: string,
     identity?: IdentityContext | null,
@@ -5134,7 +5156,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       verification.eligibilityVerificationId,
       this.clonePartnerEligibilityVerification(verification),
     );
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         partnerEligibilityVerifications: [
           this.clonePartnerEligibilityVerification(verification),
@@ -5170,6 +5192,73 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEligibilityVerification(verification);
   }
 
+  async resolvePartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+    requestId?: string,
+    identity?: PartnerEligibilityIdentity | null,
+  ) {
+    const verification = await this.loadPartnerEligibilityVerification(
+      eligibilityVerificationId,
+    );
+    return this.readPartnerEligibilityVerification(
+      verification,
+      eligibilityVerificationId,
+      requestId,
+      identity,
+    );
+  }
+
+  async hydratePartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+    identity?: PartnerEligibilityIdentity | null,
+  ) {
+    const verification = await this.loadPartnerEligibilityVerification(
+      eligibilityVerificationId,
+    );
+    if (!verification) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ELIGIBILITY_NOT_FOUND",
+        "The partner eligibility verification record could not be found.",
+        {
+          eligibilityVerificationId,
+        },
+      );
+    }
+    this.assertPartnerEligibilityVerificationIdentity(
+      identity,
+      verification,
+      eligibilityVerificationId,
+    );
+  }
+
+  private async loadPartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+  ) {
+    let verification = this.partnerEligibilityVerifications.get(
+      eligibilityVerificationId,
+    );
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const persistedVerification =
+        (await this.tenantPartnerRepository.findPartnerEligibilityVerification(
+          eligibilityVerificationId,
+        )) ?? undefined;
+      if (
+        persistedVerification &&
+        (!verification ||
+          Date.parse(persistedVerification.updatedAt) >=
+            Date.parse(verification.updatedAt))
+      ) {
+        verification = persistedVerification;
+        this.partnerEligibilityVerifications.set(
+          eligibilityVerificationId,
+          this.clonePartnerEligibilityVerification(verification),
+        );
+      }
+    }
+    return verification;
+  }
+
   getPartnerEligibilityVerification(
     eligibilityVerificationId: string,
     requestId?: string,
@@ -5178,6 +5267,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const verification = this.partnerEligibilityVerifications.get(
       eligibilityVerificationId,
     );
+    return this.readPartnerEligibilityVerification(
+      verification,
+      eligibilityVerificationId,
+      requestId,
+      identity,
+    );
+  }
+
+  private readPartnerEligibilityVerification(
+    verification: PartnerEligibilityVerificationRecord | undefined,
+    eligibilityVerificationId: string,
+    requestId?: string,
+    identity?: PartnerEligibilityIdentity | null,
+  ) {
     if (!verification) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -5222,12 +5325,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEligibilityVerification(verification);
   }
 
-  resolvePartnerEligibilityReview(
+  async resolvePartnerEligibilityReview(
     command: ResolvePartnerEligibilityReviewCommand,
     requestId?: string,
     identity?: IdentityContext | null,
-  ): PartnerEligibilityReviewResolution {
-    const verification = this.partnerEligibilityVerifications.get(
+  ): Promise<PartnerEligibilityReviewResolution> {
+    const verification = await this.loadPartnerEligibilityVerification(
       command.eligibilityVerificationId,
     );
     if (!verification) {
@@ -5273,30 +5376,51 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       command.decision === "approve" ? "eligible" : "ineligible";
     const resolvedBy = identity?.actorId ?? "ops_reviewer";
 
-    verification.verificationStatus = resolvedStatus;
-    verification.verificationReasonCode = command.reasonCode;
-    verification.decisionSource = "ops_manual_review";
-    verification.updatedAt = now;
-    verification.manualFallback = {
-      ...verification.manualFallback,
-      notes: command.notes,
-    };
-    verification.auditMetadata = {
-      ...verification.auditMetadata,
-      updatedBy: resolvedBy,
+    const resolvedVerification: PartnerEligibilityVerificationRecord = {
+      ...verification,
+      verificationStatus: resolvedStatus,
+      verificationReasonCode: command.reasonCode,
+      decisionSource: "ops_manual_review",
+      updatedAt: now,
+      manualFallback: {
+        ...verification.manualFallback,
+        notes: command.notes,
+      },
+      auditMetadata: {
+        ...verification.auditMetadata,
+        updatedBy: resolvedBy,
+      },
     };
 
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const updated =
+        await this.tenantPartnerRepository.compareAndSetPartnerEligibilityVerification(
+          resolvedVerification,
+          verification.updatedAt,
+        );
+      if (!updated) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ELIGIBILITY_REVIEW_CONFLICT",
+          "Eligibility verification changed while the review was being resolved.",
+          {
+            eligibilityVerificationId: command.eligibilityVerificationId,
+          },
+        );
+      }
+    } else {
+      await this.persistChangesRequired(
+        {
+          partnerEligibilityVerifications: [
+            this.clonePartnerEligibilityVerification(resolvedVerification),
+          ],
+        },
+        "resolve_partner_eligibility_review",
+      );
+    }
     this.partnerEligibilityVerifications.set(
       command.eligibilityVerificationId,
-      this.clonePartnerEligibilityVerification(verification),
-    );
-    this.persistChanges(
-      {
-        partnerEligibilityVerifications: [
-          this.clonePartnerEligibilityVerification(verification),
-        ],
-      },
-      "resolve_partner_eligibility_review",
+      this.clonePartnerEligibilityVerification(resolvedVerification),
     );
 
     this.recordTenantAudit(
@@ -10815,5 +10939,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .catch((error: unknown) => {
         this.tenantPartnerRepository!.reportPersistenceFailure(error, context);
       });
+  }
+
+  private async persistChangesRequired(
+    changes: PersistTenantPartnerChanges,
+    context: string,
+  ) {
+    if (!this.tenantPartnerRepository) {
+      return;
+    }
+
+    try {
+      await this.tenantPartnerRepository.persistChanges(changes);
+    } catch (error) {
+      this.tenantPartnerRepository.reportPersistenceFailure(error, context);
+      throw error;
+    }
   }
 }

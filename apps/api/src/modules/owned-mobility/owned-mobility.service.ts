@@ -304,10 +304,6 @@ const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
 export class OwnedMobilityService implements OnModuleInit {
   private readonly logger = new Logger(OwnedMobilityService.name);
 
-  private orderSequence = 1;
-
-  private bookingSequence = 1;
-
   private orders: OwnedOrderRecord[] = [];
 
   private dispatchJobs: DispatchJobRecord[] = [];
@@ -440,10 +436,6 @@ export class OwnedMobilityService implements OnModuleInit {
         }));
       this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(
         this.dispatchTraceLogs,
-      );
-      this.orderSequence = this.deriveNextOrderSequence(persistedState.orders);
-      this.bookingSequence = this.deriveNextBookingSequence(
-        persistedState.orders,
       );
     } catch (error) {
       this.ownedMobilityRepository.reportPersistenceFailure(
@@ -677,9 +669,7 @@ export class OwnedMobilityService implements OnModuleInit {
       pickup: { ...command.pickup },
       dropoff: { ...command.dropoff },
       passenger: { ...command.passenger },
-      bookingId: scheduled
-        ? `booking-${String(this.bookingSequence++).padStart(6, "0")}`
-        : null,
+      bookingId: scheduled ? `booking-${randomUUID()}` : null,
       bookingType: scheduled ? "oneway" : null,
       etaSnapshot: {
         etaMinutes: scheduled ? 30 : 8,
@@ -1004,7 +994,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const now = new Date().toISOString();
     const orderId = randomUUID();
-    const bookingId = `booking-${String(this.bookingSequence++).padStart(6, "0")}`;
+    const bookingId = `booking-${randomUUID()}`;
     const bookingWindow = this.computeBookingWindows(
       command.businessDispatchSubtype,
       command.reservationWindowStart,
@@ -1391,6 +1381,35 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.cloneOrder(order);
   }
 
+  async resolvePersistedOrder(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    let order = this.orders.find(
+      (candidateOrder) => candidateOrder.orderId === orderId,
+    );
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const persistedOrder =
+        (await this.ownedMobilityRepository.findOrderById(orderId)) ??
+        undefined;
+      order = this.pickNewestOrder(order, persistedOrder);
+    }
+    if (order) {
+      const resolvedOrderId = order.orderId;
+      this.orders = [
+        this.cloneOrder(order),
+        ...this.orders.filter(
+          (candidateOrder) => candidateOrder.orderId !== resolvedOrderId,
+        ),
+      ];
+    }
+    if (!order) {
+      order = this.requireOrder(orderId);
+    }
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.cloneOrder(order);
+  }
+
   getPassengerAssignmentDisclosure(orderId: string) {
     const snapshot = this.findPassengerAssignmentDisclosure(orderId);
     if (!snapshot) {
@@ -1438,6 +1457,57 @@ export class OwnedMobilityService implements OnModuleInit {
     const order = this.requireBookingOrder(bookingId, tenantId);
     this.assertPartnerOrderIdentity(identity, order);
     return this.mapOrderToBooking(order);
+  }
+
+  async resolvePersistedTenantBooking(
+    tenantId: string,
+    bookingId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    this.assertNonBlank(tenantId, "tenantId");
+    let order = this.orders.find(
+      (candidateOrder) =>
+        candidateOrder.bookingId === bookingId &&
+        candidateOrder.tenantId === tenantId,
+    );
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const persistedOrder =
+        (await this.ownedMobilityRepository.findOrderByBookingId(
+          bookingId,
+          tenantId,
+        )) ?? undefined;
+      order = this.pickNewestOrder(order, persistedOrder);
+    }
+    if (order) {
+      const resolvedOrderId = order.orderId;
+      this.orders = [
+        this.cloneOrder(order),
+        ...this.orders.filter(
+          (candidateOrder) => candidateOrder.orderId !== resolvedOrderId,
+        ),
+      ];
+    }
+    if (!order) {
+      order = this.requireBookingOrder(bookingId, tenantId);
+    }
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.mapOrderToBooking(order);
+  }
+
+  private pickNewestOrder(
+    localOrder: OwnedOrderRecord | undefined,
+    persistedOrder: OwnedOrderRecord | undefined,
+  ) {
+    if (!localOrder) {
+      return persistedOrder;
+    }
+    if (!persistedOrder) {
+      return localOrder;
+    }
+    return Date.parse(persistedOrder.updatedAt) >=
+      Date.parse(localOrder.updatedAt)
+      ? persistedOrder
+      : localOrder;
   }
 
   async approveTenantBookingApprovalRequest(
@@ -4565,26 +4635,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private nextOrderNo() {
-    const current = String(this.orderSequence++).padStart(6, "0");
-    return `O-20260410-${current}`;
-  }
-
-  private deriveNextOrderSequence(orders: readonly OwnedOrderRecord[]) {
-    const maxSequence = orders.reduce((currentMax, order) => {
-      const rawSequence = order.orderNo.split("-").at(-1) ?? "0";
-      const parsedSequence = Number.parseInt(rawSequence, 10);
-      if (!Number.isInteger(parsedSequence)) {
-        return currentMax;
-      }
-      return Math.max(currentMax, parsedSequence);
-    }, 0);
-
-    return maxSequence + 1;
-  }
-
-  private deriveNextBookingSequence(orders: readonly OwnedOrderRecord[]) {
-    const existingBookings = orders.filter((order) => order.bookingId).length;
-    return existingBookings + 1;
+    return `O-${randomUUID()}`;
   }
 
   private nextAttemptSequence(dispatchJobId: string) {
