@@ -795,7 +795,10 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -813,7 +816,10 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -831,7 +837,10 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -849,7 +858,10 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,DRTS_PARTNER_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.tenant_console_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -867,7 +879,10 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -885,7 +900,10 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true" \
             --allow-unauthenticated \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -903,7 +921,10 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             --allow-unauthenticated \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -921,7 +942,10 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             --allow-unauthenticated \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -939,7 +963,10 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.partner_booking_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -957,7 +984,10 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.enterprise_dispatch_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -975,7 +1005,10 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag }} \
-            --no-deploy-health-check \
+            --cpu 0.5 \
+            --concurrency 1 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
