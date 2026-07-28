@@ -1,6 +1,6 @@
 # AIRPORT-PARTNER-DEV-DEPLOY-001 Evidence
 
-Last updated: 2026-07-28T14:40:00Z
+Last updated: 2026-07-28T15:25:00Z
 Owner: Codex
 Reviewer: Codex2
 
@@ -71,11 +71,15 @@ Additional `Deploy — Dev` runs after `30353618827` show the task is still bloc
 Newest observed run while resuming this task:
 
 - `30368392706` on branch `dev` at SHA `ead1e4c8768b21ee0fc948ba236ac0edaa7e0652`
-  - observed at `2026-07-28T14:39Z` and still `in_progress`
-  - `Prepare dev deploy`, `Build & push images`, and `DB migration` had already completed `success`
-  - `Deploy services` was in progress, with `Deploy — api` through `Deploy — passenger-web` already completed `success`
-  - `Deploy — partner-booking-web` was the currently running step when last checked
-  - no new successful end-to-end dev deploy evidence exists yet from this run, so acceptance remains open pending its final conclusion
+  - completed `failure` at `2026-07-28T14:53:16Z`
+  - `Prepare dev deploy`, `Build & push images`, and `DB migration` all completed `success`
+  - `Deploy services` failed at job `90308119710`
+  - the failing step was `Deploy — partner-booking-web`
+  - `Dev health check` and `Dev UI smoke (playwright vs deployed)` were both skipped because deploy never reached a healthy completed state
+  - `gh run view 30368392706 --log-failed` shows eight retries and the same terminal error on every attempt:
+    - `ERROR: (gcloud.run.deploy) Quota exceeded for total allowable CPU per project per region.`
+  - the final failed revision attempt was `drts-dev-partner-booking-web-00031-hhq`
+  - no new successful end-to-end dev deploy evidence exists yet from this run, so acceptance remains blocked
 
 The most recent run that actually reached public dev (`30364460014`) still failed on the same partner-booking UI smoke as `30353618827`, so acceptance remains blocked even when build, migration, deploy, and health are green.
 
@@ -199,3 +203,5 @@ Acceptance is blocked pending:
 - a GitHub `Deploy — Dev` run for a source SHA that includes the task branch fixes and no longer references the missing `scripts/deploy-cloud-run-service.sh` helper seen in `30367939638`
 - a public dev deploy whose `Dev UI smoke (playwright vs deployed)` no longer fails the real airport embed booking create assertion seen in `30353618827`, `30357846786`, `30362221809`, and `30364460014`
 - a deploy source SHA that actually includes the task branch fixes rather than the older SHAs already observed failing on public dev
+
+As of `2026-07-28T15:25Z`, there is no active run to monitor for this task. The latest assigned workflow target `30353618827` is long since failed, and the newest follow-up validation run `30368392706` also failed before health and smoke due to Cloud Run regional CPU quota exhaustion on `partner-booking-web`.
