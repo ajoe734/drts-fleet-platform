@@ -4984,7 +4984,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         authMode: "bootstrap_headers",
         roleFamilies: ["partner"],
         roles: ["referral_passenger"],
-        scopes: ["partner:handoff"],
+        scopes: [
+          "partner:handoff",
+          "partner:eligibility:read",
+          "partner:eligibility:write",
+          "partner:book",
+        ],
         tenantId: bootstrap.identity.tenantId,
         partnerId: bootstrap.identity.partnerId ?? null,
         partnerProgramId: bootstrap.identity.partnerProgramId ?? null,
@@ -5141,8 +5146,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: identity?.actorId ?? null,
         actorType:
-          identity?.actorType === "partner_api_key"
-            ? "partner_api_key"
+          identity?.actorType === "partner_api_key" ||
+          identity?.actorType === "referral_passenger"
+            ? identity.actorType
             : "system",
         tenantId: entry.tenantId,
         moduleName: "tenant-partner",
@@ -8060,7 +8066,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      identity.actorType !== "partner_api_key" ||
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
       identity.tenantId !== entry.tenantId ||
       identity.partnerId !== entry.partnerId ||
@@ -8100,7 +8107,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      identity.actorType !== "partner_api_key" ||
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
       identity.tenantId !== verification.tenantId ||
       identity.partnerId !== verification.partnerId ||

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
@@ -36,6 +37,65 @@ describe("OwnedMobilityController tenant booking routes", () => {
       "req-e2e-create",
       undefined,
     );
+  });
+
+  it("routes partner booking create and read calls through scoped service methods", async () => {
+    const identity = {
+      authMode: "jwt_bearer",
+      actorType: "referral_passenger",
+      actorId: "passenger-001",
+      realm: "partner",
+      tenantId: "tenant-e2e-001",
+      partnerId: "partner-e2e-001",
+      partnerProgramId: "program-e2e-001",
+      partnerEntrySlug: "bank-e2e-airport",
+      roleFamilies: ["partner"],
+      roles: ["referral_passenger"],
+      scopes: ["partner:book"],
+      requestId: "req-e2e-partner",
+    } satisfies BootstrapRequestIdentity;
+    const service = {
+      createTenantBooking: vi.fn().mockResolvedValue({
+        orderId: "order-e2e-001",
+        bookingId: "booking-e2e-001",
+        status: "created",
+      }),
+      getTenantBooking: vi.fn().mockReturnValue({
+        bookingId: "booking-e2e-001",
+      }),
+      getOrder: vi.fn().mockReturnValue({
+        orderId: "order-e2e-001",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    await controller.createPartnerBooking(
+      {} as never,
+      identity,
+      "tenant-e2e-001",
+      "req-e2e-partner",
+    );
+    controller.getPartnerBooking(
+      "booking-e2e-001",
+      identity,
+      "tenant-e2e-001",
+      "req-e2e-partner",
+    );
+    controller.getPartnerOrder("order-e2e-001", identity, "req-e2e-partner");
+
+    expect(service.createTenantBooking).toHaveBeenCalledWith(
+      {},
+      "tenant-e2e-001",
+      identity,
+      "req-e2e-partner",
+      undefined,
+    );
+    expect(service.getTenantBooking).toHaveBeenCalledWith(
+      "tenant-e2e-001",
+      "booking-e2e-001",
+      identity,
+    );
+    expect(service.getOrder).toHaveBeenCalledWith("order-e2e-001", identity);
   });
 
   it("awaits tenant booking updates before wrapping the API envelope", async () => {

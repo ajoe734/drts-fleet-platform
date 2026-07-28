@@ -77,7 +77,12 @@ describe("tenant partner ingress handoff controller", () => {
         partnerProgramId: "program-airport-alpha",
         partnerEntrySlug: "bank-demo-alpha-airport",
         drtsPassengerId: expect.any(String),
-        scopes: ["partner:handoff"],
+        scopes: [
+          "partner:handoff",
+          "partner:eligibility:read",
+          "partner:eligibility:write",
+          "partner:book",
+        ],
       },
     });
     expect(second.data.drtsPassengerId).toBe(first.data.drtsPassengerId);

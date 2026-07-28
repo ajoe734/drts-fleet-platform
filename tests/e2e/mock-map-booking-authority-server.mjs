@@ -247,7 +247,12 @@ const server = http.createServer((req, res) => {
           authMode: "jwt_bearer",
           roleFamilies: ["partner"],
           roles: ["partner_booking"],
-          scopes: ["partner:book"],
+          scopes: [
+            "partner:handoff",
+            "partner:eligibility:read",
+            "partner:eligibility:write",
+            "partner:book",
+          ],
           tenantId: "tenant-ctbc",
           partnerId: "partner-ctbc",
           partnerProgramId: "program-ctbc-airport",
@@ -280,7 +285,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === "POST" && url.pathname === "/api/tenant/bookings") {
+  if (req.method === "POST" && url.pathname === "/api/partner/bookings") {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk.toString();
@@ -305,7 +310,7 @@ const server = http.createServer((req, res) => {
 
   if (
     req.method === "GET" &&
-    url.pathname === "/api/tenant/bookings/booking-embed-001"
+    url.pathname === "/api/partner/bookings/booking-embed-001"
   ) {
     json(res, 200, {
       data: {
@@ -324,7 +329,10 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === "GET" && url.pathname === "/api/orders/order-embed-001") {
+  if (
+    req.method === "GET" &&
+    url.pathname === "/api/partner/orders/order-embed-001"
+  ) {
     json(res, 200, {
       data: {
         orderId: "order-embed-001",

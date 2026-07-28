@@ -476,6 +476,63 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
+  it("allows a matching handoff passenger to verify partner eligibility", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    await expect(
+      service.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          cardLast4: "2468",
+        },
+        "req-eligibility-handoff-001",
+        {
+          actorType: "referral_passenger",
+          actorId: "passenger-handoff-001",
+          realm: "partner",
+          tenantId: "tenant-demo-001",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          requestId: "req-eligibility-handoff-001",
+        },
+      ),
+    ).resolves.toMatchObject({
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      verificationStatus: "eligible",
+    });
+  });
+
+  it("rejects a handoff passenger scoped to another partner entry", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    await expect(
+      service.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          cardLast4: "2468",
+        },
+        "req-eligibility-handoff-002",
+        {
+          actorType: "referral_passenger",
+          actorId: "passenger-handoff-001",
+          realm: "partner",
+          tenantId: "tenant-demo-001",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          requestId: "req-eligibility-handoff-002",
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "PARTNER_SCOPE_MISMATCH",
+        },
+      },
+    });
+  });
+
   it("redacts webhook delivery signatures and tenant passenger audit payloads", async () => {
     const auditNotificationService = new AuditNotificationService();
     const webhookDispatchService = new WebhookDispatchService(

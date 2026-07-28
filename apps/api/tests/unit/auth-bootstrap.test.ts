@@ -179,6 +179,31 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("resolves dedicated partner booking routes without tenant-admin semantics", () => {
+    expect(resolveRouteAuthPolicy("POST", "/api/partner/bookings")).toEqual({
+      routeKey: "partner:bookings:create",
+      requiredScopes: ["partner:book"],
+      allowedRealms: ["system", "partner"],
+      description: "Partner-scoped booking creation",
+    });
+    expect(
+      resolveRouteAuthPolicy("GET", "/api/partner/bookings/booking-001"),
+    ).toEqual({
+      routeKey: "partner:bookings:get",
+      requiredScopes: ["partner:book"],
+      allowedRealms: ["system", "partner"],
+      description: "Partner-scoped booking confirmation and receipt access",
+    });
+    expect(
+      resolveRouteAuthPolicy("GET", "/api/partner/orders/order-001"),
+    ).toEqual({
+      routeKey: "partner:orders:get",
+      requiredScopes: ["partner:book"],
+      allowedRealms: ["system", "partner"],
+      description: "Partner-scoped booking confirmation and receipt access",
+    });
+  });
+
   it("allows platform health views to read forwarder adapter health", () => {
     const policy = resolveRouteAuthPolicy(
       "GET",

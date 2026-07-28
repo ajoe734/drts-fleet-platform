@@ -76,6 +76,30 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "partner/bookings" && upperMethod === "POST") {
+    return {
+      routeKey: "partner:bookings:create",
+      requiredScopes: ["partner:book"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner-scoped booking creation",
+    };
+  }
+
+  if (
+    upperMethod === "GET" &&
+    (/^partner\/bookings\/[^/]+$/.test(routePath) ||
+      /^partner\/orders\/[^/]+$/.test(routePath))
+  ) {
+    return {
+      routeKey: routePath.startsWith("partner/bookings/")
+        ? "partner:bookings:get"
+        : "partner:orders:get",
+      requiredScopes: ["partner:book"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner-scoped booking confirmation and receipt access",
+    };
+  }
+
   if (routePath === "auth/driver/device/revoke") {
     return {
       routeKey: "auth:driver-device:revoke",

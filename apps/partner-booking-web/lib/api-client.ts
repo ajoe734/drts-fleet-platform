@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { createBearerClient, type ApiClient } from "@drts/api-client";
 import { SUPERVISOR_EXECUTION_MODES } from "@drts/contracts";
 import type {
   ApiSuccessEnvelope,
@@ -391,16 +390,6 @@ async function requestAuthority<T>(
   return envelope.data;
 }
 
-function getAuthorityClient(session: PartnerSessionRecord): ApiClient {
-  return createBearerClient(API_URL, session.accessToken, {
-    ...getServerAuthorityHeaders(),
-    "x-realm": "partner",
-    ...(session.identity.tenantId
-      ? { "x-tenant-id": session.identity.tenantId }
-      : {}),
-  });
-}
-
 function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
   const normalizedSlug = slug.toLowerCase();
   const base =
@@ -613,9 +602,13 @@ export async function createPartnerBooking(
   session: PartnerSessionRecord,
   command: CreateTenantBookingCommand,
 ): Promise<BookingRecord> {
-  const response = (await getAuthorityClient(session).createTenantBooking(
-    command,
-  )) as BookingRecord | { booking?: BookingRecord };
+  const response = await requestAuthority<
+    BookingRecord | { booking?: BookingRecord }
+  >("/api/partner/bookings", {
+    method: "POST",
+    headers: buildPartnerHeaders(session),
+    body: JSON.stringify(command),
+  });
 
   if (response && typeof response === "object" && "bookingId" in response) {
     return response as BookingRecord;
@@ -632,18 +625,26 @@ export async function getPartnerConfirmation(
   session: PartnerSessionRecord,
   bookingId: string,
 ): Promise<BookingRecord> {
-  return (await getAuthorityClient(session).getTenantBooking(
-    bookingId,
-  )) as BookingRecord;
+  return requestAuthority<BookingRecord>(
+    `/api/partner/bookings/${encodeURIComponent(bookingId)}`,
+    {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    },
+  );
 }
 
 export async function getPartnerTrip(
   session: PartnerSessionRecord,
   orderId: string,
 ): Promise<OwnedOrderRecord> {
-  return (await getAuthorityClient(session).getOrder(
-    orderId,
-  )) as OwnedOrderRecord;
+  return requestAuthority<OwnedOrderRecord>(
+    `/api/partner/orders/${encodeURIComponent(orderId)}`,
+    {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    },
+  );
 }
 
 export async function getPartnerReceipt(

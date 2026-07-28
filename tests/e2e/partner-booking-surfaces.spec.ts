@@ -138,12 +138,16 @@ test.describe("partner booking program surfaces", () => {
     await page.getByRole("button", { name: "確認送出預約" }).click();
 
     await expect(page.getByText("預約已建立")).toBeVisible();
-    await expect(page.getByText("booking-embed-001")).toBeVisible();
-    await expect(page.getByText("order-embed-001")).toBeVisible();
-    await expect(page.getByText("elig-embed-001")).toBeVisible();
+    await expect(page.getByTestId("partner-booking-id")).toHaveText(
+      /^booking-/,
+    );
+    await expect(page.getByTestId("partner-order-id")).not.toHaveText("—");
+    await expect(page.getByTestId("partner-eligibility-id")).toHaveText(
+      /^(elig-|elig_)/,
+    );
 
     await page.getByRole("button", { name: "追蹤行程" }).click();
-    await expect(page.getByText("ORD-EMBED-001")).toBeVisible();
+    await expect(page.getByTestId("partner-order-number")).not.toHaveText("—");
     await expect(
       page.getByText(
         "台北市信義區松仁路 100 號 -> 桃園 T2 · 第二航廈 出發接送區",

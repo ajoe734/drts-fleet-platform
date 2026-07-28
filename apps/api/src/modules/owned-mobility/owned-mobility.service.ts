@@ -66,6 +66,7 @@ import type {
   RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
+  PartnerChannelEntryRecord,
   PassengerDispatchDisclosureSnapshot,
   PassengerProfile,
   QueueCheckInCommand,
@@ -978,7 +979,11 @@ export class OwnedMobilityService implements OnModuleInit {
       command.flightNo,
     );
     this.requireActiveBookingServiceProduct(command.businessDispatchSubtype);
-    const partnerContext = this.resolvePartnerBookingContext(command, tenantId);
+    const partnerContext = this.resolvePartnerBookingContext(
+      command,
+      tenantId,
+      identity,
+    );
     const pickup = this.resolveTenantAddressPayload(
       tenantId,
       command.pickupAddressId ?? null,
@@ -1380,8 +1385,10 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.orders.map((order) => this.cloneOrder(order));
   }
 
-  getOrder(orderId: string) {
-    return this.cloneOrder(this.requireOrder(orderId));
+  getOrder(orderId: string, identity?: BootstrapRequestIdentity | null) {
+    const order = this.requireOrder(orderId);
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.cloneOrder(order);
   }
 
   getPassengerAssignmentDisclosure(orderId: string) {
@@ -1422,11 +1429,15 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  getTenantBooking(tenantId: string, bookingId: string) {
+  getTenantBooking(
+    tenantId: string,
+    bookingId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
     this.assertNonBlank(tenantId, "tenantId");
-    return this.mapOrderToBooking(
-      this.requireBookingOrder(bookingId, tenantId),
-    );
+    const order = this.requireBookingOrder(bookingId, tenantId);
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.mapOrderToBooking(order);
   }
 
   async approveTenantBookingApprovalRequest(
@@ -8458,6 +8469,7 @@ export class OwnedMobilityService implements OnModuleInit {
   private resolvePartnerBookingContext(
     command: CreateTenantBookingCommand,
     tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
   ): PartnerBookingContext | null {
     const entrySlug = this.normalizeNullableText(command.partnerEntrySlug);
     const eligibilityVerificationId = this.normalizeNullableText(
@@ -8487,6 +8499,8 @@ export class OwnedMobilityService implements OnModuleInit {
     const entry = this.tenantPartnerService.getPartnerEntry(
       entrySlug ?? verification?.partnerEntrySlug ?? "",
     );
+
+    this.assertPartnerEntryIdentity(identity, entry);
 
     if (entry.tenantId !== tenantId) {
       throw new ApiRequestError(
@@ -8585,6 +8599,65 @@ export class OwnedMobilityService implements OnModuleInit {
       issuerAuthorizationRef: verification?.issuerAuthorizationRef ?? null,
       benefitReference: verification?.benefitReference ?? null,
     };
+  }
+
+  private assertPartnerEntryIdentity(
+    identity: BootstrapRequestIdentity | null | undefined,
+    entry: PartnerChannelEntryRecord,
+  ) {
+    if (!identity || identity.realm !== "partner") {
+      return;
+    }
+
+    const mismatch =
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
+      identity.tenantId !== entry.tenantId ||
+      identity.partnerId !== entry.partnerId ||
+      identity.partnerProgramId !== entry.programId ||
+      identity.partnerEntrySlug !== entry.entrySlug;
+
+    if (mismatch) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated partner identity cannot book through another partner entry.",
+        {
+          entrySlug: entry.entrySlug,
+          tenantId: entry.tenantId,
+        },
+      );
+    }
+  }
+
+  private assertPartnerOrderIdentity(
+    identity: BootstrapRequestIdentity | null | undefined,
+    order: OwnedOrderRecord,
+  ) {
+    if (!identity || identity.realm !== "partner") {
+      return;
+    }
+
+    const mismatch =
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
+      !order.partnerEntrySlug ||
+      identity.tenantId !== order.tenantId ||
+      identity.partnerId !== order.partnerId ||
+      identity.partnerProgramId !== order.partnerProgramId ||
+      identity.partnerEntrySlug !== order.partnerEntrySlug;
+
+    if (mismatch) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated partner identity cannot read another partner booking.",
+        {
+          orderId: order.orderId,
+          tenantId: order.tenantId,
+        },
+      );
+    }
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
