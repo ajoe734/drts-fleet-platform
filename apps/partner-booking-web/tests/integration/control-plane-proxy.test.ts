@@ -108,18 +108,36 @@ describe("partner-booking control-plane proxy", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const createResponse = await POST(
-      requestFor("POST", ["tenant", "bookings"], {
+      requestFor("POST", ["partner", "bookings"], {
         body: JSON.stringify({ passenger: { name: "Test Rider" } }),
       }),
-      contextFor(["tenant", "bookings"]),
+      contextFor(["partner", "bookings"]),
     );
     const mutationResponse = await POST(
-      requestFor("POST", ["tenant", "bookings", "booking-001", "cancel"]),
-      contextFor(["tenant", "bookings", "booking-001", "cancel"]),
+      requestFor("POST", ["partner", "bookings", "booking-001", "cancel"]),
+      contextFor(["partner", "bookings", "booking-001", "cancel"]),
     );
 
     expect(createResponse.status).toBe(200);
     expect(mutationResponse.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards partner order queries", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { orderId: "ord-001" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const orderResponse = await GET(
+      requestFor("GET", ["partner", "orders", "ord-001"]),
+      contextFor(["partner", "orders", "ord-001"]),
+    );
+
+    expect(orderResponse.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

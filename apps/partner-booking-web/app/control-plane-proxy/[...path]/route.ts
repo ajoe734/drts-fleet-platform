@@ -96,7 +96,7 @@ function isAllowedPartnerPath(path: string[], method: string) {
   }
 
   if (
-    path[0] === "tenant" &&
+    (path[0] === "partner" || path[0] === "tenant") &&
     path[1] === "bookings" &&
     path.length === 2 &&
     method === "POST"
@@ -105,7 +105,7 @@ function isAllowedPartnerPath(path: string[], method: string) {
   }
 
   if (
-    path[0] === "tenant" &&
+    (path[0] === "partner" || path[0] === "tenant") &&
     path[1] === "bookings" &&
     path.length === 3 &&
     method === "GET"
@@ -113,7 +113,11 @@ function isAllowedPartnerPath(path: string[], method: string) {
     return true;
   }
 
-  if (path[0] === "orders" && path.length === 2 && method === "GET") {
+  if (
+    ((path[0] === "partner" && path[1] === "orders" && path.length === 3) ||
+      (path[0] === "orders" && path.length === 2)) &&
+    method === "GET"
+  ) {
     return true;
   }
 
