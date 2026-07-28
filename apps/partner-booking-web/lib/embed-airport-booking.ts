@@ -41,6 +41,7 @@ const defaultDependencies: EmbedBookingDependencies = {
 type SubmitEmbeddedAirportBookingInput = {
   tenantSlug: string;
   partnerEntry?: PartnerChannelEntryRecord | null;
+  apiKey: string | null;
   partnerUserRef: string | null;
   referenceToken: string | null;
   cardLast4: string | null;
@@ -176,6 +177,7 @@ export async function submitEmbeddedAirportBooking(
 
   const handoff = await dependencies.createPartnerIngressHandoff({
     entrySlug: entry.entrySlug,
+    ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     partnerUserRef: input.partnerUserRef,
   });
 
@@ -234,7 +236,7 @@ export async function submitEmbeddedAirportBooking(
 export async function loadEmbeddedAirportTracking(
   input: Pick<
     SubmitEmbeddedAirportBookingInput,
-    "tenantSlug" | "partnerEntry" | "partnerUserRef" | "locale"
+    "tenantSlug" | "partnerEntry" | "apiKey" | "partnerUserRef" | "locale"
   > & {
     orderId: string;
   },
@@ -259,6 +261,7 @@ export async function loadEmbeddedAirportTracking(
 
   const handoff = await dependencies.createPartnerIngressHandoff({
     entrySlug: entry.entrySlug,
+    ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     partnerUserRef: input.partnerUserRef,
   });
   const session = createPartnerSessionFromIngressHandoff(handoff, entry);
