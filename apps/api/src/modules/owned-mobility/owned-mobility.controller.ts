@@ -204,6 +204,55 @@ export class OwnedMobilityController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
+  @Post("partner/bookings")
+  async createPartnerBooking(
+    @Body() command: CreateTenantBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+  ) {
+    const result = await this.ownedMobilityService.createTenantBooking(
+      command,
+      this.requireTenantId(tenantId),
+      identity,
+      requestId,
+      runtimeProfileCode,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("partner/bookings/:bookingId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerBooking(
+    @Param("bookingId") bookingId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getTenantBooking(
+        this.requireTenantId(tenantId),
+        bookingId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/orders/:orderId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerOrder(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getOrder(orderId, identity),
+      requestId,
+    );
+  }
+
   @Get("tenant/bookings")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listTenantBookings(

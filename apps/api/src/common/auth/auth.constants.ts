@@ -180,7 +180,12 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "partner:eligibility:read",
     "partner:eligibility:write",
   ],
-  referral_passenger: ["partner:handoff"],
+  referral_passenger: [
+    "partner:handoff",
+    "partner:eligibility:read",
+    "partner:eligibility:write",
+    "partner:book",
+  ],
 };
 
 export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =

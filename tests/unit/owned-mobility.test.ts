@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
@@ -501,6 +502,25 @@ describe("owned mobility service", () => {
       undefined,
       tenantPartnerService,
     );
+    const handoffIdentity = {
+      authMode: "jwt_bearer",
+      actorType: "referral_passenger",
+      actorId: "passenger-partner-001",
+      realm: "partner",
+      tenantId: PARTNER_TENANT,
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      roleFamilies: ["partner"],
+      roles: ["referral_passenger"],
+      scopes: [
+        "partner:handoff",
+        "partner:eligibility:read",
+        "partner:eligibility:write",
+        "partner:book",
+      ],
+      requestId: "req-partner-booking-001",
+    } satisfies BootstrapRequestIdentity;
 
     const created = await ownedMobilityService.createTenantBooking(
       {
@@ -523,13 +543,18 @@ describe("owned mobility service", () => {
         flightNo: "CI-001",
       },
       PARTNER_TENANT,
+      handoffIdentity,
     );
 
     const booking = await ownedMobilityService.getTenantBooking(
       PARTNER_TENANT,
       created.bookingId,
+      handoffIdentity,
     );
-    const order = ownedMobilityService.getOrder(created.orderId);
+    const order = ownedMobilityService.getOrder(
+      created.orderId,
+      handoffIdentity,
+    );
 
     expect(order).toMatchObject({
       tenantId: PARTNER_TENANT,
@@ -559,6 +584,23 @@ describe("owned mobility service", () => {
         benefitReference: "benefit-bank_demo_alpha-2468",
       },
     });
+
+    const otherEntry = tenantPartnerService.getPartnerEntry(
+      "bank-demo-beta-airport",
+    );
+    const wrongEntryIdentity = {
+      ...handoffIdentity,
+      partnerId: otherEntry.partnerId,
+      partnerProgramId: otherEntry.programId,
+      partnerEntrySlug: otherEntry.entrySlug,
+    };
+
+    try {
+      ownedMobilityService.getOrder(created.orderId, wrongEntryIdentity);
+      expect.unreachable("another partner entry must not read the order");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("PARTNER_SCOPE_MISMATCH");
+    }
   });
 
   it("reuses persisted eligibility verification after tenant-partner reload", async () => {

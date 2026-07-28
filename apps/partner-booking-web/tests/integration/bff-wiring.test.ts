@@ -799,7 +799,7 @@ describe("partner-booking-web BFF wiring", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      `${API_URL}/api/tenant/bookings`,
+      `${API_URL}/api/partner/bookings`,
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -811,7 +811,7 @@ describe("partner-booking-web BFF wiring", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      `${API_URL}/api/tenant/bookings/booking-001`,
+      `${API_URL}/api/partner/bookings/booking-001`,
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({
@@ -821,7 +821,7 @@ describe("partner-booking-web BFF wiring", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      `${API_URL}/api/orders/order-001`,
+      `${API_URL}/api/partner/orders/order-001`,
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({

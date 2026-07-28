@@ -273,7 +273,7 @@ export function AirportTransferSite({
   const receiptRoute =
     receipt?.pickup.address && receipt?.dropoff.address
       ? `${receipt.pickup.address} -> ${receipt.dropoff.address}`
-      : receipt?.dropoff.address ?? form.terminal;
+      : (receipt?.dropoff.address ?? form.terminal);
   const trackVehicle = receipt?.vehiclePreference ?? receipt?.notes ?? veh.name;
 
   const site = (
@@ -576,11 +576,15 @@ export function AirportTransferSite({
               {mode === "embed" ? (
                 <div className="summ" style={{ marginBottom: "16px" }}>
                   <div className="sr">
-                    <span className="k">{t("program.embed.handoff.signature")}</span>
+                    <span className="k">
+                      {t("program.embed.handoff.signature")}
+                    </span>
                     <span className="v">issuer_signature</span>
                   </div>
                   <div className="sr">
-                    <span className="k">{t("program.embed.handoff.token")}</span>
+                    <span className="k">
+                      {t("program.embed.handoff.token")}
+                    </span>
                     <span className="v">
                       {embedReferenceToken?.trim() || "ref_token"}
                     </span>
@@ -592,7 +596,9 @@ export function AirportTransferSite({
                     </span>
                   </div>
                   <div className="sr">
-                    <span className="k">{t("program.embed.handoff.benefit")}</span>
+                    <span className="k">
+                      {t("program.embed.handoff.benefit")}
+                    </span>
                     <span className="v">
                       {embedBenefitReference?.trim() ||
                         t("program.embed.handoff.benefitValue")}
@@ -904,7 +910,9 @@ export function AirportTransferSite({
                       </svg>
                     </div>
                     <h3>{t("airport.success.title")}</h3>
-                    <div className="bk">{bookingId}</div>
+                    <div className="bk" data-testid="partner-booking-id">
+                      {bookingId}
+                    </div>
                   </div>
                   <div className="summ">
                     <div className="sr">
@@ -913,11 +921,15 @@ export function AirportTransferSite({
                     </div>
                     <div className="sr">
                       <span className="k">{t("airport.label.orderId")}</span>
-                      <span className="v">{bookingResult?.orderId ?? "—"}</span>
+                      <span className="v" data-testid="partner-order-id">
+                        {bookingResult?.orderId ?? "—"}
+                      </span>
                     </div>
                     <div className="sr">
-                      <span className="k">{t("airport.label.eligibility")}</span>
-                      <span className="v">
+                      <span className="k">
+                        {t("airport.label.eligibility")}
+                      </span>
+                      <span className="v" data-testid="partner-eligibility-id">
                         {bookingResult?.eligibilityVerificationId ?? "—"}
                       </span>
                     </div>
@@ -1009,7 +1021,7 @@ export function AirportTransferSite({
                     </div>
                     <div className="sr">
                       <span className="k">{t("airport.label.orderId")}</span>
-                      <span className="v">
+                      <span className="v" data-testid="partner-order-number">
                         {receipt?.orderNo ?? bookingResult?.orderId ?? "—"}
                       </span>
                     </div>
