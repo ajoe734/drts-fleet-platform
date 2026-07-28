@@ -2813,6 +2813,14 @@ def maybe_rotate_antigravity_lane(
     rotation = _antigravity_rotation_for_worker(config, worker)
     if not rotation.get("enabled"):
         return False
+    # Idempotency guard: the failing primary run keeps its log on disk, so every
+    # subsequent tick re-reads the same quota line, re-classifies it, and would
+    # fire another rotation redispatch. Observed 2026-07-27: one gemini worker
+    # spawned 30 identical fallback children off a single queue event (all with
+    # attempt_count=2, all parented to the same run) and drove load to 48 on a
+    # 12-core box. Once we have redispatched this worker, the rotation is done.
+    if worker.get("rotation_redispatch_run_id"):
+        return True
     agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
     if not agent_id:
         return False
@@ -2830,7 +2838,15 @@ def maybe_rotate_antigravity_lane(
 
     cooldown_seconds = int(rotation.get("cooldown_seconds", 900))
     now = datetime.now(timezone.utc).timestamp()
-    cooldowns = record_rotation_cooldown(config, agent_id, slot, now + cooldown_seconds)
+    # Prefer the provider's own reset hint over the fixed cooldown. agy reports
+    # "Resets in 29h35m13s"; retrying that pool every 900s just burns one
+    # instant-fail call per cycle (~40 pointless rotations/day were observed on
+    # 2026-07-27/28). Only ever extend the cooldown, never shorten it.
+    hinted_resume = infer_domain_pause_resume_at(reason)
+    slot_until = now + cooldown_seconds
+    if hinted_resume is not None and float(hinted_resume) > slot_until:
+        slot_until = float(hinted_resume)
+    cooldowns = record_rotation_cooldown(config, agent_id, slot, slot_until)
     other_until = float(cooldowns.get(f"{other}_until", 0) or 0)
 
     terminate_worker_pid(worker.get("pid"))
@@ -2841,7 +2857,7 @@ def maybe_rotate_antigravity_lane(
         # (so it wakes to retry the moment a model is available again), then fall
         # back to normal terminal handling so the task can reassign to a healthy
         # lane instead of stranding on the paused one.
-        resume_at = min(now + cooldown_seconds, other_until)
+        resume_at = min(slot_until, other_until)
         reset_seconds = max(1, int(resume_at - now))
         pause_provider(state, agent_id, failure_summary, kind="quota", reset_seconds=reset_seconds)
         write_activity_log(

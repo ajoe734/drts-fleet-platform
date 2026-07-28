@@ -51,6 +51,8 @@ AUTH_MARKERS = frozenset(
         "permission denied",
         "ineligibletiererror",
         "not eligible for gemini code assist",
+        "not eligible for antigravity",
+        "eligibility check failed",
         "restricted_dasher_user",
     }
 )
@@ -67,6 +69,9 @@ QUOTA_TERMINAL_MARKERS = frozenset(
         "free daily quota has been reached",
         "oauth quota exceeded",
         "daily quota",
+        "individual quota reached",
+        "hit your usage limit",
+        "exceeded your monthly quota",
     }
 )
 CAPACITY_MARKERS = frozenset(
@@ -77,6 +82,7 @@ CAPACITY_MARKERS = frozenset(
         "rate limited",
         "hit your limit",
         "no capacity available",
+        "is at capacity",
         "retryablequotaerror",
     }
 )
@@ -91,16 +97,49 @@ ISO_RESET_HINT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 HUMAN_RESET_HINT_PATTERN = re.compile(
-    r"\b(?:retry time(?: of)?|retry at|resets?(?: at)?)\s+"
+    # Providers write the day with an ordinal suffix and use "try again at" as
+    # often as "retry at" (codex: "try again at Jul 31st, 2026 5:28 AM"), and the
+    # comma after the day is optional. 6k+ occurrences in 4 days of logs went
+    # unparsed before these were allowed.
+    r"\b(?:retry time(?: of)?|retry at|try again at|resets?(?: at)?)\s+"
     r"(?P<month>[A-Z][a-z]+)\s+"
-    r"(?P<day>\d{1,2}),\s*"
-    r"(?:(?P<year>\d{4})\s+)?"
+    r"(?P<day>\d{1,2})(?:st|nd|rd|th)?,?\s*"
+    r"(?:(?P<year>\d{4})\s*,?\s+)?"
     r"(?P<hour>\d{1,2})"
     r"(?::(?P<minute>\d{2}))?\s*"
     r"(?P<ampm>[AaPp])\.?\s*[Mm]\.?"
     r"(?:\s*\(?(?P<tz>UTC|GMT)\)?)?",
     re.IGNORECASE,
 )
+# Duration form, which is what the Antigravity CLI and several web consoles emit:
+#   "Resets in 29h35m13s"  "Resets in 5m3s"  "refreshes in 1 day, 5 hours"
+# These are relative to when the failure was observed, so they resolve against
+# ``paused_at`` when the caller supplies it.
+DURATION_RESET_HINT_PATTERN = re.compile(
+    r"\b(?:resets?|refreshes?|retry|try again)\s+in\s+"
+    r"(?P<body>\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)"
+    r"(?:[\s,]*\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?))*)",
+    re.IGNORECASE,
+)
+_DURATION_UNIT_PATTERN = re.compile(
+    r"(\d+)\s*(d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)",
+    re.IGNORECASE,
+)
+_DURATION_UNIT_SECONDS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+
+
+def _parse_duration_seconds(body: str) -> int | None:
+    """Sum a compact duration like '29h35m13s' or '1 day, 5 hours' into seconds."""
+    total = 0
+    matched = False
+    for value, unit in _DURATION_UNIT_PATTERN.findall(body):
+        try:
+            amount = int(value)
+        except ValueError:
+            continue
+        total += amount * _DURATION_UNIT_SECONDS[unit[0].lower()]
+        matched = True
+    return total if matched and total > 0 else None
 
 
 def retry_settings(
@@ -199,6 +238,15 @@ def infer_pause_resume_at(
         parsed = _parse_iso_utc(iso_match.group("iso"))
         if parsed is not None:
             return parsed.timestamp()
+
+    # Duration hints ("Resets in 29h35m13s") are relative to the moment the
+    # failure was observed, so anchor them to paused_at when we have it.
+    duration_match = DURATION_RESET_HINT_PATTERN.search(text)
+    if duration_match:
+        seconds = _parse_duration_seconds(duration_match.group("body"))
+        if seconds is not None:
+            anchor = paused_at or datetime.now(timezone.utc)
+            return (anchor + timedelta(seconds=seconds)).timestamp()
 
     match = HUMAN_RESET_HINT_PATTERN.search(text)
     if not match:

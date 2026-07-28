@@ -52,6 +52,12 @@ WORKER_FAILURE_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(r"^(?:you(?:'ve| have)\s+)?hit your limit\b", re.IGNORECASE),
+    re.compile(r"^Error:\s*Individual quota reached\b", re.IGNORECASE),
+    re.compile(r"^Error:\s*Eligibility check failed\b", re.IGNORECASE),
+    re.compile(r"\bnot eligible for Antigravity\b", re.IGNORECASE),
+    re.compile(r"\bhit your usage limit\b", re.IGNORECASE),
+    re.compile(r"\bexceeded your monthly quota\b", re.IGNORECASE),
+    re.compile(r"\b(?:selected )?model is at capacity\b", re.IGNORECASE),
     re.compile(r"^An unexpected critical error occurred", re.IGNORECASE),
     re.compile(r"^fatal:", re.IGNORECASE),
 )
@@ -65,7 +71,9 @@ JSON_WORKER_FAILURE_PATTERN = re.compile(
     r"\[api error:\s*401\b|api error:\s*401\b|invalid access token|"
     r"token_invalidated|refresh_token_reused|authentication token has been invalidated|"
     r"refresh_token_invalidated|refresh token was revoked|access token could not be refreshed|"
-    r"ineligibletiererror|not eligible for gemini code assist|restricted_dasher_user",
+    r"ineligibletiererror|not eligible for gemini code assist|restricted_dasher_user|"
+    r"individual quota reached|hit your usage limit|exceeded your monthly quota|"
+    r"not eligible for antigravity|eligibility check failed|model is at capacity",
     re.IGNORECASE,
 )
 
