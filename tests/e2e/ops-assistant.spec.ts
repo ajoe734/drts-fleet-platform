@@ -197,14 +197,18 @@ async function registerComplaintMocks(page: Page) {
 
 async function gotoComplaints(page: Page) {
   await registerComplaintMocks(page);
+  // waitUntil: "networkidle" ensures the page fully hydrates before we check
+  // for SPA-rendered content; use a generous timeout for Cloud Run cold starts.
   await page.goto("/complaints", { waitUntil: "domcontentloaded" });
   await expect(
     page.getByRole("heading", { name: /Complaint Center|客訴中心/ }),
-  ).toBeVisible();
-  await expect(page.getByText(/載入客訴中…/)).toHaveCount(0);
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/載入客訴中…/)).toHaveCount(0, {
+    timeout: 10_000,
+  });
   await expect(
     page.getByRole("button", { name: CASE_NO }).first(),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 10_000 });
 }
 
 async function openAssistant(page: Page) {

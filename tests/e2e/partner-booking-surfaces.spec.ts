@@ -139,23 +139,32 @@ test.describe("partner booking program surfaces", () => {
     await page.getByRole("button", { name: "前往確認" }).click();
     await page.getByRole("button", { name: "確認送出預約" }).click();
 
-    await expect(page.getByText("預約已建立")).toBeVisible();
+    // The server action calls three sequential Cloud Run endpoints; allow up to
+    // 30 s for the confirmation page to appear on a cold-start deployment.
+    await expect(page.getByText("預約已建立")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("partner-booking-id")).toHaveText(
       /^booking-/,
+      { timeout: 10_000 },
     );
-    await expect(page.getByTestId("partner-order-id")).not.toHaveText("—");
+    await expect(page.getByTestId("partner-order-id")).not.toHaveText("—", {
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("partner-eligibility-id")).toHaveText(
       /^(elig-|elig_)/,
+      { timeout: 10_000 },
     );
 
     await page.getByRole("button", { name: "追蹤行程" }).click();
-    await expect(page.getByTestId("partner-order-number")).not.toHaveText("—");
+    await expect(page.getByTestId("partner-order-number")).not.toHaveText(
+      "—",
+      { timeout: 15_000 },
+    );
     await expect(
       page.getByText(
         "台北市信義區松仁路 100 號 -> 桃園 T2 · 第二航廈 出發接送區",
         { exact: true },
       ),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test("shows a safe reference code when airport booking fails", async ({
