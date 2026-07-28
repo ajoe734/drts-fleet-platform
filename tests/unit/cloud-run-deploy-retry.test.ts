@@ -129,4 +129,15 @@ describe("Cloud Run deploy quota retry", () => {
     ).toHaveLength(12);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
   });
+
+  it("defers web revision startup to the post-deploy health gate", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+
+    expect(workflow.match(/--no-deploy-health-check/g)).toHaveLength(11);
+    expect(workflow).toContain("name: Dev health check");
+    expect(workflow).toContain("needs: [prepare, deploy]");
+  });
 });
