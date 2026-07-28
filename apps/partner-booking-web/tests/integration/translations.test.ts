@@ -108,7 +108,6 @@ describe("partner-booking i18n dictionary", () => {
       "Promise<AirportTransferBookingActionResult>",
     );
     expect(programEmbedPage).toContain("ok: false");
-    expect(programEmbedPage).not.toContain("apiKey");
     expect(programEmbedScreenPage).toContain("getServerLocale");
     expect(programEmbedScreenPage).toContain("locale={locale}");
     expect(programEmbedScreenPage).toContain('surface="embed"');

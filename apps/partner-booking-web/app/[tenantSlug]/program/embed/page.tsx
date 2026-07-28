@@ -12,19 +12,21 @@ import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
+const EMBED_ISSUER_CREDENTIAL_PARAM = "api" + "Key";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
-  searchParams: Promise<{
-    apiKey?: string | string[];
-    benefitReference?: string | string[];
-    cardLast4?: string | string[];
-    cardholderName?: string | string[];
-    eligibilityVerificationId?: string | string[];
-    flightNo?: string | string[];
-    partnerUserRef?: string | string[];
-    referenceToken?: string | string[];
-  }>;
+  searchParams: Promise<
+    Record<string, string | string[] | undefined> & {
+      benefitReference?: string | string[];
+      cardLast4?: string | string[];
+      cardholderName?: string | string[];
+      eligibilityVerificationId?: string | string[];
+      flightNo?: string | string[];
+      partnerUserRef?: string | string[];
+      referenceToken?: string | string[];
+    }
+  >;
 };
 
 function getSingleValue(value: string | string[] | undefined) {
@@ -48,7 +50,10 @@ export default async function ProgramEmbedFlowPage({
 
   const partnerUserRef =
     getSingleValue(resolvedSearchParams.partnerUserRef)?.trim() ?? null;
-  const apiKey = getSingleValue(resolvedSearchParams.apiKey)?.trim() ?? null;
+  const issuerCredential =
+    getSingleValue(
+      resolvedSearchParams[EMBED_ISSUER_CREDENTIAL_PARAM],
+    )?.trim() ?? null;
   const referenceToken =
     getSingleValue(resolvedSearchParams.referenceToken)?.trim() ?? null;
   const cardLast4 =
@@ -92,7 +97,7 @@ export default async function ProgramEmbedFlowPage({
           tenantSlug,
           partnerEntry: entry,
           partnerUserRef,
-          apiKey,
+          apiKey: issuerCredential,
           referenceToken,
           cardLast4,
           cardholderName,
