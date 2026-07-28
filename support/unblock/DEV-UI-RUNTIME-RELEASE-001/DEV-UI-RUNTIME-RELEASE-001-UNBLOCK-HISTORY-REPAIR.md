@@ -176,3 +176,13 @@ Concrete next step:
 
 No runtime tests were run in this helper task. This repair is branch-history
 triage and machine-truth routing only.
+
+## Owner Closeout Evidence
+
+- Review-approved helper closeout commit already pushed:
+  `c27cbfe842ce3c12e38dfcfa90478e039a8e3c2a`
+- Parent unblock path is now active on PR `#1181`:
+  `https://github.com/ajoe734/drts-fleet-platform/pull/1181`
+- This helper task's integration status remains `branch_pushed` because it
+  contributes diagnosis evidence only; the merge/check lifecycle belongs to the
+  parent release branch `codex/dev-ui-runtime-release-001`.
