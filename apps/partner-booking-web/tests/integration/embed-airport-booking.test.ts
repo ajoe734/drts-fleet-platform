@@ -108,6 +108,7 @@ describe("submitEmbeddedAirportBooking", () => {
     const result = await submitEmbeddedAirportBooking(
       {
         tenantSlug: "ctbc",
+        apiKey: "pk_live_embed",
         partnerUserRef: "user-001",
         locale: "zh",
         referenceToken: "token-001",
@@ -145,6 +146,7 @@ describe("submitEmbeddedAirportBooking", () => {
     expect(getPartnerRouteContext).toHaveBeenCalledWith("ctbc");
     expect(createPartnerIngressHandoff).toHaveBeenCalledWith({
       entrySlug: "ctbc",
+      apiKey: "pk_live_embed",
       partnerUserRef: "user-001",
     });
     expect(verifyPartnerEligibility).toHaveBeenCalledWith(
@@ -231,6 +233,7 @@ describe("submitEmbeddedAirportBooking", () => {
     await submitEmbeddedAirportBooking(
       {
         tenantSlug: "ctbc",
+        apiKey: null,
         partnerUserRef: "user-001",
         locale: "zh",
         referenceToken: null,
@@ -289,6 +292,7 @@ describe("submitEmbeddedAirportBooking", () => {
       submitEmbeddedAirportBooking(
         {
           tenantSlug: "ctbc",
+          apiKey: "pk_live_embed",
           partnerUserRef: "user-001",
           locale: "zh",
           referenceToken: "token-001",

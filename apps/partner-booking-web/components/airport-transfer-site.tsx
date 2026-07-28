@@ -47,6 +47,16 @@ export type AirportTransferBookingResult = {
   receipt: OwnedOrderRecord;
 };
 
+export type AirportTransferBookingActionResult =
+  | {
+      ok: true;
+      result: AirportTransferBookingResult;
+    }
+  | {
+      ok: false;
+      errorMessage: string;
+    };
+
 function Ic({ d, s = 20, sw = 1.9 }: { d: string; s?: number; sw?: number }) {
   return (
     <svg
@@ -140,7 +150,7 @@ export function AirportTransferSite({
   mode?: Mode;
   onSubmitBooking?: (
     submission: AirportTransferBookingSubmission,
-  ) => Promise<AirportTransferBookingResult>;
+  ) => Promise<AirportTransferBookingActionResult>;
   embedSessionReady?: boolean;
   embeddedPassengerName?: string | null;
   embeddedCardLast4?: string | null;
@@ -868,18 +878,14 @@ export function AirportTransferSite({
                         }
                         setSubmitError(null);
                         startTransition(async () => {
-                          try {
-                            const result =
-                              await onSubmitBooking(buildSubmission());
-                            setBookingResult(result);
-                            setStep(4);
-                          } catch (error) {
-                            setSubmitError(
-                              error instanceof Error
-                                ? error.message
-                                : t("airport.embed.error.submitFailed"),
-                            );
+                          const actionResult =
+                            await onSubmitBooking(buildSubmission());
+                          if (!actionResult.ok) {
+                            setSubmitError(actionResult.errorMessage);
+                            return;
                           }
+                          setBookingResult(actionResult.result);
+                          setStep(4);
                         });
                       }}
                     >

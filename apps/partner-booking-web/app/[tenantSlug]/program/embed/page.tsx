@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import {
   AirportTransferSite,
+  type AirportTransferBookingActionResult,
   type AirportTransferBookingSubmission,
 } from "@/components/airport-transfer-site";
 import { submitEmbeddedAirportBooking } from "@/lib/embed-airport-booking";
@@ -15,6 +16,7 @@ type PageProps = {
   params: Promise<{ tenantSlug: string }>;
   searchParams: Promise<{
     benefitReference?: string | string[];
+    apiKey?: string | string[];
     cardLast4?: string | string[];
     cardholderName?: string | string[];
     eligibilityVerificationId?: string | string[];
@@ -35,12 +37,14 @@ export default async function ProgramEmbedFlowPage({
   const { tenantSlug } = await params;
   const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
-  const { entry, inactive, theme } = await getTenantProgramRouteContext(tenantSlug);
+  const { entry, inactive, theme } =
+    await getTenantProgramRouteContext(tenantSlug);
   const bank = getAirportBank(tenantSlug);
 
-  if (theme.kind !== "card" || !bank) {
+  if (theme.kind !== "card" || bank === null) {
     notFound();
   }
+  const airportBank = bank;
 
   const partnerUserRef =
     getSingleValue(resolvedSearchParams.partnerUserRef)?.trim() ?? null;
@@ -52,6 +56,7 @@ export default async function ProgramEmbedFlowPage({
     getSingleValue(resolvedSearchParams.cardholderName)?.trim() ?? null;
   const benefitReference =
     getSingleValue(resolvedSearchParams.benefitReference)?.trim() ?? null;
+  const apiKey = getSingleValue(resolvedSearchParams.apiKey)?.trim() ?? null;
   const flightNo =
     getSingleValue(resolvedSearchParams.flightNo)?.trim() ?? null;
   const existingEligibilityVerificationId =
@@ -75,27 +80,45 @@ export default async function ProgramEmbedFlowPage({
     );
   }
 
-  async function submitBooking(submission: AirportTransferBookingSubmission) {
+  async function submitBooking(
+    submission: AirportTransferBookingSubmission,
+  ): Promise<AirportTransferBookingActionResult> {
     "use server";
 
-    return submitEmbeddedAirportBooking({
-      tenantSlug,
-      partnerEntry: entry,
-      partnerUserRef,
-      referenceToken,
-      cardLast4,
-      cardholderName,
-      benefitReference,
-      flightNo,
-      existingEligibilityVerificationId,
-      locale,
-      submission,
-    });
+    try {
+      return {
+        ok: true,
+        result: await submitEmbeddedAirportBooking({
+          tenantSlug,
+          partnerEntry: entry,
+          apiKey,
+          partnerUserRef,
+          referenceToken,
+          cardLast4,
+          cardholderName,
+          benefitReference,
+          flightNo,
+          existingEligibilityVerificationId,
+          locale,
+          submission,
+        }),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        errorMessage:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : locale === "zh"
+              ? "預約送出失敗。"
+              : "Booking submission failed.",
+      };
+    }
   }
 
   return (
     <AirportTransferSite
-      bank={bank}
+      bank={airportBank}
       mode="embed"
       onSubmitBooking={submitBooking}
       embedSessionReady={embedSessionReady}
