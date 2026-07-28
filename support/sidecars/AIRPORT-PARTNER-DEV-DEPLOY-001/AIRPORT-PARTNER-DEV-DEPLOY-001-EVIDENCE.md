@@ -1,6 +1,6 @@
 # AIRPORT-PARTNER-DEV-DEPLOY-001 Evidence
 
-Last updated: 2026-07-28T13:30:00Z
+Last updated: 2026-07-28T14:05:00Z
 Owner: Codex
 Reviewer: Codex2
 
@@ -26,6 +26,11 @@ Job results from `gh run view 30353618827 --repo ajoe734/drts-fleet-platform --j
 - `Deploy services`: `success`
 - `Dev health check`: `success`
 - `Dev UI smoke (playwright vs deployed)`: `failure`
+
+`gh run view 30353618827 --repo ajoe734/drts-fleet-platform --log-failed` confirms the failing step was `Run UI smoke against deployed dev`, and the failing assertion remained:
+
+- `tests/e2e/partner-booking-surfaces.spec.ts:140`
+- `await expect(page.getByText("預約已建立")).toBeVisible();`
 
 ## Failing acceptance point
 
@@ -58,6 +63,30 @@ Observed post-submit page state on deployed dev:
 - The page rendered the user-visible error copy `預約送出失敗。`
 
 This means the current public dev deploy is not failing with an outer HTTP 5xx on submit; it is failing inside the booking submit action and returning an error state to the page.
+
+## Public dev entry probes
+
+Re-checked from this task worktree on `2026-07-28` with `curl -L -s -o /dev/null -w '%{http_code}'`:
+
+- `https://drts-dev-api-ne55h7sy3a-uc.a.run.app/health` -> `200`
+- `https://drts-dev-platform-admin-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-ops-console-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-fleet-partner-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-tenant-console-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-bank-console-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-referral-embed-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/ctbc/program/embed` -> `200`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/cathay/program/embed` -> `200`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/taishin/program/embed` -> `200`
+- `https://drts-dev-partner-booking-web-ne55h7sy3a-uc.a.run.app/dbs/program/embed` -> `200`
+- `https://drts-dev-concierge-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-passenger-web-ne55h7sy3a-uc.a.run.app` -> `404`
+- `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app` -> `200`
+- `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app/bookings/new` -> `200`
+- `https://drts-dev-enterprise-dispatch-web-ne55h7sy3a-uc.a.run.app/embed/unsupported-host` -> `200`
+- `https://drts-channel-partner-portal-web-ne55h7sy3a-uc.a.run.app` -> `200`
+
+These probes support the same conclusion as the workflow health job: the deploy is broadly reachable and not blocked by 5xx at the entry-origin level. The release remains blocked by the real airport booking create smoke.
 
 ## Commit relationship
 
