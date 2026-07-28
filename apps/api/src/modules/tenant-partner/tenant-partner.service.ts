@@ -1257,6 +1257,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           : this.partnerIngressCredentialSeeds.map((seed) =>
               createBootstrapPartnerIngressCredential(seed),
             );
+      this.reconcilePartnerIngressCredentialSeeds();
       this.normalizePartnerEntryAuthModes();
       this.partnerEligibilityVerifications = new Map(
         partnerEligibilityVerifications.map((verification) => [
@@ -8015,6 +8016,32 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         "normalize_partner_entry_auth_modes",
       );
     }
+  }
+
+  private reconcilePartnerIngressCredentialSeeds() {
+    const configuredEntrySlugs = new Set(
+      this.partnerIngressCredentials.map((credential) => credential.entrySlug),
+    );
+    const missingCredentials = this.partnerIngressCredentialSeeds
+      .filter((seed) => !configuredEntrySlugs.has(seed.entrySlug))
+      .map((seed) => createBootstrapPartnerIngressCredential(seed));
+
+    if (missingCredentials.length === 0) {
+      return;
+    }
+
+    this.partnerIngressCredentials = [
+      ...this.partnerIngressCredentials,
+      ...missingCredentials,
+    ];
+    this.persistChanges(
+      {
+        partnerIngressCredentials: missingCredentials.map((credential) =>
+          this.cloneStoredPartnerIngressCredential(credential),
+        ),
+      },
+      "module init partner ingress credential seed reconciliation",
+    );
   }
 
   private resolvePartnerIngressCredential(entrySlug: string) {

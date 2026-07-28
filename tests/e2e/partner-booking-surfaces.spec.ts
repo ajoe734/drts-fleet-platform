@@ -129,7 +129,7 @@ test.describe("partner booking program surfaces", () => {
     page,
   }) => {
     const response = await page.goto(
-      "/ctbc/program/embed?apiKey=pk_live_embed&partnerUserRef=user-001&referenceToken=token-001&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-001&flightNo=CI100",
+      "/ctbc/program/embed?partnerUserRef=user-001&referenceToken=token-001&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-001&flightNo=CI100",
     );
     expect(response?.status()).toBe(200);
 
