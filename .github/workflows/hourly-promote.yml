@@ -122,8 +122,76 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open promote PR
+      - name: Reconciliation gate
         if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true' && steps.already.outputs.skip != 'true'
+        id: reconcile
+        run: |
+          src="${{ steps.pick.outputs.branch }}"
+          sha="${{ steps.pick.outputs.sha }}"
+          conflict_log="${RUNNER_TEMP:-/tmp}/promote-merge-tree.log"
+
+          # A conflicting publish PR can never produce refs/pull/<n>/merge and
+          # therefore can never satisfy strict branch protection. Detect that
+          # before opening (or retaining) a permanently blocked PR.
+          if git merge-tree --write-tree origin/main "$sha" >"$conflict_log" 2>&1; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          existing=$(gh pr list \
+            --base main \
+            --head "$src" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr close "$existing" \
+              --comment "Closed automatically: \`$src\` conflicts with \`main\`. Reconcile main-only changes back to dev and cut a fresh publish snapshot; immutable publish branches are never rewritten."
+          fi
+
+          echo "::error::$src cannot merge cleanly into main. No promotion PR will be opened."
+          echo "::error::Follow docs/03-runbooks/promote-rail-rescue-runbook.md after porting all wanted main-only content back to dev."
+          tail -n 80 "$conflict_log" || true
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verified dev deployment gate
+        if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true' && steps.already.outputs.skip != 'true' && steps.reconcile.outputs.skip != 'true'
+        id: deployed
+        run: |
+          branch="${{ steps.pick.outputs.branch }}"
+          sha="${{ steps.pick.outputs.sha }}"
+          encoded_branch=$(jq -rn --arg value "$branch" '$value|@uri')
+          runs=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-dev.yml/runs?branch=${encoded_branch}&per_page=100")
+          latest=$(jq -c --arg sha "$sha" '
+            [
+              .workflow_runs[]
+              | select(.head_sha == $sha and .status == "completed")
+            ]
+            | sort_by(.run_started_at)
+            | last // empty
+          ' <<<"$runs")
+
+          if [ -z "$latest" ]; then
+            echo "::warning::No completed deploy-dev.yml run exists for $branch @ ${sha:0:12}. Promotion remains blocked."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          conclusion=$(jq -r '.conclusion' <<<"$latest")
+          run_url=$(jq -r '.html_url' <<<"$latest")
+          if [ "$conclusion" != "success" ]; then
+            echo "::warning::Latest exact-SHA dev deploy concluded '$conclusion': $run_url"
+            echo "::warning::Fix or restore the dev environment, then re-run deploy-dev.yml against $branch. Promotion will retry on the next hourly run."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Verified successful dev deploy for $branch @ ${sha:0:12}: $run_url"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Open promote PR
+        if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true' && steps.already.outputs.skip != 'true' && steps.reconcile.outputs.skip != 'true' && steps.deployed.outputs.skip != 'true'
         id: pr
         run: |
           src="${{ steps.pick.outputs.branch }}"
@@ -184,9 +252,14 @@ jobs:
           src="${{ steps.pick.outputs.branch }}"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           workdir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/promote-sha-XXXXXX")
+          compose_project="promote-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           overall=0
 
           cleanup() {
+            docker compose \
+              --project-name "$compose_project" \
+              -f "$workdir/docker-compose.dev.yml" \
+              down --volumes --remove-orphans >/dev/null 2>&1 || true
             git worktree remove --force "$workdir" >/dev/null 2>&1 || rm -rf "$workdir"
           }
           trap cleanup EXIT
@@ -271,9 +344,34 @@ jobs:
             "Checking the promote diff for generated runtime mirror files." \
             python3 scripts/git/check_staged_generated_files.py --range origin/main HEAD
 
+          docker compose \
+            --project-name "$compose_project" \
+            -f "$workdir/docker-compose.dev.yml" \
+            up -d postgres
+          ready=false
+          for _ in $(seq 1 30); do
+            if docker compose \
+              --project-name "$compose_project" \
+              -f "$workdir/docker-compose.dev.yml" \
+              exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != "true" ]; then
+            echo "::error::PostgreSQL did not become ready for Smoke acceptance."
+            docker compose \
+              --project-name "$compose_project" \
+              -f "$workdir/docker-compose.dev.yml" \
+              logs postgres || true
+            exit 1
+          fi
+
           run_check \
             "Smoke acceptance" \
             "Running lint, typecheck, and unit tests on the promote snapshot." \
+            env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform \
             bash -lc 'pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm run test:unit'
 
           echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
