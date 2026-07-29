@@ -8,6 +8,7 @@ import type {
 } from "@drts/contracts";
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { useMemo, useState } from "react";
+import { GoogleMapBaseLayer } from "@/components/google-map-base-layer";
 
 import {
   buildOpsMapTileViewport,
@@ -175,6 +176,12 @@ export function CallcenterInteractiveMap({
   }
 
   function handleClick(event: MouseEvent<HTMLDivElement>) {
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest("[data-google-map-base-layer]")
+    ) {
+      return;
+    }
     const bounds = event.currentTarget.getBoundingClientRect();
     selectPoint(
       ((event.clientX - bounds.left) / bounds.width) * MAP_WIDTH,
@@ -284,11 +291,26 @@ export function CallcenterInteractiveMap({
           />
         )}
 
+        <GoogleMapBaseLayer
+          ariaLabel={`${stopKind} Google map`}
+          center={center}
+          features={features}
+          interactive
+          onPointSelect={onPinSelect}
+          selectedPoint={value}
+          zoom={zoom}
+        />
+
         <svg
           aria-label={`${labels.serviceArea} overlays`}
           data-callcenter-map-overlays
           height="100%"
-          style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            pointerEvents: "none",
+          }}
           viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
           width="100%"
         >

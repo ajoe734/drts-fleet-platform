@@ -33,9 +33,14 @@ from adapters.base import DeliveryRequest
 from branch_routing import route_task
 from common import (
     AI_GUIDE_PATH,
+    ROTATION_FALLBACK_SLOT,
+    ROTATION_PRIMARY_SLOT,
     agent_config_for,
+    antigravity_rotation_config,
     command_exists,
     config_path,
+    load_rotation_cooldowns,
+    record_rotation_cooldown,
     display_name_for,
     evidence_path,
     ensure_task_brief,
@@ -3056,6 +3061,141 @@ def maybe_pause_provider_for_terminal_failure(
         pause_provider(state, agent_id, reason, kind="auth", reset_seconds=None)
 
 
+def _antigravity_rotation_for_worker(config: dict[str, Any], worker: dict[str, Any]) -> dict[str, Any]:
+    """Return the normalized model_rotation config for a worker's Antigravity lane
+    (enabled=False for non-Antigravity lanes)."""
+    agent = agent_config_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    if str(agent.get("adapter") or "") != "antigravity":
+        return {"enabled": False}
+    provider_key = str(agent.get("provider") or "").strip()
+    provider = config.get("providers", {}).get(provider_key, {})
+    settings = provider.get("antigravity", {}) if isinstance(provider, dict) else {}
+    return antigravity_rotation_config(settings)
+
+
+def maybe_rotate_antigravity_lane(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+    worker: dict[str, Any],
+    failure: dict[str, Any],
+    reason: str,
+    *,
+    authorized: bool,
+) -> bool:
+    """Handle a quota/capacity failure on a rotation-enabled Antigravity lane by
+    cooling the model the worker just used and re-dispatching on the SAME lane so
+    the adapter switches to the other model — instead of pausing the whole lane.
+
+    The lane is only truly paused when BOTH model pools are cooling. Returns True
+    when the failure was handled here (the caller must stop its own
+    pause/retry/finalize flow for this worker)."""
+    if not authorized:
+        return False
+    if failure.get("kind") not in {"quota_terminal", "capacity"}:
+        return False
+    rotation = _antigravity_rotation_for_worker(config, worker)
+    if not rotation.get("enabled"):
+        return False
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    if not agent_id:
+        return False
+    request = request_for_worker(config, worker)
+    if request is None:
+        return False
+
+    metadata = worker.get("metadata") if isinstance(worker.get("metadata"), dict) else {}
+    slot = str(metadata.get("rotation_slot") or "").strip().lower()
+    if slot not in {ROTATION_PRIMARY_SLOT, ROTATION_FALLBACK_SLOT}:
+        # Unknown which model this run used (e.g. metadata lost); assume the
+        # primary pool, which is agy's default.
+        slot = ROTATION_PRIMARY_SLOT
+    other = ROTATION_FALLBACK_SLOT if slot == ROTATION_PRIMARY_SLOT else ROTATION_PRIMARY_SLOT
+
+    cooldown_seconds = int(rotation.get("cooldown_seconds", 900))
+    now = datetime.now(timezone.utc).timestamp()
+    cooldowns = record_rotation_cooldown(config, agent_id, slot, now + cooldown_seconds)
+    other_until = float(cooldowns.get(f"{other}_until", 0) or 0)
+
+    terminate_worker_pid(worker.get("pid"))
+    _failure_kind, failure_summary = summarize_worker_failure(config, worker, reason)
+
+    if other_until > now:
+        # Both pools cooling — really pause the lane until the sooner pool frees
+        # (so it wakes to retry the moment a model is available again), then fall
+        # back to normal terminal handling so the task can reassign to a healthy
+        # lane instead of stranding on the paused one.
+        resume_at = min(now + cooldown_seconds, other_until)
+        reset_seconds = max(1, int(resume_at - now))
+        pause_provider(state, agent_id, failure_summary, kind="quota", reset_seconds=reset_seconds)
+        write_activity_log(
+            config,
+            {
+                "type": "antigravity_rotation_paused",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": (
+                    f"Antigravity {agent_id}: both rotation pools cooling; lane paused "
+                    f"{reset_seconds}s ({failure_summary})."
+                ),
+                "worker_run_id": worker.get("run_id"),
+            },
+        )
+        console_log(
+            f"antigravity rotation: {agent_id} both pools cooling; lane paused {reset_seconds}s",
+            quiet=SUPERVISOR_LOG_QUIET,
+        )
+        finalize_terminal_worker_outcome(config, state, worker, failure_summary)
+        return True
+
+    # The other pool is warm: retire this worker cleanly (no lane pause, no
+    # failure-streak penalty, no reassignment away) and re-dispatch on the SAME
+    # lane so the adapter selects the other model.
+    evidence_ref = record_worker_evidence(config, worker, reason)
+    worker["last_error"] = failure_summary
+    worker["last_error_kind"] = _failure_kind
+    worker["last_error_summary"] = failure_summary
+    worker["last_evidence_ref"] = evidence_ref
+    worker["status"] = "rotated"
+    worker["last_event_at"] = utc_now()
+    finalize_queue_event_record(config, state, worker, "completed")
+    ok, outcome, _ = start_worker_for_request(
+        config,
+        state,
+        provider_report,
+        request,
+        queue_event_id=worker.get("queue_event_id"),
+        attempt_count=int(worker.get("attempt_count", 0)) + 1,
+        event_id_for_log=worker.get("queue_event_id"),
+        parent_run_id=worker.get("run_id"),
+        activity_type="antigravity_rotation_redispatch",
+        activity_message=(
+            f"Antigravity {agent_id} exhausted its {slot} model ({failure_summary}); "
+            f"re-dispatched on the same lane to switch to {other}."
+        ),
+    )
+    if ok:
+        worker["rotation_redispatch_run_id"] = outcome
+        console_log(
+            f"antigravity rotation: {agent_id} {slot}->{other} redispatch run={outcome}",
+            quiet=SUPERVISOR_LOG_QUIET,
+        )
+        return True
+
+    # Re-dispatch itself failed — fall back to a bounded capacity pause so the
+    # lane does not spin on an immediate retry.
+    reset_seconds = max(1, cooldown_seconds)
+    pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=reset_seconds)
+    worker["status"] = "failed"
+    worker["last_event_at"] = utc_now()
+    finalize_queue_event_record(config, state, worker, "failed", failure_summary)
+    console_log(
+        f"antigravity rotation: {agent_id} redispatch failed; lane paused {reset_seconds}s",
+        quiet=SUPERVISOR_LOG_QUIET,
+    )
+    return True
+
+
 def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     provider_pause_registry(state).pop(normalized, None)
@@ -5315,6 +5455,17 @@ def poll_workers(
                         f"live worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} source={live_failure_signal.source} reason={live_failure_reason}",
                         quiet=SUPERVISOR_LOG_QUIET,
                     )
+                    if maybe_rotate_antigravity_lane(
+                        config,
+                        state,
+                        provider_report,
+                        worker,
+                        failure,
+                        live_failure_reason,
+                        authorized=live_failure_signal.provider_pause_authorized,
+                    ):
+                        changed = True
+                        continue
                     terminate_worker_pid(worker.get("pid"))
                     if failure.get("kind") == "quota_terminal" and live_failure_signal.provider_pause_authorized:
                         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
@@ -5419,6 +5570,17 @@ def poll_workers(
                 f"worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} transient={'yes' if failure.get('transient') else 'no'} source={failure_signal.source} reason={failure_reason}",
                 quiet=SUPERVISOR_LOG_QUIET,
             )
+            if maybe_rotate_antigravity_lane(
+                config,
+                state,
+                provider_report,
+                worker,
+                failure,
+                failure_reason,
+                authorized=failure_signal.provider_pause_authorized,
+            ):
+                changed = True
+                continue
             if failure.get("kind") == "quota_terminal" and failure_signal.provider_pause_authorized:
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 if agent_id:

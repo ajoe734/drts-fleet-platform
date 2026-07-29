@@ -247,7 +247,11 @@ export type PlatformAdminRouteKey =
   | "sandbox-evidence-manifest"
   | "sandbox-evidence-exports"
   | "sandbox-legal-holds"
-  | "sandbox-regulatory-reports";
+  | "sandbox-regulatory-reports"
+  | "p5-disclosure"
+  | "p5-corrections"
+  | "p5-records"
+  | "p5-fares";
 
 export type LocalizedText = { zh: string; en: string };
 

@@ -8374,3 +8374,119 @@ class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
 
         self.assertIn("exit code 1", error)
         self.assertIn("pnpm install failed", error)
+
+
+
+
+class AntigravityModelRotationTests(unittest.TestCase):
+    """Antigravity lanes auto-rotate Gemini <-> fallback model instead of pausing
+    the whole lane when a single model exhausts its quota."""
+
+    def setUp(self) -> None:
+        self.rot_file = Path(tempfile.mkdtemp()) / "antigravity-rotation.json"
+        self.config = {
+            "paths": {"antigravity_rotation": str(self.rot_file)},
+            "agents": {
+                "gemini": {"display_name": "Gemini", "provider": "gemini", "adapter": "antigravity"},
+                "codex": {"display_name": "Codex", "provider": "codex", "adapter": "codex"},
+            },
+            "providers": {
+                "gemini": {
+                    "antigravity": {
+                        "cli": "agy",
+                        "model_rotation": {
+                            "enabled": True,
+                            "primary": "",
+                            "fallback": "Claude Sonnet 4.6 (Thinking)",
+                            "cooldown_seconds": 900,
+                        },
+                    }
+                },
+                "codex": {"codex": {"cli": "codex"}},
+            },
+        }
+
+    def _worker(self, *, slot="gemini"):
+        return {
+            "run_id": "gemini-run-1",
+            "agent_id": "gemini",
+            "provider": "gemini",
+            "task_id": "T-1",
+            "pid": None,
+            "queue_event_id": "evt-1",
+            "attempt_count": 0,
+            "metadata": {"rotation_slot": slot},
+        }
+
+    def test_rotation_flow(self) -> None:
+        import contextlib
+        # 1) Other pool warm -> cool gemini, redispatch, no lane pause.
+        state: dict = {}
+        worker = self._worker(slot="gemini")
+        req = supervisor.DeliveryRequest(agent_id="gemini", provider="gemini", delivery_mode="antigravity", message="go")
+        with contextlib.ExitStack() as es:
+            es.enter_context(mock.patch.object(supervisor, "request_for_worker", return_value=req))
+            es.enter_context(mock.patch.object(supervisor, "record_worker_evidence", return_value="ev"))
+            es.enter_context(mock.patch.object(supervisor, "summarize_worker_failure", return_value=("capacity", "hit your limit")))
+            es.enter_context(mock.patch.object(supervisor, "finalize_queue_event_record"))
+            es.enter_context(mock.patch.object(supervisor, "terminate_worker_pid", return_value=True))
+            es.enter_context(mock.patch.object(supervisor, "write_activity_log"))
+            start = es.enter_context(mock.patch.object(supervisor, "start_worker_for_request", return_value=(True, "gemini-run-2", None)))
+            handled = supervisor.maybe_rotate_antigravity_lane(
+                self.config, state, {}, worker, {"kind": "capacity"}, "hit your limit", authorized=True
+            )
+        self.assertTrue(handled)
+        self.assertEqual(worker["status"], "rotated")
+        start.assert_called_once()
+        # gemini slot recorded as cooling; lane NOT paused.
+        cooldowns = supervisor.load_rotation_cooldowns(self.config, "gemini")
+        self.assertGreater(cooldowns["gemini_until"], 0)
+        self.assertEqual(cooldowns["claude_until"], 0)
+        self.assertNotIn("gemini", supervisor.provider_pause_registry(state))
+
+        # 2) Now the fallback (claude) pool also exhausts -> both cooling -> pause lane.
+        worker2 = self._worker(slot="claude")
+        with contextlib.ExitStack() as es:
+            es.enter_context(mock.patch.object(supervisor, "request_for_worker", return_value=req))
+            es.enter_context(mock.patch.object(supervisor, "summarize_worker_failure", return_value=("capacity", "hit your limit")))
+            es.enter_context(mock.patch.object(supervisor, "terminate_worker_pid", return_value=True))
+            es.enter_context(mock.patch.object(supervisor, "write_activity_log"))
+            fin = es.enter_context(mock.patch.object(supervisor, "finalize_terminal_worker_outcome"))
+            start = es.enter_context(mock.patch.object(supervisor, "start_worker_for_request", return_value=(True, "x", None)))
+            handled2 = supervisor.maybe_rotate_antigravity_lane(
+                self.config, state, {}, worker2, {"kind": "capacity"}, "hit your limit", authorized=True
+            )
+        self.assertTrue(handled2)
+        start.assert_not_called()  # both cooling: no redispatch, real pause instead
+        fin.assert_called_once()   # delegates to normal terminal handling (reassign/finalize)
+        self.assertIn("gemini", supervisor.provider_pause_registry(state))
+
+    def test_skips_non_antigravity_lane(self) -> None:
+        state: dict = {}
+        worker = {"run_id": "c1", "agent_id": "codex", "provider": "codex", "task_id": "T", "metadata": {}}
+        handled = supervisor.maybe_rotate_antigravity_lane(
+            self.config, state, {}, worker, {"kind": "quota_terminal"}, "you have no quota", authorized=True
+        )
+        self.assertFalse(handled)
+
+    def test_skips_when_rotation_disabled(self) -> None:
+        cfg = json.loads(json.dumps(self.config))
+        cfg["providers"]["gemini"]["antigravity"]["model_rotation"]["enabled"] = False
+        state: dict = {}
+        handled = supervisor.maybe_rotate_antigravity_lane(
+            cfg, state, {}, self._worker(), {"kind": "capacity"}, "hit your limit", authorized=True
+        )
+        self.assertFalse(handled)
+
+    def test_skips_unauthorized_and_wrong_kind(self) -> None:
+        state: dict = {}
+        self.assertFalse(
+            supervisor.maybe_rotate_antigravity_lane(
+                self.config, state, {}, self._worker(), {"kind": "capacity"}, "x", authorized=False
+            )
+        )
+        self.assertFalse(
+            supervisor.maybe_rotate_antigravity_lane(
+                self.config, state, {}, self._worker(), {"kind": "auth"}, "401", authorized=True
+            )
+        )

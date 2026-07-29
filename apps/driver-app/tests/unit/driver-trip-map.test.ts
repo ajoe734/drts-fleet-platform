@@ -33,6 +33,19 @@ vi.mock("react-native", () => ({
   }) => React.createElement("View", props, children),
 }));
 
+vi.mock("react-native-maps", () => ({
+  default: ({
+    children,
+    ...props
+  }: {
+    children?: React.ReactNode;
+    [key: string]: unknown;
+  }) => React.createElement("MapView", props, children),
+  Marker: (props: Record<string, unknown>) =>
+    React.createElement("Marker", props),
+  PROVIDER_GOOGLE: "google",
+}));
+
 vi.mock("@/components/canvas-primitives", () => ({
   driverCanvasTheme: {
     accent: "#7BC0FF",
@@ -190,7 +203,7 @@ function renderDriverTripMapText(
 }
 
 describe("DriverTripMap", () => {
-  it("shows real pickup/dropoff coordinates and honest native-map limitation", () => {
+  it("shows the native Google map with real pickup/dropoff coordinates", () => {
     const text = renderDriverTripMapText({
       task: buildTask(),
       order: buildOrder(),
@@ -200,13 +213,13 @@ describe("DriverTripMap", () => {
         accuracyM: 8,
         recordedAt: "2026-07-01T00:00:00.000Z",
       },
-      nativeMapAvailable: false,
+      nativeMapAvailable: true,
       now: Date.parse("2026-07-01T00:00:30.000Z"),
     });
 
     expect(text).toContain("Trip Map & Navigation Handoff");
     expect(text).toContain("DRTS-owned route");
-    expect(text).toContain("此 build 未 bundled native map SDK");
+    expect(text).toContain("Google native map active");
     expect(text).toContain("台北車站");
     expect(text).toContain("25.047800, 121.517000");
     expect(text).toContain("松山機場");

@@ -11,6 +11,7 @@ import {
 import type {
   CreateServiceProductCommand,
   UpdateServiceProductCommand,
+  UpsertRuntimeProfileServiceProductPolicyCommand,
 } from "./service-product.types";
 
 import { toActionReceiptEnvelope } from "../../common/action-receipt";
@@ -25,6 +26,31 @@ export class ServiceProductController {
   listServiceProducts(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       { items: this.serviceProductService.listServiceProducts() },
+      requestId,
+    );
+  }
+
+  @Get("runtime-policies")
+  listRuntimePolicies(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      { items: this.serviceProductService.listRuntimeProfilePolicies() },
+      requestId,
+    );
+  }
+
+  @Put("runtime-policies/:runtimeProfileCode/:serviceProductCode")
+  upsertRuntimePolicy(
+    @Param("runtimeProfileCode") runtimeProfileCode: string,
+    @Param("serviceProductCode") serviceProductCode: string,
+    @Body() command: UpsertRuntimeProfileServiceProductPolicyCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.serviceProductService.upsertRuntimeProfilePolicy({
+        ...command,
+        runtimeProfileCode: runtimeProfileCode as never,
+        serviceProductCode: serviceProductCode as never,
+      }),
       requestId,
     );
   }

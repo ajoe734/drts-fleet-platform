@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -1720,7 +1721,7 @@ export default function TripScreen() {
                     {
                       text: "前往 SOS",
                       style: "destructive",
-                      onPress: () => router.push("/incident"),
+                      onPress: () => router.push("/sos"),
                     },
                   ],
                 )
@@ -1807,7 +1808,7 @@ export default function TripScreen() {
             order={orderDetail}
             driverLocation={driverMapLocation}
             sourcePlatformOffline={sourcePlatformOffline}
-            nativeMapAvailable={false}
+            nativeMapAvailable={Platform.OS !== "web"}
           />
 
           <Card theme={driverCanvasTheme} padding={14} style={styles.routeCard}>

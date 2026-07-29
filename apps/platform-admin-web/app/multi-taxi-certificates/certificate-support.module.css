@@ -1,0 +1,210 @@
+.screen {
+  min-height: 100%;
+  overflow: auto;
+  background:
+    radial-gradient(
+      circle at 100% 0%,
+      rgba(17, 119, 108, 0.13),
+      transparent 32rem
+    ),
+    linear-gradient(145deg, #f4f1e8 0%, #f8faf7 52%, #edf4ef 100%);
+}
+
+.body {
+  display: grid;
+  gap: 16px;
+  padding: clamp(14px, 3vw, 26px);
+}
+
+.searchForm {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, 210px) auto;
+  gap: 10px;
+}
+
+.input,
+.select {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid rgba(18, 65, 61, 0.22);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #123d3a;
+  padding: 0 12px;
+  font: inherit;
+}
+
+.input:focus,
+.select:focus {
+  outline: 3px solid rgba(17, 119, 108, 0.18);
+  border-color: #11776c;
+}
+
+.stateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.stateCell {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(18, 65, 61, 0.13);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.stateCode {
+  display: block;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  color: #59706d;
+  font:
+    10px/1.3 "IBM Plex Mono",
+    "Noto Sans Mono",
+    monospace;
+}
+
+.results {
+  display: grid;
+  gap: 10px;
+}
+
+.resultCard {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) minmax(160px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid rgba(18, 65, 61, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.resultTitle,
+.mono {
+  font-family: "IBM Plex Mono", "Noto Sans Mono", monospace;
+}
+
+.resultTitle {
+  margin: 0 0 6px;
+  color: #0b5c55;
+  font-size: 14px;
+}
+
+.muted {
+  margin: 3px 0 0;
+  color: #617370;
+  font-size: 12px;
+}
+
+.openLink,
+.artifactLink {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.openLink {
+  background: #11776c;
+  color: #fff;
+  padding: 0 14px;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(250px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.artifactLink {
+  border: 1px solid #11776c;
+  color: #0b5c55;
+  padding: 0 13px;
+}
+
+.disabledAction {
+  min-height: 38px;
+  border: 1px solid rgba(89, 112, 109, 0.35);
+  border-radius: 8px;
+  background: #e7ebe8;
+  color: #6f7c79;
+  padding: 0 13px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.regenerationForm,
+.regenerationLabel {
+  display: grid;
+  gap: 9px;
+}
+
+.regenerationLabel {
+  color: #294e49;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.reasonInput {
+  min-height: 92px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid rgba(18, 65, 61, 0.22);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #123d3a;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.reasonInput:focus {
+  outline: 3px solid rgba(17, 119, 108, 0.18);
+  border-color: #11776c;
+}
+
+.backLink {
+  color: #0b5c55;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+@media (max-width: 980px) {
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    min-height: 100dvh;
+    max-height: 100dvh;
+  }
+
+  .searchForm,
+  .resultCard {
+    grid-template-columns: 1fr;
+  }
+
+  .openLink {
+    width: 100%;
+  }
+}

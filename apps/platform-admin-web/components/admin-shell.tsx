@@ -146,6 +146,12 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.serviceProducts",
   },
   {
+    key: "multi-taxi-authorizations",
+    icon: ShieldCheck,
+    section: "fleet",
+    labelKey: "adminShell.route.multiTaxiAuthorizations",
+  },
+  {
     key: "vehicle-eligibility",
     icon: Truck,
     section: "fleet",
@@ -204,6 +210,30 @@ const routes: NavRoute[] = [
     icon: ClipboardList,
     section: "sandbox",
     labelKey: "adminShell.route.sandboxRegulatoryReports",
+  },
+  {
+    key: "p5-disclosure",
+    icon: ShieldCheck,
+    section: "fleet",
+    labelKey: "adminShell.route.p5Disclosure",
+  },
+  {
+    key: "p5-corrections",
+    icon: ClipboardList,
+    section: "fleet",
+    labelKey: "adminShell.route.p5Corrections",
+  },
+  {
+    key: "p5-records",
+    icon: Package,
+    section: "fleet",
+    labelKey: "adminShell.route.p5Records",
+  },
+  {
+    key: "p5-fares",
+    icon: DollarSign,
+    section: "commerce",
+    labelKey: "adminShell.route.p5Fares",
   },
   {
     key: "switchboard",

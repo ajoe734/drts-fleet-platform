@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
 
 import type {
+  ComputeGeoRouteCommand,
   ResolveAddressCommand,
   ReverseGeocodeCommand,
 } from "@drts/contracts";
@@ -46,6 +47,17 @@ export class GeoController {
   ) {
     return toApiSuccessEnvelope(
       await this.geoService.reverse(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("route")
+  async route(
+    @Body() command: ComputeGeoRouteCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.geoService.route(command),
       requestId,
     );
   }

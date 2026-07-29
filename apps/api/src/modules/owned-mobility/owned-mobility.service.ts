@@ -4,6 +4,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   OnModuleInit,
   Optional,
   forwardRef,
@@ -19,15 +20,19 @@ import type {
   ComplianceGateRecord,
   ComplianceGateState,
   CompletionProofBundle,
+  ConsumerNotificationOutboxRecord,
   AssignDispatchCommand,
   BookingRecord,
   CancelOwnedOrderCommand,
   CreateCallCenterOrderCommand,
+  CreateMultiTaxiRideCommand,
   CreateOwnedOrderCommand,
   CreateTenantBookingCommand,
   DispatchAssignmentRecord,
   DispatchAttemptRecord,
   DispatchCandidate,
+  DispatchQueueEligibilityReasonCode,
+  DispatchQueueEntryReadRecord,
   DispatchQueueEntryReason,
   DispatchQueueFamily,
   DispatchJobRecord,
@@ -38,6 +43,7 @@ import type {
   DriverArrivedPickupCommand,
   DriverCompleteTaskCommand,
   DriverDepartTaskCommand,
+  DriverRatingSummary,
   DriverRejectTaskCommand,
   DriverStartTaskCommand,
   DriverTaskRecord,
@@ -46,8 +52,11 @@ import type {
   ApproveExceptionOverrideCommand,
   ExceptionHoldRecord,
   ExceptionHoldReasonCode,
+  FareQuoteAnomaly,
+  FareQuoteAnomalySnapshot,
   FulfillmentSegmentRecord,
   MoneyAmount,
+  MultiTaxiOperatingAuthorizationRecord,
   OverrideRequestRecord,
   PassengerDisclosureChannel,
   PassengerDisclosureRequirementSnapshot,
@@ -57,6 +66,8 @@ import type {
   RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
+  PartnerChannelEntryRecord,
+  PassengerDispatchDisclosureSnapshot,
   PassengerProfile,
   QueueCheckInCommand,
   QueueCheckOutCommand,
@@ -78,6 +89,9 @@ import type {
   OwnedOrderSpatialAuditStopSnapshot,
   ServiceAreaEvaluationResult,
   ServiceProductType,
+  DispatchQueueMode,
+  RuntimeProfileCode,
+  RouteFareDisclosureSnapshot,
 } from "@drts/contracts";
 
 import {
@@ -90,8 +104,10 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
+import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterService } from "../callcenter/callcenter.service";
+import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
   type OwnedMobilityQueryExecutor,
@@ -104,7 +120,9 @@ import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import { ServiceAreaService } from "../service-area/service-area.service";
 import {
+  OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+  type OwnedMobilityMultiTaxiTripCompletedEvent,
   type OwnedMobilityTripCompletedEvent,
 } from "./owned-mobility-events";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
@@ -174,6 +192,8 @@ type DispatchAssignmentBundle = {
   task: DriverTaskRecord;
   dispatchAttempt: DispatchAttemptRecord;
   traceLogs: DispatchTraceLogRecord[];
+  passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
+  consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
 };
 
 type DispatchAssignmentResult = {
@@ -184,6 +204,32 @@ type DispatchAssignmentResult = {
 
 type CreateDispatchAssignmentOptions = {
   dispatchAttemptSequence?: number;
+};
+
+type MultiTaxiCallContext = {
+  callId: string;
+  recordingId: string | null;
+  notes: string | null;
+};
+
+type QueueRuntimeContext = {
+  runtimeProfileCode: RuntimeProfileCode;
+  queueMode: DispatchQueueMode;
+  operatingAuthorizationId: string | null;
+};
+
+type QueueRegistryProjection = {
+  authorityAvailable: boolean;
+  driversById: Map<string, { driverId: string; name: string }>;
+  pairsByVehicleId: Map<string, { vehicleId: string; driverId: string }>;
+  vehiclesById: Map<
+    string,
+    {
+      vehicleId: string;
+      plateNo: string;
+      operatingArea: string;
+    }
+  >;
 };
 
 type ServiceAreaGateResolution = {
@@ -241,6 +287,8 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
+const DEFAULT_CERTIFICATE_SERVICE_PHONE = "0800-090-000";
+const DEFAULT_AUTHORITY_COMPLAINT_PHONE = "1999";
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
@@ -254,9 +302,7 @@ const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
 
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
-  private orderSequence = 1;
-
-  private bookingSequence = 1;
+  private readonly logger = new Logger(OwnedMobilityService.name);
 
   private orders: OwnedOrderRecord[] = [];
 
@@ -270,7 +316,27 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private dispatchTraceLogs: DispatchTraceLogRecord[] = [];
 
+  private passengerDisclosureSnapshots: PassengerDispatchDisclosureSnapshot[] =
+    [];
+
+  private consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
+
   private queueEntries: QueueEntryRecord[] = [];
+
+  private profileQueuePolicies: Map<
+    RuntimeProfileCode,
+    Set<DispatchQueueMode>
+  > = new Map([
+    ["multi_taxi_direct", new Set(["virtual_matching"])],
+    [
+      "ordinary_taxi",
+      new Set(["virtual_matching", "physical_rank", "taxi_stand"]),
+    ],
+    [
+      "business_dispatch",
+      new Set(["virtual_matching", "physical_rank", "taxi_stand"]),
+    ],
+  ]);
 
   /** Maps forwarded mirror order IDs to their source platform codes. */
   private forwarderSourceMap = new Map<string, string>();
@@ -304,6 +370,8 @@ export class OwnedMobilityService implements OnModuleInit {
     @Inject(forwardRef(() => SandboxDispatchGateService))
     private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
     private readonly serviceAreaService?: ServiceAreaService,
+    @Optional()
+    private readonly fareAnomalyService?: FareAnomalyService,
   ) {}
 
   private callRecordingListenersRegistered = false;
@@ -357,12 +425,17 @@ export class OwnedMobilityService implements OnModuleInit {
       this.dispatchTraceLogs = persistedState.dispatchTraceLogs.map(
         (traceLog) => this.cloneTraceLog(traceLog),
       );
+      this.passengerDisclosureSnapshots =
+        persistedState.passengerDisclosureSnapshots.map((snapshot) =>
+          this.clonePassengerDisclosureSnapshot(snapshot),
+        );
+      this.consumerNotificationOutbox =
+        persistedState.consumerNotificationOutbox.map((outbox) => ({
+          ...outbox,
+          payload: { ...outbox.payload },
+        }));
       this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(
         this.dispatchTraceLogs,
-      );
-      this.orderSequence = this.deriveNextOrderSequence(persistedState.orders);
-      this.bookingSequence = this.deriveNextBookingSequence(
-        persistedState.orders,
       );
     } catch (error) {
       this.ownedMobilityRepository.reportPersistenceFailure(
@@ -376,7 +449,9 @@ export class OwnedMobilityService implements OnModuleInit {
     command: CreateOwnedOrderCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
+    runtimeProfileCodeHeader?: string,
   ) {
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
 
@@ -512,10 +587,200 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.cloneOrder(order);
   }
 
+  createMultiTaxiRide(
+    command: CreateMultiTaxiRideCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    callContext?: MultiTaxiCallContext,
+  ) {
+    this.assertNoCanonicalMultiTaxiContextOverrides(command);
+    this.assertAddress(command.pickup?.address, "pickup.address");
+    this.assertAddress(command.dropoff?.address, "dropoff.address");
+    const requestedPickupAt = this.requireIsoTimestamp(
+      command.requestedPickupAt,
+      "requestedPickupAt",
+    );
+    if (!["on_demand", "scheduled"].includes(command.timingMode)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_TIMING_MODE_INVALID",
+        "timingMode must be on_demand or scheduled.",
+      );
+    }
+    if (
+      command.timingMode === "scheduled" &&
+      Date.parse(requestedPickupAt) <= Date.now()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SCHEDULED_PICKUP_MUST_BE_FUTURE",
+        "A scheduled multi-taxi ride must use a future pickup time.",
+      );
+    }
+    if (callContext && !callContext.callId?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "CALL_ID_REQUIRED",
+        "Call-center multi-taxi rides require callId.",
+      );
+    }
+
+    const serviceProduct =
+      this.serviceProductService?.getRuntimeServiceProductByType(
+        "taxi_reservation",
+      ) ?? null;
+    if (serviceProduct && !serviceProduct.active) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "SERVICE_PRODUCT_INACTIVE",
+        "The taxi_reservation service product is not active.",
+      );
+    }
+
+    const now = new Date().toISOString();
+    const scheduled = command.timingMode === "scheduled";
+    const reservationWindowEnd = scheduled
+      ? new Date(Date.parse(requestedPickupAt) + 30 * 60 * 1000).toISOString()
+      : null;
+    const order: OwnedOrderRecord = {
+      orderId: randomUUID(),
+      orderNo: this.nextOrderNo(),
+      orderSource: callContext ? "phone" : "app",
+      orderDomain: "owned",
+      tenantId: null,
+      partnerId: identity?.partnerId ?? null,
+      partnerProgramId: null,
+      partnerEntrySlug: identity?.partnerEntrySlug?.trim() || null,
+      eligibilityVerificationId: null,
+      issuerAuthorizationRef: null,
+      passengerDisclosure: null,
+      serviceBucket: "standard_taxi",
+      dispatchSemantics: scheduled ? "reservation" : "realtime",
+      businessDispatchSubtype: null,
+      serviceProductCode: "taxi_reservation",
+      runtimeProfileCode: "multi_taxi_direct",
+      acquisitionMode: "platform_reserved",
+      timingMode: command.timingMode,
+      operatingAuthorizationId: authorization.authorizationId,
+      queueMode: "virtual_matching",
+      paymentMethodTokenRef: command.paymentMethodTokenRef?.trim() || null,
+      status: "ready_for_dispatch",
+      pickup: { ...command.pickup },
+      dropoff: { ...command.dropoff },
+      passenger: { ...command.passenger },
+      bookingId: scheduled ? `booking-${randomUUID()}` : null,
+      bookingType: scheduled ? "oneway" : null,
+      etaSnapshot: {
+        etaMinutes: scheduled ? 30 : 8,
+        calculatedAt: now,
+      },
+      callId: callContext?.callId.trim() ?? null,
+      recordingId: callContext?.recordingId?.trim() || null,
+      reservationWindowStart: scheduled ? requestedPickupAt : null,
+      reservationWindowEnd,
+      recurrenceRule: null,
+      modifiableUntil: scheduled
+        ? new Date(Date.parse(requestedPickupAt) - 30 * 60 * 1000).toISOString()
+        : null,
+      cancelableUntil: scheduled
+        ? new Date(Date.parse(requestedPickupAt) - 30 * 60 * 1000).toISOString()
+        : null,
+      bookedBy: null,
+      onsiteContact: null,
+      costCenter: null,
+      vehiclePreference: null,
+      benefitReference: null,
+      direction: null,
+      flightNo: null,
+      terminal: null,
+      luggageCount: null,
+      notes: callContext?.notes?.trim() || null,
+      fixedPrice: false,
+      quotedFare: null,
+      quotedFareSource: null,
+      quotedFareRuleVersion: authorization.activeFareVersionId.trim() || null,
+      manualFareOverride: null,
+      exceptionHold: null,
+      proofRequirements: {
+        minPhotoCount: 0,
+        signoffRequired: false,
+        expenseProofRequired: false,
+      },
+      approvalState: "not_required",
+      approvalRequestIds: [],
+      complianceFlags: [
+        "multi_taxi_operating_authorization_verified",
+        "platform_reserved",
+      ],
+      cancelledAt: null,
+      cancelReason: null,
+      reservationHoldStatus: scheduled ? "requested" : "none",
+      reservationHoldId: scheduled ? randomUUID() : null,
+      reservationHoldExpiresAt: scheduled ? reservationWindowEnd : null,
+      dispatchAttemptCount: 0,
+      lastDispatchFailureReason: null,
+      noSupplyEscalation: null,
+      dispatchTimeout: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.applyServiceAreaCreationPolicy(
+      order,
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: callContext ? "ops_user" : "referral_passenger",
+        surface: callContext ? "callcenter" : "passenger_entry",
+      },
+      requestId,
+    );
+    this.orders = [order, ...this.orders];
+    const traceLog = this.appendTrace(
+      order.orderId,
+      "multi_taxi.order.ready_for_dispatch",
+      {
+        runtimeProfileCode: order.runtimeProfileCode,
+        serviceProductCode: order.serviceProductCode,
+        acquisitionMode: order.acquisitionMode,
+        timingMode: order.timingMode,
+        operatingAuthorizationId: order.operatingAuthorizationId,
+      },
+    );
+    this.persistChanges(
+      { orders: [order], dispatchTraceLogs: [traceLog] },
+      "create_multi_taxi_ride",
+    );
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: callContext ? "ops_user" : "system",
+        tenantId: null,
+        moduleName: "order",
+        actionName: "create_multi_taxi_direct_order",
+        resourceType: "order",
+        resourceId: order.orderId,
+        newValuesSummary: {
+          runtimeProfileCode: order.runtimeProfileCode,
+          timingMode: order.timingMode,
+          operatingAuthorizationId: order.operatingAuthorizationId,
+        },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishOrderCreated(
+      this.cloneOrder(order),
+      requestId,
+    );
+    return this.cloneOrder(order);
+  }
+
   createCallCenterOrder(
     command: CreateCallCenterOrderCommand,
     requestId?: string,
+    runtimeProfileCodeHeader?: string,
   ) {
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
     if (!command.callId?.trim()) {
@@ -693,7 +958,9 @@ export class OwnedMobilityService implements OnModuleInit {
     tenantId: string,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
+    runtimeProfileCodeHeader?: string,
   ): MaybePromise<TenantBookingResult> {
+    this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
     this.assertBookingRules(
@@ -702,7 +969,11 @@ export class OwnedMobilityService implements OnModuleInit {
       command.flightNo,
     );
     this.requireActiveBookingServiceProduct(command.businessDispatchSubtype);
-    const partnerContext = this.resolvePartnerBookingContext(command, tenantId);
+    const partnerContext = this.resolvePartnerBookingContext(
+      command,
+      tenantId,
+      identity,
+    );
     const pickup = this.resolveTenantAddressPayload(
       tenantId,
       command.pickupAddressId ?? null,
@@ -723,7 +994,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const now = new Date().toISOString();
     const orderId = randomUUID();
-    const bookingId = `booking-${String(this.bookingSequence++).padStart(6, "0")}`;
+    const bookingId = `booking-${randomUUID()}`;
     const bookingWindow = this.computeBookingWindows(
       command.businessDispatchSubtype,
       command.reservationWindowStart,
@@ -1104,8 +1375,60 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.orders.map((order) => this.cloneOrder(order));
   }
 
-  getOrder(orderId: string) {
-    return this.cloneOrder(this.requireOrder(orderId));
+  getOrder(orderId: string, identity?: BootstrapRequestIdentity | null) {
+    const order = this.requireOrder(orderId);
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.cloneOrder(order);
+  }
+
+  async resolvePersistedOrder(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    let order = this.orders.find(
+      (candidateOrder) => candidateOrder.orderId === orderId,
+    );
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const persistedOrder =
+        (await this.ownedMobilityRepository.findOrderById(orderId)) ??
+        undefined;
+      order = this.pickNewestOrder(order, persistedOrder);
+    }
+    if (order) {
+      const resolvedOrderId = order.orderId;
+      this.orders = [
+        this.cloneOrder(order),
+        ...this.orders.filter(
+          (candidateOrder) => candidateOrder.orderId !== resolvedOrderId,
+        ),
+      ];
+    }
+    if (!order) {
+      order = this.requireOrder(orderId);
+    }
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.cloneOrder(order);
+  }
+
+  getPassengerAssignmentDisclosure(orderId: string) {
+    const snapshot = this.findPassengerAssignmentDisclosure(orderId);
+    if (!snapshot) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_DISCLOSURE_NOT_READY",
+        "Passenger assignment disclosure is not ready.",
+        { orderId },
+      );
+    }
+    return snapshot;
+  }
+
+  findPassengerAssignmentDisclosure(orderId: string) {
+    const snapshot = this.passengerDisclosureSnapshots.find(
+      (candidate) =>
+        candidate.orderId === orderId && candidate.supersededAt === null,
+    );
+    return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
   }
 
   listTenantBookings(tenantId: string) {
@@ -1125,11 +1448,66 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  getTenantBooking(tenantId: string, bookingId: string) {
+  getTenantBooking(
+    tenantId: string,
+    bookingId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
     this.assertNonBlank(tenantId, "tenantId");
-    return this.mapOrderToBooking(
-      this.requireBookingOrder(bookingId, tenantId),
+    const order = this.requireBookingOrder(bookingId, tenantId);
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.mapOrderToBooking(order);
+  }
+
+  async resolvePersistedTenantBooking(
+    tenantId: string,
+    bookingId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    this.assertNonBlank(tenantId, "tenantId");
+    let order = this.orders.find(
+      (candidateOrder) =>
+        candidateOrder.bookingId === bookingId &&
+        candidateOrder.tenantId === tenantId,
     );
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const persistedOrder =
+        (await this.ownedMobilityRepository.findOrderByBookingId(
+          bookingId,
+          tenantId,
+        )) ?? undefined;
+      order = this.pickNewestOrder(order, persistedOrder);
+    }
+    if (order) {
+      const resolvedOrderId = order.orderId;
+      this.orders = [
+        this.cloneOrder(order),
+        ...this.orders.filter(
+          (candidateOrder) => candidateOrder.orderId !== resolvedOrderId,
+        ),
+      ];
+    }
+    if (!order) {
+      order = this.requireBookingOrder(bookingId, tenantId);
+    }
+    this.assertPartnerOrderIdentity(identity, order);
+    return this.mapOrderToBooking(order);
+  }
+
+  private pickNewestOrder(
+    localOrder: OwnedOrderRecord | undefined,
+    persistedOrder: OwnedOrderRecord | undefined,
+  ) {
+    if (!localOrder) {
+      return persistedOrder;
+    }
+    if (!persistedOrder) {
+      return localOrder;
+    }
+    return Date.parse(persistedOrder.updatedAt) >=
+      Date.parse(localOrder.updatedAt)
+      ? persistedOrder
+      : localOrder;
   }
 
   async approveTenantBookingApprovalRequest(
@@ -2016,17 +2394,38 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+    const latestAssignment = this.dispatchAssignments.find(
+      (assignment) =>
+        assignment.orderId === orderId &&
+        ["assigned", "accepted"].includes(assignment.status),
+    );
+
+    // Version-safe redispatch. The guard runs before any mutation below so a
+    // rejected stale event leaves the order completely untouched.
+    const currentAssignmentVersion = this.currentAssignmentVersion(orderId);
+    if (
+      command.expectedAssignmentVersion !== undefined &&
+      command.expectedAssignmentVersion !== null &&
+      currentAssignmentVersion > command.expectedAssignmentVersion
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "STALE_REDISPATCH_EVENT",
+        "The redispatch request is stale and cannot replace a newer assignment.",
+        {
+          orderId,
+          currentAssignmentVersion,
+          expectedAssignmentVersion: command.expectedAssignmentVersion,
+        },
+      );
+    }
+
     const now = new Date().toISOString();
     order.status = "redispatch_required";
     order.dispatchAttemptCount += 1;
     order.lastDispatchFailureReason = command.reasonCode;
     order.updatedAt = now;
 
-    const latestAssignment = this.dispatchAssignments.find(
-      (assignment) =>
-        assignment.orderId === orderId &&
-        ["assigned", "accepted"].includes(assignment.status),
-    );
     const latestTask = latestAssignment
       ? this.driverTasks.find(
           (task) =>
@@ -2675,7 +3074,10 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(command: AssignDispatchCommand, requestId?: string): any {
+  assignDispatch(
+    command: AssignDispatchCommand,
+    requestId?: string,
+  ): MaybePromise<DispatchAssignmentResult> {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2689,7 +3091,10 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  reassignDispatch(command: ReassignDispatchCommand, requestId?: string): any {
+  reassignDispatch(
+    command: ReassignDispatchCommand,
+    requestId?: string,
+  ): MaybePromise<DispatchAssignmentResult> {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2829,13 +3234,44 @@ export class OwnedMobilityService implements OnModuleInit {
     if (this.ownedMobilityRepository?.isEnabled()) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
-          const bundle = this.buildDispatchAssignmentBundle(
+          if (
+            order.runtimeProfileCode === "multi_taxi_direct" &&
+            order.operatingAuthorizationId
+          ) {
+            const authorized =
+              await this.ownedMobilityRepository!.isActiveMultiTaxiAuthorizedVehicle(
+                tx,
+                order.operatingAuthorizationId,
+                vehicleId,
+              );
+            if (!authorized) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "MULTI_TAXI_VEHICLE_NOT_AUTHORIZED",
+                "The vehicle is not active on the order operating authorization.",
+                {
+                  authorizationId: order.operatingAuthorizationId,
+                  vehicleId,
+                },
+              );
+            }
+          }
+          const ratingSummary =
+            order.runtimeProfileCode === "multi_taxi_direct"
+              ? await this.ownedMobilityRepository!.getOrInitializeDriverRatingSummary(
+                  tx,
+                  driverId,
+                  new Date().toISOString(),
+                )
+              : null;
+          const bundle = await this.buildDispatchAssignmentBundle(
             dispatchJob,
             order,
             vehicleId,
             driverId,
             sandboxDispatchSnapshot,
             options,
+            ratingSummary,
           );
           this.assertAssignmentEligibilityRecheck(
             bundle.order,
@@ -2860,12 +3296,34 @@ export class OwnedMobilityService implements OnModuleInit {
             dispatchTraceLogs: bundle.traceLogs.map((traceLog) =>
               this.cloneTraceLog(traceLog),
             ),
+            ...(bundle.passengerDisclosureSnapshot
+              ? {
+                  passengerDisclosureSnapshots: [
+                    this.clonePassengerDisclosureSnapshot(
+                      bundle.passengerDisclosureSnapshot,
+                    ),
+                  ],
+                }
+              : {}),
+            ...(bundle.consumerNotificationOutbox
+              ? {
+                  consumerNotificationOutbox: [
+                    {
+                      ...bundle.consumerNotificationOutbox,
+                      payload: {
+                        ...bundle.consumerNotificationOutbox.payload,
+                      },
+                    },
+                  ],
+                }
+              : {}),
           });
           return bundle;
         })
-        .then((bundle) =>
-          this.applyDispatchAssignmentBundle(bundle, requestId, false),
-        );
+        .then(async (bundle) => {
+          await this.resolveSuccessfulFareQuoteAnomalies(bundle);
+          return this.applyDispatchAssignmentBundle(bundle, requestId, false);
+        });
     }
 
     this.assertAssignmentEligibilityRecheck(
@@ -2883,7 +3341,7 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     return this.afterMaybePromise(sandboxGateResult, () =>
-      this.applyDispatchAssignmentBundle(
+      this.afterMaybePromise(
         this.buildDispatchAssignmentBundle(
           dispatchJob,
           order,
@@ -2892,7 +3350,11 @@ export class OwnedMobilityService implements OnModuleInit {
           sandboxDispatchSnapshot,
           options,
         ),
-        requestId,
+        (bundle) =>
+          this.afterMaybePromise(
+            this.resolveSuccessfulFareQuoteAnomalies(bundle),
+            () => this.applyDispatchAssignmentBundle(bundle, requestId),
+          ),
       ),
     );
   }
@@ -3087,25 +3549,79 @@ export class OwnedMobilityService implements OnModuleInit {
     return cancelledTasks.map((t) => this.cloneTask(t));
   }
 
-  queueCheckIn(command: QueueCheckInCommand, requestId?: string) {
-    this.assertNonBlank(command.vehicleId, "vehicleId");
-    this.assertNonBlank(command.siteId, "siteId");
+  setProfileQueuePolicy(
+    runtimeProfileCode: RuntimeProfileCode,
+    allowedQueueModes: DispatchQueueMode[],
+  ) {
+    if (runtimeProfileCode === "multi_taxi_direct") {
+      const isOnlyVirtual =
+        allowedQueueModes.length === 1 &&
+        allowedQueueModes[0] === "virtual_matching";
+      if (!isOnlyVirtual) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+          "Multi-taxi direct may use virtual matching but may not use physical-rank or taxi-stand queues.",
+          {
+            runtimeProfileCode,
+            allowedQueueModes,
+          },
+        );
+      }
+    }
+    this.profileQueuePolicies.set(
+      runtimeProfileCode,
+      new Set(allowedQueueModes),
+    );
+  }
 
-    if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
-        command.vehicleId,
-        "standard_taxi",
-      )
-    ) {
+  getProfileQueuePolicy(
+    runtimeProfileCode: RuntimeProfileCode,
+  ): DispatchQueueMode[] {
+    const policy = this.profileQueuePolicies.get(runtimeProfileCode);
+    return policy ? Array.from(policy) : [];
+  }
+
+  listQueueEntries(): DispatchQueueEntryReadRecord[] {
+    const registryProjection = this.buildQueueRegistryProjection();
+    return this.queueEntries.map((entry) =>
+      this.buildQueueEntryReadRecord(entry, registryProjection),
+    );
+  }
+
+  getQueueEntry(queueEntryId: string): DispatchQueueEntryReadRecord {
+    const normalizedQueueEntryId = queueEntryId.trim();
+    const queueEntry = this.queueEntries.find(
+      (entry) => entry.queueEntryId === normalizedQueueEntryId,
+    );
+    if (!queueEntry) {
       throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VEHICLE_NOT_DISPATCHABLE",
-        "Vehicle is not eligible for queue check-in.",
-        {
-          vehicleId: command.vehicleId,
-        },
+        HttpStatus.NOT_FOUND,
+        "QUEUE_ENTRY_NOT_FOUND",
+        "Queue entry was not found.",
+        { queueEntryId: normalizedQueueEntryId },
       );
     }
+
+    return this.buildQueueEntryReadRecord(
+      queueEntry,
+      this.buildQueueRegistryProjection(),
+    );
+  }
+
+  queueCheckIn(
+    command: QueueCheckInCommand,
+    requestId?: string,
+    runtimeContext?: QueueRuntimeContext,
+  ) {
+    const context: QueueRuntimeContext = runtimeContext ?? {
+      runtimeProfileCode: "ordinary_taxi",
+      queueMode: command.queueMode ?? "physical_rank",
+      operatingAuthorizationId: null,
+    };
+    this.assertNonBlank(command.vehicleId, "vehicleId");
+    this.assertNonBlank(command.siteId, "siteId");
+    this.assertQueueEligibility(command.vehicleId, context);
 
     const existingEntry = this.queueEntries.find(
       (entry) =>
@@ -3122,8 +3638,15 @@ export class OwnedMobilityService implements OnModuleInit {
       queueEntryId: randomUUID(),
       vehicleId: command.vehicleId,
       siteId: command.siteId,
+      runtimeProfileCode: context.runtimeProfileCode,
+      queueMode: context.queueMode,
+      operatingAuthorizationId: context.operatingAuthorizationId,
       status: "checked_in",
-      position: this.nextQueuePosition(command.siteId),
+      position: this.nextQueuePosition(
+        command.siteId,
+        context.runtimeProfileCode,
+        context.queueMode,
+      ),
       checkedInAt,
       checkedOutAt: null,
     };
@@ -3137,6 +3660,9 @@ export class OwnedMobilityService implements OnModuleInit {
         siteId: command.siteId,
         vehicleId: command.vehicleId,
         position: queueEntry.position,
+        runtimeProfileCode: queueEntry.runtimeProfileCode,
+        queueMode: queueEntry.queueMode,
+        operatingAuthorizationId: queueEntry.operatingAuthorizationId,
       },
     );
     this.persistChanges(
@@ -3166,7 +3692,16 @@ export class OwnedMobilityService implements OnModuleInit {
     return { ...queueEntry };
   }
 
-  queueCheckOut(command: QueueCheckOutCommand, requestId?: string) {
+  queueCheckOut(
+    command: QueueCheckOutCommand,
+    requestId?: string,
+    runtimeContext?: QueueRuntimeContext,
+  ) {
+    const context: QueueRuntimeContext = runtimeContext ?? {
+      runtimeProfileCode: "ordinary_taxi",
+      queueMode: command.queueMode ?? "physical_rank",
+      operatingAuthorizationId: null,
+    };
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
 
@@ -3174,6 +3709,9 @@ export class OwnedMobilityService implements OnModuleInit {
       (entry) =>
         entry.vehicleId === command.vehicleId &&
         entry.siteId === command.siteId &&
+        (entry.runtimeProfileCode ?? "ordinary_taxi") ===
+          context.runtimeProfileCode &&
+        (entry.queueMode ?? "physical_rank") === context.queueMode &&
         entry.status === "checked_in",
     );
     if (!queueEntry) {
@@ -3226,6 +3764,30 @@ export class OwnedMobilityService implements OnModuleInit {
     );
 
     return { ...queueEntry };
+  }
+
+  queueCheckInMultiTaxi(
+    command: QueueCheckInCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    requestId?: string,
+  ) {
+    return this.queueCheckIn(command, requestId, {
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: command.queueMode ?? "virtual_matching",
+      operatingAuthorizationId: authorization.authorizationId,
+    });
+  }
+
+  queueCheckOutMultiTaxi(
+    command: QueueCheckOutCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    requestId?: string,
+  ) {
+    return this.queueCheckOut(command, requestId, {
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: command.queueMode ?? "virtual_matching",
+      operatingAuthorizationId: authorization.authorizationId,
+    });
   }
 
   listDriverTasks() {
@@ -3680,6 +4242,10 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
+    const certificateEvent =
+      order.runtimeProfileCode === "multi_taxi_direct"
+        ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
+        : null;
     const now = new Date().toISOString();
     task.status = "completed";
     task.completedAt = command.completedAt;
@@ -3729,6 +4295,12 @@ export class OwnedMobilityService implements OnModuleInit {
       assignmentId: assignment.assignmentId,
     });
     this.publishCompletedTripSettlementEvent(order, task);
+    if (certificateEvent && this.eventEmitter) {
+      this.eventEmitter.emit(
+        OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+        certificateEvent,
+      );
+    }
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
@@ -3737,6 +4309,68 @@ export class OwnedMobilityService implements OnModuleInit {
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneTask(task);
+  }
+
+  private buildMultiTaxiCertificateEvent(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    command: DriverCompleteTaskCommand,
+    proof: Required<Pick<CompletionProofBundle, "photos" | "expenseItems">> & {
+      signatureId: string | null;
+    },
+  ): OwnedMobilityMultiTaxiTripCompletedEvent {
+    const fare = order.fixedPrice ? order.quotedFare : command.fare;
+    const plateNo =
+      this.regulatoryRegistryService
+        .listVehicles()
+        .find((vehicle) => vehicle.vehicleId === task.vehicleId)?.plateNo ??
+      null;
+    if (
+      !task.startedAt ||
+      !plateNo ||
+      !fare ||
+      fare.currency !== "NTD" ||
+      !Number.isFinite(fare.amountMinor) ||
+      fare.amountMinor < 0 ||
+      !Number.isFinite(command.actualDistanceKm) ||
+      command.actualDistanceKm < 0 ||
+      !Number.isFinite(command.actualDurationSec) ||
+      command.actualDurationSec < 0
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "MULTI_TAXI_CERTIFICATE_FIELDS_REQUIRED",
+        "A completed multi-taxi trip requires canonical timing, vehicle, distance, duration, and NTD fare fields.",
+        {
+          orderId: order.orderId,
+          taskId: task.taskId,
+        },
+      );
+    }
+    const tollMinor = proof.expenseItems
+      .filter((item) => item.type.trim().toLowerCase() === "toll")
+      .reduce((sum, item) => sum + item.amountMinor, 0);
+    return {
+      runtimeProfileCode: "multi_taxi_direct",
+      orderId: order.orderId,
+      tripId: task.taskId,
+      plateNo,
+      pickupAt: task.startedAt,
+      dropoffAt: command.completedAt,
+      travelDurationSeconds: command.actualDurationSec,
+      routeSummary: `${order.pickup.address} → ${order.dropoff.address}`,
+      distanceMeters: Math.round(command.actualDistanceKm * 1000),
+      fareMinor: fare.amountMinor,
+      tollMinor,
+      currency: "NTD",
+      consumerServicePhone:
+        process.env.MULTI_TAXI_CERTIFICATE_SERVICE_PHONE ??
+        DEFAULT_CERTIFICATE_SERVICE_PHONE,
+      authorityComplaintPhone:
+        process.env.MULTI_TAXI_AUTHORITY_COMPLAINT_PHONE ??
+        DEFAULT_AUTHORITY_COMPLAINT_PHONE,
+      completedAt: command.completedAt,
+    };
   }
 
   private publishCompletedTripSettlementEvent(
@@ -4001,26 +4635,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private nextOrderNo() {
-    const current = String(this.orderSequence++).padStart(6, "0");
-    return `O-20260410-${current}`;
-  }
-
-  private deriveNextOrderSequence(orders: readonly OwnedOrderRecord[]) {
-    const maxSequence = orders.reduce((currentMax, order) => {
-      const rawSequence = order.orderNo.split("-").at(-1) ?? "0";
-      const parsedSequence = Number.parseInt(rawSequence, 10);
-      if (!Number.isInteger(parsedSequence)) {
-        return currentMax;
-      }
-      return Math.max(currentMax, parsedSequence);
-    }, 0);
-
-    return maxSequence + 1;
-  }
-
-  private deriveNextBookingSequence(orders: readonly OwnedOrderRecord[]) {
-    const existingBookings = orders.filter((order) => order.bookingId).length;
-    return existingBookings + 1;
+    return `O-${randomUUID()}`;
   }
 
   private nextAttemptSequence(dispatchJobId: string) {
@@ -4228,6 +4843,310 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private assertRuntimeProfileAllowances(
+    command: object,
+    runtimeProfileCodeHeader?: string,
+  ) {
+    const commandProfile =
+      "runtimeProfileCode" in command &&
+      typeof command.runtimeProfileCode === "string"
+        ? command.runtimeProfileCode
+        : null;
+    if (commandProfile || runtimeProfileCodeHeader?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
+        "Runtime profile is resolved by the server route and cannot be supplied by a public request.",
+      );
+    }
+  }
+
+  private assertNoCanonicalMultiTaxiContextOverrides(command: object) {
+    const forbiddenFields = [
+      "runtimeProfileCode",
+      "serviceProductCode",
+      "acquisitionMode",
+      "operatingAuthorizationId",
+      "queueMode",
+    ] as const;
+
+    for (const field of forbiddenFields) {
+      if (field in command) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "MULTI_TAXI_CANONICAL_CONTEXT_OVERRIDE_FORBIDDEN",
+          "Multi-taxi canonical runtime context is resolved by the server and may not be supplied by the client.",
+          { field },
+        );
+      }
+    }
+  }
+
+  private requireIsoTimestamp(value: string, field: string) {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_TIMESTAMP",
+        `${field} must be an ISO-8601 timestamp.`,
+        { field },
+      );
+    }
+    return new Date(timestamp).toISOString();
+  }
+
+  private assertQueuePolicy(context: QueueRuntimeContext) {
+    if (
+      context.runtimeProfileCode === "multi_taxi_direct" &&
+      context.queueMode !== "virtual_matching"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+        "Multi-taxi direct may use virtual matching but may not use physical-rank or taxi-stand queues.",
+        {
+          runtimeProfileCode: context.runtimeProfileCode,
+          queueMode: context.queueMode,
+        },
+      );
+    }
+
+    const allowedModes = this.profileQueuePolicies.get(
+      context.runtimeProfileCode,
+    );
+    if (allowedModes && !allowedModes.has(context.queueMode)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "QUEUE_MODE_NOT_ALLOWED",
+        `Queue mode ${context.queueMode} is not allowed for profile ${context.runtimeProfileCode}.`,
+        {
+          runtimeProfileCode: context.runtimeProfileCode,
+          queueMode: context.queueMode,
+          allowedQueueModes: Array.from(allowedModes),
+        },
+      );
+    }
+  }
+
+  private assertQueueEligibility(
+    vehicleId: string,
+    context: QueueRuntimeContext,
+  ) {
+    this.assertQueuePolicy(context);
+    if (
+      context.runtimeProfileCode === "multi_taxi_direct" &&
+      !context.operatingAuthorizationId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MULTI_TAXI_AUTHORIZATION_REQUIRED",
+        "Multi-taxi queue eligibility requires a server-resolved operating authorization.",
+        { vehicleId },
+      );
+    }
+
+    if (
+      !this.regulatoryRegistryService.getVehicleDispatchability(
+        vehicleId,
+        "standard_taxi",
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VEHICLE_NOT_DISPATCHABLE",
+        "Vehicle is not eligible for queue check-in.",
+        { vehicleId },
+      );
+    }
+  }
+
+  private buildQueueRegistryProjection(): QueueRegistryProjection {
+    try {
+      const vehicles = this.regulatoryRegistryService.listVehicles();
+      const drivers = this.regulatoryRegistryService.listDrivers();
+      const supplyPairs = this.regulatoryRegistryService.listSupplyPairs();
+      return {
+        authorityAvailable: true,
+        vehiclesById: new Map(
+          vehicles.map((vehicle) => [
+            vehicle.vehicleId,
+            {
+              vehicleId: vehicle.vehicleId,
+              plateNo: vehicle.plateNo,
+              operatingArea: vehicle.operatingArea,
+            },
+          ]),
+        ),
+        driversById: new Map(
+          drivers.map((driver) => [
+            driver.driverId,
+            {
+              driverId: driver.driverId,
+              name: driver.name,
+            },
+          ]),
+        ),
+        pairsByVehicleId: new Map(
+          supplyPairs.map((pair) => [
+            pair.vehicleId,
+            {
+              vehicleId: pair.vehicleId,
+              driverId: pair.driverId,
+            },
+          ]),
+        ),
+      };
+    } catch {
+      return {
+        authorityAvailable: false,
+        vehiclesById: new Map(),
+        driversById: new Map(),
+        pairsByVehicleId: new Map(),
+      };
+    }
+  }
+
+  private buildQueueEntryReadRecord(
+    entry: QueueEntryRecord,
+    registryProjection: QueueRegistryProjection,
+  ): DispatchQueueEntryReadRecord {
+    const runtimeProfileCode = entry.runtimeProfileCode ?? null;
+    const queueMode = entry.queueMode ?? null;
+    const vehicle =
+      registryProjection.vehiclesById.get(entry.vehicleId) ?? null;
+    const supplyPair =
+      registryProjection.pairsByVehicleId.get(entry.vehicleId) ?? null;
+    const driver = supplyPair
+      ? (registryProjection.driversById.get(supplyPair.driverId) ?? null)
+      : null;
+
+    return {
+      ...entry,
+      runtimeProfileCode,
+      queueMode,
+      driverId: driver?.driverId ?? null,
+      driverName: driver?.name ?? null,
+      vehiclePlateNo: vehicle?.plateNo ?? null,
+      serviceAreaCode: vehicle?.operatingArea ?? null,
+      lastUpdatedAt: entry.checkedOutAt ?? entry.checkedInAt,
+      eligibility: this.evaluateQueueEntryEligibility(
+        entry,
+        registryProjection.authorityAvailable,
+        Boolean(vehicle),
+      ),
+      availableActions: [
+        {
+          action: "back_to_queue_overview",
+          enabled: true,
+          riskLevel: "low",
+        },
+        ...(vehicle
+          ? [
+              {
+                action: "open_vehicle",
+                enabled: true,
+                riskLevel: "low" as const,
+              },
+            ]
+          : []),
+        ...(driver
+          ? [
+              {
+                action: "open_driver",
+                enabled: true,
+                riskLevel: "low" as const,
+              },
+            ]
+          : []),
+        ...(entry.operatingAuthorizationId
+          ? [
+              {
+                action: "open_authorization",
+                enabled: true,
+                riskLevel: "low" as const,
+              },
+            ]
+          : []),
+      ],
+    };
+  }
+
+  private evaluateQueueEntryEligibility(
+    entry: QueueEntryRecord,
+    authorityAvailable: boolean,
+    vehicleExists: boolean,
+  ): DispatchQueueEntryReadRecord["eligibility"] {
+    const evaluatedAt = new Date().toISOString();
+    if (!entry.runtimeProfileCode || !entry.queueMode) {
+      return {
+        decision: "denied",
+        reasonCode: "QUEUE_CONTEXT_INCOMPLETE",
+        evaluatedAt,
+      };
+    }
+    if (!authorityAvailable) {
+      return {
+        decision: "denied",
+        reasonCode: "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+        evaluatedAt,
+      };
+    }
+    if (!vehicleExists) {
+      return {
+        decision: "denied",
+        reasonCode: "VEHICLE_NOT_FOUND",
+        evaluatedAt,
+      };
+    }
+
+    try {
+      this.assertQueueEligibility(entry.vehicleId, {
+        runtimeProfileCode: entry.runtimeProfileCode,
+        queueMode: entry.queueMode,
+        operatingAuthorizationId: entry.operatingAuthorizationId ?? null,
+      });
+      return {
+        decision: "eligible",
+        reasonCode: null,
+        evaluatedAt,
+      };
+    } catch (error) {
+      return {
+        decision: "denied",
+        reasonCode: this.resolveQueueEligibilityReasonCode(error),
+        evaluatedAt,
+      };
+    }
+  }
+
+  private resolveQueueEligibilityReasonCode(
+    error: unknown,
+  ): DispatchQueueEligibilityReasonCode {
+    if (error instanceof ApiRequestError) {
+      const response = error.getResponse();
+      if (
+        response &&
+        typeof response === "object" &&
+        "error" in response &&
+        response.error &&
+        typeof response.error === "object" &&
+        "code" in response.error &&
+        typeof response.error.code === "string"
+      ) {
+        const reasonCode = response.error.code;
+        if (
+          reasonCode === "MULTI_TAXI_AUTHORIZATION_REQUIRED" ||
+          reasonCode === "MULTI_TAXI_QUEUE_MODE_FORBIDDEN" ||
+          reasonCode === "QUEUE_MODE_NOT_ALLOWED" ||
+          reasonCode === "VEHICLE_NOT_DISPATCHABLE"
+        ) {
+          return reasonCode;
+        }
+      }
+    }
+    return "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE";
   }
 
   private requireActiveBookingServiceProduct(
@@ -4686,9 +5605,17 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
-  private nextQueuePosition(siteId: string) {
+  private nextQueuePosition(
+    siteId: string,
+    runtimeProfileCode: RuntimeProfileCode = "ordinary_taxi",
+    queueMode: DispatchQueueMode = "physical_rank",
+  ) {
     const activeEntries = this.queueEntries.filter(
-      (entry) => entry.siteId === siteId && entry.status === "checked_in",
+      (entry) =>
+        entry.siteId === siteId &&
+        entry.status === "checked_in" &&
+        (entry.runtimeProfileCode ?? "ordinary_taxi") === runtimeProfileCode &&
+        (entry.queueMode ?? "physical_rank") === queueMode,
     );
     const maxPosition = activeEntries.reduce(
       (currentMax, entry) => Math.max(currentMax, entry.position),
@@ -4731,6 +5658,20 @@ export class OwnedMobilityService implements OnModuleInit {
           queueEntryId,
           vehicleId,
           siteId,
+          runtimeProfileCode:
+            traceLog.details?.runtimeProfileCode === "multi_taxi_direct" ||
+            traceLog.details?.runtimeProfileCode === "business_dispatch"
+              ? traceLog.details.runtimeProfileCode
+              : "ordinary_taxi",
+          queueMode:
+            traceLog.details?.queueMode === "virtual_matching" ||
+            traceLog.details?.queueMode === "taxi_stand"
+              ? traceLog.details.queueMode
+              : "physical_rank",
+          operatingAuthorizationId:
+            typeof traceLog.details?.operatingAuthorizationId === "string"
+              ? traceLog.details.operatingAuthorizationId
+              : null,
           status: "checked_in",
           position:
             typeof traceLog.details?.position === "number"
@@ -5002,7 +5943,8 @@ export class OwnedMobilityService implements OnModuleInit {
     driverId: string,
     _sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     options?: CreateDispatchAssignmentOptions,
-  ): DispatchAssignmentBundle {
+    ratingSummary?: DriverRatingSummary | null,
+  ): MaybePromise<DispatchAssignmentBundle> {
     const now = new Date().toISOString();
     const nextOrder = this.cloneOrder(order);
     const nextDispatchJob = { ...dispatchJob };
@@ -5089,14 +6031,419 @@ export class OwnedMobilityService implements OnModuleInit {
       }),
     );
 
-    return {
-      order: nextOrder,
-      dispatchJob: nextDispatchJob,
-      assignment,
-      task,
-      dispatchAttempt,
-      traceLogs,
+    return this.afterMaybePromise(
+      this.buildPassengerAssignmentAuthority(
+        nextOrder,
+        nextDispatchJob,
+        assignment,
+        vehicleId,
+        driverId,
+        now,
+        ratingSummary ?? this.createNewDriverRatingSummary(driverId, now),
+      ),
+      (passengerAuthority) => ({
+        order: nextOrder,
+        dispatchJob: nextDispatchJob,
+        assignment,
+        task,
+        dispatchAttempt,
+        traceLogs,
+        passengerDisclosureSnapshot:
+          passengerAuthority.passengerDisclosureSnapshot,
+        consumerNotificationOutbox:
+          passengerAuthority.consumerNotificationOutbox,
+      }),
+    );
+  }
+
+  private buildPassengerAssignmentAuthority(
+    order: OwnedOrderRecord,
+    dispatchJob: DispatchJobRecord,
+    assignment: DispatchAssignmentRecord,
+    vehicleId: string,
+    driverId: string,
+    now: string,
+    ratingSummary: DriverRatingSummary,
+  ):
+    | {
+        passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
+        consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
+      }
+    | Promise<{
+        passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot | null;
+        consumerNotificationOutbox: ConsumerNotificationOutboxRecord | null;
+      }> {
+    if (order.runtimeProfileCode !== "multi_taxi_direct") {
+      return {
+        passengerDisclosureSnapshot: null,
+        consumerNotificationOutbox: null,
+      };
+    }
+    if (
+      ratingSummary.displayState === "unavailable" ||
+      (ratingSummary.displayState === "rated" &&
+        (ratingSummary.averageRating === null ||
+          ratingSummary.ratingCount < 1)) ||
+      (ratingSummary.displayState === "new_driver" &&
+        (ratingSummary.averageRating !== null ||
+          ratingSummary.ratingCount !== 0))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_RATING_STATE_UNINITIALIZED",
+        "A canonical driver rating state is required before assignment.",
+        {
+          driverId,
+          displayState: ratingSummary.displayState,
+          ratingCount: ratingSummary.ratingCount,
+        },
+      );
+    }
+
+    const disclosure =
+      this.regulatoryRegistryService.getVehiclePassengerDisclosureProfile(
+        vehicleId,
+      );
+    if (!disclosure || disclosure.status !== "complete") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_VEHICLE_DISCLOSURE_INCOMPLETE",
+        "A complete vehicle passenger disclosure profile is required before assignment.",
+        { vehicleId, missingFieldCodes: disclosure?.missingFieldCodes ?? [] },
+      );
+    }
+
+    const credential =
+      this.regulatoryRegistryService.getDriverPublicRegistrationCredential(
+        driverId,
+      );
+    if (
+      !credential ||
+      credential.status !== "verified_active" ||
+      !credential.effectiveUntil ||
+      Date.parse(credential.effectiveUntil) <= Date.parse(now)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_DRIVER_REGISTRATION_NOT_ACTIVE",
+        "A verified and effective public driver registration is required before assignment.",
+        { driverId, status: credential?.status ?? "missing" },
+      );
+    }
+
+    const vehicle = this.regulatoryRegistryService
+      .listVehicles()
+      .find((record) => record.vehicleId === vehicleId);
+    const driver = this.regulatoryRegistryService
+      .listDrivers()
+      .find((record) => record.driverId === driverId);
+    if (!vehicle) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "P5_VEHICLE_REGISTRY_MISSING",
+        "The assigned vehicle is missing from the canonical registry.",
+        { vehicleId },
+      );
+    }
+    const assignmentVersion =
+      this.passengerDisclosureSnapshots.filter(
+        (snapshot) => snapshot.orderId === order.orderId,
+      ).length + 1;
+    const routeSnapshotId = randomUUID();
+    const quoteSnapshotId = randomUUID();
+    const routeFare = this.buildFareQuoteSnapshot(
+      order,
+      routeSnapshotId,
+      quoteSnapshotId,
+      now,
+    );
+    if (!this.isResolvedRouteFareSnapshot(routeFare)) {
+      return this.recordFareQuoteAnomalyAndFail("route_unresolved", routeFare);
+    }
+    const anomalyReason = this.resolveFareQuoteAnomalyReason(order);
+    if (anomalyReason) {
+      return this.recordFareQuoteAnomalyAndFail(anomalyReason, routeFare);
+    }
+    const snapshot: PassengerDispatchDisclosureSnapshot = {
+      snapshotId: randomUUID(),
+      runtimeProfileCode: "multi_taxi_direct",
+      orderId: order.orderId,
+      bookingId: order.bookingId,
+      dispatchJobId: dispatchJob.dispatchJobId,
+      assignmentId: assignment.assignmentId,
+      assignmentVersion,
+      vehicle: {
+        vehicleId,
+        make: disclosure.make,
+        model: disclosure.model,
+        plateNo: vehicle.plateNo,
+        modelYear: disclosure.modelYear,
+        doorCount: disclosure.doorCount,
+        color: disclosure.color,
+        profileVersion: disclosure.version,
+      },
+      driver: {
+        driverId,
+        displayName: driver?.name ?? null,
+        registrationMaskedDisplay: credential.maskedDisplay,
+        registrationStatus: "verified_active",
+        registrationEffectiveUntil: credential.effectiveUntil,
+        credentialVersion: credential.version,
+      },
+      rating: {
+        displayState: ratingSummary.displayState,
+        averageRating: ratingSummary.averageRating,
+        ratingCount: ratingSummary.ratingCount,
+        aggregateVersion: ratingSummary.aggregateVersion,
+      },
+      eta: {
+        minutes: order.etaSnapshot?.etaMinutes ?? null,
+        calculatedAt: order.etaSnapshot?.calculatedAt ?? null,
+        locationFreshness: "missing",
+      },
+      routeFare,
+      createdAt: now,
+      supersededAt: null,
     };
+    // Must match the passenger-authority derivation: a phone-only passenger is
+    // peppered and hashed, never stored as a raw number on an outbox row.
+    const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
+    const outbox: ConsumerNotificationOutboxRecord = {
+      outboxId: randomUUID(),
+      orderId: order.orderId,
+      passengerSubjectRef,
+      eventType:
+        assignmentVersion > 1
+          ? "assignment_replaced"
+          : "assignment_disclosure_ready",
+      assignmentVersion,
+      payload: {
+        snapshotId: snapshot.snapshotId,
+        assignmentId: assignment.assignmentId,
+      },
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: now,
+      createdAt: now,
+      deliveredAt: null,
+    };
+    const authority = {
+      passengerDisclosureSnapshot: snapshot,
+      consumerNotificationOutbox: outbox,
+    };
+    return authority;
+  }
+
+  private buildFareQuoteSnapshot(
+    order: OwnedOrderRecord,
+    routeSnapshotId: string,
+    quoteSnapshotId: string,
+    generatedAt: string,
+  ): FareQuoteAnomalySnapshot {
+    const fareMinor = order.quotedFare?.amountMinor ?? null;
+    const buildAddress = (
+      address: OwnedOrderRecord["pickup"],
+    ): FareQuoteAnomalySnapshot["pickup"] => {
+      const lat = Number.isFinite(address.lat) ? address.lat! : null;
+      const lng = Number.isFinite(address.lng) ? address.lng! : null;
+      return {
+        ...address,
+        lat,
+        lng,
+        coordinateSource:
+          address.coordinateProvenance?.coordinateSource ??
+          address.coordinateSource ??
+          "legacy_text",
+        geocodeConfidence:
+          address.coordinateProvenance?.geocodeConfidence ??
+          address.geocodeConfidence ??
+          "unknown",
+        resolvedAt: lat !== null && lng !== null ? generatedAt : null,
+      };
+    };
+
+    return {
+      routeSnapshotId,
+      quoteSnapshotId,
+      orderId: order.orderId,
+      pickup: buildAddress(order.pickup),
+      dropoff: buildAddress(order.dropoff),
+      estimatedDistanceMeters: null,
+      estimatedDurationSeconds: null,
+      encodedPolyline: null,
+      chargingMode: order.fixedPrice ? "fixed_quote" : "meter_estimate",
+      estimatedFareMinor: fareMinor,
+      payableFareMinor: fareMinor,
+      currency: "NTD",
+      farePolicyId: order.operatingAuthorizationId?.trim() ?? "",
+      farePolicyVersion: order.quotedFareRuleVersion?.trim() ?? "",
+      fareChangeRuleId: "multi_taxi_passenger_confirmation",
+      fareChangeRuleVersion: "1",
+      fareChangeRuleDisplayText:
+        "Fare changes require passenger disclosure and confirmation.",
+      passengerConfirmedAt: null,
+      generatedAt,
+    };
+  }
+
+  private isResolvedRouteFareSnapshot(
+    snapshot: FareQuoteAnomalySnapshot,
+  ): snapshot is RouteFareDisclosureSnapshot {
+    return (
+      Number.isFinite(snapshot.pickup.lat) &&
+      Number.isFinite(snapshot.pickup.lng) &&
+      snapshot.pickup.resolvedAt !== null &&
+      Number.isFinite(snapshot.dropoff.lat) &&
+      Number.isFinite(snapshot.dropoff.lng) &&
+      snapshot.dropoff.resolvedAt !== null
+    );
+  }
+
+  private resolveFareQuoteAnomalyReason(
+    order: OwnedOrderRecord,
+  ): FareQuoteAnomaly | null {
+    if (
+      !order.operatingAuthorizationId?.trim() ||
+      !order.quotedFareRuleVersion?.trim()
+    ) {
+      return "fare_policy_missing";
+    }
+    if (
+      order.fixedPrice &&
+      (!order.quotedFare || !order.quotedFareSource?.trim())
+    ) {
+      return "quote_provider_unavailable";
+    }
+    if (
+      order.quotedFare &&
+      (!Number.isSafeInteger(order.quotedFare.amountMinor) ||
+        order.quotedFare.amountMinor <= 0)
+    ) {
+      return "quote_out_of_range";
+    }
+    if (order.quotedFare && order.quotedFare.currency !== "NTD") {
+      return "calculation_mismatch";
+    }
+    return null;
+  }
+
+  private recordFareQuoteAnomalyAndFail(
+    reason: FareQuoteAnomaly,
+    snapshot: FareQuoteAnomalySnapshot,
+  ): Promise<never> | never {
+    const failClosed = (): never => {
+      const errors: Record<
+        FareQuoteAnomaly,
+        { code: string; message: string }
+      > = {
+        quote_provider_unavailable: {
+          code: "P5_QUOTE_PROVIDER_UNAVAILABLE",
+          message:
+            "A fare quote provider result is required before multi-taxi assignment.",
+        },
+        quote_out_of_range: {
+          code: "P5_QUOTE_OUT_OF_RANGE",
+          message:
+            "The fare quote is outside the canonical range for assignment.",
+        },
+        route_unresolved: {
+          code: "P5_ROUTE_SNAPSHOT_UNRESOLVED",
+          message:
+            "Resolved pickup and dropoff coordinates are required before multi-taxi assignment.",
+        },
+        fare_policy_missing: {
+          code: "P5_FARE_POLICY_MISSING",
+          message:
+            "An active fare policy is required before multi-taxi assignment.",
+        },
+        calculation_mismatch: {
+          code: "P5_FARE_CALCULATION_MISMATCH",
+          message:
+            "The fare quote does not match the canonical multi-taxi calculation.",
+        },
+      };
+      const error = errors[reason];
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        error.code,
+        error.message,
+        {
+          orderId: snapshot.orderId,
+          quoteSnapshotId: snapshot.quoteSnapshotId,
+          reason,
+        },
+      );
+    };
+
+    if (!this.fareAnomalyService) {
+      return failClosed();
+    }
+    return this.fareAnomalyService
+      .recordQuoteAnomaly({ reason, snapshot })
+      .then(failClosed);
+  }
+
+  private resolveSuccessfulFareQuoteAnomalies(
+    bundle: DispatchAssignmentBundle,
+  ): void | Promise<void> {
+    if (
+      !this.fareAnomalyService ||
+      !bundle.passengerDisclosureSnapshot ||
+      bundle.order.runtimeProfileCode !== "multi_taxi_direct"
+    ) {
+      return;
+    }
+    return this.fareAnomalyService
+      .resolveOrderAnomalies(
+        bundle.order.orderId,
+        bundle.passengerDisclosureSnapshot.createdAt,
+      )
+      .catch((error: unknown) => {
+        // Assignment is already canonical at this point. Do not make callers
+        // retry a committed dispatch because stale anomaly cleanup failed.
+        this.logger.error(
+          `Fare anomaly cleanup failed after assigning order ${bundle.order.orderId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+  }
+
+  private createNewDriverRatingSummary(
+    driverId: string,
+    calculatedAt: string,
+  ): DriverRatingSummary {
+    return {
+      driverId,
+      displayState: "new_driver",
+      averageRating: null,
+      ratingCount: 0,
+      lastRatedAt: null,
+      aggregateVersion: 1,
+      calculatedAt,
+    };
+  }
+
+  private clonePassengerDisclosureSnapshot(
+    snapshot: PassengerDispatchDisclosureSnapshot,
+  ): PassengerDispatchDisclosureSnapshot {
+    return structuredClone(snapshot);
+  }
+
+  // How many assignments this order has ever had. This is the same quantity the
+  // passenger sees as `assignmentVersion` on the disclosure snapshot and the
+  // notification outbox: `buildPassengerAssignmentAuthority` derives that from
+  // the snapshot count *before* the new assignment is applied, and every
+  // multi_taxi_direct assignment produces exactly one snapshot, so the two stay
+  // in step. Deriving it here — rather than reading a field off
+  // `DispatchAssignmentRecord`, which has none — keeps the guard working for
+  // non-multi-taxi orders (no snapshots) and for assignments hydrated from
+  // persistence, and needs no schema change. Cancelled assignments stay in the
+  // array, so the counter is monotonic per order.
+  private currentAssignmentVersion(orderId: string): number {
+    return this.dispatchAssignments.filter(
+      (assignment) => assignment.orderId === orderId,
+    ).length;
   }
 
   private applyDispatchAssignmentBundle(
@@ -5120,6 +6467,26 @@ export class OwnedMobilityService implements OnModuleInit {
     this.dispatchAttempts = [bundle.dispatchAttempt, ...this.dispatchAttempts];
     for (const traceLog of bundle.traceLogs) {
       this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+    }
+    if (bundle.passengerDisclosureSnapshot) {
+      this.passengerDisclosureSnapshots = [
+        bundle.passengerDisclosureSnapshot,
+        ...this.passengerDisclosureSnapshots.map((snapshot) =>
+          snapshot.orderId === bundle.order.orderId &&
+          snapshot.supersededAt === null
+            ? {
+                ...snapshot,
+                supersededAt: bundle.passengerDisclosureSnapshot!.createdAt,
+              }
+            : snapshot,
+        ),
+      ];
+    }
+    if (bundle.consumerNotificationOutbox) {
+      this.consumerNotificationOutbox = [
+        bundle.consumerNotificationOutbox,
+        ...this.consumerNotificationOutbox,
+      ];
     }
 
     this.auditNotificationService.recordNotification({
@@ -5155,6 +6522,18 @@ export class OwnedMobilityService implements OnModuleInit {
           driverTasks: [bundle.task],
           dispatchAttempts: [bundle.dispatchAttempt],
           dispatchTraceLogs: bundle.traceLogs,
+          ...(bundle.passengerDisclosureSnapshot
+            ? {
+                passengerDisclosureSnapshots: [
+                  bundle.passengerDisclosureSnapshot,
+                ],
+              }
+            : {}),
+          ...(bundle.consumerNotificationOutbox
+            ? {
+                consumerNotificationOutbox: [bundle.consumerNotificationOutbox],
+              }
+            : {}),
         },
         "assign_dispatch",
       );
@@ -7141,6 +8520,7 @@ export class OwnedMobilityService implements OnModuleInit {
   private resolvePartnerBookingContext(
     command: CreateTenantBookingCommand,
     tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
   ): PartnerBookingContext | null {
     const entrySlug = this.normalizeNullableText(command.partnerEntrySlug);
     const eligibilityVerificationId = this.normalizeNullableText(
@@ -7170,6 +8550,8 @@ export class OwnedMobilityService implements OnModuleInit {
     const entry = this.tenantPartnerService.getPartnerEntry(
       entrySlug ?? verification?.partnerEntrySlug ?? "",
     );
+
+    this.assertPartnerEntryIdentity(identity, entry);
 
     if (entry.tenantId !== tenantId) {
       throw new ApiRequestError(
@@ -7268,6 +8650,65 @@ export class OwnedMobilityService implements OnModuleInit {
       issuerAuthorizationRef: verification?.issuerAuthorizationRef ?? null,
       benefitReference: verification?.benefitReference ?? null,
     };
+  }
+
+  private assertPartnerEntryIdentity(
+    identity: BootstrapRequestIdentity | null | undefined,
+    entry: PartnerChannelEntryRecord,
+  ) {
+    if (!identity || identity.realm !== "partner") {
+      return;
+    }
+
+    const mismatch =
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
+      identity.tenantId !== entry.tenantId ||
+      identity.partnerId !== entry.partnerId ||
+      identity.partnerProgramId !== entry.programId ||
+      identity.partnerEntrySlug !== entry.entrySlug;
+
+    if (mismatch) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated partner identity cannot book through another partner entry.",
+        {
+          entrySlug: entry.entrySlug,
+          tenantId: entry.tenantId,
+        },
+      );
+    }
+  }
+
+  private assertPartnerOrderIdentity(
+    identity: BootstrapRequestIdentity | null | undefined,
+    order: OwnedOrderRecord,
+  ) {
+    if (!identity || identity.realm !== "partner") {
+      return;
+    }
+
+    const mismatch =
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
+      !order.partnerEntrySlug ||
+      identity.tenantId !== order.tenantId ||
+      identity.partnerId !== order.partnerId ||
+      identity.partnerProgramId !== order.partnerProgramId ||
+      identity.partnerEntrySlug !== order.partnerEntrySlug;
+
+    if (mismatch) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated partner identity cannot read another partner booking.",
+        {
+          orderId: order.orderId,
+          tenantId: order.tenantId,
+        },
+      );
+    }
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {

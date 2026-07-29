@@ -1,5 +1,7 @@
 import type {
+  ComputeGeoRouteCommand,
   GeoResolveResponse,
+  GeoRouteResponse,
   GeoReverseResponse,
   GeoSearchResponse,
   ResolveAddressCommand,
@@ -14,6 +16,7 @@ export interface GeoProvider {
   search(command: SearchGeoQuery): Promise<GeoSearchResponse>;
   resolve(command: ResolveAddressCommand): Promise<GeoResolveResponse>;
   reverse(command: ReverseGeocodeCommand): Promise<GeoReverseResponse>;
+  route(command: ComputeGeoRouteCommand): Promise<GeoRouteResponse>;
 }
 
 export class GeoProviderError extends Error {

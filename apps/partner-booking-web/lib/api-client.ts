@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
-import { createBearerClient, type ApiClient } from "@drts/api-client";
+import { SUPERVISOR_EXECUTION_MODES } from "@drts/contracts";
 import type {
   ApiSuccessEnvelope,
   BookingRecord,
+  CreatePartnerIngressHandoffCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateTenantBookingCommand,
   IdentityContext,
@@ -13,6 +14,7 @@ import type {
   PartnerBootstrapSession,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
+  PartnerIngressHandoffSession,
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 import {
@@ -36,6 +38,29 @@ type ApiErrorEnvelope = {
 type ApiSuccessMetaWire = ApiSuccessEnvelope<unknown>["meta"] & {
   request_id?: string | null;
 };
+
+function snakeToCamelKey(key: string) {
+  return key.replace(/_([a-z0-9])/g, (_match, character: string) =>
+    character.toUpperCase(),
+  );
+}
+
+function deepCamelize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(deepCamelize);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(
+        ([key, nestedValue]) => [
+          snakeToCamelKey(key),
+          deepCamelize(nestedValue),
+        ],
+      ),
+    );
+  }
+  return value;
+}
 
 function normalizeEnvelopeRequestId(meta: ApiSuccessMetaWire | undefined) {
   return meta?.requestId ?? meta?.request_id ?? null;
@@ -81,6 +106,27 @@ export type PartnerSessionRecord = {
   partnerEntry: PartnerChannelEntryRecord;
   identity: IdentityContext;
 };
+
+function normalizePartnerIngressIdentity(
+  identity: PartnerIngressHandoffSession["identity"],
+): IdentityContext {
+  return {
+    ...identity,
+    supportedExecutionModes: [...SUPERVISOR_EXECUTION_MODES],
+  };
+}
+
+export function createPartnerSessionFromIngressHandoff(
+  handoff: PartnerIngressHandoffSession,
+  partnerEntry: PartnerChannelEntryRecord,
+): PartnerSessionRecord {
+  return {
+    accessToken: handoff.accessToken,
+    expiresIn: handoff.expiresIn,
+    partnerEntry,
+    identity: normalizePartnerIngressIdentity(handoff.identity),
+  };
+}
 
 export type PartnerRouteProvenance = {
   source: "authority" | "authority_cache" | "local_fallback";
@@ -312,6 +358,7 @@ async function requestAuthorityEnvelope<T>(
   init?: RequestInit,
 ): Promise<ApiSuccessEnvelope<T>> {
   let response: Response;
+  const requestId = randomUUID();
   try {
     response = await fetch(`${API_URL}${path}`, {
       cache: "no-store",
@@ -320,9 +367,21 @@ async function requestAuthorityEnvelope<T>(
         "Content-Type": "application/json",
         ...getServerAuthorityHeaders(),
         ...(init?.headers ?? {}),
+        "x-request-id": requestId,
       },
     });
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "partner_authority_request_failed",
+        path,
+        method: init?.method ?? "GET",
+        status: 0,
+        code: "PARTNER_AUTHORITY_UNAVAILABLE",
+        retryable: true,
+        requestId,
+      }),
+    );
     throw new PartnerAuthorityError(
       503,
       "PARTNER_AUTHORITY_UNAVAILABLE",
@@ -337,7 +396,7 @@ async function requestAuthorityEnvelope<T>(
   if (!response.ok) {
     let envelope: ApiErrorEnvelope | null = null;
     try {
-      envelope = (await response.json()) as ApiErrorEnvelope;
+      envelope = deepCamelize(await response.json()) as ApiErrorEnvelope;
     } catch {
       envelope = null;
     }
@@ -346,6 +405,17 @@ async function requestAuthorityEnvelope<T>(
     const message =
       envelope?.error?.message ??
       `Authority request failed with HTTP ${response.status}.`;
+    console.error(
+      JSON.stringify({
+        event: "partner_authority_request_failed",
+        path,
+        method: init?.method ?? "GET",
+        status: response.status,
+        code,
+        retryable: envelope?.error?.retryable ?? false,
+        requestId,
+      }),
+    );
     throw new PartnerAuthorityError(
       response.status,
       code,
@@ -356,7 +426,7 @@ async function requestAuthorityEnvelope<T>(
   }
 
   const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
-  return envelope;
+  return deepCamelize(envelope) as ApiSuccessEnvelope<T>;
 }
 
 async function requestAuthority<T>(
@@ -365,16 +435,6 @@ async function requestAuthority<T>(
 ): Promise<T> {
   const envelope = await requestAuthorityEnvelope<T>(path, init);
   return envelope.data;
-}
-
-function getAuthorityClient(session: PartnerSessionRecord): ApiClient {
-  return createBearerClient(API_URL, session.accessToken, {
-    ...getServerAuthorityHeaders(),
-    "x-realm": "partner",
-    ...(session.identity.tenantId
-      ? { "x-tenant-id": session.identity.tenantId }
-      : {}),
-  });
 }
 
 function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
@@ -556,6 +616,18 @@ export async function createPartnerBootstrapSession(
   );
 }
 
+export async function createPartnerIngressHandoff(
+  command: CreatePartnerIngressHandoffCommand,
+): Promise<PartnerIngressHandoffSession> {
+  return requestAuthority<PartnerIngressHandoffSession>(
+    "/api/partner/ingress/handoff",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
 export async function verifyPartnerEligibility(
   session: PartnerSessionRecord,
   command: Omit<VerifyPartnerEligibilityCommand, "entrySlug">,
@@ -576,38 +648,41 @@ export async function verifyPartnerEligibility(
 export async function createPartnerBooking(
   session: PartnerSessionRecord,
   command: CreateTenantBookingCommand,
-): Promise<BookingRecord> {
-  const response = (await getAuthorityClient(session).createTenantBooking(
-    command,
-  )) as BookingRecord | { booking?: BookingRecord };
-
-  if (response && typeof response === "object" && "bookingId" in response) {
-    return response as BookingRecord;
-  }
-
-  const booking = (response as { booking?: BookingRecord }).booking;
-  if (!booking) {
-    throw new Error("Backend did not return a booking record.");
-  }
-  return booking;
+): Promise<{ booking: BookingRecord; order: OwnedOrderRecord }> {
+  return requestAuthority<{ booking: BookingRecord; order: OwnedOrderRecord }>(
+    "/api/partner/bookings",
+    {
+      method: "POST",
+      headers: buildPartnerHeaders(session),
+      body: JSON.stringify(command),
+    },
+  );
 }
 
 export async function getPartnerConfirmation(
   session: PartnerSessionRecord,
   bookingId: string,
 ): Promise<BookingRecord> {
-  return (await getAuthorityClient(session).getTenantBooking(
-    bookingId,
-  )) as BookingRecord;
+  return requestAuthority<BookingRecord>(
+    `/api/partner/bookings/${encodeURIComponent(bookingId)}`,
+    {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    },
+  );
 }
 
 export async function getPartnerTrip(
   session: PartnerSessionRecord,
   orderId: string,
 ): Promise<OwnedOrderRecord> {
-  return (await getAuthorityClient(session).getOrder(
-    orderId,
-  )) as OwnedOrderRecord;
+  return requestAuthority<OwnedOrderRecord>(
+    `/api/partner/orders/${encodeURIComponent(orderId)}`,
+    {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    },
+  );
 }
 
 export async function getPartnerReceipt(

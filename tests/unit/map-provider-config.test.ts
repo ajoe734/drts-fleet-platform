@@ -65,4 +65,31 @@ describe("map provider deployment preflight", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("backend=mock tier=production");
   });
+
+  it("accepts Google staging without a generic tile template when all live keys are present", () => {
+    const result = runPreflight({
+      MAP_PROVIDER_DEPLOYMENT_TIER: "staging",
+      MAP_PROVIDER_BACKEND: "google",
+      GOOGLE_MAPS_GEOCODING_API_KEY: "geocoding-key",
+      GOOGLE_MAPS_ROUTES_API_KEY: "routes-key",
+      GOOGLE_MAPS_BROWSER_KEY: "browser-key",
+      MAP_PROVIDER_ALLOWED_ORIGINS: "https://ops.example.test",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("live provider config is ready");
+  });
+
+  it("fails closed when strict Google runtime is missing its browser key", () => {
+    const result = runPreflight({
+      MAP_PROVIDER_DEPLOYMENT_TIER: "production",
+      MAP_PROVIDER_BACKEND: "google",
+      GOOGLE_MAPS_GEOCODING_API_KEY: "geocoding-key",
+      GOOGLE_MAPS_ROUTES_API_KEY: "routes-key",
+      MAP_PROVIDER_ALLOWED_ORIGINS: "https://ops.example.test",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("GOOGLE_MAPS_BROWSER_KEY");
+  });
 });

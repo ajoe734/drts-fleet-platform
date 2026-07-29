@@ -7,6 +7,8 @@ import type {
 
 export const OWNED_MOBILITY_TRIP_COMPLETED_EVENT =
   "owned-mobility.trip.completed";
+export const OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT =
+  "owned-mobility.multi-taxi-trip.completed";
 
 export type OwnedMobilityTripCompletedEvent = {
   tenantId: string;
@@ -33,4 +35,22 @@ export type OwnedMobilityTripCompletedEvent = {
   sourcePlatform?: string | null;
   sandboxFulfillmentSegments?: FulfillmentSegmentRecord[];
   sandboxBillingTreatment?: SandboxBillingTreatmentRecord | null;
+};
+
+export type OwnedMobilityMultiTaxiTripCompletedEvent = {
+  runtimeProfileCode: "multi_taxi_direct";
+  orderId: string;
+  tripId: string;
+  plateNo: string;
+  pickupAt: string;
+  dropoffAt: string;
+  travelDurationSeconds: number;
+  routeSummary: string;
+  distanceMeters: number;
+  fareMinor: number;
+  tollMinor: number;
+  currency: "NTD";
+  consumerServicePhone: string;
+  authorityComplaintPhone: string;
+  completedAt: string;
 };

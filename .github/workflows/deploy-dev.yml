@@ -52,6 +52,7 @@ env:
   DEV_ARTIFACT_REGION: ${{ vars.DEV_ARTIFACT_REGION }}
   DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
   DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
+  DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
   DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
   DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
@@ -113,6 +114,8 @@ jobs:
       bank_console_service: ${{ steps.resolve.outputs.bank_console_service }}
       referral_embed_service: ${{ steps.resolve.outputs.referral_embed_service }}
       partner_booking_service: ${{ steps.resolve.outputs.partner_booking_service }}
+      concierge_portal_service: ${{ steps.resolve.outputs.concierge_portal_service }}
+      passenger_web_service: ${{ steps.resolve.outputs.passenger_web_service }}
       enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
@@ -207,6 +210,8 @@ jobs:
           bank_console_service="$(pick "${DEV_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-bank-console-web")"
           referral_embed_service="$(pick "${DEV_GCP_REFERRAL_EMBED_SERVICE:-}" "" "drts-referral-embed-web")"
           partner_booking_service="$(pick "${DEV_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-partner-booking-web")"
+          concierge_portal_service="$(pick "${DEV_GCP_CONCIERGE_PORTAL_SERVICE:-}" "" "drts-concierge-portal-web")"
+          passenger_web_service="$(pick "${DEV_GCP_PASSENGER_WEB_SERVICE:-}" "" "drts-passenger-web")"
           enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
@@ -303,6 +308,8 @@ jobs:
           emit bank_console_service "$bank_console_service"
           emit referral_embed_service "$referral_embed_service"
           emit partner_booking_service "$partner_booking_service"
+          emit concierge_portal_service "$concierge_portal_service"
+          emit passenger_web_service "$passenger_web_service"
           emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit channel_partner_portal_service "$channel_partner_portal_service"
           emit migration_job "$migration_job"
@@ -457,6 +464,30 @@ jobs:
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache,mode=max
 
+      - name: Build & push — concierge-portal-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/concierge-portal-web/Dockerfile
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/concierge-portal-web:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/concierge-portal-web:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/concierge-portal-web:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/concierge-portal-web:cache,mode=max
+
+      - name: Build & push — passenger-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/passenger-web/Dockerfile
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/passenger-web:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/passenger-web:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache,mode=max
+
       - name: Build & push — partner-booking-web
         uses: docker/build-push-action@v5
         with:
@@ -560,6 +591,11 @@ jobs:
     environment: dev
 
     steps:
+      - name: Checkout deploy source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -581,6 +617,8 @@ jobs:
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          ops_secret_args="$web_secret_args"
+          map_provider_mode="mock"
           assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
           llm_provider="mock"
           llm_chat_model="mock-chat-v1"
@@ -596,9 +634,36 @@ jobs:
           fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
 
-          if gcloud secrets describe "${secret_prefix}-internal-key" --project "$project_id" >/dev/null 2>&1; then
-            secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
-            web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
+          # Dev reuses the already-managed JWT secret for internal handoff.
+          # Production environments can map these slots to distinct secrets.
+          internal_key_secret="${secret_prefix}-jwt-secret"
+          secret_args="${secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+          web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+
+          # Dev embeds use server-to-server handoff. Map the managed secret to
+          # issuer-scoped credential slots without exposing it to the
+          # browser or accepting API keys from query parameters.
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_CTBC=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_CATHAY=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_TAISHIN=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_DBS=${internal_key_secret}:latest"
+
+          geocoding_secret="${secret_prefix}-google-maps-geocoding-api-key"
+          routes_secret="${secret_prefix}-google-maps-routes-api-key"
+          browser_secret="${secret_prefix}-google-maps-browser-key"
+          map_secret_count=0
+          for map_secret in "$geocoding_secret" "$routes_secret" "$browser_secret"; do
+            if gcloud secrets describe "$map_secret" --project "$project_id" >/dev/null 2>&1; then
+              map_secret_count=$((map_secret_count + 1))
+            fi
+          done
+          if [[ "$map_secret_count" -eq 3 ]]; then
+            secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${geocoding_secret}:latest,GOOGLE_MAPS_ROUTES_API_KEY=${routes_secret}:latest"
+            ops_secret_args="${ops_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
+            map_provider_mode="external"
+          elif [[ "$map_secret_count" -ne 0 ]]; then
+            echo "::error::Google Maps configuration is partial. Geocoding, Routes, and Browser secrets must be provisioned together."
+            exit 1
           fi
 
           llm_secret="${secret_prefix}-llm-gateway-api-key"
@@ -620,6 +685,8 @@ jobs:
 
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
           echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
           echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
           echo "llm_summarizer_model=${llm_summarizer_model}" >> "$GITHUB_OUTPUT"
@@ -627,12 +694,31 @@ jobs:
           echo "openclaw_auth_provider=${openclaw_auth_provider}" >> "$GITHUB_OUTPUT"
           echo "openclaw_home=${openclaw_home}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify live Google Maps provider
+        if: ${{ steps.api_secrets.outputs.map_provider_mode == 'external' }}
+        run: |
+          set -euo pipefail
+
+          project_id="${{ needs.prepare.outputs.project_id }}"
+          secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
+          export GOOGLE_MAPS_GEOCODING_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-geocoding-api-key" --project="$project_id")"
+          export GOOGLE_MAPS_ROUTES_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-routes-api-key" --project="$project_id")"
+          export GOOGLE_MAPS_BROWSER_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-browser-key" --project="$project_id")"
+          export MAP_PROVIDER_SMOKE_ORIGIN="${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
+          echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
+          echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
+          node scripts/verify-google-map-provider-live.mjs
+
       - name: Build API env vars
         id: api_env
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,API_PORT=3001,DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,API_PORT=3001,DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
+            env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          fi
           if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
             env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
           fi
@@ -652,7 +738,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.api_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3001 \
@@ -685,7 +771,10 @@ jobs:
             api_origin="${{ steps.api_url.outputs.url }}"
           fi
 
-          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201"
+          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
+            env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          fi
 
           if [[ -n "${DEV_IAP_CLIENT_ID:-}" ]]; then
             env_vars="${env_vars},DRTS_API_AUTH_AUDIENCE=${DEV_IAP_CLIENT_ID}"
@@ -697,41 +786,49 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.platform_admin_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.platform_admin_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3002 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — ops-console-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.ops_console_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.ops_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3003 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — fleet-partner-portal-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3007 \
@@ -740,15 +837,19 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — tenant-console-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/tenant-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.tenant_console_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.tenant_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3004 \
@@ -757,15 +858,19 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,DRTS_PARTNER_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.tenant_console_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — bank-console-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/bank-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.bank_console_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.bank_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3008 \
@@ -774,15 +879,19 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — referral-embed-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.referral_embed_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.referral_embed_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3014 \
@@ -791,15 +900,61 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true" \
             --allow-unauthenticated \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Deploy — concierge-portal-web
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/concierge-portal-web:${{ needs.build-push.outputs.image_tag }}"
+
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.concierge_portal_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3006 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --allow-unauthenticated \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
+            --min-instances 0 \
+            --max-instances 1 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Deploy — passenger-web
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/passenger-web:${{ needs.build-push.outputs.image_tag }}"
+
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_web_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3016 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --allow-unauthenticated \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
+            --min-instances 0 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — partner-booking-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/partner-booking-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.partner_booking_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.partner_booking_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3007 \
@@ -808,15 +963,19 @@ jobs:
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.partner_booking_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — enterprise-dispatch-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3010 \
@@ -825,15 +984,19 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.enterprise_dispatch_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — channel-partner-portal-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3013 \
@@ -842,8 +1005,12 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
             --min-instances 0 \
-            --max-instances 2 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
   health-check:
@@ -863,6 +1030,8 @@ jobs:
       enterprise_dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
+      concierge_portal: ${{ steps.urls.outputs.concierge_portal }}
+      passenger_web: ${{ steps.urls.outputs.passenger_web }}
 
     steps:
       - name: Authenticate to GCP
@@ -951,6 +1120,14 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
+          concierge_portal_url="$(gcloud run services describe "${{ needs.prepare.outputs.concierge_portal_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+          passenger_web_url="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_web_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
           enterprise_dispatch_url="$(gcloud run services describe "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
@@ -968,6 +1145,8 @@ jobs:
           echo "bank_console=${bank_console_url}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_url}" >> "$GITHUB_OUTPUT"
           echo "partner_booking=${partner_booking_url}" >> "$GITHUB_OUTPUT"
+          echo "concierge_portal=${concierge_portal_url}" >> "$GITHUB_OUTPUT"
+          echo "passenger_web=${passenger_web_url}" >> "$GITHUB_OUTPUT"
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
 
@@ -982,6 +1161,12 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.referral_embed }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc/program" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc/program/embed" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/cathay/program/embed" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/taishin/program/embed" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/dbs/program/embed" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.concierge_portal }}" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.passenger_web }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
@@ -998,6 +1183,8 @@ jobs:
           echo "  bank-console: ${{ steps.urls.outputs.bank_console }}"
           echo "  referral-embed-web: ${{ steps.urls.outputs.referral_embed }}"
           echo "  partner-booking: ${{ steps.urls.outputs.partner_booking }}"
+          echo "  concierge-portal-web: ${{ steps.urls.outputs.concierge_portal }}"
+          echo "  passenger-web: ${{ steps.urls.outputs.passenger_web }}"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
 
@@ -1028,6 +1215,7 @@ jobs:
           DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
           DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ needs.health-check.outputs.platform_admin }}
           DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
+          LIVE_GOOGLE_MAP_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
           DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
           DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
           DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
@@ -1038,17 +1226,36 @@ jobs:
           DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
         run: |
           set -euo pipefail
-          pnpm exec playwright test --retries=1 --config playwright.dev-runtime-matrix.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.bank-console-depth.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.bank-console-auth.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.ops-console-parity.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.ops-assistant.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.fleet-partner-portal.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.partner-booking-surfaces.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.enterprise-dispatch.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.channel-partner-portal.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.referral-embed.config.ts
-          pnpm exec playwright test --retries=1 --config playwright.platform-admin-service-area.config.ts
+          smoke_status=0
+          run_suite() {
+            local config="$1"
+            local suite="${config#playwright.}"
+            suite="${suite%.config.ts}"
+            echo "::group::Playwright ${config}"
+            PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}" \
+              pnpm exec playwright test \
+                --retries=1 \
+                --config "${config}" \
+                --reporter=list,html \
+                --output "test-results/${suite}" || smoke_status=1
+            echo "::endgroup::"
+          }
+
+          run_suite playwright.bank-console-depth.config.ts
+          run_suite playwright.bank-console-auth.config.ts
+          run_suite playwright.ops-console-parity.config.ts
+          run_suite playwright.google-map-live.config.ts
+          run_suite playwright.ops-assistant.config.ts
+          run_suite playwright.fleet-partner-portal.config.ts
+          run_suite playwright.partner-booking-surfaces.config.ts
+          run_suite playwright.enterprise-dispatch.config.ts
+          run_suite playwright.channel-partner-portal.config.ts
+          run_suite playwright.referral-embed.config.ts
+          run_suite playwright.platform-admin-service-area.config.ts
+          # Run the high-volume matrix after business-flow suites so load
+          # coverage cannot starve or mask airport and operations regressions.
+          run_suite playwright.dev-runtime-matrix.config.ts
+          exit "${smoke_status}"
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

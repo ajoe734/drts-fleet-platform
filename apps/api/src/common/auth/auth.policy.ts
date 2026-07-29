@@ -76,6 +76,30 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "partner/bookings" && upperMethod === "POST") {
+    return {
+      routeKey: "partner:bookings:create",
+      requiredScopes: ["partner:book"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner-scoped booking creation",
+    };
+  }
+
+  if (
+    upperMethod === "GET" &&
+    (/^partner\/bookings\/[^/]+$/.test(routePath) ||
+      /^partner\/orders\/[^/]+$/.test(routePath))
+  ) {
+    return {
+      routeKey: routePath.startsWith("partner/bookings/")
+        ? "partner:bookings:get"
+        : "partner:orders:get",
+      requiredScopes: ["partner:book"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner-scoped booking confirmation and receipt access",
+    };
+  }
+
   if (routePath === "auth/driver/device/revoke") {
     return {
       routeKey: "auth:driver-device:revoke",
@@ -101,6 +125,18 @@ export function resolveRouteAuthPolicy(
       requiredScopes: ["billing:read"],
       allowedRealms: baseAllowedRealms("partner"),
       description: "Referral partner self-service access",
+    };
+  }
+
+  if (
+    routePath === "platform-admin/multi-taxi-trip-records/export-jobs" ||
+    routePath.startsWith("platform-admin/multi-taxi-trip-records/export-jobs/")
+  ) {
+    return {
+      routeKey: `multi-taxi-records:export:${upperMethod}`,
+      requiredScopes: ["multi_taxi_records:export"],
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Controlled multi-taxi operational-record export",
     };
   }
 
@@ -261,6 +297,19 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    upperMethod === "GET" &&
+    (routePath === "dispatch/queue" ||
+      /^dispatch\/queue\/[^/]+$/.test(routePath))
+  ) {
+    return {
+      routeKey: `dispatch:queue:read:${routePath}`,
+      requiredScopes: ["dispatch:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops dispatch queue read access",
+    };
+  }
+
   if (routePath.startsWith("orders") || routePath.startsWith("dispatch/")) {
     const readRoute = isReadMethod(upperMethod);
     const scope = routePath.startsWith("dispatch/")
@@ -354,6 +403,48 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "driver/sos-events" && upperMethod === "POST") {
+    return {
+      routeKey: "driver:sos-events:create",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver SOS event submission",
+    };
+  }
+
+  if (routePath.startsWith("driver/sos-events/")) {
+    return {
+      routeKey: `driver:sos-attachments:${upperMethod}`,
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver SOS attachment upload and scan status",
+    };
+  }
+
+  if (
+    routePath === "ops/driver-sos/alerts/rendered" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "ops:driver-sos-alerts:rendered",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops driver SOS alert render receipt",
+    };
+  }
+
+  if (
+    routePath === "ops/driver-sos/metrics/alert-latency" &&
+    upperMethod === "GET"
+  ) {
+    return {
+      routeKey: "ops:driver-sos-alerts:latency-metrics",
+      requiredScopes: ["incident:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops driver SOS alert latency metrics",
+    };
+  }
+
   if (routePath.startsWith("callcenter/")) {
     return {
       routeKey: `callcenter:${upperMethod}`,
@@ -384,8 +475,8 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: "incidents:create",
       requiredScopes: ["incident:write"],
-      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
-      description: "Incident creation (incl. driver SOS, scoped to self)",
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Incident creation",
     };
   }
 

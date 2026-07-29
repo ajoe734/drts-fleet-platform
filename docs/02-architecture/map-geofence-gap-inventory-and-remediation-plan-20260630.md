@@ -71,6 +71,11 @@ Implementation progress as of 2026-06-30:
 
 Repo-wide dependency search shows only `expo-location` for the driver app. There is no `react-native-maps`, Mapbox / MapLibre, Google Maps React package, Leaflet, OpenLayers, or Turf dependency currently installed in app/package manifests.
 
+> 2026-07-12 closeout: this inventory statement described the pre-remediation
+> baseline. The driver app now includes `react-native-maps`; Callcenter and Ops
+> load Google Maps JavaScript through the shared live-provider adapter. See
+> `docs/03-runbooks/google-maps-live-provider-validation-20260712.md`.
+
 Evidence:
 
 - `apps/driver-app/package.json:36` includes `expo-location`.

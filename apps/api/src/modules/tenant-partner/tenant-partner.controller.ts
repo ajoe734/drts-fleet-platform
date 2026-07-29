@@ -8,6 +8,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
@@ -83,6 +84,7 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import { requireInternalKey } from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -193,11 +195,23 @@ export class TenantPartnerController {
   @Post("partner/ingress/handoff")
   async issuePartnerIngressHandoff(
     @Body() command: CreatePartnerIngressHandoffCommand,
+    @Req()
+    request?: {
+      headers?: Record<string, string | string[] | undefined>;
+      method?: string;
+      originalUrl?: string;
+      url?: string;
+    },
     @Headers("x-request-id") requestId?: string,
   ) {
+    const allowInternalBootstrap = !command.apiKey?.trim();
+    if (allowInternalBootstrap) {
+      requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+    }
     const resolved = await this.tenantPartnerService.issuePartnerIngressHandoff(
       command,
       requestId,
+      { allowInternalBootstrap },
     );
     const token = this.signJwt(
       {
@@ -646,13 +660,13 @@ export class TenantPartnerController {
   @Get("partner/eligibility/:eligibilityVerificationId")
   @RequireRealms("partner", "tenant", "platform", "ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerEligibilityVerification(
+  async getPartnerEligibilityVerification(
     @Param("eligibilityVerificationId") eligibilityVerificationId: string,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getPartnerEligibilityVerification(
+      await this.tenantPartnerService.resolvePartnerEligibilityVerification(
         eligibilityVerificationId,
         requestId,
         identity,
@@ -664,12 +678,12 @@ export class TenantPartnerController {
   @Get("ops/partner/eligibility/reviews")
   @RequireRealms("platform", "ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listPartnerEligibilityReviewQueue(
+  async listPartnerEligibilityReviewQueue(
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items: PartnerEligibilityReviewQueueItem[] =
-      this.tenantPartnerService.listPartnerEligibilityReviewQueue(
+      await this.tenantPartnerService.resolvePartnerEligibilityReviewQueue(
         requestId,
         identity,
       );
@@ -678,13 +692,13 @@ export class TenantPartnerController {
 
   @Post("ops/partner/eligibility/reviews/resolve")
   @RequireRealms("platform", "ops")
-  resolvePartnerEligibilityReview(
+  async resolvePartnerEligibilityReview(
     @Body() command: ResolvePartnerEligibilityReviewCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     const resolution: PartnerEligibilityReviewResolution =
-      this.tenantPartnerService.resolvePartnerEligibilityReview(
+      await this.tenantPartnerService.resolvePartnerEligibilityReview(
         command,
         requestId,
         identity,

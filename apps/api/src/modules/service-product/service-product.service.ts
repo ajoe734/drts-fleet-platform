@@ -12,11 +12,13 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { ServiceProductRepository } from "./service-product.repository";
 import type {
   CreateServiceProductCommand,
+  RuntimeProfileServiceProductPolicy,
   ServiceProductBillingMode,
   ServiceProductRecord,
   ServiceTiming,
   ServiceProductType,
   UpdateServiceProductCommand,
+  UpsertRuntimeProfileServiceProductPolicyCommand,
 } from "./service-product.types";
 import {
   SERVICE_PRODUCT_BILLING_MODE_VALUES,
@@ -174,6 +176,7 @@ type NormalizedUpdateServiceProductCommand = {
 export class ServiceProductService implements OnModuleInit {
   private sequence = 1;
   private records: ServiceProductRecord[] = [];
+  private runtimePolicies: RuntimeProfileServiceProductPolicy[] = [];
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -187,11 +190,14 @@ export class ServiceProductService implements OnModuleInit {
 
     try {
       const state = await this.repository.loadState();
-      if (state.records.length === 0) {
+      if (state.records.length === 0 && state.runtimePolicies.length === 0) {
         return;
       }
 
       this.records = state.records.map((record) => this.hydrateRecord(record));
+      this.runtimePolicies = state.runtimePolicies.map((policy) => ({
+        ...policy,
+      }));
       this.sequence = this.deriveNextSequence(state.records);
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
@@ -214,6 +220,95 @@ export class ServiceProductService implements OnModuleInit {
         ),
       ),
     );
+  }
+
+  listRuntimeProfilePolicies() {
+    return this.runtimePolicies.map((policy) => ({ ...policy }));
+  }
+
+  upsertRuntimeProfilePolicy(
+    command: UpsertRuntimeProfileServiceProductPolicyCommand,
+  ) {
+    if (
+      !["ordinary_taxi", "multi_taxi_direct", "business_dispatch"].includes(
+        command.runtimeProfileCode,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RUNTIME_PROFILE_INVALID",
+        "Invalid runtime profile code.",
+      );
+    }
+    this.assertValidType(command.serviceProductCode);
+    const effectiveFrom = this.requirePolicyTimestamp(
+      command.effectiveFrom,
+      "effectiveFrom",
+    );
+    const effectiveUntil = command.effectiveUntil
+      ? this.requirePolicyTimestamp(command.effectiveUntil, "effectiveUntil")
+      : null;
+    if (
+      effectiveUntil !== null &&
+      Date.parse(effectiveUntil) <= Date.parse(effectiveFrom)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RUNTIME_PROFILE_POLICY_WINDOW_INVALID",
+        "effectiveUntil must be after effectiveFrom.",
+      );
+    }
+
+    const now = new Date().toISOString();
+    const existing = this.runtimePolicies.find(
+      (policy) =>
+        policy.runtimeProfileCode === command.runtimeProfileCode &&
+        policy.serviceProductCode === command.serviceProductCode,
+    );
+    const policy: RuntimeProfileServiceProductPolicy = {
+      runtimeProfileCode: command.runtimeProfileCode,
+      serviceProductCode: command.serviceProductCode,
+      active: command.active,
+      effectiveFrom,
+      effectiveUntil,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.runtimePolicies = [
+      policy,
+      ...this.runtimePolicies.filter(
+        (candidate) =>
+          candidate.runtimeProfileCode !== policy.runtimeProfileCode ||
+          candidate.serviceProductCode !== policy.serviceProductCode,
+      ),
+    ];
+    this.persist({ runtimePolicies: [policy] }, "upsert runtime policy");
+    return { ...policy };
+  }
+
+  assertRuntimeProfileServiceProductActive(
+    runtimeProfileCode: RuntimeProfileServiceProductPolicy["runtimeProfileCode"],
+    serviceProductCode: ServiceProductType,
+  ) {
+    const now = Date.now();
+    const policy = this.runtimePolicies.find(
+      (candidate) =>
+        candidate.runtimeProfileCode === runtimeProfileCode &&
+        candidate.serviceProductCode === serviceProductCode &&
+        candidate.active &&
+        Date.parse(candidate.effectiveFrom) <= now &&
+        (candidate.effectiveUntil === null ||
+          Date.parse(candidate.effectiveUntil) > now),
+    );
+    if (!policy) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MULTI_TAXI_SERVICE_PRODUCT_NOT_ALLOWED",
+        "The service product is not active for the resolved runtime profile.",
+        { runtimeProfileCode, serviceProductCode },
+      );
+    }
+    return { ...policy };
   }
 
   getRuntimeServiceProductByType(serviceProductType: ServiceProductType) {
@@ -501,18 +596,29 @@ export class ServiceProductService implements OnModuleInit {
   }
 
   private persist(
-    changes: { records?: readonly ServiceProductRecord[] },
+    changes: {
+      records?: readonly ServiceProductRecord[];
+      runtimePolicies?: readonly RuntimeProfileServiceProductPolicy[];
+    },
     context: string,
   ) {
     if (!this.repository) {
       return;
     }
 
-    const payload: { records?: ServiceProductRecord[] } = {};
+    const payload: {
+      records?: ServiceProductRecord[];
+      runtimePolicies?: RuntimeProfileServiceProductPolicy[];
+    } = {};
     if (changes.records) {
       payload.records = changes.records.map((record) =>
         this.cloneRecord(record),
       );
+    }
+    if (changes.runtimePolicies) {
+      payload.runtimePolicies = changes.runtimePolicies.map((policy) => ({
+        ...policy,
+      }));
     }
 
     void this.repository.persistChanges(payload).catch((error: unknown) => {
@@ -537,6 +643,19 @@ export class ServiceProductService implements OnModuleInit {
       allowedLicenseTypes: [...record.allowedLicenseTypes],
       defaultProofRequirements: [...record.defaultProofRequirements],
     };
+  }
+
+  private requirePolicyTimestamp(value: string, field: string) {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RUNTIME_PROFILE_POLICY_TIMESTAMP_INVALID",
+        `${field} must be an ISO-8601 timestamp.`,
+        { field },
+      );
+    }
+    return new Date(timestamp).toISOString();
   }
 
   private hydrateRecord(record: ServiceProductRecord): ServiceProductRecord {

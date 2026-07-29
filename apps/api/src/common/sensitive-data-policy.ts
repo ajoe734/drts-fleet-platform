@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const CONTROLLED_DOWNLOAD_SECRET_ENV = "CONTROLLED_DOWNLOAD_SIGNING_SECRET";
 const CONTROLLED_DOWNLOAD_HOST_ENV = "CONTROLLED_DOWNLOAD_HOST";
 const CONTROLLED_DOWNLOAD_KEY_ID_ENV = "CONTROLLED_DOWNLOAD_KEY_ID";
@@ -36,6 +38,33 @@ function parsePositiveInteger(
   }
 
   return parsed;
+}
+
+/**
+ * Pseudonymous passenger identity used by every passenger-authority surface
+ * (ride access tokens, ratings, notification outbox). A known passenger id is
+ * already pseudonymous; a phone-only passenger is peppered and hashed so no raw
+ * phone number is ever persisted as a subject reference.
+ *
+ * Both callers must derive the ref the same way, otherwise a phone-only ride
+ * gets two identities and its rating/notification rows stop joining.
+ */
+export function resolvePassengerSubjectRef(passenger: {
+  passengerId?: string | null;
+  phone: string;
+}) {
+  const passengerId = normalizeNonBlankText(passenger.passengerId);
+  if (passengerId) {
+    return passengerId;
+  }
+  const pepper =
+    normalizeNonBlankText(process.env.PASSENGER_SUBJECT_PEPPER) ??
+    normalizeNonBlankText(process.env.PASSENGER_RIDE_TOKEN_PEPPER) ??
+    "";
+  const digest = createHash("sha256")
+    .update(`phone\0${pepper}\0${passenger.phone.trim()}`)
+    .digest("hex");
+  return `phone_sha256:${digest}`;
 }
 
 export function maskName(value: string | null | undefined) {

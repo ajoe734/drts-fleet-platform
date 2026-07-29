@@ -29,6 +29,11 @@ const conciergeOnly =
 const partnerOnly =
   selectedProjects.size > 0 &&
   [...selectedProjects].every((project) => project === "partner-booking-web");
+// The passenger surface stubs its authority through page.route, so it needs no
+// API or console server: running it alone must not boot the whole fleet.
+const passengerOnly =
+  selectedProjects.size > 0 &&
+  [...selectedProjects].every((project) => project === "passenger-web");
 const mapBookingOnly =
   selectedProjects.size > 0 &&
   [...selectedProjects].every((project) =>
@@ -47,6 +52,14 @@ const partnerWebServer = {
   command:
     "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=http://127.0.0.1:3901 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3407",
   url: "http://127.0.0.1:3407",
+  reuseExistingServer: !process.env.CI,
+  timeout: 300_000,
+};
+
+const passengerWebServer = {
+  command:
+    "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/passenger-web && NEXT_PUBLIC_PASSENGER_RIDE_DATA_MODE=live pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3016",
+  url: "http://127.0.0.1:3016",
   reuseExistingServer: !process.env.CI,
   timeout: 300_000,
 };
@@ -100,13 +113,15 @@ const defaultWebServers = [
   partnerWebServer,
 ];
 
-const webServers = conciergeOnly
-  ? [conciergeWebServer]
-  : partnerOnly
-    ? [partnerAuthorityMockServer, partnerWebServer]
-    : mapBookingOnly
-      ? [conciergeWebServer, partnerAuthorityMockServer, partnerWebServer]
-      : defaultWebServers;
+const webServers = passengerOnly
+  ? [passengerWebServer]
+  : conciergeOnly
+    ? [conciergeWebServer]
+    : partnerOnly
+      ? [partnerAuthorityMockServer, partnerWebServer]
+      : mapBookingOnly
+        ? [conciergeWebServer, partnerAuthorityMockServer, partnerWebServer]
+        : defaultWebServers;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -123,7 +138,7 @@ export default defineConfig({
     {
       name: "ops-assistant-on",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3202",
       },
@@ -131,7 +146,7 @@ export default defineConfig({
     {
       name: "ops-assistant-off",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3202",
       },
@@ -139,7 +154,7 @@ export default defineConfig({
     {
       name: "platform-admin-assistant-on",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3102",
       },
@@ -147,7 +162,7 @@ export default defineConfig({
     {
       name: "platform-admin-assistant-off",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3103",
       },
@@ -171,6 +186,13 @@ export default defineConfig({
       testMatch: /partner-map-booking-ui\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3407",
+      },
+    },
+    {
+      name: "passenger-web",
+      testMatch: /p5-passenger-live-authority\.spec\.ts/,
+      use: {
+        baseURL: "http://127.0.0.1:3016",
       },
     },
   ],

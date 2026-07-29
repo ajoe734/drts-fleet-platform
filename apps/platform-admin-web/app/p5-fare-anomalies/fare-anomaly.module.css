@@ -1,0 +1,14 @@
+.screen {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: #f7f8fb;
+  }
+}

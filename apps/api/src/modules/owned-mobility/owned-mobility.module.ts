@@ -4,6 +4,7 @@ import { DatabaseModule } from "../../common/db";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
+import { ProductRuleModule } from "../product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { SandboxDispatchGateModule } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.module";
 import { ServiceAreaModule } from "../service-area/service-area.module";
@@ -26,6 +27,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     VehicleEligibilityModule,
     AuditNotificationModule,
     CallcenterModule,
+    ProductRuleModule,
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
   ],

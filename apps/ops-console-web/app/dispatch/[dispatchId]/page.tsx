@@ -20,6 +20,10 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
+import {
+  resolveQueueSemantics,
+  isForbiddenStatutoryOverrideAction,
+} from "@/lib/queue-semantics";
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
@@ -290,7 +294,15 @@ function getTenantLabel(order: OwnedOrderRecord) {
   );
 }
 
-function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
+function getVisibleStateCode(
+  order: OwnedOrderRecord,
+  job?: DispatchJobRecord,
+  locale: Locale = "zh",
+) {
+  const queueSemantics = resolveQueueSemantics(order, locale);
+  if (queueSemantics.isStatutoryRefusal) {
+    return "statutory_refusal";
+  }
   if (order.exceptionHold?.overrideRequest && !order.exceptionHold.resolution) {
     return "override_pending";
   }
@@ -917,6 +929,16 @@ function buildForwardedActivity(
 }
 
 function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
+  const queueSemantics = resolveQueueSemantics(order, locale);
+  if (queueSemantics.isStatutoryRefusal) {
+    return {
+      type: tr(locale, "dispatch.denial.statutoryRefusalTitle"),
+      status: tr(locale, "dispatch.denial.noOverrideAllowed"),
+      actor: "—",
+      note: tr(locale, "dispatch.denial.multiTaxiRefusalCopy"),
+      nextAction: tr(locale, "dispatch.denial.noOverrideAllowed"),
+    };
+  }
   const request = order.exceptionHold?.overrideRequest;
   if (request) {
     const decisionActor =
@@ -1393,6 +1415,7 @@ function synthesizeOwnedActions(
   job: DispatchJobRecord | undefined,
   task: DriverTaskRecord | null,
   candidateCount: number,
+  locale: Locale = "zh",
 ): ResourceActionDescriptor[] {
   if (isOwnedTerminal(order, task)) {
     // Terminal state — read-only, no dead CTAs (§5.3 state variants).
@@ -1442,6 +1465,11 @@ function synthesizeOwnedActions(
 
   if (job && job.status !== "assigned") {
     actions.push({ action: "redispatch", enabled: true, riskLevel: "medium" });
+  }
+
+  const semantics = resolveQueueSemantics(order, locale);
+  if (semantics.isStatutoryRefusal) {
+    return actions.filter((a) => !isForbiddenStatutoryOverrideAction(a.action));
   }
 
   actions.push({
@@ -2157,7 +2185,7 @@ async function renderOwnedWorkspace({
       };
     },
   );
-  const currentState = getVisibleStateCode(order, dispatchJob);
+  const currentState = getVisibleStateCode(order, dispatchJob, locale);
   const licenseClearCount = candidateRows.filter(
     (row) => row.driver?.licensesValid !== false,
   ).length;
@@ -2203,6 +2231,7 @@ async function renderOwnedWorkspace({
     dispatchJob,
     currentTask,
     candidateRows.length,
+    locale,
   );
   const terminal = isOwnedTerminal(order, currentTask);
 
@@ -2223,6 +2252,8 @@ async function renderOwnedWorkspace({
     currentTask?.startedAt ?? null,
     currentTask?.completedAt ?? null,
   ];
+
+  const queueSemantics = resolveQueueSemantics(order, locale);
 
   return (
     <>
@@ -2269,6 +2300,15 @@ async function renderOwnedWorkspace({
             body={tr(locale, "dispatch.detail.banner.terminal.body")}
           />
         ) : null}
+        {queueSemantics.isStatutoryRefusal ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={tr(locale, "dispatch.denial.statutoryRefusalTitle")}
+            body={`${queueSemantics.refusalCopy}\n(${tr(locale, "dispatch.denial.noOverrideAllowed")})`}
+          />
+        ) : null}
       </div>
 
       <div
@@ -2281,6 +2321,38 @@ async function renderOwnedWorkspace({
         }}
       >
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
+          <Card
+            theme={theme}
+            title={tr(locale, "dispatch.queue.overviewTitle")}
+          >
+            <DL
+              theme={theme}
+              cols={2}
+              items={[
+                {
+                  k: tr(locale, "dispatch.queue.serviceTypeLabel"),
+                  v: queueSemantics.serviceTypeText,
+                  mono: true,
+                },
+                {
+                  k: tr(locale, "dispatch.queue.acquisitionModeLabel"),
+                  v: queueSemantics.matchingModeText,
+                  mono: true,
+                },
+                {
+                  k: tr(locale, "dispatch.queue.mode"),
+                  v: queueSemantics.queueModeText,
+                  mono: true,
+                },
+                {
+                  k: tr(locale, "dispatch.queue.site"),
+                  v: queueSemantics.siteDisplay,
+                  mono: true,
+                },
+              ]}
+            />
+          </Card>
+
           <Card
             theme={theme}
             title={`${tr(locale, "dispatch.detail.candidatesRanked")} (${candidateRows.length})`}
@@ -2364,9 +2436,11 @@ async function renderOwnedWorkspace({
                 },
                 {
                   k: tr(locale, "dispatch.detail.compliance.overrideAllowed"),
-                  v: order.exceptionHold
-                    ? `${overrideSummary.status} · ${overrideSummary.nextAction}`
-                    : tr(locale, "dispatch.detail.compliance.notNeeded"),
+                  v: queueSemantics.isStatutoryRefusal
+                    ? tr(locale, "dispatch.denial.noOverrideAllowed")
+                    : order.exceptionHold
+                      ? `${overrideSummary.status} · ${overrideSummary.nextAction}`
+                      : tr(locale, "dispatch.detail.compliance.notNeeded"),
                   mono: true,
                 },
               ]}
