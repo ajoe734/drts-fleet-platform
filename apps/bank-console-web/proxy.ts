@@ -35,6 +35,7 @@ function isPrefetchRequest(request: NextRequest) {
   const secPurpose = request.headers.get("sec-purpose")?.toLowerCase();
 
   return (
+    request.headers.get("rsc") === "1" ||
     request.headers.get("next-router-prefetch") === "1" ||
     purpose === "prefetch" ||
     secPurpose === "prefetch"
