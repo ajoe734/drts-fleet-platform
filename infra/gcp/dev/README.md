@@ -1,8 +1,8 @@
 # GCP Dev Environment — Deploy Config
 
 This repo now treats `dev` as the shared integration environment. The dev
-workflow is [Deploy — Dev](/home/edna/workspace/branch-archives/drts-fleet-platform-manual-dev/.github/workflows/deploy-dev.yml:1), and it is now manual-only via
-`workflow_dispatch`.
+workflow is [Deploy — Dev](../../../.github/workflows/deploy-dev.yml), and it is
+now manual-only via `workflow_dispatch`.
 
 ## Goal
 
