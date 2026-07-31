@@ -137,15 +137,8 @@ describe("Cloud Run deploy quota retry", () => {
     );
     expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
     expect(domainWorkflow).not.toContain("ride.smarttransport.tw");
-    expect(domainWorkflow).toContain("domain-mappings describe");
-    expect(domainWorkflow).toContain(
-      "Domain mapping already targets ${service}; skipping create.",
-    );
-    expect(domainWorkflow).toContain(
-      "Refusing to mutate a live mapping in this domain-maintenance workflow",
-    );
-    expect(domainWorkflow).toContain("describe_status=$?");
-    expect(domainWorkflow).toContain("grep -Eiq '(NOT_FOUND|not found)'");
+    expect(domainWorkflow).toContain("uses: actions/checkout@v4");
+    expect(domainWorkflow).toContain("./scripts/map-domain-service.sh");
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {

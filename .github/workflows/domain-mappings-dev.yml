@@ -36,6 +36,9 @@ jobs:
     if: ${{ inputs.confirm == 'apply' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -61,60 +64,16 @@ jobs:
           PROJECT="${{ env.DEV_GCP_PROJECT_ID }}"
           REGION="${{ env.DEV_GCP_REGION }}"
 
-          map() {  # map <subdomain> <service>
-            local domain="$1"
-            local service="$2"
-            local existing_service
-            local describe_output
-            local describe_status
-
-            echo "::group::${domain} -> ${service}"
-            set +e
-            describe_output="$(
-              gcloud --quiet beta run domain-mappings describe \
-                --domain "$domain" \
-                --region "$REGION" \
-                --project "$PROJECT" \
-                --format='value(spec.routeName)' 2>&1
-            )"
-            describe_status=$?
-            set -e
-
-            if [ "$describe_status" -eq 0 ]; then
-              existing_service="$describe_output"
-            elif grep -Eiq '(NOT_FOUND|not found)' <<<"$describe_output"; then
-              existing_service=""
-            else
-              echo "$describe_output" >&2
-              exit "$describe_status"
-            fi
-
-            if [ -n "$existing_service" ]; then
-              if [ "$existing_service" = "$service" ]; then
-                echo "Domain mapping already targets ${service}; skipping create."
-              else
-                echo "Existing mapping for ${domain} points at ${existing_service}, expected ${service}." >&2
-                echo "Refusing to mutate a live mapping in this domain-maintenance workflow; fail closed and hand off to the single deploy cleanup task." >&2
-                exit 1
-              fi
-            else
-              gcloud --quiet beta run domain-mappings create \
-                --service "$service" --domain "$domain" \
-                --region "$REGION" --project "$PROJECT" 2>&1
-            fi
-            echo "::endgroup::"
-          }
-
-          map fleets.smarttransport.tw     "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-drts-dev-platform-admin-web}"
-          map ops.smarttransport.tw        "${DEV_GCP_OPS_CONSOLE_SERVICE:-drts-dev-ops-console-web}"
-          map partners.smarttransport.tw   "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-drts-dev-fleet-partner-portal-web}"
-          map dispatch.smarttransport.tw   "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-drts-dev-enterprise-dispatch-web}"
-          map book.smarttransport.tw       "${DEV_GCP_PARTNER_BOOKING_SERVICE:-drts-dev-partner-booking-web}"
-          map bank.smarttransport.tw       "${DEV_GCP_BANK_CONSOLE_SERVICE:-drts-dev-bank-console-web}"
-          map channel.smarttransport.tw    "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-drts-channel-partner-portal-web}"
-          map tenant.smarttransport.tw     "${DEV_GCP_TENANT_CONSOLE_SERVICE:-drts-dev-tenant-console-web}"
-          map refer.smarttransport.tw      "${DEV_GCP_REFERRAL_EMBED_SERVICE:-drts-dev-referral-embed-web}"
-          map api.smarttransport.tw        "${DEV_GCP_API_SERVICE:-drts-dev-api}"
+          ./scripts/map-domain-service.sh fleets.smarttransport.tw     "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-drts-dev-platform-admin-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh ops.smarttransport.tw        "${DEV_GCP_OPS_CONSOLE_SERVICE:-drts-dev-ops-console-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh partners.smarttransport.tw   "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-drts-dev-fleet-partner-portal-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh dispatch.smarttransport.tw   "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-drts-dev-enterprise-dispatch-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh book.smarttransport.tw       "${DEV_GCP_PARTNER_BOOKING_SERVICE:-drts-dev-partner-booking-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh bank.smarttransport.tw       "${DEV_GCP_BANK_CONSOLE_SERVICE:-drts-dev-bank-console-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh channel.smarttransport.tw    "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-drts-channel-partner-portal-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh tenant.smarttransport.tw     "${DEV_GCP_TENANT_CONSOLE_SERVICE:-drts-dev-tenant-console-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh refer.smarttransport.tw      "${DEV_GCP_REFERRAL_EMBED_SERVICE:-drts-dev-referral-embed-web}" "$REGION" "$PROJECT"
+          ./scripts/map-domain-service.sh api.smarttransport.tw        "${DEV_GCP_API_SERVICE:-drts-dev-api}" "$REGION" "$PROJECT"
 
       - name: List mappings
         run: |

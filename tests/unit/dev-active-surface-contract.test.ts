@@ -64,6 +64,7 @@ describe("dev active surface contract", () => {
 
   it("keeps domain mapping defaults and fail-closed wording aligned", () => {
     const source = readRepoFile(".github/workflows/domain-mappings-dev.yml");
+    const helperSource = readRepoFile("scripts/map-domain-service.sh");
 
     expectServiceDefaults(source, {
       api: "DEV_GCP_API_SERVICE",
@@ -78,14 +79,16 @@ describe("dev active surface contract", () => {
       "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
     });
 
-    expect(source).toContain(
+    expect(source).toContain("uses: actions/checkout@v4");
+    expect(source).toContain("./scripts/map-domain-service.sh");
+    expect(helperSource).toContain(
       "fail closed and hand off to the single deploy cleanup task.",
     );
-    expect(source).toContain(
+    expect(helperSource).toContain(
       "Refusing to mutate a live mapping in this domain-maintenance workflow",
     );
-    expect(source).toContain("describe_status=$?");
-    expect(source).toContain("grep -Eiq '(NOT_FOUND|not found)'");
+    expect(helperSource).toContain("describe_status=$?");
+    expect(helperSource).toContain("grep -Eiq");
     expect(source).not.toContain("concierge.smarttransport.tw");
     expect(source).not.toContain("ride.smarttransport.tw");
   });
