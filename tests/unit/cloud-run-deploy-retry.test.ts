@@ -126,8 +126,15 @@ describe("Cloud Run deploy quota retry", () => {
 
     expect(
       workflow.match(/scripts\/deploy-cloud-run-service\.sh/g),
-    ).toHaveLength(12);
+    ).toHaveLength(11);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
+    expect(workflow).not.toContain("concierge-portal-web");
+
+    const domainWorkflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/domain-mappings-dev.yml"),
+      "utf8",
+    );
+    expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {
@@ -143,7 +150,6 @@ describe("Cloud Run deploy quota retry", () => {
       "tenant-console-web",
       "bank-console-web",
       "referral-embed-web",
-      "concierge-portal-web",
       "passenger-web",
       "partner-booking-web",
       "enterprise-dispatch-web",
