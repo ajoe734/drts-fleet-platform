@@ -1,10 +1,18 @@
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
+import { redirect } from "next/navigation";
 
-// The referral embed host has no standalone home — it is consumed only through
-// the partner-scoped `/embed/[entrySlug]` webview. This minimal root keeps the
-// service root reachable (health checks) without exposing a consumer surface.
+// A deployed environment may publish one canonical partner entry. In that case
+// the service root opens the real product surface instead of a health-only
+// placeholder. Local development keeps the placeholder when no default is set.
 export default async function ReferralEmbedRootPage() {
+  const defaultEntrySlug =
+    process.env.REFERRAL_EMBED_DEFAULT_ENTRY_SLUG?.trim();
+
+  if (defaultEntrySlug) {
+    redirect(`/embed/${encodeURIComponent(defaultEntrySlug)}`);
+  }
+
   const locale = await getServerLocale();
 
   return (
