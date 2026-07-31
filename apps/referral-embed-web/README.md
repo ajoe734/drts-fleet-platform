@@ -20,9 +20,10 @@ Partners iframe one URL per referral entry:
 https://<referral-embed-host>/embed/<entrySlug>
 ```
 
-- **dev:** `https://drts-dev-referral-embed-web-waji3fer3a-uc.a.run.app/embed/<entrySlug>`
+- **dev canonical:** `https://refer.smarttransport.tw/embed/referral-demo-community`
+- **dev Cloud Run fallback:** `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community`
 - `<entrySlug>` is the partner channel entry slug provisioned in platform-admin
-  (`/partners`), e.g. `yuhe-residence`, `cambridge-community`.
+  (`/partners`). The current dev acceptance slug is `referral-demo-community`.
 
 > **Migration note:** this **supersedes** the old `passenger-web` embed host
 > (`…passenger-web…/embed/<entrySlug>`). Any partner iframe still pointing at the
@@ -33,17 +34,19 @@ https://<referral-embed-host>/embed/<entrySlug>
 
 `/embed/*` is gated by `middleware.ts` against the `REFERRAL_EMBED_ALLOWED_HOSTS`
 env (space/comma-separated host allowlist). A request whose `entryHost` is not on
-the allowlist is denied with `403`. The standalone service root (`/`) is always
-reachable (health checks). Allowlist decision logic is unit-tested in
+the allowlist is denied with `403`. When
+`REFERRAL_EMBED_DEFAULT_ENTRY_SLUG` is set, the service root redirects to that
+canonical entry. Allowlist decision logic is unit-tested in
 `tests/unit/referral-embed-security.test.ts`; the deployed surface is smoke-tested
 by `playwright.referral-embed.config.ts`.
 
 ## Relevant env
 
-| Env                            | Purpose                                                                                |
-| ------------------------------ | -------------------------------------------------------------------------------------- |
-| `REFERRAL_EMBED_ALLOWED_HOSTS` | space/comma-separated allowlist of partner `entryHost`s permitted to iframe `/embed/*` |
-| `REFERRAL_EMBED_DEMO`          | `true` enables the deterministic demo handoff for dev/preview                          |
+| Env                                 | Purpose                                                                                |
+| ----------------------------------- | -------------------------------------------------------------------------------------- |
+| `REFERRAL_EMBED_ALLOWED_HOSTS`      | space/comma-separated allowlist of partner `entryHost`s permitted to iframe `/embed/*` |
+| `REFERRAL_EMBED_DEMO`               | `true` enables the deterministic demo handoff for dev/preview                          |
+| `REFERRAL_EMBED_DEFAULT_ENTRY_SLUG` | optional canonical entry opened from `/`; dev uses `referral-demo-community`           |
 
 ## Local commands
 
