@@ -34,9 +34,12 @@ else
 
   is_domain_not_found=0
 
+  # Escape regex metacharacters in domain for literal matching in ERE
+  domain_escaped="$(printf '%s\n' "$domain" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
+
   # Match specifically when the requested domain is the resource reported as missing
-  if grep -Eiq "Cannot find domain mapping for \\[${domain}\\]" <<<"$cleaned_output" || \
-     grep -Eiq "(Resource|DomainMapping) ['\"]?${domain}['\"]? (was not found|not found)" <<<"$cleaned_output" || \
+  if grep -Eiq "Cannot find domain mapping for \\[${domain_escaped}\\]" <<<"$cleaned_output" || \
+     grep -Eiq "(Resource|DomainMapping) ['\"]?${domain_escaped}['\"]? (was not found|not found)" <<<"$cleaned_output" || \
      (grep -Eiq "(Cannot find domain mapping|DomainMapping|domain-mapping|Resource) .*not found" <<<"$cleaned_output" && grep -Fiq "$domain" <<<"$cleaned_output"); then
     if ! grep -Eiq '(Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$cleaned_output"; then
       is_domain_not_found=1

@@ -2,6 +2,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -26,6 +27,9 @@ function runMapDomain(options: {
   const binDirectory = path.join(directory, "bin");
   mkdirSync(binDirectory);
 
+  const createLogFile = path.join(directory, "create.log");
+  writeFileSync(createLogFile, "");
+
   if (!options.commandNotFound) {
     const mockGcloud = path.join(binDirectory, "gcloud");
     writeFileSync(
@@ -44,6 +48,9 @@ case "$*" in
     exit "\${MOCK_DESCRIBE_EXIT_CODE:-0}"
     ;;
   *"domain-mappings create"*)
+    if [ -n "${"$"}{MOCK_CREATE_LOG_FILE:-}" ]; then
+      printf 'CREATE: %s\\n' "$*" >> "${"$"}{MOCK_CREATE_LOG_FILE}"
+    fi
     printf 'created domain mapping %s\\n' "$*"
     exit 0
     ;;
@@ -69,11 +76,18 @@ esac
         MOCK_DESCRIBE_STDOUT: options.describeStdout ?? "",
         MOCK_DESCRIBE_STDERR: options.describeStderr ?? "",
         MOCK_DESCRIBE_EXIT_CODE: String(options.describeExitCode ?? 0),
+        MOCK_CREATE_LOG_FILE: createLogFile,
       },
     },
   );
 
-  return result;
+  const createLogContent = readFileSync(createLogFile, "utf8").trim();
+  const createInvocationCount = createLogContent ? createLogContent.split("\n").length : 0;
+
+  return {
+    ...result,
+    createInvocationCount,
+  };
 }
 
 afterEach(() => {
@@ -92,6 +106,7 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Domain mapping already targets drts-dev-api; skipping create.");
     expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed if domain mapping points to a different service", () => {
@@ -103,6 +118,7 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Refusing to mutate a live mapping");
     expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
   });
 
   it("creates domain mapping when domain resource is not found (resource format)", () => {
@@ -113,6 +129,7 @@ describe("Cloud Run domain mapping helper", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(1);
   });
 
   it("creates domain mapping when domain resource is not found (bracket format)", () => {
@@ -123,6 +140,7 @@ describe("Cloud Run domain mapping helper", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(1);
   });
 
   it("fails closed without creating when project NOT_FOUND is returned", () => {
@@ -134,6 +152,7 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
     expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when service account NOT_FOUND is returned", () => {
@@ -145,6 +164,7 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
     expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when region NOT_FOUND is returned", () => {
@@ -156,6 +176,19 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
     expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when domain regex metacharacter substitution does not match literally", () => {
+    const result = runMapDomain({
+      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'apiXsmarttransportXtw' was not found.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when command not found happens", () => {
@@ -167,5 +200,7 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
     expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
   });
 });
+
