@@ -111,6 +111,7 @@ import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
+  type DriverCompletionOutboxClaimResult,
   type DriverCompletionOutboxEffectType,
   type DriverCompletionOutboxRecord,
   type DriverTaskCompletionBundleRecord,
@@ -493,14 +494,15 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
       this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(
         this.dispatchTraceLogs,
       );
-      this.startDriverCompletionOutboxRecoveryPolling();
-      void this.recoverDriverCompletionOutbox();
     } catch (error) {
       this.ownedMobilityRepository.reportPersistenceFailure(
         error,
         "module init",
       );
     }
+
+    this.startDriverCompletionOutboxRecoveryPolling();
+    void this.recoverDriverCompletionOutbox();
   }
 
   onModuleDestroy() {
@@ -5193,11 +5195,7 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
         if (!claimed) {
           break;
         }
-        await this.dispatchClaimedDriverCompletionOutbox(
-          claimed,
-          leaseToken,
-          claimed.taskId,
-        );
+        await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
       }
     } catch (error) {
       this.logger.warn(
@@ -5243,22 +5241,32 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      await this.dispatchClaimedDriverCompletionOutbox(
-        claimed,
-        leaseToken,
-        taskId,
-      );
+      await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
     }
+  }
+
+  private async handleClaimedDriverCompletionOutbox(
+    claimed: DriverCompletionOutboxClaimResult,
+    leaseToken: string,
+  ) {
+    if (claimed.action === "dead_letter") {
+      this.logger.warn(
+        `Driver completion outbox dead-lettered after lease recovery for ${claimed.record.effectType} on task ${claimed.record.taskId}.`,
+      );
+      return;
+    }
+
+    await this.dispatchClaimedDriverCompletionOutbox(claimed.record, leaseToken);
   }
 
   private async dispatchClaimedDriverCompletionOutbox(
     claimed: DriverCompletionOutboxRecord,
     leaseToken: string,
-    taskId: string,
   ) {
     try {
       await this.executeDriverCompletionOutboxEffect(claimed);
-      await this.ownedMobilityRepository!.withTransaction((tx) =>
+      const delivered = await this.ownedMobilityRepository!.withTransaction(
+        (tx) =>
         this.ownedMobilityRepository!.markDriverCompletionOutboxDelivered(
           tx,
           claimed.outboxId,
@@ -5266,12 +5274,17 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
           new Date().toISOString(),
         ),
       );
+      if (!delivered) {
+        this.logger.warn(
+          `Driver completion outbox acknowledgement lost its lease for ${claimed.effectType} on task ${claimed.taskId}.`,
+        );
+      }
     } catch (error) {
       const retryAt = new Date(
         Date.now() + DRIVER_COMPLETION_OUTBOX_RETRY_MS,
       ).toISOString();
       const detail = error instanceof Error ? error.message : String(error);
-      await this.ownedMobilityRepository!.withTransaction((tx) =>
+      const released = await this.ownedMobilityRepository!.withTransaction((tx) =>
         this.ownedMobilityRepository!.releaseDriverCompletionOutbox(
           tx,
           claimed.outboxId,
@@ -5281,8 +5294,14 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
           detail,
         ),
       );
+      if (!released) {
+        this.logger.warn(
+          `Driver completion outbox retry release lost its lease for ${claimed.effectType} on task ${claimed.taskId}: ${detail}`,
+        );
+        return;
+      }
       this.logger.warn(
-        `Driver completion outbox delivery failed for ${claimed.effectType} on task ${taskId}: ${detail}`,
+        `Driver completion outbox delivery failed for ${claimed.effectType} on task ${claimed.taskId}: ${detail}`,
       );
     }
   }

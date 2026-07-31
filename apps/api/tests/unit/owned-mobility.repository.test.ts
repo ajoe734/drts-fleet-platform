@@ -217,10 +217,13 @@ describe("OwnedMobilityRepository", () => {
         5,
       ),
     ).resolves.toMatchObject({
-      outboxId: "6b6e7b8a-18d4-5d8b-a7ca-c518aa5084f0",
-      taskId: "task-1",
-      status: "processing",
-      attemptCount: 2,
+      action: "dispatch",
+      record: {
+        outboxId: "6b6e7b8a-18d4-5d8b-a7ca-c518aa5084f0",
+        taskId: "task-1",
+        status: "processing",
+        attemptCount: 2,
+      },
     });
 
     expect(query).toHaveBeenCalledWith(
@@ -235,5 +238,55 @@ describe("OwnedMobilityRepository", () => {
     expect(query.mock.calls[0]?.[0]).toContain(
       "ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC, outbox_id ASC",
     );
+  });
+
+  it("dead-letters an expired final-attempt driver-completion outbox before redispatch", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          outbox_id: "c33f14f6-1cee-5a98-84a1-6fc91580c4ea",
+          task_id: "task-final-1",
+          order_id: "order-final-1",
+          effect_type: "tenant_order_completed_webhook",
+          request_id: "req-final-1",
+          payload: { effectType: "tenant_order_completed_webhook" },
+          status: "dead_letter",
+          attempt_count: 5,
+          next_attempt_at: "2026-07-31T11:59:00.000Z",
+          lease_token: null,
+          leased_until: null,
+          last_error:
+            "Lease expired after the final delivery attempt before acknowledgement.",
+          created_at: "2026-07-31T11:58:00.000Z",
+          delivered_at: null,
+        },
+      ],
+      rowCount: 1,
+    }));
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.claimNextRecoverableDriverCompletionOutbox(
+        { query } as never,
+        "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+        "2026-07-31T12:01:00.000Z",
+        "2026-07-31T12:00:00.000Z",
+        5,
+      ),
+    ).resolves.toMatchObject({
+      action: "dead_letter",
+      record: {
+        outboxId: "c33f14f6-1cee-5a98-84a1-6fc91580c4ea",
+        taskId: "task-final-1",
+        status: "dead_letter",
+        attemptCount: 5,
+      },
+    });
+
+    expect(query.mock.calls[0]?.[0]).toContain("status = 'processing'");
+    expect(query.mock.calls[0]?.[0]).toContain("THEN 'dead_letter'");
   });
 });

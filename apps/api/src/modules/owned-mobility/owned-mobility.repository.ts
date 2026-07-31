@@ -64,6 +64,10 @@ export type DriverCompletionOutboxRecord = {
   deliveredAt: string | null;
 };
 
+export type DriverCompletionOutboxClaimResult =
+  | { action: "dispatch"; record: DriverCompletionOutboxRecord }
+  | { action: "dead_letter"; record: DriverCompletionOutboxRecord };
+
 type OwnedMobilityState = {
   orders: OwnedOrderRecord[];
   dispatchJobs: DispatchJobRecord[];
@@ -571,7 +575,7 @@ export class OwnedMobilityRepository {
     leasedUntil: string,
     now: string,
     maxAttempts: number,
-  ): Promise<DriverCompletionOutboxRecord | null> {
+  ): Promise<DriverCompletionOutboxClaimResult | null> {
     const result = await executor.query<DriverCompletionOutboxRow>(
       `
         WITH candidate AS (
@@ -580,12 +584,15 @@ export class OwnedMobilityRepository {
           WHERE task_id = $1
             AND delivered_at IS NULL
             AND status IN ('pending', 'processing')
-            AND attempt_count < $5
             AND next_attempt_at <= $4::timestamptz
             AND (
               lease_token IS NULL
               OR leased_until IS NULL
               OR leased_until <= $4::timestamptz
+            )
+            AND (
+              (status = 'pending' AND attempt_count < $5)
+              OR status = 'processing'
             )
           ORDER BY next_attempt_at ASC, created_at ASC, outbox_id ASC
           FOR UPDATE SKIP LOCKED
@@ -593,10 +600,33 @@ export class OwnedMobilityRepository {
         )
         UPDATE ops.driver_completion_outbox AS outbox
         SET
-          status = 'processing',
-          attempt_count = outbox.attempt_count + 1,
-          lease_token = $2::uuid,
-          leased_until = $3::timestamptz
+          status = CASE
+            WHEN outbox.attempt_count >= $5 THEN 'dead_letter'
+            ELSE 'processing'
+          END,
+          attempt_count = CASE
+            WHEN outbox.attempt_count >= $5 THEN outbox.attempt_count
+            ELSE outbox.attempt_count + 1
+          END,
+          lease_token = CASE
+            WHEN outbox.attempt_count >= $5 THEN NULL
+            ELSE $2::uuid
+          END,
+          leased_until = CASE
+            WHEN outbox.attempt_count >= $5 THEN NULL
+            ELSE $3::timestamptz
+          END,
+          last_error = CASE
+            WHEN outbox.attempt_count >= $5 THEN
+              left(
+                COALESCE(
+                  outbox.last_error,
+                  'Lease expired after the final delivery attempt before acknowledgement.'
+                ),
+                2000
+              )
+            ELSE outbox.last_error
+          END
         FROM candidate
         WHERE outbox.outbox_id = candidate.outbox_id
         RETURNING
@@ -618,7 +648,13 @@ export class OwnedMobilityRepository {
       [taskId, leaseToken, leasedUntil, now, maxAttempts],
     );
     const row = result.rows[0];
-    return row ? this.mapDriverCompletionOutbox(row) : null;
+    if (!row) {
+      return null;
+    }
+    return {
+      action: row.status === "dead_letter" ? "dead_letter" : "dispatch",
+      record: this.mapDriverCompletionOutbox(row),
+    };
   }
 
   async claimNextRecoverableDriverCompletionOutbox(
@@ -627,7 +663,7 @@ export class OwnedMobilityRepository {
     leasedUntil: string,
     now: string,
     maxAttempts: number,
-  ): Promise<DriverCompletionOutboxRecord | null> {
+  ): Promise<DriverCompletionOutboxClaimResult | null> {
     const result = await executor.query<DriverCompletionOutboxRow>(
       `
         WITH candidate AS (
@@ -635,12 +671,15 @@ export class OwnedMobilityRepository {
           FROM ops.driver_completion_outbox
           WHERE delivered_at IS NULL
             AND status IN ('pending', 'processing')
-            AND attempt_count < $4
             AND next_attempt_at <= $3::timestamptz
             AND (
               lease_token IS NULL
               OR leased_until IS NULL
               OR leased_until <= $3::timestamptz
+            )
+            AND (
+              (status = 'pending' AND attempt_count < $4)
+              OR status = 'processing'
             )
           ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC, outbox_id ASC
           FOR UPDATE SKIP LOCKED
@@ -648,10 +687,33 @@ export class OwnedMobilityRepository {
         )
         UPDATE ops.driver_completion_outbox AS outbox
         SET
-          status = 'processing',
-          attempt_count = outbox.attempt_count + 1,
-          lease_token = $1::uuid,
-          leased_until = $2::timestamptz
+          status = CASE
+            WHEN outbox.attempt_count >= $4 THEN 'dead_letter'
+            ELSE 'processing'
+          END,
+          attempt_count = CASE
+            WHEN outbox.attempt_count >= $4 THEN outbox.attempt_count
+            ELSE outbox.attempt_count + 1
+          END,
+          lease_token = CASE
+            WHEN outbox.attempt_count >= $4 THEN NULL
+            ELSE $1::uuid
+          END,
+          leased_until = CASE
+            WHEN outbox.attempt_count >= $4 THEN NULL
+            ELSE $2::timestamptz
+          END,
+          last_error = CASE
+            WHEN outbox.attempt_count >= $4 THEN
+              left(
+                COALESCE(
+                  outbox.last_error,
+                  'Lease expired after the final delivery attempt before acknowledgement.'
+                ),
+                2000
+              )
+            ELSE outbox.last_error
+          END
         FROM candidate
         WHERE outbox.outbox_id = candidate.outbox_id
         RETURNING
@@ -673,7 +735,13 @@ export class OwnedMobilityRepository {
       [leaseToken, leasedUntil, now, maxAttempts],
     );
     const row = result.rows[0];
-    return row ? this.mapDriverCompletionOutbox(row) : null;
+    if (!row) {
+      return null;
+    }
+    return {
+      action: row.status === "dead_letter" ? "dead_letter" : "dispatch",
+      record: this.mapDriverCompletionOutbox(row),
+    };
   }
 
   async markDriverCompletionOutboxDelivered(
@@ -682,7 +750,7 @@ export class OwnedMobilityRepository {
     leaseToken: string,
     deliveredAt: string,
   ) {
-    await executor.query(
+    const result = await executor.query(
       `
         UPDATE ops.driver_completion_outbox
         SET
@@ -696,6 +764,7 @@ export class OwnedMobilityRepository {
       `,
       [outboxId, leaseToken, deliveredAt],
     );
+    return result.rowCount > 0;
   }
 
   async releaseDriverCompletionOutbox(
@@ -706,7 +775,7 @@ export class OwnedMobilityRepository {
     maxAttempts: number,
     lastError: string,
   ) {
-    await executor.query(
+    const result = await executor.query(
       `
         UPDATE ops.driver_completion_outbox
         SET
@@ -726,6 +795,7 @@ export class OwnedMobilityRepository {
       `,
       [outboxId, leaseToken, nextAttemptAt, maxAttempts, lastError],
     );
+    return result.rowCount > 0;
   }
 
   private async persistChangesWithExecutor(

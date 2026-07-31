@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { HttpStatus } from "@nestjs/common";
+import { HttpStatus, Logger } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -4915,10 +4915,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       withTransaction: vi.fn(async (work) => work({} as never)),
       claimNextRecoverableDriverCompletionOutbox: vi
         .fn()
-        .mockResolvedValueOnce(outbox)
+        .mockResolvedValueOnce({ action: "dispatch", record: outbox })
         .mockResolvedValueOnce(null),
-      markDriverCompletionOutboxDelivered: vi.fn(async () => {}),
-      releaseDriverCompletionOutbox: vi.fn(async () => {}),
+      markDriverCompletionOutboxDelivered: vi.fn(async () => true),
+      releaseDriverCompletionOutbox: vi.fn(async () => true),
       reportPersistenceFailure: vi.fn(),
     };
 
@@ -4946,6 +4946,256 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       expect.any(String),
       expect.any(String),
     );
+    service.onModuleDestroy();
+  });
+
+  it("continues global outbox recovery even when state hydration fails", async () => {
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => {
+        throw new Error("db unavailable");
+      }),
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      claimNextRecoverableDriverCompletionOutbox: vi
+        .fn()
+        .mockResolvedValueOnce(null),
+      markDriverCompletionOutboxDelivered: vi.fn(async () => true),
+      releaseDriverCompletionOutbox: vi.fn(async () => true),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service } = createOwnedMobilityService({ repository });
+
+    await service.onModuleInit();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "module init",
+    );
+    expect(
+      repository.claimNextRecoverableDriverCompletionOutbox,
+    ).toHaveBeenCalledTimes(1);
+    service.onModuleDestroy();
+  });
+
+  it("dead-letters expired final-attempt recovery rows without redispatching effects", async () => {
+    const tenantPartnerService = {
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => ({
+        orders: [],
+        dispatchJobs: [],
+        dispatchAttempts: [],
+        dispatchAssignments: [],
+        driverTasks: [],
+        dispatchTraceLogs: [],
+        passengerDisclosureSnapshots: [],
+        consumerNotificationOutbox: [],
+      })),
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      claimNextRecoverableDriverCompletionOutbox: vi
+        .fn()
+        .mockResolvedValueOnce({
+          action: "dead_letter",
+          record: {
+            outboxId: "outbox-dead-letter-001",
+            taskId: "task-dead-letter-001",
+            orderId: "order-dead-letter-001",
+            effectType: "tenant_order_completed_webhook",
+            requestId: "req-dead-letter-001",
+            payload: {
+              effectType: "tenant_order_completed_webhook",
+              tenantId: "tenant-demo-001",
+              payload: {
+                eventType: "order.completed",
+                orderId: "order-dead-letter-001",
+              },
+            },
+            status: "dead_letter",
+            attemptCount: 5,
+            nextAttemptAt: "2026-07-31T00:00:00.000Z",
+            leaseToken: null,
+            leasedUntil: null,
+            lastError:
+              "Lease expired after the final delivery attempt before acknowledgement.",
+            createdAt: "2026-07-31T00:00:00.000Z",
+            deliveredAt: null,
+          },
+        })
+        .mockResolvedValueOnce(null),
+      markDriverCompletionOutboxDelivered: vi.fn(async () => true),
+      releaseDriverCompletionOutbox: vi.fn(async () => true),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      repository,
+    });
+
+    await service.onModuleInit();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
+    expect(repository.markDriverCompletionOutboxDelivered).not.toHaveBeenCalled();
+    expect(repository.releaseDriverCompletionOutbox).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("dead-lettered after lease recovery"),
+    );
+    warnSpy.mockRestore();
+    service.onModuleDestroy();
+  });
+
+  it("warns when a delivered outbox loses its lease before acknowledgement", async () => {
+    const tenantPartnerService = {
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const outbox = {
+      outboxId: "outbox-stale-ack-001",
+      taskId: "task-stale-ack-001",
+      orderId: "order-stale-ack-001",
+      effectType: "tenant_order_completed_webhook" as const,
+      requestId: "req-stale-ack-001",
+      payload: {
+        effectType: "tenant_order_completed_webhook",
+        tenantId: "tenant-demo-001",
+        payload: {
+          eventType: "order.completed",
+          orderId: "order-stale-ack-001",
+        },
+      },
+      status: "processing" as const,
+      attemptCount: 1,
+      nextAttemptAt: "2026-07-31T00:00:00.000Z",
+      leaseToken: "2b2f6670-d8d0-4c82-af9e-8f75f0275778",
+      leasedUntil: "2026-07-31T00:01:00.000Z",
+      lastError: null,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      deliveredAt: null,
+    };
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => ({
+        orders: [],
+        dispatchJobs: [],
+        dispatchAttempts: [],
+        dispatchAssignments: [],
+        driverTasks: [],
+        dispatchTraceLogs: [],
+        passengerDisclosureSnapshots: [],
+        consumerNotificationOutbox: [],
+      })),
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      claimNextRecoverableDriverCompletionOutbox: vi
+        .fn()
+        .mockResolvedValueOnce({ action: "dispatch", record: outbox })
+        .mockResolvedValueOnce(null),
+      markDriverCompletionOutboxDelivered: vi.fn(async () => false),
+      releaseDriverCompletionOutbox: vi.fn(async () => true),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      repository,
+    });
+
+    await service.onModuleInit();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(tenantPartnerService.publishWebhookEvent).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("acknowledgement lost its lease"),
+    );
+    warnSpy.mockRestore();
+    service.onModuleDestroy();
+  });
+
+  it("warns distinctly when a failed outbox release loses its lease", async () => {
+    const tenantPartnerService = {
+      publishWebhookEvent: vi.fn(async () => {
+        throw new Error("webhook unavailable");
+      }),
+    } as unknown as TenantPartnerService;
+    const outbox = {
+      outboxId: "outbox-stale-release-001",
+      taskId: "task-stale-release-001",
+      orderId: "order-stale-release-001",
+      effectType: "tenant_order_completed_webhook" as const,
+      requestId: "req-stale-release-001",
+      payload: {
+        effectType: "tenant_order_completed_webhook",
+        tenantId: "tenant-demo-001",
+        payload: {
+          eventType: "order.completed",
+          orderId: "order-stale-release-001",
+        },
+      },
+      status: "processing" as const,
+      attemptCount: 1,
+      nextAttemptAt: "2026-07-31T00:00:00.000Z",
+      leaseToken: "2b2f6670-d8d0-4c82-af9e-8f75f0275778",
+      leasedUntil: "2026-07-31T00:01:00.000Z",
+      lastError: null,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      deliveredAt: null,
+    };
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => ({
+        orders: [],
+        dispatchJobs: [],
+        dispatchAttempts: [],
+        dispatchAssignments: [],
+        driverTasks: [],
+        dispatchTraceLogs: [],
+        passengerDisclosureSnapshots: [],
+        consumerNotificationOutbox: [],
+      })),
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      claimNextRecoverableDriverCompletionOutbox: vi
+        .fn()
+        .mockResolvedValueOnce({ action: "dispatch", record: outbox })
+        .mockResolvedValueOnce(null),
+      markDriverCompletionOutboxDelivered: vi.fn(async () => true),
+      releaseDriverCompletionOutbox: vi.fn(async () => false),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      repository,
+    });
+
+    await service.onModuleInit();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(repository.releaseDriverCompletionOutbox).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("retry release lost its lease"),
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("delivery failed"),
+    );
+    warnSpy.mockRestore();
     service.onModuleDestroy();
   });
 
