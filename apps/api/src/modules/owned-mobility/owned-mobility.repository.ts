@@ -58,6 +58,12 @@ type PersistOwnedMobilityChanges = {
   consumerNotificationOutbox?: readonly ConsumerNotificationOutboxRecord[];
 };
 
+export type DriverTaskCompletionBundleRecord = {
+  order: OwnedOrderRecord;
+  assignment: DispatchAssignmentRecord;
+  task: DriverTaskRecord;
+};
+
 @Injectable()
 export class OwnedMobilityRepository {
   private readonly logger = new Logger(OwnedMobilityRepository.name);
@@ -371,6 +377,97 @@ export class OwnedMobilityRepository {
       aggregateVersion: row.aggregate_version,
       calculatedAt: new Date(row.calculated_at).toISOString(),
     };
+  }
+
+  async loadDriverTaskCompletionBundleForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    taskId: string,
+  ): Promise<DriverTaskCompletionBundleRecord | null> {
+    const taskResult = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_driver_tasks
+        WHERE task_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [taskId],
+    );
+    const taskRow = taskResult.rows[0];
+    if (!taskRow) {
+      return null;
+    }
+    const task = this.parseRecord<DriverTaskRecord>(
+      taskRow.record,
+      "ops.phase1_driver_tasks",
+    );
+
+    const assignmentResult = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_dispatch_assignments
+        WHERE assignment_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [task.assignmentId],
+    );
+    const assignmentRow = assignmentResult.rows[0];
+    if (!assignmentRow) {
+      throw new Error(
+        `Dispatch assignment ${task.assignmentId} missing for driver task ${taskId}.`,
+      );
+    }
+    const assignment = this.parseRecord<DispatchAssignmentRecord>(
+      assignmentRow.record,
+      "ops.phase1_dispatch_assignments",
+    );
+
+    const orderResult = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_owned_orders
+        WHERE order_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [task.orderId],
+    );
+    const orderRow = orderResult.rows[0];
+    if (!orderRow) {
+      throw new Error(
+        `Owned order ${task.orderId} missing for driver task ${taskId}.`,
+      );
+    }
+    const order = this.parseRecord<OwnedOrderRecord>(
+      orderRow.record,
+      "ops.phase1_owned_orders",
+    );
+
+    return { order, assignment, task };
+  }
+
+  async hasDriverTaskTraceRequestId(
+    executor: OwnedMobilityQueryExecutor,
+    orderId: string,
+    taskId: string,
+    eventType: string,
+    requestId: string,
+  ) {
+    const result = await executor.query<{ matched: boolean }>(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM ops.phase1_dispatch_trace_logs
+          WHERE order_id = $1
+            AND event_type = $2
+            AND record -> 'details' ->> 'taskId' = $3
+            AND record -> 'details' ->> 'requestId' = $4
+        ) AS matched
+      `,
+      [orderId, eventType, taskId, requestId],
+    );
+    return result.rows[0]?.matched === true;
   }
 
   private async persistChangesWithExecutor(
