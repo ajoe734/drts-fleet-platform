@@ -7,6 +7,16 @@
 -- global poller.
 
 ALTER TABLE ops.driver_completion_outbox
+  DROP CONSTRAINT IF EXISTS driver_completion_outbox_task_id_fkey,
+  DROP CONSTRAINT IF EXISTS driver_completion_outbox_order_id_fkey;
+
+ALTER TABLE ops.driver_completion_outbox
+  ADD CONSTRAINT driver_completion_outbox_task_id_fkey
+    FOREIGN KEY (task_id) REFERENCES ops.phase1_driver_tasks(task_id) ON DELETE RESTRICT,
+  ADD CONSTRAINT driver_completion_outbox_order_id_fkey
+    FOREIGN KEY (order_id) REFERENCES ops.phase1_owned_orders(order_id) ON DELETE RESTRICT;
+
+ALTER TABLE ops.driver_completion_outbox
   DROP CONSTRAINT IF EXISTS driver_completion_outbox_delivery_state_chk;
 
 ALTER TABLE ops.driver_completion_outbox

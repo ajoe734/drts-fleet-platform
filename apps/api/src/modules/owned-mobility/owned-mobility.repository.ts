@@ -110,13 +110,23 @@ type DriverCompletionOutboxRow = QueryResultRow & {
 };
 
 @Injectable()
-export class OwnedMobilityRepository {
+export class OwnedMobilityRepository implements OwnedMobilityQueryExecutor {
   private readonly logger = new Logger(OwnedMobilityRepository.name);
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>> {
+    if (!this.databaseService?.isEnabled()) {
+      return { rows: [], command: "", rowCount: 0, oid: 0, fields: [] };
+    }
+    return this.databaseService.query<T>(text, values);
   }
 
   async findOrderById(orderId: string): Promise<OwnedOrderRecord | null> {
