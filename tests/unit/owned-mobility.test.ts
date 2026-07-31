@@ -250,7 +250,7 @@ describe("owned mobility service", () => {
     ownedMobilityService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-10T09:10:00Z",
     });
-    const completedTask = ownedMobilityService.completeDriverTask(
+    const completedTask = await ownedMobilityService.completeDriverTask(
       assignment.taskId,
       {
         completedAt: "2026-04-10T09:45:00Z",

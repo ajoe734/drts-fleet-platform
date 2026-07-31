@@ -7,13 +7,21 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(__dirname, "../..");
-const adminUrl = "postgresql://postgres:postgres@localhost:5432/postgres";
 const toolDir = mkdtempSync(path.join(os.tmpdir(), "db-apply-test-"));
 const localPsqlPath = execFileSync("bash", ["-lc", "command -v psql || true"], {
   cwd: repoRoot,
   encoding: "utf8",
   stdio: "pipe",
 }).trim();
+const fallbackDatabaseUrl =
+  process.env.DATABASE_URL ??
+  `postgresql://${process.env.POSTGRES_USER ?? "postgres"}:${process.env.POSTGRES_PASSWORD ?? "postgres"}@${process.env.POSTGRES_HOST ?? "localhost"}:${process.env.POSTGRES_PORT ?? "5432"}/drts_fleet_platform`;
+const fallbackUrl = new URL(fallbackDatabaseUrl);
+const postgresUser = fallbackUrl.username || "postgres";
+const postgresPassword = fallbackUrl.password || "postgres";
+const postgresHost = fallbackUrl.hostname || "localhost";
+const postgresPort = fallbackUrl.port || "5432";
+const adminUrl = `postgresql://${postgresUser}:${postgresPassword}@${postgresHost}:${postgresPort}/postgres`;
 
 function bash(command: string, env: NodeJS.ProcessEnv = {}) {
   return execFileSync("bash", ["-lc", command], {
@@ -37,11 +45,11 @@ function checksum(relativePath: string) {
 function psqlCommand(databaseUrl: string, sql: string) {
   return [
     "if command -v psql >/dev/null 2>&1; then",
-    `  PGPASSWORD=postgres psql "${databaseUrl}" -v ON_ERROR_STOP=1 -At <<'SQL'`,
+    `  PGPASSWORD="${postgresPassword}" psql "${databaseUrl}" -v ON_ERROR_STOP=1 -At <<'SQL'`,
     sql,
     "SQL",
     "else",
-    "  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD=postgres postgres \\",
+    `  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD="${postgresPassword}" postgres \\`,
     `    psql "${databaseUrl}" -v ON_ERROR_STOP=1 -At <<'SQL'`,
     sql,
     "SQL",
@@ -51,7 +59,7 @@ function psqlCommand(databaseUrl: string, sql: string) {
 
 describe("db-apply legacy migration canonicalization", () => {
   const dbName = `drts_e2e_fix_d_${process.pid}_${Date.now()}`;
-  const databaseUrl = `postgresql://postgres:postgres@localhost:5432/${dbName}`;
+  const databaseUrl = `postgresql://${postgresUser}:${postgresPassword}@${postgresHost}:${postgresPort}/${dbName}`;
 
   beforeAll(() => {
     writeFileSync(
@@ -80,9 +88,9 @@ describe("db-apply legacy migration canonicalization", () => {
         `  exec "${localPsqlPath}" "\${args[@]}"`,
         "fi",
         'if [[ -n "$file" ]]; then',
-        `  exec docker compose -f "${repoRoot}/docker-compose.dev.yml" exec -T -e PGPASSWORD="\${PGPASSWORD:-postgres}" postgres psql "\${args[@]}" < "$file"`,
+        `  exec docker compose -f "${repoRoot}/docker-compose.dev.yml" exec -T -e PGPASSWORD="\${PGPASSWORD:-${postgresPassword}}" postgres psql "\${args[@]}" < "$file"`,
         "fi",
-        `exec docker compose -f "${repoRoot}/docker-compose.dev.yml" exec -T -e PGPASSWORD="\${PGPASSWORD:-postgres}" postgres psql "\${args[@]}"`,
+        `exec docker compose -f "${repoRoot}/docker-compose.dev.yml" exec -T -e PGPASSWORD="\${PGPASSWORD:-${postgresPassword}}" postgres psql "\${args[@]}"`,
       ].join("\n"),
       { mode: 0o755 },
     );
@@ -92,9 +100,9 @@ describe("db-apply legacy migration canonicalization", () => {
     bash(
       [
         "if command -v psql >/dev/null 2>&1; then",
-        `  PGPASSWORD=postgres psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};"`,
+        `  PGPASSWORD="${postgresPassword}" psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};"`,
         "else",
-        "  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD=postgres postgres \\",
+        `  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD="${postgresPassword}" postgres \\`,
         `    psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};"`,
         "fi",
       ].join("\n"),
@@ -127,9 +135,9 @@ describe("db-apply legacy migration canonicalization", () => {
     bash(
       [
         "if command -v psql >/dev/null 2>&1; then",
-        `  PGPASSWORD=postgres psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
+        `  PGPASSWORD="${postgresPassword}" psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
         "else",
-        "  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD=postgres postgres \\",
+        `  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD="${postgresPassword}" postgres \\`,
         `    psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
         "fi",
       ].join("\n"),
