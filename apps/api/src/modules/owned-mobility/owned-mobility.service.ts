@@ -4673,12 +4673,19 @@ export class OwnedMobilityService
       driverTasks: [this.cloneTask(task)],
       dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
     });
+    const dispatchJob =
+      params.bundle.dispatchJob ??
+      this.dispatchJobs.find((job) => job.orderId === order.orderId) ??
+      null;
+
     await this.persistDriverCompletionOutbox(tx, {
       order,
       assignment,
       task,
+      dispatchJob,
       requestId: params.requestId ?? null,
       certificateEvent,
+      quotaConsumption,
     });
 
     return {
@@ -5111,8 +5118,10 @@ export class OwnedMobilityService
       order: OwnedOrderRecord;
       assignment: DispatchAssignmentRecord;
       task: DriverTaskRecord;
+      dispatchJob?: DispatchJobRecord | null;
       requestId: string | null;
       certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+      quotaConsumption?: TenantQuotaConsumptionCommitResult | null;
     },
   ) {
     const payloads = this.buildDriverCompletionOutboxPayloads(input);
@@ -5148,6 +5157,7 @@ export class OwnedMobilityService
     order: OwnedOrderRecord;
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord;
+    dispatchJob?: DispatchJobRecord | null;
     requestId: string | null;
     certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
     quotaConsumption?: TenantQuotaConsumptionCommitResult | null;
@@ -5230,9 +5240,10 @@ export class OwnedMobilityService
       auditEntries.push(...quotaAudits);
     }
 
-    const dispatchJob = this.dispatchJobs.find(
-      (job) => job.orderId === input.order.orderId,
-    );
+    const dispatchJob =
+      input.dispatchJob ??
+      this.dispatchJobs.find((job) => job.orderId === input.order.orderId) ??
+      null;
 
     payloads.push({
       effectType: "completion_audit_bundle",
@@ -5353,7 +5364,6 @@ export class OwnedMobilityService
           claimed = (await repo.withTransaction((tx: any) =>
             repo.claimNextDriverCompletionOutbox(
               tx,
-              "",
               leaseToken,
               leasedUntil,
               now.toISOString(),
@@ -5542,24 +5552,25 @@ export class OwnedMobilityService
             DriverCompletionOutboxPayload,
             { effectType: "driver_task_updated" }
           >;
-        if (this.ownedMobilityTaskEventsService) {
-          const eventId = generateDeterministicUuid(
-            "driver-task-updated-event",
+        if (!this.ownedMobilityTaskEventsService) {
+          throw new Error("Driver task events service unavailable.");
+        }
+        const eventId = generateDeterministicUuid(
+          "driver-task-updated-event",
+          outbox.outboxId,
+        );
+        const correlationId =
+          payload.requestId ??
+          generateDeterministicUuid(
+            "driver-task-updated-correlation",
             outbox.outboxId,
           );
-          const correlationId =
-            payload.requestId ??
-            generateDeterministicUuid(
-              "driver-task-updated-correlation",
-              outbox.outboxId,
-            );
-          await this.ownedMobilityTaskEventsService.publishTaskUpdated(
-            payload.task,
-            payload.order,
-            payload.requestId ?? undefined,
-            { eventId, correlationId },
-          );
-        }
+        await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+          payload.task,
+          payload.order,
+          payload.requestId ?? undefined,
+          { eventId, correlationId },
+        );
         return;
       }
       case "ops_dispatch_job_updated": {
@@ -5568,12 +5579,12 @@ export class OwnedMobilityService
             DriverCompletionOutboxPayload,
             { effectType: "ops_dispatch_job_updated" }
           >;
-        const dispatchJob =
-          payload.dispatchJob ??
-          this.dispatchJobs.find((job) => job.orderId === payload.orderId) ??
-          null;
+        if (!this.opsDispatchEventsService) {
+          throw new Error("Ops dispatch events service unavailable.");
+        }
+        const dispatchJob = payload.dispatchJob ?? null;
 
-        if (dispatchJob && this.opsDispatchEventsService) {
+        if (dispatchJob) {
           const eventId = generateDeterministicUuid(
             "ops-dispatch-job-updated-event",
             outbox.outboxId,
