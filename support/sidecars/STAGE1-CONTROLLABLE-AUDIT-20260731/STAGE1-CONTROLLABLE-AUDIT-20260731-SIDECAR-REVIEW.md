@@ -1,7 +1,7 @@
 # STAGE1-CONTROLLABLE-AUDIT-20260731 Sidecar Review Packet
 
 > **Parent Task:** `STAGE1-CONTROLLABLE-AUDIT-20260731`
-> **Parent Owner / Reviewer:** `Codex` / `Claude`
+> **Parent Owner / Reviewer:** `Codex` / `Codex2`
 > **Sidecar Owner / Reviewer:** `Codex2` / `Codex`
 > **Helper Kind:** `review_packet`
 > **Mutates Canonical:** `false`
@@ -16,9 +16,10 @@ This packet is a support artifact only. It does not modify L1 product truth, run
 
 ### 1.1 Shared-truth status
 
-- Parent task `STAGE1-CONTROLLABLE-AUDIT-20260731` is currently `review`.
-- Parent owner is `Codex`; parent reviewer is `Claude`.
-- This sidecar task `STAGE1-CONTROLLABLE-AUDIT-20260731-SIDECAR-REVIEW` is `in_progress` while this packet is being assembled, with owner `Codex2` and reviewer `Codex`.
+- As of `2026-07-31` machine truth currently reports parent task `STAGE1-CONTROLLABLE-AUDIT-20260731` as `in_progress`.
+- As of `2026-07-31` machine truth currently reports parent owner / reviewer as `Codex` / `Codex2`.
+- As of `2026-07-31` machine truth currently reports this sidecar task `STAGE1-CONTROLLABLE-AUDIT-20260731-SIDECAR-REVIEW` as `in_progress`, with owner `Codex2` and reviewer `Codex`.
+- Earlier parent handoff evidence in this packet is historical and remains cited with its original timestamps rather than restated as current status.
 
 ### 1.2 Why this packet is needed
 
@@ -44,11 +45,11 @@ This packet is a support artifact only. It does not modify L1 product truth, run
 | Time (UTC) | Source | Meaning |
 | --- | --- | --- |
 | `2026-07-31T14:46:46Z` | parent commit metadata | `Codex` created commit `48d319fe` titled `STAGE1-CONTROLLABLE-AUDIT-20260731: add controllable Stage 1 audit report`. |
-| `2026-07-31T14:46:59Z` | `scripts/ai-status.sh show STAGE1-CONTROLLABLE-AUDIT-20260731` | Parent task entered `review` with a handoff summary citing `origin/dev` HEAD, GitHub issues `#71-#74`, GitHub variables, latest dev deploy run, and live URL probes. |
+| `2026-07-31T14:46:59Z` | parent handoff record summarized in this packet | At that timestamp the parent task was handed to review with a summary citing `origin/dev` HEAD, GitHub issues `#71-#74`, GitHub variables, latest dev deploy run, and live URL probes. |
 | `2026-07-31T14:50:05Z` | `scripts/ai-status.sh show STAGE1-CONTROLLABLE-AUDIT-20260731-SIDECAR-REVIEW` | This sidecar helper was created to prepare a review packet and evidence summary. |
 | `2026-07-31T14:50:35Z` | `AI_NAME=Codex2 scripts/ai-status.sh start ...` | Sidecar owner moved this helper to `in_progress` to produce the packet below. |
 
-The practical implication is simple: sidecar review should validate that the support packet accurately points to the parent audit evidence and does not overstate what exists on this branch.
+The practical implication is simple: sidecar review should validate that the support packet accurately points to the parent audit evidence, distinguishes historical handoff moments from current machine truth, and does not overstate what exists on this branch.
 
 ---
 
@@ -117,7 +118,7 @@ The assigned reviewer for this helper should review the sidecar as a support-onl
 
 Suggested review order:
 
-1. Confirm machine-truth state and reviewer routing for the parent and sidecar tasks.
+1. Confirm current machine-truth state and reviewer routing for the parent and sidecar tasks.
 2. Confirm the parent branch `origin/codex/stage1-controllable-audit-20260731` exists at `48d319fe`.
 3. Spot-check the parent audit file at that commit and verify that the gap summary in section 3 is faithful.
 4. Confirm the sidecar branch only introduces this support artifact.
