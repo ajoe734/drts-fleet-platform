@@ -66,7 +66,13 @@ esac
 
   const result = spawnSync(
     "bash",
-    [mapScript, "api.smarttransport.tw", "drts-dev-api", "us-central1", "drts-dev-ray-tw-20260730"],
+    [
+      mapScript,
+      "api.smarttransport.tw",
+      "drts-dev-api",
+      "us-central1",
+      "drts-dev-ray-tw-20260730",
+    ],
     {
       cwd: repoRoot,
       encoding: "utf8",
@@ -82,7 +88,9 @@ esac
   );
 
   const createLogContent = readFileSync(createLogFile, "utf8").trim();
-  const createInvocationCount = createLogContent ? createLogContent.split("\n").length : 0;
+  const createInvocationCount = createLogContent
+    ? createLogContent.split("\n").length
+    : 0;
 
   return {
     ...result,
@@ -104,7 +112,9 @@ describe("Cloud Run domain mapping helper", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Domain mapping already targets drts-dev-api; skipping create.");
+    expect(result.stdout).toContain(
+      "Domain mapping already targets drts-dev-api; skipping create.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
@@ -123,7 +133,8 @@ describe("Cloud Run domain mapping helper", () => {
 
   it("creates domain mapping when domain resource is not found (resource format)", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' was not found.",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' was not found.",
       describeExitCode: 1,
     });
 
@@ -134,7 +145,8 @@ describe("Cloud Run domain mapping helper", () => {
 
   it("creates domain mapping when domain resource is not found (bracket format)", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Cannot find domain mapping for [api.smarttransport.tw].",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Cannot find domain mapping for [api.smarttransport.tw].",
       describeExitCode: 1,
     });
 
@@ -145,48 +157,60 @@ describe("Cloud Run domain mapping helper", () => {
 
   it("fails closed without creating when project NOT_FOUND is returned", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Project [invalid-project] not found.",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Project [invalid-project] not found.",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when service account NOT_FOUND is returned", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Service account [sa@project.iam.gserviceaccount.com] not found.",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Service account [sa@project.iam.gserviceaccount.com] not found.",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when region NOT_FOUND is returned", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Region [moon-1] not found.",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Region [moon-1] not found.",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when domain regex metacharacter substitution does not match literally", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'apiXsmarttransportXtw' was not found.",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'apiXsmarttransportXtw' was not found.",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
@@ -198,68 +222,127 @@ describe("Cloud Run domain mapping helper", () => {
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when INTERNAL error is returned even if requested domain is mentioned", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) INTERNAL: An internal error occurred for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) INTERNAL: An internal error occurred for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when INVALID_ARGUMENT error is returned even if requested domain is mentioned", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) INVALID_ARGUMENT: Invalid domain api.smarttransport.tw. Resource 'api.smarttransport.tw' was not found.",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) INVALID_ARGUMENT: Invalid domain api.smarttransport.tw. Resource 'api.smarttransport.tw' was not found.",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when UNKNOWN error is returned even if requested domain is mentioned", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) UNKNOWN: An unknown error occurred for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) UNKNOWN: An unknown error occurred for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when ABORTED error is returned even if requested domain is mentioned", () => {
     const result = runMapDomain({
-      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) ABORTED: Operation aborted for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) ABORTED: Operation aborted for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
 
   it("fails closed without creating when gcloud domain-mappings describe command header is missing", () => {
     const result = runMapDomain({
-      describeStderr: "NOT_FOUND: Cannot find domain mapping for [api.smarttransport.tw].",
+      describeStderr:
+        "NOT_FOUND: Cannot find domain mapping for [api.smarttransport.tw].",
       describeExitCode: 1,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when WARNING prefix precedes NOT_FOUND header", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "WARNING: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' was not found.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when NOT_FOUND header is for unrelated-backend resource while mentioning requested domain elsewhere", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'unrelated-backend' was not found. Requested domain api.smarttransport.tw.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("creates domain mapping when valid requested-domain NOT_FOUND is returned", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' was not found.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(1);
   });
 });

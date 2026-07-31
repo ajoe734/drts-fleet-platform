@@ -31,19 +31,18 @@ if [ "$describe_status" -eq 0 ]; then
 else
   is_domain_not_found=0
 
-  # Positively require exact domain-mappings.describe NOT_FOUND header
-  if grep -Eq '(\(gcloud\.beta\.run\.domain-mappings\.describe\)|gcloud\.beta\.run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:' <<<"$describe_output"; then
-    # Extract body strictly after the NOT_FOUND: header
-    body_output="$(sed -nE 's/.*(\(gcloud\.beta\.run\.domain-mappings\.describe\)|gcloud\.beta\.run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
+  # Positively require exact domain-mappings.describe NOT_FOUND header anchored to ^ERROR:
+  if grep -Eq '^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:' <<<"$describe_output"; then
+    # Extract body strictly after the ^ERROR: ... NOT_FOUND: header
+    body_output="$(sed -nE 's/^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
     if [ -z "$body_output" ]; then
-      body_output="$(sed -nE 's/.*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
+      body_output="$(sed -nE 's/^ERROR: [^:]*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
     fi
 
     domain_escaped="$(printf '%s\n' "$domain" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
 
-    if grep -Eiq "Cannot find domain mapping for \[${domain_escaped}\]" <<<"$body_output" || \
-       grep -Eiq "(Resource|DomainMapping) ['\"]?${domain_escaped}['\"]? (was not found|not found)" <<<"$body_output" || \
-       (grep -Eiq "(Cannot find domain mapping|DomainMapping|domain-mapping|Resource) .*not found" <<<"$body_output" && grep -Fiq "$domain" <<<"$body_output"); then
+    if grep -Eiq "Cannot find domain mapping (for )?[^a-zA-Z0-9]?${domain_escaped}[^a-zA-Z0-9]?" <<<"$body_output" || \
+       grep -Eiq "(Resource|DomainMapping|Domain mapping)[[:space:]]+[^a-zA-Z0-9]?${domain_escaped}[^a-zA-Z0-9]?[[:space:]]+(was not found|not found)" <<<"$body_output"; then
       if ! grep -Eiq '(Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$body_output"; then
         is_domain_not_found=1
       fi
