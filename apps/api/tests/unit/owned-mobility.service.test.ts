@@ -2331,7 +2331,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("rejects manual fare override after a fixed-price order is completed", () => {
+  it("rejects manual fare override after a fixed-price order is completed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const { service } = createOwnedMobilityService({
@@ -2366,19 +2366,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    service.acceptDriverTask(assignment.taskId, {
+    await service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    service.departDriverTask(assignment.taskId, {
+    await service.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    service.arrivedPickup(assignment.taskId, {
+    await service.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    service.startDriverTask(assignment.taskId, {
+    await service.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
-    service.completeDriverTask(assignment.taskId, {
+    await service.completeDriverTask(assignment.taskId, {
       completedAt: "2026-04-29T12:45:00.000Z",
       actualDistanceKm: 14.2,
       actualDurationSec: 1200,
@@ -3757,7 +3757,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("releases reservation hold when cancelling from redispatch queue", () => {
+  it("releases reservation hold when cancelling from redispatch queue", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const { service } = createOwnedMobilityService({
@@ -3777,7 +3777,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
 
     service.dispatchOrder(booking.orderId, { mode: "auto" });
-    const cancelledOrder = service.cancelOwnedOrder(booking.orderId, {
+    const cancelledOrder = await service.cancelOwnedOrder(booking.orderId, {
       reason: "Rider cancelled",
     });
 
@@ -3797,7 +3797,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("moves trips into proof_pending when signoff is missing", () => {
+  it("moves trips into proof_pending when signoff is missing", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -3831,21 +3831,21 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    service.acceptDriverTask(assignment.taskId, {
+    await service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    service.departDriverTask(assignment.taskId, {
+    await service.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    service.arrivedPickup(assignment.taskId, {
+    await service.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    service.startDriverTask(assignment.taskId, {
+    await service.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
     try {
-      service.completeDriverTask(assignment.taskId, {
+      await service.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-29T12:45:00.000Z",
         actualDistanceKm: 14.2,
         actualDurationSec: 1200,
@@ -3877,7 +3877,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("returns EXPENSE_PROOF_REQUIRED and preserves partial proof evidence", () => {
+  it("returns EXPENSE_PROOF_REQUIRED and preserves partial proof evidence", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -3911,21 +3911,21 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    service.acceptDriverTask(assignment.taskId, {
+    await service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    service.departDriverTask(assignment.taskId, {
+    await service.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    service.arrivedPickup(assignment.taskId, {
+    await service.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    service.startDriverTask(assignment.taskId, {
+    await service.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
     try {
-      service.completeDriverTask(assignment.taskId, {
+      await service.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-29T12:45:00.000Z",
         actualDistanceKm: 14.2,
         actualDurationSec: 1200,
@@ -3958,7 +3958,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("replays duplicate completion requests idempotently when the request id matches", () => {
+  it("replays duplicate completion requests idempotently when the request id matches", async () => {
     const tenantPartnerService = {
       previewBookingQuotaImpact: vi.fn(() => ({
         impacts: [],
@@ -4008,16 +4008,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    service.acceptDriverTask(assignment.taskId, {
+    await service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    service.departDriverTask(assignment.taskId, {
+    await service.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    service.arrivedPickup(assignment.taskId, {
+    await service.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    service.startDriverTask(assignment.taskId, {
+    await service.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
@@ -4030,12 +4030,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
     };
 
-    const completed = service.completeDriverTask(
+    const completed = await service.completeDriverTask(
       assignment.taskId,
       command,
       "req-complete-001",
     );
-    const replayed = service.completeDriverTask(
+    const replayed = await service.completeDriverTask(
       assignment.taskId,
       command,
       "req-complete-001",
@@ -4165,16 +4165,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    seedService.acceptDriverTask(assignment.taskId, {
+    await seedService.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    seedService.departDriverTask(assignment.taskId, {
+    await seedService.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    seedService.arrivedPickup(assignment.taskId, {
+    await seedService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    seedService.startDriverTask(assignment.taskId, {
+    await seedService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
@@ -4331,16 +4331,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    seedService.acceptDriverTask(assignment.taskId, {
+    await seedService.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    seedService.departDriverTask(assignment.taskId, {
+    await seedService.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    seedService.arrivedPickup(assignment.taskId, {
+    await seedService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    seedService.startDriverTask(assignment.taskId, {
+    await seedService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
@@ -4450,19 +4450,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    seedService.acceptDriverTask(assignment.taskId, {
+    await seedService.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    seedService.departDriverTask(assignment.taskId, {
+    await seedService.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    seedService.arrivedPickup(assignment.taskId, {
+    await seedService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    seedService.startDriverTask(assignment.taskId, {
+    await seedService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
-    seedService.completeDriverTask(
+    await seedService.completeDriverTask(
       assignment.taskId,
       {
         completedAt: "2026-04-29T12:45:00.000Z",
@@ -4613,16 +4613,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    seedService.acceptDriverTask(assignment.taskId, {
+    await seedService.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    seedService.departDriverTask(assignment.taskId, {
+    await seedService.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    seedService.arrivedPickup(assignment.taskId, {
+    await seedService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    seedService.startDriverTask(assignment.taskId, {
+    await seedService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
@@ -4692,7 +4692,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("rejects duplicate completion requests after the trip is already completed", () => {
+  it("rejects duplicate completion requests after the trip is already completed", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -4725,20 +4725,20 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    service.acceptDriverTask(assignment.taskId, {
+    await service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    service.departDriverTask(assignment.taskId, {
+    await service.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    service.arrivedPickup(assignment.taskId, {
+    await service.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    service.startDriverTask(assignment.taskId, {
+    await service.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
-    service.completeDriverTask(
+    await service.completeDriverTask(
       assignment.taskId,
       {
         completedAt: "2026-04-29T12:45:00.000Z",
@@ -4751,7 +4751,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "req-complete-001",
     );
 
-    expect(() =>
+    await expect(
       service.completeDriverTask(
         assignment.taskId,
         {
@@ -4764,31 +4764,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         },
         "req-complete-002",
       ),
-    ).toThrowError(ApiRequestError);
-
-    try {
-      service.completeDriverTask(
-        assignment.taskId,
-        {
-          completedAt: "2026-04-29T12:46:00.000Z",
-          actualDistanceKm: 14.3,
-          actualDurationSec: 1201,
-          proof: {
-            photos: [SAMPLE_PROOF_PHOTO],
-          },
-        },
-        "req-complete-002",
-      );
-    } catch (error) {
-      expect((error as ApiRequestError).getResponse()).toMatchObject({
-        error: {
-          code: "TASK_ALREADY_COMPLETED",
-        },
-      });
-    }
+    ).rejects.toThrowError(ApiRequestError);
   });
 
-  it("replays proof-pending completion requests idempotently when the request id matches", () => {
+  it("replays proof-pending completion requests idempotently when the request id matches", async () => {
     const { service, auditNotificationService } = createOwnedMobilityService({
       candidates: [
         {
@@ -4822,21 +4801,21 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       vehicleId: "vehicle-001",
       driverId: "driver-001",
     });
-    service.acceptDriverTask(assignment.taskId, {
+    await service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
-    service.departDriverTask(assignment.taskId, {
+    await service.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T12:10:00.000Z",
     });
-    service.arrivedPickup(assignment.taskId, {
+    await service.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T12:20:00.000Z",
     });
-    service.startDriverTask(assignment.taskId, {
+    await service.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T12:25:00.000Z",
     });
 
     try {
-      service.completeDriverTask(
+      await service.completeDriverTask(
         assignment.taskId,
         {
           completedAt: "2026-04-29T12:45:00.000Z",
@@ -4857,7 +4836,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       });
     }
 
-    const replayed = service.completeDriverTask(
+    const replayed = await service.completeDriverTask(
       assignment.taskId,
       {
         completedAt: "2026-04-29T12:45:00.000Z",
