@@ -32,7 +32,7 @@ jq \
 http_call POST "/tenant/invoices/generate" "$FIXTURE_TMP"
 assert_status "200|201"
 
-INVOICE_ID=$(json_get ".data.invoiceId")
+INVOICE_ID=$(json_get_first ".data.invoiceId" ".data.invoice_id")
 if [[ -z "$INVOICE_ID" ]]; then
   log_fail "No invoiceId in response: ${RESP_BODY}"
   exit 1
