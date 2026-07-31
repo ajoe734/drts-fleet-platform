@@ -27,12 +27,20 @@ set -e
 existing_service=""
 
 if [ "$describe_status" -eq 0 ]; then
+  if [ -z "$describe_output" ] || [[ "$describe_output" == *$'\n'* ]] || \
+    ! [[ "$describe_output" =~ ^[a-z]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    echo "Fatal error describing domain mapping for ${domain}: expected exactly one non-empty Cloud Run service name, got:" >&2
+    echo "$describe_output" >&2
+    echo "Refusing to create a domain mapping from an empty, multiline, or malformed describe result." >&2
+    exit 1
+  fi
   existing_service="$describe_output"
 else
   is_domain_not_found=0
 
   # Positively require exact domain-mappings.describe NOT_FOUND header anchored at byte zero of describe_output
-  if [[ "$describe_output" =~ ^ERROR:[[:space:]]*(\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND: ]]; then
+  if [[ "$describe_output" != *$'\n'* ]] && \
+    [[ "$describe_output" =~ ^ERROR:[[:space:]]*(\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND: ]]; then
     first_line="${describe_output%%$'\n'*}"
     body_output="$(sed -nE 's/^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:[[:space:]]*//p' <<<"$first_line")"
     if [ -z "$body_output" ]; then
@@ -40,13 +48,28 @@ else
     fi
 
     domain_escaped="$(printf '%s\n' "$domain" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
+    region_escaped="$(printf '%s\n' "$region" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
+    project_escaped="$(printf '%s\n' "$project" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
 
-    # Require exact paired delimiter ('domain', "domain", [domain]) or end boundary not bounded by domain chars [a-zA-Z0-9.-]
-    domain_pattern="('${domain_escaped}'|\"${domain_escaped}\"|\\[${domain_escaped}\\]|(^|[^a-zA-Z0-9.-])${domain_escaped}($|[^a-zA-Z0-9.-]))"
+    domain_pattern="('${domain_escaped}'|\"${domain_escaped}\"|\\[${domain_escaped}\\]|${domain_escaped})"
+    region_pattern="('${region_escaped}'|\"${region_escaped}\"|\\[${region_escaped}\\]|${region_escaped})"
+    project_pattern="('${project_escaped}'|\"${project_escaped}\"|\\[${project_escaped}\\]|${project_escaped})"
+    kind_pattern="('DOMAIN_MAPPING'|\"DOMAIN_MAPPING\"|\\[DOMAIN_MAPPING\\]|DOMAIN_MAPPING)"
 
-    if grep -Eiq "Cannot find domain mapping (for )?${domain_pattern}" <<<"$body_output" || \
-       grep -Eiq "(Resource|DomainMapping|Domain mapping)[[:space:]]+${domain_pattern}[[:space:]]+(was not found|not found)" <<<"$body_output"; then
-      if ! grep -Eiq '(Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$body_output"; then
+    mapping_error="$body_output"
+    if [[ "$mapping_error" == *" This command is authenticated as "* ]]; then
+      auth_context="${mapping_error#* This command is authenticated as }"
+      mapping_error="${mapping_error%% This command is authenticated as *}"
+      if ! [[ "$auth_context" =~ ^[A-Za-z0-9._%+@*-]+[[:space:]]using[[:space:]]the[[:space:]]credentials[[:space:]]in[[:space:]]/[A-Za-z0-9._/@%+:=-]+,[[:space:]]specified[[:space:]]by[[:space:]]the[[:space:]]\[auth/credential_file_override\][[:space:]]property\.$ ]]; then
+        mapping_error=""
+      fi
+    fi
+
+    if ! grep -Eiq '(^|[^A-Z_])(PERMISSION_DENIED|UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|INTERNAL|UNKNOWN|ABORTED|INVALID_ARGUMENT|RESOURCE_EXHAUSTED|UNAVAILABLE|DEADLINE_EXCEEDED|API_ERROR|SERVICE_DISABLED|API_NOT_ENABLED|QUOTA_EXCEEDED)([^A-Z_]|$)|Permission(s)? (denied|required|missing)|Access Denied|Authentication (failed|required)|Invalid credentials|Credential(s)? (have )?expired|Service (is )?(disabled|not enabled)|Quota (is )?(exceeded|error)|API.*(error|disabled|not enabled|unavailable)' <<<"$describe_output"; then
+      if grep -Eq "^Cannot find domain mapping (for )?${domain_pattern}[.]?$" <<<"$mapping_error" || \
+         grep -Eq "^(Resource|DomainMapping|Domain mapping)[[:space:]]+${domain_pattern}[[:space:]]+(was not found|not found)[.]?$" <<<"$mapping_error" || \
+         grep -Eq "^Resource[[:space:]]+${domain_pattern}[[:space:]]+of kind[[:space:]]+${kind_pattern}[[:space:]]+does not exist[.]?$" <<<"$mapping_error" || \
+         grep -Eq "^Resource[[:space:]]+${domain_pattern}[[:space:]]+of kind[[:space:]]+${kind_pattern}[[:space:]]+in region[[:space:]]+${region_pattern}[[:space:]]+in project[[:space:]]+${project_pattern}[[:space:]]+does not exist[.]?$" <<<"$mapping_error"; then
         is_domain_not_found=1
       fi
     fi
