@@ -19,13 +19,12 @@ import { ApiClient } from "@drts/api-client";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
 import { headers as nextHeaders } from "next/headers";
 
+import {
+  buildReferralPortalBootstrapContext,
+  type ReferralPortalRequestEvidence,
+} from "./referral-bootstrap-identity";
+
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
-// Self-service portals read billing/statement data scoped to one partner.
-const PORTAL_SCOPES = ["billing:read"];
-const DEFAULT_PARTNER_ID = "partner-referral-demo-001";
-const DEFAULT_TENANT_ID = "tenant-demo-001";
-const DEFAULT_PARTNER_PROGRAM_ID = "program-referral-community";
-const DEFAULT_PARTNER_ENTRY_SLUG = "referral-demo-community";
 
 function resolveServerApiBaseUrl(): string {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
@@ -65,121 +64,11 @@ export interface ServerReferralPartnerClient {
   requestEvidence: ReferralPortalRequestEvidence;
 }
 
-export interface ReferralPortalRequestEvidence {
-  actorType: string;
-  partnerEntrySlug: string;
-  scopes: string[];
-}
-
-function resolveHeaderOrEnv(
-  requestHeaders: Headers,
-  headerName: string,
-  envName: string,
-  fallback?: string,
-): string | null {
-  const fromHeader = requestHeaders.get(headerName)?.trim();
-  if (fromHeader) {
-    return fromHeader;
-  }
-
-  const fromEnv = process.env[envName]?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-
-  return fallback ?? null;
-}
-
 export async function getServerReferralPartnerClient(): Promise<ServerReferralPartnerClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
-  const actorType =
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-drts-e2e-actor-type",
-      "DRTS_E2E_ACTOR_TYPE",
-      "partner_api_key",
-    ) ?? "partner_api_key";
-  const rawScopeValue =
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-drts-e2e-scopes",
-      "DRTS_E2E_SCOPES",
-      PORTAL_SCOPES.join(","),
-    ) ?? PORTAL_SCOPES.join(",");
-  const scopes = rawScopeValue
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const partnerId =
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-drts-e2e-partner-id",
-      "DRTS_E2E_PARTNER_ID",
-    ) ??
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-partner-id",
-      "DRTS_PARTNER_ID",
-      DEFAULT_PARTNER_ID,
-    ) ??
-    DEFAULT_PARTNER_ID;
-  const tenantId =
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-drts-e2e-tenant-id",
-      "DRTS_E2E_TENANT_ID",
-    ) ??
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-tenant-id",
-      "DRTS_TENANT_ID",
-      DEFAULT_TENANT_ID,
-    );
-  const partnerProgramId =
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-drts-e2e-partner-program-id",
-      "DRTS_E2E_PARTNER_PROGRAM_ID",
-    ) ??
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-partner-program-id",
-      "DRTS_PARTNER_PROGRAM_ID",
-      DEFAULT_PARTNER_PROGRAM_ID,
-    );
-  const partnerEntrySlug =
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-drts-e2e-entry-slug",
-      "DRTS_E2E_ENTRY_SLUG",
-    ) ??
-    resolveHeaderOrEnv(
-      requestHeaders,
-      "x-partner-entry-slug",
-      "DRTS_PARTNER_ENTRY_SLUG",
-      DEFAULT_PARTNER_ENTRY_SLUG,
-    );
-
-  const defaultHeaders: Record<string, string> = {
-    "x-actor-type": actorType,
-    "x-actor-id": partnerId,
-    "x-partner-id": partnerId,
-    "x-roles": "partner",
-    "x-role-families": "partner",
-    "x-scopes": scopes.join(","),
-    "x-realm": "partner",
-  };
-
-  if (tenantId) {
-    defaultHeaders["x-tenant-id"] = tenantId;
-  }
-  if (partnerProgramId) {
-    defaultHeaders["x-partner-program-id"] = partnerProgramId;
-  }
-  if (partnerEntrySlug) {
-    defaultHeaders["x-partner-entry-slug"] = partnerEntrySlug;
-  }
+  const { defaultHeaders, partnerId, partnerEntrySlug, requestEvidence } =
+    buildReferralPortalBootstrapContext();
 
   const iapEmail = requestHeaders.get(CONTROL_PLANE_IAP_EMAIL_HEADER);
   if (iapEmail) {
@@ -212,11 +101,7 @@ export async function getServerReferralPartnerClient(): Promise<ServerReferralPa
       defaultHeaders,
     }),
     partnerId,
-    partnerEntrySlug: partnerEntrySlug ?? DEFAULT_PARTNER_ENTRY_SLUG,
-    requestEvidence: {
-      actorType,
-      partnerEntrySlug: partnerEntrySlug ?? DEFAULT_PARTNER_ENTRY_SLUG,
-      scopes,
-    },
+    partnerEntrySlug,
+    requestEvidence,
   };
 }

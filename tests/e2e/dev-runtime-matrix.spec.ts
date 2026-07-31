@@ -214,10 +214,10 @@ const partnerBookingActors: ActorProfile[] = [
 
 const channelPartnerActors: ActorProfile[] = [
   {
-    key: "channel-partner-billing-read",
-    actorType: "partner_api_key",
-    partnerEntrySlug: "referral-demo-community",
-    scopes: ["billing:read"],
+    key: "channel-partner-public-override-attempt",
+    actorType: "platform_admin",
+    partnerEntrySlug: "bogus-public-entry",
+    scopes: ["foundation:write", "dispatch:write"],
   },
 ];
 
@@ -251,6 +251,7 @@ const channelPartnerEvidenceMarkers = [
   /drts-data-source:live/i,
   /drts-e2e-actor-type:partner_api_key/i,
   /drts-e2e-entry-slug:referral-demo-community/i,
+  /drts-e2e-scopes:billing:read/i,
 ] as const;
 
 function resolveCloudRunBaseUrl(

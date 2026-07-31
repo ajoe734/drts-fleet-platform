@@ -86,7 +86,7 @@ map api.smarttransport.tw        drts-api
 ```
 
 每條新建 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
-若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed，不在此 no-deploy task 直接覆寫 live target。
+若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed，讓具權限者在獨立 deploy / domain-maintenance 變更中處理，不在此 repo-only task 直接覆寫 live target。
 
 ---
 
@@ -134,8 +134,8 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
   - `smarttransport.tw` → `185.158.133.1`
   - active inventory 子網域 `fleets/ops/partners/dispatch/book/bank/channel/tenant/refer/api.smarttransport.tw` 皆解析到 `ghs.googlehosted.com` 後的 Google anycast IP
   - retired `ride.smarttransport.tw` 與 `concierge.smarttransport.tw` 也仍解析到 `ghs.googlehosted.com`，代表外部 DNS / mapping 清理尚未完成；它們不是 authoritative active inventory
-- HTTPS 實測：
+- HTTPS 實測（純觀測，不構成本 task gate）：
   - `https://refer.smarttransport.tw/` 於 2026-07-31 會 `307` 轉到 `/embed/referral-demo-community`
   - `https://refer.smarttransport.tw/embed/referral-demo-community` 回 `200`
-  - `https://channel.smarttransport.tw`、`https://api.smarttransport.tw/health`、`https://ride.smarttransport.tw`、`https://concierge.smarttransport.tw` 於 2026-07-31 測得 TLS/SSL 連線失敗，表示 mapping / certificate / backend readiness 仍需由具權限者在外部環境排查
-- 因此本 runbook 只能把 repo 內 authoritative inventory 對齊；外部 DNS、憑證、mapping 存活清理不屬於此 no-deploy task。
+  - `https://channel.smarttransport.tw`、`https://api.smarttransport.tw/health`、`https://ride.smarttransport.tw`、`https://concierge.smarttransport.tw` 於 2026-07-31 測得 TLS/SSL 連線失敗；這些是外部 live-state observation，不回寫 repo active inventory，也不阻擋本次 no-deploy rails 修復
+- 因此本 runbook 的 machine-truth 職責只有對齊 repo 內 authoritative inventory；外部 DNS、憑證、mapping 存活清理另案處理。
