@@ -214,6 +214,19 @@ jobs:
         run: pnpm --filter @drts/api build
       - name: Run cross-surface E2E suite (hermetic — reset DB + restart API per scenario)
         run: ./tests/e2e/run-e2e-hermetic.sh
+      - name: Run deterministic 39-route UI suite
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_route_suite;' \
+            -c 'CREATE DATABASE drts_route_suite;'
+          pnpm db:migrate
+          pnpm db:seed
+          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
       - name: API logs on failure
         if: failure()
         run: tail -n 100 /tmp/drts-e2e-api.log || true

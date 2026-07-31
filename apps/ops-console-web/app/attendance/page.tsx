@@ -210,6 +210,7 @@ function renderTabLink(
 ) {
   return (
     <Link
+      key={href}
       href={href}
       style={{
         color: selected ? activeTheme.text : activeTheme.textMuted,
