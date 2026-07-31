@@ -12,6 +12,7 @@
     "github_webhook_events": ".orchestrator/github-webhook-events.jsonl",
     "github_relay_state": ".orchestrator/github-relay-state.json",
     "provider_capabilities": ".orchestrator/provider_capabilities.json",
+    "antigravity_rotation": ".orchestrator/antigravity-rotation.json",
     "claude_mcp_config": ".orchestrator/claude-approval-broker.mcp.json"
   },
   "watcher": {
@@ -347,7 +348,13 @@
         "cli": "agy",
         "config_home": "~/.antigravity-home",
         "skip_permissions": true,
-        "include_directories": true
+        "include_directories": true,
+        "model_rotation": {
+          "enabled": true,
+          "primary": "",
+          "fallback": "Claude Sonnet 4.6 (Thinking)",
+          "cooldown_seconds": 900
+        }
       },
       "approval": {
         "default_approval_mode": "auto_edit",
@@ -385,7 +392,13 @@
         "config_home": "~/.antigravity2-home",
         "skip_permissions": true,
         "include_directories": true,
-        "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]
+        "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"],
+        "model_rotation": {
+          "enabled": true,
+          "primary": "",
+          "fallback": "Claude Sonnet 4.6 (Thinking)",
+          "cooldown_seconds": 900
+        }
       },
       "model_preference": {
         "default": "gemini-2.5-flash-lite",

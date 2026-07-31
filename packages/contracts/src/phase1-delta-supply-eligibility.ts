@@ -106,6 +106,8 @@ export interface VehicleSupplyDraft {
   fixedFareAllowed: boolean;
 
   currentDriverSubmissionId: string | null;
+  doorCount: number | null;
+  color: string | null;
 }
 
 // ---------------------------------------------------------------------------

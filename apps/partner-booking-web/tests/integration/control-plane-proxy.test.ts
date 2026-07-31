@@ -122,4 +122,23 @@ describe("partner-booking control-plane proxy", () => {
     expect(mutationResponse.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("blocks partner ingress handoff before it reaches the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(
+      requestFor("POST", ["partner", "ingress", "handoff"], {
+        body: JSON.stringify({
+          entrySlug: "ctbc",
+          apiKey: "pk_test",
+          partnerUserRef: "user-001",
+        }),
+      }),
+      contextFor(["partner", "ingress", "handoff"]),
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

@@ -21,6 +21,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IncidentRepository } from "./incident.repository";
+import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 
 const DRIVER_MATCHING_SUPPRESSION_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const INCIDENT_STATUS_VALUES = [
@@ -91,6 +92,8 @@ export class IncidentService implements OnModuleInit {
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly incidentRepository?: IncidentRepository,
+    @Optional()
+    private readonly opsDispatchEventsService?: OpsDispatchEventsService,
   ) {}
 
   async onModuleInit() {
@@ -222,6 +225,8 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    this.opsDispatchEventsService?.publishIncidentCreated(decorated, requestId);
+
     return this.cloneIncident(decorated);
   }
 
@@ -289,16 +294,30 @@ export class IncidentService implements OnModuleInit {
     }
 
     if (command.assignedTo !== undefined) {
+      if (incident.assignedTo && incident.assignedTo !== command.assignedTo) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "INCIDENT_ASSIGNMENT_CONFLICT",
+          `Incident ${incidentId} is already assigned to ${incident.assignedTo}.`,
+          {
+            incidentId,
+            existingAssignment: incident.assignedTo,
+            requestedAssignment: command.assignedTo,
+          },
+        );
+      }
       updated.assignedTo = command.assignedTo;
-      timelineEntries.push(
-        this.createTimelineEntry(
-          incidentId,
-          TIMELINE_ACTIONS.assigned,
-          `Assigned to ${command.assignedTo}.`,
-          this.resolveActorId(identity, "ops_user"),
-          now,
-        ),
-      );
+      if (incident.assignedTo !== command.assignedTo) {
+        timelineEntries.push(
+          this.createTimelineEntry(
+            incidentId,
+            TIMELINE_ACTIONS.assigned,
+            `Assigned to ${command.assignedTo}.`,
+            this.resolveActorId(identity, "ops_user"),
+            now,
+          ),
+        );
+      }
     }
 
     if (command.severity !== undefined) {
@@ -401,6 +420,8 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
+
     return this.cloneIncident(decorated);
   }
 
@@ -472,6 +493,9 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+
+    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
+
     return this.cloneIncident(updated);
   }
 
@@ -569,6 +593,8 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    this.opsDispatchEventsService?.publishIncidentCreated(decorated, requestId);
+
     return this.cloneIncident(decorated);
   }
 
@@ -644,6 +670,8 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+
+    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
 
     return { ...action };
   }
@@ -733,6 +761,8 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
+
     return this.cloneIncident(updated);
   }
 
@@ -741,6 +771,59 @@ export class IncidentService implements OnModuleInit {
     return (this.recoveryActions.get(incidentId) ?? []).map((action) => ({
       ...action,
     }));
+  }
+
+  allocateIncidentId() {
+    return this.nextIncidentId();
+  }
+
+  registerPersistedIncident(
+    incident: IncidentRecord,
+    timelineEntries: readonly IncidentTimelineEntry[],
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    const suppression = incident.matchingSuppression;
+    if (suppression) {
+      this.suppressions.set(incident.incidentId, { ...suppression });
+    }
+
+    const decorated = this.decorateIncident(
+      this.cloneIncident(incident),
+      identity,
+    );
+    const existing = this.incidents.some(
+      (candidate) => candidate.incidentId === decorated.incidentId,
+    );
+    if (existing) {
+      this.replace(decorated);
+    } else {
+      this.incidents = [decorated, ...this.incidents];
+    }
+
+    if (timelineEntries.length > 0) {
+      const merged = [
+        ...(this.timelines.get(decorated.incidentId) ?? []),
+        ...timelineEntries.map((entry) => ({ ...entry })),
+      ];
+      const byEntryId = new Map<string, IncidentTimelineEntry>();
+      for (const entry of merged) {
+        byEntryId.set(entry.entryId, entry);
+      }
+      this.timelines.set(decorated.incidentId, [...byEntryId.values()]);
+    }
+
+    this.incidentSequence = Math.max(
+      this.incidentSequence,
+      this.deriveNextSequence([decorated]),
+    );
+
+    if (existing) {
+      this.opsDispatchEventsService?.publishIncidentUpdated(decorated);
+    } else {
+      this.opsDispatchEventsService?.publishIncidentCreated(decorated);
+    }
+
+    return this.cloneIncident(decorated);
   }
 
   private hydrateSuppressions(

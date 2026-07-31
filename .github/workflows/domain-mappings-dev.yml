@@ -16,6 +16,18 @@ env:
   CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
   DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
   DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
+  DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
+  DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
+  DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
+  DEV_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.DEV_GCP_TENANT_CONSOLE_SERVICE }}
+  DEV_GCP_BANK_CONSOLE_SERVICE: ${{ vars.DEV_GCP_BANK_CONSOLE_SERVICE }}
+  DEV_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.DEV_GCP_REFERRAL_EMBED_SERVICE }}
+  DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
+  DEV_GCP_CONCIERGE_PORTAL_SERVICE: ${{ vars.DEV_GCP_CONCIERGE_PORTAL_SERVICE }}
+  DEV_GCP_PASSENGER_WEB_SERVICE: ${{ vars.DEV_GCP_PASSENGER_WEB_SERVICE }}
+  DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
+  DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
   DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
   DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
   WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
@@ -59,18 +71,18 @@ jobs:
             echo "::endgroup::"
           }
 
-          map fleets.smarttransport.tw     drts-platform-admin-web
-          map ops.smarttransport.tw        drts-ops-console-web
-          map partners.smarttransport.tw   drts-fleet-partner-portal-web
-          map dispatch.smarttransport.tw   drts-enterprise-dispatch-web
-          map ride.smarttransport.tw       drts-passenger-web
-          map book.smarttransport.tw       drts-partner-booking-web
-          map bank.smarttransport.tw       drts-bank-console-web
-          map channel.smarttransport.tw    drts-channel-partner-portal-web
-          map tenant.smarttransport.tw     drts-tenant-console-web
-          map concierge.smarttransport.tw  drts-concierge-portal-web
-          map refer.smarttransport.tw      drts-referral-embed-web
-          map api.smarttransport.tw        drts-api
+          map fleets.smarttransport.tw     "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-drts-platform-admin-web}"
+          map ops.smarttransport.tw        "${DEV_GCP_OPS_CONSOLE_SERVICE:-drts-ops-console-web}"
+          map partners.smarttransport.tw   "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-drts-fleet-partner-portal-web}"
+          map dispatch.smarttransport.tw   "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-drts-enterprise-dispatch-web}"
+          map ride.smarttransport.tw       "${DEV_GCP_PASSENGER_WEB_SERVICE:-drts-passenger-web}"
+          map book.smarttransport.tw       "${DEV_GCP_PARTNER_BOOKING_SERVICE:-drts-partner-booking-web}"
+          map bank.smarttransport.tw       "${DEV_GCP_BANK_CONSOLE_SERVICE:-drts-bank-console-web}"
+          map channel.smarttransport.tw    "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-drts-channel-partner-portal-web}"
+          map tenant.smarttransport.tw     "${DEV_GCP_TENANT_CONSOLE_SERVICE:-drts-tenant-console-web}"
+          map concierge.smarttransport.tw  "${DEV_GCP_CONCIERGE_PORTAL_SERVICE:-drts-concierge-portal-web}"
+          map refer.smarttransport.tw      "${DEV_GCP_REFERRAL_EMBED_SERVICE:-drts-referral-embed-web}"
+          map api.smarttransport.tw        "${DEV_GCP_API_SERVICE:-drts-api}"
 
       - name: List mappings
         run: |

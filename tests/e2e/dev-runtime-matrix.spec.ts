@@ -1,6 +1,21 @@
 import { expect, test, type APIResponse } from "@playwright/test";
 
-const TARGET_CASE_COUNT = 3_000;
+function readPositiveIntEnv(
+  value: string | undefined,
+  fallback: number,
+): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const TARGET_CASE_COUNT = readPositiveIntEnv(
+  process.env.DRTS_DEV_RUNTIME_MATRIX_CASE_COUNT,
+  3_000,
+);
 
 const skippedRuntimeSurfaces = [] as const;
 
@@ -274,7 +289,7 @@ const surfaces: RuntimeSurface[] = [
         key: "card-embed",
         path: "/ctbc/program/embed",
         operation: "credit-card bank-app embed handoff",
-        marker: /reference token|issuer_signature|cardholder_resolved/i,
+        marker: /未偵測到銀行登入|no_embed_session|Bank sign-in not detected/i,
       },
       {
         key: "card-embed-reauth",
@@ -972,12 +987,14 @@ function visibleTextFromHtml(html: string): string {
     .trim();
 }
 
-test.describe("dev runtime 3000-case end-to-end matrix", () => {
+test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
   test.describe.configure({ mode: "parallel" });
 
   const matrixCases = buildCases();
 
-  test("matrix generation covers exactly 3000 non-excluded cases", async () => {
+  test(
+    `matrix generation covers exactly ${TARGET_CASE_COUNT} non-excluded cases`,
+    async () => {
     expect(matrixCases).toHaveLength(TARGET_CASE_COUNT);
     expect(
       matrixCases.some((item) =>
@@ -986,7 +1003,8 @@ test.describe("dev runtime 3000-case end-to-end matrix", () => {
         ),
       ),
     ).toBe(false);
-  });
+    },
+  );
 
   for (const [index, testCase] of matrixCases.entries()) {
     test(`${String(index + 1).padStart(4, "0")} ${testCase.title}`, async ({

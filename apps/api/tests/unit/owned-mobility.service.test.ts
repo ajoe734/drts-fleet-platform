@@ -1,4 +1,5 @@
 import { EventEmitter2 } from "@nestjs/event-emitter";
+import { HttpStatus } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -7,12 +8,17 @@ import {
   RESERVATION_HOLD_VALID_TRANSITIONS,
   EXCEPTION_HOLD_REASON_CODES,
 } from "@drts/contracts";
-import type { ServiceAreaEvaluationResult } from "@drts/contracts";
+import type {
+  DriverRatingSummary,
+  ServiceAreaEvaluationResult,
+} from "@drts/contracts";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { FareAnomalyRepository } from "../../src/modules/product-rule/fare-anomaly.repository";
+import { FareAnomalyService } from "../../src/modules/product-rule/fare-anomaly.service";
 import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
@@ -60,12 +66,23 @@ function createOwnedMobilityService(options?: {
     evaluate: ReturnType<typeof vi.fn>;
   };
   serviceAreaService?: ServiceAreaService;
+  fareAnomalyService?: FareAnomalyService;
+  vehicleDisclosureProfile?: Record<string, unknown> | null;
+  driverRegistrationCredential?: Record<string, unknown> | null;
   repository?: {
     isEnabled: () => boolean;
     persistChanges: (...args: any[]) => Promise<unknown>;
     persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
     reportPersistenceFailure: (...args: any[]) => void;
+    findOrderById?: (...args: any[]) => Promise<unknown>;
+    findOrderByBookingId?: (...args: any[]) => Promise<unknown>;
+    // Only the transactional assignment path reaches these, so stubs that never
+    // enable a repository can keep omitting them.
+    isActiveMultiTaxiAuthorizedVehicle?: (...args: any[]) => Promise<boolean>;
+    getOrInitializeDriverRatingSummary?: (
+      ...args: any[]
+    ) => Promise<DriverRatingSummary>;
   };
 }) {
   const regulatoryRegistryService = {
@@ -96,6 +113,32 @@ function createOwnedMobilityService(options?: {
         DEFAULT_VEHICLE_LICENSE_TYPES[vehicleId] ??
         null,
     ),
+    getVehiclePassengerDisclosureProfile: vi.fn(
+      () => options?.vehicleDisclosureProfile ?? null,
+    ),
+    getDriverPublicRegistrationCredential: vi.fn(
+      () => options?.driverRegistrationCredential ?? null,
+    ),
+    listVehicles: vi.fn(() => [
+      {
+        vehicleId: "veh-demo-001",
+        plateNo: "TAXI-001",
+        operatingArea: "TPE",
+      },
+    ]),
+    listDrivers: vi.fn(() => [
+      {
+        driverId: "drv-demo-001",
+        name: "Driver One",
+      },
+    ]),
+    listSupplyPairs: vi.fn(() => [
+      {
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+        etaMinutes: 8,
+      },
+    ]),
   };
   const auditNotificationService = {
     recordNotification: vi.fn(),
@@ -161,6 +204,7 @@ function createOwnedMobilityService(options?: {
     undefined,
     undefined,
     options?.serviceAreaService,
+    options?.fareAnomalyService,
   );
 
   return {
@@ -168,6 +212,108 @@ function createOwnedMobilityService(options?: {
     regulatoryRegistryService,
     auditNotificationService,
   };
+}
+
+async function createFareAnomalyAuthority(databaseService?: {
+  isEnabled: () => boolean;
+  query: ReturnType<typeof vi.fn>;
+}) {
+  const repository = new FareAnomalyRepository(databaseService as never);
+  const service = new FareAnomalyService(
+    repository,
+    { recordAuditLog: vi.fn() } as never,
+    {
+      isAvailable: vi.fn(() => false),
+      recover: vi.fn(),
+    } as never,
+  );
+  await service.onModuleInit();
+  return service;
+}
+
+function createMultiTaxiFareProducerService(
+  fareAnomalyService: FareAnomalyService,
+) {
+  return createOwnedMobilityService({
+    candidates: [
+      {
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        etaMinutes: 4,
+        operatingArea: "TPE",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ],
+    serviceProductOverrides: {
+      serviceProductType: "taxi_reservation",
+      displayName: "Multi-taxi reservation",
+      timing: "reservation",
+      active: true,
+      defaultBillingMode: "meter",
+      defaultProofRequirements: [],
+    },
+    vehicleDisclosureProfile: {
+      vehicleId: "veh-demo-001",
+      make: "Toyota",
+      model: "Sienta",
+      modelYear: 2024,
+      doorCount: 5,
+      color: "Silver",
+      status: "complete",
+      missingFieldCodes: [],
+      version: 2,
+    },
+    driverRegistrationCredential: {
+      driverId: "drv-demo-001",
+      effectiveUntil: "2027-01-01",
+      status: "verified_active",
+      maskedDisplay: "RE***01",
+      version: 3,
+    },
+    fareAnomalyService,
+  }).service;
+}
+
+function createFareProducerOrder(
+  service: OwnedMobilityService,
+  options: {
+    activeFareVersionId?: string;
+    resolvedRoute?: boolean;
+  } = {},
+) {
+  return service.createMultiTaxiRide(
+    {
+      pickup:
+        options.resolvedRoute === false
+          ? { address: "台北車站" }
+          : { address: "台北車站", lat: 25.0478, lng: 121.517 },
+      dropoff:
+        options.resolvedRoute === false
+          ? { address: "松山機場" }
+          : { address: "松山機場", lat: 25.0697, lng: 121.5525 },
+      passenger: {
+        passengerId: "passenger-fare-producer-001",
+        name: "測試乘客",
+        phone: "0911222333",
+      },
+      requestedPickupAt: new Date().toISOString(),
+      timingMode: "on_demand",
+      paymentMethodTokenRef: null,
+    },
+    {
+      authorizationId: "auth-mtx-fare-producer-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved",
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: options.activeFareVersionId ?? "fare-2026-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  );
 }
 
 describe("OwnedMobilityService queue and reservation orchestration", () => {
@@ -739,6 +885,87 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
           code: "VEHICLE_NOT_DISPATCHABLE",
+        },
+      });
+    }
+  });
+
+  it("projects queue reads from registry authority and fails closed when eligibility changes", () => {
+    let vehicleDispatchable = true;
+    const { service } = createOwnedMobilityService({
+      getVehicleDispatchability: () => vehicleDispatchable,
+    });
+    const checkedIn = service.queueCheckIn({
+      vehicleId: "veh-demo-001",
+      siteId: "north-station",
+      queueMode: "physical_rank",
+    });
+
+    expect(service.listQueueEntries()).toEqual([
+      expect.objectContaining({
+        queueEntryId: checkedIn.queueEntryId,
+        runtimeProfileCode: "ordinary_taxi",
+        queueMode: "physical_rank",
+        driverId: "drv-demo-001",
+        driverName: "Driver One",
+        vehiclePlateNo: "TAXI-001",
+        serviceAreaCode: "TPE",
+        eligibility: expect.objectContaining({
+          decision: "eligible",
+          reasonCode: null,
+        }),
+        availableActions: expect.arrayContaining([
+          expect.objectContaining({ action: "open_vehicle", enabled: true }),
+          expect.objectContaining({ action: "open_driver", enabled: true }),
+        ]),
+      }),
+    ]);
+
+    vehicleDispatchable = false;
+    expect(service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
+      eligibility: {
+        decision: "denied",
+        reasonCode: "VEHICLE_NOT_DISPATCHABLE",
+      },
+    });
+  });
+
+  it("fails queue reads closed when registry authority is unavailable", () => {
+    const { service, regulatoryRegistryService } = createOwnedMobilityService();
+    const checkedIn = service.queueCheckIn({
+      vehicleId: "veh-demo-001",
+      siteId: "north-station",
+    });
+    regulatoryRegistryService.listVehicles.mockImplementation(() => {
+      throw new Error("registry unavailable");
+    });
+
+    expect(service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
+      driverId: null,
+      vehiclePlateNo: null,
+      serviceAreaCode: null,
+      eligibility: {
+        decision: "denied",
+        reasonCode: "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+      },
+      availableActions: [
+        expect.objectContaining({ action: "back_to_queue_overview" }),
+      ],
+    });
+  });
+
+  it("returns a canonical not-found error for unknown queue entry details", () => {
+    const { service } = createOwnedMobilityService();
+
+    expect(() => service.getQueueEntry("queue-entry-missing")).toThrowError(
+      ApiRequestError,
+    );
+    try {
+      service.getQueueEntry("queue-entry-missing");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "QUEUE_ENTRY_NOT_FOUND",
         },
       });
     }
@@ -1435,6 +1662,94 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       addressName: "Manual Override",
       address: "台北市中山區南京東路 100 號",
     });
+  });
+
+  it("resolves partner booking and order records persisted by another API instance", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const producer = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    }).service;
+    const booking = await producer.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2099-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2099-06-05T11:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const persistedOrder = producer.getOrder(booking.orderId);
+    const parallelProducer = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    }).service;
+    const parallelBooking = await parallelProducer.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2099-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2099-06-05T11:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider Two", phone: "0912000001" },
+      },
+      "tenant-demo-001",
+    );
+    const parallelOrder = parallelProducer.getOrder(parallelBooking.orderId);
+    expect(parallelBooking.bookingId).not.toBe(booking.bookingId);
+    expect(parallelOrder.orderNo).not.toBe(persistedOrder.orderNo);
+
+    let authorityOrder = persistedOrder;
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findOrderById: vi.fn(async () => authorityOrder),
+      findOrderByBookingId: vi.fn().mockResolvedValue(persistedOrder),
+    };
+    const orderConsumer = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    }).service;
+    const bookingConsumer = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    }).service;
+
+    await expect(
+      orderConsumer.resolvePersistedOrder(persistedOrder.orderId),
+    ).resolves.toEqual(persistedOrder);
+    authorityOrder = {
+      ...persistedOrder,
+      status: "cancelled",
+      updatedAt: new Date(
+        Date.parse(persistedOrder.updatedAt) + 1_000,
+      ).toISOString(),
+    };
+    await expect(
+      orderConsumer.resolvePersistedOrder(persistedOrder.orderId),
+    ).resolves.toMatchObject({
+      status: "cancelled",
+      updatedAt: authorityOrder.updatedAt,
+    });
+    await expect(
+      bookingConsumer.resolvePersistedTenantBooking(
+        "tenant-demo-001",
+        booking.bookingId,
+      ),
+    ).resolves.toMatchObject({
+      orderId: persistedOrder.orderId,
+      bookingId: booking.bookingId,
+    });
+    expect(repository.findOrderById).toHaveBeenCalledWith(
+      persistedOrder.orderId,
+    );
+    expect(repository.findOrderByBookingId).toHaveBeenCalledWith(
+      booking.bookingId,
+      "tenant-demo-001",
+    );
   });
 
   it("validates costCenter against the tenant cost-center directory on create and update", async () => {
@@ -3965,6 +4280,675 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ),
     ).toThrowError(ApiRequestError);
   });
+
+  it("rejects a public runtime-profile override on owned orders", () => {
+    const { service } = createOwnedMobilityService();
+
+    expect(() =>
+      service.createPassengerOrder(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+        },
+        null,
+        undefined,
+        "multi_taxi_direct",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createPassengerOrder(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+        },
+        null,
+        undefined,
+        "multi_taxi_direct",
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(403);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
+        },
+      });
+    }
+  });
+
+  it("rejects a public runtime-profile override on tenant bookings", () => {
+    const { service } = createOwnedMobilityService();
+
+    expect(() =>
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          reservationWindowStart: "2026-06-05T10:00:00.000Z",
+          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          pickup: { address: "台中市西屯區台灣大道 1 號" },
+          dropoff: { address: "桃園機場第一航廈" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          direction: "dropoff",
+        },
+        "tenant-demo-001",
+        null,
+        undefined,
+        "multi_taxi_direct",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          reservationWindowStart: "2026-06-05T10:00:00.000Z",
+          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          pickup: { address: "台中市西屯區台灣大道 1 號" },
+          dropoff: { address: "桃園機場第一航廈" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          direction: "dropoff",
+        },
+        "tenant-demo-001",
+        null,
+        undefined,
+        "multi_taxi_direct",
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(403);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PUBLIC_RUNTIME_PROFILE_OVERRIDE_FORBIDDEN",
+        },
+      });
+    }
+  });
+
+  it("creates on-demand and scheduled multi-taxi orders with canonical runtime context", () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const onDemand = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站" },
+        dropoff: { address: "松山機場" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: "pm-token-001",
+      },
+      authorization,
+    );
+    const scheduled = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站" },
+        dropoff: { address: "桃園機場" },
+        passenger: { name: "預約乘客", phone: "0911000000" },
+        requestedPickupAt: "2026-12-01T10:00:00.000Z",
+        timingMode: "scheduled",
+        paymentMethodTokenRef: null,
+      },
+      authorization,
+    );
+
+    expect(onDemand).toMatchObject({
+      runtimeProfileCode: "multi_taxi_direct",
+      serviceProductCode: "taxi_reservation",
+      acquisitionMode: "platform_reserved",
+      timingMode: "on_demand",
+      dispatchSemantics: "realtime",
+      operatingAuthorizationId: "auth-mtx-001",
+      queueMode: "virtual_matching",
+    });
+    expect(scheduled).toMatchObject({
+      timingMode: "scheduled",
+      dispatchSemantics: "reservation",
+      operatingAuthorizationId: "auth-mtx-001",
+    });
+  });
+
+  it("denies client-supplied street-hail and other canonical context overrides on multi-taxi intake", () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(() =>
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          acquisitionMode: "street_hail",
+        } as never,
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          acquisitionMode: "street_hail",
+        } as never,
+        authorization,
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "MULTI_TAXI_CANONICAL_CONTEXT_OVERRIDE_FORBIDDEN",
+          details: { field: "acquisitionMode" },
+        },
+      });
+    }
+  });
+
+  it("denies client-supplied physical-rank queue context on multi-taxi intake", () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(() =>
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          queueMode: "physical_rank",
+        } as never,
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+          queueMode: "physical_rank",
+        } as never,
+        authorization,
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "MULTI_TAXI_CANONICAL_CONTEXT_OVERRIDE_FORBIDDEN",
+          details: { field: "queueMode" },
+        },
+      });
+    }
+  });
+
+  it("allows only virtual matching for multi-taxi queue entries", () => {
+    const { service } = createOwnedMobilityService();
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const virtualEntry = service.queueCheckInMultiTaxi(
+      {
+        vehicleId: "veh-demo-001",
+        siteId: "virtual-tpe",
+        queueMode: "virtual_matching",
+      },
+      authorization,
+    );
+    expect(virtualEntry).toMatchObject({
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: "virtual_matching",
+      operatingAuthorizationId: "auth-mtx-001",
+    });
+
+    expect(() =>
+      service.queueCheckInMultiTaxi(
+        {
+          vehicleId: "veh-demo-001",
+          siteId: "taxi-stand-tpe",
+          queueMode: "taxi_stand",
+        },
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("enforces MTX-QUEUE-001 queue semantics and independent ordinary_taxi configuration", () => {
+    const { service } = createOwnedMobilityService();
+    const authorization = {
+      authorizationId: "auth-mtx-002",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    // 1. multi_taxi_direct + virtual_matching passes
+    const virtualCheckIn = service.queueCheckInMultiTaxi(
+      {
+        vehicleId: "veh-demo-001",
+        siteId: "virtual-site-01",
+        queueMode: "virtual_matching",
+      },
+      authorization,
+    );
+    expect(virtualCheckIn.queueMode).toBe("virtual_matching");
+
+    // 2. multi_taxi_direct + physical_rank denied
+    expect(() =>
+      service.queueCheckInMultiTaxi(
+        {
+          vehicleId: "veh-demo-001",
+          siteId: "rank-site-01",
+          queueMode: "physical_rank",
+        },
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    // 3. multi_taxi_direct + taxi_stand denied
+    expect(() =>
+      service.queueCheckInMultiTaxi(
+        {
+          vehicleId: "veh-demo-001",
+          siteId: "stand-site-01",
+          queueMode: "taxi_stand",
+        },
+        authorization,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    // Cannot loosen multi_taxi_direct policy via setProfileQueuePolicy
+    expect(() =>
+      service.setProfileQueuePolicy("multi_taxi_direct", [
+        "virtual_matching",
+        "physical_rank",
+      ]),
+    ).toThrowError(ApiRequestError);
+
+    // 4. ordinary_taxi policy is independently configurable
+    expect(service.getProfileQueuePolicy("ordinary_taxi")).toEqual([
+      "virtual_matching",
+      "physical_rank",
+      "taxi_stand",
+    ]);
+
+    // Check-in ordinary_taxi under virtual_matching before policy change
+    const priorVirtualCheckIn = service.queueCheckIn({
+      vehicleId: "veh-demo-002",
+      siteId: "virtual-site-02",
+      queueMode: "virtual_matching",
+    });
+    expect(priorVirtualCheckIn.status).toBe("checked_in");
+
+    // Reconfigure ordinary_taxi to disallow virtual_matching
+    service.setProfileQueuePolicy("ordinary_taxi", [
+      "physical_rank",
+      "taxi_stand",
+    ]);
+    expect(service.getProfileQueuePolicy("ordinary_taxi")).toEqual([
+      "physical_rank",
+      "taxi_stand",
+    ]);
+
+    // New check-in for ordinary_taxi with virtual_matching should now be denied
+    expect(() =>
+      service.queueCheckIn({
+        vehicleId: "veh-demo-001",
+        siteId: "virtual-site-01",
+        queueMode: "virtual_matching",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    // Existing entry checked in under virtual_matching can still check out successfully
+    const virtualCheckOut = service.queueCheckOut({
+      vehicleId: "veh-demo-002",
+      siteId: "virtual-site-02",
+      queueMode: "virtual_matching",
+    });
+    expect(virtualCheckOut.status).toBe("checked_out");
+
+    // Check-in for ordinary_taxi with physical_rank should still work
+    const ordinaryCheckIn = service.queueCheckIn({
+      vehicleId: "veh-demo-001",
+      siteId: "rank-site-01",
+      queueMode: "physical_rank",
+    });
+    expect(ordinaryCheckIn.queueMode).toBe("physical_rank");
+  });
+
+  it("builds a P-5 disclosure snapshot as part of multi-taxi assignment", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "TPE",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+      vehicleDisclosureProfile: {
+        vehicleId: "veh-demo-001",
+        make: "Toyota",
+        model: "Sienta",
+        modelYear: 2024,
+        doorCount: 5,
+        color: "Silver",
+        status: "complete",
+        missingFieldCodes: [],
+        version: 2,
+      },
+      driverRegistrationCredential: {
+        driverId: "drv-demo-001",
+        effectiveUntil: "2027-01-01",
+        status: "verified_active",
+        maskedDisplay: "RE***01",
+        version: 3,
+      },
+    });
+    const authorization = {
+      authorizationId: "auth-mtx-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "2026.1",
+      status: "approved" as const,
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const order = service.createMultiTaxiRide(
+      {
+        pickup: { address: "台北車站", lat: 25.0478, lng: 121.517 },
+        dropoff: { address: "松山機場", lat: 25.0697, lng: 121.5525 },
+        passenger: {
+          passengerId: "passenger-001",
+          name: "測試乘客",
+          phone: "0911222333",
+        },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+      authorization,
+    );
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+    });
+    const snapshot = service.getPassengerAssignmentDisclosure(order.orderId);
+
+    expect(snapshot).toMatchObject({
+      assignmentId: assignment.assignmentId,
+      assignmentVersion: 1,
+      vehicle: { plateNo: "TAXI-001", doorCount: 5 },
+      driver: {
+        registrationMaskedDisplay: "RE***01",
+        registrationStatus: "verified_active",
+      },
+      rating: { displayState: "new_driver" },
+    });
+  });
+
+  it("persists one route_unresolved anomaly before failing assignment closed", async () => {
+    const databaseService = {
+      isEnabled: vi.fn(() => true),
+      query: vi.fn(async () => ({ rows: [] })),
+    };
+    const fareAnomalyService =
+      await createFareAnomalyAuthority(databaseService);
+    const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service, { resolvedRoute: false });
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.CONFLICT,
+    });
+
+    expect(recordSpy).toHaveBeenCalledTimes(1);
+    expect(recordSpy).toHaveBeenCalledWith({
+      reason: "route_unresolved",
+      snapshot: expect.objectContaining({
+        orderId: order.orderId,
+        passengerConfirmedAt: null,
+      }),
+    });
+    const insertCall = databaseService.query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO ops.fare_quote_anomalies"),
+    );
+    expect(insertCall).toBeDefined();
+    expect(insertCall?.[1]).toEqual(
+      expect.arrayContaining([order.orderId, "route_unresolved"]),
+    );
+    const persistedRecord = JSON.parse(String(insertCall?.[1]?.[6]));
+    expect(persistedRecord.snapshot).toMatchObject({
+      pickup: { lat: null, lng: null, resolvedAt: null },
+      dropoff: { lat: null, lng: null, resolvedAt: null },
+      passengerConfirmedAt: null,
+    });
+    expect(fareAnomalyService.list()[0]?.snapshot).toMatchObject({
+      pickup: { lat: null, lng: null, resolvedAt: null },
+      dropoff: { lat: null, lng: null, resolvedAt: null },
+    });
+  });
+
+  it("records fare_policy_missing instead of inventing a fallback policy", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service, {
+      activeFareVersionId: " ",
+    });
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    ).rejects.toThrowError(ApiRequestError);
+
+    expect(recordSpy).toHaveBeenCalledTimes(1);
+    expect(fareAnomalyService.list()).toEqual([
+      expect.objectContaining({
+        reason: "fare_policy_missing",
+        snapshot: expect.objectContaining({
+          orderId: order.orderId,
+          farePolicyVersion: "",
+          passengerConfirmedAt: null,
+        }),
+      }),
+    ]);
+  });
+
+  it("resolves prior order anomalies after a valid route and fare snapshot", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const resolveSpy = vi.spyOn(fareAnomalyService, "resolveOrderAnomalies");
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service);
+    await fareAnomalyService.recordQuoteAnomaly({
+      reason: "route_unresolved",
+      snapshot: {
+        routeSnapshotId: "route-prior-001",
+        quoteSnapshotId: "quote-prior-001",
+        orderId: order.orderId,
+        pickup: {
+          address: "台北車站",
+          lat: 25.0478,
+          lng: 121.517,
+          coordinateSource: "legacy_text",
+          geocodeConfidence: "unknown",
+          resolvedAt: "2026-07-24T08:00:00.000Z",
+        },
+        dropoff: {
+          address: "松山機場",
+          lat: 25.0697,
+          lng: 121.5525,
+          coordinateSource: "legacy_text",
+          geocodeConfidence: "unknown",
+          resolvedAt: "2026-07-24T08:00:00.000Z",
+        },
+        estimatedDistanceMeters: null,
+        estimatedDurationSeconds: null,
+        encodedPolyline: null,
+        chargingMode: "meter_estimate",
+        estimatedFareMinor: null,
+        payableFareMinor: null,
+        currency: "NTD",
+        farePolicyId: "auth-mtx-fare-producer-001",
+        farePolicyVersion: "fare-2026-001",
+        fareChangeRuleId: "multi_taxi_passenger_confirmation",
+        fareChangeRuleVersion: "1",
+        fareChangeRuleDisplayText:
+          "Fare changes require passenger disclosure and confirmation.",
+        passengerConfirmedAt: null,
+        generatedAt: "2026-07-24T08:00:00.000Z",
+      },
+    });
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+    });
+
+    expect(assignment.status).toBe("assigned");
+    expect(resolveSpy).toHaveBeenCalledWith(order.orderId, expect.any(String));
+    expect(fareAnomalyService.list()).toHaveLength(0);
+  });
+
+  it("does not report a committed assignment as failed when anomaly cleanup is unavailable", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    vi.spyOn(fareAnomalyService, "resolveOrderAnomalies").mockRejectedValueOnce(
+      new Error("fare anomaly store unavailable"),
+    );
+    const service = createMultiTaxiFareProducerService(fareAnomalyService);
+    const order = createFareProducerOrder(service);
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    ).resolves.toMatchObject({
+      status: "assigned",
+    });
+    expect(service.getOrder(order.orderId).status).toBe("assigned");
+  });
 });
 
 describe("Queue-entry policy and dispatch semantics contracts", () => {
@@ -4365,5 +5349,339 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
     expect(order.partnerEntrySlug).toBeNull();
     const order2 = service.createPassengerOrder(baseCommand as any, null);
     expect(order2.partnerEntrySlug).toBeNull();
+  });
+});
+
+// P5-RATE-001 (Fleet D) acceptance. Three criteria had no test at any level
+// before this suite: the disclosure gate, assignment rollback, and version-safe
+// redispatch. "scarcity cannot bypass a legal gate" is already covered by
+// "never offers an airport-permit-failing vehicle even under scarcity" above,
+// and the rating criteria are covered by the multi-taxi rating governance suites.
+//
+// Every case below drives the real production path — createMultiTaxiRide →
+// dispatchOrder → assignDispatch → redispatchOrder. None of them pushes a
+// hand-built record into private service state, because a fabricated shape can
+// make a guard look alive when production never produces the field it reads.
+describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
+  const COMPLETE_DISCLOSURE = {
+    vehicleId: "veh-demo-001",
+    make: "Toyota",
+    model: "Sienta",
+    modelYear: 2024,
+    doorCount: 5,
+    color: "Silver",
+    status: "complete",
+    missingFieldCodes: [] as string[],
+    version: 2,
+  };
+  const ACTIVE_CREDENTIAL = {
+    driverId: "drv-demo-001",
+    effectiveUntil: "2027-01-01",
+    status: "verified_active",
+    maskedDisplay: "RE***01",
+    version: 3,
+  };
+
+  function createFleetDService(options?: {
+    vehicleDisclosureProfile?: Record<string, unknown> | null;
+    repository?: NonNullable<
+      Parameters<typeof createOwnedMobilityService>[0]
+    >["repository"];
+    fareAnomalyService?: FareAnomalyService;
+  }) {
+    return createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "TPE",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "taxi_reservation",
+        displayName: "Multi-taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+        defaultProofRequirements: [],
+      },
+      vehicleDisclosureProfile:
+        options?.vehicleDisclosureProfile === undefined
+          ? COMPLETE_DISCLOSURE
+          : options.vehicleDisclosureProfile,
+      driverRegistrationCredential: ACTIVE_CREDENTIAL,
+      // Spread rather than assign: `exactOptionalPropertyTypes` rejects an
+      // explicit `undefined` for an optional property.
+      ...(options?.fareAnomalyService
+        ? { fareAnomalyService: options.fareAnomalyService }
+        : {}),
+      ...(options?.repository ? { repository: options.repository } : {}),
+    });
+  }
+
+  // Read-only view of state that has no public accessor. Asserting on it is not
+  // the same as fabricating it: nothing here writes into the service.
+  function readOutbox(service: OwnedMobilityService) {
+    return (service as unknown as { consumerNotificationOutbox: unknown[] })
+      .consumerNotificationOutbox;
+  }
+
+  async function assignOnce(
+    service: OwnedMobilityService,
+    orderId: string,
+  ): Promise<void> {
+    const dispatch = service.dispatchOrder(orderId, { mode: "auto" });
+    await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+    });
+  }
+
+  // `assignDispatch` returns MaybePromise: it throws synchronously on the
+  // in-memory path and rejects on the transactional one. Capture both so each
+  // assertion is about the gate that fired, not about which path ran.
+  async function captureApiError(run: () => unknown): Promise<ApiRequestError> {
+    let caught: unknown;
+    let threw = false;
+    try {
+      await run();
+    } catch (error) {
+      threw = true;
+      caught = error;
+    }
+    expect(threw, "expected the call to be rejected").toBe(true);
+    expect(caught).toBeInstanceOf(ApiRequestError);
+    return caught as ApiRequestError;
+  }
+
+  it("refuses assignment when the vehicle passenger disclosure is incomplete", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const { service } = createFleetDService({
+      fareAnomalyService,
+      vehicleDisclosureProfile: {
+        ...COMPLETE_DISCLOSURE,
+        status: "incomplete",
+        missingFieldCodes: ["color", "doorCount"],
+      },
+    });
+    const order = createFareProducerOrder(service);
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    const error = await captureApiError(() =>
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    );
+
+    expect(error.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(error.getResponse()).toMatchObject({
+      error: {
+        code: "P5_VEHICLE_DISCLOSURE_INCOMPLETE",
+        details: {
+          vehicleId: "veh-demo-001",
+          missingFieldCodes: ["color", "doorCount"],
+        },
+      },
+    });
+    // The gate is not advisory: the order stays unassigned.
+    expect(service.getOrder(order.orderId).status).not.toBe("assigned");
+  });
+
+  it("leaves no partial snapshot, assignment, or outbox row when assignment rolls back", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: <T>(work: (tx: unknown) => Promise<T>) => work({}),
+      reportPersistenceFailure: vi.fn(),
+      isActiveMultiTaxiAuthorizedVehicle: vi.fn(async () => true),
+      // Mirrors what the real repository's INSERT ... ON CONFLICT returns for a
+      // driver with no ratings, so the rating authority is satisfied and the
+      // disclosure gate below is the only thing that fails.
+      getOrInitializeDriverRatingSummary: vi.fn(
+        async (
+          _tx: unknown,
+          driverId: string,
+          calculatedAt: string,
+        ): Promise<DriverRatingSummary> => ({
+          driverId,
+          displayState: "new_driver",
+          averageRating: null,
+          ratingCount: 0,
+          lastRatedAt: null,
+          aggregateVersion: 1,
+          calculatedAt,
+        }),
+      ),
+    };
+    const { service } = createFleetDService({
+      fareAnomalyService,
+      repository,
+      // Fails inside buildPassengerAssignmentAuthority — i.e. after the order,
+      // dispatch job, assignment, task, and trace logs for the bundle have all
+      // been built. This is precisely the window where a partial write could
+      // escape, so it is the right place to prove none does.
+      vehicleDisclosureProfile: {
+        ...COMPLETE_DISCLOSURE,
+        status: "incomplete",
+        missingFieldCodes: ["color"],
+      },
+    });
+    const order = createFareProducerOrder(service);
+    const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
+    const outboxBefore = readOutbox(service).length;
+
+    const error = await captureApiError(() =>
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    );
+    expect(error.getResponse()).toMatchObject({
+      error: { code: "P5_VEHICLE_DISCLOSURE_INCOMPLETE" },
+    });
+    // The failure happened inside the transaction, which is the only window a
+    // partial write could have escaped through.
+    expect(repository.isActiveMultiTaxiAuthorizedVehicle).toHaveBeenCalledTimes(
+      1,
+    );
+
+    // No disclosure snapshot.
+    expect(service.findPassengerAssignmentDisclosure(order.orderId)).toBeNull();
+    // No notification outbox row.
+    expect(readOutbox(service)).toHaveLength(outboxBefore);
+    // No assignment and no driver task.
+    const snapshot = service.getReportingSnapshot();
+    expect(
+      snapshot.dispatchAssignments.filter(
+        (assignment) => assignment.orderId === order.orderId,
+      ),
+    ).toHaveLength(0);
+    expect(
+      snapshot.driverTasks.filter((task) => task.orderId === order.orderId),
+    ).toHaveLength(0);
+    // The order never advanced to assigned.
+    expect(service.getOrder(order.orderId).status).not.toBe("assigned");
+    // Nothing was written through the transactional workflow path.
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale redispatch that would replace a newer assignment", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const { service } = createFleetDService({ fareAnomalyService });
+    const order = createFareProducerOrder(service);
+
+    // Assignment v1. The version the passenger is told is the one the guard
+    // must compare against, so read it from the disclosure snapshot rather
+    // than assuming it.
+    await assignOnce(service, order.orderId);
+    const firstVersion = service.findPassengerAssignmentDisclosure(
+      order.orderId,
+    )!.assignmentVersion;
+    expect(firstVersion).toBe(1);
+
+    // A caller holding v1 is current, so its redispatch is accepted.
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "driver_unreachable",
+      expectedAssignmentVersion: firstVersion,
+    });
+
+    // Assignment v2 supersedes it.
+    await assignOnce(service, order.orderId);
+    const secondVersion = service.findPassengerAssignmentDisclosure(
+      order.orderId,
+    )!.assignmentVersion;
+    expect(secondVersion).toBe(2);
+
+    const before = service.getOrder(order.orderId);
+    expect(before.status).toBe("assigned");
+
+    // The v1 event arrives late. It must not cancel the v2 assignment.
+    expect(() =>
+      service.redispatchOrder(order.orderId, {
+        reasonCode: "driver_unreachable",
+        expectedAssignmentVersion: firstVersion,
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.redispatchOrder(order.orderId, {
+        reasonCode: "driver_unreachable",
+        expectedAssignmentVersion: firstVersion,
+      });
+      expect.unreachable("stale redispatch must be rejected");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(HttpStatus.CONFLICT);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "STALE_REDISPATCH_EVENT",
+          details: {
+            orderId: order.orderId,
+            currentAssignmentVersion: secondVersion,
+            expectedAssignmentVersion: firstVersion,
+          },
+        },
+      });
+    }
+
+    // The rejection is total: the guard runs before any mutation, so neither the
+    // order nor the newer assignment moved.
+    const after = service.getOrder(order.orderId);
+    expect(after.status).toBe("assigned");
+    expect(after.dispatchAttemptCount).toBe(before.dispatchAttemptCount);
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.lastDispatchFailureReason).toBe(
+      before.lastDispatchFailureReason,
+    );
+    const live = service
+      .getReportingSnapshot()
+      .dispatchAssignments.filter(
+        (assignment) =>
+          assignment.orderId === order.orderId &&
+          ["assigned", "accepted"].includes(assignment.status),
+      );
+    expect(live).toHaveLength(1);
+  });
+
+  it("still redispatches unconditionally when no expected version is supplied", async () => {
+    const fareAnomalyService = await createFareAnomalyAuthority();
+    const { service } = createFleetDService({ fareAnomalyService });
+    const order = createFareProducerOrder(service);
+
+    // Reach assignment version 2 the only way production allows: assign,
+    // redispatch, assign again.
+    await assignOnce(service, order.orderId);
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "driver_unreachable",
+    });
+    await assignOnce(service, order.orderId);
+    expect(
+      service.findPassengerAssignmentDisclosure(order.orderId)!
+        .assignmentVersion,
+    ).toBe(2);
+
+    // A caller still holding v1 is now stale...
+    expect(() =>
+      service.redispatchOrder(order.orderId, {
+        reasonCode: "driver_unreachable",
+        expectedAssignmentVersion: 1,
+      }),
+    ).toThrowError(ApiRequestError);
+
+    // ...but omitting the version keeps the pre-existing unconditional
+    // behaviour, so the guard is opt-in and cannot strand callers that were
+    // written before it existed.
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "driver_unreachable",
+    });
+    expect(service.getOrder(order.orderId).status).toBe("redispatch_required");
   });
 });

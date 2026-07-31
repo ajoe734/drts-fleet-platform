@@ -1095,6 +1095,9 @@ export default function CallcenterPage() {
   >("loading");
   const [existingOrderId, setExistingOrderId] = useState("");
   const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
+  const [routeQuoteStatus, setRouteQuoteStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
   const [recordingForm, setRecordingForm] = useState<RecordingFormState>(
     INITIAL_RECORDING_FORM,
   );
@@ -1156,6 +1159,52 @@ export default function CallcenterPage() {
     null;
   const callcenterActorId =
     selectedSession?.agentId ?? intakeForm.agentId ?? "AGENT-OPS-001";
+  useEffect(() => {
+    if (
+      !hasCallcenterAddressCoordinates(pickupAddress) ||
+      !hasCallcenterAddressCoordinates(dropoffAddress)
+    ) {
+      setRouteQuoteStatus("idle");
+      return;
+    }
+    let active = true;
+    setRouteQuoteStatus("loading");
+    const timer = window.setTimeout(() => {
+      void getOpsClient()
+        .computeGeoRoute({
+          origin: { lat: pickupAddress.lat, lng: pickupAddress.lng },
+          destination: { lat: dropoffAddress.lat, lng: dropoffAddress.lng },
+          travelMode: "drive",
+          locale: currentLocale === "zh" ? "zh-TW" : "en-US",
+          requestedByActorId: callcenterActorId,
+        })
+        .then((route) => {
+          if (!active) {
+            return;
+          }
+          setQuotedEtaMinutes(
+            String(Math.max(1, Math.ceil(route.durationSeconds / 60))),
+          );
+          setRouteQuoteStatus("ready");
+        })
+        .catch(() => {
+          if (active) {
+            setRouteQuoteStatus("error");
+          }
+        });
+    }, 500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [
+    callcenterActorId,
+    currentLocale,
+    dropoffAddress?.lat,
+    dropoffAddress?.lng,
+    pickupAddress?.lat,
+    pickupAddress?.lng,
+  ]);
   const mapBookingGate = useMemo(
     () =>
       getCallcenterMapBookingGate({
@@ -2359,6 +2408,7 @@ export default function CallcenterPage() {
               >
                 <div style={dualFormGridStyle}>
                   <form
+                    data-route-quote-status={routeQuoteStatus}
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!selectedSession) {

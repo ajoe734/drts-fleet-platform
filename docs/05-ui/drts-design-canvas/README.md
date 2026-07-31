@@ -64,6 +64,27 @@ The source bundle also included three nested directories that are NOT brought ac
 - `export/` — older self-contained Driver App export artifact, superseded by the current `Driver App.html`.
 - `.scratch/` — debug screenshot from the design session.
 
+## Approved 17-screen update: 2026-07-24
+
+The later `driver app (15).zip` submission is preserved under
+[`archive/20260723-driver-app-15/`](./archive/20260723-driver-app-15/) as an
+eight-file, byte-exact source snapshot. Product Owner approved the complete
+17-screen update on 2026-07-24, and its seven files that differed from
+`dev@2711c366f` are promoted into this canonical canvas. The submitted
+`Driver App.html` already matched.
+
+Canonical coverage added:
+
+```text
+platform-mtx-auth.jsx       MTX-AUTH-UI-01..06
+ops-mtx-queue.jsx           MTX-QUEUE-UI-01..03
+platform-mtx-commerce.jsx   P5-RATE-UI-01..03 + P5-COM-UI-01..05
+```
+
+The full suite is product-approved, not entirely law-mandated. Prototype
+actions labeled `design-only / command pending` remain disabled until their
+backend command, capability, audit, and tests land.
+
 ## Relationship to the predecessor stub
 
 Before this PR, `docs/05-ui/drts-design-canvas/` held five orphan files (`Partner Booking.html`, `design-canvas.jsx`, `ios-frame.jsx`, `partner-screens.jsx`, `tweaks-panel.jsx`) from an earlier design iteration on a stranded branch. Those have been replaced; the relevant Partner Booking content lives under [`archive/`](./archive/) and carries an `archive/README.md` explaining the Q-TEN03 deferral.

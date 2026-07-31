@@ -310,6 +310,10 @@ describe("TenantPartnerService sensitive-data governance", () => {
   afterEach(() => {
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT;
+    delete process.env.PARTNER_INGRESS_KEY_CTBC;
+    delete process.env.PARTNER_INGRESS_KEY_CATHAY;
+    delete process.env.PARTNER_INGRESS_KEY_TAISHIN;
+    delete process.env.PARTNER_INGRESS_KEY_DBS;
   });
 
   it("reconciles canonical partner-booking route seeds without duplicating persisted entries", async () => {
@@ -336,6 +340,21 @@ describe("TenantPartnerService sensitive-data governance", () => {
         requestId: "seed-partner-booking-ctbc",
       },
     });
+    expect(service.getPartnerEntry("cathay")).toMatchObject({
+      entrySlug: "cathay",
+      bankCode: "CATHAY",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+    });
+    expect(service.getPartnerEntry("taishin")).toMatchObject({
+      entrySlug: "taishin",
+      bankCode: "TAISHIN",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+    });
+    expect(service.getPartnerEntry("dbs")).toMatchObject({
+      entrySlug: "dbs",
+      bankCode: "DBS",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+    });
     expect(service.getPartnerEntry("fubon")).toMatchObject({
       entrySlug: "fubon",
       businessDispatchSubtype: "insurance_replacement_vehicle",
@@ -349,11 +368,154 @@ describe("TenantPartnerService sensitive-data governance", () => {
       .flatMap(([changes]) => changes.partnerEntries ?? [])
       .map((entry) => entry.entrySlug);
     expect(persistedPartnerEntries).toEqual(
-      expect.arrayContaining(["ctbc", "fubon", "lion"]),
+      expect.arrayContaining([
+        "ctbc",
+        "cathay",
+        "taishin",
+        "dbs",
+        "fubon",
+        "lion",
+      ]),
     );
     expect(
       persistedPartnerEntries.filter(
         (entrySlug) => entrySlug === "bank-demo-alpha-airport",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("reconciles newly configured issuer credentials into legacy persisted state", async () => {
+    const persistedState = createEmptyRepositoryState();
+    persistedState.partnerIngressCredentials = [
+      {
+        keyId: "partner-key-alpha-demo",
+        entrySlug: "bank-demo-alpha-airport",
+        keyPrefix: "env_bootstrap",
+        maskedSuffix: "configured",
+        source: "env_bootstrap",
+        createdAt: "2026-04-10T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: null,
+        issuedBy: "system:env_bootstrap",
+        revokedBy: null,
+        rotationReason: null,
+        revokeReason: null,
+        keyHash: "a".repeat(64),
+      } satisfies StoredPartnerIngressCredentialRecord,
+    ];
+    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+      undefined,
+      [
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          keyId: "partner-key-alpha-demo",
+          apiKeyHash: "a".repeat(64),
+        },
+        {
+          entrySlug: "ctbc",
+          keyId: "partner-key-ctbc-dev",
+          apiKeyHash: "b".repeat(64),
+        },
+      ],
+    );
+
+    await service.onModuleInit();
+
+    expect(repository.getState().partnerIngressCredentials).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyId: "partner-key-alpha-demo",
+          entrySlug: "bank-demo-alpha-airport",
+        }),
+        expect.objectContaining({
+          keyId: "partner-key-ctbc-dev",
+          entrySlug: "ctbc",
+          source: "env_bootstrap",
+        }),
+      ]),
+    );
+    await expect(
+      service.issuePartnerIngressHandoff(
+        {
+          entrySlug: "ctbc",
+          partnerUserRef: "ctbc-user-001",
+        },
+        "req-ctbc-handoff-001",
+        { allowInternalBootstrap: true },
+      ),
+    ).resolves.toMatchObject({
+      partnerEntry: { entrySlug: "ctbc" },
+      identity: {
+        actorType: "referral_passenger",
+        partnerEntrySlug: "ctbc",
+      },
+    });
+  });
+
+  it("does not resurrect revoked credentials or replace rotated credentials from seeds", async () => {
+    const persistedState = createEmptyRepositoryState();
+    persistedState.partnerIngressCredentials = [
+      {
+        keyId: "partner-key-ctbc-revoked",
+        entrySlug: "ctbc",
+        keyPrefix: "pk_revoked",
+        maskedSuffix: "0001",
+        source: "platform_issued",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: "2026-07-02T00:00:00.000Z",
+        issuedBy: "platform-admin-001",
+        revokedBy: "platform-admin-001",
+        rotationReason: null,
+        revokeReason: "partner_offboarding",
+        keyHash: "c".repeat(64),
+      },
+      {
+        keyId: "partner-key-cathay-rotated",
+        entrySlug: "cathay",
+        keyPrefix: "pk_rotated",
+        maskedSuffix: "0002",
+        source: "platform_issued",
+        createdAt: "2026-07-03T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: null,
+        issuedBy: "platform-admin-001",
+        revokedBy: null,
+        rotationReason: "scheduled_rotation",
+        revokeReason: null,
+        keyHash: "d".repeat(64),
+      },
+    ];
+    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+      undefined,
+      [
+        {
+          entrySlug: "ctbc",
+          keyId: "partner-key-ctbc-dev",
+          apiKeyHash: "e".repeat(64),
+        },
+        {
+          entrySlug: "cathay",
+          keyId: "partner-key-cathay-dev",
+          apiKeyHash: "f".repeat(64),
+        },
+      ],
+    );
+
+    await service.onModuleInit();
+
+    expect(repository.getState().partnerIngressCredentials).toEqual(
+      persistedState.partnerIngressCredentials,
+    );
+    expect(
+      repository.persistChanges.mock.calls.flatMap(
+        ([changes]) => changes.partnerIngressCredentials ?? [],
       ),
     ).toHaveLength(0);
   });
@@ -377,6 +539,27 @@ describe("TenantPartnerService sensitive-data governance", () => {
       realm: "partner",
       tenantId: "tenant-demo-001",
       partnerEntrySlug: "bank-demo-alpha-airport",
+    });
+  });
+
+  it("loads canonical airport issuer ingress credentials from environment secrets", () => {
+    process.env.PARTNER_INGRESS_KEY_CATHAY = "pk_test_cathay_ingress_secret";
+
+    const service = new TenantPartnerService(new AuditNotificationService());
+    const resolution = service.authenticatePartnerBootstrap(
+      {
+        entrySlug: "cathay",
+        apiKey: "pk_test_cathay_ingress_secret",
+      },
+      "req-partner-cathay-001",
+    );
+
+    expect(resolution.identity).toMatchObject({
+      actorType: "partner_api_key",
+      actorId: "partner-key-cathay-dev",
+      realm: "partner",
+      tenantId: "tenant-demo-001",
+      partnerEntrySlug: "cathay",
     });
   });
 
@@ -427,6 +610,63 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
       ]),
     );
+  });
+
+  it("allows a matching handoff passenger to verify partner eligibility", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    await expect(
+      service.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          cardLast4: "2468",
+        },
+        "req-eligibility-handoff-001",
+        {
+          actorType: "referral_passenger",
+          actorId: "passenger-handoff-001",
+          realm: "partner",
+          tenantId: "tenant-demo-001",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          requestId: "req-eligibility-handoff-001",
+        },
+      ),
+    ).resolves.toMatchObject({
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      verificationStatus: "eligible",
+    });
+  });
+
+  it("rejects a handoff passenger scoped to another partner entry", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    await expect(
+      service.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          cardLast4: "2468",
+        },
+        "req-eligibility-handoff-002",
+        {
+          actorType: "referral_passenger",
+          actorId: "passenger-handoff-001",
+          realm: "partner",
+          tenantId: "tenant-demo-001",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          requestId: "req-eligibility-handoff-002",
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "PARTNER_SCOPE_MISMATCH",
+        },
+      },
+    });
   });
 
   it("redacts webhook delivery signatures and tenant passenger audit payloads", async () => {
@@ -958,6 +1198,194 @@ describe("TenantPartnerService sensitive-data governance", () => {
         reasonCode: "REFERENCE_ACCEPTED",
       }),
     ]);
+  });
+
+  it("does not expose an eligibility id before required persistence completes", async () => {
+    let releasePersistence!: () => void;
+    const persistence = new Promise<void>((resolvePersistence) => {
+      releasePersistence = resolvePersistence;
+    });
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      persistChanges: vi.fn(() => persistence),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    let settled = false;
+
+    const verificationPromise = service
+      .verifyPartnerEligibility({
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "1234",
+      })
+      .then((verification) => {
+        settled = true;
+        return verification;
+      });
+
+    await vi.waitFor(() => {
+      expect(repository.persistChanges).toHaveBeenCalledOnce();
+    });
+    expect(settled).toBe(false);
+
+    releasePersistence();
+    const verification = await verificationPromise;
+    expect(verification.verificationStatus).toBe("eligible");
+    expect(repository.persistChanges).toHaveBeenCalledWith({
+      partnerEligibilityVerifications: [
+        expect.objectContaining({
+          eligibilityVerificationId: verification.eligibilityVerificationId,
+        }),
+      ],
+    });
+  });
+
+  it("resolves eligibility persisted by another API instance", async () => {
+    const producer = new TenantPartnerService(new AuditNotificationService());
+    const persistedVerification = await producer.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "1234",
+    });
+    let authorityVerification = persistedVerification;
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findPartnerEligibilityVerification: vi.fn(
+        async () => authorityVerification,
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const consumer = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await expect(
+      consumer.hydratePartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+        {
+          actorType: "referral_passenger",
+          actorId: "passenger-cross-instance-001",
+          realm: "partner",
+          tenantId: persistedVerification.tenantId,
+          partnerId: persistedVerification.partnerId,
+          partnerProgramId: persistedVerification.partnerProgramId,
+          partnerEntrySlug: persistedVerification.partnerEntrySlug,
+          scopes: ["partner:book"],
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(
+      consumer.getPartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+      ),
+    ).toEqual(persistedVerification);
+    authorityVerification = {
+      ...persistedVerification,
+      verificationStatus: "ineligible",
+      updatedAt: new Date(
+        Date.parse(persistedVerification.updatedAt) + 1_000,
+      ).toISOString(),
+    };
+    await consumer.hydratePartnerEligibilityVerification(
+      persistedVerification.eligibilityVerificationId,
+      {
+        actorType: "referral_passenger",
+        actorId: "passenger-cross-instance-001",
+        realm: "partner",
+        tenantId: persistedVerification.tenantId,
+        partnerId: persistedVerification.partnerId,
+        partnerProgramId: persistedVerification.partnerProgramId,
+        partnerEntrySlug: persistedVerification.partnerEntrySlug,
+        scopes: ["partner:book"],
+      },
+    );
+    expect(
+      consumer.getPartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+      ).verificationStatus,
+    ).toBe("ineligible");
+    expect(repository.findPartnerEligibilityVerification).toHaveBeenCalledWith(
+      persistedVerification.eligibilityVerificationId,
+    );
+    await expect(
+      consumer.hydratePartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+        {
+          actorType: "referral_passenger",
+          actorId: "foreign-passenger-001",
+          realm: "partner",
+          tenantId: "tenant-foreign-001",
+          partnerId: persistedVerification.partnerId,
+          partnerProgramId: persistedVerification.partnerProgramId,
+          partnerEntrySlug: persistedVerification.partnerEntrySlug,
+          scopes: ["partner:book"],
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: "PARTNER_SCOPE_MISMATCH" } },
+    });
+  });
+
+  it("loads and atomically resolves a review created by another API instance", async () => {
+    const producer = new TenantPartnerService(new AuditNotificationService());
+    const verified = await producer.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "1234",
+    });
+    const persistedReview = {
+      ...verified,
+      verificationStatus: "manual_review" as const,
+      verificationReasonCode: "ISSUER_REVIEW_REQUIRED",
+    };
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      listPartnerEligibilityReviewQueue: vi
+        .fn()
+        .mockResolvedValue([persistedReview]),
+      findPartnerEligibilityVerification: vi
+        .fn()
+        .mockResolvedValue(persistedReview),
+      compareAndSetPartnerEligibilityVerification: vi
+        .fn()
+        .mockResolvedValue(true),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const consumer = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await expect(
+      consumer.resolvePartnerEligibilityReviewQueue(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        eligibilityVerificationId: persistedReview.eligibilityVerificationId,
+        verificationStatus: "manual_review",
+      }),
+    ]);
+    await expect(
+      consumer.resolvePartnerEligibilityReview({
+        eligibilityVerificationId: persistedReview.eligibilityVerificationId,
+        decision: "approve",
+        reasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+        notes: null,
+      }),
+    ).resolves.toMatchObject({
+      previousStatus: "manual_review",
+      resolvedStatus: "eligible",
+    });
+    expect(
+      repository.compareAndSetPartnerEligibilityVerification,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eligibilityVerificationId: persistedReview.eligibilityVerificationId,
+        verificationStatus: "eligible",
+      }),
+      persistedReview.updatedAt,
+    );
   });
 
   it("applies passenger/address governance quality rules and masks export views", () => {
@@ -1585,7 +2013,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       "req-eligibility-manual-resolve-001",
     );
 
-    const approveResolution = service.resolvePartnerEligibilityReview(
+    const approveResolution = await service.resolvePartnerEligibilityReview(
       {
         eligibilityVerificationId: manualReview.eligibilityVerificationId,
         decision: "approve",
@@ -1609,7 +2037,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       resolvedBy: "ops-reviewer-approve-001",
     });
 
-    const denyResolution = service.resolvePartnerEligibilityReview(
+    const denyResolution = await service.resolvePartnerEligibilityReview(
       {
         eligibilityVerificationId: denied.eligibilityVerificationId,
         decision: "deny",
@@ -1634,7 +2062,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
 
     try {
-      service.resolvePartnerEligibilityReview(
+      await service.resolvePartnerEligibilityReview(
         {
           eligibilityVerificationId: denied.eligibilityVerificationId,
           decision: "approve",

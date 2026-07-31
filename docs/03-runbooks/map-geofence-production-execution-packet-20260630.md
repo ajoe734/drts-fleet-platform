@@ -224,7 +224,8 @@ Implementation status as of 2026-06-30:
 
 - Added provider runtime health contract at `GET /api/geo/health`.
 - Added provider config fail-closed checks for production-like mock mode,
-  disabled mode, and external mode missing `MAP_PROVIDER_SERVER_KEY`.
+  disabled mode, and Google external mode missing either
+  `GOOGLE_MAPS_GEOCODING_API_KEY` or `GOOGLE_MAPS_ROUTES_API_KEY`.
 - Added `.env.example` map-provider variables for mode, secrets, browser
   origins, mobile bundle/package restrictions, quota budgets, and alert
   thresholds.

@@ -177,16 +177,18 @@ describe("tenant partner foundation service", () => {
       "bank-demo-alpha-airport",
     );
 
-    // 6 active entries now: the 2 bank-airport flows + the referral-channel
-    // demo entry (CRC-BE-007) + the 3 canonical partner-booking route seeds
-    // (ctbc / fubon / lion) added by PARTNER-ENTRY-SEED-RECONCILE-20260616.
-    expect(entries).toHaveLength(6);
+    // 9 active entries: 2 demo bank flows, the referral demo, 4 canonical
+    // airport-card issuers, and the insurance/travel partner routes.
+    expect(entries).toHaveLength(9);
     expect(entries.map((entry) => entry.entrySlug)).toEqual(
       expect.arrayContaining([
         "bank-demo-alpha-airport",
         "bank-demo-beta-airport",
         "referral-demo-community",
         "ctbc",
+        "cathay",
+        "taishin",
+        "dbs",
         "fubon",
         "lion",
       ]),
@@ -351,7 +353,7 @@ describe("tenant partner foundation service", () => {
     );
     await reloadedService.onModuleInit();
 
-    expect(store.snapshot().partnerEntries).toHaveLength(6);
+    expect(store.snapshot().partnerEntries).toHaveLength(9);
     expect(reloadedService.listPartnerEntries()).toEqual(
       firstService.listPartnerEntries(),
     );

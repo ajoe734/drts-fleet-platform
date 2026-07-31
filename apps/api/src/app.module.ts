@@ -24,8 +24,10 @@ import { AuditNotificationModule } from "./modules/audit-notification/audit-noti
 import { AssistantModule } from "./modules/assistant/assistant.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
+import { CertificateSupportModule } from "./modules/certificate-support/certificate-support.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
+import { DriverSosModule } from "./modules/driver-sos/driver-sos.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
 import { FeatureFlagsModule } from "./modules/feature-flags/feature-flags.module";
 import { FleetPartnerModule } from "./modules/fleet-partner/fleet-partner.module";
@@ -35,6 +37,7 @@ import { GeoModule } from "./modules/geo/geo.module";
 import { IdentityModule } from "./modules/identity/identity.module";
 import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
+import { MultiTaxiModule } from "./modules/multi-taxi/multi-taxi.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
 import { OperationalObservabilityModule } from "./modules/operational-observability/operational-observability.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
@@ -78,8 +81,10 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     ProductRuleModule,
     AuditNotificationModule,
     CallcenterModule,
+    CertificateSupportModule,
     ComplaintModule,
     DriverProfileModule,
+    DriverSosModule,
     OwnedMobilityModule,
     OperationalObservabilityModule,
     PlatformAdminModule,
@@ -95,6 +100,7 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     FleetPartnerModule,
     IncidentModule,
     MaintenanceModule,
+    MultiTaxiModule,
     ShiftAttendanceModule,
     DriverSettingsModule,
     PlatformPresenceModule,

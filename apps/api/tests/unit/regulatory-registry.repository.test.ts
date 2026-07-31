@@ -97,4 +97,33 @@ describe("RegulatoryRegistryRepository", () => {
       }),
     ]);
   });
+
+  it("backfills driver credentials without fake registration areas and queues incomplete vehicle drafts for correction", async () => {
+    const query = vi.fn().mockResolvedValue({ rowCount: 0, rows: [] });
+    const repository = new RegulatoryRegistryRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await repository.runIdempotentBackfill();
+
+    expect(query).toHaveBeenCalledTimes(2);
+
+    const credentialBackfillSql = String(query.mock.calls[0]?.[0]);
+    expect(credentialBackfillSql).toContain(
+      "INSERT INTO reg.driver_public_registration_credentials",
+    );
+    expect(credentialBackfillSql).toContain("dp.taxi_registration_no");
+    expect(credentialBackfillSql).toContain("NULL,");
+    expect(credentialBackfillSql).toContain("'unverified'");
+    expect(credentialBackfillSql).toContain("ON CONFLICT (driver_id) DO NOTHING");
+    expect(credentialBackfillSql).not.toContain("'TPE'");
+
+    const correctionQueueSql = String(query.mock.calls[1]?.[0]);
+    expect(correctionQueueSql).toContain("UPDATE fleet.supply_submissions s");
+    expect(correctionQueueSql).toContain("SET status = 'needs_revision'");
+    expect(correctionQueueSql).toContain(
+      "AND (d.door_count IS NULL OR d.color IS NULL)",
+    );
+  });
 });

@@ -73,11 +73,11 @@ Important fields:
 
 Common unhealthy causes:
 
-| Cause                                           | Expected behavior                                                          |
-| ----------------------------------------------- | -------------------------------------------------------------------------- |
-| `MAP_PROVIDER_MODE=mock` in staging/production  | Fail closed unless `MAP_PROVIDER_ALLOW_MOCK_IN_PROD=true` break-glass set. |
-| `MAP_PROVIDER_MODE=external` without server key | Fail closed with `missingSecretNames=["MAP_PROVIDER_SERVER_KEY"]`.         |
-| `MAP_PROVIDER_MODE=disabled`                    | Fail closed for all provider-backed geo operations.                        |
+| Cause                                                                         | Expected behavior                                                          |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `MAP_PROVIDER_MODE=mock` in staging/production                                | Fail closed unless `MAP_PROVIDER_ALLOW_MOCK_IN_PROD=true` break-glass set. |
+| `MAP_PROVIDER_MODE=external`, `MAP_PROVIDER_NAME=google`, missing server keys | Fail closed with the missing Geocoding and/or Routes secret names.         |
+| `MAP_PROVIDER_MODE=disabled`                                                  | Fail closed for all provider-backed geo operations.                        |
 
 ### `GET /api/geo/search`
 

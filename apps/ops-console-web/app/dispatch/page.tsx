@@ -18,12 +18,17 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
+import { GoogleMapBaseLayer } from "@/components/google-map-base-layer";
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
+import {
+  resolveQueueSemantics,
+  isForbiddenStatutoryOverrideAction,
+} from "@/lib/queue-semantics";
 import type { Locale } from "@/lib/translations";
 import { t } from "@/lib/translations";
 import {
@@ -333,6 +338,7 @@ const spatialMapFallbackStyle: CSSProperties = {
 const spatialRouteOverlayStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
+  zIndex: 2,
   width: "100%",
   height: "100%",
   pointerEvents: "none",
@@ -361,6 +367,7 @@ const spatialMapControlStyle: CSSProperties = {
 
 const spatialPointBaseStyle: CSSProperties = {
   position: "absolute",
+  zIndex: 3,
   transform: "translate(-50%, -50%)",
   width: 32,
   height: 32,
@@ -954,7 +961,15 @@ function getApprovalLabel(value: string, locale: Locale) {
   return formatDispatchCode(locale, value);
 }
 
-function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
+function getVisibleStateCode(
+  order: OwnedOrderRecord,
+  job?: DispatchJobRecord,
+  locale: Locale = "zh",
+) {
+  const queueSemantics = resolveQueueSemantics(order, locale);
+  if (queueSemantics.isStatutoryRefusal) {
+    return "statutory_refusal";
+  }
   if (order.exceptionHold?.overrideRequest && !order.exceptionHold.resolution) {
     return "override_pending";
   }
@@ -976,8 +991,10 @@ function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
 function getOwnedBoard(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
+  locale: Locale = "zh",
 ): DispatchBoard {
-  const state = getVisibleStateCode(order, job);
+  const state = getVisibleStateCode(order, job, locale);
+  if (state === "statutory_refusal") return "governance";
   if (state === "override_pending") return "governance";
   if (state === "no_supply") return "no_supply";
   if (state === "exception_hold") return "exception";
@@ -986,11 +1003,11 @@ function getOwnedBoard(
 }
 
 function getStateTone(stateCode: string): CanvasTone {
+  if (stateCode === "statutory_refusal" || stateCode === "no_supply") {
+    return "danger";
+  }
   if (stateCode === "assigned" || stateCode === "completed") {
     return "success";
-  }
-  if (stateCode === "no_supply") {
-    return "danger";
   }
   if (stateCode === "exception_hold" || stateCode === "override_pending") {
     return "warn";
@@ -1001,10 +1018,17 @@ function getStateTone(stateCode: string): CanvasTone {
   return "neutral";
 }
 
-function getOwnedGateSummary(order: OwnedOrderRecord): {
+function getOwnedGateSummary(
+  order: OwnedOrderRecord,
+  locale: Locale = "zh",
+): {
   label: string;
   tone: CanvasTone;
 } {
+  const queueSemantics = resolveQueueSemantics(order, locale);
+  if (queueSemantics.isStatutoryRefusal) {
+    return { label: "statutory_refusal", tone: "danger" };
+  }
   if (order.exceptionHold?.overrideRequest && !order.exceptionHold.resolution) {
     return { label: "override_pending", tone: "warn" };
   }
@@ -1176,7 +1200,7 @@ function resolveActionLabel(action: string, locale: Locale) {
     case "inspect_adapter":
       return t("dispatch.action.inspectAdapter", locale);
     default:
-      return action.replace(/_/g, " ");
+      return action ? action.replace(/_/g, " ") : "—";
   }
 }
 
@@ -1335,34 +1359,44 @@ function buildActionContexts(
   selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ): BoardActionContext[] {
-  return normalizeActions(record).map((action) => {
-    const href = buildActionHref(
-      board,
-      record,
-      action,
-      selectedProduct,
-      selectedTiming,
-      selectedLicense,
-      selectedFleet,
-      selectedApproval,
-      selectedEligibility,
-      selectedFacet,
-    );
-    const external =
-      action.action === "inspect_adapter" ||
-      href.startsWith("http://") ||
-      href.startsWith("https://");
+  const semantics = resolveQueueSemantics(record, locale);
+  return normalizeActions(record)
+    .filter((action) => {
+      if (semantics.isStatutoryRefusal) {
+        if (isForbiddenStatutoryOverrideAction(action.action)) {
+          return false;
+        }
+      }
+      return true;
+    })
+    .map((action) => {
+      const href = buildActionHref(
+        board,
+        record,
+        action,
+        selectedProduct,
+        selectedTiming,
+        selectedLicense,
+        selectedFleet,
+        selectedApproval,
+        selectedEligibility,
+        selectedFacet,
+      );
+      const external =
+        action.action === "inspect_adapter" ||
+        href.startsWith("http://") ||
+        href.startsWith("https://");
 
-    return {
-      action: action.action,
-      href,
-      label: resolveActionLabel(action.action, locale),
-      riskLevel: action.riskLevel,
-      disabled: !action.enabled,
-      disabledReason: action.disabledReasonCode,
-      external,
-    };
-  });
+      return {
+        action: action.action,
+        href,
+        label: resolveActionLabel(action.action, locale),
+        riskLevel: action.riskLevel,
+        disabled: !action.enabled,
+        disabledReason: action.disabledReasonCode,
+        external,
+      };
+    });
 }
 
 function deriveBoardEmptyState({
@@ -1765,6 +1799,7 @@ function renderDispatchSpatialBoard({
   const hasOverlays = overlayCount > 0;
   const axisBadgeStyle: CSSProperties = {
     position: "absolute",
+    zIndex: 4,
     left: 12,
     padding: "5px 8px",
     borderRadius: 999,
@@ -1940,6 +1975,14 @@ function renderDispatchSpatialBoard({
                 {t("dispatch.workflow.map.tileFallback", locale)}
               </div>
             )}
+            <GoogleMapBaseLayer
+              ariaLabel={t("dispatch.workflow.map.title", locale)}
+              center={{
+                lat: viewport.centerLat,
+                lng: viewport.centerLng,
+              }}
+              zoom={viewport.zoom}
+            />
             {model.routeSegments.length > 0 ? (
               <svg
                 aria-hidden="true"
@@ -2264,6 +2307,19 @@ function renderBoardSignalBanner({
   }
 
   const title = `${selectedRecord.orderNo} · ${getTenantLabel(selectedRecord)}`;
+  const selectedSem = resolveQueueSemantics(selectedRecord, locale);
+  if (selectedSem.isStatutoryRefusal) {
+    return (
+      <Banner
+        theme={theme}
+        tone="danger"
+        icon="warn"
+        title={t("dispatch.denial.statutoryRefusalTitle", locale)}
+        body={`${selectedSem.refusalCopy} (${t("dispatch.denial.noOverrideAllowed", locale)})`}
+      />
+    );
+  }
+
   if (board === "governance") {
     return (
       <Banner
@@ -2870,8 +2926,9 @@ export default async function DispatchPage({
     (order) =>
       order.approvalState === "blocked" || order.approvalState === "pending",
   ).length;
-  const quotaBlockedCount = sortedOwnedOrders.filter((order) =>
-    order.complianceFlags.some((flag) => flag.includes("quota")),
+  const quotaBlockedCount = sortedOwnedOrders.filter(
+    (order) =>
+      order.complianceFlags?.some((flag) => flag.includes("quota")) ?? false,
   ).length;
   const mapBoardJobRecord = Object.fromEntries(
     visibleOwnedByBoard.map((order) => [
@@ -3438,6 +3495,7 @@ export default async function DispatchPage({
   } else if (board === "governance") {
     boardRows = visibleOwnedByBoard.map((order) => {
       const request = order.exceptionHold?.overrideRequest;
+      const sem = resolveQueueSemantics(order, locale);
       const approvalHref = order.approvalRequestIds[0]
         ? `/approval-requests?approvalRequestId=${encodeURIComponent(order.approvalRequestIds[0])}`
         : "/approval-requests";
@@ -3475,13 +3533,19 @@ export default async function DispatchPage({
           </div>
         ),
         tenant: getTenantLabel(order),
-        overrideType: formatDispatchCode(locale, request?.overrideType),
+        overrideType: sem.isStatutoryRefusal
+          ? t("dispatch.denial.statutoryRefusalTitle", locale)
+          : formatDispatchCode(locale, request?.overrideType),
         requester: request?.requestedBy.actorId ?? "—",
         age: formatDurationSince(
           locale,
           request?.requestedAt ?? order.updatedAt,
         ),
-        approval: (
+        approval: sem.isStatutoryRefusal ? (
+          <span style={{ color: theme.textDim, fontSize: 12 }}>
+            {t("dispatch.denial.noOverrideAllowed", locale)}
+          </span>
+        ) : (
           <Link
             href={approvalHref}
             style={{ color: theme.accent, textDecoration: "none" }}
@@ -3536,11 +3600,12 @@ export default async function DispatchPage({
   } else {
     boardRows = visibleOwnedByBoard.map((order) => {
       const job = jobByOrderId.get(order.orderId);
-      const state = getVisibleStateCode(order, job);
-      const gate = getOwnedGateSummary(order);
+      const state = getVisibleStateCode(order, job, locale);
+      const gate = getOwnedGateSummary(order, locale);
       const candidates = job
         ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
         : [];
+      const queueSemantics = resolveQueueSemantics(order, locale);
       return {
         actions: renderInlineActionPills(
           buildActionContexts(
@@ -3584,7 +3649,43 @@ export default async function DispatchPage({
           </div>
         ),
         window: formatWindow(order, locale),
-        service: formatDispatchCode(locale, getServiceProductValue(order)),
+        service: queueSemantics.isMultiTaxi
+          ? queueSemantics.serviceTypeText
+          : formatDispatchCode(locale, getServiceProductValue(order)),
+        queueModeCell: (
+          <div style={{ display: "grid", gap: 2 }}>
+            <Pill
+              theme={theme}
+              tone={
+                queueSemantics.isStatutoryRefusal
+                  ? "danger"
+                  : queueSemantics.queueMode === "virtual_matching"
+                    ? "accent"
+                    : "info"
+              }
+              dot
+            >
+              {queueSemantics.queueModeText}
+            </Pill>
+            {queueSemantics.isMultiTaxi &&
+            !queueSemantics.isStatutoryRefusal ? (
+              <span style={{ fontSize: 10.5, color: theme.textMuted }}>
+                {queueSemantics.matchingModeText}
+              </span>
+            ) : null}
+            {queueSemantics.isStatutoryRefusal ? (
+              <span
+                style={{
+                  fontSize: 10.5,
+                  color: theme.danger,
+                  fontWeight: 700,
+                }}
+              >
+                {queueSemantics.refusalCopy}
+              </span>
+            ) : null}
+          </div>
+        ),
         eta:
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== null &&
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== undefined
@@ -3631,6 +3732,11 @@ export default async function DispatchPage({
         k: "service",
         w: 130,
         mono: true,
+      },
+      {
+        h: t("dispatch.table.ready.queueMode", locale),
+        k: "queueModeCell",
+        w: 170,
       },
       {
         h: t("dispatch.table.shared.eta", locale),
@@ -3764,6 +3870,24 @@ export default async function DispatchPage({
               </Link>
             );
           })}
+          <Link
+            href="/dispatch/queue"
+            style={{ ...boardNavLinkStyle, marginLeft: "auto" }}
+            data-screen-link="MTX-QUEUE-UI-01"
+          >
+            <div
+              style={{
+                ...boardNavItemStyle,
+                color: theme.accent,
+                fontWeight: 650,
+              }}
+            >
+              <Pill theme={theme} tone="info" dot>
+                MTX
+              </Pill>
+              <span>{t("dispatch.queue.action.openOperations", locale)}</span>
+            </div>
+          </Link>
         </div>
 
         <div style={boardContentStyle}>
@@ -4269,6 +4393,71 @@ export default async function DispatchPage({
                             </span>
                           </div>
                         )}
+                        {"mirrorOrderId" in selectedRecord
+                          ? null
+                          : (() => {
+                              const sem = resolveQueueSemantics(
+                                selectedRecord,
+                                locale,
+                              );
+                              return (
+                                <div style={selectedMetaCellStyle}>
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      color: theme.textDim,
+                                    }}
+                                  >
+                                    {t("dispatch.queue.overviewTitle", locale)}
+                                  </span>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: 8,
+                                      alignItems: "center",
+                                      flexWrap: "wrap",
+                                    }}
+                                  >
+                                    <Pill
+                                      theme={theme}
+                                      tone={
+                                        sem.isStatutoryRefusal
+                                          ? "danger"
+                                          : "accent"
+                                      }
+                                      dot
+                                    >
+                                      {sem.queueModeText}
+                                    </Pill>
+                                    <span
+                                      style={{
+                                        fontSize: 11,
+                                        color: theme.textMuted,
+                                      }}
+                                    >
+                                      {`${sem.serviceTypeText} · ${sem.matchingModeText} · ${sem.siteDisplay}`}
+                                    </span>
+                                  </div>
+                                  {sem.isStatutoryRefusal ? (
+                                    <span
+                                      style={{
+                                        fontSize: 11,
+                                        color: theme.danger,
+                                        fontWeight: 700,
+                                        marginTop: 2,
+                                      }}
+                                    >
+                                      {sem.refusalCopy} (
+                                      {t(
+                                        "dispatch.denial.noOverrideAllowed",
+                                        locale,
+                                      )}
+                                      )
+                                    </span>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
                             {t("dispatch.selected.links", locale)}

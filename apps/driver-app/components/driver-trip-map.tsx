@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from "react-native";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 
 import { driverCanvasTheme } from "@/components/canvas-primitives";
@@ -16,12 +17,43 @@ import {
   getDriverLocationFixState,
   openDriverNavigation,
   type DriverLocationFixInput,
+  type DriverNavigationCoordinate,
   type DriverNavigationOpenResult,
   type DriverNavigationProvider,
   type DriverNavigationStop,
 } from "@/lib/driver-navigation";
 
 export type DriverTripMapLocation = NonNullable<DriverLocationFixInput>;
+
+function buildNativeMapRegion(
+  stops: DriverNavigationCoordinate[],
+  driverLocation: DriverTripMapLocation | null,
+) {
+  const points = [
+    ...stops,
+    ...(driverLocation
+      ? [
+          {
+            latitude: driverLocation.latitude,
+            longitude: driverLocation.longitude,
+          },
+        ]
+      : []),
+  ];
+  const latitudes = points.map((point) => point.latitude);
+  const longitudes = points.map((point) => point.longitude);
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max(0.015, (maxLat - minLat) * 1.6),
+    longitudeDelta: Math.max(0.015, (maxLng - minLng) * 1.6),
+  };
+}
 
 type DriverTripMapProps = {
   task: DriverTaskRecord;
@@ -169,6 +201,15 @@ export default function DriverTripMap({
         ? "warning"
         : "info",
   );
+  const nativePoints = [
+    model.stops.pickup.coordinate,
+    model.stops.dropoff.coordinate,
+  ].filter((point): point is DriverNavigationCoordinate => point !== null);
+  const nativeMapEnabled =
+    nativeMapAvailable && Platform.OS !== "web" && nativePoints.length > 0;
+  const initialRegion = nativeMapEnabled
+    ? buildNativeMapRegion(nativePoints, driverLocation)
+    : null;
 
   const handleOpenNavigation = async (
     stop: DriverNavigationStop,
@@ -237,16 +278,45 @@ export default function DriverTripMap({
               : "Coordinate handoff mode"}
           </Text>
           <Text style={styles.previewStatus}>
-            {nativeMapAvailable
-              ? "原生地圖 adapter 可用"
+            {nativeMapEnabled
+              ? "Google native map active"
               : "此 build 未 bundled native map SDK；不宣稱原生地圖渲染。"}
           </Text>
         </View>
-        <View style={styles.pinRow}>
-          <View style={[styles.pin, styles.pickupPin]} />
-          <View style={styles.pinConnector} />
-          <View style={[styles.pin, styles.dropoffPin]} />
-        </View>
+        {nativeMapEnabled && initialRegion ? (
+          <MapView
+            accessibilityLabel="Driver trip Google map"
+            initialRegion={initialRegion}
+            mapType="standard"
+            provider={PROVIDER_GOOGLE}
+            showsMyLocationButton
+            showsUserLocation={fixState.state !== "missing"}
+            style={styles.nativeMap}
+          >
+            {model.stops.pickup.coordinate ? (
+              <Marker
+                coordinate={model.stops.pickup.coordinate}
+                description={model.stops.pickup.address}
+                pinColor={driverCanvasTheme.success}
+                title={model.stops.pickup.label}
+              />
+            ) : null}
+            {model.stops.dropoff.coordinate ? (
+              <Marker
+                coordinate={model.stops.dropoff.coordinate}
+                description={model.stops.dropoff.address}
+                pinColor={driverCanvasTheme.danger}
+                title={model.stops.dropoff.label}
+              />
+            ) : null}
+          </MapView>
+        ) : (
+          <View style={styles.pinRow}>
+            <View style={[styles.pin, styles.pickupPin]} />
+            <View style={styles.pinConnector} />
+            <View style={[styles.pin, styles.dropoffPin]} />
+          </View>
+        )}
         <Text style={styles.previewMeta}>
           {model.hasNavigableRoute
             ? "Pickup/dropoff pins use synced coordinates and can open external navigation."
@@ -405,6 +475,11 @@ const styles = StyleSheet.create({
     borderColor: driverCanvasTheme.borderStrong,
     padding: 12,
     backgroundColor: driverCanvasTheme.surfaceLo,
+  },
+  nativeMap: {
+    width: "100%",
+    height: 240,
+    borderRadius: 12,
   },
   previewHeader: {
     gap: 2,

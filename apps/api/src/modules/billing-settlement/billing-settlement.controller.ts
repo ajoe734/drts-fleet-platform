@@ -32,6 +32,12 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+  type BootstrapRequestIdentity,
+} from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { BillingSettlementService } from "./billing-settlement.service";
 
@@ -40,6 +46,50 @@ export class BillingSettlementController {
   constructor(
     private readonly billingSettlementService: BillingSettlementService,
   ) {}
+
+  @Get("payment-exceptions/:orderId")
+  @RequireRealms("platform", "ops")
+  @RequireScopes("billing:read")
+  async getMultiTaxiPaymentException(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.getMultiTaxiPaymentException(
+        orderId,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("payment-exceptions/:orderId/actions/:action")
+  @RequireRealms("platform")
+  @RequireScopes("billing:write")
+  async executeMultiTaxiPaymentRecovery(
+    @Param("orderId") orderId: string,
+    @Param("action") action: string,
+    @Body() command: unknown,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.executeMultiTaxiPaymentRecovery(
+        orderId,
+        action,
+        command,
+        identity,
+        {
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+          ...(requestId ? { requestId } : {}),
+        },
+      ),
+      requestId,
+    );
+  }
 
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();

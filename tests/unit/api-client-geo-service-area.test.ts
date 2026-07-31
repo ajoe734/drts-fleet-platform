@@ -67,6 +67,13 @@ describe("api client geo and service-area coverage", () => {
       location: { lat: 25.033, lng: 121.5654 },
       surface: "ops_console",
     });
+    await client.computeGeoRoute({
+      origin: { lat: 25.033, lng: 121.5654 },
+      destination: { lat: 25.0478, lng: 121.5319 },
+      travelMode: "drive",
+      locale: "zh-TW",
+      requestedByActorId: "agent-001",
+    });
     await client.getServiceAreaDefinitions();
     await client.getServiceAreaGeoJson();
     await client.getOperationalServiceAreaGeoJson();
@@ -137,6 +144,7 @@ describe("api client geo and service-area coverage", () => {
       "http://localhost:3001/api/geo/search?q=Taipei+101&nearLat=25.033&nearLng=121.5654&locale=zh-TW&limit=5&surface=callcenter&requestedByActorId=agent-001",
       "http://localhost:3001/api/geo/resolve",
       "http://localhost:3001/api/geo/reverse",
+      "http://localhost:3001/api/geo/route",
       "http://localhost:3001/api/service-area/definitions",
       "http://localhost:3001/api/service-area/admin/geojson",
       "http://localhost:3001/api/service-area/geojson",

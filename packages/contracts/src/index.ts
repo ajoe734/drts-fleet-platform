@@ -208,6 +208,25 @@ export interface GeoReverseResponse {
   resolvedAt: string;
 }
 
+export const GEO_ROUTE_TRAVEL_MODES = ["drive", "two_wheeler", "walk"] as const;
+export type GeoRouteTravelMode = (typeof GEO_ROUTE_TRAVEL_MODES)[number];
+
+export interface ComputeGeoRouteCommand {
+  origin: GeoPoint;
+  destination: GeoPoint;
+  travelMode?: GeoRouteTravelMode;
+  locale?: string;
+  requestedByActorId?: string | null;
+}
+
+export interface GeoRouteResponse {
+  provider: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  encodedPolyline: string | null;
+  generatedAt: string;
+}
+
 export const GEO_PROVIDER_MODES = ["mock", "external", "disabled"] as const;
 export type GeoProviderMode = (typeof GEO_PROVIDER_MODES)[number];
 
@@ -2865,6 +2884,11 @@ export interface RedispatchOrderCommand {
   reasonNote?: string;
   operatorId?: string;
   escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+  // Optimistic-concurrency guard. When supplied, the redispatch is rejected if
+  // the order has already advanced past this assignment version, so a stale
+  // event cannot cancel an assignment the caller never saw. Omit to redispatch
+  // unconditionally.
+  expectedAssignmentVersion?: number | null;
 }
 
 export interface CancelOwnedOrderCommand {
@@ -2874,11 +2898,13 @@ export interface CancelOwnedOrderCommand {
 export interface QueueCheckInCommand {
   vehicleId: string;
   siteId: string;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
 }
 
 export interface QueueCheckOutCommand {
   vehicleId: string;
   siteId: string;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
 }
 
 export interface DriverAcceptTaskCommand {
@@ -2934,6 +2960,12 @@ export interface OwnedOrderRecord {
   // settlement. Optional for legacy/in-flight orders persisted before this
   // field existed; consumers fall back to deriving it from the bucket/subtype.
   serviceProductCode?: ServiceProductType | null;
+  runtimeProfileCode?: import("./phase1-p5-s3-multi-taxi").RuntimeProfileCode;
+  acquisitionMode?: import("./phase1-p5-s3-multi-taxi").PassengerAcquisitionMode;
+  timingMode?: import("./phase1-p5-s3-multi-taxi").RideTimingMode;
+  operatingAuthorizationId?: string | null;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode | null;
+  paymentMethodTokenRef?: string | null;
   status: OwnedOrderStatus;
   pickup: AddressPayload;
   dropoff: AddressPayload;
@@ -3344,7 +3376,9 @@ export type OpsDispatchStreamEventType =
   | "order_updated"
   | "dispatch_job_updated"
   | "driver_location_updated"
-  | "supply_lifecycle_updated";
+  | "supply_lifecycle_updated"
+  | "incident_created"
+  | "incident_updated";
 
 export interface OpsDispatchOrderCreatedEventData {
   order: OwnedOrderRecord;
@@ -3373,12 +3407,22 @@ export interface OpsDispatchSupplyLifecycleUpdatedEventData {
   lifecycle: VehicleSupplyLifecycleRecord;
 }
 
+export interface OpsDispatchIncidentCreatedEventData {
+  incident: IncidentRecord;
+}
+
+export interface OpsDispatchIncidentUpdatedEventData {
+  incident: IncidentRecord;
+}
+
 export type OpsDispatchStreamEventData =
   | OpsDispatchOrderCreatedEventData
   | OpsDispatchOrderUpdatedEventData
   | OpsDispatchJobUpdatedEventData
   | OpsDispatchDriverLocationUpdatedEventData
-  | OpsDispatchSupplyLifecycleUpdatedEventData;
+  | OpsDispatchSupplyLifecycleUpdatedEventData
+  | OpsDispatchIncidentCreatedEventData
+  | OpsDispatchIncidentUpdatedEventData;
 
 export interface OpsDispatchStreamEventEnvelope extends DomainEventEnvelope<OpsDispatchStreamEventData> {
   eventType: OpsDispatchStreamEventType;
@@ -3397,10 +3441,55 @@ export interface QueueEntryRecord {
   queueEntryId: string;
   vehicleId: string;
   siteId: string;
+  runtimeProfileCode?: import("./phase1-p5-s3-multi-taxi").RuntimeProfileCode;
+  queueMode?: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode;
+  operatingAuthorizationId?: string | null;
   status: QueueEntryStatus;
   position: number;
   checkedInAt: string;
   checkedOutAt: string | null;
+}
+
+export const DISPATCH_QUEUE_ELIGIBILITY_DECISIONS = [
+  "eligible",
+  "denied",
+] as const;
+export type DispatchQueueEligibilityDecision =
+  (typeof DISPATCH_QUEUE_ELIGIBILITY_DECISIONS)[number];
+
+export const DISPATCH_QUEUE_ELIGIBILITY_REASON_CODES = [
+  "QUEUE_CONTEXT_INCOMPLETE",
+  "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+  "MULTI_TAXI_AUTHORIZATION_REQUIRED",
+  "MULTI_TAXI_QUEUE_MODE_FORBIDDEN",
+  "QUEUE_MODE_NOT_ALLOWED",
+  "VEHICLE_NOT_DISPATCHABLE",
+  "VEHICLE_NOT_FOUND",
+] as const;
+export type DispatchQueueEligibilityReasonCode =
+  (typeof DISPATCH_QUEUE_ELIGIBILITY_REASON_CODES)[number];
+
+export interface DispatchQueueEligibilitySnapshot {
+  decision: DispatchQueueEligibilityDecision;
+  reasonCode: DispatchQueueEligibilityReasonCode | null;
+  evaluatedAt: string;
+}
+
+export interface DispatchQueueEntryReadRecord extends Omit<
+  QueueEntryRecord,
+  "runtimeProfileCode" | "queueMode"
+> {
+  runtimeProfileCode:
+    | import("./phase1-p5-s3-multi-taxi").RuntimeProfileCode
+    | null;
+  queueMode: import("./phase1-p5-s3-multi-taxi").DispatchQueueMode | null;
+  driverId: string | null;
+  driverName: string | null;
+  vehiclePlateNo: string | null;
+  serviceAreaCode: string | null;
+  lastUpdatedAt: string;
+  eligibility: DispatchQueueEligibilitySnapshot;
+  availableActions: import("./ui-runtime").ResourceActionDescriptor[];
 }
 
 export type VehicleContractLifecycleStatus =
@@ -4800,6 +4889,7 @@ export const OPERATIONAL_REPORT_JOB_TYPES = [
   "revenue_summary",
   "incident_register",
   "maintenance_overview",
+  "multi_taxi_trip_records",
   // Phase 1 delta (SD §1.6): daily dispatch record + six-month operations summary.
   "daily_dispatch_record",
   "six_month_operations_summary",
@@ -4812,6 +4902,7 @@ export const REPORT_JOB_TYPES = [
 export type ReportJobType = (typeof REPORT_JOB_TYPES)[number];
 
 export const REPORT_JOB_STATUSES = [
+  "pending",
   "queued",
   "running",
   "completed",
@@ -6397,3 +6488,5 @@ export * from "./platform-adapter-registry";
 export * from "./ui-runtime";
 export * from "./phase1-delta-supply-eligibility";
 export * from "./phase2-tesla-fsd-sandbox";
+export * from "./phase1-p5-s3-multi-taxi";
+export * from "./p5-fare-anomaly-admin";

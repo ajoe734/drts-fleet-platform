@@ -6,6 +6,7 @@ import { GeoProviderConfigService } from "./geo-provider-config.service";
 import { GeoController } from "./geo.controller";
 import { GEO_PROVIDER } from "./geo.provider";
 import { GeoService } from "./geo.service";
+import { GoogleGeoProvider } from "./google-geo.provider";
 import { MockGeoProvider } from "./mock-geo.provider";
 
 @Module({
@@ -14,9 +15,15 @@ import { MockGeoProvider } from "./mock-geo.provider";
   providers: [
     GeoProviderConfigService,
     MockGeoProvider,
+    GoogleGeoProvider,
     {
       provide: GEO_PROVIDER,
-      useExisting: MockGeoProvider,
+      inject: [GeoProviderConfigService, MockGeoProvider, GoogleGeoProvider],
+      useFactory: (
+        config: GeoProviderConfigService,
+        mockProvider: MockGeoProvider,
+        googleProvider: GoogleGeoProvider,
+      ) => (config.useGoogleProvider() ? googleProvider : mockProvider),
     },
     GeoService,
   ],

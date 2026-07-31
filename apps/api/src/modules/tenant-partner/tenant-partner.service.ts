@@ -781,6 +781,117 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     },
   },
   {
+    partnerId: "partner-cathay-card-001",
+    partnerCode: "cathay",
+    partnerType: "bank_partner",
+    programId: "program-cathay-cube-world",
+    programCode: "CUBE_WORLD",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "CATHAY",
+    entrySlug: "cathay",
+    displayName: "Cathay CUBE World",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: "ride.cathaybk.com.tw",
+    entryPath: "/cathay/program/site",
+    themeAccent: "#0A3621",
+    brandingMetadata: {
+      displayName: "Cathay CUBE World",
+      themeAccent: "#0A3621",
+      supportEmail: "cube-world@cathay.example",
+      supportPhone: "0800-818-001",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-07-27T00:00:00.000Z",
+    updatedAt: "2026-07-27T00:00:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-cathay",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
+    partnerId: "partner-taishin-card-001",
+    partnerCode: "taishin",
+    partnerType: "bank_partner",
+    programId: "program-taishin-infinite",
+    programCode: "TAISHIN_INFINITE",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "TAISHIN",
+    entrySlug: "taishin",
+    displayName: "Taishin Infinite",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: "ride.taishinbank.com.tw",
+    entryPath: "/taishin/program/site",
+    themeAccent: "#7C2241",
+    brandingMetadata: {
+      displayName: "Taishin Infinite",
+      themeAccent: "#7C2241",
+      supportEmail: "infinite@taishin.example",
+      supportPhone: "0800-023-123",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-07-27T00:05:00.000Z",
+    updatedAt: "2026-07-27T00:05:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-taishin",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
+    partnerId: "partner-dbs-card-001",
+    partnerCode: "dbs",
+    partnerType: "bank_partner",
+    programId: "program-dbs-insignia",
+    programCode: "DBS_INSIGNIA",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "DBS",
+    entrySlug: "dbs",
+    displayName: "DBS Insignia",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: "ride.dbs.com.tw",
+    entryPath: "/dbs/program/site",
+    themeAccent: "#9B1B22",
+    brandingMetadata: {
+      displayName: "DBS Insignia",
+      themeAccent: "#9B1B22",
+      supportEmail: "insignia@dbs.example",
+      supportPhone: "0800-808-889",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-07-27T00:10:00.000Z",
+    updatedAt: "2026-07-27T00:10:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-dbs",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
     partnerId: "partner-fubon-claim-001",
     partnerCode: "fubon",
     partnerType: "bank_partner",
@@ -867,6 +978,26 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       entrySlug: "bank-demo-beta-airport",
       keyId: "partner-key-beta-demo",
       envVarName: "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT",
+    },
+    {
+      entrySlug: "ctbc",
+      keyId: "partner-key-ctbc-dev",
+      envVarName: "PARTNER_INGRESS_KEY_CTBC",
+    },
+    {
+      entrySlug: "cathay",
+      keyId: "partner-key-cathay-dev",
+      envVarName: "PARTNER_INGRESS_KEY_CATHAY",
+    },
+    {
+      entrySlug: "taishin",
+      keyId: "partner-key-taishin-dev",
+      envVarName: "PARTNER_INGRESS_KEY_TAISHIN",
+    },
+    {
+      entrySlug: "dbs",
+      keyId: "partner-key-dbs-dev",
+      envVarName: "PARTNER_INGRESS_KEY_DBS",
     },
   ];
 
@@ -1126,6 +1257,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           : this.partnerIngressCredentialSeeds.map((seed) =>
               createBootstrapPartnerIngressCredential(seed),
             );
+      this.reconcilePartnerIngressCredentialSeeds();
       this.normalizePartnerEntryAuthModes();
       this.partnerEligibilityVerifications = new Map(
         partnerEligibilityVerifications.map((verification) => [
@@ -3908,7 +4040,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
 
-  listReferralRevenueShareRules(entrySlug?: string): ReferralRevenueShareRule[] {
+  listReferralRevenueShareRules(
+    entrySlug?: string,
+  ): ReferralRevenueShareRule[] {
     const slug = entrySlug?.trim();
     return this.referralRevenueShareRules
       .filter((rule) => !slug || rule.partnerEntrySlug === slug)
@@ -4023,6 +4157,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((credential) => this.toPartnerIngressCredentialResponse(credential));
   }
 
+  async resolvePartnerEligibilityReviewQueue(
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const persistedRecords =
+        await this.tenantPartnerRepository.listPartnerEligibilityReviewQueue();
+      for (const [id, verification] of this.partnerEligibilityVerifications) {
+        if (verification.verificationStatus !== "eligible") {
+          this.partnerEligibilityVerifications.delete(id);
+        }
+      }
+      for (const verification of persistedRecords) {
+        this.partnerEligibilityVerifications.set(
+          verification.eligibilityVerificationId,
+          this.clonePartnerEligibilityVerification(verification),
+        );
+      }
+    }
+    return this.listPartnerEligibilityReviewQueue(requestId, identity);
+  }
+
   listPartnerEligibilityReviewQueue(
     requestId?: string,
     identity?: IdentityContext | null,
@@ -4106,7 +4262,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       entry.entrySlug,
     );
     const period =
-      periodMonth?.trim() || statements[0]?.period || new Date().toISOString().slice(0, 7);
+      periodMonth?.trim() ||
+      statements[0]?.period ||
+      new Date().toISOString().slice(0, 7);
     const statement = billingSettlementService.getReferralStatement(
       entry.entrySlug,
       period,
@@ -4137,7 +4295,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const statements = await billingSettlementService.listReferralStatements(
       entry.entrySlug,
     );
-    return statements.map((statement) => this.toPartnerReferralUsage(statement));
+    return statements.map((statement) =>
+      this.toPartnerReferralUsage(statement),
+    );
   }
 
   async listPartnerReferralRevenue(
@@ -4716,17 +4876,91 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private authenticatePartnerBootstrapWithResolvedCredential(
+    entrySlug: string,
+    requestId?: string,
+  ): PartnerIngressResolution {
+    const entry = this.requireAccessiblePartnerEntry(
+      entrySlug,
+      requestId,
+      "authenticate",
+    );
+    const credential = this.resolvePartnerIngressCredential(entry.entrySlug);
+    if (!credential) {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "credential_not_configured",
+      });
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_AUTH_NOT_CONFIGURED",
+        "Partner ingress authentication is not configured for this entry.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    const identity: IdentityContext = {
+      actorType: "partner_api_key",
+      actorId: credential.keyId,
+      realm: "partner",
+      authMode: "bootstrap_headers",
+      roleFamilies: ["partner"],
+      roles: ["partner_ingress"],
+      scopes: [
+        "partner:entries:read",
+        "partner:eligibility:read",
+        "partner:eligibility:write",
+      ],
+      tenantId: entry.tenantId,
+      partnerId: entry.partnerId,
+      partnerProgramId: entry.programId,
+      partnerEntrySlug: entry.entrySlug,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPartnerIngressAttempt(entry, requestId, "accepted", {
+      keyId: credential.keyId,
+      authSource: "internal_resolved_credential",
+    });
+    credential.lastUsedAt = new Date().toISOString();
+
+    return {
+      partnerEntry: this.clonePartnerEntry(entry),
+      identity,
+    };
+  }
+
   async issuePartnerIngressHandoff(
     command: CreatePartnerIngressHandoffCommand,
     requestId?: string,
+    options?: {
+      allowInternalBootstrap?: boolean;
+    },
   ): Promise<PartnerIngressHandoffResolution> {
-    const bootstrap = this.authenticatePartnerBootstrap(
-      {
-        entrySlug: command.entrySlug,
-        apiKey: command.apiKey,
-      },
-      requestId,
-    );
+    const bootstrap = command.apiKey?.trim()
+      ? this.authenticatePartnerBootstrap(
+          {
+            entrySlug: command.entrySlug,
+            apiKey: command.apiKey,
+          },
+          requestId,
+        )
+      : options?.allowInternalBootstrap
+        ? this.authenticatePartnerBootstrapWithResolvedCredential(
+            command.entrySlug,
+            requestId,
+          )
+        : this.authenticatePartnerBootstrap(
+            {
+              entrySlug: command.entrySlug,
+              apiKey: command.apiKey ?? "",
+            },
+            requestId,
+          );
     const partnerUserRef = command.partnerUserRef?.trim();
     if (!partnerUserRef) {
       throw new ApiRequestError(
@@ -4773,7 +5007,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         authMode: "bootstrap_headers",
         roleFamilies: ["partner"],
         roles: ["referral_passenger"],
-        scopes: ["partner:handoff"],
+        scopes: [
+          "partner:handoff",
+          "partner:eligibility:read",
+          "partner:eligibility:write",
+          "partner:book",
+        ],
         tenantId: bootstrap.identity.tenantId,
         partnerId: bootstrap.identity.partnerId ?? null,
         partnerProgramId: bootstrap.identity.partnerProgramId ?? null,
@@ -4917,7 +5156,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       verification.eligibilityVerificationId,
       this.clonePartnerEligibilityVerification(verification),
     );
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         partnerEligibilityVerifications: [
           this.clonePartnerEligibilityVerification(verification),
@@ -4930,8 +5169,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: identity?.actorId ?? null,
         actorType:
-          identity?.actorType === "partner_api_key"
-            ? "partner_api_key"
+          identity?.actorType === "partner_api_key" ||
+          identity?.actorType === "referral_passenger"
+            ? identity.actorType
             : "system",
         tenantId: entry.tenantId,
         moduleName: "tenant-partner",
@@ -4952,6 +5192,73 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEligibilityVerification(verification);
   }
 
+  async resolvePartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+    requestId?: string,
+    identity?: PartnerEligibilityIdentity | null,
+  ) {
+    const verification = await this.loadPartnerEligibilityVerification(
+      eligibilityVerificationId,
+    );
+    return this.readPartnerEligibilityVerification(
+      verification,
+      eligibilityVerificationId,
+      requestId,
+      identity,
+    );
+  }
+
+  async hydratePartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+    identity?: PartnerEligibilityIdentity | null,
+  ) {
+    const verification = await this.loadPartnerEligibilityVerification(
+      eligibilityVerificationId,
+    );
+    if (!verification) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ELIGIBILITY_NOT_FOUND",
+        "The partner eligibility verification record could not be found.",
+        {
+          eligibilityVerificationId,
+        },
+      );
+    }
+    this.assertPartnerEligibilityVerificationIdentity(
+      identity,
+      verification,
+      eligibilityVerificationId,
+    );
+  }
+
+  private async loadPartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+  ) {
+    let verification = this.partnerEligibilityVerifications.get(
+      eligibilityVerificationId,
+    );
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const persistedVerification =
+        (await this.tenantPartnerRepository.findPartnerEligibilityVerification(
+          eligibilityVerificationId,
+        )) ?? undefined;
+      if (
+        persistedVerification &&
+        (!verification ||
+          Date.parse(persistedVerification.updatedAt) >=
+            Date.parse(verification.updatedAt))
+      ) {
+        verification = persistedVerification;
+        this.partnerEligibilityVerifications.set(
+          eligibilityVerificationId,
+          this.clonePartnerEligibilityVerification(verification),
+        );
+      }
+    }
+    return verification;
+  }
+
   getPartnerEligibilityVerification(
     eligibilityVerificationId: string,
     requestId?: string,
@@ -4960,6 +5267,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const verification = this.partnerEligibilityVerifications.get(
       eligibilityVerificationId,
     );
+    return this.readPartnerEligibilityVerification(
+      verification,
+      eligibilityVerificationId,
+      requestId,
+      identity,
+    );
+  }
+
+  private readPartnerEligibilityVerification(
+    verification: PartnerEligibilityVerificationRecord | undefined,
+    eligibilityVerificationId: string,
+    requestId?: string,
+    identity?: PartnerEligibilityIdentity | null,
+  ) {
     if (!verification) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -5004,12 +5325,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEligibilityVerification(verification);
   }
 
-  resolvePartnerEligibilityReview(
+  async resolvePartnerEligibilityReview(
     command: ResolvePartnerEligibilityReviewCommand,
     requestId?: string,
     identity?: IdentityContext | null,
-  ): PartnerEligibilityReviewResolution {
-    const verification = this.partnerEligibilityVerifications.get(
+  ): Promise<PartnerEligibilityReviewResolution> {
+    const verification = await this.loadPartnerEligibilityVerification(
       command.eligibilityVerificationId,
     );
     if (!verification) {
@@ -5055,30 +5376,51 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       command.decision === "approve" ? "eligible" : "ineligible";
     const resolvedBy = identity?.actorId ?? "ops_reviewer";
 
-    verification.verificationStatus = resolvedStatus;
-    verification.verificationReasonCode = command.reasonCode;
-    verification.decisionSource = "ops_manual_review";
-    verification.updatedAt = now;
-    verification.manualFallback = {
-      ...verification.manualFallback,
-      notes: command.notes,
-    };
-    verification.auditMetadata = {
-      ...verification.auditMetadata,
-      updatedBy: resolvedBy,
+    const resolvedVerification: PartnerEligibilityVerificationRecord = {
+      ...verification,
+      verificationStatus: resolvedStatus,
+      verificationReasonCode: command.reasonCode,
+      decisionSource: "ops_manual_review",
+      updatedAt: now,
+      manualFallback: {
+        ...verification.manualFallback,
+        notes: command.notes,
+      },
+      auditMetadata: {
+        ...verification.auditMetadata,
+        updatedBy: resolvedBy,
+      },
     };
 
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const updated =
+        await this.tenantPartnerRepository.compareAndSetPartnerEligibilityVerification(
+          resolvedVerification,
+          verification.updatedAt,
+        );
+      if (!updated) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ELIGIBILITY_REVIEW_CONFLICT",
+          "Eligibility verification changed while the review was being resolved.",
+          {
+            eligibilityVerificationId: command.eligibilityVerificationId,
+          },
+        );
+      }
+    } else {
+      await this.persistChangesRequired(
+        {
+          partnerEligibilityVerifications: [
+            this.clonePartnerEligibilityVerification(resolvedVerification),
+          ],
+        },
+        "resolve_partner_eligibility_review",
+      );
+    }
     this.partnerEligibilityVerifications.set(
       command.eligibilityVerificationId,
-      this.clonePartnerEligibilityVerification(verification),
-    );
-    this.persistChanges(
-      {
-        partnerEligibilityVerifications: [
-          this.clonePartnerEligibilityVerification(verification),
-        ],
-      },
-      "resolve_partner_eligibility_review",
+      this.clonePartnerEligibilityVerification(resolvedVerification),
     );
 
     this.recordTenantAudit(
@@ -7800,6 +8142,32 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private reconcilePartnerIngressCredentialSeeds() {
+    const configuredEntrySlugs = new Set(
+      this.partnerIngressCredentials.map((credential) => credential.entrySlug),
+    );
+    const missingCredentials = this.partnerIngressCredentialSeeds
+      .filter((seed) => !configuredEntrySlugs.has(seed.entrySlug))
+      .map((seed) => createBootstrapPartnerIngressCredential(seed));
+
+    if (missingCredentials.length === 0) {
+      return;
+    }
+
+    this.partnerIngressCredentials = [
+      ...this.partnerIngressCredentials,
+      ...missingCredentials,
+    ];
+    this.persistChanges(
+      {
+        partnerIngressCredentials: missingCredentials.map((credential) =>
+          this.cloneStoredPartnerIngressCredential(credential),
+        ),
+      },
+      "module init partner ingress credential seed reconciliation",
+    );
+  }
+
   private resolvePartnerIngressCredential(entrySlug: string) {
     return this.partnerIngressCredentials.find(
       (credential) =>
@@ -7849,7 +8217,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      identity.actorType !== "partner_api_key" ||
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
       identity.tenantId !== entry.tenantId ||
       identity.partnerId !== entry.partnerId ||
@@ -7889,7 +8258,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      identity.actorType !== "partner_api_key" ||
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
       identity.tenantId !== verification.tenantId ||
       identity.partnerId !== verification.partnerId ||
@@ -10569,5 +10939,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .catch((error: unknown) => {
         this.tenantPartnerRepository!.reportPersistenceFailure(error, context);
       });
+  }
+
+  private async persistChangesRequired(
+    changes: PersistTenantPartnerChanges,
+    context: string,
+  ) {
+    if (!this.tenantPartnerRepository) {
+      return;
+    }
+
+    try {
+      await this.tenantPartnerRepository.persistChanges(changes);
+    } catch (error) {
+      this.tenantPartnerRepository.reportPersistenceFailure(error, context);
+      throw error;
+    }
   }
 }

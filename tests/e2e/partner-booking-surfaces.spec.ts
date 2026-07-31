@@ -1,4 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+
+const partnerBookingBaseUrl =
+  process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL ??
+  process.env.PARTNER_BOOKING_BASE_URL ??
+  "http://localhost:3007";
+const usesLocalPartnerBookingAuthority = (() => {
+  try {
+    const hostname = new URL(partnerBookingBaseUrl).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+})();
 
 const insuranceBlockedStates = [
   {
@@ -38,7 +52,33 @@ const insuranceBlockedStates = [
   },
 ] as const;
 
+const cardAirportEmbedIssuers = [
+  { slug: "ctbc", name: /中信|CTBC/i },
+  { slug: "cathay", name: /國泰|Cathay/i },
+  { slug: "taishin", name: /台新|Taishin/i },
+  { slug: "dbs", name: /星展|DBS/i },
+] as const;
+
 test.describe("partner booking program surfaces", () => {
+  test("keeps every airport issuer embed backed by partner authority", async ({
+    page,
+  }) => {
+    for (const issuer of cardAirportEmbedIssuers) {
+      const response = await page.goto(`/${issuer.slug}/program/embed`);
+      expect(response?.status(), issuer.slug).toBe(200);
+      await expect(
+        page.locator("[data-program-surface='embed']"),
+        issuer.slug,
+      ).toBeVisible();
+      await expect(page.locator("body"), issuer.slug).toContainText(
+        issuer.name,
+      );
+      await expect(page.locator("body"), issuer.slug).toContainText(
+        /未偵測到銀行登入|Bank sign-in not detected/i,
+      );
+    }
+  });
+
   test("keeps card website booking and bank-app embed identity states distinct", async ({
     page,
   }) => {
@@ -51,13 +91,17 @@ test.describe("partner booking program surfaces", () => {
     const embedResponse = await page.goto("/ctbc/program/embed");
     expect(embedResponse?.status()).toBe(200);
     await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
-    await expect(page.getByText("program: card · embed")).toBeVisible();
-    await expect(page.getByText("issuer_signature")).toBeVisible();
-    await expect(page.getByText("ref_token")).toBeVisible();
-    await expect(page.getByText("網銀 APP 內嵌 webview")).toHaveCount(0);
-    await expect(page.getByText("原始卡資料")).toHaveCount(0);
+    await expect(
+      page.getByText("未取得有效網銀身分，改導向 standalone 官方站點。"),
+    ).toBeVisible();
+    await expect(page.getByText("未偵測到銀行登入")).toBeVisible();
+    await expect(page.getByText("no_embed_session · 改用官網")).toBeVisible();
+    await expect(page.getByText("不在此頁輸入原始卡資料")).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: /卡號|信用卡|card/i }),
+    ).toHaveCount(0);
 
-    const reauthResponse = await page.goto("/ctbc/program/embed/reauth");
+    const reauthResponse = await page.goto("/ctbc/program/embed/embed-reauth");
     expect(reauthResponse?.status()).toBe(200);
     await expect(page.getByText("issuer_session")).toBeVisible();
     await expect(page.getByText("expired", { exact: true })).toBeVisible();
@@ -93,6 +137,65 @@ test.describe("partner booking program surfaces", () => {
     await expect(page.getByText("末四碼 / 網銀帳號")).toBeVisible();
     await expect(page.getByText("不在此頁輸入原始卡資料")).toBeVisible();
     await expect(page.getByText("ref_token")).toHaveCount(0);
+  });
+
+  test("creates a real booking from the airport embed flow", async ({
+    page,
+  }) => {
+    const requestRef = randomUUID();
+    const response = await page.goto(
+      `/ctbc/program/embed?partnerUserRef=user-${requestRef}&referenceToken=token-${requestRef}&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-${requestRef}&flightNo=CI100`,
+    );
+    expect(response?.status()).toBe(200);
+
+    await page.getByRole("button", { name: "開始預約" }).click();
+    await page.getByRole("button", { name: "前往確認" }).click();
+    await page.getByRole("button", { name: "確認送出預約" }).click();
+
+    await expect(page.getByText("預約已建立")).toBeVisible();
+    await expect(page.getByTestId("partner-booking-id")).toHaveText(
+      /^booking-/,
+    );
+    await expect(page.getByTestId("partner-order-id")).not.toHaveText("—");
+    await expect(page.getByTestId("partner-eligibility-id")).toHaveText(
+      /^(elig-|elig_)/,
+    );
+
+    await page.getByRole("button", { name: "追蹤行程" }).click();
+    await expect(page.getByTestId("partner-order-number")).not.toHaveText("—");
+    await expect(
+      page.getByText(
+        "台北市信義區松仁路 100 號 -> 桃園 T2 · 第二航廈 出發接送區",
+        { exact: true },
+      ),
+    ).toBeVisible();
+  });
+
+  test("shows a safe reference code when airport booking fails", async ({
+    page,
+  }) => {
+    test.skip(
+      !usesLocalPartnerBookingAuthority,
+      "The force-error authority hook is available only in the local mock.",
+    );
+
+    const response = await page.goto(
+      "/ctbc/program/embed?partnerUserRef=failure-user&referenceToken=failure-token&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=force-error&flightNo=CI100",
+    );
+    expect(response?.status()).toBe(200);
+
+    await page.getByRole("button", { name: "開始預約" }).click();
+    await page.getByRole("button", { name: "前往確認" }).click();
+    await page.getByRole("button", { name: "確認送出預約" }).click();
+
+    await expect(page.getByText("預約送出失敗。")).toBeVisible();
+    await expect(page.getByTestId("partner-booking-error-code")).toHaveText(
+      "錯誤代碼：PARTNER_BOOKING_CONFLICT",
+    );
+    await expect(
+      page.getByText("sensitive upstream booking detail"),
+    ).toHaveCount(0);
+    await expect(page.getByText("must-not-leak")).toHaveCount(0);
   });
 
   test("keeps insurance and travel on site funnel states while blocking embed", async ({

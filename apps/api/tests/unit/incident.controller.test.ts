@@ -4,6 +4,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { ComplaintService } from "../../src/modules/complaint/complaint.service";
 import { IncidentController } from "../../src/modules/incident/incident.controller";
 import { IncidentService } from "../../src/modules/incident/incident.service";
+import { ApiRequestError } from "../../src/common/api-envelope";
 
 function createController() {
   const auditNotificationService = new AuditNotificationService();
@@ -221,5 +222,54 @@ describe("IncidentController", () => {
         timestamp: expect.any(String),
       },
     });
+  });
+
+  it("enforces first-writer-wins for assignments, throwing conflict error if already assigned to a different operator", () => {
+    const { controller, incidentService } = createController();
+
+    const incident = incidentService.createIncident({
+      title: "Assignment conflict test",
+      description: "Should enforce first-writer-wins.",
+      category: "operational",
+      severity: "medium",
+      reportedBy: "ops-user-006",
+    });
+
+    // First writer assigns the incident
+    controller.updateIncident(
+      incident.incidentId,
+      { assignedTo: "OperatorA" },
+      "req-assign-1",
+    );
+
+    // Second writer attempts to assign to OperatorB, which should fail
+    expect(() => {
+      controller.updateIncident(
+        incident.incidentId,
+        { assignedTo: "OperatorB" },
+        "req-assign-2",
+      );
+    }).toThrow(ApiRequestError);
+
+    try {
+      controller.updateIncident(
+        incident.incidentId,
+        { assignedTo: "OperatorB" },
+        "req-assign-2",
+      );
+    } catch (err: any) {
+      expect(err.getStatus()).toBe(409);
+      expect((err.getResponse() as any).error.message).toContain(
+        "already assigned to OperatorA",
+      );
+    }
+
+    // Assigning to the same operator should succeed without throwing
+    const res = controller.updateIncident(
+      incident.incidentId,
+      { assignedTo: "OperatorA" },
+      "req-assign-3",
+    );
+    expect(res.data.assignedTo).toBe("OperatorA");
   });
 });

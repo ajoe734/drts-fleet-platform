@@ -47,6 +47,88 @@ function createQuotaSnapshot(
 }
 
 describe("tenant partner repository quota persistence", () => {
+  it("loads an eligibility verification by its authority id", async () => {
+    const record = {
+      eligibilityVerificationId: "eligibility-cross-instance-001",
+      entrySlug: "ctbc",
+      verificationStatus: "eligible",
+    };
+    const query = vi.fn().mockResolvedValue({ rows: [{ record }] });
+    const repository = new TenantPartnerRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.findPartnerEligibilityVerification(
+        record.eligibilityVerificationId,
+      ),
+    ).resolves.toEqual(record);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "FROM admin.phase1_partner_eligibility_verifications",
+      ),
+      [record.eligibilityVerificationId],
+    );
+  });
+
+  it("loads the review queue from authority status columns", async () => {
+    const records = [
+      {
+        eligibilityVerificationId: "eligibility-review-001",
+        verificationStatus: "manual_review",
+      },
+    ];
+    const query = vi.fn().mockResolvedValue({
+      rows: records.map((record) => ({ record })),
+    });
+    const repository = new TenantPartnerRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.listPartnerEligibilityReviewQueue(),
+    ).resolves.toEqual(records);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "verification_status IN ('manual_review', 'ineligible')",
+      ),
+    );
+  });
+
+  it("resolves eligibility reviews with an updated-at compare-and-set", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ updated_at: new Date("2026-07-28T14:00:00.000Z") }],
+    });
+    const repository = new TenantPartnerRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+    const verification = {
+      eligibilityVerificationId: "eligibility-review-002",
+      verificationStatus: "eligible",
+      updatedAt: "2026-07-28T14:00:00.000Z",
+    };
+
+    await expect(
+      repository.compareAndSetPartnerEligibilityVerification(
+        verification as never,
+        "2026-07-28T13:59:00.000Z",
+      ),
+    ).resolves.toBe(true);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("AND updated_at = $5::timestamptz"),
+      [
+        verification.eligibilityVerificationId,
+        verification.verificationStatus,
+        verification.updatedAt,
+        JSON.stringify(verification),
+        "2026-07-28T13:59:00.000Z",
+      ],
+    );
+  });
+
   it("uses a null-aware conflict target for tenant-scope quota policies", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
     const repository = new TenantPartnerRepository({

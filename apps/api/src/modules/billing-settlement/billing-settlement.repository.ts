@@ -1,14 +1,17 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   FulfillmentSegmentRecord,
   DriverTaskRecord,
   DriverFeePlanRecord,
   DriverStatementRecord,
   MoneyAmount,
   OwnedOrderRecord,
+  PassengerPaymentStatus,
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
+  ResourceActionDescriptor,
   SandboxBillingTreatmentRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
@@ -16,6 +19,7 @@ import type {
 
 import { DatabaseService } from "../../common/db";
 import type { ControlledDownloadMetadata } from "../reporting-filing/download-signing.util";
+import type { PaymentRecoveryAction } from "./payment-recovery.port";
 
 type JsonRecordRow = {
   record: unknown;
@@ -24,6 +28,84 @@ type JsonRecordRow = {
 type LiveSettlementTripRow = {
   order_record: unknown;
   task_record: unknown;
+};
+
+type MultiTaxiPaymentExceptionRow = {
+  payment_id: string;
+  order_id: string;
+  trip_id: string | null;
+  provider_payment_ref: string | null;
+  status: PassengerPaymentStatus;
+  amount_minor: string | number | null;
+  currency: string;
+  attempt_count: number;
+  available_actions: unknown;
+  recovery_state: PaymentRecoveryState | null;
+  last_recovery_action: PaymentRecoveryAction | null;
+  updated_at: Date | string;
+};
+
+type MultiTaxiPaymentRecoveryCommandRow = {
+  recovery_command_id: string;
+  payment_id: string;
+  order_id: string;
+  action: PaymentRecoveryAction;
+  idempotency_key: string;
+  state: PaymentRecoveryState;
+  action_receipt: unknown;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
+type MultiTaxiPaymentAuditRow = {
+  audit_id: string;
+  actor_id: string | null;
+  actor_type: string;
+  action_name: string;
+  request_id: string | null;
+  created_at: Date | string;
+};
+
+export type MultiTaxiPaymentExceptionRecord = {
+  paymentId: string;
+  orderId: string;
+  tripId: string | null;
+  providerPaymentRef: string | null;
+  status: PassengerPaymentStatus;
+  amountMinor: number | null;
+  currency: string;
+  attemptCount: number;
+  availableActions: ResourceActionDescriptor[];
+  recoveryState: PaymentRecoveryState | null;
+  lastRecoveryAction: PaymentRecoveryAction | null;
+  updatedAt: string;
+};
+
+export type PaymentRecoveryState =
+  | "processing"
+  | "accepted"
+  | "completed"
+  | "failed";
+
+export type MultiTaxiPaymentRecoveryCommandRecord = {
+  recoveryCommandId: string;
+  paymentId: string;
+  orderId: string;
+  action: PaymentRecoveryAction;
+  idempotencyKey: string;
+  state: PaymentRecoveryState;
+  receipt: ActionReceipt | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MultiTaxiPaymentAuditRecord = {
+  auditId: string;
+  actorId: string | null;
+  actorType: string;
+  actionName: string;
+  requestId: string | null;
+  createdAt: string;
 };
 
 type FulfillmentSegmentRow = {
@@ -131,7 +213,10 @@ const DEFAULT_CURRENCY = "NTD";
 // and loses the exact product identity; resolving it here keeps the precise
 // serviceProductCode flowing booking -> dispatch -> task -> settlement.
 function resolvePreciseServiceProductCode(
-  order: Pick<OwnedOrderRecord, "businessDispatchSubtype" | "serviceProductCode">,
+  order: Pick<
+    OwnedOrderRecord,
+    "businessDispatchSubtype" | "serviceProductCode"
+  >,
 ): string | null {
   // Prefer the booking-origin precise code stamped on the order; otherwise keep
   // the prior settlement value (businessDispatchSubtype) byte-for-byte so legacy
@@ -147,6 +232,290 @@ export class BillingSettlementRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async findMultiTaxiPaymentException(
+    orderId: string,
+  ): Promise<MultiTaxiPaymentExceptionRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result =
+      await this.databaseService!.query<MultiTaxiPaymentExceptionRow>(
+        `
+          SELECT
+            payment.payment_id,
+            payment.order_id,
+            trip_record.trip_id,
+            payment.provider_payment_ref,
+            payment.status,
+            payment.amount_minor,
+            payment.currency,
+            payment.attempt_count,
+            payment.available_actions,
+            latest_recovery.state AS recovery_state,
+            latest_recovery.action AS last_recovery_action,
+            payment.updated_at
+          FROM billing.multi_taxi_passenger_payments payment
+          LEFT JOIN reporting.multi_taxi_trip_operational_records trip_record
+            ON trip_record.order_id = payment.order_id
+          LEFT JOIN LATERAL (
+            SELECT recovery.state, recovery.action
+            FROM billing.multi_taxi_payment_recovery_commands recovery
+            WHERE recovery.payment_id = payment.payment_id
+            ORDER BY recovery.created_at DESC
+            LIMIT 1
+          ) latest_recovery ON true
+          WHERE payment.order_id = $1
+          LIMIT 1
+        `,
+        [orderId],
+      );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      paymentId: row.payment_id,
+      orderId: row.order_id,
+      tripId: row.trip_id,
+      providerPaymentRef: row.provider_payment_ref,
+      status: row.status,
+      amountMinor: row.amount_minor === null ? null : Number(row.amount_minor),
+      currency: row.currency,
+      attemptCount: Number(row.attempt_count),
+      availableActions: this.parsePaymentAvailableActions(
+        row.available_actions,
+      ),
+      recoveryState: row.recovery_state ?? null,
+      lastRecoveryAction: row.last_recovery_action ?? null,
+      updatedAt: this.toIsoString(row.updated_at),
+    };
+  }
+
+  async listMultiTaxiPaymentAuditTrail(
+    orderId: string,
+    paymentId: string,
+  ): Promise<MultiTaxiPaymentAuditRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = await this.databaseService!.query<MultiTaxiPaymentAuditRow>(
+      `
+        SELECT
+          audit_id,
+          actor_id,
+          actor_type,
+          action_name,
+          request_id,
+          created_at
+        FROM admin.audit_logs
+        WHERE resource_id IN ($1, $2)
+          AND (
+            module_name = 'billing-settlement'
+            OR resource_type IN (
+              'multi_taxi_payment',
+              'multi_taxi_payment_exception'
+            )
+          )
+        ORDER BY created_at ASC
+        LIMIT 100
+      `,
+      [orderId, paymentId],
+    );
+
+    return result.rows.map((row) => ({
+      auditId: row.audit_id,
+      actorId: row.actor_id,
+      actorType: row.actor_type,
+      actionName: row.action_name,
+      requestId: row.request_id,
+      createdAt: this.toIsoString(row.created_at),
+    }));
+  }
+
+  async claimMultiTaxiPaymentRecoveryCommand(input: {
+    recoveryCommandId: string;
+    paymentId: string;
+    orderId: string;
+    action: PaymentRecoveryAction;
+    idempotencyKey: string;
+    actorId: string;
+    requestId?: string;
+    reason?: string;
+  }): Promise<{
+    claimed: boolean;
+    command: MultiTaxiPaymentRecoveryCommandRecord;
+  }> {
+    if (!this.isEnabled()) {
+      throw new Error("Payment recovery persistence is unavailable.");
+    }
+
+    const inserted =
+      await this.databaseService!.query<MultiTaxiPaymentRecoveryCommandRow>(
+        `
+          INSERT INTO billing.multi_taxi_payment_recovery_commands (
+            recovery_command_id,
+            payment_id,
+            order_id,
+            action,
+            idempotency_key,
+            state,
+            actor_id,
+            request_id,
+            reason
+          ) VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, $8)
+          ON CONFLICT (payment_id, action, idempotency_key) DO NOTHING
+          RETURNING
+            recovery_command_id,
+            payment_id,
+            order_id,
+            action,
+            idempotency_key,
+            state,
+            action_receipt,
+            created_at,
+            updated_at
+        `,
+        [
+          input.recoveryCommandId,
+          input.paymentId,
+          input.orderId,
+          input.action,
+          input.idempotencyKey,
+          input.actorId,
+          input.requestId ?? null,
+          input.reason ?? null,
+        ],
+      );
+    const insertedRow = inserted.rows[0];
+    if (insertedRow) {
+      return {
+        claimed: true,
+        command: this.mapPaymentRecoveryCommand(insertedRow),
+      };
+    }
+
+    const existing = await this.findMultiTaxiPaymentRecoveryCommand(
+      input.paymentId,
+      input.action,
+      input.idempotencyKey,
+    );
+    if (!existing) {
+      throw new Error("Payment recovery idempotency claim was not retained.");
+    }
+    return {
+      claimed: false,
+      command: existing,
+    };
+  }
+
+  async findMultiTaxiPaymentRecoveryCommand(
+    paymentId: string,
+    action: PaymentRecoveryAction,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiPaymentRecoveryCommandRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const existing =
+      await this.databaseService!.query<MultiTaxiPaymentRecoveryCommandRow>(
+        `
+          SELECT
+            recovery_command_id,
+            payment_id,
+            order_id,
+            action,
+            idempotency_key,
+            state,
+            action_receipt,
+            created_at,
+            updated_at
+          FROM billing.multi_taxi_payment_recovery_commands
+          WHERE payment_id = $1
+            AND action = $2
+            AND idempotency_key = $3
+          LIMIT 1
+        `,
+        [paymentId, action, idempotencyKey],
+      );
+    const existingRow = existing.rows[0];
+    return existingRow ? this.mapPaymentRecoveryCommand(existingRow) : null;
+  }
+
+  async completeMultiTaxiPaymentRecoveryCommand(input: {
+    recoveryCommandId: string;
+    paymentId: string;
+    action: PaymentRecoveryAction;
+    state: "accepted" | "completed";
+    receipt: ActionReceipt;
+  }) {
+    if (!this.isEnabled()) {
+      throw new Error("Payment recovery persistence is unavailable.");
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const commandUpdate = await client.query(
+        `
+          UPDATE billing.multi_taxi_payment_recovery_commands
+          SET
+            state = $2,
+            action_receipt = $3::jsonb,
+            updated_at = now()
+          WHERE recovery_command_id = $1
+            AND state = 'processing'
+        `,
+        [input.recoveryCommandId, input.state, JSON.stringify(input.receipt)],
+      );
+      if (commandUpdate.rowCount !== 1) {
+        throw new Error("Payment recovery command is no longer processing.");
+      }
+
+      await client.query(
+        `
+          UPDATE billing.multi_taxi_passenger_payments
+          SET
+            status = CASE
+              WHEN $2 = 'begin_manual_recovery' THEN 'manual_recovery'
+              WHEN $2 = 'retry_capture' AND $3 = 'completed' THEN 'captured'
+              ELSE status
+            END,
+            attempt_count = attempt_count + CASE
+              WHEN $2 = 'retry_capture' AND $3 = 'completed' THEN 1
+              ELSE 0
+            END,
+            updated_at = now()
+          WHERE payment_id = $1
+        `,
+        [input.paymentId, input.action, input.state],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async failMultiTaxiPaymentRecoveryCommand(recoveryCommandId: string) {
+    if (!this.isEnabled()) {
+      return;
+    }
+    await this.databaseService!.query(
+      `
+        UPDATE billing.multi_taxi_payment_recovery_commands
+        SET state = 'failed', updated_at = now()
+        WHERE recovery_command_id = $1
+          AND state = 'processing'
+      `,
+      [recoveryCommandId],
+    );
   }
 
   async loadState(): Promise<BillingSettlementState> {
@@ -929,7 +1298,10 @@ export class BillingSettlementRepository {
         row.internal_human_fallback_cost_minor,
         row.currency,
       ),
-      partnerCharge: this.toOptionalMoney(row.partner_charge_minor, row.currency),
+      partnerCharge: this.toOptionalMoney(
+        row.partner_charge_minor,
+        row.currency,
+      ),
       tenantCharge: this.toOptionalMoney(row.tenant_charge_minor, row.currency),
       platformAbsorbed: this.toOptionalMoney(
         row.platform_absorbed_minor,
@@ -952,5 +1324,95 @@ export class BillingSettlementRepository {
           currency,
           amountMinor: Number(amountMinor),
         };
+  }
+
+  private parsePaymentAvailableActions(
+    value: unknown,
+  ): ResourceActionDescriptor[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.flatMap((candidate) => {
+      if (
+        !candidate ||
+        typeof candidate !== "object" ||
+        typeof (candidate as { action?: unknown }).action !== "string" ||
+        typeof (candidate as { enabled?: unknown }).enabled !== "boolean"
+      ) {
+        return [];
+      }
+      const descriptor = candidate as {
+        action: string;
+        enabled: boolean;
+        disabledReasonCode?: unknown;
+        requiresReason?: unknown;
+        riskLevel?: unknown;
+      };
+      const action = descriptor.action.trim();
+      const normalizedAction = action.toLowerCase().replace(/[-\s]+/g, "_");
+      const riskLevel = descriptor.riskLevel;
+      if (
+        !action ||
+        normalizedAction === "mark_paid" ||
+        !["low", "medium", "high"].includes(String(riskLevel))
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          action,
+          enabled: descriptor.enabled,
+          riskLevel: riskLevel as ResourceActionDescriptor["riskLevel"],
+          ...(typeof descriptor.disabledReasonCode === "string"
+            ? { disabledReasonCode: descriptor.disabledReasonCode }
+            : {}),
+          ...(typeof descriptor.requiresReason === "boolean"
+            ? { requiresReason: descriptor.requiresReason }
+            : {}),
+        },
+      ];
+    });
+  }
+
+  private mapPaymentRecoveryCommand(
+    row: MultiTaxiPaymentRecoveryCommandRow,
+  ): MultiTaxiPaymentRecoveryCommandRecord {
+    return {
+      recoveryCommandId: row.recovery_command_id,
+      paymentId: row.payment_id,
+      orderId: row.order_id,
+      action: row.action,
+      idempotencyKey: row.idempotency_key,
+      state: row.state,
+      receipt: this.parseActionReceipt(row.action_receipt),
+      createdAt: this.toIsoString(row.created_at),
+      updatedAt: this.toIsoString(row.updated_at),
+    };
+  }
+
+  private parseActionReceipt(value: unknown): ActionReceipt | null {
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+    const receipt = value as Partial<ActionReceipt>;
+    if (
+      typeof receipt.actionId !== "string" ||
+      typeof receipt.auditId !== "string" ||
+      typeof receipt.resourceType !== "string" ||
+      typeof receipt.resourceId !== "string" ||
+      !["accepted", "completed", "failed"].includes(String(receipt.status)) ||
+      typeof receipt.message !== "string"
+    ) {
+      return null;
+    }
+    return receipt as ActionReceipt;
+  }
+
+  private toIsoString(value: Date | string) {
+    return value instanceof Date
+      ? value.toISOString()
+      : new Date(value).toISOString();
   }
 }

@@ -26,6 +26,40 @@ Decision anchor:
 2. Tenant, partner, and driver production traffic must not be routed behind the default control-plane IAP boundary.
 3. `x-drts-internal-key` is only for local/direct-path fallback or break-glass diagnostics.
 4. If a route uses control-plane proxy auth, `x-drts-authorization` is the app-layer Bearer source of truth.
+5. The control-plane proxy scope preset for an actor type must mirror
+   `AUTH_SCOPE_PRESETS` for that same actor type. See "Scope Grants" below.
+
+## Scope Grants
+
+The control-plane proxy does not just forward a caller; it **mints** the
+identity. `issueControlPlaneRequestAuth()`
+(`packages/control-plane-auth/src/index.ts`) writes an explicit scope list into
+`x-scopes`, or into the `scopes` claim of the inner `x-drts-authorization`
+Bearer when `JWT_SECRET` is set.
+
+The API's `deriveScopes()` honours an explicit scope list verbatim and only
+falls back to `AUTH_SCOPE_PRESETS`
+(`apps/api/src/common/auth/auth.constants.ts`) when none was supplied. So for
+every browser request through the proxy the proxy preset **replaces** the API
+preset rather than supplementing it.
+
+Consequence for operators and reviewers: granting a control-plane actor type a
+new scope in `AUTH_SCOPE_PRESETS` alone changes nothing for the console that
+needs it. The surface keeps returning `403 AUTH_SCOPE_DENIED` and keeps writing
+`reject_authorization` audit rows, while API-side tests that assert against
+`AUTH_SCOPE_PRESETS` stay green. Mirror the grant into
+`CONTROL_PLANE_SCOPE_PRESETS` in the same change. Parity is pinned by
+`apps/api/tests/unit/ops-driver-tasks-scope.test.ts`.
+
+### Cross-plane read: ops reads driver tasks
+
+`GET /api/driver/tasks` is listed under the business-plane `/api/driver/*`
+family, but its route policy deliberately admits the `ops` realm as well as
+`driver` — Ops dispatch surfaces (`/sos/board`, `/dashboard`, `/dispatch`) join
+driver/vehicle assignment onto dispatch jobs from it. Ops holds `driver:read`
+only; the write half (`driver:write`) stays out of the ops grant, so the read is
+the boundary. Other `/api/driver/*` routes (profile, SOS submission, device
+session) remain driver-realm only.
 
 ## Route Families
 
