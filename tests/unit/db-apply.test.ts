@@ -9,11 +9,36 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(__dirname, "../..");
 const adminUrl = "postgresql://postgres:postgres@localhost:5432/postgres";
 const toolDir = mkdtempSync(path.join(os.tmpdir(), "db-apply-test-"));
-const localPsqlPath = execFileSync("bash", ["-lc", "command -v psql || true"], {
-  cwd: repoRoot,
-  encoding: "utf8",
-  stdio: "pipe",
-}).trim();
+const localPsqlPath = (() => {
+  const candidate = execFileSync("bash", ["-lc", "command -v psql || true"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "pipe",
+  }).trim();
+
+  if (!candidate) {
+    return "";
+  }
+
+  try {
+    execFileSync(
+      candidate,
+      [adminUrl, "-v", "ON_ERROR_STOP=1", "-c", "SELECT 1;"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        stdio: "pipe",
+        env: {
+          ...process.env,
+          PGPASSWORD: "postgres",
+        },
+      },
+    );
+    return candidate;
+  } catch {
+    return "";
+  }
+})();
 
 function bash(command: string, env: NodeJS.ProcessEnv = {}) {
   return execFileSync("bash", ["-lc", command], {
@@ -231,5 +256,104 @@ WHERE table_schema = 'ops'
     expect(stopPolicyTable).toBe("ops.stop_policies");
     expect(serviceAreaColumnCount).toBeGreaterThan(0);
     expect(stopPolicyColumnCount).toBeGreaterThan(0);
+  }, 180_000);
+
+  it("keeps driver-completion outbox durable across task or order deletes", () => {
+    bash(
+      [
+        "if command -v psql >/dev/null 2>&1; then",
+        `  PGPASSWORD=postgres psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
+        "else",
+        "  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD=postgres postgres \\",
+        `    psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
+        "fi",
+      ].join("\n"),
+    );
+
+    bash("./scripts/db-apply.sh", {
+      DATABASE_URL: databaseUrl,
+    });
+
+    const foreignKeys = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT conname || '|' || pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conrelid = 'ops.driver_completion_outbox'::regclass
+  AND contype = 'f'
+ORDER BY conname;
+        `,
+      ),
+    )
+      .trim()
+      .split("\n");
+
+    expect(foreignKeys).toEqual([
+      "driver_completion_outbox_order_fk|FOREIGN KEY (order_id) REFERENCES ops.phase1_owned_orders(order_id)",
+      "driver_completion_outbox_task_order_fk|FOREIGN KEY (task_id, order_id) REFERENCES ops.phase1_driver_tasks(task_id, order_id)",
+    ]);
+
+    const checkConstraints = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT conname
+FROM pg_constraint
+WHERE conrelid = 'ops.driver_completion_outbox'::regclass
+  AND contype = 'c'
+ORDER BY conname;
+        `,
+      ),
+    )
+      .trim()
+      .split("\n");
+
+    expect(checkConstraints).toEqual(
+      expect.arrayContaining([
+        "driver_completion_outbox_attempt_count_chk",
+        "driver_completion_outbox_dead_letter_state_chk",
+        "driver_completion_outbox_delivery_state_chk",
+        "driver_completion_outbox_effect_type_chk",
+        "driver_completion_outbox_payload_object_chk",
+        "driver_completion_outbox_processing_lease_chk",
+        "driver_completion_outbox_status_chk",
+      ]),
+    );
+
+    const taskOrderUnique = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conrelid = 'ops.phase1_driver_tasks'::regclass
+  AND conname = 'phase1_driver_tasks_task_order_unique';
+        `,
+      ),
+    ).trim();
+
+    expect(taskOrderUnique).toBe("UNIQUE (task_id, order_id)");
+
+    const recoveryIndex = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT indexdef
+FROM pg_indexes
+WHERE schemaname = 'ops'
+  AND tablename = 'driver_completion_outbox'
+  AND indexname = 'driver_completion_outbox_recovery_idx';
+        `,
+      ),
+    ).trim();
+
+    expect(recoveryIndex).toContain(
+      "ON ops.driver_completion_outbox USING btree (next_attempt_at, created_at, task_id, outbox_id)",
+    );
+    expect(recoveryIndex).toContain("WHERE ((delivered_at IS NULL)");
+    expect(recoveryIndex).toContain(
+      "(status = ANY (ARRAY['pending'::text, 'processing'::text]))",
+    );
   }, 180_000);
 });

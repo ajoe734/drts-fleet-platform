@@ -1,9 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+
+import { generateDeterministicUuid } from "../../common/durable-identity";
 
 import {
   HttpStatus,
   Inject,
   Injectable,
+  OnApplicationBootstrap,
+  OnApplicationShutdown,
+  OnModuleDestroy,
   Logger,
   OnModuleInit,
   Optional,
@@ -110,11 +115,18 @@ import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
+  type DriverCompletionOutboxClaimResult,
+  type DriverCompletionOutboxEffectType,
+  type DriverCompletionOutboxRecord,
+  type DriverTaskCompletionBundleRecord,
   type OwnedMobilityQueryExecutor,
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
-import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import {
+  TenantPartnerService,
+  type TenantQuotaConsumptionCommitResult,
+} from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/sandbox-fallback-cost-policy-resolver.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
@@ -201,6 +213,72 @@ type DispatchAssignmentResult = {
   status: DispatchAssignmentRecord["status"];
   taskId: string;
 };
+
+type DriverTaskCompletionCommitResult = {
+  order: OwnedOrderRecord;
+  assignment: DispatchAssignmentRecord;
+  task: DriverTaskRecord;
+  traceLog: DispatchTraceLogRecord;
+  quotaConsumption: TenantQuotaConsumptionCommitResult | null;
+  outcome: "completed" | "proof_pending";
+  errorToThrow: ApiRequestError | null;
+  certificateEvent?: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+};
+
+type DriverTaskCompletionTransactionResult =
+  | {
+      outcome: "replayed";
+      bundle: DriverTaskCompletionBundleRecord;
+    }
+  | {
+      outcome: "committed";
+      committed: DriverTaskCompletionCommitResult;
+    };
+
+type AuditEntryInput = Omit<
+  AuditLogRecord,
+  "auditId" | "createdAt" | "requestId"
+> & { auditId?: string };
+
+type DriverCompletionOutboxPayload =
+  | {
+      effectType: "tenant_order_completed_webhook";
+      tenantId: string;
+      payload: {
+        eventType: "order.created" | "order.cancelled" | "order.completed";
+        occurredAt: string;
+        data: Record<string, unknown>;
+      };
+    }
+  | {
+      effectType: "owned_mobility_trip_completed";
+      event: OwnedMobilityTripCompletedEvent;
+    }
+  | {
+      effectType: "multi_taxi_certificate";
+      event: OwnedMobilityMultiTaxiTripCompletedEvent;
+    }
+  | {
+      effectType: "completion_audit_bundle";
+      audits: AuditEntryInput[];
+      requestId: string | null;
+    }
+  | {
+      effectType: "driver_task_updated";
+      task: DriverTaskRecord;
+      order: OwnedOrderRecord;
+      requestId: string | null;
+      eventId: string;
+      correlationId: string;
+    }
+  | {
+      effectType: "ops_dispatch_job_updated";
+      orderId: string;
+      dispatchJob: DispatchJobRecord;
+      requestId: string | null;
+      eventId: string;
+      correlationId: string;
+    };
 
 type CreateDispatchAssignmentOptions = {
   dispatchAttemptSequence?: number;
@@ -289,6 +367,11 @@ const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
 const DEFAULT_CERTIFICATE_SERVICE_PHONE = "0800-090-000";
 const DEFAULT_AUTHORITY_COMPLAINT_PHONE = "1999";
+const DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS = 5;
+const DRIVER_COMPLETION_OUTBOX_LEASE_MS = 60_000;
+const DRIVER_COMPLETION_OUTBOX_RETRY_MS = 5_000;
+const DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS = 15_000;
+const DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE = 25;
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
@@ -301,7 +384,13 @@ const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
 ]);
 
 @Injectable()
-export class OwnedMobilityService implements OnModuleInit {
+export class OwnedMobilityService
+  implements
+    OnModuleInit,
+    OnApplicationBootstrap,
+    OnModuleDestroy,
+    OnApplicationShutdown
+{
   private readonly logger = new Logger(OwnedMobilityService.name);
 
   private orders: OwnedOrderRecord[] = [];
@@ -340,6 +429,13 @@ export class OwnedMobilityService implements OnModuleInit {
 
   /** Maps forwarded mirror order IDs to their source platform codes. */
   private forwarderSourceMap = new Map<string, string>();
+
+  private driverCompletionRecoveryTimer: ReturnType<typeof setInterval> | null =
+    null;
+
+  private driverCompletionOutboxDrainPromise: Promise<void> | null = null;
+  private driverCompletionOutboxDrainRequested = false;
+  private driverCompletionOutboxStopping = false;
 
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
@@ -442,6 +538,36 @@ export class OwnedMobilityService implements OnModuleInit {
         error,
         "module init",
       );
+    }
+  }
+
+  async onApplicationBootstrap() {
+    this.driverCompletionOutboxStopping = false;
+    if (!this.ownedMobilityRepository?.isEnabled()) {
+      return;
+    }
+    this.startDriverCompletionOutboxRecoveryPolling();
+    this.triggerDriverCompletionOutboxDispatch();
+  }
+
+  async onModuleDestroy() {
+    await this.shutdownDrain();
+  }
+
+  async onApplicationShutdown() {
+    await this.shutdownDrain();
+  }
+
+  private async shutdownDrain() {
+    this.driverCompletionOutboxStopping = true;
+    this.driverCompletionOutboxDrainRequested = false;
+    if (this.driverCompletionRecoveryTimer) {
+      clearInterval(this.driverCompletionRecoveryTimer);
+      this.driverCompletionRecoveryTimer = null;
+    }
+    const activeDrain = this.driverCompletionOutboxDrainPromise;
+    if (activeDrain) {
+      await activeDrain;
     }
   }
 
@@ -945,11 +1071,10 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.opsDispatchEventsService?.publishOrderCreated(
+    void this.opsDispatchEventsService?.publishOrderCreated(
       this.cloneOrder(order),
       requestId,
     );
-
     return this.cloneOrder(order);
   }
 
@@ -1109,7 +1234,7 @@ export class OwnedMobilityService implements OnModuleInit {
       previousApprovalState: TenantBookingApprovalState,
       approvalRequest: TenantBookingApprovalRequestRecord | null,
       persistOrderWrite = true,
-    ): TenantBookingResult => {
+    ): MaybePromise<TenantBookingResult> => {
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
@@ -1153,12 +1278,15 @@ export class OwnedMobilityService implements OnModuleInit {
         previousApprovalState,
         requestId,
       );
-      this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
-      this.opsDispatchEventsService?.publishOrderCreated(
+      void this.publishTenantOrderWebhook(
+        order,
+        "order.created",
+        order.createdAt,
+      );
+      void this.opsDispatchEventsService?.publishOrderCreated(
         this.cloneOrder(order),
         requestId,
       );
-
       return {
         orderId,
         bookingId,
@@ -2495,7 +2623,7 @@ export class OwnedMobilityService implements OnModuleInit {
     command: ResolveExceptionHoldCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
-  ) {
+  ): MaybePromise<OwnedOrderRecord> {
     const order = this.requireOrder(orderId);
     const actor = this.requireExceptionHoldActor(identity, command.operatorId);
     const reason = this.requireNonBlankText(command.reason, "reason");
@@ -2612,12 +2740,11 @@ export class OwnedMobilityService implements OnModuleInit {
         },
         requestId,
       );
-      this.publishTenantOrderWebhook(order, "order.cancelled", now, {
+      void this.publishTenantOrderWebhook(order, "order.cancelled", now, {
         cancelledAt: order.cancelledAt,
         cancelReason: order.cancelReason,
       });
-      this.publishLatestDispatchJobUpdate(orderId, requestId);
-
+      void this.publishLatestDispatchJobUpdate(orderId, requestId);
       return this.cloneOrder(order);
     }
 
@@ -3359,7 +3486,7 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  cancelOwnedOrder(
+  async cancelOwnedOrder(
     orderId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
@@ -3437,19 +3564,18 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.publishTenantOrderWebhook(order, "order.cancelled", now, {
+    void this.publishTenantOrderWebhook(order, "order.cancelled", now, {
       cancelledAt: order.cancelledAt,
       cancelReason: order.cancelReason,
     });
     if (task) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
+      void this.ownedMobilityTaskEventsService.publishTaskCancelled(
         task,
         order,
         requestId,
       );
     }
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
-
+    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneOrder(order);
   }
 
@@ -3831,7 +3957,10 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
+  private async publishLatestDispatchJobUpdate(
+    orderId: string,
+    requestId?: string,
+  ): Promise<void> {
     const dispatchJob = this.dispatchJobs.find(
       (job) => job.orderId === orderId,
     );
@@ -3839,7 +3968,7 @@ export class OwnedMobilityService implements OnModuleInit {
       return;
     }
 
-    this.opsDispatchEventsService?.publishDispatchJobUpdated(
+    await this.opsDispatchEventsService?.publishDispatchJobUpdated(
       orderId,
       dispatchJob,
       requestId,
@@ -3855,7 +3984,7 @@ export class OwnedMobilityService implements OnModuleInit {
     return clone;
   }
 
-  acceptDriverTask(
+  async acceptDriverTask(
     taskId: string,
     command: DriverAcceptTaskCommand,
     requestId?: string,
@@ -3874,7 +4003,7 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       assignmentId: assignment.assignmentId,
     });
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         orders: [order],
         dispatchAssignments: [assignment],
@@ -3883,7 +4012,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "accept_driver_task",
     );
-    this.recordAudit(
+    await this.recordAudit(
       {
         actorId: task.driverId,
         actorType: "ops_user",
@@ -3898,16 +4027,16 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
-  rejectDriverTask(
+  async rejectDriverTask(
     taskId: string,
     command: DriverRejectTaskCommand,
     requestId?: string,
@@ -3945,7 +4074,7 @@ export class OwnedMobilityService implements OnModuleInit {
       reasonCode: command.reasonCode,
       reasonNote: command.reasonNote ?? null,
     });
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         orders: [order],
         dispatchAssignments: [assignment],
@@ -3955,7 +4084,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "reject_driver_task",
     );
-    this.recordAudit(
+    await this.recordAudit(
       {
         actorId: task.driverId,
         actorType: "ops_user",
@@ -3971,16 +4100,16 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
-  departDriverTask(
+  async departDriverTask(
     taskId: string,
     command: DriverDepartTaskCommand,
     requestId?: string,
@@ -3995,7 +4124,7 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       currentLocation: command.currentLocation ?? null,
     });
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         orders: [order],
         driverTasks: [task],
@@ -4003,7 +4132,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "depart_driver_task",
     );
-    this.recordAudit(
+    await this.recordAudit(
       {
         actorId: task.driverId,
         actorType: "ops_user",
@@ -4018,16 +4147,16 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
-  arrivedPickup(
+  async arrivedPickup(
     taskId: string,
     command: DriverArrivedPickupCommand,
     requestId?: string,
@@ -4041,7 +4170,7 @@ export class OwnedMobilityService implements OnModuleInit {
     const traceLog = this.appendTrace(order.orderId, "driver.arrived_pickup", {
       taskId,
     });
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         orders: [order],
         driverTasks: [task],
@@ -4049,7 +4178,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "arrived_pickup",
     );
-    this.recordAudit(
+    await this.recordAudit(
       {
         actorId: task.driverId,
         actorType: "ops_user",
@@ -4064,16 +4193,16 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
-  startDriverTask(
+  async startDriverTask(
     taskId: string,
     command: DriverStartTaskCommand,
     requestId?: string,
@@ -4094,7 +4223,7 @@ export class OwnedMobilityService implements OnModuleInit {
     const traceLog = this.appendTrace(order.orderId, "driver.started_trip", {
       taskId,
     });
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         orders: [order],
         driverTasks: [task],
@@ -4102,7 +4231,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "start_driver_task",
     );
-    this.recordAudit(
+    await this.recordAudit(
       {
         actorId: task.driverId,
         actorType: "ops_user",
@@ -4117,20 +4246,38 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
-  completeDriverTask(
+  async completeDriverTask(
     taskId: string,
     command: DriverCompleteTaskCommand,
     requestId?: string,
   ) {
+    const proof = {
+      photos: [...(command.proof?.photos ?? [])],
+      signatureId: command.proof?.signatureId ?? null,
+      expenseItems: [...(command.proof?.expenseItems ?? [])],
+    };
+    this.assertCompletionProofPhotos(proof.photos);
+    const proofHasEvidence = this.hasCompletionProofEvidence(proof);
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      return this.completeDriverTaskWithDatabase(
+        taskId,
+        command,
+        requestId,
+        proof,
+        proofHasEvidence,
+      );
+    }
+
     const task = this.requireTask(taskId);
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
@@ -4161,14 +4308,6 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
-    const proof = {
-      photos: [...(command.proof?.photos ?? [])],
-      signatureId: command.proof?.signatureId ?? null,
-      expenseItems: [...(command.proof?.expenseItems ?? [])],
-    };
-    this.assertCompletionProofPhotos(proof.photos);
-    const proofHasEvidence = this.hasCompletionProofEvidence(proof);
-
     if (
       order.fixedPrice &&
       command.fare &&
@@ -4186,7 +4325,7 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     if (proof.photos.length < order.proofRequirements.minPhotoCount) {
-      this.markDriverTaskProofPending(
+      await this.markDriverTaskProofPending(
         task,
         assignment,
         order,
@@ -4204,7 +4343,7 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     if (order.proofRequirements.signoffRequired && !proof.signatureId) {
-      this.markDriverTaskProofPending(
+      await this.markDriverTaskProofPending(
         task,
         assignment,
         order,
@@ -4223,9 +4362,9 @@ export class OwnedMobilityService implements OnModuleInit {
 
     if (
       order.proofRequirements.expenseProofRequired &&
-      proof.expenseItems.length === 0
+      (proof.expenseItems?.length ?? 0) === 0
     ) {
-      this.markDriverTaskProofPending(
+      await this.markDriverTaskProofPending(
         task,
         assignment,
         order,
@@ -4246,69 +4385,462 @@ export class OwnedMobilityService implements OnModuleInit {
       order.runtimeProfileCode === "multi_taxi_direct"
         ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
         : null;
+
+    const finalizeCompletion = async () => {
+      const now = new Date().toISOString();
+      task.status = "completed";
+      task.completedAt = command.completedAt;
+      task.actualDistanceKm = command.actualDistanceKm;
+      task.actualDurationSec = command.actualDurationSec;
+      task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
+      task.proof = proofHasEvidence ? proof : null;
+      assignment.status = "completed";
+      assignment.updatedAt = now;
+      order.status = "completed";
+      order.updatedAt = now;
+
+      const traceLog = this.appendTrace(
+        order.orderId,
+        "driver.completed_trip",
+        {
+          taskId,
+          assignmentId: assignment.assignmentId,
+          completedAt: command.completedAt,
+          requestId: requestId ?? null,
+        },
+      );
+      this.persistChanges(
+        {
+          orders: [order],
+          dispatchAssignments: [assignment],
+          driverTasks: [task],
+          dispatchTraceLogs: [traceLog],
+        },
+        "complete_driver_task",
+      );
+      await this.recordAudit(
+        {
+          actorId: task.driverId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "driver-task",
+          actionName: "complete_trip",
+          resourceType: "driver_task",
+          resourceId: taskId,
+          newValuesSummary: {
+            status: task.status,
+            completedAt: command.completedAt,
+          },
+        },
+        requestId,
+      );
+      await this.publishTenantOrderWebhook(order, "order.completed", now, {
+        completedAt: command.completedAt,
+        taskId,
+        assignmentId: assignment.assignmentId,
+      });
+      await this.publishCompletedTripSettlementEvent(order, task);
+      if (certificateEvent) {
+        await this.publishMultiTaxiCertificateEvent(certificateEvent);
+      }
+      await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+        task,
+        order,
+        requestId,
+      );
+      await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+
+      return this.cloneTask(task);
+    };
+
+    if (
+      this.tenantPartnerService &&
+      typeof this.tenantPartnerService.consumeTenantQuota === "function" &&
+      order.tenantId &&
+      order.bookingId
+    ) {
+      return this.afterMaybePromise(
+        this.tenantPartnerService.consumeTenantQuota({
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
+        }),
+        finalizeCompletion,
+      );
+    }
+
+    return finalizeCompletion();
+  }
+
+  private async completeDriverTaskWithDatabase(
+    taskId: string,
+    command: DriverCompleteTaskCommand,
+    requestId: string | undefined,
+    proof: Required<Pick<CompletionProofBundle, "photos" | "expenseItems">> & {
+      signatureId: string | null;
+    },
+    proofHasEvidence: boolean,
+  ) {
+    const result = await this.ownedMobilityRepository!.withTransaction(
+      async (tx) => {
+        const bundle =
+          await this.ownedMobilityRepository!.loadDriverTaskCompletionBundleForUpdate(
+            tx,
+            taskId,
+          );
+        if (!bundle) {
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "DRIVER_TASK_NOT_FOUND",
+            "Driver task was not found.",
+            { taskId },
+          );
+        }
+
+        return this.finalizeDriverTaskCompletionInTransaction(tx, {
+          bundle,
+          command,
+          ...(requestId ? { requestId } : {}),
+          proof,
+          proofHasEvidence,
+        });
+      },
+    );
+
+    if (result.outcome === "replayed") {
+      this.applyReplayedDriverTaskCompletionBundle(result.bundle);
+      return this.cloneTask(result.bundle.task);
+    }
+
+    const committed = result.committed;
+    await this.applyCommittedDriverTaskCompletion(committed, requestId);
+    this.triggerDriverCompletionOutboxDispatch();
+    if (committed.errorToThrow) {
+      throw committed.errorToThrow;
+    }
+    return this.cloneTask(committed.task);
+  }
+
+  private async finalizeDriverTaskCompletionInTransaction(
+    tx: OwnedMobilityQueryExecutor,
+    params: {
+      bundle: DriverTaskCompletionBundleRecord;
+      command: DriverCompleteTaskCommand;
+      requestId?: string;
+      proof: Required<
+        Pick<CompletionProofBundle, "photos" | "expenseItems">
+      > & {
+        signatureId: string | null;
+      };
+      proofHasEvidence: boolean;
+    },
+  ): Promise<DriverTaskCompletionTransactionResult> {
+    const order = this.cloneOrder(params.bundle.order);
+    const dispatchJob = { ...params.bundle.dispatchJob };
+    const assignment = { ...params.bundle.assignment };
+    const task = this.cloneTask(params.bundle.task);
+
+    if (params.requestId) {
+      const replayedTask = await this.replayDriverCompletionFromRepository(
+        tx,
+        task,
+        order,
+        params.requestId,
+      );
+      if (replayedTask) {
+        return {
+          outcome: "replayed",
+          bundle: {
+            order,
+            dispatchJob,
+            assignment,
+            task: replayedTask,
+          },
+        };
+      }
+    }
+
+    if (task.status === "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TASK_ALREADY_COMPLETED",
+        "Driver task has already been completed.",
+      );
+    }
+
+    if (task.status !== "on_trip" && task.status !== "proof_pending") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TASK_NOT_ACTIVE",
+        "Driver task cannot be completed from the current status.",
+        {
+          status: task.status,
+        },
+      );
+    }
+
+    if (
+      order.fixedPrice &&
+      params.command.fare &&
+      order.quotedFare &&
+      params.command.fare.amountMinor !== order.quotedFare.amountMinor
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIXED_PRICE_IMMUTABLE",
+        "Fare cannot be changed for a fixed-price job.",
+        {
+          assignmentType: assignment.assignmentType,
+        },
+      );
+    }
+
+    const proofPendingError = this.buildDriverTaskProofPendingError(
+      order,
+      params.proof,
+    );
+
+    if (proofPendingError) {
+      const now = new Date().toISOString();
+      task.status = "proof_pending";
+      task.proof = params.proofHasEvidence ? params.proof : null;
+      order.status = "proof_pending";
+      order.updatedAt = now;
+      assignment.updatedAt = now;
+
+      const traceLog = this.buildTraceLog(
+        order.orderId,
+        "driver.proof_pending",
+        {
+          taskId: task.taskId,
+          assignmentId: assignment.assignmentId,
+          missingItems: this.describeMissingCompletionProof(
+            order,
+            params.proof,
+          ),
+          requestId: params.requestId ?? null,
+        },
+      );
+
+      await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+        orders: [this.cloneOrder(order)],
+        dispatchAssignments: [{ ...assignment }],
+        driverTasks: [this.cloneTask(task)],
+        dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
+      });
+
+      return {
+        outcome: "committed",
+        committed: {
+          order,
+          assignment,
+          task,
+          traceLog,
+          quotaConsumption: null,
+          outcome: "proof_pending",
+          errorToThrow: proofPendingError,
+        },
+      };
+    }
+
+    let quotaConsumption: TenantQuotaConsumptionCommitResult | null = null;
+
+    if (
+      this.tenantPartnerService &&
+      typeof this.tenantPartnerService.prepareTenantQuotaConsumption ===
+        "function" &&
+      order.tenantId &&
+      order.bookingId
+    ) {
+      quotaConsumption =
+        await this.tenantPartnerService.prepareTenantQuotaConsumption(tx, {
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
+        });
+    }
+
+    const certificateEvent =
+      order.runtimeProfileCode === "multi_taxi_direct"
+        ? this.buildMultiTaxiCertificateEvent(
+            order,
+            task,
+            params.command,
+            params.proof,
+          )
+        : null;
+
     const now = new Date().toISOString();
     task.status = "completed";
-    task.completedAt = command.completedAt;
-    task.actualDistanceKm = command.actualDistanceKm;
-    task.actualDurationSec = command.actualDurationSec;
-    task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
-    task.proof = proofHasEvidence ? proof : null;
+    task.completedAt = params.command.completedAt;
+    task.actualDistanceKm = params.command.actualDistanceKm;
+    task.actualDurationSec = params.command.actualDurationSec;
+    task.fare = order.fixedPrice
+      ? order.quotedFare
+      : (params.command.fare ?? null);
+    task.proof = params.proofHasEvidence ? params.proof : null;
     assignment.status = "completed";
     assignment.updatedAt = now;
     order.status = "completed";
     order.updatedAt = now;
 
-    const traceLog = this.appendTrace(order.orderId, "driver.completed_trip", {
-      taskId,
-      assignmentId: assignment.assignmentId,
-      completedAt: command.completedAt,
-      requestId: requestId ?? null,
-    });
-    this.persistChanges(
+    const traceLog = this.buildTraceLog(
+      order.orderId,
+      "driver.completed_trip",
       {
-        orders: [order],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchTraceLogs: [traceLog],
+        taskId: task.taskId,
+        assignmentId: assignment.assignmentId,
+        completedAt: params.command.completedAt,
+        requestId: params.requestId ?? null,
       },
-      "complete_driver_task",
     );
-    this.recordAudit(
-      {
-        actorId: task.driverId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "driver-task",
-        actionName: "complete_trip",
-        resourceType: "driver_task",
-        resourceId: taskId,
-        newValuesSummary: {
-          status: task.status,
-          completedAt: command.completedAt,
-        },
-      },
-      requestId,
-    );
-    this.publishTenantOrderWebhook(order, "order.completed", now, {
-      completedAt: command.completedAt,
-      taskId,
-      assignmentId: assignment.assignmentId,
+
+    await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+      orders: [this.cloneOrder(order)],
+      dispatchAssignments: [{ ...assignment }],
+      driverTasks: [this.cloneTask(task)],
+      dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
     });
-    this.publishCompletedTripSettlementEvent(order, task);
-    if (certificateEvent && this.eventEmitter) {
-      this.eventEmitter.emit(
-        OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+    await this.persistDriverCompletionOutbox(tx, {
+      order,
+      dispatchJob,
+      assignment,
+      task,
+      requestId: params.requestId ?? null,
+      certificateEvent,
+      quotaConsumption,
+    });
+
+    return {
+      outcome: "committed",
+      committed: {
+        order,
+        assignment,
+        task,
+        traceLog,
+        quotaConsumption,
+        outcome: "completed",
+        errorToThrow: null,
         certificateEvent,
+      },
+    };
+  }
+
+  private async applyCommittedDriverTaskCompletion(
+    committed: DriverTaskCompletionCommitResult,
+    requestId?: string,
+  ) {
+    if (
+      committed.quotaConsumption &&
+      this.tenantPartnerService &&
+      typeof this.tenantPartnerService.applyCommittedQuotaConsumption ===
+        "function"
+    ) {
+      this.tenantPartnerService.applyCommittedQuotaConsumption(
+        committed.quotaConsumption,
       );
     }
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
-      task,
-      order,
-      requestId,
-    );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
-    return this.cloneTask(task);
+    this.orders = [
+      this.cloneOrder(committed.order),
+      ...this.orders.filter(
+        (order) => order.orderId !== committed.order.orderId,
+      ),
+    ];
+    this.dispatchAssignments = [
+      { ...committed.assignment },
+      ...this.dispatchAssignments.filter(
+        (assignment) =>
+          assignment.assignmentId !== committed.assignment.assignmentId,
+      ),
+    ];
+    this.driverTasks = [
+      this.cloneTask(committed.task),
+      ...this.driverTasks.filter(
+        (task) => task.taskId !== committed.task.taskId,
+      ),
+    ];
+    this.dispatchTraceLogs = [
+      this.cloneTraceLog(committed.traceLog),
+      ...this.dispatchTraceLogs.filter(
+        (traceLog) => traceLog.traceId !== committed.traceLog.traceId,
+      ),
+    ];
+
+    const now = new Date().toISOString();
+    if (
+      !this.ownedMobilityRepository ||
+      !this.ownedMobilityRepository.isEnabled() ||
+      !(
+        "claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository
+      )
+    ) {
+      if (committed.outcome === "completed") {
+        await this.recordAudit(
+          {
+            actorId: committed.task.driverId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "driver-task",
+            actionName: "complete_trip",
+            resourceType: "driver_task",
+            resourceId: committed.task.taskId,
+            newValuesSummary: {
+              status: committed.task.status,
+              completedAt: committed.task.completedAt,
+            },
+          },
+          requestId,
+        );
+        await this.publishTenantOrderWebhook(
+          committed.order,
+          "order.completed",
+          now,
+          {
+            completedAt: committed.task.completedAt,
+            taskId: committed.task.taskId,
+            assignmentId: committed.assignment.assignmentId,
+          },
+        );
+        await this.publishCompletedTripSettlementEvent(
+          committed.order,
+          committed.task,
+        );
+        if (committed.certificateEvent) {
+          await this.publishMultiTaxiCertificateEvent(
+            committed.certificateEvent,
+          );
+        }
+      }
+      await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+        committed.task,
+        committed.order,
+        requestId,
+      );
+      await this.publishLatestDispatchJobUpdate(
+        committed.order.orderId,
+        requestId,
+      );
+    }
+  }
+
+  private applyReplayedDriverTaskCompletionBundle(
+    bundle: DriverTaskCompletionBundleRecord,
+  ) {
+    this.orders = [
+      this.cloneOrder(bundle.order),
+      ...this.orders.filter((order) => order.orderId !== bundle.order.orderId),
+    ];
+    this.dispatchAssignments = [
+      { ...bundle.assignment },
+      ...this.dispatchAssignments.filter(
+        (assignment) =>
+          assignment.assignmentId !== bundle.assignment.assignmentId,
+      ),
+    ];
+    this.driverTasks = [
+      this.cloneTask(bundle.task),
+      ...this.driverTasks.filter((task) => task.taskId !== bundle.task.taskId),
+    ];
   }
 
   private buildMultiTaxiCertificateEvent(
@@ -4373,18 +4905,35 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  private publishCompletedTripSettlementEvent(
+  private async publishCompletedTripSettlementEvent(
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
-  ) {
+  ): Promise<void> {
+    const payload = this.buildCompletedTripSettlementEvent(order, task);
+    if (!payload || !this.eventEmitter) {
+      return;
+    }
+
+    await this.eventEmitter.emitAsync(
+      OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+      payload,
+    );
+  }
+
+  private buildCompletedTripSettlementEvent(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    dispatchAssignments: readonly DispatchAssignmentRecord[] = this
+      .dispatchAssignments,
+    driverTasks: readonly DriverTaskRecord[] = this.driverTasks,
+  ): OwnedMobilityTripCompletedEvent | null {
     if (
-      !this.eventEmitter ||
       !order.tenantId ||
       order.serviceBucket !== "business_dispatch" ||
       !order.businessDispatchSubtype ||
       !task.completedAt
     ) {
-      return;
+      return null;
     }
 
     const grossEarning = task.fare ??
@@ -4396,6 +4945,8 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       task,
       grossEarning,
+      dispatchAssignments,
+      driverTasks,
     );
     const sandboxBillingTreatment = this.buildSandboxBillingTreatment(
       order,
@@ -4403,7 +4954,7 @@ export class OwnedMobilityService implements OnModuleInit {
       grossEarning,
       sandboxFulfillmentSegments,
     );
-    const payload: OwnedMobilityTripCompletedEvent = {
+    return {
       tenantId: order.tenantId,
       driverId: task.driverId,
       orderId: order.orderId,
@@ -4430,23 +4981,24 @@ export class OwnedMobilityService implements OnModuleInit {
         : {}),
       ...(sandboxBillingTreatment ? { sandboxBillingTreatment } : {}),
     };
-
-    this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
   }
 
   private buildSandboxFulfillmentSegments(
     order: OwnedOrderRecord,
     completedTask: DriverTaskRecord,
     grossEarning: MoneyAmount,
+    dispatchAssignments: readonly DispatchAssignmentRecord[] = this
+      .dispatchAssignments,
+    driverTasks: readonly DriverTaskRecord[] = this.driverTasks,
   ): FulfillmentSegmentRecord[] {
-    const orderAssignments = this.dispatchAssignments
+    const orderAssignments = dispatchAssignments
       .filter((assignment) => assignment.orderId === order.orderId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     const bookingId = order.bookingId ?? order.orderId;
     const sandboxTripId = order.orderId;
 
     return orderAssignments.flatMap((assignment, index) => {
-      const task = this.driverTasks.find(
+      const task = driverTasks.find(
         (candidate) => candidate.assignmentId === assignment.assignmentId,
       );
       const isAvVehicle = this.isSandboxAvVehicle(assignment.vehicleId);
@@ -4601,37 +5153,590 @@ export class OwnedMobilityService implements OnModuleInit {
     return order.partnerProgramId ?? DEFAULT_TENANT_SERVICE_PROGRAM_ID;
   }
 
-  private publishTenantOrderWebhook(
+  private async persistDriverCompletionOutbox(
+    tx: OwnedMobilityQueryExecutor,
+    input: {
+      order: OwnedOrderRecord;
+      dispatchJob: DispatchJobRecord;
+      assignment: DispatchAssignmentRecord;
+      task: DriverTaskRecord;
+      requestId: string | null;
+      certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+      quotaConsumption: TenantQuotaConsumptionCommitResult | null;
+    },
+  ) {
+    const payloads = this.buildDriverCompletionOutboxPayloads(input);
+    if (payloads.length === 0) {
+      return;
+    }
+    const createdAt = input.order.updatedAt;
+    const records: DriverCompletionOutboxRecord[] = payloads.map((payload) => ({
+      outboxId: this.buildDriverCompletionOutboxId(
+        input.task.taskId,
+        payload.effectType,
+      ),
+      taskId: input.task.taskId,
+      orderId: input.order.orderId,
+      effectType: payload.effectType,
+      requestId: input.requestId,
+      payload: payload as unknown as Record<string, unknown>,
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: createdAt,
+      leaseToken: null,
+      leasedUntil: null,
+      lastError: null,
+      createdAt,
+      deliveredAt: null,
+    }));
+    if (this.ownedMobilityRepository?.persistDriverCompletionOutbox) {
+      await this.ownedMobilityRepository.persistDriverCompletionOutbox(
+        tx,
+        records,
+      );
+    }
+  }
+
+  private buildDriverCompletionOutboxPayloads(input: {
+    order: OwnedOrderRecord;
+    dispatchJob: DispatchJobRecord;
+    assignment: DispatchAssignmentRecord;
+    task: DriverTaskRecord;
+    requestId: string | null;
+    certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+    quotaConsumption: TenantQuotaConsumptionCommitResult | null;
+  }): DriverCompletionOutboxPayload[] {
+    const payloads: DriverCompletionOutboxPayload[] = [];
+    if (input.order.tenantId) {
+      payloads.push({
+        effectType: "tenant_order_completed_webhook",
+        tenantId: input.order.tenantId,
+        payload: this.buildTenantOrderWebhookPayload(
+          input.order,
+          "order.completed",
+          input.order.updatedAt,
+          {
+            completedAt: input.task.completedAt,
+            taskId: input.task.taskId,
+            assignmentId: input.assignment.assignmentId,
+          },
+        ),
+      });
+    }
+
+    const dispatchAssignments = [
+      ...this.dispatchAssignments.filter(
+        (assignment) =>
+          assignment.assignmentId !== input.assignment.assignmentId,
+      ),
+      { ...input.assignment },
+    ];
+    const driverTasks = [
+      ...this.driverTasks.filter((task) => task.taskId !== input.task.taskId),
+      this.cloneTask(input.task),
+    ];
+    const tripCompletedEvent = this.buildCompletedTripSettlementEvent(
+      input.order,
+      input.task,
+      dispatchAssignments,
+      driverTasks,
+    );
+    if (tripCompletedEvent) {
+      payloads.push({
+        effectType: "owned_mobility_trip_completed",
+        event: tripCompletedEvent,
+      });
+    }
+
+    if (input.certificateEvent) {
+      payloads.push({
+        effectType: "multi_taxi_certificate",
+        event: input.certificateEvent,
+      });
+    }
+
+    const completionAuditOutboxId = this.buildDriverCompletionOutboxId(
+      input.task.taskId,
+      "completion_audit_bundle",
+    );
+    const completionAudit: AuditEntryInput = {
+      actorId: input.task.driverId,
+      actorType: "ops_user",
+      tenantId: null,
+      moduleName: "driver-task",
+      actionName: "complete_trip",
+      resourceType: "driver_task",
+      resourceId: input.task.taskId,
+      newValuesSummary: {
+        status: input.task.status,
+        completedAt: input.task.completedAt,
+      },
+    };
+    const completionAudits: AuditEntryInput[] = [
+      completionAudit,
+      ...((input.quotaConsumption?.auditEntries ?? []).map((entry) =>
+        structuredClone(entry),
+      ) as AuditEntryInput[]),
+    ].map((entry, index) => ({
+      ...structuredClone(entry),
+      auditId: generateDeterministicUuid(
+        "driver_completion_outbox_audit",
+        `${completionAuditOutboxId}:${index}`,
+      ),
+    }));
+
+    payloads.push({
+      effectType: "completion_audit_bundle",
+      audits: completionAudits,
+      requestId: input.requestId,
+    });
+
+    const driverTaskUpdatedOutboxId = this.buildDriverCompletionOutboxId(
+      input.task.taskId,
+      "driver_task_updated",
+    );
+    payloads.push({
+      effectType: "driver_task_updated",
+      task: this.cloneTask(input.task),
+      order: this.cloneOrder(input.order),
+      requestId: input.requestId,
+      eventId: generateDeterministicUuid(
+        "driver_completion_outbox_event",
+        `${driverTaskUpdatedOutboxId}:driver_task_updated`,
+      ),
+      correlationId: generateDeterministicUuid(
+        "driver_completion_outbox_correlation",
+        driverTaskUpdatedOutboxId,
+      ),
+    });
+
+    const opsDispatchJobUpdatedOutboxId = this.buildDriverCompletionOutboxId(
+      input.task.taskId,
+      "ops_dispatch_job_updated",
+    );
+    payloads.push({
+      effectType: "ops_dispatch_job_updated",
+      orderId: input.order.orderId,
+      dispatchJob: structuredClone(input.dispatchJob),
+      requestId: input.requestId,
+      eventId: generateDeterministicUuid(
+        "driver_completion_outbox_event",
+        `${opsDispatchJobUpdatedOutboxId}:ops_dispatch_job_updated`,
+      ),
+      correlationId: generateDeterministicUuid(
+        "driver_completion_outbox_correlation",
+        opsDispatchJobUpdatedOutboxId,
+      ),
+    });
+
+    return payloads;
+  }
+
+  private buildDriverCompletionOutboxId(
+    taskId: string,
+    effectType: DriverCompletionOutboxEffectType,
+  ) {
+    const digest = createHash("sha256")
+      .update(`driver-completion-outbox:${taskId}:${effectType}`)
+      .digest("hex")
+      .slice(0, 32)
+      .split("");
+    digest[12] = "5";
+    digest[16] = ((parseInt(digest[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
+    return [
+      digest.slice(0, 8).join(""),
+      digest.slice(8, 12).join(""),
+      digest.slice(12, 16).join(""),
+      digest.slice(16, 20).join(""),
+      digest.slice(20, 32).join(""),
+    ].join("-");
+  }
+
+  private startDriverCompletionOutboxRecoveryPolling() {
+    if (
+      this.driverCompletionRecoveryTimer ||
+      !this.ownedMobilityRepository?.isEnabled() ||
+      !(
+        "claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository
+      )
+    ) {
+      return;
+    }
+
+    this.driverCompletionRecoveryTimer = setInterval(() => {
+      this.triggerDriverCompletionOutboxDispatch();
+    }, DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS);
+    this.driverCompletionRecoveryTimer.unref?.();
+  }
+
+  private triggerDriverCompletionOutboxDispatch() {
+    if (
+      this.driverCompletionOutboxStopping ||
+      !this.ownedMobilityRepository?.isEnabled() ||
+      !(
+        "claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository
+      )
+    ) {
+      return;
+    }
+
+    this.driverCompletionOutboxDrainRequested = true;
+    if (this.driverCompletionOutboxDrainPromise) {
+      return;
+    }
+
+    const drain = this.drainDriverCompletionOutbox();
+    this.driverCompletionOutboxDrainPromise = drain;
+    void drain.finally(() => {
+      if (this.driverCompletionOutboxDrainPromise !== drain) {
+        return;
+      }
+      this.driverCompletionOutboxDrainPromise = null;
+      if (
+        this.driverCompletionOutboxDrainRequested &&
+        !this.driverCompletionOutboxStopping
+      ) {
+        this.triggerDriverCompletionOutboxDispatch();
+      }
+    });
+  }
+
+  private async drainDriverCompletionOutbox() {
+    try {
+      while (!this.driverCompletionOutboxStopping) {
+        this.driverCompletionOutboxDrainRequested = false;
+        let claimedCount = 0;
+        while (
+          claimedCount < DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE &&
+          !this.driverCompletionOutboxStopping
+        ) {
+          const now = new Date();
+          const leaseToken = randomUUID();
+          const leasedUntil = new Date(
+            now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
+          ).toISOString();
+          const claimed = await this.ownedMobilityRepository!.withTransaction(
+            (tx) =>
+              this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox(
+                tx,
+                leaseToken,
+                leasedUntil,
+                now.toISOString(),
+                DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+              ),
+          );
+          if (!claimed) {
+            break;
+          }
+          claimedCount += 1;
+          await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
+        }
+
+        if (this.driverCompletionOutboxStopping) {
+          return;
+        }
+        if (claimedCount === DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE) {
+          this.driverCompletionOutboxDrainRequested = true;
+          await Promise.resolve();
+        }
+        if (!this.driverCompletionOutboxDrainRequested) {
+          return;
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Driver completion outbox drain failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private async handleClaimedDriverCompletionOutbox(
+    claimed: DriverCompletionOutboxClaimResult,
+    leaseToken: string,
+  ) {
+    if (claimed.action === "dead_letter") {
+      this.logger.warn(
+        `Driver completion outbox dead-lettered after lease recovery for ${claimed.record.effectType} on task ${claimed.record.taskId}.`,
+      );
+      return;
+    }
+
+    await this.dispatchClaimedDriverCompletionOutbox(
+      claimed.record,
+      leaseToken,
+    );
+  }
+
+  private async dispatchClaimedDriverCompletionOutbox(
+    claimed: DriverCompletionOutboxRecord,
+    leaseToken: string,
+  ) {
+    try {
+      await this.executeDriverCompletionOutboxEffect(claimed);
+      const delivered = await this.ownedMobilityRepository!.withTransaction(
+        (tx) =>
+          this.ownedMobilityRepository!.markDriverCompletionOutboxDelivered(
+            tx,
+            claimed.outboxId,
+            leaseToken,
+            new Date().toISOString(),
+          ),
+      );
+      if (!delivered) {
+        this.logger.warn(
+          `Driver completion outbox acknowledgement lost its lease for ${claimed.effectType} on task ${claimed.taskId}.`,
+        );
+      }
+    } catch (error) {
+      const retryAt = new Date(
+        Date.now() + DRIVER_COMPLETION_OUTBOX_RETRY_MS,
+      ).toISOString();
+      const detail = error instanceof Error ? error.message : String(error);
+      const released = await this.ownedMobilityRepository!.withTransaction(
+        (tx) =>
+          this.ownedMobilityRepository!.releaseDriverCompletionOutbox(
+            tx,
+            claimed.outboxId,
+            leaseToken,
+            retryAt,
+            DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+            detail,
+          ),
+      );
+      if (!released) {
+        this.logger.warn(
+          `Driver completion outbox retry release lost its lease for ${claimed.effectType} on task ${claimed.taskId}: ${detail}`,
+        );
+        return;
+      }
+      this.logger.warn(
+        `Driver completion outbox delivery failed for ${claimed.effectType} on task ${claimed.taskId}: ${detail}`,
+      );
+    }
+  }
+
+  private async executeDriverCompletionOutboxEffect(
+    outbox: DriverCompletionOutboxRecord,
+  ) {
+    switch (outbox.effectType as DriverCompletionOutboxEffectType) {
+      case "tenant_order_completed_webhook": {
+        const payload = outbox.payload as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "tenant_order_completed_webhook" }
+        >;
+        if (!this.tenantPartnerService) {
+          throw new Error("Tenant partner webhook service unavailable.");
+        }
+        await this.tenantPartnerService.publishWebhookEvent(payload.tenantId, {
+          ...payload.payload,
+          outboxKey: outbox.outboxId,
+        });
+        return;
+      }
+      case "owned_mobility_trip_completed": {
+        const payload = outbox.payload as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "owned_mobility_trip_completed" }
+        >;
+        if (!this.eventEmitter) {
+          throw new Error(
+            "Owned mobility completion event emitter unavailable.",
+          );
+        }
+        if (
+          this.eventEmitter.listenerCount(
+            OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+          ) === 0
+        ) {
+          throw new Error(
+            "Owned mobility trip completion listener is missing or unavailable.",
+          );
+        }
+        const results = await this.eventEmitter.emitAsync(
+          OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+          payload.event,
+        );
+        if (!results || results.length === 0) {
+          throw new Error(
+            "Owned mobility trip completion emission yielded no listener execution.",
+          );
+        }
+        return;
+      }
+      case "multi_taxi_certificate": {
+        const payload = outbox.payload as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "multi_taxi_certificate" }
+        >;
+        await this.publishMultiTaxiCertificateEvent(payload.event);
+        return;
+      }
+      case "completion_audit_bundle": {
+        const payload = outbox.payload as unknown as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "completion_audit_bundle" }
+        >;
+        if (
+          !this.auditNotificationService ||
+          (typeof this.auditNotificationService.recordAuditLogAsync !==
+            "function" &&
+            typeof this.auditNotificationService.recordAuditLog !== "function")
+        ) {
+          throw new Error("Completion audit publisher unavailable.");
+        }
+        if (!Array.isArray(payload.audits) || payload.audits.length === 0) {
+          throw new Error("Completion audit bundle is empty or invalid.");
+        }
+        for (const [index, audit] of payload.audits.entries()) {
+          if (!audit.auditId) {
+            throw new Error(
+              `Completion audit ${index} is missing its durable auditId.`,
+            );
+          }
+          await this.recordAudit(
+            structuredClone(audit),
+            payload.requestId ?? outbox.requestId ?? outbox.outboxId,
+          );
+        }
+        return;
+      }
+      case "driver_task_updated": {
+        const payload = outbox.payload as unknown as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "driver_task_updated" }
+        >;
+        if (
+          !this.ownedMobilityTaskEventsService ||
+          typeof this.ownedMobilityTaskEventsService.publishTaskUpdated !==
+            "function"
+        ) {
+          throw new Error("Driver task event publisher unavailable.");
+        }
+        if (!payload.eventId || !payload.correlationId) {
+          throw new Error("Driver task event identity is missing.");
+        }
+        await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+          this.cloneTask(payload.task),
+          this.cloneOrder(payload.order),
+          payload.requestId ?? outbox.requestId ?? undefined,
+          {
+            eventId: payload.eventId,
+            correlationId: payload.correlationId,
+          },
+        );
+        return;
+      }
+      case "ops_dispatch_job_updated": {
+        const payload = outbox.payload as unknown as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "ops_dispatch_job_updated" }
+        >;
+        if (
+          !this.opsDispatchEventsService ||
+          typeof this.opsDispatchEventsService.publishDispatchJobUpdated !==
+            "function"
+        ) {
+          throw new Error("Ops dispatch event publisher unavailable.");
+        }
+        if (!payload.dispatchJob) {
+          throw new Error("Ops dispatch job snapshot is missing.");
+        }
+        if (!payload.eventId || !payload.correlationId) {
+          throw new Error("Ops dispatch event identity is missing.");
+        }
+        await this.opsDispatchEventsService.publishDispatchJobUpdated(
+          payload.orderId,
+          structuredClone(payload.dispatchJob),
+          payload.requestId ?? outbox.requestId ?? undefined,
+          {
+            eventId: payload.eventId,
+            correlationId: payload.correlationId,
+          },
+        );
+        return;
+      }
+      default:
+        throw new Error(`Unsupported driver completion outbox effect.`);
+    }
+  }
+
+  private async publishMultiTaxiCertificateEvent(
+    certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent,
+  ): Promise<void> {
+    if (!this.eventEmitter) {
+      throw new Error("Multi-taxi certificate event emitter unavailable.");
+    }
+    if (
+      this.eventEmitter.listenerCount(
+        OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+      ) === 0
+    ) {
+      throw new Error(
+        "Multi-taxi certificate listener is missing or unavailable.",
+      );
+    }
+    const results = await this.eventEmitter.emitAsync(
+      OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+      certificateEvent,
+    );
+    if (!results || results.length === 0) {
+      throw new Error(
+        "Multi-taxi certificate emission yielded no listener execution.",
+      );
+    }
+  }
+
+  private async publishTenantOrderWebhook(
+    order: OwnedOrderRecord,
+    eventType: "order.created" | "order.cancelled" | "order.completed",
+    occurredAt: string,
+    extraData: Record<string, unknown> = {},
+    outboxKey?: string,
+  ): Promise<void> {
+    if (!order.tenantId || !this.tenantPartnerService) {
+      return;
+    }
+
+    await this.tenantPartnerService.publishWebhookEvent(order.tenantId, {
+      ...this.buildTenantOrderWebhookPayload(
+        order,
+        eventType,
+        occurredAt,
+        extraData,
+      ),
+      outboxKey: outboxKey ?? `order_${order.orderId}_${eventType}`,
+    });
+  }
+
+  private buildTenantOrderWebhookPayload(
     order: OwnedOrderRecord,
     eventType: "order.created" | "order.cancelled" | "order.completed",
     occurredAt: string,
     extraData: Record<string, unknown> = {},
   ) {
-    if (!order.tenantId || !this.tenantPartnerService) {
-      return;
-    }
-
-    void this.tenantPartnerService
-      .publishWebhookEvent(order.tenantId, {
-        eventType,
-        occurredAt,
-        data: {
-          orderId: order.orderId,
-          orderNo: order.orderNo,
-          bookingId: order.bookingId,
-          bookingType: order.bookingType,
-          orderStatus: order.status,
-          serviceBucket: order.serviceBucket,
-          dispatchSemantics: order.dispatchSemantics,
-          businessDispatchSubtype: order.businessDispatchSubtype,
-          reservationWindowStart: order.reservationWindowStart,
-          reservationWindowEnd: order.reservationWindowEnd,
-          createdAt: order.createdAt,
-          updatedAt: order.updatedAt,
-          ...extraData,
-        },
-      })
-      .catch(() => undefined);
+    return {
+      eventType,
+      occurredAt,
+      data: {
+        orderId: order.orderId,
+        orderNo: order.orderNo,
+        bookingId: order.bookingId,
+        bookingType: order.bookingType,
+        orderStatus: order.status,
+        serviceBucket: order.serviceBucket,
+        dispatchSemantics: order.dispatchSemantics,
+        businessDispatchSubtype: order.businessDispatchSubtype,
+        reservationWindowStart: order.reservationWindowStart,
+        reservationWindowEnd: order.reservationWindowEnd,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        ...extraData,
+      },
+    };
   }
 
   private nextOrderNo() {
@@ -6588,6 +7693,43 @@ export class OwnedMobilityService implements OnModuleInit {
     return null;
   }
 
+  private async replayDriverCompletionFromRepository(
+    tx: OwnedMobilityQueryExecutor,
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord,
+    requestId: string,
+  ): Promise<DriverTaskRecord | null> {
+    if (task.status === "completed") {
+      const matched =
+        await this.ownedMobilityRepository!.hasDriverTaskTraceRequestId(
+          tx,
+          order.orderId,
+          task.taskId,
+          "driver.completed_trip",
+          requestId,
+        );
+      if (matched) {
+        return this.cloneTask(task);
+      }
+    }
+
+    if (task.status === "proof_pending") {
+      const matched =
+        await this.ownedMobilityRepository!.hasDriverTaskTraceRequestId(
+          tx,
+          order.orderId,
+          task.taskId,
+          "driver.proof_pending",
+          requestId,
+        );
+      if (matched) {
+        return this.cloneTask(task);
+      }
+    }
+
+    return null;
+  }
+
   private hasDriverTaskTraceRequestId(
     orderId: string,
     taskId: string,
@@ -6681,22 +7823,100 @@ export class OwnedMobilityService implements OnModuleInit {
       });
   }
 
-  private recordAudit(
-    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
-    requestId?: string,
-  ): AuditLogRecord | undefined {
-    const auditInput: Omit<
-      AuditLogRecord,
-      "auditId" | "createdAt" | "requestId"
-    > & {
-      requestId?: string;
-    } = {
-      ...input,
-    };
-    if (requestId) {
-      auditInput.requestId = requestId;
+  private async persistChangesRequired(
+    changes: {
+      orders?: readonly OwnedOrderRecord[];
+      dispatchJobs?: readonly DispatchJobRecord[];
+      dispatchAttempts?: readonly DispatchAttemptRecord[];
+      dispatchAssignments?: readonly DispatchAssignmentRecord[];
+      driverTasks?: readonly DriverTaskRecord[];
+      dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
+    },
+    context: string,
+  ) {
+    if (!this.ownedMobilityRepository) {
+      return;
     }
-    return this.auditNotificationService.recordAuditLog(auditInput);
+
+    const persistPayload: {
+      orders?: OwnedOrderRecord[];
+      dispatchJobs?: DispatchJobRecord[];
+      dispatchAttempts?: DispatchAttemptRecord[];
+      dispatchAssignments?: DispatchAssignmentRecord[];
+      driverTasks?: DriverTaskRecord[];
+      dispatchTraceLogs?: DispatchTraceLogRecord[];
+    } = {};
+
+    if (changes.orders) {
+      persistPayload.orders = changes.orders.map((order) =>
+        this.cloneOrder(order),
+      );
+    }
+    if (changes.dispatchJobs) {
+      persistPayload.dispatchJobs = changes.dispatchJobs.map((job) => ({
+        ...job,
+      }));
+    }
+    if (changes.dispatchAttempts) {
+      persistPayload.dispatchAttempts = changes.dispatchAttempts.map(
+        (attempt) => ({
+          ...attempt,
+        }),
+      );
+    }
+    if (changes.dispatchAssignments) {
+      persistPayload.dispatchAssignments = changes.dispatchAssignments.map(
+        (assignment) => ({ ...assignment }),
+      );
+    }
+    if (changes.driverTasks) {
+      persistPayload.driverTasks = changes.driverTasks.map((task) =>
+        this.cloneTask(task),
+      );
+    }
+    if (changes.dispatchTraceLogs) {
+      persistPayload.dispatchTraceLogs = changes.dispatchTraceLogs.map(
+        (traceLog) => this.cloneTraceLog(traceLog),
+      );
+    }
+
+    try {
+      await this.ownedMobilityRepository.persistChanges(persistPayload);
+    } catch (error) {
+      this.ownedMobilityRepository.reportPersistenceFailure(error, context);
+      throw error;
+    }
+  }
+
+  private async recordAudit(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
+      auditId?: string;
+    },
+    requestId?: string,
+  ): Promise<AuditLogRecord | undefined> {
+    const requestIdValue = requestId ?? randomUUID();
+    const auditId =
+      input.auditId ??
+      generateDeterministicUuid(
+        "owned_mobility_audit",
+        `${input.actionName}:${input.resourceType}:${input.resourceId ?? ""}:${requestIdValue}`,
+      );
+    const auditInput = {
+      ...input,
+      auditId,
+      requestId: requestIdValue,
+    };
+    if (this.auditNotificationService) {
+      if (
+        typeof this.auditNotificationService.recordAuditLogAsync === "function"
+      ) {
+        return await this.auditNotificationService.recordAuditLogAsync(
+          auditInput,
+        );
+      }
+      return this.auditNotificationService.recordAuditLog(auditInput);
+    }
+    return undefined;
   }
 
   private recordReservationEscalationNotifications(
@@ -7704,16 +8924,16 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  private recordSpatialAuditSnapshot(
+  private async recordSpatialAuditSnapshot(
     order: OwnedOrderRecord,
     context: SpatialAuditContext,
     requestId?: string,
-  ): void {
+  ): Promise<void> {
     if (!order.spatialAudit) {
       return;
     }
 
-    const auditLog = this.recordAudit(
+    const auditLog = await this.recordAudit(
       {
         actorId: context.actorId,
         actorType: context.actorType,
@@ -8212,13 +9432,56 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  private markDriverTaskProofPending(
+  private buildDriverTaskProofPendingError(
+    order: OwnedOrderRecord,
+    proof: CompletionProofBundle,
+  ): ApiRequestError | null {
+    if (proof.photos.length < order.proofRequirements.minPhotoCount) {
+      return new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MIN_PHOTO_COUNT_NOT_MET",
+        "Completion proof does not satisfy minimum photo count.",
+        {
+          minPhotoCount: order.proofRequirements.minPhotoCount,
+        },
+      );
+    }
+
+    if (order.proofRequirements.signoffRequired && !proof.signatureId) {
+      return new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PROOF_REQUIRED",
+        "Signoff proof is required before completion.",
+        {
+          requirement: "signature",
+        },
+      );
+    }
+
+    if (
+      order.proofRequirements.expenseProofRequired &&
+      (proof.expenseItems?.length ?? 0) === 0
+    ) {
+      return new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "EXPENSE_PROOF_REQUIRED",
+        "Expense proof is required before completion.",
+        {
+          requirement: "expense_items",
+        },
+      );
+    }
+
+    return null;
+  }
+
+  private async markDriverTaskProofPending(
     task: DriverTaskRecord,
     assignment: DispatchAssignmentRecord,
     order: OwnedOrderRecord,
     proof: CompletionProofBundle,
     requestId?: string,
-  ): void {
+  ): Promise<void> {
     const now = new Date().toISOString();
 
     task.status = "proof_pending";
@@ -8233,7 +9496,7 @@ export class OwnedMobilityService implements OnModuleInit {
       missingItems: this.describeMissingCompletionProof(order, proof),
       requestId: requestId ?? null,
     });
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         orders: [order],
         dispatchAssignments: [assignment],
@@ -8242,12 +9505,12 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "driver_task_proof_pending",
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
   }
 
   private describeMissingCompletionProof(

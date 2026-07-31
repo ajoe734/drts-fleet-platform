@@ -247,10 +247,10 @@ describe("owned mobility service", () => {
     ownedMobilityService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-10T09:08:00Z",
     });
-    ownedMobilityService.startDriverTask(assignment.taskId, {
+    await ownedMobilityService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-10T09:10:00Z",
     });
-    const completedTask = ownedMobilityService.completeDriverTask(
+    const completedTask = await ownedMobilityService.completeDriverTask(
       assignment.taskId,
       {
         completedAt: "2026-04-10T09:45:00Z",
@@ -364,7 +364,7 @@ describe("owned mobility service", () => {
     });
 
     try {
-      ownedMobilityService.startDriverTask(assignment.taskId, {
+      await ownedMobilityService.startDriverTask(assignment.taskId, {
         startedAt: "2026-04-10T09:10:00Z",
       });
       expect.unreachable("startDriverTask should fail before arrived_pickup");
@@ -446,12 +446,12 @@ describe("owned mobility service", () => {
     ownedMobilityService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-10T09:08:00Z",
     });
-    ownedMobilityService.startDriverTask(assignment.taskId, {
+    await ownedMobilityService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-10T09:10:00Z",
     });
 
     try {
-      ownedMobilityService.completeDriverTask(assignment.taskId, {
+      await ownedMobilityService.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-10T09:45:00Z",
         actualDistanceKm: 22.4,
         actualDurationSec: 2100,
@@ -472,7 +472,7 @@ describe("owned mobility service", () => {
     }
 
     try {
-      ownedMobilityService.completeDriverTask(assignment.taskId, {
+      await ownedMobilityService.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-10T09:45:00Z",
         actualDistanceKm: 22.4,
         actualDurationSec: 2100,
@@ -746,12 +746,12 @@ describe("owned mobility service", () => {
     ownedMobilityService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-10T09:08:00Z",
     });
-    ownedMobilityService.startDriverTask(assignment.taskId, {
+    await ownedMobilityService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-10T09:10:00Z",
     });
 
     try {
-      ownedMobilityService.completeDriverTask(assignment.taskId, {
+      await ownedMobilityService.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-10T09:45:00Z",
         actualDistanceKm: 22.4,
         actualDurationSec: 2100,
@@ -767,7 +767,7 @@ describe("owned mobility service", () => {
     }
 
     try {
-      ownedMobilityService.completeDriverTask(assignment.taskId, {
+      await ownedMobilityService.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-10T09:45:00Z",
         actualDistanceKm: 22.4,
         actualDurationSec: 2100,
@@ -987,10 +987,10 @@ describe("owned mobility service", () => {
     ownedMobilityService.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-16T10:08:00Z",
     });
-    ownedMobilityService.startDriverTask(assignment.taskId, {
+    await ownedMobilityService.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-16T10:10:00Z",
     });
-    ownedMobilityService.completeDriverTask(assignment.taskId, {
+    await ownedMobilityService.completeDriverTask(assignment.taskId, {
       completedAt: "2026-04-16T10:45:00Z",
       actualDistanceKm: 18.2,
       actualDurationSec: 2100,
@@ -1156,10 +1156,10 @@ describe("owned mobility service", () => {
       ownedMobilityService.arrivedPickup(assignment.taskId, {
         arrivedAt: "2026-04-16T11:08:00Z",
       });
-      ownedMobilityService.startDriverTask(assignment.taskId, {
+      await ownedMobilityService.startDriverTask(assignment.taskId, {
         startedAt: "2026-04-16T11:10:00Z",
       });
-      ownedMobilityService.completeDriverTask(assignment.taskId, {
+      await ownedMobilityService.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-16T11:45:00Z",
         actualDistanceKm: 22.4,
         actualDurationSec: 2100,
@@ -1381,7 +1381,7 @@ describe("owned mobility service", () => {
       driverId: candidate.driverId,
     });
 
-    const cancelledOrder = ownedMobilityService.cancelOwnedOrder(
+    const cancelledOrder = await ownedMobilityService.cancelOwnedOrder(
       order.orderId,
       {
         reason: "passenger_cancelled",
