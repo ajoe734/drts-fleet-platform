@@ -519,49 +519,47 @@ export class OwnedMobilityRepository {
     executor: OwnedMobilityQueryExecutor,
     entries: readonly DriverCompletionOutboxRecord[],
   ) {
-    await Promise.all(
-      entries.map((entry) =>
-        executor.query(
-          `
-            INSERT INTO ops.driver_completion_outbox (
-              outbox_id,
-              task_id,
-              order_id,
-              effect_type,
-              request_id,
-              payload,
-              status,
-              attempt_count,
-              next_attempt_at,
-              lease_token,
-              leased_until,
-              last_error,
-              created_at,
-              delivered_at
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14
-            )
-            ON CONFLICT (task_id, effect_type) DO NOTHING
-          `,
-          [
-            entry.outboxId,
-            entry.taskId,
-            entry.orderId,
-            entry.effectType,
-            entry.requestId,
-            JSON.stringify(entry.payload),
-            entry.status,
-            entry.attemptCount,
-            entry.nextAttemptAt,
-            entry.leaseToken,
-            entry.leasedUntil,
-            entry.lastError,
-            entry.createdAt,
-            entry.deliveredAt,
-          ],
-        ),
-      ),
-    );
+    for (const entry of entries) {
+      await executor.query(
+        `
+          INSERT INTO ops.driver_completion_outbox (
+            outbox_id,
+            task_id,
+            order_id,
+            effect_type,
+            request_id,
+            payload,
+            status,
+            attempt_count,
+            next_attempt_at,
+            lease_token,
+            leased_until,
+            last_error,
+            created_at,
+            delivered_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14
+          )
+          ON CONFLICT (task_id, effect_type) DO NOTHING
+        `,
+        [
+          entry.outboxId,
+          entry.taskId,
+          entry.orderId,
+          entry.effectType,
+          entry.requestId,
+          JSON.stringify(entry.payload),
+          entry.status,
+          entry.attemptCount,
+          entry.nextAttemptAt,
+          entry.leaseToken,
+          entry.leasedUntil,
+          entry.lastError,
+          entry.createdAt,
+          entry.deliveredAt,
+        ],
+      );
+    }
   }
 
   async claimNextDriverCompletionOutbox(
@@ -997,7 +995,9 @@ export class OwnedMobilityRepository {
       );
     }
 
-    await Promise.all(writes);
+    for (const write of writes) {
+      await write;
+    }
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

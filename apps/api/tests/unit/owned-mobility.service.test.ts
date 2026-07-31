@@ -4105,6 +4105,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           state.set("trace", changes.dispatchTraceLogs[0]);
         }
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => {
         sequence.push("begin");
         const result = await work({} as never);
@@ -4231,13 +4232,13 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "persist",
       "commit",
       "quota_apply",
-      "webhook",
     ]);
     expect(
       auditNotificationService.recordAuditLog.mock.calls.filter(
         ([input]) => input.actionName === "complete_trip",
       ),
     ).toHaveLength(1);
+    expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
     expect(service.listDriverTasks()[0]).toMatchObject({ status: "completed" });
   });
 
@@ -4276,6 +4277,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           state.set("trace", changes.dispatchTraceLogs[0]);
         }
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => work({} as never)),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
@@ -4395,6 +4397,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       isEnabled: () => true,
       persistChanges: vi.fn(async () => {}),
       persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => work({} as never)),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
@@ -4554,6 +4557,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           state.set("task", changes.driverTasks[0]);
         }
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => {
         await work({} as never);
         throw new Error("commit failed");
