@@ -220,7 +220,7 @@ type DriverTaskCompletionCommitResult = {
 type DriverTaskCompletionTransactionResult =
   | {
       outcome: "replayed";
-      task: DriverTaskRecord;
+      bundle: DriverTaskCompletionBundleRecord;
     }
   | {
       outcome: "committed";
@@ -4156,6 +4156,24 @@ export class OwnedMobilityService implements OnModuleInit {
     command: DriverCompleteTaskCommand,
     requestId?: string,
   ) {
+    const proof = {
+      photos: [...(command.proof?.photos ?? [])],
+      signatureId: command.proof?.signatureId ?? null,
+      expenseItems: [...(command.proof?.expenseItems ?? [])],
+    };
+    this.assertCompletionProofPhotos(proof.photos);
+    const proofHasEvidence = this.hasCompletionProofEvidence(proof);
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      return this.completeDriverTaskWithDatabase(
+        taskId,
+        command,
+        requestId,
+        proof,
+        proofHasEvidence,
+      );
+    }
+
     const task = this.requireTask(taskId);
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
@@ -4183,24 +4201,6 @@ export class OwnedMobilityService implements OnModuleInit {
         {
           status: task.status,
         },
-      );
-    }
-
-    const proof = {
-      photos: [...(command.proof?.photos ?? [])],
-      signatureId: command.proof?.signatureId ?? null,
-      expenseItems: [...(command.proof?.expenseItems ?? [])],
-    };
-    this.assertCompletionProofPhotos(proof.photos);
-    const proofHasEvidence = this.hasCompletionProofEvidence(proof);
-
-    if (this.ownedMobilityRepository?.isEnabled()) {
-      return this.completeDriverTaskWithDatabase(
-        taskId,
-        command,
-        requestId,
-        proof,
-        proofHasEvidence,
       );
     }
 
@@ -4406,7 +4406,8 @@ export class OwnedMobilityService implements OnModuleInit {
     );
 
     if (result.outcome === "replayed") {
-      return this.cloneTask(result.task);
+      this.applyReplayedDriverTaskCompletionBundle(result.bundle);
+      return this.cloneTask(result.bundle.task);
     }
 
     const committed = result.committed;
@@ -4445,7 +4446,11 @@ export class OwnedMobilityService implements OnModuleInit {
       if (replayedTask) {
         return {
           outcome: "replayed",
-          task: replayedTask,
+          bundle: {
+            order,
+            assignment,
+            task: replayedTask,
+          },
         };
       }
     }
@@ -4671,6 +4676,25 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     this.publishLatestDispatchJobUpdate(committed.order.orderId, requestId);
+  }
+
+  private applyReplayedDriverTaskCompletionBundle(
+    bundle: DriverTaskCompletionBundleRecord,
+  ) {
+    this.orders = [
+      this.cloneOrder(bundle.order),
+      ...this.orders.filter((order) => order.orderId !== bundle.order.orderId),
+    ];
+    this.dispatchAssignments = [
+      { ...bundle.assignment },
+      ...this.dispatchAssignments.filter(
+        (assignment) => assignment.assignmentId !== bundle.assignment.assignmentId,
+      ),
+    ];
+    this.driverTasks = [
+      this.cloneTask(bundle.task),
+      ...this.driverTasks.filter((task) => task.taskId !== bundle.task.taskId),
+    ];
   }
 
   private buildMultiTaxiCertificateEvent(
