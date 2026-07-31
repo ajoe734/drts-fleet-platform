@@ -764,7 +764,7 @@ export class OwnedMobilityRepository {
       `,
       [outboxId, leaseToken, deliveredAt],
     );
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async releaseDriverCompletionOutbox(
@@ -795,7 +795,7 @@ export class OwnedMobilityRepository {
       `,
       [outboxId, leaseToken, nextAttemptAt, maxAttempts, lastError],
     );
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   private async persistChangesWithExecutor(

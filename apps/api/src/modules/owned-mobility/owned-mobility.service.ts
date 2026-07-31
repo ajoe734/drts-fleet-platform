@@ -5184,14 +5184,16 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
         const leasedUntil = new Date(
           now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
         ).toISOString();
-        const claimed =
-          await this.ownedMobilityRepository.claimNextRecoverableDriverCompletionOutbox(
-            this.ownedMobilityRepository,
-            leaseToken,
-            leasedUntil,
-            now.toISOString(),
-            DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-          );
+        const claimed = await this.ownedMobilityRepository.withTransaction(
+          (tx) =>
+            this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox(
+              tx,
+              leaseToken,
+              leasedUntil,
+              now.toISOString(),
+              DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+            ),
+        );
         if (!claimed) {
           break;
         }
