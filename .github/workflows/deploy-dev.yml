@@ -22,7 +22,7 @@ on:
           - "false"
           - "true"
       target_profile:
-        description: "Dev Cloud Run target profile. Only current is supported: the live dev set on drts-dev-ray-tw-20260530 (hash ne55h7sy3a). The legacy waji/bobo profile was decommissioned 2026-07-04."
+        description: "Dev Cloud Run target profile. Only current is supported; the live project and services are resolved from DEV_GCP_* repository variables."
         required: false
         default: "current"
         type: choice
