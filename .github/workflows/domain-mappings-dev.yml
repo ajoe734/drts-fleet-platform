@@ -24,7 +24,6 @@ env:
   DEV_GCP_BANK_CONSOLE_SERVICE: ${{ vars.DEV_GCP_BANK_CONSOLE_SERVICE }}
   DEV_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.DEV_GCP_REFERRAL_EMBED_SERVICE }}
   DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
-  DEV_GCP_CONCIERGE_PORTAL_SERVICE: ${{ vars.DEV_GCP_CONCIERGE_PORTAL_SERVICE }}
   DEV_GCP_PASSENGER_WEB_SERVICE: ${{ vars.DEV_GCP_PASSENGER_WEB_SERVICE }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
@@ -59,7 +58,7 @@ jobs:
 
       - name: Create domain mappings
         run: |
-          set +e
+          set -euo pipefail
           PROJECT="${{ env.DEV_GCP_PROJECT_ID }}"
           REGION="${{ env.DEV_GCP_REGION }}"
 
@@ -80,7 +79,6 @@ jobs:
           map bank.smarttransport.tw       "${DEV_GCP_BANK_CONSOLE_SERVICE:-drts-bank-console-web}"
           map channel.smarttransport.tw    "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-drts-channel-partner-portal-web}"
           map tenant.smarttransport.tw     "${DEV_GCP_TENANT_CONSOLE_SERVICE:-drts-tenant-console-web}"
-          map concierge.smarttransport.tw  "${DEV_GCP_CONCIERGE_PORTAL_SERVICE:-drts-concierge-portal-web}"
           map refer.smarttransport.tw      "${DEV_GCP_REFERRAL_EMBED_SERVICE:-drts-referral-embed-web}"
           map api.smarttransport.tw        "${DEV_GCP_API_SERVICE:-drts-api}"
 
