@@ -10392,7 +10392,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       { costCenterCode: string | null; periodKey: string }
     >();
     for (const entry of claimedEntries) {
-      const key = `${entry.costCenterCode ?? "~"}:${entry.periodKey}`;
+      const key = `${this.serializeQuotaScopePart(entry.costCenterCode)}:${entry.periodKey}`;
       snapshotGroups.set(key, {
         costCenterCode: entry.costCenterCode,
         periodKey: entry.periodKey,
@@ -10471,7 +10471,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
 
     for (const entry of bookingEntries) {
-      const key = `${entry.costCenterCode ?? "~"}:${entry.periodKey}:${entry.dimension}`;
+      const key = `${this.serializeQuotaScopePart(entry.costCenterCode)}:${entry.periodKey}:${entry.dimension}`;
       const current = outstanding.get(key) ?? {
         costCenterCode: entry.costCenterCode,
         periodKey: entry.periodKey,
@@ -10844,7 +10844,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .update("\u0000")
       .update(input.bookingId)
       .update("\u0000")
-      .update(input.costCenterCode ?? "~")
+      .update(this.serializeQuotaScopePart(input.costCenterCode))
       .update("\u0000")
       .update(input.periodKey)
       .update("\u0000")
@@ -10859,7 +10859,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     costCenterCode: string | null,
     period: "monthly",
   ) {
-    return `${tenantId}:${costCenterCode ?? "~"}:${period}`;
+    return `${tenantId}:${this.serializeQuotaScopePart(costCenterCode)}:${period}`;
   }
 
   private buildQuotaSnapshotKey(
@@ -10868,7 +10868,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     period: "monthly",
     periodKey: string,
   ) {
-    return `${tenantId}:${costCenterCode ?? "~"}:${period}:${periodKey}`;
+    return `${tenantId}:${this.serializeQuotaScopePart(costCenterCode)}:${period}:${periodKey}`;
+  }
+
+  private serializeQuotaScopePart(costCenterCode: string | null) {
+    if (costCenterCode === null) {
+      return "null";
+    }
+
+    return `value:${costCenterCode.length}:${costCenterCode}`;
   }
 
   private cloneQuotaPolicy(

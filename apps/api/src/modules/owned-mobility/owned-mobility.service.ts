@@ -213,7 +213,19 @@ type DriverTaskCompletionCommitResult = {
   traceLog: DispatchTraceLogRecord;
   certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
   quotaConsumption: TenantQuotaConsumptionCommitResult | null;
+  outcome: "completed" | "proof_pending";
+  errorToThrow: ApiRequestError | null;
 };
+
+type DriverTaskCompletionTransactionResult =
+  | {
+      outcome: "replayed";
+      task: DriverTaskRecord;
+    }
+  | {
+      outcome: "committed";
+      committed: DriverTaskCompletionCommitResult;
+    };
 
 type CreateDispatchAssignmentOptions = {
   dispatchAttemptSequence?: number;
@@ -4182,6 +4194,16 @@ export class OwnedMobilityService implements OnModuleInit {
     this.assertCompletionProofPhotos(proof.photos);
     const proofHasEvidence = this.hasCompletionProofEvidence(proof);
 
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      return this.completeDriverTaskWithDatabase(
+        taskId,
+        command,
+        requestId,
+        proof,
+        proofHasEvidence,
+      );
+    }
+
     if (
       order.fixedPrice &&
       command.fare &&
@@ -4236,7 +4258,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     if (
       order.proofRequirements.expenseProofRequired &&
-      proof.expenseItems.length === 0
+      (proof.expenseItems?.length ?? 0) === 0
     ) {
       this.markDriverTaskProofPending(
         task,
@@ -4259,16 +4281,6 @@ export class OwnedMobilityService implements OnModuleInit {
       order.runtimeProfileCode === "multi_taxi_direct"
         ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
         : null;
-    if (this.ownedMobilityRepository?.isEnabled()) {
-      return this.completeDriverTaskWithDatabase(
-        taskId,
-        command,
-        requestId,
-        proof,
-        proofHasEvidence,
-        certificateEvent,
-      );
-    }
 
     const finalizeCompletion = () => {
       const now = new Date().toISOString();
@@ -4366,9 +4378,8 @@ export class OwnedMobilityService implements OnModuleInit {
       signatureId: string | null;
     },
     proofHasEvidence: boolean,
-    certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null,
   ) {
-    const committed = await this.ownedMobilityRepository!.withTransaction(
+    const result = await this.ownedMobilityRepository!.withTransaction(
       async (tx) => {
         const bundle =
           await this.ownedMobilityRepository!.loadDriverTaskCompletionBundleForUpdate(
@@ -4390,17 +4401,19 @@ export class OwnedMobilityService implements OnModuleInit {
           ...(requestId ? { requestId } : {}),
           proof,
           proofHasEvidence,
-          certificateEvent,
         });
       },
     );
 
-    if (!committed) {
-      const task = this.requireTask(taskId);
-      return this.cloneTask(task);
+    if (result.outcome === "replayed") {
+      return this.cloneTask(result.task);
     }
 
+    const committed = result.committed;
     this.applyCommittedDriverTaskCompletion(committed, requestId);
+    if (committed.errorToThrow) {
+      throw committed.errorToThrow;
+    }
     return this.cloneTask(committed.task);
   }
 
@@ -4416,9 +4429,8 @@ export class OwnedMobilityService implements OnModuleInit {
         signatureId: string | null;
       };
       proofHasEvidence: boolean;
-      certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
     },
-  ): Promise<DriverTaskCompletionCommitResult | null> {
+  ): Promise<DriverTaskCompletionTransactionResult> {
     const order = this.cloneOrder(params.bundle.order);
     const assignment = { ...params.bundle.assignment };
     const task = this.cloneTask(params.bundle.task);
@@ -4431,7 +4443,10 @@ export class OwnedMobilityService implements OnModuleInit {
         params.requestId,
       );
       if (replayedTask) {
-        return null;
+        return {
+          outcome: "replayed",
+          task: replayedTask,
+        };
       }
     }
 
@@ -4454,6 +4469,64 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
+    if (
+      order.fixedPrice &&
+      params.command.fare &&
+      order.quotedFare &&
+      params.command.fare.amountMinor !== order.quotedFare.amountMinor
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIXED_PRICE_IMMUTABLE",
+        "Fare cannot be changed for a fixed-price job.",
+        {
+          assignmentType: assignment.assignmentType,
+        },
+      );
+    }
+
+    const proofPendingError = this.buildDriverTaskProofPendingError(
+      order,
+      params.proof,
+    );
+
+    if (proofPendingError) {
+      const now = new Date().toISOString();
+      task.status = "proof_pending";
+      task.proof = params.proofHasEvidence ? params.proof : null;
+      order.status = "proof_pending";
+      order.updatedAt = now;
+      assignment.updatedAt = now;
+
+      const traceLog = this.buildTraceLog(order.orderId, "driver.proof_pending", {
+        taskId: task.taskId,
+        assignmentId: assignment.assignmentId,
+        missingItems: this.describeMissingCompletionProof(order, params.proof),
+        requestId: params.requestId ?? null,
+      });
+
+      await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+        orders: [this.cloneOrder(order)],
+        dispatchAssignments: [{ ...assignment }],
+        driverTasks: [this.cloneTask(task)],
+        dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
+      });
+
+      return {
+        outcome: "committed",
+        committed: {
+          order,
+          assignment,
+          task,
+          traceLog,
+          certificateEvent: null,
+          quotaConsumption: null,
+          outcome: "proof_pending",
+          errorToThrow: proofPendingError,
+        },
+      };
+    }
+
     let quotaConsumption: TenantQuotaConsumptionCommitResult | null = null;
 
     if (
@@ -4466,11 +4539,16 @@ export class OwnedMobilityService implements OnModuleInit {
       quotaConsumption = await this.tenantPartnerService.prepareTenantQuotaConsumption(
         tx,
         {
-        tenantId: order.tenantId,
-        bookingId: order.bookingId,
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
         },
       );
     }
+
+    const certificateEvent =
+      order.runtimeProfileCode === "multi_taxi_direct"
+        ? this.buildMultiTaxiCertificateEvent(order, task, params.command, params.proof)
+        : null;
 
     const now = new Date().toISOString();
     task.status = "completed";
@@ -4501,12 +4579,17 @@ export class OwnedMobilityService implements OnModuleInit {
     });
 
     return {
-      order,
-      assignment,
-      task,
-      traceLog,
-      certificateEvent: params.certificateEvent,
-      quotaConsumption,
+      outcome: "committed",
+      committed: {
+        order,
+        assignment,
+        task,
+        traceLog,
+        certificateEvent,
+        quotaConsumption,
+        outcome: "completed",
+        errorToThrow: null,
+      },
     };
   }
 
@@ -4547,38 +4630,40 @@ export class OwnedMobilityService implements OnModuleInit {
       ),
     ];
 
-    this.recordAudit(
-      {
-        actorId: committed.task.driverId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "driver-task",
-        actionName: "complete_trip",
-        resourceType: "driver_task",
-        resourceId: committed.task.taskId,
-        newValuesSummary: {
-          status: committed.task.status,
-          completedAt: committed.task.completedAt,
+    if (committed.outcome === "completed") {
+      this.recordAudit(
+        {
+          actorId: committed.task.driverId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "driver-task",
+          actionName: "complete_trip",
+          resourceType: "driver_task",
+          resourceId: committed.task.taskId,
+          newValuesSummary: {
+            status: committed.task.status,
+            completedAt: committed.task.completedAt,
+          },
         },
-      },
-      requestId,
-    );
-    this.publishTenantOrderWebhook(
-      committed.order,
-      "order.completed",
-      committed.order.updatedAt,
-      {
-        completedAt: committed.task.completedAt,
-        taskId: committed.task.taskId,
-        assignmentId: committed.assignment.assignmentId,
-      },
-    );
-    this.publishCompletedTripSettlementEvent(committed.order, committed.task);
-    if (committed.certificateEvent && this.eventEmitter) {
-      this.eventEmitter.emit(
-        OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
-        committed.certificateEvent,
+        requestId,
       );
+      this.publishTenantOrderWebhook(
+        committed.order,
+        "order.completed",
+        committed.order.updatedAt,
+        {
+          completedAt: committed.task.completedAt,
+          taskId: committed.task.taskId,
+          assignmentId: committed.assignment.assignmentId,
+        },
+      );
+      this.publishCompletedTripSettlementEvent(committed.order, committed.task);
+      if (committed.certificateEvent && this.eventEmitter) {
+        this.eventEmitter.emit(
+          OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+          committed.certificateEvent,
+        );
+      }
     }
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       committed.task,
@@ -8524,6 +8609,49 @@ export class OwnedMobilityService implements OnModuleInit {
     return Boolean(
       proof?.photos.length || proof?.signatureId || proof?.expenseItems?.length,
     );
+  }
+
+  private buildDriverTaskProofPendingError(
+    order: OwnedOrderRecord,
+    proof: CompletionProofBundle,
+  ): ApiRequestError | null {
+    if (proof.photos.length < order.proofRequirements.minPhotoCount) {
+      return new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MIN_PHOTO_COUNT_NOT_MET",
+        "Completion proof does not satisfy minimum photo count.",
+        {
+          minPhotoCount: order.proofRequirements.minPhotoCount,
+        },
+      );
+    }
+
+    if (order.proofRequirements.signoffRequired && !proof.signatureId) {
+      return new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PROOF_REQUIRED",
+        "Signoff proof is required before completion.",
+        {
+          requirement: "signature",
+        },
+      );
+    }
+
+    if (
+      order.proofRequirements.expenseProofRequired &&
+      (proof.expenseItems?.length ?? 0) === 0
+    ) {
+      return new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "EXPENSE_PROOF_REQUIRED",
+        "Expense proof is required before completion.",
+        {
+          requirement: "expense_items",
+        },
+      );
+    }
+
+    return null;
   }
 
   private markDriverTaskProofPending(

@@ -52,6 +52,14 @@ function mergeByKey<T>(
   return [...merged.values()];
 }
 
+function serializeQuotaScopePart(costCenterCode: string | null) {
+  if (costCenterCode === null) {
+    return "null";
+  }
+
+  return `value:${costCenterCode.length}:${costCenterCode}`;
+}
+
 function createInMemoryTenantPartnerRepository(
   initialState: TenantPartnerState,
 ) {
@@ -130,7 +138,7 @@ function createInMemoryTenantPartnerRepository(
           state.quotaPolicies,
           changes.quotaPolicies,
           (value) =>
-            `${value.tenantId}:${value.costCenterCode ?? "~"}:${value.period}`,
+            `${value.tenantId}:${serializeQuotaScopePart(value.costCenterCode)}:${value.period}`,
         ),
         quotaLedger: mergeByKey(
           state.quotaLedger,
@@ -141,7 +149,7 @@ function createInMemoryTenantPartnerRepository(
           state.quotaMonthlySnapshots,
           changes.quotaMonthlySnapshots,
           (value) =>
-            `${value.tenantId}:${value.costCenterCode ?? "~"}:${value.period}:${value.periodKey}`,
+            `${value.tenantId}:${serializeQuotaScopePart(value.costCenterCode)}:${value.period}:${value.periodKey}`,
         ),
         userRoles: mergeByKey(
           state.userRoles,

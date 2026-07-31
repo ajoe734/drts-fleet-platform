@@ -95,7 +95,7 @@ function quotaPolicyKey(
     "tenantId" | "costCenterCode" | "period"
   >,
 ) {
-  return `${record.tenantId}:${record.costCenterCode ?? "~"}:${record.period}`;
+  return `${record.tenantId}:${serializeQuotaScopePart(record.costCenterCode)}:${record.period}`;
 }
 
 function quotaSnapshotKey(
@@ -104,7 +104,15 @@ function quotaSnapshotKey(
     "tenantId" | "costCenterCode" | "period" | "periodKey"
   >,
 ) {
-  return `${snapshot.tenantId}:${snapshot.costCenterCode ?? "~"}:${snapshot.period}:${snapshot.periodKey}`;
+  return `${snapshot.tenantId}:${serializeQuotaScopePart(snapshot.costCenterCode)}:${snapshot.period}:${snapshot.periodKey}`;
+}
+
+function serializeQuotaScopePart(costCenterCode: string | null) {
+  if (costCenterCode === null) {
+    return "null";
+  }
+
+  return `value:${costCenterCode.length}:${costCenterCode}`;
 }
 
 function quotaPolicyLockKey(
