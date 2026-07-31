@@ -548,10 +548,9 @@ export class OwnedMobilityRepository {
     executor: OwnedMobilityQueryExecutor,
     entries: readonly DriverCompletionOutboxRecord[],
   ) {
-    await Promise.all(
-      entries.map((entry) =>
-        executor.query(
-          `
+    for (const entry of entries) {
+      await executor.query(
+        `
             INSERT INTO ops.driver_completion_outbox (
               outbox_id,
               task_id,
@@ -572,25 +571,24 @@ export class OwnedMobilityRepository {
             )
             ON CONFLICT (task_id, effect_type) DO NOTHING
           `,
-          [
-            entry.outboxId,
-            entry.taskId,
-            entry.orderId,
-            entry.effectType,
-            entry.requestId,
-            JSON.stringify(entry.payload),
-            entry.status,
-            entry.attemptCount,
-            entry.nextAttemptAt,
-            entry.leaseToken,
-            entry.leasedUntil,
-            entry.lastError,
-            entry.createdAt,
-            entry.deliveredAt,
-          ],
-        ),
-      ),
-    );
+        [
+          entry.outboxId,
+          entry.taskId,
+          entry.orderId,
+          entry.effectType,
+          entry.requestId,
+          JSON.stringify(entry.payload),
+          entry.status,
+          entry.attemptCount,
+          entry.nextAttemptAt,
+          entry.leaseToken,
+          entry.leasedUntil,
+          entry.lastError,
+          entry.createdAt,
+          entry.deliveredAt,
+        ],
+      );
+    }
   }
 
   async claimNextRecoverableDriverCompletionOutbox(
@@ -653,20 +651,20 @@ export class OwnedMobilityRepository {
         FROM candidate
         WHERE outbox.outbox_id = candidate.outbox_id
         RETURNING
-          outbox_id,
-          task_id,
-          order_id,
-          effect_type,
-          request_id,
-          payload,
-          status,
-          attempt_count,
-          next_attempt_at,
-          lease_token,
-          leased_until,
-          last_error,
-          created_at,
-          delivered_at
+          outbox.outbox_id,
+          outbox.task_id,
+          outbox.order_id,
+          outbox.effect_type,
+          outbox.request_id,
+          outbox.payload,
+          outbox.status,
+          outbox.attempt_count,
+          outbox.next_attempt_at,
+          outbox.lease_token,
+          outbox.leased_until,
+          outbox.last_error,
+          outbox.created_at,
+          outbox.delivered_at
       `,
       [leaseToken, leasedUntil, now, maxAttempts],
     );
@@ -738,10 +736,10 @@ export class OwnedMobilityRepository {
     executor: OwnedMobilityQueryExecutor,
     changes: PersistOwnedMobilityChanges,
   ) {
-    const writes: Promise<unknown>[] = [];
+    const writes: Array<() => Promise<unknown>> = [];
 
     for (const order of changes.orders ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_owned_orders (
@@ -802,7 +800,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const job of changes.dispatchJobs ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_jobs (
@@ -835,7 +833,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const attempt of changes.dispatchAttempts ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_attempts (
@@ -871,7 +869,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const assignment of changes.dispatchAssignments ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_assignments (
@@ -910,7 +908,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const task of changes.driverTasks ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_driver_tasks (
@@ -949,7 +947,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const traceLog of changes.dispatchTraceLogs ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_trace_logs (
@@ -979,7 +977,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const snapshot of changes.passengerDisclosureSnapshots ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             WITH superseded AS (
@@ -1023,7 +1021,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.consumer_notification_outbox (
@@ -1058,7 +1056,9 @@ export class OwnedMobilityRepository {
       );
     }
 
-    await Promise.all(writes);
+    for (const write of writes) {
+      await write();
+    }
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

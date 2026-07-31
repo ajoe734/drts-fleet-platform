@@ -135,8 +135,8 @@ jobs:
         run: pnpm db:migrate
       - name: Run integration tests
         run: pnpm run test:integration
-      - name: Run quota concurrency regression serially
-        run: pnpm --filter @drts/api run test:integration:quota-concurrency
+      - name: Run PostgreSQL UAT gates serially
+        run: pnpm --filter @drts/api run test:integration:postgres-gates
 
   build:
     runs-on: ubuntu-latest

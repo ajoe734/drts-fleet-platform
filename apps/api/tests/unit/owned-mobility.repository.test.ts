@@ -5,7 +5,10 @@ import type {
   PassengerDispatchDisclosureSnapshot,
 } from "@drts/contracts";
 
-import { OwnedMobilityRepository } from "../../src/modules/owned-mobility/owned-mobility.repository";
+import {
+  OwnedMobilityRepository,
+  type DriverCompletionOutboxRecord,
+} from "../../src/modules/owned-mobility/owned-mobility.repository";
 
 describe("OwnedMobilityRepository", () => {
   it("loads partner orders by order and tenant-scoped booking ids", async () => {
@@ -240,6 +243,49 @@ describe("OwnedMobilityRepository", () => {
 
     const [outboxSql] = query.mock.calls[1]!;
     expect(outboxSql).toContain("INSERT INTO ops.consumer_notification_outbox");
+  });
+
+  it("serializes writes issued through one transaction client", async () => {
+    const pending: Array<(value: { rows: never[] }) => void> = [];
+    const query = vi.fn(
+      () =>
+        new Promise<{ rows: never[] }>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+    const record = (
+      effectType: DriverCompletionOutboxRecord["effectType"],
+    ): DriverCompletionOutboxRecord => ({
+      outboxId: `outbox-${effectType}`,
+      taskId: "task-serial",
+      orderId: "order-serial",
+      effectType,
+      requestId: "request-serial",
+      payload: { effectType },
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: "2026-07-31T00:00:00.000Z",
+      leaseToken: null,
+      leasedUntil: null,
+      lastError: null,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      deliveredAt: null,
+    });
+
+    const persisted = repository.persistDriverCompletionOutbox(
+      { query } as never,
+      [record("completion_audit_bundle"), record("driver_task_updated")],
+    );
+
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(1));
+    pending.shift()!({ rows: [] });
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    pending.shift()!({ rows: [] });
+    await persisted;
   });
 
   it("claims the next recoverable driver-completion outbox globally in retry order", async () => {
