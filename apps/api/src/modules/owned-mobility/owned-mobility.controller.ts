@@ -707,14 +707,16 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/complete")
-  completeDriverTask(
+  async completeDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverCompleteTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.completeDriverTask(taskId, command, requestId),
+    const completedTask = await this.ownedMobilityService.completeDriverTask(
+      taskId,
+      command,
       requestId,
     );
+    return toApiSuccessEnvelope(completedTask, requestId);
   }
 }

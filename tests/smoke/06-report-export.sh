@@ -28,7 +28,7 @@ jq \
 http_call POST "/reports/jobs" "$FIXTURE_TMP"
 assert_status "200|201"
 
-JOB_ID=$(json_get ".data.jobId")
+JOB_ID=$(json_get_first ".data.jobId" ".data.job_id")
 if [[ -z "$JOB_ID" ]]; then
   log_fail "No jobId in response: ${RESP_BODY}"
   exit 1

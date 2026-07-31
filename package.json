@@ -50,6 +50,7 @@
     "test:e2e": "playwright test",
     "test:e2e:bank-console-auth": "playwright test -c playwright.bank-console-auth.config.ts",
     "test:e2e:bank-console-depth": "playwright test -c playwright.bank-console-depth.config.ts",
+    "test:integration": "pnpm --filter @drts/api test:integration",
     "test:e2e:enterprise-dispatch": "playwright test -c playwright.enterprise-dispatch.config.ts",
     "test:e2e:partner-booking-surfaces": "playwright test -c playwright.partner-booking-surfaces.config.ts",
     "test:e2e:tenant-localization": "playwright test -c playwright.tenant-localization.config.ts",

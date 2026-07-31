@@ -74,6 +74,8 @@ function createOwnedMobilityService(options?: {
     persistChanges: (...args: any[]) => Promise<unknown>;
     persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
+    loadDriverTaskCompletionBundleForUpdate?: (...args: any[]) => Promise<unknown>;
+    hasDriverTaskTraceRequestId?: (...args: any[]) => Promise<boolean>;
     reportPersistenceFailure: (...args: any[]) => void;
     findOrderById?: (...args: any[]) => Promise<unknown>;
     findOrderByBookingId?: (...args: any[]) => Promise<unknown>;
@@ -1163,10 +1165,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "tenant-demo-001",
     );
 
-    const dispatchResult = service.dispatchOrder(booking.orderId, {
+    const dispatchResult = await service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
@@ -1209,10 +1211,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "credit_card_airport_transfer",
     );
 
-    const dispatchResult = service.dispatchOrder(booking.orderId, {
+    const dispatchResult = await service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
@@ -4057,6 +4059,641 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         ([, payload]) => payload.eventType === "order.completed",
       ),
     ).toHaveLength(1);
+  });
+
+  it("defers task completion side effects until the database transaction commits", async () => {
+    const sequence: string[] = [];
+    const tenantPartnerService = {
+      isPersistenceEnabled: vi.fn(() => false),
+      previewBookingQuotaImpact: vi.fn(() => ({ impacts: [] })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: { blocked: false, approvalRequired: false },
+      })),
+      reserveTenantQuota: vi.fn(() => ({ ledgerEntries: [], impacts: [] })),
+      prepareTenantQuotaConsumption: vi.fn(async () => {
+        sequence.push("quota");
+        return {
+          tenantId: "tenant-demo-001",
+          ledgerEntries: [],
+          updatedSnapshots: [],
+        };
+      }),
+      applyCommittedQuotaConsumption: vi.fn(() => {
+        sequence.push("quota_apply");
+      }),
+      publishWebhookEvent: vi.fn(async () => {
+        sequence.push("webhook");
+      }),
+    } as unknown as TenantPartnerService;
+
+    const state = new Map<string, any>();
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async (_tx, changes) => {
+        sequence.push("persist");
+        if (changes.orders?.[0]) {
+          state.set("order", changes.orders[0]);
+        }
+        if (changes.dispatchAssignments?.[0]) {
+          state.set("assignment", changes.dispatchAssignments[0]);
+        }
+        if (changes.driverTasks?.[0]) {
+          state.set("task", changes.driverTasks[0]);
+        }
+        if (changes.dispatchTraceLogs?.[0]) {
+          state.set("trace", changes.dispatchTraceLogs[0]);
+        }
+      }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => {
+        sequence.push("begin");
+        const result = await work({} as never);
+        sequence.push("commit");
+        return result;
+      }),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
+        order: state.get("order"),
+        assignment: state.get("assignment"),
+        task: state.get("task"),
+      })),
+      hasDriverTaskTraceRequestId: vi.fn(async () => false),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+      repository,
+    });
+    const { service: seedService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+    });
+
+    const booking = seedService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = seedService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = seedService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    seedService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    seedService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    seedService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    seedService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    (service as any).orders = (seedService as any).orders.map((order: any) => ({
+      ...order,
+    }));
+    (service as any).dispatchJobs = (seedService as any).dispatchJobs.map(
+      (job: any) => ({ ...job }),
+    );
+    (service as any).dispatchAssignments = (
+      seedService as any
+    ).dispatchAssignments.map((item: any) => ({ ...item }));
+    (service as any).driverTasks = (seedService as any).driverTasks.map(
+      (task: any) => ({
+        ...task,
+        fare: task.fare ? { ...task.fare } : null,
+        proof: task.proof
+          ? {
+              photos: [...task.proof.photos],
+              signatureId: task.proof.signatureId ?? null,
+              expenseItems: [...(task.proof.expenseItems ?? [])],
+            }
+          : null,
+      }),
+    );
+    (service as any).dispatchTraceLogs = (seedService as any).dispatchTraceLogs.map(
+      (trace: any) => ({
+        ...trace,
+        details: trace.details ? { ...trace.details } : undefined,
+      }),
+    );
+
+    state.set("order", service.getOrder(booking.orderId));
+    state.set("assignment", (service as any).dispatchAssignments[0]);
+    state.set("task", service.listDriverTasks()[0]);
+    sequence.length = 0;
+    auditNotificationService.recordAuditLog.mockClear();
+    (tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>).mockClear();
+
+    await service.completeDriverTask(
+      assignment.taskId,
+      {
+        completedAt: "2026-04-29T12:45:00.000Z",
+        actualDistanceKm: 14.2,
+        actualDurationSec: 1200,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      },
+      "req-complete-db-001",
+    );
+
+    expect(sequence).toEqual([
+      "begin",
+      "quota",
+      "persist",
+      "commit",
+      "quota_apply",
+    ]);
+    expect(
+      auditNotificationService.recordAuditLog.mock.calls.filter(
+        ([input]) => input.actionName === "complete_trip",
+      ),
+    ).toHaveLength(1);
+    expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
+    expect(service.listDriverTasks()[0]).toMatchObject({ status: "completed" });
+  });
+
+  it("uses the locked database completion bundle even when local task state is stale or missing", async () => {
+    const tenantPartnerService = {
+      isPersistenceEnabled: vi.fn(() => false),
+      previewBookingQuotaImpact: vi.fn(() => ({ impacts: [] })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: { blocked: false, approvalRequired: false },
+      })),
+      reserveTenantQuota: vi.fn(() => ({ ledgerEntries: [], impacts: [] })),
+      prepareTenantQuotaConsumption: vi.fn(async () => ({
+        tenantId: "tenant-demo-001",
+        ledgerEntries: [],
+        updatedSnapshots: [],
+      })),
+      applyCommittedQuotaConsumption: vi.fn(() => undefined),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+
+    const state = new Map<string, any>();
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async (_tx, changes) => {
+        if (changes.orders?.[0]) {
+          state.set("order", changes.orders[0]);
+        }
+        if (changes.dispatchAssignments?.[0]) {
+          state.set("assignment", changes.dispatchAssignments[0]);
+        }
+        if (changes.driverTasks?.[0]) {
+          state.set("task", changes.driverTasks[0]);
+        }
+        if (changes.dispatchTraceLogs?.[0]) {
+          state.set("trace", changes.dispatchTraceLogs[0]);
+        }
+      }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
+        order: state.get("order"),
+        assignment: state.get("assignment"),
+        task: state.get("task"),
+      })),
+      hasDriverTaskTraceRequestId: vi.fn(async () => false),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+      repository,
+    });
+    const { service: seedService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+    });
+
+    const booking = seedService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = seedService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = seedService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    seedService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    seedService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    seedService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    seedService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    state.set("order", seedService.getOrder(booking.orderId));
+    state.set("assignment", (seedService as any).dispatchAssignments[0]);
+    state.set("task", seedService.listDriverTasks()[0]);
+
+    await expect(
+      service.completeDriverTask(
+        assignment.taskId,
+        {
+          completedAt: "2026-04-29T12:45:00.000Z",
+          actualDistanceKm: 14.2,
+          actualDurationSec: 1200,
+          proof: { photos: [SAMPLE_PROOF_PHOTO] },
+        },
+        "req-complete-db-stale-local-001",
+      ),
+    ).resolves.toMatchObject({
+      taskId: assignment.taskId,
+      status: "completed",
+    });
+
+    expect(service.getOrder(booking.orderId)).toMatchObject({
+      status: "completed",
+    });
+    expect(service.listDriverTasks()[0]).toMatchObject({
+      taskId: assignment.taskId,
+      status: "completed",
+    });
+  });
+
+  it("hydrates local state from the locked database bundle when replaying a duplicate completion request", async () => {
+    const tenantPartnerService = {
+      isPersistenceEnabled: vi.fn(() => false),
+      previewBookingQuotaImpact: vi.fn(() => ({ impacts: [] })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: { blocked: false, approvalRequired: false },
+      })),
+      reserveTenantQuota: vi.fn(() => ({ ledgerEntries: [], impacts: [] })),
+      prepareTenantQuotaConsumption: vi.fn(async () => ({
+        tenantId: "tenant-demo-001",
+        ledgerEntries: [],
+        updatedSnapshots: [],
+      })),
+      applyCommittedQuotaConsumption: vi.fn(() => undefined),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+
+    const state = new Map<string, any>();
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
+        order: state.get("order"),
+        assignment: state.get("assignment"),
+        task: state.get("task"),
+      })),
+      hasDriverTaskTraceRequestId: vi.fn(async () => true),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+      repository,
+    });
+    const { service: seedService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+    });
+
+    const booking = seedService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = seedService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = seedService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    seedService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    seedService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    seedService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    seedService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+    seedService.completeDriverTask(
+      assignment.taskId,
+      {
+        completedAt: "2026-04-29T12:45:00.000Z",
+        actualDistanceKm: 14.2,
+        actualDurationSec: 1200,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      },
+      "req-complete-db-replay-001",
+    );
+
+    const completedOrder = seedService.getOrder(booking.orderId);
+    const completedAssignment = (seedService as any).dispatchAssignments[0];
+    const completedTask = seedService.listDriverTasks()[0];
+    state.set("order", completedOrder);
+    state.set("assignment", completedAssignment);
+    state.set("task", completedTask);
+
+    (service as any).orders = [{ ...completedOrder, status: "on_trip" }];
+    (service as any).dispatchAssignments = [
+      { ...completedAssignment, status: "accepted" },
+    ];
+    (service as any).driverTasks = [
+      { ...completedTask, status: "on_trip", completedAt: null },
+    ];
+    auditNotificationService.recordAuditLog.mockClear();
+    (tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>).mockClear();
+
+    await expect(
+      service.completeDriverTask(
+        assignment.taskId,
+        {
+          completedAt: "2026-04-29T12:45:00.000Z",
+          actualDistanceKm: 14.2,
+          actualDurationSec: 1200,
+          proof: { photos: [SAMPLE_PROOF_PHOTO] },
+        },
+        "req-complete-db-replay-001",
+      ),
+    ).resolves.toMatchObject({
+      taskId: assignment.taskId,
+      status: "completed",
+    });
+
+    expect(service.getOrder(booking.orderId)).toMatchObject({
+      status: "completed",
+    });
+    expect(service.listDriverTasks()[0]).toMatchObject({
+      taskId: assignment.taskId,
+      status: "completed",
+      completedAt: "2026-04-29T12:45:00.000Z",
+    });
+    expect(
+      auditNotificationService.recordAuditLog.mock.calls.filter(
+        ([input]) => input.actionName === "complete_trip",
+      ),
+    ).toHaveLength(0);
+    expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate in-memory completion state when the database commit fails", async () => {
+    const tenantPartnerService = {
+      isPersistenceEnabled: vi.fn(() => false),
+      previewBookingQuotaImpact: vi.fn(() => ({ impacts: [] })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: { blocked: false, approvalRequired: false },
+      })),
+      reserveTenantQuota: vi.fn(() => ({ ledgerEntries: [], impacts: [] })),
+      prepareTenantQuotaConsumption: vi.fn(async () => ({
+        tenantId: "tenant-demo-001",
+        ledgerEntries: [],
+        updatedSnapshots: [],
+      })),
+      applyCommittedQuotaConsumption: vi.fn(() => undefined),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+
+    const state = new Map<string, any>();
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async (_tx, changes) => {
+        if (changes.orders?.[0]) {
+          state.set("order", changes.orders[0]);
+        }
+        if (changes.dispatchAssignments?.[0]) {
+          state.set("assignment", changes.dispatchAssignments[0]);
+        }
+        if (changes.driverTasks?.[0]) {
+          state.set("task", changes.driverTasks[0]);
+        }
+      }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => {
+        await work({} as never);
+        throw new Error("commit failed");
+      }),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
+        order: state.get("order"),
+        assignment: state.get("assignment"),
+        task: state.get("task"),
+      })),
+      hasDriverTaskTraceRequestId: vi.fn(async () => false),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+      repository,
+    });
+
+    const { service: seedService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+    });
+
+    const booking = seedService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = seedService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = seedService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    seedService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    seedService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    seedService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    seedService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    (service as any).orders = (seedService as any).orders.map((order: any) => ({
+      ...order,
+    }));
+    (service as any).dispatchJobs = (seedService as any).dispatchJobs.map(
+      (job: any) => ({ ...job }),
+    );
+    (service as any).dispatchAssignments = (
+      seedService as any
+    ).dispatchAssignments.map((item: any) => ({ ...item }));
+    (service as any).driverTasks = (seedService as any).driverTasks.map(
+      (task: any) => ({
+        ...task,
+        fare: task.fare ? { ...task.fare } : null,
+        proof: task.proof
+          ? {
+              photos: [...task.proof.photos],
+              signatureId: task.proof.signatureId ?? null,
+              expenseItems: [...(task.proof.expenseItems ?? [])],
+            }
+          : null,
+      }),
+    );
+    (service as any).dispatchTraceLogs = (seedService as any).dispatchTraceLogs.map(
+      (trace: any) => ({
+        ...trace,
+        details: trace.details ? { ...trace.details } : undefined,
+      }),
+    );
+
+    state.set("order", service.getOrder(booking.orderId));
+    state.set("assignment", (service as any).dispatchAssignments[0]);
+    state.set("task", service.listDriverTasks()[0]);
+    auditNotificationService.recordAuditLog.mockClear();
+    (tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>).mockClear();
+
+    await expect(
+      service.completeDriverTask(
+        assignment.taskId,
+        {
+          completedAt: "2026-04-29T12:45:00.000Z",
+          actualDistanceKm: 14.2,
+          actualDurationSec: 1200,
+          proof: { photos: [SAMPLE_PROOF_PHOTO] },
+        },
+        "req-complete-db-rollback",
+      ),
+    ).rejects.toThrow("commit failed");
+
+    expect(service.getOrder(booking.orderId)).toMatchObject({
+      status: "on_trip",
+    });
+    expect(service.listDriverTasks()[0]).toMatchObject({
+      status: "on_trip",
+      completedAt: null,
+    });
+    expect(
+      auditNotificationService.recordAuditLog.mock.calls.filter(
+        ([input]) => input.actionName === "complete_trip",
+      ),
+    ).toHaveLength(0);
+    expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
+    expect(
+      tenantPartnerService.applyCommittedQuotaConsumption,
+    ).not.toHaveBeenCalled();
   });
 
   it("rejects duplicate completion requests after the trip is already completed", () => {

@@ -168,8 +168,8 @@ Before starting UAT, confirm:
 | OC-010 | Create complaint case                                | `complaint_specialist` | P1       | ⬜        | Unique case number; SLA timer starts       | STATIC EVIDENCE |
 | OC-011 | Reopen closed complaint                              | `complaint_specialist` | P2       | ⬜        | Case number retained; timeline updated     | STATIC EVIDENCE |
 | OC-012 | SLA breach flag visible (non-destructive)            | `complaint_specialist` | P2       | ⬜        | Main status unchanged                      | STATIC EVIDENCE |
-| OC-013 | Vehicle onboarding — exclusivity review gate         | `ops_manager`          | P1       | ⬜        | Cannot set dispatchable before approval    | LIVE            |
-| OC-014 | Insurance expiry makes vehicle ineligible            | `ops_manager`          | P1       | ⬜        | Alert generated; dispatch excludes vehicle | LIVE            |
+| OC-013 | Vehicle onboarding — exclusivity review gate         | `ops_manager`          | P1       | ⬜        | Cannot set dispatchable before approval; after the block clears, operator must explicitly re-enable dispatchability | LIVE            |
+| OC-014 | Insurance expiry makes vehicle ineligible            | `ops_manager`          | P1       | ⬜        | Alert generated; dispatch excludes vehicle; compliance restoration does not silently clear `manual_hold` | LIVE            |
 | OC-015 | Vehicle offboarding — debranding task created        | `ops_manager`          | P2       | ⬜        |                                            | INVENTORY       |
 | OC-016 | Driver expired license blocks clock-in               | `ops_manager`          | P1       | ⬜        | `DRIVER_CERT_INVALID`                      | LIVE            |
 | OC-017 | View driver earnings statement (read-only)           | `ops_manager`          | P2       | ⬜        | Cannot modify net                          | STATIC EVIDENCE |
@@ -184,6 +184,8 @@ Before starting UAT, confirm:
 | OC-026 | View tenant contract rules                           | `ops_manager`          | P2       | ⬜        |                                            | STATIC EVIDENCE |
 
 **Ops Console P1 pass gate:** OC-001, OC-002, OC-003, OC-005, OC-006, OC-009, OC-010, OC-013, OC-014, OC-016, OC-021, OC-025
+
+Recovery policy for `OC-013` / `OC-014`: once a vehicle has been forced out of dispatchability by a compliance gate, clearing the underlying block does not auto-release a pre-existing manual hold. UAT must prove the operator-visible recovery step by explicitly setting `dispatchableFlag=true` after exclusivity/insurance blockers are resolved.
 
 ---
 

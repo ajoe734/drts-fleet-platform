@@ -101,6 +101,22 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -112,15 +128,15 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
+      - name: Apply migrations
+        run: pnpm db:migrate
       - name: Run integration tests
-        # `pnpm run test:integration` may not exist yet on every package — exit cleanly if not.
-        run: |
-          if pnpm run | grep -q '^  test:integration'; then
-            pnpm run test:integration
-          else
-            echo "test:integration script not present in root package.json; skipping."
-          fi
+        run: pnpm run test:integration
+      - name: Run quota concurrency regression serially
+        run: pnpm --filter @drts/api run test:integration:quota-concurrency
 
   build:
     runs-on: ubuntu-latest
