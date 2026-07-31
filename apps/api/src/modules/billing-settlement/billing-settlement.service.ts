@@ -845,7 +845,10 @@ export class BillingSettlementService implements OnModuleInit {
     return receipt;
   }
 
-  @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
+  @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, {
+    async: true,
+    suppressErrors: false,
+  })
   async handleOwnedMobilityTripCompleted(event: OwnedMobilityTripCompletedEvent) {
     if (
       !event.tenantId ||

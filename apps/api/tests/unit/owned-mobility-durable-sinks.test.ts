@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter2 } from "@nestjs/event-emitter";
+import { Reflector } from "@nestjs/core";
+import { EventsMetadataAccessor } from "@nestjs/event-emitter/dist/events-metadata.accessor";
 
 import {
   OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
@@ -392,6 +394,99 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       ).rejects.toThrow(
         "Owned mobility trip completion listener is missing or unavailable.",
       );
+    });
+
+    it("propagates settlement repository persistence failure through emitAsync to executeDriverCompletionOutboxEffect when registered via @OnEvent metadata", async () => {
+      const eventEmitter = new EventEmitter2();
+      const auditRepo = {
+        isEnabled: () => true,
+        append: vi.fn().mockResolvedValue(undefined),
+      };
+      const auditService = new AuditNotificationService(auditRepo as any);
+      const settlementRepo = {
+        persistChanges: vi
+          .fn()
+          .mockRejectedValue(new Error("Settlement repo write error")),
+        reportPersistenceFailure: vi.fn(),
+      };
+
+      const settlementService = new BillingSettlementService(
+        auditService as any,
+        settlementRepo as any,
+      );
+
+      const accessor = new EventsMetadataAccessor(new Reflector());
+      const metadata = accessor.getEventHandlerMetadata(
+        settlementService.handleOwnedMobilityTripCompleted,
+      );
+      expect(metadata).toBeDefined();
+      expect(metadata![0].options).toEqual({ async: true, suppressErrors: false });
+
+      for (const meta of metadata!) {
+        const options = meta.options;
+        eventEmitter.on(
+          meta.event,
+          async (...args: any[]) => {
+            try {
+              return await settlementService.handleOwnedMobilityTripCompleted(
+                ...(args as [any]),
+              );
+            } catch (e) {
+              if (options?.suppressErrors ?? true) {
+                // Nest EventSubscribersLoader swallows error when suppressErrors is true/default
+                return;
+              }
+              throw e;
+            }
+          },
+          options,
+        );
+      }
+
+      const ownedMobilityService = new OwnedMobilityService(
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+      (ownedMobilityService as any).eventEmitter = eventEmitter;
+
+      const outboxRecord = {
+        outboxId: "outbox_settlement_err_01",
+        taskId: "task_01",
+        orderId: "order_01",
+        effectType: "owned_mobility_trip_completed",
+        requestId: "req_01",
+        payload: {
+          effectType: "owned_mobility_trip_completed",
+          event: {
+            tenantId: "tenant_01",
+            driverId: "driver_01",
+            orderId: "order_01",
+            serviceBucket: "business_dispatch",
+            businessDispatchSubtype: "enterprise_dispatch",
+            completedAt: new Date().toISOString(),
+            grossEarning: { amountMinor: 1000, currency: "TWD" },
+            sandboxFulfillmentSegments: [
+              { fulfillmentSegmentId: "seg_01", orderId: "order_01" },
+            ],
+          },
+        },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: new Date().toISOString(),
+        leaseToken: null,
+        leasedUntil: null,
+        lastError: null,
+        createdAt: new Date().toISOString(),
+        deliveredAt: null,
+      };
+
+      await expect(
+        (ownedMobilityService as any).executeDriverCompletionOutboxEffect(
+          outboxRecord as any,
+        ),
+      ).rejects.toThrow("Settlement repo write error");
     });
   });
 
