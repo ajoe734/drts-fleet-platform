@@ -3,8 +3,8 @@
 Task-ID: STAGE1-DEPLOY-VERIFY-20260731
 LLM-Agent: Gemini
 Generated-At: 2026-07-31T21:20:00Z
-Revised-At: 2026-07-31T21:30:00Z
-Revision-Reason: Codex2 review finding — added concrete dev/main sync evidence (PROMOTE-RESCUE-20260731-5, PR #1211)
+Revised-At: 2026-07-31T21:37:00Z
+Revision-Reason: Codex2 review finding — added concrete dev/main sync evidence (PROMOTE-RESCUE-20260731-5, PR #1211 MERGED, prod/v2026.07.31.5 tagged)
 
 ## 1. Dependency Verification
 
@@ -67,16 +67,17 @@ Rescue commit:
 - **Trailers**: `Task-ID: STAGE1-DEPLOY-VERIFY-20260731`, `LLM-Agent: Gemini`, `Reviewer: Codex2`
 - **Promote dispatch run**: `30666573059` (confirmed v2026.07.31.5 @ `2123330182d3`, soak=67m, no regression label)
 
-PR and merge:
+PR and merge — COMPLETE:
 - **PR**: https://github.com/ajoe734/drts-fleet-platform/pull/1211
 - **Title**: `PROMOTE-RESCUE-20260731-5: reconcile main to verified dev (publish/v2026.07.31.5)`
 - **Base**: `main` / **Head**: `rescue/promote-reconcile-20260731`
-- **Mergeable**: MERGEABLE (no conflict, branch is descendant of main)
-- **CI run**: `30666768063` — 3 required gates (Commit trailers, Runtime mirror guard, Smoke acceptance) registered and running
-- **Push**: non-force push to `origin/rescue/promote-reconcile-20260731`
-
-> Post-merge: `origin/main` tree will equal `origin/publish/v2026.07.31.5` tree.
-> `tag-on-merge` job will apply `prod/v2026.07.31.5` tag.
+- **Mergeable**: MERGEABLE / CLEAN (all 6 CI gates passed)
+- **CI run**: `30666768063` — 6/6 gates: Commit trailers ✅, Runtime mirror guard ✅, Smoke acceptance ✅, Spec source archive ✅, i18n guard ✅, BFF-only imports ✅
+- **Merged at**: `2026-07-31T21:35:47Z`
+- **Merge commit**: `11db5408fb7395a5277834f93bcd124155a2255e` — `PROMOTE-RESCUE-20260731-5: reconcile main to verified dev (publish/v2026.07.31.5) (#1211)`
+- **`origin/main`**: now `11db5408` (was `af843fe6`)
+- **Tag**: `prod/v2026.07.31.5` applied to `11db5408` by `tag-on-merge` job (run `30667138335`)
+- **Post-merge tree**: `origin/main` tree == `publish/v2026.07.31.5` tree
 
 ## 3. Cloud Run Service Verification
 
@@ -154,7 +155,7 @@ None block Stage 1 conclusion.
 | Criterion | Result |
 |---|---|
 | release PR review approved + CI green before merge | PASS — PR #1210, ci-integ green |
-| sync dev/main, trigger one deploy | PASS — Deploy-Dev run 30663746297 on `publish/v2026.07.31.5`; dev/main sync via PROMOTE-RESCUE PR #1211 (`rescue/promote-reconcile-20260731` → main, commit `9d8a2d4e`, CI run 30666768063) |
+| sync dev/main, trigger one deploy | PASS — Deploy-Dev run 30663746297 on `publish/v2026.07.31.5`; dev/main sync COMPLETE via PROMOTE-RESCUE PR #1211 (squash-merged `2026-07-31T21:35:47Z`, merge commit `11db5408`, tag `prod/v2026.07.31.5` applied, `origin/main` = `11db5408`) |
 | all Cloud Run URLs health + auth boundary + browser smoke | PASS — 10 services, 3000 smoke tests |
 | Referral partner-scoped entry available | PASS — /embed/referral-demo-community and /program/embed entries |
 | Cloud Run + local no Concierge | PASS — Cloud Run passenger deleted; local concierge stopped+removed |
