@@ -24,14 +24,12 @@ The broader blueprint-completion and master-closeout execution waves are now
 materially closed on the current remote baseline. The repo truth currently
 says:
 
-- core Phase 1 operator surfaces are implemented in code
-- rollout evidence, tenant boundary, finance/reporting completeness, and
-  integration hardening are closed
-- the protected control-plane auth cutover (`GAP-P2S3-001`) is closed on
-  protected staging and the remaining visible delta is limited to
-  external-gated integrations plus consciously deferred families
-- Passenger App / Web, Call Point / Concierge Portal, and AV / live-board scope
-  remain explicit deferred or future-gated families
+- core Phase 1 operator surfaces are fully implemented, verified, and deployed (`dev_deployed` via [deploy run 30663746297](https://github.com/ajoe734/drts-fleet-platform/actions/runs/30663746297), SHA `2123330182d3`, release tag `publish/v2026.07.31.5`)
+- Stage 1 controllable truth and UAT closeout is complete (100% Playwright smoke pass 3000/3000, see [`docs/04-uat/stage1-controllable-truth-closeout-20260731.md`](docs/04-uat/stage1-controllable-truth-closeout-20260731.md))
+- 10 official active Cloud Run services deployed (`api`, `platform-admin-web`, `ops-console-web`, `fleet-partner-portal-web`, `tenant-console-web`, `bank-console-web`, `partner-booking-web`, `enterprise-dispatch-web`, `channel-partner-portal-web`, `referral-embed-web`)
+- Concierge portal (`concierge-portal-web`, `assisted-entry-web`) is permanently retired/decommissioned; zero active concierge services remain
+- Referral entry is strictly partner-scoped under `referral-embed-web` (`/embed/referral-demo-community`)
+- External-gated dependencies (external bank API keys, live forwarder sandbox adapters, mobile store app keys, external CTI/filing services) are isolated in sidecar documentation and excluded from Stage 1 controllable scope evaluation
 
 Current working rule:
 

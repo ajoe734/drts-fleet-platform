@@ -16,33 +16,15 @@ Use it to separate:
 
 ## Current Reality Snapshot
 
-As of `2026-05-01`, the switchboard follow-up wave, protected control-plane auth
-cutover, P1PX productization wave, ORX operational remediation wave, and BDX
-blueprint-delta closeout wave are closed for the repo-local Phase 1 claim. The
-current visible delta is now:
+As of `2026-07-31` (`STAGE1-TRUTH-CLOSEOUT-20260731`), the Stage 1 controllable truth closeout is complete (`dev_deployed` via [deploy run 30663746297](https://github.com/ajoe734/drts-fleet-platform/actions/runs/30663746297), commit `2123330182d3`, release tag `publish/v2026.07.31.5`).
 
-- external-gated integrations: real bank/issuer credentials, Grab Taiwan or
-  equivalent real adapter, mobile distribution inputs, and live CTI /
-  recording / filing activation
-- pilot-gated evidence: tenant-by-tenant rollout acceptance, human UAT sign-off,
-  operator acceptance, and mobile tester install proof when in scope
-- production-gated evidence: production `DATABASE_URL` boot, migrations,
-  retention/object-store controls, secrets, SLO/pager routing, rollback owner,
-  and legal/compliance sign-off
-- consciously deferred future-gated surfaces: passenger app/web, passenger
-  receipt UI, call point/concierge, AV/ODD, live board (captured in `MSC-P1-001`)
-
-This means:
-
-- **gap-fix execution is complete enough to stop being the main story**
-- **partner channel and driver app baselines are landed; external credentials
-  and distribution inputs block productization completion**
-- **the repo-local closeout bar is met, while deferred, external-gated,
-  pilot-gated, and production-gated scope remains explicit**
-
-Release wording should now cite workflow families from
-`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` instead of
-reducing the closeout narrative to repo-local test green-ness.
+The current reconciled truth states:
+- **10 Official Active Cloud Run Services** are deployed and verified (`Ready=True`, 3000/3000 smoke PASS).
+- **Concierge Surface** is permanently retired and decommissioned. Zero concierge services or containers remain.
+- **Referral Surface** is strictly a partner-scoped entry point (`/embed/referral-demo-community`).
+- **All Controllable Issues** (PRs #1194, #1196, #1198, #1209, #1210, #1211) are verified and closed.
+- **External 4 Gate Types** (bank/issuer live APIs, forwarder live sandboxes, mobile store distribution keys, external CTI/filing integrations) are isolated in sidecars and excluded from Stage 1 controllable scope assessment.
+- Full details are documented in [`docs/04-uat/stage1-controllable-truth-closeout-20260731.md`](../04-uat/stage1-controllable-truth-closeout-20260731.md).
 
 ## A. Gap-Fix Wave Closeout
 

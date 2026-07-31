@@ -1,14 +1,13 @@
 # Phase 1 UAT Execution Checklist
 
-**Status:** Baseline execution checklist — final evidence interpretation now lives in `support/sidecars/FBP-013C/FBP-013C-UAT-EVIDENCE-PACK.md` and `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md`
-**Owner:** Claude (WE-005 baseline)
-**Task:** WE-005 baseline; consumed by `FBP-013C` and `FBP-013D` for final closeout
+**Status:** Stage 1 controllable truth closeout complete (`dev_deployed` via [deploy run 30663746297](https://github.com/ajoe734/drts-fleet-platform/actions/runs/30663746297), see [`docs/04-uat/stage1-controllable-truth-closeout-20260731.md`](stage1-controllable-truth-closeout-20260731.md))  
+**Owner:** Gemini (`STAGE1-TRUTH-CLOSEOUT-20260731`)  
+**Task:** `STAGE1-TRUTH-CLOSEOUT-20260731`  
 **Created:** 2026-04-14  
+**Last Reconciled:** 2026-07-31  
 **Scenario source:** `docs/04-uat/phase1-uat-scenarios.md`
 
-This file remains the canonical row-by-row checklist inventory. Use the `FBP-013C` evidence
-pack for current deferred-item math, static verification coverage, and sign-off framing, and
-use `FBP-013D` for the final release / pilot / production decision read.
+This file remains the canonical row-by-row checklist inventory. See [`docs/04-uat/stage1-controllable-truth-closeout-20260731.md`](stage1-controllable-truth-closeout-20260731.md) for empirical Cloud Run service deployment evidence, 10 active service URLs, Concierge surface retirement, and closed GitHub issues.
 
 ---
 
