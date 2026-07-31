@@ -22,10 +22,10 @@ provisioning screen instead of binding a demo actor.
 
 Set one of the following before running or building:
 
-| Variable                | Purpose                                                    |
-| ----------------------- | ---------------------------------------------------------- |
-| `EXPO_PUBLIC_DRIVER_ID` | Explicit driver actor ID for local dev and internal builds |
-| `EXPO_PUBLIC_API_URL`   | Override the API base URL (defaults to staging endpoint)   |
+| Variable                | Purpose                                                      |
+| ----------------------- | ------------------------------------------------------------ |
+| `EXPO_PUBLIC_DRIVER_ID` | Explicit driver actor ID for local dev and internal builds   |
+| `EXPO_PUBLIC_API_URL`   | Explicit direct API origin for the selected environment tier |
 
 Example local dev invocation:
 
@@ -53,17 +53,34 @@ Useful commands:
 - `pnpm --filter @drts/driver-app android`
 - `pnpm --filter @drts/driver-app ios`
 - `pnpm --filter @drts/driver-app build:android:development`
-- `cd apps/driver-app && npx eas-cli build --platform android --profile preview`
-- `pnpm --filter @drts/driver-app build:ios:development`
-- `cd apps/driver-app && npx eas-cli build --platform ios --profile development-simulator`
+- `cd apps/driver-app && npx eas-cli@21.4.0 build --platform android --profile preview`
+- `.github/workflows/build-driver-ios.yml` for guarded hosted iOS builds
 
-Hosted EAS builds currently assume `npx eas-cli` unless the operator has a
-global `eas` binary installed. The repo does not vendor `eas-cli` as a
-workspace dependency.
+Hosted EAS builds use `npx eas-cli@21.4.0`; the repo does not vendor `eas-cli`
+as a workspace dependency.
 
-The default packaged API target is the direct staging API host
-`https://drts-api-kdhu6wzufa-uc.a.run.app`, not the IAP-protected control-plane
-host. Override with `EXPO_PUBLIC_API_URL` when needed.
+### iOS quickstart on a Mac
+
+The native `ios/` project is committed, so a fresh clone does not need
+`expo prebuild`. The Simulator path requires Xcode but does not require an
+Apple Developer membership:
+
+```bash
+pnpm install
+EXPO_PUBLIC_API_URL=https://drts-dev-api-4t7rg6fmeq-uc.a.run.app \
+EXPO_PUBLIC_DRIVER_ID=driver-dev-001 \
+pnpm --filter @drts/driver-app ios
+```
+
+Always select an explicit direct API origin. The current dev operator target is
+`https://drts-dev-api-4t7rg6fmeq-uc.a.run.app`; do not point the app at an
+IAP-protected control-plane host.
+
+For a hosted iOS build, manually run
+`.github/workflows/build-driver-ios.yml`. It requires the `EXPO_TOKEN` Actions
+secret and `DRIVER_APP_EAS_PROJECT_ID` Actions variable before it can queue
+paid EAS capacity. Physical-device signing and TestFlight also require the
+Apple team and App Store Connect setup described in the runbook.
 
 For step-by-step setup, build instructions, and environment separation, see
 [Driver App Native Dev Runbook](../../docs/03-runbooks/driver-app-native-dev-runbook.md).

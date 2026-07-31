@@ -1382,6 +1382,7 @@ export default async function VehiclesPage({
       key: "all" as const,
       node: (
         <Link
+          key="all"
           href={buildHref(filters, { tab: "all" })}
           style={{
             color: theme.text,
@@ -1400,6 +1401,7 @@ export default async function VehiclesPage({
       key: "dispatchable" as const,
       node: (
         <Link
+          key="dispatchable"
           href={buildHref(filters, { tab: "dispatchable" })}
           style={{
             color: theme.text,
@@ -1418,6 +1420,7 @@ export default async function VehiclesPage({
       key: "offboarding" as const,
       node: (
         <Link
+          key="offboarding"
           href={buildHref(filters, { tab: "offboarding" })}
           style={{
             color: theme.text,

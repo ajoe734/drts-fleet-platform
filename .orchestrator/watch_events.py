@@ -169,7 +169,8 @@ def compute_replay_events(current: dict[str, Any], config: dict[str, Any]) -> li
 
 def compute_events(previous: dict[str, Any], current: dict[str, Any], config: dict[str, Any]) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
-    previous_tasks = previous.get("tasks", {})
+    watcher = previous.get("watcher") if isinstance(previous.get("watcher"), dict) else {}
+    previous_tasks = watcher.get("task_snapshots") or previous.get("tasks", {})
     current_tasks = current.get("tasks", {})
     review_statuses = {value.lower() for value in config.get("events", {}).get("review_statuses", ["review"])}
 
@@ -413,6 +414,7 @@ def build_branch_protocol_block(
         f"else git switch -c {lane}/{task_id_kebab} origin/{base_branch}; fi\n"
         "  ```\n"
         "- working tree 不是暫存區。改動觸及 fragile surface（`.orchestrator/supervisor.py`、"
+        "`.orchestrator/control_plane/**`、"
         "`.orchestrator/skills/**`、`.orchestrator/templates/*`、`docs/**`、`.github/workflows/**`、"
         "`.husky/*`、`config*.json`），或跨檔案、預計跨 supervisor cycle、即將 yield 時，"
         "立即 anchor commit：\n"
@@ -505,7 +507,8 @@ def run_scan(config: dict[str, Any], state: dict[str, Any], replay: bool, provid
     if is_first_run and not replay and not config.get("watcher", {}).get("replay_on_start", False):
         state["initialized_at"] = utc_now()
         state["last_scan_at"] = utc_now()
-        state["tasks"] = snapshot["tasks"]
+        state.setdefault("watcher", {})["task_snapshots"] = snapshot["tasks"]
+        state.pop("tasks", None)
         state["pending_handoff_keys"] = snapshot["pending_handoff_keys"]
         save_runtime_state(config, state)
         return False
@@ -534,7 +537,8 @@ def run_scan(config: dict[str, Any], state: dict[str, Any], replay: bool, provid
 
     state["initialized_at"] = state.get("initialized_at") or utc_now()
     state["last_scan_at"] = utc_now()
-    state["tasks"] = snapshot["tasks"]
+    state.setdefault("watcher", {})["task_snapshots"] = snapshot["tasks"]
+    state.pop("tasks", None)
     state["pending_handoff_keys"] = snapshot["pending_handoff_keys"]
     trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))
     save_runtime_state(config, state)

@@ -196,7 +196,7 @@ class AntigravityAdapter(BaseAdapter):
             note = "Antigravity CLI was available during capability probing but is no longer resolvable before dispatch."
             return _fallback_to_inbox(self, request, note, hard_error=True)
 
-        command = [cli, "--print"]
+        command = [cli]
         if _truthy(settings.get("skip_permissions"), default=True):
             command.append("--dangerously-skip-permissions")
         if _truthy(settings.get("sandbox"), default=False):
@@ -232,8 +232,9 @@ class AntigravityAdapter(BaseAdapter):
         workspace_root = delivery_workspace_root(self.config, request.metadata)
         for directory in _include_directories(self.config, settings, Path(str(workspace_root))):
             command.extend(["--add-dir", directory])
-        # Prompt is the trailing positional argument (Go flag parsing stops at first non-flag).
-        command.append(request.message)
+        # In agy 1.1.1, --print is a string flag whose next argument is the
+        # prompt. Keep it last so another flag cannot be consumed as the prompt.
+        command.extend(["--print", request.message])
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)

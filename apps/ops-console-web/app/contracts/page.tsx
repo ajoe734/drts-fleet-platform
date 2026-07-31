@@ -1309,6 +1309,7 @@ export default async function ContractsPage({
       key: "all" as const,
       node: (
         <Link
+          key="all"
           href={buildHref(filters, { tab: "all" })}
           style={{
             color: theme.text,
@@ -1327,6 +1328,7 @@ export default async function ContractsPage({
       key: "expiring" as const,
       node: (
         <Link
+          key="expiring"
           href={buildHref(filters, { tab: "expiring" })}
           style={{
             color: theme.text,
@@ -1345,6 +1347,7 @@ export default async function ContractsPage({
       key: "partner" as const,
       node: (
         <Link
+          key="partner"
           href={buildHref(filters, { tab: "partner" })}
           style={{
             color: theme.text,

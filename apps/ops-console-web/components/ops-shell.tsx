@@ -61,11 +61,14 @@ export function OpsShell({
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     const client = getOpsClient();
 
     async function fetchBadgeCount() {
       try {
-        const res = await client.get<any>("/api/incidents");
+        const res = await client.get<any>("/api/incidents", {
+          signal: controller.signal,
+        });
         const items: IncidentRecord[] = unwrapListItems(res);
         const pendingCount = items.filter(
           (incident) =>
@@ -77,7 +80,13 @@ export function OpsShell({
           setSosBadgeCount(pendingCount);
         }
       } catch (err) {
-        console.error("Failed to fetch pending SOS badge count", err);
+        // Browser navigation can reject the old document's fetch before React
+        // runs this effect's cleanup. Yield once so an expected navigation
+        // abort is not reported as an active-shell API failure.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (active && !controller.signal.aborted) {
+          console.error("Failed to fetch pending SOS badge count", err);
+        }
       }
     }
 
@@ -108,6 +117,7 @@ export function OpsShell({
 
     return () => {
       active = false;
+      controller.abort();
       clearInterval(interval);
       if (sse) {
         sse.close();
