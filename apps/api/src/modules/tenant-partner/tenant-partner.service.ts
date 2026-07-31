@@ -10998,8 +10998,77 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  buildQuotaReservationAuditInputs(
+    committed: TenantQuotaConsumptionCommitResult,
+  ): Array<{
+    actorId: string | null;
+    actorType: "system";
+    tenantId: string;
+    moduleName: "tenant-partner";
+    actionName: string;
+    resourceType: string;
+    resourceId: string;
+    newValuesSummary: Record<string, unknown>;
+  }> {
+    const audits: Array<{
+      actorId: string | null;
+      actorType: "system";
+      tenantId: string;
+      moduleName: "tenant-partner";
+      actionName: string;
+      resourceType: string;
+      resourceId: string;
+      newValuesSummary: Record<string, unknown>;
+    }> = [];
+
+    for (const entry of committed.ledgerEntries) {
+      audits.push({
+        actorId: null,
+        actorType: "system",
+        tenantId: committed.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_ledger.entry_added",
+        resourceType: "tenant_quota_ledger",
+        resourceId: entry.ledgerEntryId,
+        newValuesSummary: {
+          bookingId: entry.bookingId,
+          costCenterCode: entry.costCenterCode,
+          periodKey: entry.periodKey,
+          dimension: entry.dimension,
+          entryType: entry.entryType,
+          amount: entry.amount,
+        },
+      });
+    }
+
+    for (const snapshot of committed.updatedSnapshots) {
+      audits.push({
+        actorId: null,
+        actorType: "system",
+        tenantId: committed.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_snapshot.refreshed",
+        resourceType: "tenant_quota_snapshot",
+        resourceId: this.buildQuotaSnapshotKey(
+          snapshot.tenantId,
+          snapshot.costCenterCode,
+          snapshot.period,
+          snapshot.periodKey,
+        ),
+        newValuesSummary: {
+          costCenterCode: snapshot.costCenterCode,
+          periodKey: snapshot.periodKey,
+          usage: snapshot.usage,
+        },
+      });
+    }
+
+    return audits;
+  }
+
   applyCommittedQuotaConsumption(
     committed: TenantQuotaConsumptionCommitResult,
+    options?: { stateOnly?: boolean },
   ) {
     if (committed.ledgerEntries.length === 0) {
       return;
@@ -11009,11 +11078,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       committed.ledgerEntries,
       committed.updatedSnapshots,
     );
-    this.recordQuotaReservationAudits(
-      committed.tenantId,
-      committed.ledgerEntries,
-      committed.updatedSnapshots,
-    );
+    if (!options?.stateOnly) {
+      this.recordQuotaReservationAudits(
+        committed.tenantId,
+        committed.ledgerEntries,
+        committed.updatedSnapshots,
+      );
+    }
   }
 
   private recordQuotaReservationAudits(

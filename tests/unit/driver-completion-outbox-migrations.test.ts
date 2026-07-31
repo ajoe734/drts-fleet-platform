@@ -62,4 +62,20 @@ describe("driver completion outbox migrations", () => {
     expect(v0066).toContain("task_id,");
     expect(v0066).toContain("outbox_id");
   });
+
+  it("includes all six outbox effect types in V0065 and V0066 CHECK constraints", () => {
+    const requiredEffects = [
+      "tenant_order_completed_webhook",
+      "owned_mobility_trip_completed",
+      "multi_taxi_certificate",
+      "completion_audit_bundle",
+      "driver_task_updated",
+      "ops_dispatch_job_updated",
+    ];
+
+    for (const effect of requiredEffects) {
+      expect(v0065).toContain(`'${effect}'`);
+      expect(v0066).toContain(`'${effect}'`);
+    }
+  });
 });

@@ -57,6 +57,21 @@ ALTER TABLE ops.driver_completion_outbox
   );
 
 ALTER TABLE ops.driver_completion_outbox
+  DROP CONSTRAINT IF EXISTS driver_completion_outbox_effect_type_chk;
+
+ALTER TABLE ops.driver_completion_outbox
+  ADD CONSTRAINT driver_completion_outbox_effect_type_chk CHECK (
+    effect_type IN (
+      'tenant_order_completed_webhook',
+      'owned_mobility_trip_completed',
+      'multi_taxi_certificate',
+      'completion_audit_bundle',
+      'driver_task_updated',
+      'ops_dispatch_job_updated'
+    )
+  );
+
+ALTER TABLE ops.driver_completion_outbox
   DROP CONSTRAINT IF EXISTS driver_completion_outbox_attempt_count_chk;
 
 ALTER TABLE ops.driver_completion_outbox

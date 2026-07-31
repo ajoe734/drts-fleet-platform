@@ -260,7 +260,8 @@ type DriverCompletionOutboxPayload =
     }
   | {
       effectType: "completion_audit_bundle";
-      auditEntry: AuditEntryInput;
+      audits?: AuditEntryInput[];
+      auditEntry?: AuditEntryInput;
       requestId: string | null;
     }
   | {
@@ -272,6 +273,7 @@ type DriverCompletionOutboxPayload =
   | {
       effectType: "ops_dispatch_job_updated";
       orderId: string;
+      dispatchJob: DispatchJobRecord | null;
       requestId: string | null;
     };
 
@@ -366,7 +368,6 @@ const DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS = 5;
 const DRIVER_COMPLETION_OUTBOX_LEASE_MS = 60_000;
 const DRIVER_COMPLETION_OUTBOX_RETRY_MS = 5_000;
 const DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS = 15_000;
-const DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE = 25;
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
@@ -428,11 +429,9 @@ export class OwnedMobilityService
   private driverCompletionRecoveryTimer: ReturnType<typeof setInterval> | null =
     null;
 
-  private driverCompletionRecoveryInFlight = false;
   private isShuttingDown = false;
-  private activeOutboxExecutions = 0;
-  private outboxDispatcherActive = false;
-  private outboxKickLatched = false;
+  private hasRequestedDrain = false;
+  private activeDrainPromise: Promise<void> | null = null;
 
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
@@ -544,7 +543,7 @@ export class OwnedMobilityService
       return;
     }
     this.startDriverCompletionOutboxRecoveryPolling();
-    void this.recoverDriverCompletionOutbox();
+    this.triggerDriverCompletionOutboxDispatch();
   }
 
   async onModuleDestroy() {
@@ -561,12 +560,8 @@ export class OwnedMobilityService
       clearInterval(this.driverCompletionRecoveryTimer);
       this.driverCompletionRecoveryTimer = null;
     }
-    while (
-      this.driverCompletionRecoveryInFlight ||
-      this.activeOutboxExecutions > 0 ||
-      this.outboxDispatcherActive
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    if (this.activeDrainPromise) {
+      await this.activeDrainPromise;
     }
   }
 
@@ -4508,7 +4503,7 @@ export class OwnedMobilityService
 
     const committed = result.committed;
     await this.applyCommittedDriverTaskCompletion(committed, requestId);
-    void this.triggerDriverCompletionOutboxDispatch(committed.task.taskId);
+    void this.triggerDriverCompletionOutboxDispatch();
     if (committed.errorToThrow) {
       throw committed.errorToThrow;
     }
@@ -4713,6 +4708,7 @@ export class OwnedMobilityService
     ) {
       this.tenantPartnerService.applyCommittedQuotaConsumption(
         committed.quotaConsumption,
+        { stateOnly: true },
       );
     }
 
@@ -4742,7 +4738,9 @@ export class OwnedMobilityService
     if (
       !this.ownedMobilityRepository ||
       !this.ownedMobilityRepository.isEnabled() ||
-      !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository)
+      (!("claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository) &&
+        !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository))
     ) {
       if (committed.outcome === "completed") {
         await this.recordAudit(
@@ -5152,6 +5150,7 @@ export class OwnedMobilityService
     task: DriverTaskRecord;
     requestId: string | null;
     certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+    quotaConsumption?: TenantQuotaConsumptionCommitResult | null;
   }): DriverCompletionOutboxPayload[] {
     const payloads: DriverCompletionOutboxPayload[] = [];
     if (input.order.tenantId) {
@@ -5202,9 +5201,8 @@ export class OwnedMobilityService
       });
     }
 
-    payloads.push({
-      effectType: "completion_audit_bundle",
-      auditEntry: {
+    const auditEntries: AuditEntryInput[] = [
+      {
         actorId: input.task.driverId,
         actorType: "ops_user",
         tenantId: null,
@@ -5217,6 +5215,28 @@ export class OwnedMobilityService
           completedAt: input.task.completedAt,
         },
       },
+    ];
+
+    if (
+      input.quotaConsumption &&
+      this.tenantPartnerService &&
+      typeof this.tenantPartnerService.buildQuotaReservationAuditInputs ===
+        "function"
+    ) {
+      const quotaAudits =
+        this.tenantPartnerService.buildQuotaReservationAuditInputs(
+          input.quotaConsumption,
+        );
+      auditEntries.push(...quotaAudits);
+    }
+
+    const dispatchJob = this.dispatchJobs.find(
+      (job) => job.orderId === input.order.orderId,
+    );
+
+    payloads.push({
+      effectType: "completion_audit_bundle",
+      audits: auditEntries,
       requestId: input.requestId,
     });
 
@@ -5230,6 +5250,7 @@ export class OwnedMobilityService
     payloads.push({
       effectType: "ops_dispatch_job_updated",
       orderId: input.order.orderId,
+      dispatchJob: dispatchJob ? { ...dispatchJob } : null,
       requestId: input.requestId,
     });
 
@@ -5267,82 +5288,40 @@ export class OwnedMobilityService
     }
 
     this.driverCompletionRecoveryTimer = setInterval(() => {
-      void this.recoverDriverCompletionOutbox();
+      this.triggerDriverCompletionOutboxDispatch();
     }, DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS);
     this.driverCompletionRecoveryTimer.unref?.();
   }
 
+  private triggerDriverCompletionOutboxDispatch() {
+    this.hasRequestedDrain = true;
+    if (this.isShuttingDown || this.activeDrainPromise) {
+      return;
+    }
+    this.activeDrainPromise = this.runSharedOutboxDrain();
+  }
+
   private async recoverDriverCompletionOutbox() {
-    if (
-      this.driverCompletionRecoveryInFlight ||
-      !this.ownedMobilityRepository?.isEnabled() ||
-      !("claimNextRecoverableDriverCompletionOutbox" in
-        this.ownedMobilityRepository)
-    ) {
-      return;
-    }
-
-    this.driverCompletionRecoveryInFlight = true;
-    try {
-      for (let claimedCount = 0; claimedCount < DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE; claimedCount += 1) {
-        const now = new Date();
-        const leaseToken = randomUUID();
-        const leasedUntil = new Date(
-          now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
-        ).toISOString();
-        const claimed = await this.ownedMobilityRepository.withTransaction(
-          (tx) =>
-            this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox(
-              tx,
-              leaseToken,
-              leasedUntil,
-              now.toISOString(),
-              DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-            ),
-        );
-        if (!claimed) {
-          break;
-        }
-        await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Driver completion outbox recovery failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    } finally {
-      this.driverCompletionRecoveryInFlight = false;
+    this.triggerDriverCompletionOutboxDispatch();
+    if (this.activeDrainPromise) {
+      await this.activeDrainPromise;
     }
   }
 
-  private async triggerDriverCompletionOutboxDispatch(taskId?: string) {
-    this.outboxKickLatched = true;
-    if (this.outboxDispatcherActive || this.isShuttingDown) {
-      return;
-    }
-    void this.runGlobalDriverCompletionOutboxDispatcher(taskId);
-  }
-
-  private async runGlobalDriverCompletionOutboxDispatcher(
-    initialTaskId?: string,
-  ) {
+  private async runSharedOutboxDrain() {
     if (
-      this.outboxDispatcherActive ||
-      this.isShuttingDown ||
       !this.ownedMobilityRepository ||
-      !this.ownedMobilityRepository.isEnabled()
+      !this.ownedMobilityRepository.isEnabled() ||
+      (!("claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository) &&
+        !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository))
     ) {
       return;
     }
 
-    this.outboxDispatcherActive = true;
-    this.activeOutboxExecutions++;
-
     try {
-      let currentTaskId = initialTaskId;
       while (!this.isShuttingDown) {
-        this.outboxKickLatched = false;
+        this.hasRequestedDrain = false;
         const now = new Date();
         const leaseToken = randomUUID();
         const leasedUntil = new Date(
@@ -5351,40 +5330,40 @@ export class OwnedMobilityService
 
         let claimed: DriverCompletionOutboxClaimResult | null = null;
         if (
-          currentTaskId &&
+          "claimNextRecoverableDriverCompletionOutbox" in
+          this.ownedMobilityRepository
+        ) {
+          claimed = await this.ownedMobilityRepository.withTransaction(
+            (tx) =>
+              this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox!(
+                tx,
+                leaseToken,
+                leasedUntil,
+                now.toISOString(),
+                DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+              ),
+          );
+        } else if (
           "claimNextDriverCompletionOutbox" in this.ownedMobilityRepository
         ) {
-          claimed = await this.ownedMobilityRepository.withTransaction((tx) =>
-            this.ownedMobilityRepository!.claimNextDriverCompletionOutbox(
+          const repo = this.ownedMobilityRepository as unknown as {
+            withTransaction: (cb: (tx: any) => Promise<any>) => Promise<any>;
+            claimNextDriverCompletionOutbox: (...args: any[]) => Promise<any>;
+          };
+          claimed = (await repo.withTransaction((tx: any) =>
+            repo.claimNextDriverCompletionOutbox(
               tx,
-              currentTaskId!,
+              "",
               leaseToken,
               leasedUntil,
               now.toISOString(),
               DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
             ),
-          );
-        }
-
-        if (
-          !claimed &&
-          "claimNextRecoverableDriverCompletionOutbox" in
-            this.ownedMobilityRepository
-        ) {
-          claimed = await this.ownedMobilityRepository.withTransaction((tx) =>
-            this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox(
-              tx,
-              leaseToken,
-              leasedUntil,
-              now.toISOString(),
-              DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-            ),
-          );
+          )) as DriverCompletionOutboxClaimResult | null;
         }
 
         if (!claimed) {
-          currentTaskId = undefined;
-          if (this.outboxKickLatched && !this.isShuttingDown) {
+          if (this.hasRequestedDrain && !this.isShuttingDown) {
             continue;
           }
           break;
@@ -5399,10 +5378,9 @@ export class OwnedMobilityService
         }`,
       );
     } finally {
-      this.outboxDispatcherActive = false;
-      this.activeOutboxExecutions--;
-      if (this.outboxKickLatched && !this.isShuttingDown) {
-        void this.runGlobalDriverCompletionOutboxDispatcher();
+      this.activeDrainPromise = null;
+      if (this.hasRequestedDrain && !this.isShuttingDown) {
+        this.triggerDriverCompletionOutboxDispatch();
       }
     }
   }
@@ -5535,10 +5513,27 @@ export class OwnedMobilityService
             DriverCompletionOutboxPayload,
             { effectType: "completion_audit_bundle" }
           >;
-        await this.recordAudit(
-          payload.auditEntry,
-          payload.requestId ?? undefined,
-        );
+        const auditsToRecord: AuditEntryInput[] =
+          payload.audits && Array.isArray(payload.audits)
+            ? payload.audits
+            : payload.auditEntry
+              ? [payload.auditEntry]
+              : [];
+
+        for (let i = 0; i < auditsToRecord.length; i += 1) {
+          const entry = auditsToRecord[i]!;
+          const auditId = generateDeterministicUuid(
+            "completion-audit-entry",
+            `${outbox.outboxId}:${i}`,
+          );
+          await this.recordAudit(
+            {
+              ...entry,
+              auditId,
+            },
+            payload.requestId ?? undefined,
+          );
+        }
         return;
       }
       case "driver_task_updated": {
@@ -5547,11 +5542,24 @@ export class OwnedMobilityService
             DriverCompletionOutboxPayload,
             { effectType: "driver_task_updated" }
           >;
-        await this.ownedMobilityTaskEventsService.publishTaskUpdated(
-          payload.task,
-          payload.order,
-          payload.requestId ?? undefined,
-        );
+        if (this.ownedMobilityTaskEventsService) {
+          const eventId = generateDeterministicUuid(
+            "driver-task-updated-event",
+            outbox.outboxId,
+          );
+          const correlationId =
+            payload.requestId ??
+            generateDeterministicUuid(
+              "driver-task-updated-correlation",
+              outbox.outboxId,
+            );
+          await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+            payload.task,
+            payload.order,
+            payload.requestId ?? undefined,
+            { eventId, correlationId },
+          );
+        }
         return;
       }
       case "ops_dispatch_job_updated": {
@@ -5560,10 +5568,29 @@ export class OwnedMobilityService
             DriverCompletionOutboxPayload,
             { effectType: "ops_dispatch_job_updated" }
           >;
-        await this.publishLatestDispatchJobUpdate(
-          payload.orderId,
-          payload.requestId ?? undefined,
-        );
+        const dispatchJob =
+          payload.dispatchJob ??
+          this.dispatchJobs.find((job) => job.orderId === payload.orderId) ??
+          null;
+
+        if (dispatchJob && this.opsDispatchEventsService) {
+          const eventId = generateDeterministicUuid(
+            "ops-dispatch-job-updated-event",
+            outbox.outboxId,
+          );
+          const correlationId =
+            payload.requestId ??
+            generateDeterministicUuid(
+              "ops-dispatch-job-updated-correlation",
+              outbox.outboxId,
+            );
+          await this.opsDispatchEventsService.publishDispatchJobUpdated(
+            payload.orderId,
+            dispatchJob,
+            payload.requestId ?? undefined,
+            { eventId, correlationId },
+          );
+        }
         return;
       }
       default:

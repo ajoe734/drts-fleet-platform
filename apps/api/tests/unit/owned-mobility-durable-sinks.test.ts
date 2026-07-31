@@ -1028,5 +1028,97 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       expect((service as any).driverCompletionRecoveryTimer).toBeNull();
       expect((service as any).isShuttingDown).toBe(true);
     });
+
+    it("releases outbox item with retry detail when listener is missing or fails", async () => {
+      let releasedId: string | null = null;
+      let releasedError: string | null = null;
+
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        claimNextRecoverableDriverCompletionOutbox: vi.fn()
+          .mockResolvedValueOnce({
+            action: "dispatch",
+            record: {
+              outboxId: "outbox-err-1",
+              taskId: "task-err-1",
+              orderId: "ord-err-1",
+              effectType: "owned_mobility_trip_completed",
+              status: "processing",
+              payload: { event: {} },
+            },
+          })
+          .mockResolvedValueOnce(null),
+        releaseDriverCompletionOutbox: vi.fn(async (_tx, outboxId, _token, _retry, _max, err) => {
+          releasedId = outboxId;
+          releasedError = err;
+          return true;
+        }),
+      };
+
+      const eventEmitter = new EventEmitter2();
+      // No listeners registered for OWNED_MOBILITY_TRIP_COMPLETED_EVENT
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        new OwnedMobilityTaskEventsService(eventEmitter),
+        undefined,
+        repository as any,
+        undefined,
+        undefined,
+        undefined,
+        eventEmitter,
+      );
+
+      await (service as any).triggerDriverCompletionOutboxDispatch();
+      await (service as any).activeDrainPromise;
+
+      expect(releasedId).toBe("outbox-err-1");
+      expect(releasedError).toContain("listener is missing or unavailable");
+    });
+
+    it("bounds concurrency so timer + startup + completion simultaneous kicks run at most 1 active drain", async () => {
+      let activeDrains = 0;
+      let maxSimultaneousDrains = 0;
+
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
+          activeDrains++;
+          if (activeDrains > maxSimultaneousDrains) {
+            maxSimultaneousDrains = activeDrains;
+          }
+          await new Promise((r) => setTimeout(r, 20));
+          activeDrains--;
+          return null;
+        }),
+      };
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        new OwnedMobilityTaskEventsService(new EventEmitter2()),
+        undefined,
+        repository as any,
+      );
+
+      // Simultaneous kicks from timer, startup, and completion
+      (service as any).triggerDriverCompletionOutboxDispatch();
+      (service as any).triggerDriverCompletionOutboxDispatch();
+      (service as any).triggerDriverCompletionOutboxDispatch();
+
+      await (service as any).activeDrainPromise;
+      expect(maxSimultaneousDrains).toBe(1);
+    });
   });
 });
