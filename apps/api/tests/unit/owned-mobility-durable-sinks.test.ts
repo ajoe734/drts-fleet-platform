@@ -861,7 +861,7 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       expect(id1).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     });
 
-    it("guarantees strict replay zero side-effects (no kick, claim, emit, audit, or quota)", async () => {
+    it("guarantees strict replay zero side-effects (no kick, claim, emit, audit, quota, webhook, ops, or task events)", async () => {
       const repository = {
         isEnabled: () => true,
         loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
@@ -885,7 +885,28 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       };
 
       const auditNotificationService = { recordAuditLog: vi.fn() };
-      const tenantPartnerService = { applyCommittedQuotaConsumption: vi.fn() };
+      const tenantPartnerService = {
+        applyCommittedQuotaConsumption: vi.fn(),
+        publishWebhookEvent: vi.fn(),
+      };
+      const opsDispatchEventsService = {
+        publishDispatchJobUpdated: vi.fn(),
+        publishOrderCreated: vi.fn(),
+        publishOrderUpdated: vi.fn(),
+      };
+      const taskEventsService = {
+        publishTaskUpdated: vi.fn(),
+        publishTaskAssigned: vi.fn(),
+        publishTaskCancelled: vi.fn(),
+      };
+      const multiTaxiCertificateService = {
+        publishMultiTaxiCertificateEvent: vi.fn(),
+      };
+      const mockEventEmitter = {
+        emit: vi.fn(),
+        emitAsync: vi.fn(),
+        listenerCount: vi.fn(() => 1),
+      };
 
       const service = new OwnedMobilityService(
         { listVehicles: () => [] } as any,
@@ -894,10 +915,15 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
           registerRecordingAttachmentListener: vi.fn(),
           registerRecordingStateChangeListener: vi.fn(),
         } as any,
-        new OwnedMobilityTaskEventsService(new EventEmitter2()),
+        taskEventsService as any,
         undefined,
         repository as any,
         tenantPartnerService as any,
+        multiTaxiCertificateService as any,
+        mockEventEmitter as any,
+        undefined,
+        undefined,
+        opsDispatchEventsService as any,
       );
 
       (service as any).driverTasks = [{ taskId: "task-replay", status: "completed" }];
@@ -915,6 +941,16 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       expect(repository.persistDriverCompletionOutbox).not.toHaveBeenCalled();
       expect(auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
       expect(tenantPartnerService.applyCommittedQuotaConsumption).not.toHaveBeenCalled();
+      expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
+      expect(opsDispatchEventsService.publishDispatchJobUpdated).not.toHaveBeenCalled();
+      expect(opsDispatchEventsService.publishOrderCreated).not.toHaveBeenCalled();
+      expect(opsDispatchEventsService.publishOrderUpdated).not.toHaveBeenCalled();
+      expect(taskEventsService.publishTaskUpdated).not.toHaveBeenCalled();
+      expect(taskEventsService.publishTaskAssigned).not.toHaveBeenCalled();
+      expect(taskEventsService.publishTaskCancelled).not.toHaveBeenCalled();
+      expect(multiTaxiCertificateService.publishMultiTaxiCertificateEvent).not.toHaveBeenCalled();
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+      expect(mockEventEmitter.emitAsync).not.toHaveBeenCalled();
     });
 
     it("latches global outbox kick and prevents null-claim race conditions", async () => {
@@ -1470,14 +1506,14 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       expect(releasedError).toContain("Invalid ops_dispatch_job_updated outbox payload");
     });
 
-    it("handles bounded batch continuation and graceful shutdownDrain without lost wakeups", async () => {
+    it("handles bounded batch continuation across full batches (>50 items) without lost wakeups", async () => {
       let claimCount = 0;
       const repository = {
         isEnabled: () => true,
         withTransaction: vi.fn(async (work) => work({} as never)),
         claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
           claimCount += 1;
-          if (claimCount <= 5) {
+          if (claimCount <= 55) {
             return {
               action: "dispatch",
               record: {
@@ -1520,8 +1556,128 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       await (service as any).activeDrainPromise;
       await (service as any).shutdownDrain();
 
-      expect(claimCount).toBe(6);
-      expect(taskEventsService.publishTaskUpdated).toHaveBeenCalledTimes(5);
+      expect(claimCount).toBe(56);
+      expect(taskEventsService.publishTaskUpdated).toHaveBeenCalledTimes(55);
+    });
+
+    it("holds shutdown while a real in-flight effect and ACK are processing", async () => {
+      let resolveInFlight!: () => void;
+      const inFlightPromise = new Promise<void>((resolve) => {
+        resolveInFlight = resolve;
+      });
+
+      let claimCount = 0;
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
+          claimCount += 1;
+          if (claimCount === 1) {
+            return {
+              action: "dispatch",
+              record: {
+                outboxId: "outbox-inflight-1",
+                taskId: "task-inflight-1",
+                orderId: "ord-inflight-1",
+                effectType: "driver_task_updated",
+                status: "processing",
+                payload: {
+                  eventId: "evt-inflight-1",
+                  correlationId: "corr-inflight-1",
+                  task: { taskId: "task-inflight-1" },
+                  order: { orderId: "ord-inflight-1" },
+                },
+              },
+            };
+          }
+          return null;
+        }),
+        markDriverCompletionOutboxDelivered: vi.fn(async () => true),
+      };
+
+      const taskEventsService = {
+        publishTaskUpdated: vi.fn(async () => {
+          await inFlightPromise;
+        }),
+      };
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        taskEventsService as any,
+        undefined,
+        repository as any,
+      );
+
+      (service as any).triggerDriverCompletionOutboxDispatch();
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      let shutdownFinished = false;
+      const shutdownPromise = (service as any).onApplicationShutdown().then(() => {
+        shutdownFinished = true;
+      });
+
+      expect(shutdownFinished).toBe(false);
+      expect((service as any).isShuttingDown).toBe(true);
+
+      resolveInFlight();
+      await shutdownPromise;
+
+      expect(shutdownFinished).toBe(true);
+      expect(repository.markDriverCompletionOutboxDelivered).toHaveBeenCalledTimes(1);
+      expect(taskEventsService.publishTaskUpdated).toHaveBeenCalledTimes(1);
+    });
+
+    it("releases outbox item when completion_audit_bundle payload has empty or missing audits", async () => {
+      let releasedError: string | null = null;
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        claimNextRecoverableDriverCompletionOutbox: vi.fn()
+          .mockResolvedValueOnce({
+            action: "dispatch",
+            record: {
+              outboxId: "outbox-audit-empty",
+              taskId: "task-audit-empty",
+              orderId: "ord-audit-empty",
+              effectType: "completion_audit_bundle",
+              status: "processing",
+              payload: { audits: [] },
+            },
+          })
+          .mockResolvedValueOnce(null),
+        markDriverCompletionOutboxDelivered: vi.fn(),
+        releaseDriverCompletionOutbox: vi.fn(
+          async (_tx, _id, _token, _retryAt, _maxAttempts, errorDetail) => {
+            releasedError = errorDetail;
+            return true;
+          },
+        ),
+      };
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        undefined,
+        undefined,
+        repository as any,
+      );
+
+      (service as any).triggerDriverCompletionOutboxDispatch();
+      await (service as any).activeDrainPromise;
+
+      expect(repository.markDriverCompletionOutboxDelivered).not.toHaveBeenCalled();
+      expect(repository.releaseDriverCompletionOutbox).toHaveBeenCalled();
+      expect(releasedError).toContain("Invalid completion_audit_bundle outbox payload");
     });
   });
 });

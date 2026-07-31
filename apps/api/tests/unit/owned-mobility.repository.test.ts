@@ -289,4 +289,58 @@ describe("OwnedMobilityRepository", () => {
     expect(query.mock.calls[0]?.[0]).toContain("status = 'processing'");
     expect(query.mock.calls[0]?.[0]).toContain("THEN 'dead_letter'");
   });
+
+  it("loads completion bundle with FOR UPDATE locks including assignment.dispatchJobId for dispatchJob", async () => {
+    const task = { taskId: "task-100", assignmentId: "asgn-100", orderId: "ord-100" };
+    const assignment = { assignmentId: "asgn-100", dispatchJobId: "job-100" };
+    const order = { orderId: "ord-100" };
+    const dispatchJob = { dispatchJobId: "job-100", status: "completed" };
+
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("ops.phase1_driver_tasks")) {
+        return { rows: [{ record: task }] };
+      }
+      if (sql.includes("ops.phase1_dispatch_assignments")) {
+        return { rows: [{ record: assignment }] };
+      }
+      if (sql.includes("ops.phase1_owned_orders")) {
+        return { rows: [{ record: order }] };
+      }
+      if (sql.includes("ops.phase1_dispatch_jobs")) {
+        return { rows: [{ record: dispatchJob }] };
+      }
+      return { rows: [] };
+    });
+
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const bundle = await repository.loadDriverTaskCompletionBundleForUpdate(
+      { query } as never,
+      "task-100",
+    );
+
+    expect(bundle).toEqual({ task, assignment, order, dispatchJob });
+    expect(query).toHaveBeenCalledTimes(4);
+
+    const taskCall = query.mock.calls.find((c) => c[0].includes("ops.phase1_driver_tasks"));
+    expect(taskCall?.[0]).toContain("FOR UPDATE");
+    expect(taskCall?.[1]).toEqual(["task-100"]);
+
+    const assignmentCall = query.mock.calls.find((c) =>
+      c[0].includes("ops.phase1_dispatch_assignments"),
+    );
+    expect(assignmentCall?.[0]).toContain("FOR UPDATE");
+    expect(assignmentCall?.[1]).toEqual(["asgn-100"]);
+
+    const orderCall = query.mock.calls.find((c) => c[0].includes("ops.phase1_owned_orders"));
+    expect(orderCall?.[0]).toContain("FOR UPDATE");
+    expect(orderCall?.[1]).toEqual(["ord-100"]);
+
+    const jobCall = query.mock.calls.find((c) => c[0].includes("ops.phase1_dispatch_jobs"));
+    expect(jobCall?.[0]).toContain("FOR UPDATE");
+    expect(jobCall?.[1]).toEqual(["job-100"]);
+  });
 });

@@ -5273,11 +5273,13 @@ export class OwnedMobilityService
 
     const dispatchJob = input.dispatchJob;
 
-    payloads.push({
-      effectType: "completion_audit_bundle",
-      audits: auditEntries,
-      requestId: input.requestId,
-    });
+    if (auditEntries.length > 0) {
+      payloads.push({
+        effectType: "completion_audit_bundle",
+        audits: auditEntries,
+        requestId: input.requestId,
+      });
+    }
 
     const driverTaskEventId = generateDeterministicUuid(
       "driver-task-updated-event",
@@ -5417,7 +5419,10 @@ export class OwnedMobilityService
           await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
         }
 
-        if (!this.hasRequestedDrain || this.isShuttingDown) {
+        if (
+          (!this.hasRequestedDrain && processedInBatch < BATCH_SIZE) ||
+          this.isShuttingDown
+        ) {
           break;
         }
       }
@@ -5569,6 +5574,12 @@ export class OwnedMobilityService
             : payload.auditEntry
               ? [payload.auditEntry]
               : [];
+
+        if (auditsToRecord.length === 0) {
+          throw new Error(
+            "Invalid completion_audit_bundle outbox payload: missing or empty audits.",
+          );
+        }
 
         for (let i = 0; i < auditsToRecord.length; i += 1) {
           const entry = auditsToRecord[i]!;
