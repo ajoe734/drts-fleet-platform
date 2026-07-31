@@ -839,6 +839,7 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
           status: "completed",
           completedAt: new Date().toISOString(),
         } as any,
+        dispatchJob: { orderId: "ord-6-effects", dispatchJobId: "job-6-effects", status: "dispatched" } as any,
         requestId: "req-6",
         certificateEvent: null,
       };
@@ -1274,6 +1275,253 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       await (service as any).activeDrainPromise;
 
       expect(releasedError).toContain("Driver task events service unavailable.");
+    });
+
+    it("pre-assigns auditId on all audit entries, sorts quota audit inputs, and deep clones summary", async () => {
+      let persistedOutbox: any[] = [];
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        persistDriverCompletionOutbox: vi.fn(async (_tx, records) => {
+          persistedOutbox = records;
+        }),
+      };
+
+      const nestedUsage = { count: 5 };
+      const tenantPartnerService = {
+        buildQuotaReservationAuditInputs: vi.fn(() => [
+          {
+            actorId: "tenant-1",
+            actorType: "system",
+            tenantId: "tenant-1",
+            moduleName: "quota",
+            actionName: "consume_quota_b",
+            resourceType: "quota_ledger",
+            resourceId: "ledger-2",
+            newValuesSummary: { usage: nestedUsage },
+          },
+          {
+            actorId: "tenant-1",
+            actorType: "system",
+            tenantId: "tenant-1",
+            moduleName: "quota",
+            actionName: "consume_quota_a",
+            resourceType: "quota_ledger",
+            resourceId: "ledger-1",
+            newValuesSummary: { usage: nestedUsage },
+          },
+        ]),
+      };
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        new OwnedMobilityTaskEventsService(new EventEmitter2()),
+        undefined,
+        repository as any,
+        tenantPartnerService as any,
+      );
+
+      await (service as any).persistDriverCompletionOutbox({} as any, {
+        order: {
+          orderId: "ord-audit-1",
+          tenantId: "tenant-1",
+          updatedAt: "2026-07-31T00:00:00Z",
+          proofRequirements: { minPhotoCount: 0, signoffRequired: false, expenseProofRequired: false },
+          complianceFlags: [],
+          approvalRequestIds: [],
+        } as any,
+        assignment: { assignmentId: "asgn-audit-1" } as any,
+        task: { taskId: "task-audit-1", driverId: "drv-1", status: "completed" } as any,
+        dispatchJob: { orderId: "ord-audit-1", dispatchJobId: "job-audit-1", status: "dispatched" } as any,
+        requestId: "req-audit-1",
+        certificateEvent: null,
+        quotaConsumption: { consumedAmount: 100 } as any,
+      });
+
+      const auditBundleRecord = persistedOutbox.find(
+        (r) => r.effectType === "completion_audit_bundle",
+      );
+      expect(auditBundleRecord).toBeDefined();
+      expect(auditBundleRecord.payload.audits).toHaveLength(3);
+      expect(auditBundleRecord.payload.audits[0].auditId).toBeDefined();
+      expect(auditBundleRecord.payload.audits[1].auditId).toBeDefined();
+      expect(auditBundleRecord.payload.audits[2].auditId).toBeDefined();
+
+      expect(auditBundleRecord.payload.audits[1].actionName).toBe("consume_quota_a");
+      expect(auditBundleRecord.payload.audits[2].actionName).toBe("consume_quota_b");
+
+      nestedUsage.count = 999;
+      expect(auditBundleRecord.payload.audits[1].newValuesSummary.usage.count).toBe(5);
+    });
+
+    it("pre-assigns eventId and correlationId for driver_task_updated and ops_dispatch_job_updated payloads", async () => {
+      let persistedOutbox: any[] = [];
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        persistDriverCompletionOutbox: vi.fn(async (_tx, records) => {
+          persistedOutbox = records;
+        }),
+      };
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        new OwnedMobilityTaskEventsService(new EventEmitter2()),
+        undefined,
+        repository as any,
+      );
+
+      await (service as any).persistDriverCompletionOutbox({} as any, {
+        order: {
+          orderId: "ord-ids-1",
+          tenantId: "tenant-1",
+          updatedAt: "2026-07-31T00:00:00Z",
+          proofRequirements: { minPhotoCount: 0, signoffRequired: false, expenseProofRequired: false },
+          complianceFlags: [],
+          approvalRequestIds: [],
+        } as any,
+        assignment: { assignmentId: "asgn-ids-1" } as any,
+        task: { taskId: "task-ids-1", driverId: "drv-1", status: "completed" } as any,
+        dispatchJob: { orderId: "ord-ids-1", dispatchJobId: "job-ids-1", status: "dispatched" } as any,
+        requestId: "req-ids-1",
+        certificateEvent: null,
+      });
+
+      const taskUpdated = persistedOutbox.find((r) => r.effectType === "driver_task_updated");
+      expect(taskUpdated.payload.eventId).toBeDefined();
+      expect(taskUpdated.payload.correlationId).toBe("req-ids-1");
+
+      const opsUpdated = persistedOutbox.find((r) => r.effectType === "ops_dispatch_job_updated");
+      expect(opsUpdated.payload.eventId).toBeDefined();
+      expect(opsUpdated.payload.correlationId).toBe("req-ids-1");
+      expect(opsUpdated.payload.dispatchJob).toEqual({ orderId: "ord-ids-1", dispatchJobId: "job-ids-1", status: "dispatched" });
+    });
+
+    it("skips ops_dispatch_job_updated payload when dispatchJob is null and throws/releases when executing invalid payload with null dispatchJob", async () => {
+      let releasedError: string | null = null;
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        claimNextRecoverableDriverCompletionOutbox: vi.fn()
+          .mockResolvedValueOnce({
+            action: "dispatch",
+            record: {
+              outboxId: "outbox-null-ops",
+              taskId: "task-null-ops",
+              orderId: "ord-null-ops",
+              effectType: "ops_dispatch_job_updated",
+              status: "processing",
+              payload: {
+                orderId: "ord-null-ops",
+                dispatchJob: null,
+              },
+            },
+          })
+          .mockResolvedValueOnce(null),
+        releaseDriverCompletionOutbox: vi.fn(async (_tx, _id, _tok, _ret, _max, err) => {
+          releasedError = err;
+          return true;
+        }),
+      };
+
+      const opsEventsService = {
+        publishDispatchJobUpdated: vi.fn(),
+      };
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        new OwnedMobilityTaskEventsService(new EventEmitter2()),
+        opsEventsService as any,
+        repository as any,
+      );
+
+      const payloads = (service as any).buildDriverCompletionOutboxPayloads({
+        order: {
+          orderId: "ord-null-1",
+          tenantId: "tenant-1",
+          updatedAt: "2026-07-31T00:00:00Z",
+          proofRequirements: { minPhotoCount: 0, signoffRequired: false, expenseProofRequired: false },
+          complianceFlags: [],
+          approvalRequestIds: [],
+        },
+        task: { taskId: "task-null-1", driverId: "drv-1", status: "completed" },
+        dispatchJob: null,
+      });
+
+      expect(payloads.find((p: any) => p.effectType === "ops_dispatch_job_updated")).toBeUndefined();
+
+      await (service as any).triggerDriverCompletionOutboxDispatch();
+      await (service as any).activeDrainPromise;
+      expect(releasedError).toContain("Invalid ops_dispatch_job_updated outbox payload");
+    });
+
+    it("handles bounded batch continuation and graceful shutdownDrain without lost wakeups", async () => {
+      let claimCount = 0;
+      const repository = {
+        isEnabled: () => true,
+        withTransaction: vi.fn(async (work) => work({} as never)),
+        claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
+          claimCount += 1;
+          if (claimCount <= 5) {
+            return {
+              action: "dispatch",
+              record: {
+                outboxId: `outbox-batch-${claimCount}`,
+                taskId: `task-batch-${claimCount}`,
+                orderId: `ord-batch-${claimCount}`,
+                effectType: "driver_task_updated",
+                status: "processing",
+                payload: {
+                  eventId: `evt-${claimCount}`,
+                  correlationId: `corr-${claimCount}`,
+                  task: { taskId: `task-batch-${claimCount}` },
+                  order: { orderId: `ord-batch-${claimCount}` },
+                },
+              },
+            };
+          }
+          return null;
+        }),
+        markDriverCompletionOutboxDelivered: vi.fn(async () => true),
+      };
+
+      const taskEventsService = {
+        publishTaskUpdated: vi.fn(async () => {}),
+      };
+
+      const service = new OwnedMobilityService(
+        { listVehicles: () => [] } as any,
+        { recordAuditLog: vi.fn() } as any,
+        {
+          registerRecordingAttachmentListener: vi.fn(),
+          registerRecordingStateChangeListener: vi.fn(),
+        } as any,
+        taskEventsService as any,
+        undefined,
+        repository as any,
+      );
+
+      (service as any).triggerDriverCompletionOutboxDispatch();
+      await (service as any).activeDrainPromise;
+      await (service as any).shutdownDrain();
+
+      expect(claimCount).toBe(6);
+      expect(taskEventsService.publishTaskUpdated).toHaveBeenCalledTimes(5);
     });
   });
 });
