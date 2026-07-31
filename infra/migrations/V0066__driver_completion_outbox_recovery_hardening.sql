@@ -37,7 +37,8 @@ CREATE INDEX IF NOT EXISTS driver_completion_outbox_recovery_idx
     status,
     next_attempt_at,
     created_at,
-    task_id
+    task_id,
+    outbox_id
   )
   WHERE delivered_at IS NULL
     AND status IN ('pending', 'processing');

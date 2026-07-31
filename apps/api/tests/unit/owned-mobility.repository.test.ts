@@ -182,9 +182,26 @@ describe("OwnedMobilityRepository", () => {
     expect(outboxSql).toContain("INSERT INTO ops.consumer_notification_outbox");
   });
 
-  it("lists recoverable driver-completion task ids in retry order", async () => {
+  it("claims the next recoverable driver-completion outbox globally in retry order", async () => {
     const query = vi.fn(async () => ({
-      rows: [{ task_id: "task-1" }, { task_id: "task-2" }],
+      rows: [
+        {
+          outbox_id: "6b6e7b8a-18d4-5d8b-a7ca-c518aa5084f0",
+          task_id: "task-1",
+          order_id: "order-1",
+          effect_type: "tenant_order_completed_webhook",
+          request_id: "req-1",
+          payload: { effectType: "tenant_order_completed_webhook" },
+          status: "processing",
+          attempt_count: 2,
+          next_attempt_at: "2026-07-31T11:59:00.000Z",
+          lease_token: "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+          leased_until: "2026-07-31T12:01:00.000Z",
+          last_error: null,
+          created_at: "2026-07-31T11:58:00.000Z",
+          delivered_at: null,
+        },
+      ],
     }));
     const repository = new OwnedMobilityRepository({
       isEnabled: () => true,
@@ -192,21 +209,31 @@ describe("OwnedMobilityRepository", () => {
     } as never);
 
     await expect(
-      repository.listRecoverableDriverCompletionTaskIds(
+      repository.claimNextRecoverableDriverCompletionOutbox(
         { query } as never,
+        "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+        "2026-07-31T12:01:00.000Z",
         "2026-07-31T12:00:00.000Z",
         5,
-        25,
       ),
-    ).resolves.toEqual(["task-1", "task-2"]);
+    ).resolves.toMatchObject({
+      outboxId: "6b6e7b8a-18d4-5d8b-a7ca-c518aa5084f0",
+      taskId: "task-1",
+      status: "processing",
+      attemptCount: 2,
+    });
 
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("FROM ops.driver_completion_outbox"),
-      ["2026-07-31T12:00:00.000Z", 5, 25],
+      expect.stringContaining("UPDATE ops.driver_completion_outbox AS outbox"),
+      [
+        "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+        "2026-07-31T12:01:00.000Z",
+        "2026-07-31T12:00:00.000Z",
+        5,
+      ],
     );
-    expect(query.mock.calls[0]?.[0]).toContain("GROUP BY task_id");
     expect(query.mock.calls[0]?.[0]).toContain(
-      "ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC",
+      "ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC, outbox_id ASC",
     );
   });
 });

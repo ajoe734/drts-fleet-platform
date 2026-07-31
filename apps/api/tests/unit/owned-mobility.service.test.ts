@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { HttpStatus } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +34,26 @@ const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
   "veh-demo-004": "business_vehicle",
   "veh-av-demo-001": "business_vehicle",
 };
+
+function buildExpectedDriverCompletionOutboxId(
+  taskId: string,
+  effectType: string,
+) {
+  const digest = createHash("sha256")
+    .update(`driver-completion-outbox:${taskId}:${effectType}`)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  digest[12] = "5";
+  digest[16] = ((parseInt(digest[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
+  return [
+    digest.slice(0, 8).join(""),
+    digest.slice(8, 12).join(""),
+    digest.slice(12, 16).join(""),
+    digest.slice(16, 20).join(""),
+    digest.slice(20, 32).join(""),
+  ].join("-");
+}
 
 function createOwnedMobilityService(options?: {
   candidates?: Array<{
@@ -78,10 +100,10 @@ function createOwnedMobilityService(options?: {
     loadState?: (...args: any[]) => Promise<unknown>;
     loadDriverTaskCompletionBundleForUpdate?: (...args: any[]) => Promise<unknown>;
     hasDriverTaskTraceRequestId?: (...args: any[]) => Promise<boolean>;
-    listRecoverableDriverCompletionTaskIds?: (
-      ...args: any[]
-    ) => Promise<string[]>;
     claimNextDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
+    claimNextRecoverableDriverCompletionOutbox?: (
+      ...args: any[]
+    ) => Promise<unknown>;
     markDriverCompletionOutboxDelivered?: (...args: any[]) => Promise<unknown>;
     releaseDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     reportPersistenceFailure: (...args: any[]) => void;
@@ -4386,6 +4408,147 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
+  it("persists deterministic outbox ids for driver-completion effects", async () => {
+    const tenantPartnerService = {
+      isPersistenceEnabled: vi.fn(() => false),
+      previewBookingQuotaImpact: vi.fn(() => ({ impacts: [] })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: { blocked: false, approvalRequired: false },
+      })),
+      reserveTenantQuota: vi.fn(() => ({ ledgerEntries: [], impacts: [] })),
+      prepareTenantQuotaConsumption: vi.fn(async () => ({
+        tenantId: "tenant-demo-001",
+        ledgerEntries: [],
+        updatedSnapshots: [],
+      })),
+      applyCommittedQuotaConsumption: vi.fn(() => undefined),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+
+    const state = new Map<string, any>();
+    const persistDriverCompletionOutbox = vi.fn(async () => {});
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async (_tx, changes) => {
+        if (changes.orders?.[0]) {
+          state.set("order", changes.orders[0]);
+        }
+        if (changes.dispatchAssignments?.[0]) {
+          state.set("assignment", changes.dispatchAssignments[0]);
+        }
+        if (changes.driverTasks?.[0]) {
+          state.set("task", changes.driverTasks[0]);
+        }
+      }),
+      persistDriverCompletionOutbox,
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
+        order: state.get("order"),
+        assignment: state.get("assignment"),
+        task: state.get("task"),
+      })),
+      hasDriverTaskTraceRequestId: vi.fn(async () => false),
+      claimNextDriverCompletionOutbox: vi.fn(async () => null),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+      repository,
+    });
+    const { service: seedService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+    });
+
+    const booking = seedService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = seedService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = seedService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    seedService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    seedService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    seedService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    seedService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    state.set("order", seedService.getOrder(booking.orderId));
+    state.set("assignment", (seedService as any).dispatchAssignments[0]);
+    state.set("task", seedService.listDriverTasks()[0]);
+
+    await service.completeDriverTask(
+      assignment.taskId,
+      {
+        completedAt: "2026-04-29T12:45:00.000Z",
+        actualDistanceKm: 14.2,
+        actualDurationSec: 1200,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      },
+      "req-complete-db-deterministic-001",
+    );
+
+    const persistedRecords = persistDriverCompletionOutbox.mock.calls[0]?.[1];
+    expect(persistedRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: assignment.taskId,
+          effectType: "tenant_order_completed_webhook",
+          outboxId: buildExpectedDriverCompletionOutboxId(
+            assignment.taskId,
+            "tenant_order_completed_webhook",
+          ),
+        }),
+        expect.objectContaining({
+          taskId: assignment.taskId,
+          effectType: "owned_mobility_trip_completed",
+          outboxId: buildExpectedDriverCompletionOutboxId(
+            assignment.taskId,
+            "owned_mobility_trip_completed",
+          ),
+        }),
+      ]),
+    );
+  });
+
   it("hydrates local state from the locked database bundle when replaying a duplicate completion request", async () => {
     const tenantPartnerService = {
       isPersistenceEnabled: vi.fn(() => false),
@@ -4750,10 +4913,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       persistOrderWorkflow: vi.fn(async () => {}),
       persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => work({} as never)),
-      listRecoverableDriverCompletionTaskIds: vi.fn(async () => [
-        outbox.taskId,
-      ]),
-      claimNextDriverCompletionOutbox: vi
+      claimNextRecoverableDriverCompletionOutbox: vi
         .fn()
         .mockResolvedValueOnce(outbox)
         .mockResolvedValueOnce(null),
@@ -4771,9 +4931,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(
-      repository.listRecoverableDriverCompletionTaskIds,
-    ).toHaveBeenCalledOnce();
-    expect(repository.claimNextDriverCompletionOutbox).toHaveBeenCalled();
+      repository.claimNextRecoverableDriverCompletionOutbox,
+    ).toHaveBeenCalled();
     expect(tenantPartnerService.publishWebhookEvent).toHaveBeenCalledWith(
       "tenant-demo-001",
       {

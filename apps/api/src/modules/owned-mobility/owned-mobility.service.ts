@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   HttpStatus,
@@ -396,8 +396,6 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
     null;
 
   private driverCompletionRecoveryInFlight = false;
-
-  private readonly driverCompletionOutboxTaskDispatches = new Set<string>();
 
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
@@ -5051,7 +5049,10 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
     }
     const createdAt = input.order.updatedAt;
     const records: DriverCompletionOutboxRecord[] = payloads.map((payload) => ({
-      outboxId: randomUUID(),
+      outboxId: this.buildDriverCompletionOutboxId(
+        input.task.taskId,
+        payload.effectType,
+      ),
       taskId: input.task.taskId,
       orderId: input.order.orderId,
       effectType: payload.effectType,
@@ -5127,11 +5128,32 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
     return payloads;
   }
 
+  private buildDriverCompletionOutboxId(
+    taskId: string,
+    effectType: DriverCompletionOutboxEffectType,
+  ) {
+    const digest = createHash("sha256")
+      .update(`driver-completion-outbox:${taskId}:${effectType}`)
+      .digest("hex")
+      .slice(0, 32)
+      .split("");
+    digest[12] = "5";
+    digest[16] = ((parseInt(digest[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
+    return [
+      digest.slice(0, 8).join(""),
+      digest.slice(8, 12).join(""),
+      digest.slice(12, 16).join(""),
+      digest.slice(16, 20).join(""),
+      digest.slice(20, 32).join(""),
+    ].join("-");
+  }
+
   private startDriverCompletionOutboxRecoveryPolling() {
     if (
       this.driverCompletionRecoveryTimer ||
       !this.ownedMobilityRepository?.isEnabled() ||
-      !("listRecoverableDriverCompletionTaskIds" in this.ownedMobilityRepository)
+      !("claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository)
     ) {
       return;
     }
@@ -5146,22 +5168,36 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
     if (
       this.driverCompletionRecoveryInFlight ||
       !this.ownedMobilityRepository?.isEnabled() ||
-      !("listRecoverableDriverCompletionTaskIds" in this.ownedMobilityRepository)
+      !("claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository)
     ) {
       return;
     }
 
     this.driverCompletionRecoveryInFlight = true;
     try {
-      const taskIds =
-        await this.ownedMobilityRepository.listRecoverableDriverCompletionTaskIds(
-          this.ownedMobilityRepository,
-          new Date().toISOString(),
-          DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-          DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE,
+      for (let claimedCount = 0; claimedCount < DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE; claimedCount += 1) {
+        const now = new Date();
+        const leaseToken = randomUUID();
+        const leasedUntil = new Date(
+          now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
+        ).toISOString();
+        const claimed =
+          await this.ownedMobilityRepository.claimNextRecoverableDriverCompletionOutbox(
+            this.ownedMobilityRepository,
+            leaseToken,
+            leasedUntil,
+            now.toISOString(),
+            DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+          );
+        if (!claimed) {
+          break;
+        }
+        await this.dispatchClaimedDriverCompletionOutbox(
+          claimed,
+          leaseToken,
+          claimed.taskId,
         );
-      for (const taskId of taskIds) {
-        await this.triggerDriverCompletionOutboxDispatch(taskId);
       }
     } catch (error) {
       this.logger.warn(
@@ -5175,16 +5211,7 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async triggerDriverCompletionOutboxDispatch(taskId: string) {
-    if (this.driverCompletionOutboxTaskDispatches.has(taskId)) {
-      return;
-    }
-
-    this.driverCompletionOutboxTaskDispatches.add(taskId);
-    try {
-      await this.dispatchDriverCompletionOutbox(taskId);
-    } finally {
-      this.driverCompletionOutboxTaskDispatches.delete(taskId);
-    }
+    await this.dispatchDriverCompletionOutbox(taskId);
   }
 
   private async dispatchDriverCompletionOutbox(taskId: string) {
@@ -5216,35 +5243,47 @@ export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      try {
-        await this.executeDriverCompletionOutboxEffect(claimed);
-        await this.ownedMobilityRepository.withTransaction((tx) =>
-          this.ownedMobilityRepository!.markDriverCompletionOutboxDelivered(
-            tx,
-            claimed.outboxId,
-            leaseToken,
-            new Date().toISOString(),
-          ),
-        );
-      } catch (error) {
-        const retryAt = new Date(
-          Date.now() + DRIVER_COMPLETION_OUTBOX_RETRY_MS,
-        ).toISOString();
-        const detail = error instanceof Error ? error.message : String(error);
-        await this.ownedMobilityRepository.withTransaction((tx) =>
-          this.ownedMobilityRepository!.releaseDriverCompletionOutbox(
-            tx,
-            claimed.outboxId,
-            leaseToken,
-            retryAt,
-            DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-            detail,
-          ),
-        );
-        this.logger.warn(
-          `Driver completion outbox delivery failed for ${claimed.effectType} on task ${taskId}: ${detail}`,
-        );
-      }
+      await this.dispatchClaimedDriverCompletionOutbox(
+        claimed,
+        leaseToken,
+        taskId,
+      );
+    }
+  }
+
+  private async dispatchClaimedDriverCompletionOutbox(
+    claimed: DriverCompletionOutboxRecord,
+    leaseToken: string,
+    taskId: string,
+  ) {
+    try {
+      await this.executeDriverCompletionOutboxEffect(claimed);
+      await this.ownedMobilityRepository!.withTransaction((tx) =>
+        this.ownedMobilityRepository!.markDriverCompletionOutboxDelivered(
+          tx,
+          claimed.outboxId,
+          leaseToken,
+          new Date().toISOString(),
+        ),
+      );
+    } catch (error) {
+      const retryAt = new Date(
+        Date.now() + DRIVER_COMPLETION_OUTBOX_RETRY_MS,
+      ).toISOString();
+      const detail = error instanceof Error ? error.message : String(error);
+      await this.ownedMobilityRepository!.withTransaction((tx) =>
+        this.ownedMobilityRepository!.releaseDriverCompletionOutbox(
+          tx,
+          claimed.outboxId,
+          leaseToken,
+          retryAt,
+          DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+          detail,
+        ),
+      );
+      this.logger.warn(
+        `Driver completion outbox delivery failed for ${claimed.effectType} on task ${taskId}: ${detail}`,
+      );
     }
   }
 

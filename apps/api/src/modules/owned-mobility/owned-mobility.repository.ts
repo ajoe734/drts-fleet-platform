@@ -587,7 +587,7 @@ export class OwnedMobilityRepository {
               OR leased_until IS NULL
               OR leased_until <= $4::timestamptz
             )
-          ORDER BY created_at ASC, outbox_id ASC
+          ORDER BY next_attempt_at ASC, created_at ASC, outbox_id ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         )
@@ -621,38 +621,59 @@ export class OwnedMobilityRepository {
     return row ? this.mapDriverCompletionOutbox(row) : null;
   }
 
-  async listRecoverableDriverCompletionTaskIds(
+  async claimNextRecoverableDriverCompletionOutbox(
     executor: OwnedMobilityQueryExecutor,
+    leaseToken: string,
+    leasedUntil: string,
     now: string,
     maxAttempts: number,
-    limit: number,
-  ): Promise<string[]> {
-    const result = await executor.query<{ task_id: string }>(
+  ): Promise<DriverCompletionOutboxRecord | null> {
+    const result = await executor.query<DriverCompletionOutboxRow>(
       `
-        SELECT task_id
-        FROM (
-          SELECT
-            task_id,
-            MIN(next_attempt_at) AS next_attempt_at,
-            MIN(created_at) AS created_at
+        WITH candidate AS (
+          SELECT outbox_id
           FROM ops.driver_completion_outbox
           WHERE delivered_at IS NULL
             AND status IN ('pending', 'processing')
-            AND attempt_count < $2
-            AND next_attempt_at <= $1::timestamptz
+            AND attempt_count < $4
+            AND next_attempt_at <= $3::timestamptz
             AND (
               lease_token IS NULL
               OR leased_until IS NULL
-              OR leased_until <= $1::timestamptz
+              OR leased_until <= $3::timestamptz
             )
-          GROUP BY task_id
-        ) recoverable
-        ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC
-        LIMIT $3
+          ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC, outbox_id ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+        )
+        UPDATE ops.driver_completion_outbox AS outbox
+        SET
+          status = 'processing',
+          attempt_count = outbox.attempt_count + 1,
+          lease_token = $1::uuid,
+          leased_until = $2::timestamptz
+        FROM candidate
+        WHERE outbox.outbox_id = candidate.outbox_id
+        RETURNING
+          outbox_id,
+          task_id,
+          order_id,
+          effect_type,
+          request_id,
+          payload,
+          status,
+          attempt_count,
+          next_attempt_at,
+          lease_token,
+          leased_until,
+          last_error,
+          created_at,
+          delivered_at
       `,
-      [now, maxAttempts, limit],
+      [leaseToken, leasedUntil, now, maxAttempts],
     );
-    return result.rows.map((row) => row.task_id);
+    const row = result.rows[0];
+    return row ? this.mapDriverCompletionOutbox(row) : null;
   }
 
   async markDriverCompletionOutboxDelivered(
