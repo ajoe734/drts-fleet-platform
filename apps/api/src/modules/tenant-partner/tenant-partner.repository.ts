@@ -1317,6 +1317,31 @@ export class TenantPartnerRepository {
     );
   }
 
+  async loadQuotaLedgerForBookingForUpdate(
+    executor: TenantPartnerQueryExecutor,
+    tenantId: string,
+    bookingId: string,
+  ) {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM core.phase1_tenant_quota_ledger
+        WHERE tenant_id = $1
+          AND booking_id = $2
+        ORDER BY created_at, ledger_entry_id
+        FOR UPDATE
+      `,
+      [tenantId, bookingId],
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<TenantQuotaLedgerEntry>(
+        row.record,
+        "core.phase1_tenant_quota_ledger",
+      ),
+    );
+  }
+
   async persistQuotaReservation(
     executor: TenantPartnerQueryExecutor,
     changes: {

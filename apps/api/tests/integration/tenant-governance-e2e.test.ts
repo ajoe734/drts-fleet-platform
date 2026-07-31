@@ -16,11 +16,13 @@ import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-pa
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tZWUyLTAwMQ==";
 
-// Cost-center mutation paths (upsertCostCenter/disableCostCenter) and
-// booking.governance.evaluated were folded into broader action names during a later
-// audit-taxonomy refactor (e.g. upsert_cost_center). The set below tracks what the
-// service actually emits today across the booking governance lifecycle.
 const EXPECTED_AUDIT_ACTIONS = [
+  "tenant.cost_center.created",
+  "tenant.cost_center.updated",
+  "tenant.cost_center.disabled",
+  "tenant.cost_center.coverage_listed",
+  "booking.cost_center.assigned",
+  "booking.governance.evaluated",
   "tenant.approval_rule.created",
   "tenant.approval_rule.updated",
   "tenant.approval_rule.disabled",
@@ -551,11 +553,33 @@ describe("tenant governance e2e integration", () => {
         bookingId: created.bookingId,
       },
     );
-    // The quota ledger captures reserve entries at approval time; task completion
-    // no longer emits a separate "consume" entry and does not flip the summary's
-    // pending/confirmed split (consumption is realized downstream through billing
-    // invoice generation, asserted below).
-    expect(quotaLedgerAfterComplete.length).toBeGreaterThan(0);
+    expect(quotaLedgerAfterComplete).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          bookingId: created.bookingId,
+          entryType: "consume",
+          dimension: "booking_count",
+          amount: 1,
+        }),
+        expect.objectContaining({
+          bookingId: created.bookingId,
+          entryType: "consume",
+          dimension: "amount_minor",
+          amount: 150_000,
+        }),
+      ]),
+    );
+    expect(
+      tenantPartnerService.getTenantQuotaSummary(
+        tenantId,
+        "2026-04-29T14:00:00.000Z",
+      ).usage,
+    ).toMatchObject({
+      pendingReservedBookingCount: 0,
+      confirmedBookingCount: 1,
+      pendingReservedAmountMinor: 0,
+      confirmedAmountMinor: 150_000,
+    });
 
     vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
     const invoice = await billingSettlementService.generateTenantInvoice(
@@ -978,6 +1002,18 @@ describe("tenant governance e2e integration", () => {
 
     for (const log of governanceLogs) {
       switch (log.actionName) {
+        case "tenant.cost_center.created":
+        case "tenant.cost_center.updated":
+        case "tenant.cost_center.disabled":
+          expect(log.resourceType).toBe("tenant_cost_center");
+          break;
+        case "tenant.cost_center.coverage_listed":
+          expect(log.resourceType).toBe("tenant_cost_center_coverage_report");
+          break;
+        case "booking.cost_center.assigned":
+        case "booking.governance.evaluated":
+          expectBookingAudit(log);
+          break;
         case "tenant.approval_rule.created":
         case "tenant.approval_rule.updated":
         case "tenant.approval_rule.disabled":

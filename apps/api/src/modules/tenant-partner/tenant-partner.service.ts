@@ -2408,6 +2408,46 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.reserveTenantQuotaInMemory(input, normalized);
   }
 
+  consumeTenantQuota(
+    tx: TenantPartnerQueryExecutor | null,
+    input: {
+      tenantId: string;
+      bookingId: string;
+    },
+  ):
+    | { ledgerEntries: TenantQuotaLedgerEntry[] }
+    | Promise<{ ledgerEntries: TenantQuotaLedgerEntry[] }>;
+  consumeTenantQuota(input: {
+    tenantId: string;
+    bookingId: string;
+  }):
+    | { ledgerEntries: TenantQuotaLedgerEntry[] }
+    | Promise<{ ledgerEntries: TenantQuotaLedgerEntry[] }>;
+  consumeTenantQuota(
+    txOrInput:
+      | TenantPartnerQueryExecutor
+      | {
+          tenantId: string;
+          bookingId: string;
+        }
+      | null,
+    maybeInput?: {
+      tenantId: string;
+      bookingId: string;
+    },
+  ) {
+    const tx = maybeInput
+      ? (txOrInput as TenantPartnerQueryExecutor | null)
+      : null;
+    const input = maybeInput ?? (txOrInput as NonNullable<typeof maybeInput>);
+
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      return this.consumeTenantQuotaWithDatabase(tx, input);
+    }
+
+    return this.consumeTenantQuotaInMemory(input);
+  }
+
   listApprovalRules(
     tenantId: string,
     query: ListTenantApprovalRulesQuery = {},
@@ -2659,14 +2699,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       flightNoPresent: command.sampleBooking?.flightNoPresent ?? null,
       flightNo: command.sampleBooking?.flightNo ?? null,
     };
+    const evaluationSubject = command.subject ?? {
+      subjectType: "booking" as const,
+      bookingId: null,
+      draftId: null,
+      operation: "dry_run" as const,
+    };
     const result = evaluateTenantApprovalRules({
       tenantId,
-      subject: command.subject ?? {
-        subjectType: "booking",
-        bookingId: null,
-        draftId: null,
-        operation: "dry_run",
-      },
+      subject: evaluationSubject,
       inputSnapshot,
       rules: this.listApprovalRules(tenantId, {
         activeOnly: command.includeInactive ? false : true,
@@ -2697,6 +2738,50 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
       requestId,
     );
+    const resolvedSubject = result.subject ?? evaluationSubject;
+    const bookingResourceId =
+      resolvedSubject.bookingId ?? resolvedSubject.draftId;
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "booking.governance.evaluated",
+        resourceType: bookingResourceId
+          ? "booking"
+          : "tenant_approval_rule_set",
+        resourceId: bookingResourceId ?? tenantId,
+        newValuesSummary: {
+          subject: result.subject,
+          decision: result.outcome?.decision ?? null,
+          matchedRuleIds: result.matchedRules.map((rule) => rule.ruleId),
+          matchedRuleCount: result.matchedRules.length,
+          evaluationLatencyMs,
+          approvalRequired: result.outcome?.approvalRequired ?? false,
+        },
+      },
+      requestId,
+    );
+    if (bookingResourceId && inputSnapshot.costCenterCode) {
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "booking.cost_center.assigned",
+          resourceType: "booking",
+          resourceId: bookingResourceId,
+          newValuesSummary: {
+            costCenterCode: inputSnapshot.costCenterCode,
+            operation: resolvedSubject.operation,
+            evaluationId: result.evaluationId,
+          },
+        },
+        requestId,
+      );
+    }
     return result;
   }
 
@@ -3294,6 +3379,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
       requestId,
     );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.cost_center.coverage_listed",
+        resourceType: "tenant_cost_center_coverage_report",
+        resourceId: tenantId,
+        newValuesSummary: {
+          totalBookings: report.totalBookings,
+          resolvedCount: report.resolvedCount,
+          unresolvedCount: report.unresolvedCount,
+          disabledHits: report.disabledHits,
+        },
+      },
+      requestId,
+    );
 
     return report;
   }
@@ -3860,6 +3963,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
       requestId,
     );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: existing
+          ? "tenant.cost_center.updated"
+          : "tenant.cost_center.created",
+        resourceType: "tenant_cost_center",
+        resourceId: costCenter.code,
+        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+      },
+      requestId,
+    );
 
     return this.cloneCostCenter(costCenter);
   }
@@ -3905,6 +4023,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         tenantId,
         moduleName: "tenant-partner",
         actionName: "disable_cost_center",
+        resourceType: "tenant_cost_center",
+        resourceId: costCenter.code,
+        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+      },
+      requestId,
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.cost_center.disabled",
         resourceType: "tenant_cost_center",
         resourceId: costCenter.code,
         newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
@@ -10129,6 +10260,198 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.tenantPartnerRepository!.withTransaction(work);
+  }
+
+  private consumeTenantQuotaInMemory(input: {
+    tenantId: string;
+    bookingId: string;
+  }) {
+    const entries = this.buildQuotaConsumptionEntries(
+      input.tenantId,
+      input.bookingId,
+      this.quotaLedger,
+    );
+    if (entries.length === 0) {
+      return { ledgerEntries: [] };
+    }
+
+    const updatedSnapshots = this.applyQuotaLedgerEntries(
+      input.tenantId,
+      entries,
+    );
+    this.applyQuotaReservationCommit(entries, updatedSnapshots);
+    this.persistChanges(
+      {
+        quotaLedger: entries.map((entry) => this.cloneQuotaLedgerEntry(entry)),
+        quotaMonthlySnapshots: updatedSnapshots.map((snapshot) =>
+          this.cloneQuotaMonthlySnapshot(snapshot),
+        ),
+      },
+      "consume tenant quota",
+    );
+    this.recordQuotaReservationAudits(
+      input.tenantId,
+      entries,
+      updatedSnapshots,
+    );
+
+    return {
+      ledgerEntries: entries.map((entry) => this.cloneQuotaLedgerEntry(entry)),
+    };
+  }
+
+  private async consumeTenantQuotaWithDatabase(
+    tx: TenantPartnerQueryExecutor | null,
+    input: {
+      tenantId: string;
+      bookingId: string;
+    },
+  ) {
+    const work = async (executor: TenantPartnerQueryExecutor) => {
+      const existingEntries =
+        await this.tenantPartnerRepository!.loadQuotaLedgerForBookingForUpdate(
+          executor,
+          input.tenantId,
+          input.bookingId,
+        );
+      const entries = this.buildQuotaConsumptionEntries(
+        input.tenantId,
+        input.bookingId,
+        existingEntries,
+      );
+      if (entries.length === 0) {
+        return { ledgerEntries: [] };
+      }
+
+      const snapshotGroups = new Map<
+        string,
+        { costCenterCode: string | null; periodKey: string }
+      >();
+      for (const entry of entries) {
+        const key = `${entry.costCenterCode ?? "~"}:${entry.periodKey}`;
+        snapshotGroups.set(key, {
+          costCenterCode: entry.costCenterCode,
+          periodKey: entry.periodKey,
+        });
+      }
+      const lockedSnapshots = (
+        await Promise.all(
+          [...snapshotGroups.values()].map((group) =>
+            this.tenantPartnerRepository!.loadQuotaMonthlySnapshotsForUpdate(
+              executor,
+              input.tenantId,
+              group.costCenterCode,
+              group.periodKey,
+            ),
+          ),
+        )
+      ).flat();
+      const uniqueSnapshots = new Map<
+        string,
+        TenantQuotaMonthlySnapshotRecord
+      >();
+      for (const snapshot of lockedSnapshots) {
+        uniqueSnapshots.set(
+          this.buildQuotaSnapshotKey(
+            snapshot.tenantId,
+            snapshot.costCenterCode,
+            snapshot.period,
+            snapshot.periodKey,
+          ),
+          snapshot,
+        );
+      }
+      const updatedSnapshots = this.applyQuotaLedgerEntriesToSnapshots(
+        input.tenantId,
+        entries,
+        [...uniqueSnapshots.values()],
+        (costCenterCode) =>
+          this.resolveQuotaPolicy(input.tenantId, costCenterCode),
+      );
+
+      await this.tenantPartnerRepository!.persistQuotaReservation(executor, {
+        quotaLedger: entries,
+        quotaMonthlySnapshots: updatedSnapshots,
+      });
+      this.applyQuotaReservationCommit(entries, updatedSnapshots);
+      this.recordQuotaReservationAudits(
+        input.tenantId,
+        entries,
+        updatedSnapshots,
+      );
+
+      return {
+        ledgerEntries: entries.map((entry) =>
+          this.cloneQuotaLedgerEntry(entry),
+        ),
+      };
+    };
+
+    if (tx) {
+      return work(tx);
+    }
+
+    return this.tenantPartnerRepository!.withTransaction(work);
+  }
+
+  private buildQuotaConsumptionEntries(
+    tenantId: string,
+    bookingId: string,
+    sourceEntries: readonly TenantQuotaLedgerEntry[],
+  ) {
+    const outstanding = new Map<
+      string,
+      {
+        costCenterCode: string | null;
+        periodKey: string;
+        dimension: TenantQuotaLedgerEntry["dimension"];
+        amount: number;
+        evaluationId: string;
+      }
+    >();
+
+    const bookingEntries = sourceEntries
+      .filter(
+        (entry) => entry.tenantId === tenantId && entry.bookingId === bookingId,
+      )
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.ledgerEntryId.localeCompare(right.ledgerEntryId),
+      );
+
+    for (const entry of bookingEntries) {
+      const key = `${entry.costCenterCode ?? "~"}:${entry.periodKey}:${entry.dimension}`;
+      const current = outstanding.get(key) ?? {
+        costCenterCode: entry.costCenterCode,
+        periodKey: entry.periodKey,
+        dimension: entry.dimension,
+        amount: 0,
+        evaluationId: entry.evaluationId,
+      };
+      const direction =
+        entry.entryType === "reserve" || entry.entryType === "adjust" ? 1 : -1;
+      current.amount += direction * entry.amount;
+      current.evaluationId = entry.evaluationId;
+      outstanding.set(key, current);
+    }
+
+    const now = new Date().toISOString();
+    return [...outstanding.values()]
+      .filter((entry) => entry.amount > 0)
+      .map((entry) =>
+        this.createQuotaLedgerEntry({
+          tenantId,
+          bookingId,
+          evaluationId: entry.evaluationId,
+          costCenterCode: entry.costCenterCode,
+          periodKey: entry.periodKey,
+          dimension: entry.dimension,
+          amount: entry.amount,
+          entryType: "consume",
+          createdAt: now,
+        }),
+      );
   }
 
   private buildQuotaImpactPreviewFromResolvedState(params: {

@@ -300,6 +300,7 @@ function createDatabaseQuotaRepository(options?: {
         },
       ],
     ),
+    loadQuotaLedgerForBookingForUpdate: vi.fn(async () => []),
     persistQuotaReservation: vi.fn(async () => {}),
   };
 
@@ -1498,7 +1499,17 @@ describe("TenantPartnerService sensitive-data governance", () => {
           resourceId: "CC-RD-12",
         }),
         expect.objectContaining({
+          actionName: "tenant.cost_center.created",
+          resourceType: "tenant_cost_center",
+          resourceId: "CC-RD-12",
+        }),
+        expect.objectContaining({
           actionName: "disable_cost_center",
+          resourceType: "tenant_cost_center",
+          resourceId: "CC-RD-12",
+        }),
+        expect.objectContaining({
+          actionName: "tenant.cost_center.disabled",
           resourceType: "tenant_cost_center",
           resourceId: "CC-RD-12",
         }),
@@ -2817,6 +2828,16 @@ describe("TenantPartnerService approval rules", () => {
           actionName: "booking.approval_rules.evaluated",
           resourceId: "tenant-demo-001",
         }),
+        expect.objectContaining({
+          actionName: "booking.governance.evaluated",
+          resourceType: "booking",
+          resourceId: "booking-001",
+        }),
+        expect.objectContaining({
+          actionName: "booking.cost_center.assigned",
+          resourceType: "booking",
+          resourceId: "booking-001",
+        }),
       ]),
     );
   });
@@ -3121,6 +3142,136 @@ describe("TenantPartnerService approval rules", () => {
       }),
     );
     expect(result.ledgerEntries).toHaveLength(1);
+  });
+
+  it("atomically consumes a database-backed quota reservation at trip completion", async () => {
+    const { repository } = createDatabaseQuotaRepository({
+      bookingCountLimit: 1,
+    });
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    const tx: TenantPartnerQueryExecutor = {
+      query: vi.fn(async () => ({ rows: [] })) as never,
+    };
+    repository.loadQuotaLedgerForBookingForUpdate.mockResolvedValue([
+      {
+        ledgerEntryId: "quota-ledger-reserve-db-001",
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        periodKey: "2026-05",
+        dimension: "booking_count",
+        amount: 1,
+        entryType: "reserve",
+        bookingId: "booking-db-consume-001",
+        evaluationId: "eval-db-consume-001",
+        createdAt: "2026-05-13T10:00:00.000Z",
+      },
+    ]);
+    repository.loadQuotaMonthlySnapshotsForUpdate.mockResolvedValue([
+      {
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        period: "monthly",
+        periodKey: "2026-05",
+        limit: {
+          bookingCountLimit: 1,
+          amountMinorLimit: null,
+          currency: "TWD",
+          enforcementMode: "hard_block",
+        },
+        usage: {
+          ...createEmptyTenantQuotaUsage({
+            bookingCountLimit: 1,
+            amountMinorLimit: null,
+            currency: "TWD",
+            enforcementMode: "hard_block",
+          }),
+          pendingReservedBookingCount: 1,
+          bookingCountRemaining: 0,
+        },
+        refreshedAt: "2026-05-13T10:00:00.000Z",
+      },
+    ]);
+
+    const result = await service.consumeTenantQuota(tx, {
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-db-consume-001",
+    });
+
+    expect(repository.withTransaction).not.toHaveBeenCalled();
+    expect(repository.loadQuotaLedgerForBookingForUpdate).toHaveBeenCalledWith(
+      tx,
+      "tenant-demo-001",
+      "booking-db-consume-001",
+    );
+    expect(repository.persistQuotaReservation).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        quotaLedger: [
+          expect.objectContaining({
+            bookingId: "booking-db-consume-001",
+            dimension: "booking_count",
+            amount: 1,
+            entryType: "consume",
+          }),
+        ],
+        quotaMonthlySnapshots: [
+          expect.objectContaining({
+            usage: expect.objectContaining({
+              pendingReservedBookingCount: 0,
+              confirmedBookingCount: 1,
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(result.ledgerEntries).toEqual([
+      expect.objectContaining({ entryType: "consume", amount: 1 }),
+    ]);
+  });
+
+  it("keeps database-backed quota consumption idempotent", async () => {
+    const { repository } = createDatabaseQuotaRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    repository.loadQuotaLedgerForBookingForUpdate.mockResolvedValue([
+      {
+        ledgerEntryId: "quota-ledger-reserve-db-002",
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        periodKey: "2026-05",
+        dimension: "booking_count",
+        amount: 1,
+        entryType: "reserve",
+        bookingId: "booking-db-consume-002",
+        evaluationId: "eval-db-consume-002",
+        createdAt: "2026-05-13T10:00:00.000Z",
+      },
+      {
+        ledgerEntryId: "quota-ledger-consume-db-002",
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        periodKey: "2026-05",
+        dimension: "booking_count",
+        amount: 1,
+        entryType: "consume",
+        bookingId: "booking-db-consume-002",
+        evaluationId: "eval-db-consume-002",
+        createdAt: "2026-05-13T11:00:00.000Z",
+      },
+    ]);
+
+    const result = await service.consumeTenantQuota({
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-db-consume-002",
+    });
+
+    expect(result.ledgerEntries).toEqual([]);
+    expect(repository.persistQuotaReservation).not.toHaveBeenCalled();
   });
 
   it("blocks over-limit reservations on the database path before persisting ledger rows", async () => {

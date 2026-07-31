@@ -615,11 +615,21 @@ export class RegulatoryRegistryService implements OnModuleInit {
           this.hydrateExclusivity(exclusivity),
         );
       }
-      if (persistedState.disclosureProfiles && persistedState.disclosureProfiles.length > 0) {
-        this.disclosureProfiles = persistedState.disclosureProfiles.map((profile) => ({ ...profile }));
+      if (
+        persistedState.disclosureProfiles &&
+        persistedState.disclosureProfiles.length > 0
+      ) {
+        this.disclosureProfiles = persistedState.disclosureProfiles.map(
+          (profile) => ({ ...profile }),
+        );
       }
-      if (persistedState.driverCredentials && persistedState.driverCredentials.length > 0) {
-        this.driverCredentials = persistedState.driverCredentials.map((cred) => ({ ...cred }));
+      if (
+        persistedState.driverCredentials &&
+        persistedState.driverCredentials.length > 0
+      ) {
+        this.driverCredentials = persistedState.driverCredentials.map(
+          (cred) => ({ ...cred }),
+        );
       }
       this.reconcileSupplyLifecycleForAll({
         emitEvent: false,
@@ -729,7 +739,12 @@ export class RegulatoryRegistryService implements OnModuleInit {
     let disclosureProfile: VehiclePassengerDisclosureProfile | null = null;
     if (command.vehicleDraft && resolvedCanonicalVehicleId) {
       const draft = command.vehicleDraft;
-      if (!draft.brand || !draft.model || draft.modelYear === null || draft.doorCount === null) {
+      if (
+        !draft.brand ||
+        !draft.model ||
+        draft.modelYear === null ||
+        draft.doorCount === null
+      ) {
         throw new ApiRequestError(
           HttpStatus.BAD_REQUEST,
           "DISCLOSURE_PROFILE_MISSING_REQUIRED_FIELDS",
@@ -754,7 +769,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
       changes.disclosureProfiles = [disclosureProfile];
 
       this.disclosureProfiles = [
-        ...this.disclosureProfiles.filter((p) => p.vehicleId !== resolvedCanonicalVehicleId),
+        ...this.disclosureProfiles.filter(
+          (p) => p.vehicleId !== resolvedCanonicalVehicleId,
+        ),
         disclosureProfile,
       ];
     }
@@ -763,9 +780,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
     if (command.driverDraft && resolvedCanonicalDriverId) {
       const draft = command.driverDraft;
       const registrationNo = draft.taxiDriverRegistrationNo;
-      const maskedDisplay = registrationNo.length <= 4
-        ? "***"
-        : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
+      const maskedDisplay =
+        registrationNo.length <= 4
+          ? "***"
+          : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
       driverCredential = {
         driverId: resolvedCanonicalDriverId,
         registrationNo: registrationNo,
@@ -783,7 +801,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
       changes.driverCredentials = [driverCredential];
 
       this.driverCredentials = [
-        ...this.driverCredentials.filter((c) => c.driverId !== resolvedCanonicalDriverId),
+        ...this.driverCredentials.filter(
+          (c) => c.driverId !== resolvedCanonicalDriverId,
+        ),
         driverCredential,
       ];
     }
@@ -1841,6 +1861,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
       relatedEntityId: vehicleId,
       persistContext: null,
       touchUpdatedAt: true,
+      ...(command.dispatchableFlag === undefined
+        ? {}
+        : { manualDispatchHold: command.dispatchableFlag === false }),
     });
     this.persistChanges(
       {
@@ -2047,6 +2070,16 @@ export class RegulatoryRegistryService implements OnModuleInit {
     draft: VehicleSupplyDraft,
     approvedAt: string,
   ): VehicleRegistryRecord {
+    const supplyLifecycle = createEmptySupplyLifecycle(approvedAt);
+    supplyLifecycle.dispatch = {
+      eligible: false,
+      blockedReasons: [
+        "contract_missing",
+        "insurance_missing",
+        "exclusivity_missing",
+      ],
+      evaluatedAt: approvedAt,
+    };
     const created: VehicleRegistryRecord = {
       vehicleId: `veh_${randomUUID()}`,
       plateNo: draft.plateNo.trim(),
@@ -2059,7 +2092,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       exclusivityApproved: false,
       insuranceStatus: "expired",
       updatedAt: approvedAt,
-      supplyLifecycle: createEmptySupplyLifecycle(approvedAt),
+      supplyLifecycle,
     };
 
     this.vehicles = [this.cloneVehicle(created), ...this.vehicles];
@@ -2256,6 +2289,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       emitEvent?: boolean;
       persistContext?: string | null;
       touchUpdatedAt?: boolean;
+      manualDispatchHold?: boolean;
     },
   ): VehicleRegistryRecord {
     const vehicle = this.requireVehicle(vehicleId);
@@ -2264,23 +2298,27 @@ export class RegulatoryRegistryService implements OnModuleInit {
       vehicle.supplyLifecycle,
     );
 
-    let nextLifecycle = this.evaluateVehicleSupplyLifecycle(
+    // `dispatchableFlag` is the effective state, so a compliance failure also
+    // clears it. Preserve the operator's intent separately in the lifecycle:
+    // a manual hold is explicit, while an automatically-cleared flag has only
+    // the real compliance reason. This lets a vehicle recover automatically
+    // after contract / insurance / exclusivity is restored without overriding
+    // a deliberate operator hold.
+    const manualDispatchHold =
+      options?.manualDispatchHold ??
+      (!vehicle.dispatchableFlag &&
+        previousLifecycle.dispatch.blockedReasons.includes("manual_hold"));
+
+    const nextLifecycle = this.evaluateVehicleSupplyLifecycle(
       vehicle,
-      vehicle.dispatchableFlag,
+      !manualDispatchHold,
       occurredAt,
     );
 
     const hasComplianceBlock = nextLifecycle.dispatch.blockedReasons.some(
       (reason) => reason !== "manual_hold",
     );
-    if (vehicle.dispatchableFlag && hasComplianceBlock) {
-      vehicle.dispatchableFlag = false;
-      nextLifecycle = this.evaluateVehicleSupplyLifecycle(
-        vehicle,
-        vehicle.dispatchableFlag,
-        occurredAt,
-      );
-    }
+    vehicle.dispatchableFlag = !manualDispatchHold && !hasComplianceBlock;
 
     const lifecycleChanged = this.didLifecycleChange(
       previousLifecycle,
@@ -2388,7 +2426,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       blockedReasons.push("offboarding_pending_debranding");
     }
 
-    if (blockedReasons.length === 0 && !dispatchableFlag) {
+    if (!dispatchableFlag) {
       blockedReasons.push("manual_hold");
     }
 
@@ -3277,12 +3315,18 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return (value * Math.PI) / 180;
   }
 
-  getVehiclePassengerDisclosureProfile(vehicleId: string): VehiclePassengerDisclosureProfile | null {
-    const profile = this.disclosureProfiles.find((p) => p.vehicleId === vehicleId);
+  getVehiclePassengerDisclosureProfile(
+    vehicleId: string,
+  ): VehiclePassengerDisclosureProfile | null {
+    const profile = this.disclosureProfiles.find(
+      (p) => p.vehicleId === vehicleId,
+    );
     return profile ? { ...profile } : null;
   }
 
-  getDriverPublicRegistrationCredential(driverId: string): DriverPublicRegistrationCredential | null {
+  getDriverPublicRegistrationCredential(
+    driverId: string,
+  ): DriverPublicRegistrationCredential | null {
     const cred = this.driverCredentials.find((c) => c.driverId === driverId);
     return cred ? { ...cred } : null;
   }
@@ -3297,20 +3341,35 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   private runInMemoryIdempotentBackfill() {
     const regProfiles = [
-      { driverId: "drv-demo-001", taxiRegistrationNo: "REG-TAXI-0001", taxiRegistrationExpiry: "2027-12-31" },
-      { driverId: "drv-demo-002", taxiRegistrationNo: "REG-TAXI-0002", taxiRegistrationExpiry: "2027-12-31" },
-      { driverId: "drv-demo-003", taxiRegistrationNo: "REG-BIZ-0001", taxiRegistrationExpiry: "2027-12-31" },
+      {
+        driverId: "drv-demo-001",
+        taxiRegistrationNo: "REG-TAXI-0001",
+        taxiRegistrationExpiry: "2027-12-31",
+      },
+      {
+        driverId: "drv-demo-002",
+        taxiRegistrationNo: "REG-TAXI-0002",
+        taxiRegistrationExpiry: "2027-12-31",
+      },
+      {
+        driverId: "drv-demo-003",
+        taxiRegistrationNo: "REG-BIZ-0001",
+        taxiRegistrationExpiry: "2027-12-31",
+      },
     ];
 
     for (const driver of this.drivers) {
-      const exists = this.driverCredentials.some((c) => c.driverId === driver.driverId);
+      const exists = this.driverCredentials.some(
+        (c) => c.driverId === driver.driverId,
+      );
       if (!exists) {
         const profile = regProfiles.find((p) => p.driverId === driver.driverId);
         if (profile) {
           const registrationNo = profile.taxiRegistrationNo;
-          const maskedDisplay = registrationNo.length <= 4
-            ? "***"
-            : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
+          const maskedDisplay =
+            registrationNo.length <= 4
+              ? "***"
+              : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
           this.driverCredentials.push({
             driverId: driver.driverId,
             registrationNo,

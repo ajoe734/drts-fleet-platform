@@ -4246,69 +4246,92 @@ export class OwnedMobilityService implements OnModuleInit {
       order.runtimeProfileCode === "multi_taxi_direct"
         ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
         : null;
-    const now = new Date().toISOString();
-    task.status = "completed";
-    task.completedAt = command.completedAt;
-    task.actualDistanceKm = command.actualDistanceKm;
-    task.actualDurationSec = command.actualDurationSec;
-    task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
-    task.proof = proofHasEvidence ? proof : null;
-    assignment.status = "completed";
-    assignment.updatedAt = now;
-    order.status = "completed";
-    order.updatedAt = now;
+    const finalizeCompletion = () => {
+      const now = new Date().toISOString();
+      task.status = "completed";
+      task.completedAt = command.completedAt;
+      task.actualDistanceKm = command.actualDistanceKm;
+      task.actualDurationSec = command.actualDurationSec;
+      task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
+      task.proof = proofHasEvidence ? proof : null;
+      assignment.status = "completed";
+      assignment.updatedAt = now;
+      order.status = "completed";
+      order.updatedAt = now;
 
-    const traceLog = this.appendTrace(order.orderId, "driver.completed_trip", {
-      taskId,
-      assignmentId: assignment.assignmentId,
-      completedAt: command.completedAt,
-      requestId: requestId ?? null,
-    });
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchTraceLogs: [traceLog],
-      },
-      "complete_driver_task",
-    );
-    this.recordAudit(
-      {
-        actorId: task.driverId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "driver-task",
-        actionName: "complete_trip",
-        resourceType: "driver_task",
-        resourceId: taskId,
-        newValuesSummary: {
-          status: task.status,
+      const traceLog = this.appendTrace(
+        order.orderId,
+        "driver.completed_trip",
+        {
+          taskId,
+          assignmentId: assignment.assignmentId,
           completedAt: command.completedAt,
+          requestId: requestId ?? null,
         },
-      },
-      requestId,
-    );
-    this.publishTenantOrderWebhook(order, "order.completed", now, {
-      completedAt: command.completedAt,
-      taskId,
-      assignmentId: assignment.assignmentId,
-    });
-    this.publishCompletedTripSettlementEvent(order, task);
-    if (certificateEvent && this.eventEmitter) {
-      this.eventEmitter.emit(
-        OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
-        certificateEvent,
+      );
+      this.persistChanges(
+        {
+          orders: [order],
+          dispatchAssignments: [assignment],
+          driverTasks: [task],
+          dispatchTraceLogs: [traceLog],
+        },
+        "complete_driver_task",
+      );
+      this.recordAudit(
+        {
+          actorId: task.driverId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "driver-task",
+          actionName: "complete_trip",
+          resourceType: "driver_task",
+          resourceId: taskId,
+          newValuesSummary: {
+            status: task.status,
+            completedAt: command.completedAt,
+          },
+        },
+        requestId,
+      );
+      this.publishTenantOrderWebhook(order, "order.completed", now, {
+        completedAt: command.completedAt,
+        taskId,
+        assignmentId: assignment.assignmentId,
+      });
+      this.publishCompletedTripSettlementEvent(order, task);
+      if (certificateEvent && this.eventEmitter) {
+        this.eventEmitter.emit(
+          OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+          certificateEvent,
+        );
+      }
+      this.ownedMobilityTaskEventsService.publishTaskUpdated(
+        task,
+        order,
+        requestId,
+      );
+      this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+
+      return this.cloneTask(task);
+    };
+
+    if (
+      this.tenantPartnerService &&
+      typeof this.tenantPartnerService.consumeTenantQuota === "function" &&
+      order.tenantId &&
+      order.bookingId
+    ) {
+      return this.afterMaybePromise(
+        this.tenantPartnerService.consumeTenantQuota({
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
+        }),
+        finalizeCompletion,
       );
     }
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
-      task,
-      order,
-      requestId,
-    );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
-    return this.cloneTask(task);
+    return finalizeCompletion();
   }
 
   private buildMultiTaxiCertificateEvent(
