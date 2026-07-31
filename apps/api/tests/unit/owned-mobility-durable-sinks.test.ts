@@ -878,7 +878,6 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
           task: { taskId: "task-replay", status: "completed" },
         })),
         hasDriverTaskTraceRequestId: vi.fn(async () => true),
-        claimNextDriverCompletionOutbox: vi.fn(),
         claimNextRecoverableDriverCompletionOutbox: vi.fn(),
         persistDriverCompletionOutbox: vi.fn(),
         withTransaction: vi.fn(async (work) => work({} as never)),
@@ -911,7 +910,6 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       );
 
       expect(result).toMatchObject({ taskId: "task-replay" });
-      expect(repository.claimNextDriverCompletionOutbox).not.toHaveBeenCalled();
       expect(repository.claimNextRecoverableDriverCompletionOutbox).not.toHaveBeenCalled();
       expect(repository.persistDriverCompletionOutbox).not.toHaveBeenCalled();
       expect(auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
@@ -923,7 +921,6 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       const repository = {
         isEnabled: () => true,
         withTransaction: vi.fn(async (work) => work({} as never)),
-        claimNextDriverCompletionOutbox: vi.fn(async () => null),
         claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
           claimCalls++;
           if (claimCalls === 1) {

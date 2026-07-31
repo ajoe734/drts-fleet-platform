@@ -4542,6 +4542,7 @@ export class OwnedMobilityService
             order,
             assignment,
             task: replayedTask,
+            dispatchJob: params.bundle.dispatchJob,
           },
         };
       }
@@ -4673,10 +4674,7 @@ export class OwnedMobilityService
       driverTasks: [this.cloneTask(task)],
       dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
     });
-    const dispatchJob =
-      params.bundle.dispatchJob ??
-      this.dispatchJobs.find((job) => job.orderId === order.orderId) ??
-      null;
+    const dispatchJob = params.bundle.dispatchJob;
 
     await this.persistDriverCompletionOutbox(tx, {
       order,
@@ -4745,9 +4743,8 @@ export class OwnedMobilityService
     if (
       !this.ownedMobilityRepository ||
       !this.ownedMobilityRepository.isEnabled() ||
-      (!("claimNextRecoverableDriverCompletionOutbox" in
-        this.ownedMobilityRepository) &&
-        !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository))
+      !("claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository)
     ) {
       if (committed.outcome === "completed") {
         await this.recordAudit(
@@ -5118,7 +5115,7 @@ export class OwnedMobilityService
       order: OwnedOrderRecord;
       assignment: DispatchAssignmentRecord;
       task: DriverTaskRecord;
-      dispatchJob?: DispatchJobRecord | null;
+      dispatchJob: DispatchJobRecord;
       requestId: string | null;
       certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
       quotaConsumption?: TenantQuotaConsumptionCommitResult | null;
@@ -5157,7 +5154,7 @@ export class OwnedMobilityService
     order: OwnedOrderRecord;
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord;
-    dispatchJob?: DispatchJobRecord | null;
+    dispatchJob: DispatchJobRecord;
     requestId: string | null;
     certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
     quotaConsumption?: TenantQuotaConsumptionCommitResult | null;
@@ -5240,10 +5237,7 @@ export class OwnedMobilityService
       auditEntries.push(...quotaAudits);
     }
 
-    const dispatchJob =
-      input.dispatchJob ??
-      this.dispatchJobs.find((job) => job.orderId === input.order.orderId) ??
-      null;
+    const dispatchJob = input.dispatchJob;
 
     payloads.push({
       effectType: "completion_audit_bundle",
@@ -5323,9 +5317,8 @@ export class OwnedMobilityService
     if (
       !this.ownedMobilityRepository ||
       !this.ownedMobilityRepository.isEnabled() ||
-      (!("claimNextRecoverableDriverCompletionOutbox" in
-        this.ownedMobilityRepository) &&
-        !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository))
+      !("claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository)
     ) {
       return;
     }
@@ -5339,38 +5332,16 @@ export class OwnedMobilityService
           now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
         ).toISOString();
 
-        let claimed: DriverCompletionOutboxClaimResult | null = null;
-        if (
-          "claimNextRecoverableDriverCompletionOutbox" in
-          this.ownedMobilityRepository
-        ) {
-          claimed = await this.ownedMobilityRepository.withTransaction(
-            (tx) =>
-              this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox!(
-                tx,
-                leaseToken,
-                leasedUntil,
-                now.toISOString(),
-                DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-              ),
-          );
-        } else if (
-          "claimNextDriverCompletionOutbox" in this.ownedMobilityRepository
-        ) {
-          const repo = this.ownedMobilityRepository as unknown as {
-            withTransaction: (cb: (tx: any) => Promise<any>) => Promise<any>;
-            claimNextDriverCompletionOutbox: (...args: any[]) => Promise<any>;
-          };
-          claimed = (await repo.withTransaction((tx: any) =>
-            repo.claimNextDriverCompletionOutbox(
+        const claimed =
+          await this.ownedMobilityRepository.withTransaction((tx) =>
+            this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox!(
               tx,
               leaseToken,
               leasedUntil,
               now.toISOString(),
               DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
             ),
-          )) as DriverCompletionOutboxClaimResult | null;
-        }
+          );
 
         if (!claimed) {
           if (this.hasRequestedDrain && !this.isShuttingDown) {

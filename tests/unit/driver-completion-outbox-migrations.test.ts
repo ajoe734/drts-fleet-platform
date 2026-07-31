@@ -73,9 +73,19 @@ describe("driver completion outbox migrations", () => {
       "ops_dispatch_job_updated",
     ];
 
-    for (const effect of requiredEffects) {
-      expect(v0065).toContain(`'${effect}'`);
-      expect(v0066).toContain(`'${effect}'`);
-    }
+    const extractEffectsFromCheck = (sql: string) => {
+      const match = sql.match(
+        /driver_completion_outbox_effect_type_chk\s+CHECK\s*\([\s\S]*?effect_type\s+IN\s*\(\s*([\s\S]*?)\s*\)\s*\)/,
+      );
+      if (!match) {
+        throw new Error(
+          "Could not find driver_completion_outbox_effect_type_chk CHECK constraint",
+        );
+      }
+      return Array.from(match[1].matchAll(/'([^']+)'/g), (m) => m[1]);
+    };
+
+    expect(extractEffectsFromCheck(v0065)).toEqual(requiredEffects);
+    expect(extractEffectsFromCheck(v0066)).toEqual(requiredEffects);
   });
 });

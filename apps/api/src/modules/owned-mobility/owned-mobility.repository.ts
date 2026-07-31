@@ -97,7 +97,7 @@ export type DriverTaskCompletionBundleRecord = {
   order: OwnedOrderRecord;
   assignment: DispatchAssignmentRecord;
   task: DriverTaskRecord;
-  dispatchJob?: DispatchJobRecord | null;
+  dispatchJob: DispatchJobRecord;
 };
 
 type DriverCompletionOutboxRow = QueryResultRow & {
@@ -501,19 +501,22 @@ export class OwnedMobilityRepository {
       `
         SELECT record
         FROM ops.phase1_dispatch_jobs
-        WHERE order_id = $1
+        WHERE dispatch_job_id = $1
         LIMIT 1
         FOR UPDATE
       `,
-      [task.orderId],
+      [assignment.dispatchJobId],
     );
     const dispatchJobRow = dispatchJobResult.rows[0];
-    const dispatchJob = dispatchJobRow
-      ? this.parseRecord<DispatchJobRecord>(
-          dispatchJobRow.record,
-          "ops.phase1_dispatch_jobs",
-        )
-      : null;
+    if (!dispatchJobRow) {
+      throw new Error(
+        `Dispatch job ${assignment.dispatchJobId} missing for driver task ${taskId}.`,
+      );
+    }
+    const dispatchJob = this.parseRecord<DispatchJobRecord>(
+      dispatchJobRow.record,
+      "ops.phase1_dispatch_jobs",
+    );
 
     return { order, assignment, task, dispatchJob };
   }
@@ -587,28 +590,6 @@ export class OwnedMobilityRepository {
           ],
         ),
       ),
-    );
-  }
-
-  async claimNextDriverCompletionOutbox(
-    executor: OwnedMobilityQueryExecutor,
-    arg1: string,
-    arg2: string,
-    arg3: string,
-    arg4: number | string,
-    arg5?: number,
-  ): Promise<DriverCompletionOutboxClaimResult | null> {
-    const leaseToken = typeof arg4 === "number" ? arg1 : arg2;
-    const leasedUntil = typeof arg4 === "number" ? arg2 : arg3;
-    const now = typeof arg4 === "number" ? arg3 : (arg4 as string);
-    const maxAttempts = typeof arg4 === "number" ? arg4 : (arg5 ?? 5);
-
-    return this.claimNextRecoverableDriverCompletionOutbox(
-      executor,
-      leaseToken,
-      leasedUntil,
-      now,
-      maxAttempts,
     );
   }
 

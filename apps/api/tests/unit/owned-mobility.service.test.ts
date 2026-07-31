@@ -100,7 +100,6 @@ function createOwnedMobilityService(options?: {
     loadState?: (...args: any[]) => Promise<unknown>;
     loadDriverTaskCompletionBundleForUpdate?: (...args: any[]) => Promise<unknown>;
     hasDriverTaskTraceRequestId?: (...args: any[]) => Promise<boolean>;
-    claimNextDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     claimNextRecoverableDriverCompletionOutbox?: (
       ...args: any[]
     ) => Promise<unknown>;
@@ -4154,7 +4153,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         task: state.get("task"),
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
-      claimNextDriverCompletionOutbox: vi.fn(async () => {
+      claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
         const record = outboxQueue.shift();
         return record ? { action: "dispatch", record } : null;
       }),
@@ -4465,7 +4464,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         task: state.get("task"),
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
-      claimNextDriverCompletionOutbox: vi.fn(async () => null),
+      claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => null),
       reportPersistenceFailure: vi.fn(),
     };
 
