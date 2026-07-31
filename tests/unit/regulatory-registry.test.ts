@@ -96,10 +96,6 @@ describe("regulatory registry service", () => {
     expect(activatedContract.status).toBe("active");
     expect(activatedPolicy.status).toBe("active");
     expect(approvedExclusivity.reviewStatus).toBe("approved");
-    // Note: submitExclusivityReview auto-clears dispatchableFlag while review is
-    // pending, and the current pipeline does not auto-restore the flag once
-    // compliance returns to "active". Lifecycle facets are verified to be active
-    // here; dispatchability requires a separate operator re-enable step.
     const restoredVehicle = regulatoryRegistryService
       .listVehicles()
       .find((vehicle) => vehicle.vehicleId === "veh-demo-001");
@@ -112,6 +108,13 @@ describe("regulatory registry service", () => {
     expect(restoredVehicle?.supplyLifecycle.exclusivity.lifecycleStatus).toBe(
       "active",
     );
+    expect(restoredVehicle?.dispatchableFlag).toBe(true);
+    expect(
+      regulatoryRegistryService.getVehicleDispatchability(
+        "veh-demo-001",
+        "standard_taxi",
+      ),
+    ).toBe(true);
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         contracts: [

@@ -126,15 +126,29 @@ describe("Cloud Run deploy quota retry", () => {
 
     expect(
       workflow.match(/scripts\/deploy-cloud-run-service\.sh/g),
-    ).toHaveLength(11);
+    ).toHaveLength(10);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
     expect(workflow).not.toContain("concierge-portal-web");
+    expect(
+      workflow
+        .split("\n")
+        .filter((line) => line.includes("passenger-web"))
+        .map((line) => line.trim()),
+    ).toEqual([
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 services plus drts-passenger-web."',
+      '- "delete-drts-passenger-web"',
+    ]);
+    expect(workflow).not.toMatch(/Deploy — .*passenger/i);
+    expect(workflow).not.toMatch(/Build & push — .*passenger/i);
 
     const domainWorkflow = readFileSync(
       path.join(repoRoot, ".github/workflows/domain-mappings-dev.yml"),
       "utf8",
     );
     expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
+    expect(domainWorkflow).not.toContain("ride.smarttransport.tw");
+    expect(domainWorkflow).toContain("uses: actions/checkout@v4");
+    expect(domainWorkflow).toContain("./scripts/map-domain-service.sh");
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {
@@ -150,7 +164,6 @@ describe("Cloud Run deploy quota retry", () => {
       "tenant-console-web",
       "bank-console-web",
       "referral-embed-web",
-      "passenger-web",
       "partner-booking-web",
       "enterprise-dispatch-web",
       "channel-partner-portal-web",

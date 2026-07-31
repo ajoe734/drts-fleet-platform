@@ -23,6 +23,7 @@ import type { Notification, PoolClient } from "pg";
 import { fromEvent, map, type Observable } from "rxjs";
 
 import { DatabaseService } from "./db/database.service";
+import { generateDeterministicUuid } from "./durable-identity";
 
 const OPS_DISPATCH_EVENT_CHANNEL = "ops.dispatch";
 const OPS_DISPATCH_EVENT_NOTIFICATION_CHANNEL = "ops_dispatch_events";
@@ -149,24 +150,49 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  publishOrderCreated(order: OwnedOrderRecord, requestId?: string) {
-    this.publish("order_created", order.orderId, requestId, {
-      order: this.cloneOrder(order),
-    });
+  async publishOrderCreated(
+    order: OwnedOrderRecord,
+    requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
+  ) {
+    await this.publish(
+      "order_created",
+      order.orderId,
+      requestId,
+      {
+        order: this.cloneOrder(order),
+      },
+      order.tenantId,
+      options?.eventId,
+      options?.correlationId,
+    );
   }
 
-  publishOrderUpdated(order: OwnedOrderRecord, requestId?: string) {
-    this.publish("order_updated", order.orderId, requestId, {
-      order: this.cloneOrder(order),
-    });
+  async publishOrderUpdated(
+    order: OwnedOrderRecord,
+    requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
+  ) {
+    await this.publish(
+      "order_updated",
+      order.orderId,
+      requestId,
+      {
+        order: this.cloneOrder(order),
+      },
+      order.tenantId,
+      options?.eventId,
+      options?.correlationId,
+    );
   }
 
-  publishDispatchJobUpdated(
+  async publishDispatchJobUpdated(
     orderId: string,
     dispatchJob: DispatchJobRecord,
     requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
   ) {
-    this.publish(
+    await this.publish(
       "dispatch_job_updated",
       dispatchJob.dispatchJobId,
       requestId,
@@ -175,14 +201,17 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
         dispatchJob: { ...dispatchJob },
       },
       orderId,
+      options?.eventId,
+      options?.correlationId,
     );
   }
 
-  publishDriverLocationUpdated(
+  async publishDriverLocationUpdated(
     location: DriverLocationSnapshot,
     requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
   ) {
-    this.publish(
+    await this.publish(
       "driver_location_updated",
       location.driverId,
       requestId,
@@ -193,14 +222,17 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
         recordedAt: location.recordedAt,
       },
       null,
+      options?.eventId,
+      options?.correlationId,
     );
   }
 
-  publishSupplyLifecycleUpdated(
+  async publishSupplyLifecycleUpdated(
     vehicle: VehicleRegistryRecord,
     requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
   ) {
-    this.publish(
+    await this.publish(
       "supply_lifecycle_updated",
       vehicle.vehicleId,
       requestId,
@@ -211,19 +243,45 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
         lifecycle: this.cloneVehicle(vehicle).supplyLifecycle,
       },
       null,
+      options?.eventId,
+      options?.correlationId,
     );
   }
 
-  publishIncidentCreated(incident: IncidentRecord, requestId?: string) {
-    this.publish("incident_created", incident.incidentId, requestId, {
-      incident: this.cloneIncident(incident),
-    });
+  async publishIncidentCreated(
+    incident: IncidentRecord,
+    requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
+  ) {
+    await this.publish(
+      "incident_created",
+      incident.incidentId,
+      requestId,
+      {
+        incident: this.cloneIncident(incident),
+      },
+      null,
+      options?.eventId,
+      options?.correlationId,
+    );
   }
 
-  publishIncidentUpdated(incident: IncidentRecord, requestId?: string) {
-    this.publish("incident_updated", incident.incidentId, requestId, {
-      incident: this.cloneIncident(incident),
-    });
+  async publishIncidentUpdated(
+    incident: IncidentRecord,
+    requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
+  ) {
+    await this.publish(
+      "incident_updated",
+      incident.incidentId,
+      requestId,
+      {
+        incident: this.cloneIncident(incident),
+      },
+      null,
+      options?.eventId,
+      options?.correlationId,
+    );
   }
 
   private cloneIncident(incident: IncidentRecord): IncidentRecord {
@@ -245,25 +303,33 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private publish(
+  private async publish(
     eventType: OpsDispatchStreamEventType,
     subjectId: string,
     requestId: string | undefined,
     data: OpsDispatchStreamEventEnvelope["data"],
     tenantId: string | null = null,
+    eventIdOverride?: string,
+    correlationIdOverride?: string,
   ) {
     const occurredAt = new Date().toISOString();
     const publishedAt = new Date().toISOString();
+    const eventId =
+      eventIdOverride ??
+      generateDeterministicUuid(
+        "ops_dispatch_event",
+        `${eventType}:${subjectId}:${tenantId ?? ""}:${requestId ?? ""}`,
+      );
 
     const envelope: OpsDispatchStreamEventEnvelope & { publishedAt: string } = {
-      eventId: randomUUID(),
+      eventId,
       eventType,
       eventVersion: 1,
       occurredAt,
       publishedAt,
       producer: "apps/api/ops-dispatch",
       tenantId,
-      correlationId: requestId ?? randomUUID(),
+      correlationId: correlationIdOverride ?? requestId ?? randomUUID(),
       causationId: requestId ?? subjectId,
       subjectId,
       data,
@@ -285,24 +351,22 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (payload.length > 7500) {
-        this.logger.warn(
-          `Payload too large for Postgres NOTIFY even after Gzip (${payload.length} bytes), falling back to local-only for ${envelope.eventId}`,
+        throw new Error(
+          `Payload too large for Postgres NOTIFY even after Gzip (${payload.length} bytes) for ${envelope.eventId}`,
         );
-        this.eventEmitter.emit(OPS_DISPATCH_EVENT_CHANNEL, envelope);
-      } else {
-        void this.databaseService
-          .query(
-            `SELECT pg_notify('${OPS_DISPATCH_EVENT_NOTIFICATION_CHANNEL}', $1)`,
-            [payload],
-          )
-          .catch((err) => {
-            this.logger.error(
-              `Postgres NOTIFY failed for ${envelope.eventId}`,
-              err,
-            );
-            // Fallback to local
-            this.eventEmitter.emit(OPS_DISPATCH_EVENT_CHANNEL, envelope);
-          });
+      }
+
+      try {
+        await this.databaseService.query(
+          `SELECT pg_notify('${OPS_DISPATCH_EVENT_NOTIFICATION_CHANNEL}', $1)`,
+          [payload],
+        );
+      } catch (err) {
+        this.logger.error(
+          `Postgres NOTIFY failed for ${envelope.eventId}`,
+          err,
+        );
+        throw err;
       }
     } else {
       this.eventEmitter.emit(OPS_DISPATCH_EVENT_CHANNEL, envelope);

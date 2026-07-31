@@ -9,17 +9,63 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 
 log_step "05 — Billing invoice"
 
-# ── 1. Build period fixture (previous calendar month — closed period) ─────────
-# Billing engine requires a closed period (past month); current month is open and
-# will be rejected by the staging billing engine with a validation error.
-PERIOD_START=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +"%Y-%m-01T00:00:00Z" 2>/dev/null \
-  || date -u -v-1m -v1d +"%Y-%m-01T00:00:00Z")
-# Last day of previous month = one second before this month's 1st
-PERIOD_END=$(date -u -d "$(date -u +%Y-%m-01) -1 second" +"%Y-%m-%dT23:59:59Z" 2>/dev/null \
-  || date -u -v-1d -v+1m -v1d -v-1d +"%Y-%m-%dT23:59:59Z")
+# ── 1. Build a closed period fixture anchored to the current month ────────────
+# Repo-local smoke should be self-contained: it creates the dispatch in 02–04,
+# then closes and invoices that trip here. The billing service only requires
+# periodEnd < now, so use "month start → one minute ago" instead of assuming
+# historical completed trips already exist for the prior month.
+PERIOD_START=$(date -u +"%Y-%m-01T00:00:00Z")
+PERIOD_END=$(date -u -d "@$(( $(date -u +%s) - 60 ))" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+  || date -u -r "$(( $(date -u +%s) - 60 ))" +"%Y-%m-%dT%H:%M:%SZ")
+
+TASK_ID=$(state_get "taskId")
+if [[ -z "$TASK_ID" ]]; then
+  http_call GET "/driver/tasks"
+  assert_status "200"
+  TASK_ID=$(json_get_first ".data.items[0].taskId" ".data.items[0].task_id")
+fi
+
+if [[ -z "$TASK_ID" ]]; then
+  log_fail "Billing smoke requires a driver task from suites 03–04, but none was found."
+  exit 1
+fi
+
+log_info "Closing taskId=${TASK_ID} to produce an invoice-eligible trip"
+
+TMP_DIR=$(mktemp -d /tmp/drts-smoke-billing-XXXXXX)
+trap 'rm -rf "$TMP_DIR" "$FIXTURE_TMP"' EXIT
+
+DEPARTED_AT=$(date -u -d "@$(( $(date -u +%s) - 50 ))" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+  || date -u -r "$(( $(date -u +%s) - 50 ))" +"%Y-%m-%dT%H:%M:%SZ")
+ARRIVED_AT=$(date -u -d "@$(( $(date -u +%s) - 40 ))" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+  || date -u -r "$(( $(date -u +%s) - 40 ))" +"%Y-%m-%dT%H:%M:%SZ")
+STARTED_AT=$(date -u -d "@$(( $(date -u +%s) - 30 ))" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+  || date -u -r "$(( $(date -u +%s) - 30 ))" +"%Y-%m-%dT%H:%M:%SZ")
+COMPLETED_AT=$(date -u -d "@$(( $(date -u +%s) - 20 ))" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+  || date -u -r "$(( $(date -u +%s) - 20 ))" +"%Y-%m-%dT%H:%M:%SZ")
+
+jq --arg ts "$DEPARTED_AT" '.departedAt = $ts' \
+  "${SCRIPT_DIR}/../e2e/fixtures/e2e-driver-depart.json" > "${TMP_DIR}/depart.json"
+http_call POST "/driver/tasks/${TASK_ID}/depart" "${TMP_DIR}/depart.json"
+assert_status "200|201"
+
+jq --arg ts "$ARRIVED_AT" '.arrivedAt = $ts' \
+  "${SCRIPT_DIR}/../e2e/fixtures/e2e-driver-arrived-pickup.json" > "${TMP_DIR}/arrived.json"
+http_call POST "/driver/tasks/${TASK_ID}/arrived_pickup" "${TMP_DIR}/arrived.json"
+assert_status "200|201"
+
+jq --arg ts "$STARTED_AT" '.startedAt = $ts' \
+  "${SCRIPT_DIR}/../e2e/fixtures/e2e-driver-start.json" > "${TMP_DIR}/start.json"
+http_call POST "/driver/tasks/${TASK_ID}/start" "${TMP_DIR}/start.json"
+assert_status "200|201"
+
+jq --arg ts "$COMPLETED_AT" '.completedAt = $ts' \
+  "${SCRIPT_DIR}/../e2e/fixtures/e2e-driver-complete.json" > "${TMP_DIR}/complete.json"
+http_call POST "/driver/tasks/${TASK_ID}/complete" "${TMP_DIR}/complete.json"
+assert_status "200|201"
+log_ok "POST /driver/tasks/${TASK_ID}/complete → HTTP ${RESP_STATUS}, completedAt=${COMPLETED_AT}"
 
 FIXTURE_TMP=$(mktemp /tmp/drts-smoke-invoice-XXXXXX.json)
-trap 'rm -f "$FIXTURE_TMP"' EXIT
 
 jq \
   --arg tid "$SMOKE_TENANT_ID" \
@@ -32,7 +78,7 @@ jq \
 http_call POST "/tenant/invoices/generate" "$FIXTURE_TMP"
 assert_status "200|201"
 
-INVOICE_ID=$(json_get ".data.invoiceId")
+INVOICE_ID=$(json_get_first ".data.invoiceId" ".data.invoice_id")
 if [[ -z "$INVOICE_ID" ]]; then
   log_fail "No invoiceId in response: ${RESP_BODY}"
   exit 1

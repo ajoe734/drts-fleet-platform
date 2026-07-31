@@ -28,7 +28,7 @@ jq \
 http_call POST "/tenant/bookings" "$FIXTURE_TMP"
 assert_status "200|201"
 
-BOOKING_ID=$(json_get ".data.bookingId")
+BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
 if [[ -z "$BOOKING_ID" ]]; then
   log_fail "No bookingId in response: ${RESP_BODY}"
   exit 1
