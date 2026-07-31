@@ -73,6 +73,27 @@ describe("bank-console proxy auth boundary", () => {
     );
   });
 
+  it("does not refresh sign-out state from a cookie-only RSC prefetch", () => {
+    const response = proxy(
+      requestFor(
+        "/login?bank=cathay&locale=en",
+        "drts_bank_console_signed_out=1",
+        {
+          rsc: "1",
+          "next-router-prefetch": "1",
+          "sec-fetch-dest": "empty",
+        },
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://bank-console.test/login?bank=cathay&locale=en&signedOut=1",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
+  });
+
   it("clears the signed-out cookie when a demo persona signs in", () => {
     const response = proxy(
       requestFor(
