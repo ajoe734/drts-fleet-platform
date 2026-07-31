@@ -31,8 +31,9 @@ if [ "$describe_status" -eq 0 ]; then
 else
   is_domain_not_found=0
 
-  # Positively require exact domain-mappings.describe NOT_FOUND header anchored to ^ERROR:
-  if grep -Eq '^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:' <<<"$describe_output"; then
+  first_line="${describe_output%%$'\n'*}"
+  # Positively require exact domain-mappings.describe NOT_FOUND header anchored to the very start of describe_output (first line)
+  if grep -Eq '^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:' <<<"$first_line"; then
     # Extract body strictly after the ^ERROR: ... NOT_FOUND: header
     body_output="$(sed -nE 's/^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
     if [ -z "$body_output" ]; then
