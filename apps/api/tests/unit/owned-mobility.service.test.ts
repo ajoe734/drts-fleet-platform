@@ -73,6 +73,7 @@ function createOwnedMobilityService(options?: {
     isEnabled: () => boolean;
     persistChanges: (...args: any[]) => Promise<unknown>;
     persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
+    persistDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
     loadDriverTaskCompletionBundleForUpdate?: (...args: any[]) => Promise<unknown>;
     hasDriverTaskTraceRequestId?: (...args: any[]) => Promise<boolean>;
@@ -4111,6 +4112,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         sequence.push("commit");
         return result;
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
         assignment: state.get("assignment"),
@@ -4231,13 +4233,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "persist",
       "commit",
       "quota_apply",
-      "webhook",
     ]);
+    expect(repository.persistDriverCompletionOutbox).toHaveBeenCalledTimes(1);
     expect(
       auditNotificationService.recordAuditLog.mock.calls.filter(
         ([input]) => input.actionName === "complete_trip",
       ),
     ).toHaveLength(1);
+    expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
     expect(service.listDriverTasks()[0]).toMatchObject({ status: "completed" });
   });
 
@@ -4277,6 +4280,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         }
       }),
       withTransaction: vi.fn(async (work) => work({} as never)),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
         assignment: state.get("assignment"),
@@ -4396,6 +4400,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       persistChanges: vi.fn(async () => {}),
       persistOrderWorkflow: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => work({} as never)),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
         assignment: state.get("assignment"),
@@ -4558,6 +4563,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         await work({} as never);
         throw new Error("commit failed");
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
         assignment: state.get("assignment"),
