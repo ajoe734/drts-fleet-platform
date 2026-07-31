@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import sys
@@ -20,19 +19,19 @@ if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
 from common import config_path, load_config, new_runtime_id, utc_now, write_activity_log, write_json
-from runtime_state import default_approval_state, load_approval_state, load_runtime_state, save_approval_state
+from control_plane.infra.approval_repo import (
+    approval_transaction,
+    default_approval_state,
+    load_approval_state,
+    save_approval_state,
+)
+from control_plane.infra.runtime_repo import load_runtime_state
 
 
 @contextmanager
 def approval_lock(config: dict[str, Any]):
-    lock_path = config_path(config, "approval_queue").with_suffix(".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("w", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    with approval_transaction(config):
+        yield
 
 
 def list_pending(config: dict[str, Any], include_history: bool = False) -> dict[str, Any]:

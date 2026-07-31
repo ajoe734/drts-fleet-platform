@@ -658,7 +658,9 @@ export class ApiClient {
       const init: RequestInit = {
         method,
         headers,
-        signal: controller.signal,
+        signal: options?.signal
+          ? AbortSignal.any([controller.signal, options.signal])
+          : controller.signal,
       };
 
       if (options?.body !== undefined) {
