@@ -29,6 +29,7 @@ THIS_DIR = Path(__file__).resolve().parent
 
 DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS = [
     ".orchestrator/supervisor.py",
+    ".orchestrator/control_plane/**",
     ".orchestrator/skills/**",
     ".orchestrator/templates/*",
     ".orchestrator/config*.json",

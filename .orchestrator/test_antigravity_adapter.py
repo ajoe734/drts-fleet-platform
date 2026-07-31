@@ -63,7 +63,9 @@ class AntigravityAdapterTests(unittest.TestCase):
             self.assertEqual(command[0], "/usr/bin/agy")
             self.assertIn("--print", command)
             self.assertIn("--dangerously-skip-permissions", command)
-            self.assertEqual(command[-1], "wake up")  # prompt is the trailing positional
+            print_index = command.index("--print")
+            self.assertEqual(command[print_index + 1], "wake up")
+            self.assertEqual(command[-2:], ["--print", "wake up"])
             add_dirs = [command[i + 1] for i, v in enumerate(command) if v == "--add-dir"]
             self.assertIn(str(tenant_repo), add_dirs)
 
