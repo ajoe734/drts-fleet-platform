@@ -16,7 +16,7 @@ This packet is a support artifact only. It packages the current machine-truth sn
 
 ### 1.1 Sidecar row
 
-`STAGE1-PILOT-RAILS-20260731-SIDECAR-ACCEPTANCE` is currently `in_progress` under owner `Codex` and reviewer `Codex2`, with `last_update=2026-07-31T15:22:27Z`.
+`STAGE1-PILOT-RAILS-20260731-SIDECAR-ACCEPTANCE` is currently `in_progress` under owner `Codex` and reviewer `Codex2`, with `last_update=2026-07-31T15:25:46Z`.
 
 Authoritative fields from machine truth:
 
@@ -159,4 +159,5 @@ AI_NAME=Codex2 scripts/ai-status.sh reopen STAGE1-PILOT-RAILS-20260731-SIDECAR-A
 
 ## 9. Change Log
 
+- `2026-07-31` — Refreshed the sidecar machine-truth snapshot after the failed review handoff so the packet matches the current reviewer-visible branch/worktree state.
 - `2026-07-31` — Initial packet created for `STAGE1-PILOT-RAILS-20260731-SIDECAR-ACCEPTANCE`, based on current sidecar row, parent row, upstream audit row, and L0 collaboration rules.
