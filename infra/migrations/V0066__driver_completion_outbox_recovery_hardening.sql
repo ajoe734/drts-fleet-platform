@@ -28,13 +28,25 @@ ALTER TABLE ops.phase1_driver_tasks
   ADD CONSTRAINT phase1_driver_tasks_task_order_unique UNIQUE (task_id, order_id);
 
 ALTER TABLE ops.driver_completion_outbox
+  DROP CONSTRAINT IF EXISTS driver_completion_outbox_task_id_fkey;
+
+ALTER TABLE ops.driver_completion_outbox
+  DROP CONSTRAINT IF EXISTS driver_completion_outbox_order_id_fkey;
+
+ALTER TABLE ops.driver_completion_outbox
   DROP CONSTRAINT IF EXISTS driver_completion_outbox_task_order_fk;
 
 ALTER TABLE ops.driver_completion_outbox
   ADD CONSTRAINT driver_completion_outbox_task_order_fk
   FOREIGN KEY (task_id, order_id)
   REFERENCES ops.phase1_driver_tasks(task_id, order_id)
-  ON DELETE CASCADE;
+  ON DELETE NO ACTION;
+
+ALTER TABLE ops.driver_completion_outbox
+  ADD CONSTRAINT driver_completion_outbox_order_fk
+  FOREIGN KEY (order_id)
+  REFERENCES ops.phase1_owned_orders(order_id)
+  ON DELETE NO ACTION;
 
 ALTER TABLE ops.driver_completion_outbox
   DROP CONSTRAINT IF EXISTS driver_completion_outbox_payload_object_chk;
