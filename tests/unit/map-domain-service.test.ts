@@ -94,6 +94,7 @@ esac
 
   return {
     ...result,
+    createLogContent,
     createInvocationCount,
   };
 }
@@ -141,6 +142,35 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(1);
+    expect(result.createLogContent).toBe(
+      "CREATE: --quiet beta run domain-mappings create --service drts-dev-api --domain api.smarttransport.tw --region us-central1 --project drts-dev-ray-tw-20260730",
+    );
+  });
+
+  it("fails closed without creating when describe succeeds with empty output", () => {
+    const result = runMapDomain({
+      describeStdout: "",
+      describeExitCode: 0,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Refusing to create a domain mapping from an empty, multiline, or malformed describe result.",
+    );
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when describe succeeds with multiline output", () => {
+    const result = runMapDomain({
+      describeStdout: "drts-dev-api\nunexpected-second-line",
+      describeExitCode: 0,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Refusing to create a domain mapping from an empty, multiline, or malformed describe result.",
+    );
+    expect(result.createInvocationCount).toBe(0);
   });
 
   it("creates domain mapping when domain resource is not found (bracket format)", () => {
@@ -153,6 +183,24 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(1);
+    expect(result.createLogContent).toBe(
+      "CREATE: --quiet beta run domain-mappings create --service drts-dev-api --domain api.smarttransport.tw --region us-central1 --project drts-dev-ray-tw-20260730",
+    );
+  });
+
+  it("creates domain mapping for the Cloud Run DOMAIN_MAPPING does-not-exist response", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist. This command is authenticated as deployer@example.com using the credentials in /tmp/gha-creds.json, specified by the [auth/credential_file_override] property.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(1);
+    expect(result.createLogContent).toBe(
+      "CREATE: --quiet beta run domain-mappings create --service drts-dev-api --domain api.smarttransport.tw --region us-central1 --project drts-dev-ray-tw-20260730",
+    );
   });
 
   it("fails closed without creating when project NOT_FOUND is returned", () => {
@@ -271,6 +319,131 @@ describe("Cloud Run domain mapping helper", () => {
       "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
     );
     expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when UNKNOWN wraps a DOMAIN_MAPPING does-not-exist message", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) UNKNOWN: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when the DOMAIN_MAPPING does-not-exist response names the wrong region", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'europe-west1' in project 'drts-dev-ray-tw-20260730' does not exist.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when the DOMAIN_MAPPING does-not-exist response names the wrong project", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'wrong-project' does not exist.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when the DOMAIN_MAPPING does-not-exist response names the wrong domain", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'evil.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when a mixed permission error follows an otherwise valid missing mapping", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist. Permission denied while reading API metadata.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when a mixed authentication error follows an otherwise valid missing mapping", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist. Authentication failed.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when a mixed API error follows an otherwise valid missing mapping", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist. Domain Mappings API disabled.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when the resource kind is not DOMAIN_MAPPING", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'SERVICE' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when a kindless resource claims the domain does not exist", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' does not exist.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when API_NOT_ENABLED is embedded in the authentication context", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist. This command is authenticated as API_NOT_ENABLED using the credentials in /tmp/gha-creds.json, specified by the [auth/credential_file_override] property.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed when QUOTA_EXCEEDED is embedded in the authentication context", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' of kind 'DOMAIN_MAPPING' in region 'us-central1' in project 'drts-dev-ray-tw-20260730' does not exist. This command is authenticated as deployer@example.com using the credentials in /tmp/QUOTA_EXCEEDED.json, specified by the [auth/credential_file_override] property.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
     expect(result.createInvocationCount).toBe(0);
   });
 
