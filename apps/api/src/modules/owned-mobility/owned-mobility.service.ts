@@ -5203,7 +5203,11 @@ export class OwnedMobilityService implements OnModuleInit {
         }
         await this.tenantPartnerService.publishWebhookEvent(
           payload.tenantId,
-          payload.payload,
+          {
+            ...payload.payload,
+            outboxKey: (outbox as any).outboxKey ?? outbox.outboxId,
+            deliveryId: `wd_${generateDeterministicUuid("webhook_delivery", `outbox:${outbox.outboxId}`)}`,
+          },
         );
         return;
       }
@@ -5216,10 +5220,24 @@ export class OwnedMobilityService implements OnModuleInit {
         if (!this.eventEmitter) {
           throw new Error("Owned mobility completion event emitter unavailable.");
         }
-        await this.eventEmitter.emitAsync(
+        if (
+          this.eventEmitter.listenerCount(
+            OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+          ) === 0
+        ) {
+          throw new Error(
+            "Owned mobility trip completion listener is missing or unavailable.",
+          );
+        }
+        const results = await this.eventEmitter.emitAsync(
           OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
           payload.event,
         );
+        if (!results || results.length === 0) {
+          throw new Error(
+            "Owned mobility trip completion emission yielded no listener execution.",
+          );
+        }
         return;
       }
       case "multi_taxi_certificate": {

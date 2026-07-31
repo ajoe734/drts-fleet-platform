@@ -6572,6 +6572,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         "publish_webhook_event",
         deliveryIdOverride,
       );
+      if (delivery.status === "delivered") {
+        results.push({
+          webhookId: endpoint.webhookId,
+          deliveryId: delivery.deliveryId,
+          attempt: delivery.attempt,
+          httpStatus: delivery.httpStatus,
+          nextAttemptAt: delivery.nextAttemptAt,
+          status: delivery.status,
+        });
+        continue;
+      }
       const payload = this.buildWebhookPayload({
         deliveryId: delivery.deliveryId,
         eventType: input.eventType,
