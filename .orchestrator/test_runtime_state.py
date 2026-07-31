@@ -7,6 +7,28 @@ import runtime_state
 
 
 class RuntimeStateMigrationTests(unittest.TestCase):
+    def test_migrate_state_preserves_maintenance_throttle_metadata(self) -> None:
+        raw = {
+            "version": 4,
+            "maintenance": {
+                "worker_workspace_cleanup": {
+                    "last_attempt_at": "2026-07-20T01:00:00Z",
+                    "last_result": {"checked": 1, "skipped": 1},
+                }
+            },
+        }
+
+        state = runtime_state.migrate_state(raw)
+
+        self.assertEqual(
+            state["maintenance"]["worker_workspace_cleanup"]["last_attempt_at"],
+            "2026-07-20T01:00:00Z",
+        )
+        self.assertEqual(
+            state["maintenance"]["worker_workspace_cleanup"]["last_result"],
+            {"checked": 1, "skipped": 1},
+        )
+
     def test_migrate_state_preserves_quota_paused_agents(self) -> None:
         raw = {
             "version": 2,
@@ -38,6 +60,18 @@ class RuntimeStateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["failure_streaks"], {})
         self.assertEqual(migrated["chair_reassignment_guards"], {})
         self.assertEqual(migrated["supervisor"]["lifecycle"], "running")
+
+    def test_migrate_state_moves_legacy_task_mirror_to_watcher_cursor(self) -> None:
+        migrated = runtime_state.migrate_state(
+            {"version": 3, "tasks": {"TASK-1": {"status": "review"}}}
+        )
+
+        self.assertEqual(migrated["version"], 4)
+        self.assertNotIn("tasks", migrated)
+        self.assertEqual(
+            migrated["watcher"]["task_snapshots"]["TASK-1"]["status"],
+            "review",
+        )
 
     def test_upsert_and_clear_dispatch_pause(self) -> None:
         state = runtime_state.default_state()

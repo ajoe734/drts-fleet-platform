@@ -7,6 +7,7 @@
     "state_file": ".orchestrator/state.json",
     "event_queue": ".orchestrator/event-queue.jsonl",
     "approval_queue": ".orchestrator/approval-queue.json",
+    "control_plane_summary": ".orchestrator/projections/control-plane-summary.json",
     "sidecar_catalog": ".orchestrator/sidecar_catalog.json",
     "github_bus_state": ".orchestrator/github-bus-state.json",
     "github_webhook_events": ".orchestrator/github-webhook-events.jsonl",
@@ -24,7 +25,21 @@
     "heartbeat_warn_after_seconds": 10.0,
     "stall_after_seconds": 300,
     "max_worker_history": 200,
-    "auto_refresh_provider_capabilities": false
+    "auto_refresh_provider_capabilities": false,
+    "optional_automation": {
+      "governance_automation": {
+        "enabled": true
+      },
+      "underutilization": {
+        "enabled": true
+      }
+    },
+    "worker_workspace_cleanup": {
+      "enabled": true,
+      "archive_dirty_worktrees": true,
+      "force_remove_dirty_worktrees_after_archive": true,
+      "release_interval_seconds": 60
+    }
   },
   "worker_retry": {
     "enabled": true,

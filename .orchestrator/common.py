@@ -49,7 +49,7 @@ def _jsonl_lock_path(path: Path) -> Path:
 
 
 @contextmanager
-def _hold_jsonl_lock(path: Path):
+def hold_jsonl_lock(path: Path):
     ensure_parent(path)
     handle = _jsonl_lock_path(path).open("a+", encoding="utf-8")
     try:
@@ -62,7 +62,7 @@ def _hold_jsonl_lock(path: Path):
         handle.close()
 
 
-def _append_jsonl_line_unlocked(path: Path, line: str) -> None:
+def append_jsonl_line_unlocked(path: Path, line: str) -> None:
     payload = (line + "\n").encode("utf-8")
     fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
     try:
@@ -173,8 +173,14 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     ensure_parent(path)
-    with _hold_jsonl_lock(path):
-        _append_jsonl_line_unlocked(path, json.dumps(payload, ensure_ascii=False))
+    with hold_jsonl_lock(path):
+        append_jsonl_line_unlocked(path, json.dumps(payload, ensure_ascii=False))
+
+
+# Compatibility aliases for older imports. New repository code uses the public
+# names so queue append and compaction share one lock protocol.
+_hold_jsonl_lock = hold_jsonl_lock
+_append_jsonl_line_unlocked = append_jsonl_line_unlocked
 
 
 def deep_merge(base: Any, overlay: Any) -> Any:
