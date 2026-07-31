@@ -22,9 +22,11 @@ const skippedRuntimeSurfaces = [] as const;
 type RuntimeSurfaceKey =
   | "api"
   | "bank-console-web"
+  | "channel-partner-portal-web"
   | "enterprise-dispatch-web"
   | "partner-booking-web"
   | "platform-admin-web"
+  | "referral-embed-web"
   | "ops-console-web"
   | "fleet-partner-portal-web"
   | "tenant-console-web";
@@ -184,6 +186,32 @@ const partnerBookingActors: ActorProfile[] = [
   { key: "partner-booking-visitor", role: "partner_booking_visitor" },
 ];
 
+const channelPartnerActors: ActorProfile[] = [
+  {
+    key: "channel-partner-admin",
+    role: "channel_partner_admin",
+    tenant: "referral-demo-community",
+  },
+  {
+    key: "channel-partner-finance",
+    role: "channel_partner_finance",
+    tenant: "referral-demo-community",
+  },
+  {
+    key: "channel-partner-viewer",
+    role: "channel_partner_viewer",
+    tenant: "referral-demo-community",
+  },
+];
+
+const referralEmbedActors: ActorProfile[] = [
+  {
+    key: "referral-rider",
+    role: "referral_rider",
+    tenant: "referral-demo-community",
+  },
+];
+
 const apiActors: ActorProfile[] = [
   { key: "api-smoke", role: "runtime_smoke" },
   { key: "api-observer", role: "runtime_observer" },
@@ -195,6 +223,12 @@ const fleetMarker = /Fleet Partner Portal|車行夥伴入口|車行營運總覽|
 const tenantMarker = /租戶後台|Tenant|訂單|工作面|帳務概覽/i;
 const enterpriseMarker =
   /企業派車|鴻碩科技|建立預約|我的預約|成本中心|身分交付/i;
+const channelPartnerMarker =
+  /Channel Dashboard|渠道總覽|Referral Statements|分潤對帳單|Usage|用量明細/i;
+const referralEmbedMarker =
+  /社區叫車|Referral Embed|轉介嵌入前台|\/embed\/referral-demo-community/i;
+const referralEmbedEntrySlug =
+  process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "referral-demo-community";
 
 const surfaces: RuntimeSurface[] = [
   {
@@ -414,6 +448,56 @@ const surfaces: RuntimeSurface[] = [
         path: "/embed/unsupported-host",
         operation: "embedded unsupported host",
         marker: enterpriseMarker,
+      },
+    ],
+  },
+  {
+    key: "channel-partner-portal-web",
+    family: "referral channel partner self-service",
+    baseUrl:
+      process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL ??
+      "https://drts-dev-channel-partner-portal-web-waji3fer3a-uc.a.run.app",
+    actors: channelPartnerActors,
+    routes: [
+      {
+        key: "dashboard",
+        path: "/dashboard",
+        operation: "channel dashboard",
+        marker: channelPartnerMarker,
+      },
+      {
+        key: "usage",
+        path: "/usage",
+        operation: "referral usage detail",
+        marker: channelPartnerMarker,
+      },
+      {
+        key: "statements",
+        path: "/statements",
+        operation: "referral statements",
+        marker: channelPartnerMarker,
+      },
+    ],
+  },
+  {
+    key: "referral-embed-web",
+    family: "partner-scoped referral embed front",
+    baseUrl:
+      process.env.DRTS_DEV_REFERRAL_EMBED_BASE_URL ??
+      "https://drts-dev-referral-embed-web-waji3fer3a-uc.a.run.app",
+    actors: referralEmbedActors,
+    routes: [
+      {
+        key: "root",
+        path: "/",
+        operation: "referral root redirects to canonical partner entry",
+        marker: referralEmbedMarker,
+      },
+      {
+        key: "entry",
+        path: `/embed/${referralEmbedEntrySlug}`,
+        operation: "partner-scoped referral entry",
+        marker: referralEmbedMarker,
       },
     ],
   },

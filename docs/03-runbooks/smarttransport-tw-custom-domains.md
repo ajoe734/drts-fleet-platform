@@ -1,9 +1,9 @@
 # smarttransport.tw 自訂網域設定 Runbook
 
 **產生日期：** 2026-07-26
-**GCP Project：** `drts-dev-ray-tw-20260530`（dev live set，hash `ne55h7sy3a`）
+**GCP Project：** `drts-dev-ray-tw-20260730`
 **Region：** `us-central1`
-**目標：** 把每個 Cloud Run web app 對到 `smarttransport.tw` 下的獨立子網域。
+**目標：** 把目前仍屬 active inventory 的 Cloud Run web app 對到 `smarttransport.tw` 下的獨立子網域。
 
 > ⚠️ **執行前提（只有具權限者能做）**
 >
@@ -23,13 +23,15 @@
 | `ops.smarttransport.tw`      | `drts-ops-console-web`            | 營運中心         |
 | `partners.smarttransport.tw` | `drts-fleet-partner-portal-web`   | 車行夥伴         |
 | `dispatch.smarttransport.tw` | `drts-enterprise-dispatch-web`    | 企業派車         |
-| `ride.smarttransport.tw`     | `drts-passenger-web`              | 智行叫車（乘客） |
 | `book.smarttransport.tw`     | `drts-partner-booking-web`        | 機場／合作預約   |
 | `bank.smarttransport.tw`     | `drts-bank-console-web`           | 銀行後臺         |
 | `channel.smarttransport.tw`  | `drts-channel-partner-portal-web` | 渠道夥伴         |
 | `tenant.smarttransport.tw`   | `drts-tenant-console-web`         | 企業租戶         |
 | `refer.smarttransport.tw`    | `drts-referral-embed-web`         | 推薦嵌入         |
 | `api.smarttransport.tw`      | `drts-api`                        | 後端 API         |
+
+> `passenger-web` 已於 2026-06-16 退休，`concierge-portal-web` / `assisted-entry-web`
+> 亦非 active deploy surface；三者不得回到 domain mapping 或 active URL inventory。
 
 ---
 
@@ -54,7 +56,6 @@ map fleets.smarttransport.tw     drts-platform-admin-web
 map ops.smarttransport.tw        drts-ops-console-web
 map partners.smarttransport.tw   drts-fleet-partner-portal-web
 map dispatch.smarttransport.tw   drts-enterprise-dispatch-web
-map ride.smarttransport.tw       drts-passenger-web
 map book.smarttransport.tw       drts-partner-booking-web
 map bank.smarttransport.tw       drts-bank-console-web
 map channel.smarttransport.tw    drts-channel-partner-portal-web
@@ -76,7 +77,6 @@ fleets     CNAME  ghs.googlehosted.com.
 ops        CNAME  ghs.googlehosted.com.
 partners   CNAME  ghs.googlehosted.com.
 dispatch   CNAME  ghs.googlehosted.com.
-ride       CNAME  ghs.googlehosted.com.
 book       CNAME  ghs.googlehosted.com.
 bank       CNAME  ghs.googlehosted.com.
 channel    CNAME  ghs.googlehosted.com.
@@ -95,7 +95,7 @@ Google 會自動為每個對應簽發受管 SSL 憑證（首次 provisioning 可
 ## 4. 驗證
 
 ```bash
-for sub in fleets ops partners dispatch ride book bank channel tenant refer api; do
+for sub in fleets ops partners dispatch book bank channel tenant refer api; do
   echo -n "$sub.smarttransport.tw → "
   curl -s -o /dev/null -w "%{http_code}\n" --max-time 20 "https://$sub.smarttransport.tw" || echo "尚未生效"
 done
@@ -108,6 +108,6 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
 
 ## 5. 現況（產生本 runbook 時）
 
-- Cloud Run 服務全部已部署且 dev URL 回 200（`drts-*-web-ne55h7sy3a-uc.a.run.app`）。
+- Active Cloud Run 服務已部署於 project `drts-dev-ray-tw-20260730`；domain mapping inventory 不含 retired `passenger-web` / `concierge-portal-web` / `assisted-entry-web`。
 - `smarttransport.tw`：apex→`185.158.133.1`，子網域未解析 → **尚未接 Cloud Run**。
 - 本 runbook 的指令與記錄**未套用**，等前提 1+2 齊備後由具權限者執行。

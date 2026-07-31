@@ -116,7 +116,6 @@ jobs:
       referral_embed_service: ${{ steps.resolve.outputs.referral_embed_service }}
       referral_embed_entry_slug: ${{ steps.resolve.outputs.referral_embed_entry_slug }}
       partner_booking_service: ${{ steps.resolve.outputs.partner_booking_service }}
-      passenger_web_service: ${{ steps.resolve.outputs.passenger_web_service }}
       enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
@@ -212,7 +211,6 @@ jobs:
           referral_embed_service="$(pick "${DEV_GCP_REFERRAL_EMBED_SERVICE:-}" "" "drts-referral-embed-web")"
           referral_embed_entry_slug="$(pick "${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "referral-demo-community")"
           partner_booking_service="$(pick "${DEV_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-partner-booking-web")"
-          passenger_web_service="$(pick "${DEV_GCP_PASSENGER_WEB_SERVICE:-}" "" "drts-passenger-web")"
           enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
@@ -310,7 +308,6 @@ jobs:
           emit referral_embed_service "$referral_embed_service"
           emit referral_embed_entry_slug "$referral_embed_entry_slug"
           emit partner_booking_service "$partner_booking_service"
-          emit passenger_web_service "$passenger_web_service"
           emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit channel_partner_portal_service "$channel_partner_portal_service"
           emit migration_job "$migration_job"
@@ -464,18 +461,6 @@ jobs:
             ${{ needs.prepare.outputs.registry }}/referral-embed-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache,mode=max
-
-      - name: Build & push — passenger-web
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/passenger-web/Dockerfile
-          push: true
-          tags: |
-            ${{ needs.prepare.outputs.registry }}/passenger-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/passenger-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache,mode=max
 
       - name: Build & push — partner-booking-web
         uses: docker/build-push-action@v5
@@ -897,27 +882,6 @@ jobs:
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
-      - name: Deploy — passenger-web
-        run: |
-          IMAGE="${{ needs.prepare.outputs.registry }}/passenger-web:${{ needs.build-push.outputs.image_tag }}"
-
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_web_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --image "$IMAGE" \
-            --port 3016 \
-            --ingress all \
-            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
-            --allow-unauthenticated \
-            --cpu 1 \
-            --concurrency 80 \
-            --execution-environment gen1 \
-            --no-cpu-boost \
-            --min-instances 0 \
-            --max-instances 1 \
-            --project "${{ needs.prepare.outputs.project_id }}"
-
       - name: Deploy — partner-booking-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/partner-booking-web:${{ needs.build-push.outputs.image_tag }}"
@@ -998,7 +962,6 @@ jobs:
       enterprise_dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
-      passenger_web: ${{ steps.urls.outputs.passenger_web }}
 
     steps:
       - name: Authenticate to GCP
@@ -1087,10 +1050,6 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
-          passenger_web_url="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_web_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --project "${{ needs.prepare.outputs.project_id }}" \
-            --format='value(status.url)')"
           enterprise_dispatch_url="$(gcloud run services describe "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
@@ -1108,7 +1067,6 @@ jobs:
           echo "bank_console=${bank_console_url}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_url}" >> "$GITHUB_OUTPUT"
           echo "partner_booking=${partner_booking_url}" >> "$GITHUB_OUTPUT"
-          echo "passenger_web=${passenger_web_url}" >> "$GITHUB_OUTPUT"
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
 
@@ -1133,7 +1091,6 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/cathay/program/embed" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/taishin/program/embed" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/dbs/program/embed" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.passenger_web }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
@@ -1150,7 +1107,6 @@ jobs:
           echo "  bank-console: ${{ steps.urls.outputs.bank_console }}"
           echo "  referral-embed-web: ${{ steps.urls.outputs.referral_embed }}/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
           echo "  partner-booking: ${{ steps.urls.outputs.partner_booking }}"
-          echo "  passenger-web: ${{ steps.urls.outputs.passenger_web }}"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
 

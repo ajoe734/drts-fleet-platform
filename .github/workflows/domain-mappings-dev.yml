@@ -24,7 +24,6 @@ env:
   DEV_GCP_BANK_CONSOLE_SERVICE: ${{ vars.DEV_GCP_BANK_CONSOLE_SERVICE }}
   DEV_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.DEV_GCP_REFERRAL_EMBED_SERVICE }}
   DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
-  DEV_GCP_PASSENGER_WEB_SERVICE: ${{ vars.DEV_GCP_PASSENGER_WEB_SERVICE }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
   DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
@@ -74,7 +73,6 @@ jobs:
           map ops.smarttransport.tw        "${DEV_GCP_OPS_CONSOLE_SERVICE:-drts-ops-console-web}"
           map partners.smarttransport.tw   "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-drts-fleet-partner-portal-web}"
           map dispatch.smarttransport.tw   "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-drts-enterprise-dispatch-web}"
-          map ride.smarttransport.tw       "${DEV_GCP_PASSENGER_WEB_SERVICE:-drts-passenger-web}"
           map book.smarttransport.tw       "${DEV_GCP_PARTNER_BOOKING_SERVICE:-drts-partner-booking-web}"
           map bank.smarttransport.tw       "${DEV_GCP_BANK_CONSOLE_SERVICE:-drts-bank-console-web}"
           map channel.smarttransport.tw    "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-drts-channel-partner-portal-web}"
