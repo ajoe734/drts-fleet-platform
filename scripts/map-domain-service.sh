@@ -31,19 +31,21 @@ if [ "$describe_status" -eq 0 ]; then
 else
   is_domain_not_found=0
 
-  first_line="${describe_output%%$'\n'*}"
-  # Positively require exact domain-mappings.describe NOT_FOUND header anchored to the very start of describe_output (first line)
-  if grep -Eq '^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:' <<<"$first_line"; then
-    # Extract body strictly after the ^ERROR: ... NOT_FOUND: header
-    body_output="$(sed -nE 's/^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
+  # Positively require exact domain-mappings.describe NOT_FOUND header anchored at byte zero of describe_output
+  if [[ "$describe_output" =~ ^ERROR:[[:space:]]*(\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND: ]]; then
+    first_line="${describe_output%%$'\n'*}"
+    body_output="$(sed -nE 's/^ERROR: (\(gcloud\.(beta\.)?run\.domain-mappings\.describe\)|gcloud\.(beta\.)?run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:[[:space:]]*//p' <<<"$first_line")"
     if [ -z "$body_output" ]; then
-      body_output="$(sed -nE 's/^ERROR: [^:]*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
+      body_output="$(sed -nE 's/^ERROR: [^:]*NOT_FOUND:[[:space:]]*//p' <<<"$first_line")"
     fi
 
     domain_escaped="$(printf '%s\n' "$domain" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
 
-    if grep -Eiq "Cannot find domain mapping (for )?[^a-zA-Z0-9]?${domain_escaped}[^a-zA-Z0-9]?" <<<"$body_output" || \
-       grep -Eiq "(Resource|DomainMapping|Domain mapping)[[:space:]]+[^a-zA-Z0-9]?${domain_escaped}[^a-zA-Z0-9]?[[:space:]]+(was not found|not found)" <<<"$body_output"; then
+    # Require exact paired delimiter ('domain', "domain", [domain]) or end boundary not bounded by domain chars [a-zA-Z0-9.-]
+    domain_pattern="('${domain_escaped}'|\"${domain_escaped}\"|\\[${domain_escaped}\\]|(^|[^a-zA-Z0-9.-])${domain_escaped}($|[^a-zA-Z0-9.-]))"
+
+    if grep -Eiq "Cannot find domain mapping (for )?${domain_pattern}" <<<"$body_output" || \
+       grep -Eiq "(Resource|DomainMapping|Domain mapping)[[:space:]]+${domain_pattern}[[:space:]]+(was not found|not found)" <<<"$body_output"; then
       if ! grep -Eiq '(Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$body_output"; then
         is_domain_not_found=1
       fi
