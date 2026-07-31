@@ -846,7 +846,7 @@ export class BillingSettlementService implements OnModuleInit {
   }
 
   @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
-  handleOwnedMobilityTripCompleted(event: OwnedMobilityTripCompletedEvent) {
+  async handleOwnedMobilityTripCompleted(event: OwnedMobilityTripCompletedEvent) {
     if (
       !event.tenantId ||
       !event.driverId ||
@@ -878,7 +878,7 @@ export class BillingSettlementService implements OnModuleInit {
       event.sandboxFulfillmentSegments?.length ||
       event.sandboxBillingTreatment
     ) {
-      this.persistChanges(
+      await this.persistChangesRequired(
         {
           ...(event.sandboxFulfillmentSegments?.length
             ? {
@@ -920,7 +920,7 @@ export class BillingSettlementService implements OnModuleInit {
         persistedState.sandboxBillingTreatments.length > 0;
 
       if (!hasPersistedState) {
-        this.persistChanges(
+        await this.persistChanges(
           {
             tenantBillingProfiles: this.listStoredTenantBillingProfiles(),
             reconciliationIssues: this.reconciliationIssues.map((issue) =>
@@ -978,7 +978,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneBillingProfile(this.requireTenantBillingProfile(tenantId));
   }
 
-  updateTenantBillingProfile(
+  async updateTenantBillingProfile(
     tenantId: string,
     command: UpdateTenantBillingProfileCommand,
     requestId?: string,
@@ -996,7 +996,7 @@ export class BillingSettlementService implements OnModuleInit {
       updatedAt: new Date().toISOString(),
     };
     this.tenantBillingProfiles.set(tenantId, this.cloneBillingProfile(profile));
-    this.persistChanges(
+    await this.persistChanges(
       {
         tenantBillingProfiles: [this.cloneBillingProfile(profile)],
       },
@@ -1115,7 +1115,7 @@ export class BillingSettlementService implements OnModuleInit {
     };
 
     this.tenantInvoices = [this.cloneInvoice(invoice), ...this.tenantInvoices];
-    this.persistChanges(
+    await this.persistChanges(
       {
         tenantInvoices: [this.cloneInvoice(invoice)],
       },
@@ -1498,7 +1498,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneInvoice(invoice);
   }
 
-  publishDriverFeePlan(
+  async publishDriverFeePlan(
     command: PublishDriverFeePlanCommand,
     requestId?: string,
   ) {
@@ -1532,7 +1532,7 @@ export class BillingSettlementService implements OnModuleInit {
     };
 
     this.driverFeePlans = [{ ...feePlan }, ...this.driverFeePlans];
-    this.persistChanges(
+    await this.persistChanges(
       {
         driverFeePlans: [{ ...feePlan }],
       },
@@ -1741,7 +1741,7 @@ export class BillingSettlementService implements OnModuleInit {
       ...generatedReimbursements,
       ...this.reimbursementBatches,
     ];
-    this.persistChanges(
+    await this.persistChanges(
       {
         driverStatements: generatedStatements.map((statement) =>
           this.cloneStatement(statement),
@@ -1853,7 +1853,7 @@ export class BillingSettlementService implements OnModuleInit {
       .map((issue) => this.cloneReconciliationIssue(issue));
   }
 
-  createReconciliationIssue(
+  async createReconciliationIssue(
     command: CreateReconciliationIssueCommand,
     requestId?: string,
   ) {
@@ -1907,7 +1907,7 @@ export class BillingSettlementService implements OnModuleInit {
       this.cloneReconciliationIssue(issue),
       ...this.reconciliationIssues,
     ];
-    this.persistChanges(
+    await this.persistChanges(
       {
         reconciliationIssues: [this.cloneReconciliationIssue(issue)],
       },
@@ -1935,7 +1935,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReconciliationIssue(issue);
   }
 
-  assignReconciliationIssue(
+  async assignReconciliationIssue(
     issueId: string,
     command: AssignReconciliationIssueCommand,
     requestId?: string,
@@ -1965,7 +1965,7 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
-    this.persistChanges(
+    await this.persistChanges(
       {
         reconciliationIssues: [this.cloneReconciliationIssue(issue)],
       },
@@ -1991,7 +1991,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReconciliationIssue(issue);
   }
 
-  addReconciliationIssueComment(
+  async addReconciliationIssueComment(
     issueId: string,
     command: AddReconciliationIssueCommentCommand,
     requestId?: string,
@@ -2015,7 +2015,7 @@ export class BillingSettlementService implements OnModuleInit {
     );
     issue.updatedAt = now;
 
-    this.persistChanges(
+    await this.persistChanges(
       {
         reconciliationIssues: [this.cloneReconciliationIssue(issue)],
       },
@@ -2041,7 +2041,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReconciliationIssue(issue);
   }
 
-  resolveReconciliationIssue(
+  async resolveReconciliationIssue(
     issueId: string,
     command: ResolveReconciliationIssueCommand,
     requestId?: string,
@@ -2069,7 +2069,7 @@ export class BillingSettlementService implements OnModuleInit {
       command.artifactIds,
     );
 
-    this.persistChanges(
+    await this.persistChanges(
       {
         reconciliationIssues: [this.cloneReconciliationIssue(issue)],
       },
@@ -2096,7 +2096,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReconciliationIssue(issue);
   }
 
-  reopenReconciliationIssue(
+  async reopenReconciliationIssue(
     issueId: string,
     command: ReopenReconciliationIssueCommand,
     requestId?: string,
@@ -2134,7 +2134,7 @@ export class BillingSettlementService implements OnModuleInit {
       command.artifactIds,
     );
 
-    this.persistChanges(
+    await this.persistChanges(
       {
         reconciliationIssues: [this.cloneReconciliationIssue(issue)],
       },
@@ -2160,7 +2160,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReconciliationIssue(issue);
   }
 
-  approveReimbursementBatch(
+  async approveReimbursementBatch(
     batchId: string,
     command: ApproveReimbursementBatchCommand,
     requestId?: string,
@@ -2184,7 +2184,7 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     batch.approvedAt = new Date().toISOString();
-    this.persistChanges(
+    await this.persistChanges(
       {
         reimbursementBatches: [this.cloneReimbursementBatch(batch)],
       },
@@ -3759,7 +3759,14 @@ export class BillingSettlementService implements OnModuleInit {
     });
   }
 
-  private persistChanges(
+  private async persistChanges(
+    changes: PersistBillingSettlementChanges,
+    context: string,
+  ) {
+    await this.persistChangesRequired(changes, context);
+  }
+
+  private async persistChangesRequired(
     changes: PersistBillingSettlementChanges,
     context: string,
   ) {
@@ -3767,13 +3774,19 @@ export class BillingSettlementService implements OnModuleInit {
       return;
     }
 
-    void this.billingSettlementRepository
-      .persistChanges(changes)
-      .catch((error: unknown) => {
-        this.billingSettlementRepository!.reportPersistenceFailure(
+    try {
+      await this.billingSettlementRepository.persistChanges(changes);
+    } catch (error) {
+      if (
+        typeof (this.billingSettlementRepository as any)
+          .reportPersistenceFailure === "function"
+      ) {
+        (this.billingSettlementRepository as any).reportPersistenceFailure(
           error,
           context,
         );
-      });
+      }
+      throw error;
+    }
   }
 }

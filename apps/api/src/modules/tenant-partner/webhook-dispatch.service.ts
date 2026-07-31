@@ -124,20 +124,23 @@ export class WebhookDispatchService {
     retryPolicy: WebhookRetryPolicy,
     attempt: number,
   ) {
+    const baseTime = Number.isNaN(new Date(attemptedAt).getTime())
+      ? Date.now()
+      : new Date(attemptedAt).getTime();
     return new Date(
-      new Date(attemptedAt).getTime() +
-        this.computeRetryDelayMs(retryPolicy, attempt),
+      baseTime + this.computeRetryDelayMs(retryPolicy, attempt),
     ).toISOString();
   }
 
   computeRetryDelayMs(retryPolicy: WebhookRetryPolicy, attempt: number) {
-    const delaySeconds =
-      retryPolicy.initialBackoffSeconds *
-      retryPolicy.backoffMultiplier ** (attempt - 1);
+    const initialBackoff = retryPolicy?.initialBackoffSeconds ?? 10;
+    const multiplier = retryPolicy?.backoffMultiplier ?? 2;
+    const maxBackoff = retryPolicy?.maxBackoffSeconds ?? 300;
+    const delaySeconds = initialBackoff * multiplier ** (attempt - 1);
     return (
       Math.min(
         Math.max(1, Math.round(delaySeconds)),
-        retryPolicy.maxBackoffSeconds,
+        maxBackoff,
       ) * 1000
     );
   }

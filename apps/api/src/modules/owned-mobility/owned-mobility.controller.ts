@@ -647,63 +647,73 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/accept")
-  acceptDriverTask(
+  async acceptDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverAcceptTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.acceptDriverTask(taskId, command, requestId),
+    const task = await this.ownedMobilityService.acceptDriverTask(
+      taskId,
+      command,
       requestId,
     );
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/reject")
-  rejectDriverTask(
+  async rejectDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverRejectTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.rejectDriverTask(taskId, command, requestId),
+    const task = await this.ownedMobilityService.rejectDriverTask(
+      taskId,
+      command,
       requestId,
     );
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/depart")
-  departDriverTask(
+  async departDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverDepartTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.departDriverTask(taskId, command, requestId),
+    const task = await this.ownedMobilityService.departDriverTask(
+      taskId,
+      command,
       requestId,
     );
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/arrived_pickup")
-  arrivePickup(
+  async arrivePickup(
     @Param("taskId") taskId: string,
     @Body() command: DriverArrivedPickupCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.arrivedPickup(taskId, command, requestId),
+    const task = await this.ownedMobilityService.arrivePickup(
+      taskId,
+      command,
       requestId,
     );
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/start")
-  startDriverTask(
+  async startDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverStartTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.startDriverTask(taskId, command, requestId),
+    const task = await this.ownedMobilityService.startDriverTask(
+      taskId,
+      command,
       requestId,
     );
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/complete")

@@ -164,6 +164,7 @@ export interface UpsertReferralRevenueShareRuleCommand {
 }
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { generateDeterministicUuid } from "../../common/durable-identity";
 import type { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import {
   assertEvidenceAccess,
@@ -6472,7 +6473,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       requestId,
     );
 
-    const delivery = this.enqueueWebhookDelivery(
+    const delivery = await this.enqueueWebhookDelivery(
       endpoint,
       "tenant.webhook.test",
       createdAt,
@@ -6533,6 +6534,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       eventType: string;
       data: T;
       occurredAt?: string;
+      deliveryId?: string;
+      outboxKey?: string;
     },
   ) {
     this.assertNonBlank(tenantId, "tenantId");
@@ -6556,11 +6559,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }> = [];
 
     for (const endpoint of endpoints) {
-      const delivery = this.enqueueWebhookDelivery(
+      const deliveryIdOverride =
+        input.deliveryId ??
+        (input.outboxKey
+          ? `wd_${generateDeterministicUuid("webhook_delivery", `${input.outboxKey}:${endpoint.webhookId}`)}`
+          : undefined);
+
+      const delivery = await this.enqueueWebhookDelivery(
         endpoint,
         input.eventType,
         occurredAt,
         "publish_webhook_event",
+        deliveryIdOverride,
       );
       const payload = this.buildWebhookPayload({
         deliveryId: delivery.deliveryId,
@@ -6605,14 +6615,23 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private enqueueWebhookDelivery(
+  private async enqueueWebhookDelivery(
     endpoint: StoredWebhookEndpoint,
     eventType: string,
     createdAt: string,
     context: string,
+    deliveryIdOverride?: string,
   ) {
+    const deliveryId = deliveryIdOverride ?? `wd_${randomUUID()}`;
+    const existingIndex = this.webhookDeliveries.findIndex(
+      (d) => d.deliveryId === deliveryId,
+    );
+    if (existingIndex >= 0) {
+      return this.webhookDeliveries[existingIndex];
+    }
+
     const delivery: StoredWebhookDelivery = {
-      deliveryId: `wd_${randomUUID()}`,
+      deliveryId,
       webhookId: endpoint.webhookId,
       tenantId: endpoint.tenantId,
       eventType,
@@ -6645,7 +6664,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicy: { ...endpoint.retryPolicy },
     };
 
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
         webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
@@ -6700,7 +6719,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ? result.attemptedAt
           : endpoint.runtimeMetadata.lastDeliveredAt,
       nextAttemptAt: result.nextAttemptAt,
-      lastSignaturePreview: result.signature.slice(0, 16),
+      lastSignaturePreview: (result.signature ?? "").slice(0, 16),
       disabledAt: endpoint.runtimeMetadata.disabledAt,
       disableReason: endpoint.runtimeMetadata.disableReason,
       disableReasonNote: endpoint.runtimeMetadata.disableReasonNote ?? null,
@@ -6721,7 +6740,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       previousEndpointValues,
     );
 
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
         webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
@@ -7661,12 +7680,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             endpoint.runtimeMetadata.secretRotation.currentVersion,
           rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
           rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: endpoint.runtimeMetadata.secretRotation.history.map(
+          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
             (record) => ({ ...record }),
           ),
         },
       },
-      secretHistory: endpoint.secretHistory.map((record) => ({ ...record })),
+      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({ ...record })),
     };
   }
 
@@ -8010,14 +8029,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             endpoint.runtimeMetadata.secretRotation.currentVersion,
           rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
           rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: endpoint.runtimeMetadata.secretRotation.history.map(
+          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
             (record) => ({
               ...record,
             }),
           ),
         },
       },
-      secretHistory: endpoint.secretHistory.map((record) => ({ ...record })),
+      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({ ...record })),
     };
   }
 
@@ -11359,14 +11378,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     changes: PersistTenantPartnerChanges,
     context: string,
   ) {
-    if (!this.tenantPartnerRepository) {
+    if (
+      !this.tenantPartnerRepository ||
+      typeof (this.tenantPartnerRepository as any).persistChanges !== "function"
+    ) {
       return;
     }
 
     void this.tenantPartnerRepository
       .persistChanges(changes)
       .catch((error: unknown) => {
-        this.tenantPartnerRepository!.reportPersistenceFailure(error, context);
+        if (
+          typeof (this.tenantPartnerRepository as any).reportPersistenceFailure ===
+          "function"
+        ) {
+          (this.tenantPartnerRepository as any).reportPersistenceFailure(
+            error,
+            context,
+          );
+        }
       });
   }
 
@@ -11374,14 +11404,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     changes: PersistTenantPartnerChanges,
     context: string,
   ) {
-    if (!this.tenantPartnerRepository) {
+    if (
+      !this.tenantPartnerRepository ||
+      typeof (this.tenantPartnerRepository as any).persistChanges !== "function"
+    ) {
       return;
     }
 
     try {
       await this.tenantPartnerRepository.persistChanges(changes);
     } catch (error) {
-      this.tenantPartnerRepository.reportPersistenceFailure(error, context);
+      if (
+        typeof (this.tenantPartnerRepository as any).reportPersistenceFailure ===
+        "function"
+      ) {
+        (this.tenantPartnerRepository as any).reportPersistenceFailure(
+          error,
+          context,
+        );
+      }
       throw error;
     }
   }
