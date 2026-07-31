@@ -10,9 +10,9 @@
 CREATE TABLE IF NOT EXISTS ops.driver_completion_outbox (
   outbox_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   task_id text NOT NULL
-    REFERENCES ops.phase1_driver_tasks(task_id) ON DELETE CASCADE,
+    REFERENCES ops.phase1_driver_tasks(task_id) ON DELETE NO ACTION,
   order_id text NOT NULL
-    REFERENCES ops.phase1_owned_orders(order_id) ON DELETE CASCADE,
+    REFERENCES ops.phase1_owned_orders(order_id) ON DELETE NO ACTION,
   effect_type text NOT NULL,
   request_id text NULL,
   payload jsonb NOT NULL,
@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS ops.driver_completion_outbox (
   CONSTRAINT driver_completion_outbox_effect_type_chk CHECK (effect_type IN (
     'tenant_order_completed_webhook',
     'owned_mobility_trip_completed',
-    'multi_taxi_certificate'
+    'multi_taxi_certificate',
+    'completion_audit_bundle',
+    'driver_task_updated',
+    'ops_dispatch_job_updated'
   )),
   CONSTRAINT driver_completion_outbox_status_chk CHECK (status IN (
     'pending',

@@ -14,6 +14,10 @@ import {
   loadReferralRevenue,
 } from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
+import {
+  formatReferralPortalEvidence,
+  mergeReferralPortalEvidence,
+} from "@/lib/referral-portal-evidence";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -49,6 +53,17 @@ export default async function ReferralDashboardPage() {
     loadReferralDashboard(),
     loadReferralRevenue(),
   ]);
+  const combinedEvidence = mergeReferralPortalEvidence(
+    {
+      ...dashboard.evidence,
+      sourceDetails: { dashboard: dashboard.source },
+    },
+    {
+      ...revenue.evidence,
+      sourceDetails: { revenue: revenue.source },
+    },
+  );
+  const evidenceMarker = formatReferralPortalEvidence(combinedEvidence);
   const { summary, periods } = dashboard;
   const latestRevenue = revenue.rows[0] ?? null;
   const statementStatus =
@@ -121,6 +136,7 @@ export default async function ReferralDashboardPage() {
           gap: 16,
         }}
       >
+        <span hidden>{evidenceMarker}</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <CanvasPill theme={theme} tone="info" dot>
             {t("referral.dashboard.flowPartner", locale)}
@@ -131,8 +147,9 @@ export default async function ReferralDashboardPage() {
         </div>
         <DataSourceNotice
           theme={theme}
-          source={dashboard.source}
+          source={combinedEvidence.source}
           body={t("data.fixtureNotice", locale)}
+          evidenceMarker={evidenceMarker}
         />
 
         <div

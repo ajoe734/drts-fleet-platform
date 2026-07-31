@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
 
-import { FLEET_SELF } from "@/lib/fleet-portal-fixtures";
+import { buildReferralPortalBootstrapContext } from "@/lib/referral-bootstrap-identity";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
-const FLEET_PARTNER_ID_HEADER = "x-fleet-partner-id";
 const REQUEST_HEADER_BLOCKLIST = new Set([
   "authorization",
   "connection",
@@ -23,12 +22,15 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-forwarded-host",
   "x-forwarded-port",
   "x-forwarded-proto",
+  "x-partner-entry-slug",
   "x-partner-id",
+  "x-partner-program-id",
   "x-realm",
   "x-role-families",
   "x-roles",
   "x-scopes",
   "x-serverless-authorization",
+  "x-tenant-id",
 ]);
 
 export const dynamic = "force-dynamic";
@@ -36,20 +38,6 @@ export const runtime = "nodejs";
 
 function resolveTargetOrigin(): string {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
-}
-
-function resolveFleetPartnerId(requestHeaders: Headers): string {
-  const fromHeader = requestHeaders.get(FLEET_PARTNER_ID_HEADER)?.trim();
-  if (fromHeader) {
-    return fromHeader;
-  }
-
-  const fromEnv = process.env.DRTS_FLEET_PARTNER_ID?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-
-  return FLEET_SELF.id;
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
@@ -122,16 +110,10 @@ async function applyUpstreamAuth(
   request: NextRequest,
   targetUrl: URL,
 ) {
-  const fleetPartnerId = resolveFleetPartnerId(request.headers);
-
-  headers.set("x-actor-type", "partner_api_key");
-  headers.set("x-actor-id", fleetPartnerId);
-  headers.set("x-partner-id", fleetPartnerId);
-  headers.set("x-realm", "partner");
-  headers.set("x-roles", "partner");
-  headers.set("x-role-families", "partner");
-  headers.set("x-scopes", "billing:read");
-  headers.set(FLEET_PARTNER_ID_HEADER, fleetPartnerId);
+  const { defaultHeaders } = buildReferralPortalBootstrapContext();
+  for (const [key, value] of Object.entries(defaultHeaders)) {
+    headers.set(key, value);
+  }
 
   const iapEmail = request.headers.get(CONTROL_PLANE_IAP_EMAIL_HEADER);
   if (iapEmail) {

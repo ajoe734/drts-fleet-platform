@@ -164,6 +164,7 @@ export interface UpsertReferralRevenueShareRuleCommand {
 }
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { generateDeterministicUuid } from "../../common/durable-identity";
 import type { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import {
   assertEvidenceAccess,
@@ -1042,10 +1043,16 @@ function createBootstrapPartnerIngressCredential(
   };
 }
 
+export type TenantQuotaAuditEntryInput = Omit<
+  AuditLogRecord,
+  "auditId" | "createdAt" | "requestId"
+>;
+
 export type TenantQuotaConsumptionCommitResult = {
   tenantId: string;
   ledgerEntries: TenantQuotaLedgerEntry[];
   updatedSnapshots: TenantQuotaMonthlySnapshotRecord[];
+  auditEntries: TenantQuotaAuditEntryInput[];
 };
 
 @Injectable()
@@ -6472,7 +6479,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       requestId,
     );
 
-    const delivery = this.enqueueWebhookDelivery(
+    const delivery = await this.enqueueWebhookDelivery(
       endpoint,
       "tenant.webhook.test",
       createdAt,
@@ -6533,6 +6540,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       eventType: string;
       data: T;
       occurredAt?: string;
+      deliveryId?: string;
+      outboxKey?: string;
     },
   ) {
     this.assertNonBlank(tenantId, "tenantId");
@@ -6556,12 +6565,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }> = [];
 
     for (const endpoint of endpoints) {
-      const delivery = this.enqueueWebhookDelivery(
+      const deliveryIdOverride =
+        input.deliveryId ??
+        (input.outboxKey
+          ? `wd_${generateDeterministicUuid("webhook_delivery", `${input.outboxKey}:${endpoint.webhookId}`)}`
+          : undefined);
+
+      const delivery = await this.enqueueWebhookDelivery(
         endpoint,
         input.eventType,
         occurredAt,
         "publish_webhook_event",
+        deliveryIdOverride,
       );
+      if (delivery.status === "delivered") {
+        results.push({
+          webhookId: endpoint.webhookId,
+          deliveryId: delivery.deliveryId,
+          attempt: delivery.attempt,
+          httpStatus: delivery.httpStatus,
+          nextAttemptAt: delivery.nextAttemptAt,
+          status: delivery.status,
+        });
+        continue;
+      }
       const payload = this.buildWebhookPayload({
         deliveryId: delivery.deliveryId,
         eventType: input.eventType,
@@ -6605,14 +6632,23 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private enqueueWebhookDelivery(
+  private async enqueueWebhookDelivery(
     endpoint: StoredWebhookEndpoint,
     eventType: string,
     createdAt: string,
     context: string,
-  ) {
+    deliveryIdOverride?: string,
+  ): Promise<StoredWebhookDelivery> {
+    const deliveryId = deliveryIdOverride ?? `wd_${randomUUID()}`;
+    const existingIndex = this.webhookDeliveries.findIndex(
+      (d) => d.deliveryId === deliveryId,
+    );
+    if (existingIndex >= 0 && this.webhookDeliveries[existingIndex]) {
+      return this.webhookDeliveries[existingIndex];
+    }
+
     const delivery: StoredWebhookDelivery = {
-      deliveryId: `wd_${randomUUID()}`,
+      deliveryId,
       webhookId: endpoint.webhookId,
       tenantId: endpoint.tenantId,
       eventType,
@@ -6645,7 +6681,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicy: { ...endpoint.retryPolicy },
     };
 
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
         webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
@@ -6700,7 +6736,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ? result.attemptedAt
           : endpoint.runtimeMetadata.lastDeliveredAt,
       nextAttemptAt: result.nextAttemptAt,
-      lastSignaturePreview: result.signature.slice(0, 16),
+      lastSignaturePreview: (result.signature ?? "").slice(0, 16),
       disabledAt: endpoint.runtimeMetadata.disabledAt,
       disableReason: endpoint.runtimeMetadata.disableReason,
       disableReasonNote: endpoint.runtimeMetadata.disableReasonNote ?? null,
@@ -6721,7 +6757,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       previousEndpointValues,
     );
 
-    this.persistChanges(
+    await this.persistChangesRequired(
       {
         webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
         webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
@@ -7661,12 +7697,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             endpoint.runtimeMetadata.secretRotation.currentVersion,
           rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
           rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: endpoint.runtimeMetadata.secretRotation.history.map(
+          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
             (record) => ({ ...record }),
           ),
         },
       },
-      secretHistory: endpoint.secretHistory.map((record) => ({ ...record })),
+      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({
+        ...record,
+      })),
     };
   }
 
@@ -8010,14 +8048,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             endpoint.runtimeMetadata.secretRotation.currentVersion,
           rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
           rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: endpoint.runtimeMetadata.secretRotation.history.map(
+          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
             (record) => ({
               ...record,
             }),
           ),
         },
       },
-      secretHistory: endpoint.secretHistory.map((record) => ({ ...record })),
+      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({
+        ...record,
+      })),
     };
   }
 
@@ -10326,16 +10366,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.prepareTenantQuotaConsumptionInTransaction(tx, input);
   }
 
-  private async consumeTenantQuotaWithDatabase(
-    input: {
-      tenantId: string;
-      bookingId: string;
-    },
-  ) {
+  private async consumeTenantQuotaWithDatabase(input: {
+    tenantId: string;
+    bookingId: string;
+  }) {
     const committed = await this.tenantPartnerRepository!.withTransaction(
-      (executor) => this.prepareTenantQuotaConsumptionInTransaction(executor, input),
+      (executor) =>
+        this.prepareTenantQuotaConsumptionInTransaction(executor, input),
     );
     this.applyCommittedQuotaConsumption(committed);
+    this.recordQuotaAuditEntries(committed.auditEntries);
 
     return {
       ledgerEntries: committed.ledgerEntries.map((entry) =>
@@ -10367,18 +10407,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         tenantId: input.tenantId,
         ledgerEntries: [],
         updatedSnapshots: [],
+        auditEntries: [],
       };
     }
 
-    const claimedEntries = await this.tenantPartnerRepository!.claimQuotaLedgerEntries(
-      executor,
-      entries,
-    );
+    const claimedEntries =
+      await this.tenantPartnerRepository!.claimQuotaLedgerEntries(
+        executor,
+        entries,
+      );
     if (claimedEntries.length === 0) {
       return {
         tenantId: input.tenantId,
         ledgerEntries: [],
         updatedSnapshots: [],
+        auditEntries: [],
       };
     }
     if (claimedEntries.length !== entries.length) {
@@ -10426,7 +10469,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       input.tenantId,
       claimedEntries,
       [...uniqueSnapshots.values()],
-      (costCenterCode) => this.resolveQuotaPolicy(input.tenantId, costCenterCode),
+      (costCenterCode) =>
+        this.resolveQuotaPolicy(input.tenantId, costCenterCode),
     );
 
     await this.tenantPartnerRepository!.persistQuotaReservation(executor, {
@@ -10440,6 +10484,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ),
       updatedSnapshots: updatedSnapshots.map((snapshot) =>
         this.cloneQuotaMonthlySnapshot(snapshot),
+      ),
+      auditEntries: this.buildQuotaReservationAuditEntries(
+        input.tenantId,
+        claimedEntries,
+        updatedSnapshots,
       ),
     };
   }
@@ -10979,11 +11028,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       committed.ledgerEntries,
       committed.updatedSnapshots,
     );
-    this.recordQuotaReservationAudits(
-      committed.tenantId,
-      committed.ledgerEntries,
-      committed.updatedSnapshots,
-    );
   }
 
   private recordQuotaReservationAudits(
@@ -10991,10 +11035,27 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     entries: readonly TenantQuotaLedgerEntry[],
     updatedSnapshots: readonly TenantQuotaMonthlySnapshotRecord[],
   ) {
-    for (const entry of entries) {
-      this.auditNotificationService.recordAuditLog({
+    this.recordQuotaAuditEntries(
+      this.buildQuotaReservationAuditEntries(
+        tenantId,
+        entries,
+        updatedSnapshots,
+      ),
+    );
+  }
+
+  private buildQuotaReservationAuditEntries(
+    tenantId: string,
+    entries: readonly TenantQuotaLedgerEntry[],
+    updatedSnapshots: readonly TenantQuotaMonthlySnapshotRecord[],
+  ): TenantQuotaAuditEntryInput[] {
+    const ledgerAudits = [...entries]
+      .sort((left, right) =>
+        left.ledgerEntryId.localeCompare(right.ledgerEntryId),
+      )
+      .map((entry) => ({
         actorId: null,
-        actorType: "system",
+        actorType: "system" as const,
         tenantId,
         moduleName: "tenant-partner",
         actionName: "tenant.quota_ledger.entry_added",
@@ -11008,12 +11069,26 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           entryType: entry.entryType,
           amount: entry.amount,
         },
-      });
-    }
-    for (const snapshot of updatedSnapshots) {
-      this.auditNotificationService.recordAuditLog({
+      }));
+    const snapshotAudits = [...updatedSnapshots]
+      .sort((left, right) =>
+        this.buildQuotaSnapshotKey(
+          left.tenantId,
+          left.costCenterCode,
+          left.period,
+          left.periodKey,
+        ).localeCompare(
+          this.buildQuotaSnapshotKey(
+            right.tenantId,
+            right.costCenterCode,
+            right.period,
+            right.periodKey,
+          ),
+        ),
+      )
+      .map((snapshot) => ({
         actorId: null,
-        actorType: "system",
+        actorType: "system" as const,
         tenantId,
         moduleName: "tenant-partner",
         actionName: "tenant.quota_snapshot.refreshed",
@@ -11027,8 +11102,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         newValuesSummary: {
           costCenterCode: snapshot.costCenterCode,
           periodKey: snapshot.periodKey,
-          usage: snapshot.usage,
+          usage: structuredClone(snapshot.usage),
         },
+      }));
+
+    return [...ledgerAudits, ...snapshotAudits].map((entry) => ({
+      ...entry,
+      newValuesSummary: structuredClone(entry.newValuesSummary),
+    }));
+  }
+
+  private recordQuotaAuditEntries(
+    entries: readonly TenantQuotaAuditEntryInput[],
+  ) {
+    for (const entry of entries) {
+      this.auditNotificationService.recordAuditLog({
+        ...entry,
+        ...(entry.newValuesSummary
+          ? { newValuesSummary: structuredClone(entry.newValuesSummary) }
+          : {}),
       });
     }
   }
@@ -11359,14 +11451,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     changes: PersistTenantPartnerChanges,
     context: string,
   ) {
-    if (!this.tenantPartnerRepository) {
+    if (
+      !this.tenantPartnerRepository ||
+      typeof (this.tenantPartnerRepository as any).persistChanges !== "function"
+    ) {
       return;
     }
 
     void this.tenantPartnerRepository
       .persistChanges(changes)
       .catch((error: unknown) => {
-        this.tenantPartnerRepository!.reportPersistenceFailure(error, context);
+        if (
+          typeof (this.tenantPartnerRepository as any)
+            .reportPersistenceFailure === "function"
+        ) {
+          (this.tenantPartnerRepository as any).reportPersistenceFailure(
+            error,
+            context,
+          );
+        }
       });
   }
 
@@ -11374,14 +11477,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     changes: PersistTenantPartnerChanges,
     context: string,
   ) {
-    if (!this.tenantPartnerRepository) {
+    if (
+      !this.tenantPartnerRepository ||
+      typeof (this.tenantPartnerRepository as any).persistChanges !== "function"
+    ) {
       return;
     }
 
     try {
       await this.tenantPartnerRepository.persistChanges(changes);
     } catch (error) {
-      this.tenantPartnerRepository.reportPersistenceFailure(error, context);
+      if (
+        typeof (this.tenantPartnerRepository as any)
+          .reportPersistenceFailure === "function"
+      ) {
+        (this.tenantPartnerRepository as any).reportPersistenceFailure(
+          error,
+          context,
+        );
+      }
       throw error;
     }
   }
