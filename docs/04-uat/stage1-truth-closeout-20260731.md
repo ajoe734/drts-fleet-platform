@@ -1,7 +1,7 @@
 # Stage 1 Truth Closeout (2026-07-31)
 
-**Task:** `STAGE1-TRUTH-CLOSEOUT-20260731`  
-**Depends on:** `STAGE1-DEPLOY-VERIFY-20260731`  
+**Task:** `STAGE1-TRUTH-CLOSEOUT-20260731`
+**Depends on:** `STAGE1-DEPLOY-VERIFY-20260731`
 **Scope rule:** this closeout records only controllable repo-and-deploy truth proven by the verified dev release. It does not reopen external gates, pilot gates, or production-only gates.
 
 ## 1. Accepted release evidence
