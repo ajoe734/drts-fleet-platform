@@ -78,6 +78,66 @@ describe("OwnedMobilityRepository", () => {
     });
   });
 
+  it("locks and returns the completion dispatch-job snapshot from the assignment authority", async () => {
+    const recordsByTable = new Map<string, unknown>([
+      [
+        "ops.phase1_driver_tasks",
+        {
+          taskId: "task-complete-1",
+          assignmentId: "assignment-complete-1",
+          orderId: "order-complete-1",
+        },
+      ],
+      [
+        "ops.phase1_dispatch_assignments",
+        {
+          assignmentId: "assignment-complete-1",
+          dispatchJobId: "job-complete-1",
+        },
+      ],
+      [
+        "ops.phase1_dispatch_jobs",
+        {
+          dispatchJobId: "job-complete-1",
+          orderId: "order-complete-1",
+          status: "assigned",
+        },
+      ],
+      ["ops.phase1_owned_orders", { orderId: "order-complete-1" }],
+    ]);
+    const query = vi.fn(async (sql: string) => {
+      const entry = [...recordsByTable.entries()].find(([table]) =>
+        sql.includes(table),
+      );
+      return { rows: entry ? [{ record: entry[1] }] : [] };
+    });
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.loadDriverTaskCompletionBundleForUpdate(
+        { query } as never,
+        "task-complete-1",
+      ),
+    ).resolves.toMatchObject({
+      order: { orderId: "order-complete-1" },
+      dispatchJob: { dispatchJobId: "job-complete-1", status: "assigned" },
+      assignment: { assignmentId: "assignment-complete-1" },
+      task: { taskId: "task-complete-1" },
+    });
+
+    expect(query).toHaveBeenCalledTimes(4);
+    for (const [sql] of query.mock.calls) {
+      expect(sql).toContain("FOR UPDATE");
+    }
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE dispatch_job_id = $1"),
+      ["job-complete-1"],
+    );
+  });
+
   it("atomically supersedes only older passenger snapshots before inserting a replacement", async () => {
     const query = vi.fn(async () => ({ rows: [] }));
     const repository = new OwnedMobilityRepository({

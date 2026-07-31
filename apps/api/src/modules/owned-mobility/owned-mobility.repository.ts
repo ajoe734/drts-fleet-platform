@@ -95,6 +95,7 @@ type PersistOwnedMobilityChanges = {
 
 export type DriverTaskCompletionBundleRecord = {
   order: OwnedOrderRecord;
+  dispatchJob: DispatchJobRecord;
   assignment: DispatchAssignmentRecord;
   task: DriverTaskRecord;
 };
@@ -475,6 +476,27 @@ export class OwnedMobilityRepository {
       "ops.phase1_dispatch_assignments",
     );
 
+    const dispatchJobResult = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_dispatch_jobs
+        WHERE dispatch_job_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [assignment.dispatchJobId],
+    );
+    const dispatchJobRow = dispatchJobResult.rows[0];
+    if (!dispatchJobRow) {
+      throw new Error(
+        `Dispatch job ${assignment.dispatchJobId} missing for driver task ${taskId}.`,
+      );
+    }
+    const dispatchJob = this.parseRecord<DispatchJobRecord>(
+      dispatchJobRow.record,
+      "ops.phase1_dispatch_jobs",
+    );
+
     const orderResult = await executor.query<JsonRecordRow>(
       `
         SELECT record
@@ -496,7 +518,7 @@ export class OwnedMobilityRepository {
       "ops.phase1_owned_orders",
     );
 
-    return { order, assignment, task };
+    return { order, dispatchJob, assignment, task };
   }
 
   async hasDriverTaskTraceRequestId(
@@ -569,95 +591,6 @@ export class OwnedMobilityRepository {
         ),
       ),
     );
-  }
-
-  async claimNextDriverCompletionOutbox(
-    executor: OwnedMobilityQueryExecutor,
-    taskId: string,
-    leaseToken: string,
-    leasedUntil: string,
-    now: string,
-    maxAttempts: number,
-  ): Promise<DriverCompletionOutboxClaimResult | null> {
-    const result = await executor.query<DriverCompletionOutboxRow>(
-      `
-        WITH candidate AS (
-          SELECT outbox_id
-          FROM ops.driver_completion_outbox
-          WHERE task_id = $1
-            AND delivered_at IS NULL
-            AND status IN ('pending', 'processing')
-            AND next_attempt_at <= $4::timestamptz
-            AND (
-              lease_token IS NULL
-              OR leased_until IS NULL
-              OR leased_until <= $4::timestamptz
-            )
-            AND (
-              (status = 'pending' AND attempt_count < $5)
-              OR status = 'processing'
-            )
-          ORDER BY next_attempt_at ASC, created_at ASC, outbox_id ASC
-          FOR UPDATE SKIP LOCKED
-          LIMIT 1
-        )
-        UPDATE ops.driver_completion_outbox AS outbox
-        SET
-          status = CASE
-            WHEN outbox.attempt_count >= $5 THEN 'dead_letter'
-            ELSE 'processing'
-          END,
-          attempt_count = CASE
-            WHEN outbox.attempt_count >= $5 THEN outbox.attempt_count
-            ELSE outbox.attempt_count + 1
-          END,
-          lease_token = CASE
-            WHEN outbox.attempt_count >= $5 THEN NULL
-            ELSE $2::uuid
-          END,
-          leased_until = CASE
-            WHEN outbox.attempt_count >= $5 THEN NULL
-            ELSE $3::timestamptz
-          END,
-          last_error = CASE
-            WHEN outbox.attempt_count >= $5 THEN
-              left(
-                COALESCE(
-                  outbox.last_error,
-                  'Lease expired after the final delivery attempt before acknowledgement.'
-                ),
-                2000
-              )
-            ELSE outbox.last_error
-          END
-        FROM candidate
-        WHERE outbox.outbox_id = candidate.outbox_id
-        RETURNING
-          outbox_id,
-          task_id,
-          order_id,
-          effect_type,
-          request_id,
-          payload,
-          status,
-          attempt_count,
-          next_attempt_at,
-          lease_token,
-          leased_until,
-          last_error,
-          created_at,
-          delivered_at
-      `,
-      [taskId, leaseToken, leasedUntil, now, maxAttempts],
-    );
-    const row = result.rows[0];
-    if (!row) {
-      return null;
-    }
-    return {
-      action: row.status === "dead_letter" ? "dead_letter" : "dispatch",
-      record: this.mapDriverCompletionOutbox(row),
-    };
   }
 
   async claimNextRecoverableDriverCompletionOutbox(

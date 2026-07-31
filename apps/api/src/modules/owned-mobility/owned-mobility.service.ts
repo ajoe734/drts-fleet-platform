@@ -260,7 +260,7 @@ type DriverCompletionOutboxPayload =
     }
   | {
       effectType: "completion_audit_bundle";
-      auditEntry: AuditEntryInput;
+      audits: AuditEntryInput[];
       requestId: string | null;
     }
   | {
@@ -268,11 +268,16 @@ type DriverCompletionOutboxPayload =
       task: DriverTaskRecord;
       order: OwnedOrderRecord;
       requestId: string | null;
+      eventId: string;
+      correlationId: string;
     }
   | {
       effectType: "ops_dispatch_job_updated";
       orderId: string;
+      dispatchJob: DispatchJobRecord;
       requestId: string | null;
+      eventId: string;
+      correlationId: string;
     };
 
 type CreateDispatchAssignmentOptions = {
@@ -428,11 +433,9 @@ export class OwnedMobilityService
   private driverCompletionRecoveryTimer: ReturnType<typeof setInterval> | null =
     null;
 
-  private driverCompletionRecoveryInFlight = false;
-  private isShuttingDown = false;
-  private activeOutboxExecutions = 0;
-  private outboxDispatcherActive = false;
-  private outboxKickLatched = false;
+  private driverCompletionOutboxDrainPromise: Promise<void> | null = null;
+  private driverCompletionOutboxDrainRequested = false;
+  private driverCompletionOutboxStopping = false;
 
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
@@ -539,12 +542,12 @@ export class OwnedMobilityService
   }
 
   async onApplicationBootstrap() {
-    this.isShuttingDown = false;
+    this.driverCompletionOutboxStopping = false;
     if (!this.ownedMobilityRepository?.isEnabled()) {
       return;
     }
     this.startDriverCompletionOutboxRecoveryPolling();
-    void this.recoverDriverCompletionOutbox();
+    this.triggerDriverCompletionOutboxDispatch();
   }
 
   async onModuleDestroy() {
@@ -556,17 +559,15 @@ export class OwnedMobilityService
   }
 
   private async shutdownDrain() {
-    this.isShuttingDown = true;
+    this.driverCompletionOutboxStopping = true;
+    this.driverCompletionOutboxDrainRequested = false;
     if (this.driverCompletionRecoveryTimer) {
       clearInterval(this.driverCompletionRecoveryTimer);
       this.driverCompletionRecoveryTimer = null;
     }
-    while (
-      this.driverCompletionRecoveryInFlight ||
-      this.activeOutboxExecutions > 0 ||
-      this.outboxDispatcherActive
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    const activeDrain = this.driverCompletionOutboxDrainPromise;
+    if (activeDrain) {
+      await activeDrain;
     }
   }
 
@@ -1277,7 +1278,11 @@ export class OwnedMobilityService
         previousApprovalState,
         requestId,
       );
-      void this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
+      void this.publishTenantOrderWebhook(
+        order,
+        "order.created",
+        order.createdAt,
+      );
       void this.opsDispatchEventsService?.publishOrderCreated(
         this.cloneOrder(order),
         requestId,
@@ -4508,7 +4513,7 @@ export class OwnedMobilityService
 
     const committed = result.committed;
     await this.applyCommittedDriverTaskCompletion(committed, requestId);
-    void this.triggerDriverCompletionOutboxDispatch(committed.task.taskId);
+    this.triggerDriverCompletionOutboxDispatch();
     if (committed.errorToThrow) {
       throw committed.errorToThrow;
     }
@@ -4530,6 +4535,7 @@ export class OwnedMobilityService
     },
   ): Promise<DriverTaskCompletionTransactionResult> {
     const order = this.cloneOrder(params.bundle.order);
+    const dispatchJob = { ...params.bundle.dispatchJob };
     const assignment = { ...params.bundle.assignment };
     const task = this.cloneTask(params.bundle.task);
 
@@ -4545,6 +4551,7 @@ export class OwnedMobilityService
           outcome: "replayed",
           bundle: {
             order,
+            dispatchJob,
             assignment,
             task: replayedTask,
           },
@@ -4600,12 +4607,19 @@ export class OwnedMobilityService
       order.updatedAt = now;
       assignment.updatedAt = now;
 
-      const traceLog = this.buildTraceLog(order.orderId, "driver.proof_pending", {
-        taskId: task.taskId,
-        assignmentId: assignment.assignmentId,
-        missingItems: this.describeMissingCompletionProof(order, params.proof),
-        requestId: params.requestId ?? null,
-      });
+      const traceLog = this.buildTraceLog(
+        order.orderId,
+        "driver.proof_pending",
+        {
+          taskId: task.taskId,
+          assignmentId: assignment.assignmentId,
+          missingItems: this.describeMissingCompletionProof(
+            order,
+            params.proof,
+          ),
+          requestId: params.requestId ?? null,
+        },
+      );
 
       await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
         orders: [this.cloneOrder(order)],
@@ -4637,18 +4651,21 @@ export class OwnedMobilityService
       order.tenantId &&
       order.bookingId
     ) {
-      quotaConsumption = await this.tenantPartnerService.prepareTenantQuotaConsumption(
-        tx,
-        {
+      quotaConsumption =
+        await this.tenantPartnerService.prepareTenantQuotaConsumption(tx, {
           tenantId: order.tenantId,
           bookingId: order.bookingId,
-        },
-      );
+        });
     }
 
     const certificateEvent =
       order.runtimeProfileCode === "multi_taxi_direct"
-        ? this.buildMultiTaxiCertificateEvent(order, task, params.command, params.proof)
+        ? this.buildMultiTaxiCertificateEvent(
+            order,
+            task,
+            params.command,
+            params.proof,
+          )
         : null;
 
     const now = new Date().toISOString();
@@ -4665,12 +4682,16 @@ export class OwnedMobilityService
     order.status = "completed";
     order.updatedAt = now;
 
-    const traceLog = this.buildTraceLog(order.orderId, "driver.completed_trip", {
-      taskId: task.taskId,
-      assignmentId: assignment.assignmentId,
-      completedAt: params.command.completedAt,
-      requestId: params.requestId ?? null,
-    });
+    const traceLog = this.buildTraceLog(
+      order.orderId,
+      "driver.completed_trip",
+      {
+        taskId: task.taskId,
+        assignmentId: assignment.assignmentId,
+        completedAt: params.command.completedAt,
+        requestId: params.requestId ?? null,
+      },
+    );
 
     await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
       orders: [this.cloneOrder(order)],
@@ -4680,10 +4701,12 @@ export class OwnedMobilityService
     });
     await this.persistDriverCompletionOutbox(tx, {
       order,
+      dispatchJob,
       assignment,
       task,
       requestId: params.requestId ?? null,
       certificateEvent,
+      quotaConsumption,
     });
 
     return {
@@ -4718,7 +4741,9 @@ export class OwnedMobilityService
 
     this.orders = [
       this.cloneOrder(committed.order),
-      ...this.orders.filter((order) => order.orderId !== committed.order.orderId),
+      ...this.orders.filter(
+        (order) => order.orderId !== committed.order.orderId,
+      ),
     ];
     this.dispatchAssignments = [
       { ...committed.assignment },
@@ -4729,7 +4754,9 @@ export class OwnedMobilityService
     ];
     this.driverTasks = [
       this.cloneTask(committed.task),
-      ...this.driverTasks.filter((task) => task.taskId !== committed.task.taskId),
+      ...this.driverTasks.filter(
+        (task) => task.taskId !== committed.task.taskId,
+      ),
     ];
     this.dispatchTraceLogs = [
       this.cloneTraceLog(committed.traceLog),
@@ -4742,7 +4769,10 @@ export class OwnedMobilityService
     if (
       !this.ownedMobilityRepository ||
       !this.ownedMobilityRepository.isEnabled() ||
-      !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository)
+      !(
+        "claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository
+      )
     ) {
       if (committed.outcome === "completed") {
         await this.recordAudit(
@@ -4761,14 +4791,24 @@ export class OwnedMobilityService
           },
           requestId,
         );
-        await this.publishTenantOrderWebhook(committed.order, "order.completed", now, {
-          completedAt: committed.task.completedAt,
-          taskId: committed.task.taskId,
-          assignmentId: committed.assignment.assignmentId,
-        });
-        await this.publishCompletedTripSettlementEvent(committed.order, committed.task);
+        await this.publishTenantOrderWebhook(
+          committed.order,
+          "order.completed",
+          now,
+          {
+            completedAt: committed.task.completedAt,
+            taskId: committed.task.taskId,
+            assignmentId: committed.assignment.assignmentId,
+          },
+        );
+        await this.publishCompletedTripSettlementEvent(
+          committed.order,
+          committed.task,
+        );
         if (committed.certificateEvent) {
-          await this.publishMultiTaxiCertificateEvent(committed.certificateEvent);
+          await this.publishMultiTaxiCertificateEvent(
+            committed.certificateEvent,
+          );
         }
       }
       await this.ownedMobilityTaskEventsService.publishTaskUpdated(
@@ -4776,7 +4816,10 @@ export class OwnedMobilityService
         committed.order,
         requestId,
       );
-      await this.publishLatestDispatchJobUpdate(committed.order.orderId, requestId);
+      await this.publishLatestDispatchJobUpdate(
+        committed.order.orderId,
+        requestId,
+      );
     }
   }
 
@@ -4790,7 +4833,8 @@ export class OwnedMobilityService
     this.dispatchAssignments = [
       { ...bundle.assignment },
       ...this.dispatchAssignments.filter(
-        (assignment) => assignment.assignmentId !== bundle.assignment.assignmentId,
+        (assignment) =>
+          assignment.assignmentId !== bundle.assignment.assignmentId,
       ),
     ];
     this.driverTasks = [
@@ -4879,7 +4923,8 @@ export class OwnedMobilityService
   private buildCompletedTripSettlementEvent(
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
-    dispatchAssignments: readonly DispatchAssignmentRecord[] = this.dispatchAssignments,
+    dispatchAssignments: readonly DispatchAssignmentRecord[] = this
+      .dispatchAssignments,
     driverTasks: readonly DriverTaskRecord[] = this.driverTasks,
   ): OwnedMobilityTripCompletedEvent | null {
     if (
@@ -4942,7 +4987,8 @@ export class OwnedMobilityService
     order: OwnedOrderRecord,
     completedTask: DriverTaskRecord,
     grossEarning: MoneyAmount,
-    dispatchAssignments: readonly DispatchAssignmentRecord[] = this.dispatchAssignments,
+    dispatchAssignments: readonly DispatchAssignmentRecord[] = this
+      .dispatchAssignments,
     driverTasks: readonly DriverTaskRecord[] = this.driverTasks,
   ): FulfillmentSegmentRecord[] {
     const orderAssignments = dispatchAssignments
@@ -5111,10 +5157,12 @@ export class OwnedMobilityService
     tx: OwnedMobilityQueryExecutor,
     input: {
       order: OwnedOrderRecord;
+      dispatchJob: DispatchJobRecord;
       assignment: DispatchAssignmentRecord;
       task: DriverTaskRecord;
       requestId: string | null;
       certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+      quotaConsumption: TenantQuotaConsumptionCommitResult | null;
     },
   ) {
     const payloads = this.buildDriverCompletionOutboxPayloads(input);
@@ -5142,16 +5190,21 @@ export class OwnedMobilityService
       deliveredAt: null,
     }));
     if (this.ownedMobilityRepository?.persistDriverCompletionOutbox) {
-      await this.ownedMobilityRepository.persistDriverCompletionOutbox(tx, records);
+      await this.ownedMobilityRepository.persistDriverCompletionOutbox(
+        tx,
+        records,
+      );
     }
   }
 
   private buildDriverCompletionOutboxPayloads(input: {
     order: OwnedOrderRecord;
+    dispatchJob: DispatchJobRecord;
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord;
     requestId: string | null;
     certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+    quotaConsumption: TenantQuotaConsumptionCommitResult | null;
   }): DriverCompletionOutboxPayload[] {
     const payloads: DriverCompletionOutboxPayload[] = [];
     if (input.order.tenantId) {
@@ -5202,35 +5255,78 @@ export class OwnedMobilityService
       });
     }
 
+    const completionAuditOutboxId = this.buildDriverCompletionOutboxId(
+      input.task.taskId,
+      "completion_audit_bundle",
+    );
+    const completionAudit: AuditEntryInput = {
+      actorId: input.task.driverId,
+      actorType: "ops_user",
+      tenantId: null,
+      moduleName: "driver-task",
+      actionName: "complete_trip",
+      resourceType: "driver_task",
+      resourceId: input.task.taskId,
+      newValuesSummary: {
+        status: input.task.status,
+        completedAt: input.task.completedAt,
+      },
+    };
+    const completionAudits: AuditEntryInput[] = [
+      completionAudit,
+      ...((input.quotaConsumption?.auditEntries ?? []).map((entry) =>
+        structuredClone(entry),
+      ) as AuditEntryInput[]),
+    ].map((entry, index) => ({
+      ...structuredClone(entry),
+      auditId: generateDeterministicUuid(
+        "driver_completion_outbox_audit",
+        `${completionAuditOutboxId}:${index}`,
+      ),
+    }));
+
     payloads.push({
       effectType: "completion_audit_bundle",
-      auditEntry: {
-        actorId: input.task.driverId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "driver-task",
-        actionName: "complete_trip",
-        resourceType: "driver_task",
-        resourceId: input.task.taskId,
-        newValuesSummary: {
-          status: input.task.status,
-          completedAt: input.task.completedAt,
-        },
-      },
+      audits: completionAudits,
       requestId: input.requestId,
     });
 
+    const driverTaskUpdatedOutboxId = this.buildDriverCompletionOutboxId(
+      input.task.taskId,
+      "driver_task_updated",
+    );
     payloads.push({
       effectType: "driver_task_updated",
       task: this.cloneTask(input.task),
       order: this.cloneOrder(input.order),
       requestId: input.requestId,
+      eventId: generateDeterministicUuid(
+        "driver_completion_outbox_event",
+        `${driverTaskUpdatedOutboxId}:driver_task_updated`,
+      ),
+      correlationId: generateDeterministicUuid(
+        "driver_completion_outbox_correlation",
+        driverTaskUpdatedOutboxId,
+      ),
     });
 
+    const opsDispatchJobUpdatedOutboxId = this.buildDriverCompletionOutboxId(
+      input.task.taskId,
+      "ops_dispatch_job_updated",
+    );
     payloads.push({
       effectType: "ops_dispatch_job_updated",
       orderId: input.order.orderId,
+      dispatchJob: structuredClone(input.dispatchJob),
       requestId: input.requestId,
+      eventId: generateDeterministicUuid(
+        "driver_completion_outbox_event",
+        `${opsDispatchJobUpdatedOutboxId}:ops_dispatch_job_updated`,
+      ),
+      correlationId: generateDeterministicUuid(
+        "driver_completion_outbox_correlation",
+        opsDispatchJobUpdatedOutboxId,
+      ),
     });
 
     return payloads;
@@ -5260,150 +5356,101 @@ export class OwnedMobilityService
     if (
       this.driverCompletionRecoveryTimer ||
       !this.ownedMobilityRepository?.isEnabled() ||
-      !("claimNextRecoverableDriverCompletionOutbox" in
-        this.ownedMobilityRepository)
+      !(
+        "claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository
+      )
     ) {
       return;
     }
 
     this.driverCompletionRecoveryTimer = setInterval(() => {
-      void this.recoverDriverCompletionOutbox();
+      this.triggerDriverCompletionOutboxDispatch();
     }, DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS);
     this.driverCompletionRecoveryTimer.unref?.();
   }
 
-  private async recoverDriverCompletionOutbox() {
+  private triggerDriverCompletionOutboxDispatch() {
     if (
-      this.driverCompletionRecoveryInFlight ||
+      this.driverCompletionOutboxStopping ||
       !this.ownedMobilityRepository?.isEnabled() ||
-      !("claimNextRecoverableDriverCompletionOutbox" in
-        this.ownedMobilityRepository)
+      !(
+        "claimNextRecoverableDriverCompletionOutbox" in
+        this.ownedMobilityRepository
+      )
     ) {
       return;
     }
 
-    this.driverCompletionRecoveryInFlight = true;
-    try {
-      for (let claimedCount = 0; claimedCount < DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE; claimedCount += 1) {
-        const now = new Date();
-        const leaseToken = randomUUID();
-        const leasedUntil = new Date(
-          now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
-        ).toISOString();
-        const claimed = await this.ownedMobilityRepository.withTransaction(
-          (tx) =>
-            this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox(
-              tx,
-              leaseToken,
-              leasedUntil,
-              now.toISOString(),
-              DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-            ),
-        );
-        if (!claimed) {
-          break;
-        }
-        await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
+    this.driverCompletionOutboxDrainRequested = true;
+    if (this.driverCompletionOutboxDrainPromise) {
+      return;
+    }
+
+    const drain = this.drainDriverCompletionOutbox();
+    this.driverCompletionOutboxDrainPromise = drain;
+    void drain.finally(() => {
+      if (this.driverCompletionOutboxDrainPromise !== drain) {
+        return;
       }
-    } catch (error) {
-      this.logger.warn(
-        `Driver completion outbox recovery failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    } finally {
-      this.driverCompletionRecoveryInFlight = false;
-    }
+      this.driverCompletionOutboxDrainPromise = null;
+      if (
+        this.driverCompletionOutboxDrainRequested &&
+        !this.driverCompletionOutboxStopping
+      ) {
+        this.triggerDriverCompletionOutboxDispatch();
+      }
+    });
   }
 
-  private async triggerDriverCompletionOutboxDispatch(taskId?: string) {
-    this.outboxKickLatched = true;
-    if (this.outboxDispatcherActive || this.isShuttingDown) {
-      return;
-    }
-    void this.runGlobalDriverCompletionOutboxDispatcher(taskId);
-  }
-
-  private async runGlobalDriverCompletionOutboxDispatcher(
-    initialTaskId?: string,
-  ) {
-    if (
-      this.outboxDispatcherActive ||
-      this.isShuttingDown ||
-      !this.ownedMobilityRepository ||
-      !this.ownedMobilityRepository.isEnabled()
-    ) {
-      return;
-    }
-
-    this.outboxDispatcherActive = true;
-    this.activeOutboxExecutions++;
-
+  private async drainDriverCompletionOutbox() {
     try {
-      let currentTaskId = initialTaskId;
-      while (!this.isShuttingDown) {
-        this.outboxKickLatched = false;
-        const now = new Date();
-        const leaseToken = randomUUID();
-        const leasedUntil = new Date(
-          now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
-        ).toISOString();
-
-        let claimed: DriverCompletionOutboxClaimResult | null = null;
-        if (
-          currentTaskId &&
-          "claimNextDriverCompletionOutbox" in this.ownedMobilityRepository
+      while (!this.driverCompletionOutboxStopping) {
+        this.driverCompletionOutboxDrainRequested = false;
+        let claimedCount = 0;
+        while (
+          claimedCount < DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE &&
+          !this.driverCompletionOutboxStopping
         ) {
-          claimed = await this.ownedMobilityRepository.withTransaction((tx) =>
-            this.ownedMobilityRepository!.claimNextDriverCompletionOutbox(
-              tx,
-              currentTaskId!,
-              leaseToken,
-              leasedUntil,
-              now.toISOString(),
-              DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-            ),
+          const now = new Date();
+          const leaseToken = randomUUID();
+          const leasedUntil = new Date(
+            now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
+          ).toISOString();
+          const claimed = await this.ownedMobilityRepository!.withTransaction(
+            (tx) =>
+              this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox(
+                tx,
+                leaseToken,
+                leasedUntil,
+                now.toISOString(),
+                DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+              ),
           );
-        }
-
-        if (
-          !claimed &&
-          "claimNextRecoverableDriverCompletionOutbox" in
-            this.ownedMobilityRepository
-        ) {
-          claimed = await this.ownedMobilityRepository.withTransaction((tx) =>
-            this.ownedMobilityRepository!.claimNextRecoverableDriverCompletionOutbox(
-              tx,
-              leaseToken,
-              leasedUntil,
-              now.toISOString(),
-              DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
-            ),
-          );
-        }
-
-        if (!claimed) {
-          currentTaskId = undefined;
-          if (this.outboxKickLatched && !this.isShuttingDown) {
-            continue;
+          if (!claimed) {
+            break;
           }
-          break;
+          claimedCount += 1;
+          await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
         }
 
-        await this.handleClaimedDriverCompletionOutbox(claimed, leaseToken);
+        if (this.driverCompletionOutboxStopping) {
+          return;
+        }
+        if (claimedCount === DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE) {
+          this.driverCompletionOutboxDrainRequested = true;
+          await Promise.resolve();
+        }
+        if (!this.driverCompletionOutboxDrainRequested) {
+          return;
+        }
       }
     } catch (error) {
       this.logger.warn(
-        `Global driver completion outbox dispatch failed: ${
+        `Driver completion outbox drain failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    } finally {
-      this.outboxDispatcherActive = false;
-      this.activeOutboxExecutions--;
-      if (this.outboxKickLatched && !this.isShuttingDown) {
-        void this.runGlobalDriverCompletionOutboxDispatcher();
-      }
     }
   }
 
@@ -5418,7 +5465,10 @@ export class OwnedMobilityService
       return;
     }
 
-    await this.dispatchClaimedDriverCompletionOutbox(claimed.record, leaseToken);
+    await this.dispatchClaimedDriverCompletionOutbox(
+      claimed.record,
+      leaseToken,
+    );
   }
 
   private async dispatchClaimedDriverCompletionOutbox(
@@ -5474,31 +5524,28 @@ export class OwnedMobilityService
   ) {
     switch (outbox.effectType as DriverCompletionOutboxEffectType) {
       case "tenant_order_completed_webhook": {
-        const payload =
-          outbox.payload as Extract<
-            DriverCompletionOutboxPayload,
-            { effectType: "tenant_order_completed_webhook" }
-          >;
+        const payload = outbox.payload as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "tenant_order_completed_webhook" }
+        >;
         if (!this.tenantPartnerService) {
           throw new Error("Tenant partner webhook service unavailable.");
         }
-        await this.tenantPartnerService.publishWebhookEvent(
-          payload.tenantId,
-          {
-            ...payload.payload,
-            outboxKey: outbox.outboxId,
-          },
-        );
+        await this.tenantPartnerService.publishWebhookEvent(payload.tenantId, {
+          ...payload.payload,
+          outboxKey: outbox.outboxId,
+        });
         return;
       }
       case "owned_mobility_trip_completed": {
-        const payload =
-          outbox.payload as Extract<
-            DriverCompletionOutboxPayload,
-            { effectType: "owned_mobility_trip_completed" }
-          >;
+        const payload = outbox.payload as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "owned_mobility_trip_completed" }
+        >;
         if (!this.eventEmitter) {
-          throw new Error("Owned mobility completion event emitter unavailable.");
+          throw new Error(
+            "Owned mobility completion event emitter unavailable.",
+          );
         }
         if (
           this.eventEmitter.listenerCount(
@@ -5521,48 +5568,94 @@ export class OwnedMobilityService
         return;
       }
       case "multi_taxi_certificate": {
-        const payload =
-          outbox.payload as Extract<
-            DriverCompletionOutboxPayload,
-            { effectType: "multi_taxi_certificate" }
-          >;
+        const payload = outbox.payload as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "multi_taxi_certificate" }
+        >;
         await this.publishMultiTaxiCertificateEvent(payload.event);
         return;
       }
       case "completion_audit_bundle": {
-        const payload =
-          outbox.payload as unknown as Extract<
-            DriverCompletionOutboxPayload,
-            { effectType: "completion_audit_bundle" }
-          >;
-        await this.recordAudit(
-          payload.auditEntry,
-          payload.requestId ?? undefined,
-        );
+        const payload = outbox.payload as unknown as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "completion_audit_bundle" }
+        >;
+        if (
+          !this.auditNotificationService ||
+          (typeof this.auditNotificationService.recordAuditLogAsync !==
+            "function" &&
+            typeof this.auditNotificationService.recordAuditLog !== "function")
+        ) {
+          throw new Error("Completion audit publisher unavailable.");
+        }
+        if (!Array.isArray(payload.audits) || payload.audits.length === 0) {
+          throw new Error("Completion audit bundle is empty or invalid.");
+        }
+        for (const [index, audit] of payload.audits.entries()) {
+          if (!audit.auditId) {
+            throw new Error(
+              `Completion audit ${index} is missing its durable auditId.`,
+            );
+          }
+          await this.recordAudit(
+            structuredClone(audit),
+            payload.requestId ?? outbox.requestId ?? outbox.outboxId,
+          );
+        }
         return;
       }
       case "driver_task_updated": {
-        const payload =
-          outbox.payload as unknown as Extract<
-            DriverCompletionOutboxPayload,
-            { effectType: "driver_task_updated" }
-          >;
+        const payload = outbox.payload as unknown as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "driver_task_updated" }
+        >;
+        if (
+          !this.ownedMobilityTaskEventsService ||
+          typeof this.ownedMobilityTaskEventsService.publishTaskUpdated !==
+            "function"
+        ) {
+          throw new Error("Driver task event publisher unavailable.");
+        }
+        if (!payload.eventId || !payload.correlationId) {
+          throw new Error("Driver task event identity is missing.");
+        }
         await this.ownedMobilityTaskEventsService.publishTaskUpdated(
-          payload.task,
-          payload.order,
-          payload.requestId ?? undefined,
+          this.cloneTask(payload.task),
+          this.cloneOrder(payload.order),
+          payload.requestId ?? outbox.requestId ?? undefined,
+          {
+            eventId: payload.eventId,
+            correlationId: payload.correlationId,
+          },
         );
         return;
       }
       case "ops_dispatch_job_updated": {
-        const payload =
-          outbox.payload as unknown as Extract<
-            DriverCompletionOutboxPayload,
-            { effectType: "ops_dispatch_job_updated" }
-          >;
-        await this.publishLatestDispatchJobUpdate(
+        const payload = outbox.payload as unknown as Extract<
+          DriverCompletionOutboxPayload,
+          { effectType: "ops_dispatch_job_updated" }
+        >;
+        if (
+          !this.opsDispatchEventsService ||
+          typeof this.opsDispatchEventsService.publishDispatchJobUpdated !==
+            "function"
+        ) {
+          throw new Error("Ops dispatch event publisher unavailable.");
+        }
+        if (!payload.dispatchJob) {
+          throw new Error("Ops dispatch job snapshot is missing.");
+        }
+        if (!payload.eventId || !payload.correlationId) {
+          throw new Error("Ops dispatch event identity is missing.");
+        }
+        await this.opsDispatchEventsService.publishDispatchJobUpdated(
           payload.orderId,
-          payload.requestId ?? undefined,
+          structuredClone(payload.dispatchJob),
+          payload.requestId ?? outbox.requestId ?? undefined,
+          {
+            eventId: payload.eventId,
+            correlationId: payload.correlationId,
+          },
         );
         return;
       }
@@ -5608,18 +5701,15 @@ export class OwnedMobilityService
       return;
     }
 
-    await this.tenantPartnerService.publishWebhookEvent(
-      order.tenantId,
-      {
-        ...this.buildTenantOrderWebhookPayload(
-          order,
-          eventType,
-          occurredAt,
-          extraData,
-        ),
-        outboxKey: outboxKey ?? `order_${order.orderId}_${eventType}`,
-      },
-    );
+    await this.tenantPartnerService.publishWebhookEvent(order.tenantId, {
+      ...this.buildTenantOrderWebhookPayload(
+        order,
+        eventType,
+        occurredAt,
+        extraData,
+      ),
+      outboxKey: outboxKey ?? `order_${order.orderId}_${eventType}`,
+    });
   }
 
   private buildTenantOrderWebhookPayload(
@@ -7817,8 +7907,12 @@ export class OwnedMobilityService
       requestId: requestIdValue,
     };
     if (this.auditNotificationService) {
-      if (typeof this.auditNotificationService.recordAuditLogAsync === "function") {
-        return await this.auditNotificationService.recordAuditLogAsync(auditInput);
+      if (
+        typeof this.auditNotificationService.recordAuditLogAsync === "function"
+      ) {
+        return await this.auditNotificationService.recordAuditLogAsync(
+          auditInput,
+        );
       }
       return this.auditNotificationService.recordAuditLog(auditInput);
     }

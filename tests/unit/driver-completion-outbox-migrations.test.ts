@@ -16,7 +16,31 @@ const v0066 = readFileSync(
   "utf8",
 );
 
+const expectedEffectTypes = [
+  "tenant_order_completed_webhook",
+  "owned_mobility_trip_completed",
+  "multi_taxi_certificate",
+  "completion_audit_bundle",
+  "driver_task_updated",
+  "ops_dispatch_job_updated",
+];
+
+function extractEffectTypeConstraint(sql: string) {
+  const constraint = sql.match(
+    /(?:ADD\s+)?CONSTRAINT\s+driver_completion_outbox_effect_type_chk\s+CHECK\s*\(\s*effect_type\s+IN\s*\(([^)]*)\)\s*\)/s,
+  );
+  expect(constraint, "effect-type CHECK constraint is missing").not.toBeNull();
+  return [...(constraint?.[1] ?? "").matchAll(/'([^']+)'/g)].map(
+    (match) => match[1],
+  );
+}
+
 describe("driver completion outbox migrations", () => {
+  it("allows exactly the six durable effects on fresh and upgraded databases", () => {
+    expect(extractEffectTypeConstraint(v0065)).toEqual(expectedEffectTypes);
+    expect(extractEffectTypeConstraint(v0066)).toEqual(expectedEffectTypes);
+  });
+
   it("does not allow fresh installs to cascade-delete durable completion intent", () => {
     expect(v0065).toContain(
       "REFERENCES ops.phase1_driver_tasks(task_id) ON DELETE NO ACTION",
@@ -56,7 +80,9 @@ describe("driver completion outbox migrations", () => {
     expect(v0066).toContain(
       "ADD CONSTRAINT phase1_driver_tasks_task_order_unique UNIQUE (task_id, order_id);",
     );
-    expect(v0066).toContain("CREATE INDEX IF NOT EXISTS driver_completion_outbox_recovery_idx");
+    expect(v0066).toContain(
+      "CREATE INDEX IF NOT EXISTS driver_completion_outbox_recovery_idx",
+    );
     expect(v0066).toContain("next_attempt_at,");
     expect(v0066).toContain("created_at,");
     expect(v0066).toContain("task_id,");

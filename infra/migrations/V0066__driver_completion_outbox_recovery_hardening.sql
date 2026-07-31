@@ -1,10 +1,23 @@
 -- V0066__driver_completion_outbox_recovery_hardening.sql
 -- Phase 1 · harden driver-completion outbox invariants and recovery scans.
 --
--- V0065 introduced task-scoped claims, but crash recovery now scans globally
--- for any recoverable task. Add invariants so lease/delivery state stays
+-- V0065 introduced completion claims; recovery now scans globally for any
+-- recoverable task. Add invariants so lease/delivery state stays
 -- internally consistent and add a recovery-oriented partial index for the
 -- global poller.
+
+ALTER TABLE ops.driver_completion_outbox
+  DROP CONSTRAINT IF EXISTS driver_completion_outbox_effect_type_chk;
+
+ALTER TABLE ops.driver_completion_outbox
+  ADD CONSTRAINT driver_completion_outbox_effect_type_chk CHECK (effect_type IN (
+    'tenant_order_completed_webhook',
+    'owned_mobility_trip_completed',
+    'multi_taxi_certificate',
+    'completion_audit_bundle',
+    'driver_task_updated',
+    'ops_dispatch_job_updated'
+  ));
 
 ALTER TABLE ops.driver_completion_outbox
   DROP CONSTRAINT IF EXISTS driver_completion_outbox_delivery_state_chk;

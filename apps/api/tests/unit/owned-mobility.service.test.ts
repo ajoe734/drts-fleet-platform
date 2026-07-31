@@ -98,9 +98,10 @@ function createOwnedMobilityService(options?: {
     persistDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
     loadState?: (...args: any[]) => Promise<unknown>;
-    loadDriverTaskCompletionBundleForUpdate?: (...args: any[]) => Promise<unknown>;
+    loadDriverTaskCompletionBundleForUpdate?: (
+      ...args: any[]
+    ) => Promise<unknown>;
     hasDriverTaskTraceRequestId?: (...args: any[]) => Promise<boolean>;
-    claimNextDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     claimNextRecoverableDriverCompletionOutbox?: (
       ...args: any[]
     ) => Promise<unknown>;
@@ -4150,11 +4151,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       }),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
+        dispatchJob: state.get("dispatchJob"),
         assignment: state.get("assignment"),
         task: state.get("task"),
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
-      claimNextDriverCompletionOutbox: vi.fn(async () => {
+      claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
         const record = outboxQueue.shift();
         return record ? { action: "dispatch", record } : null;
       }),
@@ -4241,19 +4243,22 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           : null,
       }),
     );
-    (service as any).dispatchTraceLogs = (seedService as any).dispatchTraceLogs.map(
-      (trace: any) => ({
-        ...trace,
-        details: trace.details ? { ...trace.details } : undefined,
-      }),
-    );
+    (service as any).dispatchTraceLogs = (
+      seedService as any
+    ).dispatchTraceLogs.map((trace: any) => ({
+      ...trace,
+      details: trace.details ? { ...trace.details } : undefined,
+    }));
 
     state.set("order", service.getOrder(booking.orderId));
+    state.set("dispatchJob", (service as any).dispatchJobs[0]);
     state.set("assignment", (service as any).dispatchAssignments[0]);
     state.set("task", service.listDriverTasks()[0]);
     sequence.length = 0;
     auditNotificationService.recordAuditLog.mockClear();
-    (tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>).mockClear();
+    (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mockClear();
 
     await service.completeDriverTask(
       assignment.taskId,
@@ -4330,6 +4335,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       withTransaction: vi.fn(async (work) => work({} as never)),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
+        dispatchJob: state.get("dispatchJob"),
         assignment: state.get("assignment"),
         task: state.get("task"),
       })),
@@ -4396,6 +4402,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
 
     state.set("order", seedService.getOrder(booking.orderId));
+    state.set("dispatchJob", (seedService as any).dispatchJobs[0]);
     state.set("assignment", (seedService as any).dispatchAssignments[0]);
     state.set("task", seedService.listDriverTasks()[0]);
 
@@ -4461,11 +4468,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       withTransaction: vi.fn(async (work) => work({} as never)),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
+        dispatchJob: state.get("dispatchJob"),
         assignment: state.get("assignment"),
         task: state.get("task"),
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
-      claimNextDriverCompletionOutbox: vi.fn(async () => null),
+      claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => null),
       reportPersistenceFailure: vi.fn(),
     };
 
@@ -4528,6 +4536,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
 
     state.set("order", seedService.getOrder(booking.orderId));
+    state.set("dispatchJob", (seedService as any).dispatchJobs[0]);
     state.set("assignment", (seedService as any).dispatchAssignments[0]);
     state.set("task", seedService.listDriverTasks()[0]);
 
@@ -4591,6 +4600,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       withTransaction: vi.fn(async (work) => work({} as never)),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
+        dispatchJob: state.get("dispatchJob"),
         assignment: state.get("assignment"),
         task: state.get("task"),
       })),
@@ -4670,6 +4680,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const completedAssignment = (seedService as any).dispatchAssignments[0];
     const completedTask = seedService.listDriverTasks()[0];
     state.set("order", completedOrder);
+    state.set("dispatchJob", (seedService as any).dispatchJobs[0]);
     state.set("assignment", completedAssignment);
     state.set("task", completedTask);
 
@@ -4681,7 +4692,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       { ...completedTask, status: "on_trip", completedAt: null },
     ];
     auditNotificationService.recordAuditLog.mockClear();
-    (tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>).mockClear();
+    (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mockClear();
 
     await expect(
       service.completeDriverTask(
@@ -4754,6 +4767,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       }),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
+        dispatchJob: state.get("dispatchJob"),
         assignment: state.get("assignment"),
         task: state.get("task"),
       })),
@@ -4842,18 +4856,21 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           : null,
       }),
     );
-    (service as any).dispatchTraceLogs = (seedService as any).dispatchTraceLogs.map(
-      (trace: any) => ({
-        ...trace,
-        details: trace.details ? { ...trace.details } : undefined,
-      }),
-    );
+    (service as any).dispatchTraceLogs = (
+      seedService as any
+    ).dispatchTraceLogs.map((trace: any) => ({
+      ...trace,
+      details: trace.details ? { ...trace.details } : undefined,
+    }));
 
     state.set("order", service.getOrder(booking.orderId));
+    state.set("dispatchJob", (service as any).dispatchJobs[0]);
     state.set("assignment", (service as any).dispatchAssignments[0]);
     state.set("task", service.listDriverTasks()[0]);
     auditNotificationService.recordAuditLog.mockClear();
-    (tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>).mockClear();
+    (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mockClear();
 
     await expect(
       service.completeDriverTask(
@@ -5054,7 +5071,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       releaseDriverCompletionOutbox: vi.fn(async () => true),
       reportPersistenceFailure: vi.fn(),
     };
-    const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => undefined);
 
     const { service } = createOwnedMobilityService({
       tenantPartnerService,
@@ -5066,7 +5085,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
-    expect(repository.markDriverCompletionOutboxDelivered).not.toHaveBeenCalled();
+    expect(
+      repository.markDriverCompletionOutboxDelivered,
+    ).not.toHaveBeenCalled();
     expect(repository.releaseDriverCompletionOutbox).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("dead-lettered after lease recovery"),
@@ -5126,7 +5147,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       releaseDriverCompletionOutbox: vi.fn(async () => true),
       reportPersistenceFailure: vi.fn(),
     };
-    const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => undefined);
 
     const { service } = createOwnedMobilityService({
       tenantPartnerService,
@@ -5198,7 +5221,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       releaseDriverCompletionOutbox: vi.fn(async () => false),
       reportPersistenceFailure: vi.fn(),
     };
-    const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => undefined);
 
     const { service } = createOwnedMobilityService({
       tenantPartnerService,
