@@ -29,28 +29,26 @@ existing_service=""
 if [ "$describe_status" -eq 0 ]; then
   existing_service="$describe_output"
 else
-  # Parse error output strictly.
-  # Command-not-found, project-not-found, permission-denied must fail closed.
-  if grep -Eiq '(command not found|Project \[.*\] not found|Project \[.*\] is not found|Project .* not found|Permission denied)' <<<"$describe_output"; then
-    echo "Fatal error describing domain mapping for ${domain}:" >&2
-    echo "$describe_output" >&2
-    echo "Refusing to proceed: project-level or command failure detected." >&2
-    exit "$describe_status"
+  # Strip gcloud header line prefix: `ERROR: (gcloud.beta.run.domain-mappings.describe) `
+  cleaned_output="$(sed -E 's/^ERROR: \([^)]+\) //' <<<"$describe_output")"
+
+  is_domain_not_found=0
+
+  # Match specifically when the requested domain is the resource reported as missing
+  if grep -Eiq "Cannot find domain mapping for \\[${domain}\\]" <<<"$cleaned_output" || \
+     grep -Eiq "(Resource|DomainMapping) ['\"]?${domain}['\"]? (was not found|not found)" <<<"$cleaned_output" || \
+     (grep -Eiq "(Cannot find domain mapping|DomainMapping|domain-mapping|Resource) .*not found" <<<"$cleaned_output" && grep -Fiq "$domain" <<<"$cleaned_output"); then
+    if ! grep -Eiq '(Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$cleaned_output"; then
+      is_domain_not_found=1
+    fi
   fi
 
-  # Extract message body by stripping the gcloud header line `ERROR: (gcloud.beta.run.domain-mappings.describe)...`
-  body="$(grep -vi 'gcloud\.beta\.run\.domain-mappings\.describe' <<<"$describe_output" || true)"
-  if [ -z "$body" ]; then
-    body="$describe_output"
-  fi
-
-  # Verify if message body specifically indicates domain mapping resource was NOT_FOUND
-  if grep -Eiq '(Cannot find domain mapping|DomainMapping .* not found|Resource .* not found|NOT_FOUND|not found)' <<<"$body" && \
-     ! grep -Eiq 'project' <<<"$body"; then
+  if [ "$is_domain_not_found" -eq 1 ]; then
     existing_service=""
   else
-    echo "Error describing domain mapping for ${domain}:" >&2
+    echo "Fatal error describing domain mapping for ${domain}:" >&2
     echo "$describe_output" >&2
+    echo "Refusing to proceed: error output does not match domain-not-found for ${domain}." >&2
     exit "${describe_status:-1}"
   fi
 fi
