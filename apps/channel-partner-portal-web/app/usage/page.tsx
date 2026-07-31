@@ -5,11 +5,9 @@ import {
   CanvasPill,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import {
-  formatReferralPortalEvidence,
-  loadReferralUsage,
-} from "@/lib/channel-portal-data.server";
+import { loadReferralUsage } from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
+import { formatReferralPortalEvidence } from "@/lib/referral-portal-evidence";
 import {
   ReferralTripLinesTable,
   ReferralUsageDailyTable,

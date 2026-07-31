@@ -142,8 +142,10 @@ describe("Cloud Run deploy quota retry", () => {
       "Domain mapping already targets ${service}; skipping create.",
     );
     expect(domainWorkflow).toContain(
-      "Refusing to mutate a live mapping in this no-deploy workflow",
+      "Refusing to mutate a live mapping in this domain-maintenance workflow",
     );
+    expect(domainWorkflow).toContain("describe_status=$?");
+    expect(domainWorkflow).toContain("grep -Eiq '(NOT_FOUND|not found)'");
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {

@@ -22,25 +22,10 @@ import type {
   ReferralStatementRecord,
   ReferralStatementStatus,
 } from "./referral-portal-contracts";
-
-export type DataSource = "live" | "fallback";
-export type ReferralPortalEvidence = {
-  actorType: string;
-  partnerEntrySlug: string;
-  scopes: string[];
-  source: DataSource;
-};
-
-export function formatReferralPortalEvidence(
-  evidence: ReferralPortalEvidence,
-): string {
-  return [
-    `drts-data-source:${evidence.source}`,
-    `drts-e2e-actor-type:${evidence.actorType}`,
-    `drts-e2e-entry-slug:${evidence.partnerEntrySlug}`,
-    `drts-e2e-scopes:${evidence.scopes.join(",") || "none"}`,
-  ].join(" ");
-}
+import type {
+  DataSource,
+  ReferralPortalEvidence,
+} from "./referral-portal-evidence";
 
 // --- shared formatters ------------------------------------------------------
 

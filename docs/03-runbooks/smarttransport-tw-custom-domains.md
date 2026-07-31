@@ -33,7 +33,7 @@
 
 ---
 
-## 2. 建立 domain mappings（idempotent；不覆寫既有 live mapping）
+## 2. 建立 domain mappings（domain-maintenance；idempotent；不覆寫既有 live mapping）
 
 ```bash
 PROJECT=drts-dev-ray-tw-20260730
@@ -48,14 +48,28 @@ map() {  # map <subdomain> <service>
   local domain="$1"
   local service="$2"
   local existing_service
+  local describe_output
+  local describe_status
 
-  existing_service="$(
+  set +e
+  describe_output="$(
     gcloud --quiet beta run domain-mappings describe \
       --domain "$domain" \
       --region "$REGION" \
       --project "$PROJECT" \
-      --format='value(spec.routeName)' 2>/dev/null || true
+      --format='value(spec.routeName)' 2>&1
   )"
+  describe_status=$?
+  set -e
+
+  if [ "$describe_status" -eq 0 ]; then
+    existing_service="$describe_output"
+  elif grep -Eiq '(NOT_FOUND|not found)' <<<"$describe_output"; then
+    existing_service=""
+  else
+    printf '%s\n' "$describe_output" >&2
+    return "$describe_status"
+  fi
 
   if [ -n "$existing_service" ]; then
     if [ "$existing_service" = "$service" ]; then
@@ -64,7 +78,7 @@ map() {  # map <subdomain> <service>
     fi
 
     echo "Existing mapping for ${domain} points at ${existing_service}, expected ${service}." >&2
-    echo "Refusing to mutate a live mapping in this no-deploy workflow; fail closed and hand off to the single deploy cleanup task." >&2
+    echo "Refusing to mutate a live mapping in this domain-maintenance workflow; fail closed and hand off to the single deploy cleanup task." >&2
     return 1
   fi
 
@@ -137,5 +151,5 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
 - HTTPS 實測（純觀測，不構成本 task gate）：
   - `https://refer.smarttransport.tw/` 於 2026-07-31 會 `307` 轉到 `/embed/referral-demo-community`
   - `https://refer.smarttransport.tw/embed/referral-demo-community` 回 `200`
-  - `https://channel.smarttransport.tw`、`https://api.smarttransport.tw/health`、`https://ride.smarttransport.tw`、`https://concierge.smarttransport.tw` 於 2026-07-31 測得 TLS/SSL 連線失敗；這些是外部 live-state observation，不回寫 repo active inventory，也不阻擋本次 no-deploy rails 修復
+  - `https://channel.smarttransport.tw`、`https://api.smarttransport.tw/health`、`https://ride.smarttransport.tw`、`https://concierge.smarttransport.tw` 於 2026-07-31 測得 TLS/SSL 連線失敗；這些是外部 live-state observation，不回寫 repo active inventory，也不阻擋本次 repo-only domain-maintenance rails 修復
 - 因此本 runbook 的 machine-truth 職責只有對齊 repo 內 authoritative inventory；外部 DNS、憑證、mapping 存活清理另案處理。

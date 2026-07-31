@@ -81,7 +81,11 @@ describe("dev active surface contract", () => {
     expect(source).toContain(
       "fail closed and hand off to the single deploy cleanup task.",
     );
-    expect(source).not.toContain("reconcile externally first");
+    expect(source).toContain(
+      "Refusing to mutate a live mapping in this domain-maintenance workflow",
+    );
+    expect(source).toContain("describe_status=$?");
+    expect(source).toContain("grep -Eiq '(NOT_FOUND|not found)'");
     expect(source).not.toContain("concierge.smarttransport.tw");
     expect(source).not.toContain("ride.smarttransport.tw");
   });
@@ -118,6 +122,7 @@ describe("dev active surface contract", () => {
     expect(runbook).toContain(
       "fail closed and hand off to the single deploy cleanup task.",
     );
+    expect(runbook).toContain("domain-maintenance");
     expect(runbook).toContain("drts-dev-ray-tw-20260730");
     expect(runbook).toContain("us-central1");
     expect(runbook).not.toContain("drts-referral-embed-web");

@@ -1,10 +1,8 @@
 import { CanvasCard, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import {
-  formatReferralPortalEvidence,
-  loadReferralStatements,
-} from "@/lib/channel-portal-data.server";
+import { loadReferralStatements } from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
+import { formatReferralPortalEvidence } from "@/lib/referral-portal-evidence";
 import { ReferralStatementsTable } from "@/components/referral-tables";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";

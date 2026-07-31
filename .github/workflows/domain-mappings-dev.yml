@@ -1,4 +1,4 @@
-name: Domain Mappings — Dev (smarttransport.tw)
+name: Domain Maintenance — Dev (smarttransport.tw)
 
 on:
   workflow_dispatch:
@@ -65,22 +65,36 @@ jobs:
             local domain="$1"
             local service="$2"
             local existing_service
+            local describe_output
+            local describe_status
 
             echo "::group::${domain} -> ${service}"
-            existing_service="$(
+            set +e
+            describe_output="$(
               gcloud --quiet beta run domain-mappings describe \
                 --domain "$domain" \
                 --region "$REGION" \
                 --project "$PROJECT" \
-                --format='value(spec.routeName)' 2>/dev/null || true
+                --format='value(spec.routeName)' 2>&1
             )"
+            describe_status=$?
+            set -e
+
+            if [ "$describe_status" -eq 0 ]; then
+              existing_service="$describe_output"
+            elif grep -Eiq '(NOT_FOUND|not found)' <<<"$describe_output"; then
+              existing_service=""
+            else
+              echo "$describe_output" >&2
+              exit "$describe_status"
+            fi
 
             if [ -n "$existing_service" ]; then
               if [ "$existing_service" = "$service" ]; then
                 echo "Domain mapping already targets ${service}; skipping create."
               else
                 echo "Existing mapping for ${domain} points at ${existing_service}, expected ${service}." >&2
-                echo "Refusing to mutate a live mapping in this no-deploy workflow; fail closed and hand off to the single deploy cleanup task." >&2
+                echo "Refusing to mutate a live mapping in this domain-maintenance workflow; fail closed and hand off to the single deploy cleanup task." >&2
                 exit 1
               fi
             else
