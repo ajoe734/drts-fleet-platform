@@ -15,18 +15,18 @@
 
 ## 1. 前綴 → 服務對照
 
-| 子網域                       | Cloud Run 服務                    | 用途           |
-| ---------------------------- | --------------------------------- | -------------- |
-| `fleets.smarttransport.tw`   | `drts-platform-admin-web`         | 車隊管理後臺   |
-| `ops.smarttransport.tw`      | `drts-ops-console-web`            | 營運中心       |
-| `partners.smarttransport.tw` | `drts-fleet-partner-portal-web`   | 車行夥伴       |
-| `dispatch.smarttransport.tw` | `drts-enterprise-dispatch-web`    | 企業派車       |
-| `book.smarttransport.tw`     | `drts-partner-booking-web`        | 機場／合作預約 |
-| `bank.smarttransport.tw`     | `drts-bank-console-web`           | 銀行後臺       |
-| `channel.smarttransport.tw`  | `drts-channel-partner-portal-web` | 渠道夥伴       |
-| `tenant.smarttransport.tw`   | `drts-tenant-console-web`         | 企業租戶       |
-| `refer.smarttransport.tw`    | `drts-referral-embed-web`         | 推薦嵌入       |
-| `api.smarttransport.tw`      | `drts-api`                        | 後端 API       |
+| 子網域                       | Cloud Run 服務                      | 用途           |
+| ---------------------------- | ----------------------------------- | -------------- |
+| `fleets.smarttransport.tw`   | `drts-dev-platform-admin-web`       | 車隊管理後臺   |
+| `ops.smarttransport.tw`      | `drts-dev-ops-console-web`          | 營運中心       |
+| `partners.smarttransport.tw` | `drts-dev-fleet-partner-portal-web` | 車行夥伴       |
+| `dispatch.smarttransport.tw` | `drts-dev-enterprise-dispatch-web`  | 企業派車       |
+| `book.smarttransport.tw`     | `drts-dev-partner-booking-web`      | 機場／合作預約 |
+| `bank.smarttransport.tw`     | `drts-dev-bank-console-web`         | 銀行後臺       |
+| `channel.smarttransport.tw`  | `drts-channel-partner-portal-web`   | 渠道夥伴       |
+| `tenant.smarttransport.tw`   | `drts-dev-tenant-console-web`       | 企業租戶       |
+| `refer.smarttransport.tw`    | `drts-dev-referral-embed-web`       | 推薦嵌入       |
+| `api.smarttransport.tw`      | `drts-dev-api`                      | 後端 API       |
 
 > `passenger-web` 已於 2026-06-16 退休，`concierge-portal-web` / `assisted-entry-web`
 > 亦已退休；三者不得回到 authoritative domain mapping inventory、deploy workflow、smoke URL inventory。
@@ -64,7 +64,7 @@ map() {  # map <subdomain> <service>
     fi
 
     echo "Existing mapping for ${domain} points at ${existing_service}, expected ${service}." >&2
-    echo "Refusing to mutate a live mapping in this no-deploy workflow; reconcile externally first." >&2
+    echo "Refusing to mutate a live mapping in this no-deploy workflow; fail closed and hand off to the single deploy cleanup task." >&2
     return 1
   fi
 
@@ -73,20 +73,20 @@ map() {  # map <subdomain> <service>
     --region "$REGION" --project "$PROJECT"
 }
 
-map fleets.smarttransport.tw     drts-platform-admin-web
-map ops.smarttransport.tw        drts-ops-console-web
-map partners.smarttransport.tw   drts-fleet-partner-portal-web
-map dispatch.smarttransport.tw   drts-enterprise-dispatch-web
-map book.smarttransport.tw       drts-partner-booking-web
-map bank.smarttransport.tw       drts-bank-console-web
+map fleets.smarttransport.tw     drts-dev-platform-admin-web
+map ops.smarttransport.tw        drts-dev-ops-console-web
+map partners.smarttransport.tw   drts-dev-fleet-partner-portal-web
+map dispatch.smarttransport.tw   drts-dev-enterprise-dispatch-web
+map book.smarttransport.tw       drts-dev-partner-booking-web
+map bank.smarttransport.tw       drts-dev-bank-console-web
 map channel.smarttransport.tw    drts-channel-partner-portal-web
-map tenant.smarttransport.tw     drts-tenant-console-web
-map refer.smarttransport.tw      drts-referral-embed-web
-map api.smarttransport.tw        drts-api
+map tenant.smarttransport.tw     drts-dev-tenant-console-web
+map refer.smarttransport.tw      drts-dev-referral-embed-web
+map api.smarttransport.tw        drts-dev-api
 ```
 
 每條新建 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
-若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed，讓具權限者在獨立 deploy / domain-maintenance 變更中處理，不在此 repo-only task 直接覆寫 live target。
+若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed，明確交由單一 deploy cleanup task 處理，不在此 repo-only task 直接覆寫 live target。
 
 ---
 
@@ -128,7 +128,7 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
 
 ## 5. 2026-07-31 實測現況
 
-- Authoritative active surface 仍是 `deploy-dev.yml` 內的 10 services：`api` + 9 web；不含 `passenger-web`、`concierge-portal-web`、`assisted-entry-web`。
+- Authoritative active surface 仍是 `deploy-dev.yml` 內的 10 services：`drts-dev-api`、`drts-dev-platform-admin-web`、`drts-dev-ops-console-web`、`drts-dev-fleet-partner-portal-web`、`drts-dev-tenant-console-web`、`drts-dev-bank-console-web`、`drts-dev-partner-booking-web`、`drts-dev-enterprise-dispatch-web`、`drts-dev-referral-embed-web`、`drts-channel-partner-portal-web`；不含 `passenger-web`、`concierge-portal-web`、`assisted-entry-web`。
 - GCP target 已固定為 project `drts-dev-ray-tw-20260730`、region `us-central1`。
 - DNS 已存在：
   - `smarttransport.tw` → `185.158.133.1`

@@ -1,0 +1,125 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+const repoRoot = path.resolve(__dirname, "../..");
+
+const expectedServices = {
+  api: "drts-dev-api",
+  "platform-admin-web": "drts-dev-platform-admin-web",
+  "ops-console-web": "drts-dev-ops-console-web",
+  "fleet-partner-portal-web": "drts-dev-fleet-partner-portal-web",
+  "tenant-console-web": "drts-dev-tenant-console-web",
+  "bank-console-web": "drts-dev-bank-console-web",
+  "partner-booking-web": "drts-dev-partner-booking-web",
+  "enterprise-dispatch-web": "drts-dev-enterprise-dispatch-web",
+  "referral-embed-web": "drts-dev-referral-embed-web",
+  "channel-partner-portal-web": "drts-channel-partner-portal-web",
+} as const;
+
+function readRepoFile(relativePath: string): string {
+  return readFileSync(path.join(repoRoot, relativePath), "utf8");
+}
+
+function expectServiceDefaults(
+  source: string,
+  variableNames: Record<keyof typeof expectedServices, string>,
+) {
+  for (const [surface, service] of Object.entries(expectedServices)) {
+    const variableName =
+      variableNames[surface as keyof typeof expectedServices];
+    expect(source).toContain(`\${${variableName}:-${service}}`);
+  }
+}
+
+describe("dev active surface contract", () => {
+  it("keeps deploy-dev fallback services aligned to the authoritative dev inventory", () => {
+    const source = readRepoFile(".github/workflows/deploy-dev.yml");
+
+    const workflowVariables = {
+      api: "DEV_GCP_API_SERVICE",
+      "platform-admin-web": "DEV_GCP_PLATFORM_ADMIN_SERVICE",
+      "ops-console-web": "DEV_GCP_OPS_CONSOLE_SERVICE",
+      "fleet-partner-portal-web": "DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE",
+      "tenant-console-web": "DEV_GCP_TENANT_CONSOLE_SERVICE",
+      "bank-console-web": "DEV_GCP_BANK_CONSOLE_SERVICE",
+      "partner-booking-web": "DEV_GCP_PARTNER_BOOKING_SERVICE",
+      "enterprise-dispatch-web": "DEV_GCP_ENTERPRISE_DISPATCH_SERVICE",
+      "referral-embed-web": "DEV_GCP_REFERRAL_EMBED_SERVICE",
+      "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
+    } as const;
+
+    for (const [surface, service] of Object.entries(expectedServices)) {
+      const variableName =
+        workflowVariables[surface as keyof typeof workflowVariables];
+      expect(source).toContain(`"${service}")`);
+      expect(source).toContain(`\${${variableName}:-}`);
+    }
+
+    expect(source).not.toContain("drts-referral-embed-web");
+    expect(source).not.toContain('"" "drts-api")');
+    expect(source).not.toContain("concierge-portal-web");
+    expect(source).not.toContain("passenger-web");
+  });
+
+  it("keeps domain mapping defaults and fail-closed wording aligned", () => {
+    const source = readRepoFile(".github/workflows/domain-mappings-dev.yml");
+
+    expectServiceDefaults(source, {
+      api: "DEV_GCP_API_SERVICE",
+      "platform-admin-web": "DEV_GCP_PLATFORM_ADMIN_SERVICE",
+      "ops-console-web": "DEV_GCP_OPS_CONSOLE_SERVICE",
+      "fleet-partner-portal-web": "DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE",
+      "tenant-console-web": "DEV_GCP_TENANT_CONSOLE_SERVICE",
+      "bank-console-web": "DEV_GCP_BANK_CONSOLE_SERVICE",
+      "partner-booking-web": "DEV_GCP_PARTNER_BOOKING_SERVICE",
+      "enterprise-dispatch-web": "DEV_GCP_ENTERPRISE_DISPATCH_SERVICE",
+      "referral-embed-web": "DEV_GCP_REFERRAL_EMBED_SERVICE",
+      "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
+    });
+
+    expect(source).toContain(
+      "fail closed and hand off to the single deploy cleanup task.",
+    );
+    expect(source).not.toContain("reconcile externally first");
+    expect(source).not.toContain("concierge.smarttransport.tw");
+    expect(source).not.toContain("ride.smarttransport.tw");
+  });
+
+  it("keeps the runtime matrix on the same ten-service inventory", () => {
+    const source = readRepoFile("tests/e2e/dev-runtime-matrix.spec.ts");
+
+    for (const service of Object.values(expectedServices)) {
+      expect(source).toContain(`"${service}"`);
+    }
+
+    expect(source).not.toContain('"drts-referral-embed-web"');
+  });
+
+  it("keeps the app entry index and smarttransport runbook on the same inventory", () => {
+    const appEntryIndex = readRepoFile(
+      "docs/02-architecture/app-entry-url-index-20260616.md",
+    );
+    const runbook = readRepoFile(
+      "docs/03-runbooks/smarttransport-tw-custom-domains.md",
+    );
+
+    expect(appEntryIndex).toContain(
+      "https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community",
+    );
+    expect(appEntryIndex).toContain(
+      "https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app",
+    );
+
+    for (const service of Object.values(expectedServices)) {
+      expect(runbook).toContain(service);
+    }
+
+    expect(runbook).toContain(
+      "fail closed and hand off to the single deploy cleanup task.",
+    );
+    expect(runbook).toContain("drts-dev-ray-tw-20260730");
+    expect(runbook).toContain("us-central1");
+    expect(runbook).not.toContain("drts-referral-embed-web");
+  });
+});

@@ -525,7 +525,7 @@ const surfaces: RuntimeSurface[] = [
     family: "partner-scoped referral embed front",
     baseUrl: resolveCloudRunBaseUrl(
       process.env.DRTS_DEV_REFERRAL_EMBED_BASE_URL,
-      "drts-referral-embed-web",
+      "drts-dev-referral-embed-web",
     ),
     actors: referralEmbedActors,
     routes: [
