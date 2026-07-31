@@ -3236,6 +3236,62 @@ describe("TenantPartnerService approval rules", () => {
     ]);
   });
 
+  it("does not mutate in-memory quota state when a database-backed consume rolls back", async () => {
+    const { repository } = createDatabaseQuotaRepository();
+    const auditNotificationService = new AuditNotificationService();
+    const recordAuditLog = vi.spyOn(
+      auditNotificationService,
+      "recordAuditLog",
+    );
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      repository as never,
+    );
+    repository.withTransaction.mockImplementationOnce(async (work) => {
+      await work({
+        query: vi.fn(async () => ({ rows: [] })) as never,
+      });
+      throw new Error("quota commit failed");
+    });
+    repository.loadQuotaLedgerForBookingForUpdate.mockResolvedValue([
+      {
+        ledgerEntryId: "quota-ledger-reserve-db-rollback-001",
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        periodKey: "2026-05",
+        dimension: "booking_count",
+        amount: 1,
+        entryType: "reserve",
+        bookingId: "booking-db-consume-rollback-001",
+        evaluationId: "eval-db-consume-rollback-001",
+        createdAt: "2026-05-13T10:00:00.000Z",
+      },
+    ]);
+
+    await expect(
+      service.consumeTenantQuota({
+        tenantId: "tenant-demo-001",
+        bookingId: "booking-db-consume-rollback-001",
+      }),
+    ).rejects.toThrow("quota commit failed");
+
+    expect(
+      service.listTenantQuotaLedger("tenant-demo-001", {
+        periodKey: "2026-05",
+      }),
+    ).toEqual([]);
+    expect(
+      service.getTenantQuotaSummary(
+        "tenant-demo-001",
+        "2026-05-13T10:00:00.000Z",
+      ).usage,
+    ).toMatchObject({
+      pendingReservedBookingCount: 0,
+      confirmedBookingCount: 0,
+    });
+    expect(recordAuditLog).not.toHaveBeenCalled();
+  });
+
   it("keeps database-backed quota consumption idempotent", async () => {
     const { repository } = createDatabaseQuotaRepository();
     const service = new TenantPartnerService(

@@ -115,7 +115,10 @@ import {
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
-import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import {
+  TenantPartnerService,
+  type TenantQuotaConsumptionCommitResult,
+} from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/sandbox-fallback-cost-policy-resolver.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
@@ -209,6 +212,7 @@ type DriverTaskCompletionCommitResult = {
   task: DriverTaskRecord;
   traceLog: DispatchTraceLogRecord;
   certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+  quotaConsumption: TenantQuotaConsumptionCommitResult | null;
 };
 
 type CreateDispatchAssignmentOptions = {
@@ -4450,16 +4454,22 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
+    let quotaConsumption: TenantQuotaConsumptionCommitResult | null = null;
+
     if (
       this.tenantPartnerService &&
-      typeof this.tenantPartnerService.consumeTenantQuota === "function" &&
+      typeof this.tenantPartnerService.prepareTenantQuotaConsumption ===
+        "function" &&
       order.tenantId &&
       order.bookingId
     ) {
-      await this.tenantPartnerService.consumeTenantQuota(tx, {
+      quotaConsumption = await this.tenantPartnerService.prepareTenantQuotaConsumption(
+        tx,
+        {
         tenantId: order.tenantId,
         bookingId: order.bookingId,
-      });
+        },
+      );
     }
 
     const now = new Date().toISOString();
@@ -4496,6 +4506,7 @@ export class OwnedMobilityService implements OnModuleInit {
       task,
       traceLog,
       certificateEvent: params.certificateEvent,
+      quotaConsumption,
     };
   }
 
@@ -4503,6 +4514,17 @@ export class OwnedMobilityService implements OnModuleInit {
     committed: DriverTaskCompletionCommitResult,
     requestId?: string,
   ) {
+    if (
+      committed.quotaConsumption &&
+      this.tenantPartnerService &&
+      typeof this.tenantPartnerService.applyCommittedQuotaConsumption ===
+        "function"
+    ) {
+      this.tenantPartnerService.applyCommittedQuotaConsumption(
+        committed.quotaConsumption,
+      );
+    }
+
     this.orders = [
       this.cloneOrder(committed.order),
       ...this.orders.filter((order) => order.orderId !== committed.order.orderId),

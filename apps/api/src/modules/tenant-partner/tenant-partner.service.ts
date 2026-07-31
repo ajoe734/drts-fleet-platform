@@ -1042,6 +1042,12 @@ function createBootstrapPartnerIngressCredential(
   };
 }
 
+export type TenantQuotaConsumptionCommitResult = {
+  tenantId: string;
+  ledgerEntries: TenantQuotaLedgerEntry[];
+  updatedSnapshots: TenantQuotaMonthlySnapshotRecord[];
+};
+
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TenantPartnerService.name);
@@ -2442,7 +2448,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const input = maybeInput ?? (txOrInput as NonNullable<typeof maybeInput>);
 
     if (this.tenantPartnerRepository?.isEnabled()) {
-      return this.consumeTenantQuotaWithDatabase(tx, input);
+      if (tx) {
+        return this.prepareTenantQuotaConsumption(tx, input).then(
+          (committed) => ({
+            ledgerEntries: committed.ledgerEntries.map((entry) =>
+              this.cloneQuotaLedgerEntry(entry),
+            ),
+          }),
+        );
+      }
+
+      return this.consumeTenantQuotaWithDatabase(input);
     }
 
     return this.consumeTenantQuotaInMemory(input);
@@ -10300,111 +10316,132 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  prepareTenantQuotaConsumption(
+    tx: TenantPartnerQueryExecutor,
+    input: {
+      tenantId: string;
+      bookingId: string;
+    },
+  ): Promise<TenantQuotaConsumptionCommitResult> {
+    return this.prepareTenantQuotaConsumptionInTransaction(tx, input);
+  }
+
   private async consumeTenantQuotaWithDatabase(
-    tx: TenantPartnerQueryExecutor | null,
     input: {
       tenantId: string;
       bookingId: string;
     },
   ) {
-    const work = async (executor: TenantPartnerQueryExecutor) => {
-      const existingEntries =
-        await this.tenantPartnerRepository!.loadQuotaLedgerForBookingForUpdate(
-          executor,
-          input.tenantId,
-          input.bookingId,
-        );
-      const entries = this.buildQuotaConsumptionEntries(
+    const committed = await this.tenantPartnerRepository!.withTransaction(
+      (executor) => this.prepareTenantQuotaConsumptionInTransaction(executor, input),
+    );
+    this.applyCommittedQuotaConsumption(committed);
+
+    return {
+      ledgerEntries: committed.ledgerEntries.map((entry) =>
+        this.cloneQuotaLedgerEntry(entry),
+      ),
+    };
+  }
+
+  private async prepareTenantQuotaConsumptionInTransaction(
+    executor: TenantPartnerQueryExecutor,
+    input: {
+      tenantId: string;
+      bookingId: string;
+    },
+  ): Promise<TenantQuotaConsumptionCommitResult> {
+    const existingEntries =
+      await this.tenantPartnerRepository!.loadQuotaLedgerForBookingForUpdate(
+        executor,
         input.tenantId,
         input.bookingId,
-        existingEntries,
       );
-      if (entries.length === 0) {
-        return { ledgerEntries: [] };
-      }
-
-      const claimedEntries =
-        await this.tenantPartnerRepository!.claimQuotaLedgerEntries(
-          executor,
-          entries,
-        );
-      if (claimedEntries.length === 0) {
-        return { ledgerEntries: [] };
-      }
-      if (claimedEntries.length !== entries.length) {
-        throw new Error(
-          `Quota consumption claim for booking ${input.bookingId} partially succeeded.`,
-        );
-      }
-
-      const snapshotGroups = new Map<
-        string,
-        { costCenterCode: string | null; periodKey: string }
-      >();
-      for (const entry of claimedEntries) {
-        const key = `${entry.costCenterCode ?? "~"}:${entry.periodKey}`;
-        snapshotGroups.set(key, {
-          costCenterCode: entry.costCenterCode,
-          periodKey: entry.periodKey,
-        });
-      }
-      const lockedSnapshots = (
-        await Promise.all(
-          [...snapshotGroups.values()].map((group) =>
-            this.tenantPartnerRepository!.loadQuotaMonthlySnapshotsForUpdate(
-              executor,
-              input.tenantId,
-              group.costCenterCode,
-              group.periodKey,
-            ),
-          ),
-        )
-      ).flat();
-      const uniqueSnapshots = new Map<
-        string,
-        TenantQuotaMonthlySnapshotRecord
-      >();
-      for (const snapshot of lockedSnapshots) {
-        uniqueSnapshots.set(
-          this.buildQuotaSnapshotKey(
-            snapshot.tenantId,
-            snapshot.costCenterCode,
-            snapshot.period,
-            snapshot.periodKey,
-          ),
-          snapshot,
-        );
-      }
-      const updatedSnapshots = this.applyQuotaLedgerEntriesToSnapshots(
-        input.tenantId,
-        claimedEntries,
-        [...uniqueSnapshots.values()],
-        (costCenterCode) =>
-          this.resolveQuotaPolicy(input.tenantId, costCenterCode),
-      );
-
-      await this.tenantPartnerRepository!.persistQuotaReservation(executor, {
-        quotaMonthlySnapshots: updatedSnapshots,
-      });
-      this.applyQuotaReservationCommit(claimedEntries, updatedSnapshots);
-      this.recordQuotaReservationAudits(
-        input.tenantId,
-        claimedEntries,
-        updatedSnapshots,
-      );
-
+    const entries = this.buildQuotaConsumptionEntries(
+      input.tenantId,
+      input.bookingId,
+      existingEntries,
+    );
+    if (entries.length === 0) {
       return {
-        ledgerEntries: claimedEntries.map((entry) =>
-          this.cloneQuotaLedgerEntry(entry),
-        ),
+        tenantId: input.tenantId,
+        ledgerEntries: [],
+        updatedSnapshots: [],
       };
-    };
-
-    if (tx) {
-      return work(tx);
     }
 
-    return this.tenantPartnerRepository!.withTransaction(work);
+    const claimedEntries = await this.tenantPartnerRepository!.claimQuotaLedgerEntries(
+      executor,
+      entries,
+    );
+    if (claimedEntries.length === 0) {
+      return {
+        tenantId: input.tenantId,
+        ledgerEntries: [],
+        updatedSnapshots: [],
+      };
+    }
+    if (claimedEntries.length !== entries.length) {
+      throw new Error(
+        `Quota consumption claim for booking ${input.bookingId} partially succeeded.`,
+      );
+    }
+
+    const snapshotGroups = new Map<
+      string,
+      { costCenterCode: string | null; periodKey: string }
+    >();
+    for (const entry of claimedEntries) {
+      const key = `${entry.costCenterCode ?? "~"}:${entry.periodKey}`;
+      snapshotGroups.set(key, {
+        costCenterCode: entry.costCenterCode,
+        periodKey: entry.periodKey,
+      });
+    }
+    const lockedSnapshots = (
+      await Promise.all(
+        [...snapshotGroups.values()].map((group) =>
+          this.tenantPartnerRepository!.loadQuotaMonthlySnapshotsForUpdate(
+            executor,
+            input.tenantId,
+            group.costCenterCode,
+            group.periodKey,
+          ),
+        ),
+      )
+    ).flat();
+    const uniqueSnapshots = new Map<string, TenantQuotaMonthlySnapshotRecord>();
+    for (const snapshot of lockedSnapshots) {
+      uniqueSnapshots.set(
+        this.buildQuotaSnapshotKey(
+          snapshot.tenantId,
+          snapshot.costCenterCode,
+          snapshot.period,
+          snapshot.periodKey,
+        ),
+        snapshot,
+      );
+    }
+    const updatedSnapshots = this.applyQuotaLedgerEntriesToSnapshots(
+      input.tenantId,
+      claimedEntries,
+      [...uniqueSnapshots.values()],
+      (costCenterCode) => this.resolveQuotaPolicy(input.tenantId, costCenterCode),
+    );
+
+    await this.tenantPartnerRepository!.persistQuotaReservation(executor, {
+      quotaMonthlySnapshots: updatedSnapshots,
+    });
+
+    return {
+      tenantId: input.tenantId,
+      ledgerEntries: claimedEntries.map((entry) =>
+        this.cloneQuotaLedgerEntry(entry),
+      ),
+      updatedSnapshots: updatedSnapshots.map((snapshot) =>
+        this.cloneQuotaMonthlySnapshot(snapshot),
+      ),
+    };
   }
 
   private buildQuotaConsumptionEntries(
@@ -10921,6 +10958,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.cloneQuotaMonthlySnapshot(snapshot),
       );
     }
+  }
+
+  applyCommittedQuotaConsumption(
+    committed: TenantQuotaConsumptionCommitResult,
+  ) {
+    if (committed.ledgerEntries.length === 0) {
+      return;
+    }
+
+    this.applyQuotaReservationCommit(
+      committed.ledgerEntries,
+      committed.updatedSnapshots,
+    );
+    this.recordQuotaReservationAudits(
+      committed.tenantId,
+      committed.ledgerEntries,
+      committed.updatedSnapshots,
+    );
   }
 
   private recordQuotaReservationAudits(

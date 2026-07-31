@@ -4070,9 +4070,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         outcome: { blocked: false, approvalRequired: false },
       })),
       reserveTenantQuota: vi.fn(() => ({ ledgerEntries: [], impacts: [] })),
-      consumeTenantQuota: vi.fn(async () => {
+      prepareTenantQuotaConsumption: vi.fn(async () => {
         sequence.push("quota");
-        return { ledgerEntries: [] };
+        return {
+          tenantId: "tenant-demo-001",
+          ledgerEntries: [],
+          updatedSnapshots: [],
+        };
+      }),
+      applyCommittedQuotaConsumption: vi.fn(() => {
+        sequence.push("quota_apply");
       }),
       publishWebhookEvent: vi.fn(async () => {
         sequence.push("webhook");
@@ -4218,7 +4225,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "req-complete-db-001",
     );
 
-    expect(sequence).toEqual(["begin", "quota", "persist", "commit", "webhook"]);
+    expect(sequence).toEqual([
+      "begin",
+      "quota",
+      "persist",
+      "commit",
+      "quota_apply",
+      "webhook",
+    ]);
     expect(
       auditNotificationService.recordAuditLog.mock.calls.filter(
         ([input]) => input.actionName === "complete_trip",
@@ -4235,7 +4249,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         outcome: { blocked: false, approvalRequired: false },
       })),
       reserveTenantQuota: vi.fn(() => ({ ledgerEntries: [], impacts: [] })),
-      consumeTenantQuota: vi.fn(async () => ({ ledgerEntries: [] })),
+      prepareTenantQuotaConsumption: vi.fn(async () => ({
+        tenantId: "tenant-demo-001",
+        ledgerEntries: [],
+        updatedSnapshots: [],
+      })),
+      applyCommittedQuotaConsumption: vi.fn(() => undefined),
       publishWebhookEvent: vi.fn(async () => undefined),
     } as unknown as TenantPartnerService;
 
@@ -4387,6 +4406,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ),
     ).toHaveLength(0);
     expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
+    expect(
+      tenantPartnerService.applyCommittedQuotaConsumption,
+    ).not.toHaveBeenCalled();
   });
 
   it("rejects duplicate completion requests after the trip is already completed", () => {
