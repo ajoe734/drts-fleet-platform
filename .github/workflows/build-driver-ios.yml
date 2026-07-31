@@ -1,0 +1,168 @@
+name: Build Driver App (iOS, EAS)
+
+# Manual-only cloud build for apps/driver-app. It never runs on push or pull
+# requests because iOS builds consume paid EAS capacity and signing resources.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: EAS build profile
+        required: true
+        default: development-simulator
+        type: choice
+        options:
+          - development-simulator
+          - development
+          - preview
+          - production
+      api_url:
+        description: Direct API URL to bake into this build
+        required: true
+        default: https://drts-dev-api-4t7rg6fmeq-uc.a.run.app
+        type: string
+      submit:
+        description: Auto-submit the completed production build to TestFlight
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-driver-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build iOS (${{ inputs.profile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BUILD_API_URL: ${{ inputs.api_url }}
+      BUILD_PROFILE: ${{ inputs.profile }}
+      DRIVER_APP_EAS_PROJECT_ID: ${{ vars.DRIVER_APP_EAS_PROJECT_ID }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      SUBMIT_TO_TESTFLIGHT: ${{ inputs.submit }}
+    defaults:
+      run:
+        working-directory: apps/driver-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard credentials, project linkage, and inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+          if [[ -z "${EXPO_TOKEN:-}" ]]; then
+            echo "::error::EXPO_TOKEN is not configured in GitHub Actions secrets."
+            missing=1
+          fi
+          if [[ -z "${DRIVER_APP_EAS_PROJECT_ID:-}" ]]; then
+            echo "::error::DRIVER_APP_EAS_PROJECT_ID is not configured in GitHub Actions variables."
+            missing=1
+          fi
+          if (( missing != 0 )); then
+            exit 1
+          fi
+
+          case "$BUILD_PROFILE" in
+            development-simulator|development|preview|production) ;;
+            *)
+              echo "::error::Unsupported EAS build profile: $BUILD_PROFILE"
+              exit 1
+              ;;
+          esac
+
+          if [[ ! "$BUILD_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
+            echo "::error::api_url must be a direct HTTPS API origin."
+            exit 1
+          fi
+
+          if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" && "$BUILD_PROFILE" != "production" ]]; then
+            echo "::error::TestFlight auto-submit is allowed only with the production profile."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Verify API target before consuming EAS capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 3 --retry-all-errors \
+            --max-time 20 \
+            "${BUILD_API_URL%/}/health" >/dev/null
+
+      - name: Prepare ephemeral EAS configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq --arg project_id "$DRIVER_APP_EAS_PROJECT_ID" \
+            '.expo.extra.eas.projectId = $project_id' \
+            app.json > app.json.tmp
+          mv app.json.tmp app.json
+
+          jq --arg profile "$BUILD_PROFILE" \
+            --arg api_url "${BUILD_API_URL%/}" '
+              if (.build | has($profile) | not) then
+                error("unknown build profile: " + $profile)
+              else
+                .build[$profile].env =
+                  ((.build[$profile].env // {}) +
+                    {"EXPO_PUBLIC_API_URL": $api_url})
+                | if $profile == "production" then
+                    .cli.appVersionSource = "remote"
+                    | .build.production.autoIncrement = true
+                  else
+                    .
+                  end
+              end
+            ' eas.json > eas.json.tmp
+          mv eas.json.tmp eas.json
+
+          jq empty app.json
+          jq empty eas.json
+
+      - name: Validate resolved iOS build configuration
+        run: >-
+          npx --yes eas-cli@21.4.0 config
+          --platform ios
+          --profile "$BUILD_PROFILE"
+          --non-interactive
+
+      - name: Queue EAS iOS build
+        if: ${{ inputs.submit == false }}
+        run: >-
+          npx --yes eas-cli@21.4.0 build
+          --platform ios
+          --profile "$BUILD_PROFILE"
+          --non-interactive
+          --no-wait
+
+      - name: Queue EAS iOS build and TestFlight submission
+        if: ${{ inputs.submit }}
+        run: >-
+          npx --yes eas-cli@21.4.0 build
+          --platform ios
+          --profile production
+          --auto-submit-with-profile production
+          --non-interactive
+          --no-wait
