@@ -10323,11 +10323,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         return { ledgerEntries: [] };
       }
 
+      const claimedEntries =
+        await this.tenantPartnerRepository!.claimQuotaLedgerEntries(
+          executor,
+          entries,
+        );
+      if (claimedEntries.length === 0) {
+        return { ledgerEntries: [] };
+      }
+      if (claimedEntries.length !== entries.length) {
+        throw new Error(
+          `Quota consumption claim for booking ${input.bookingId} partially succeeded.`,
+        );
+      }
+
       const snapshotGroups = new Map<
         string,
         { costCenterCode: string | null; periodKey: string }
       >();
-      for (const entry of entries) {
+      for (const entry of claimedEntries) {
         const key = `${entry.costCenterCode ?? "~"}:${entry.periodKey}`;
         snapshotGroups.set(key, {
           costCenterCode: entry.costCenterCode,
@@ -10363,25 +10377,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
       const updatedSnapshots = this.applyQuotaLedgerEntriesToSnapshots(
         input.tenantId,
-        entries,
+        claimedEntries,
         [...uniqueSnapshots.values()],
         (costCenterCode) =>
           this.resolveQuotaPolicy(input.tenantId, costCenterCode),
       );
 
       await this.tenantPartnerRepository!.persistQuotaReservation(executor, {
-        quotaLedger: entries,
         quotaMonthlySnapshots: updatedSnapshots,
       });
-      this.applyQuotaReservationCommit(entries, updatedSnapshots);
+      this.applyQuotaReservationCommit(claimedEntries, updatedSnapshots);
       this.recordQuotaReservationAudits(
         input.tenantId,
-        entries,
+        claimedEntries,
         updatedSnapshots,
       );
 
       return {
-        ledgerEntries: entries.map((entry) =>
+        ledgerEntries: claimedEntries.map((entry) =>
           this.cloneQuotaLedgerEntry(entry),
         ),
       };
@@ -10441,6 +10454,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .filter((entry) => entry.amount > 0)
       .map((entry) =>
         this.createQuotaLedgerEntry({
+          ledgerEntryId: this.buildQuotaConsumptionLedgerEntryId({
+            tenantId,
+            bookingId,
+            costCenterCode: entry.costCenterCode,
+            periodKey: entry.periodKey,
+            dimension: entry.dimension,
+          }),
           tenantId,
           bookingId,
           evaluationId: entry.evaluationId,
@@ -10750,6 +10770,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private createQuotaLedgerEntry(input: {
+    ledgerEntryId?: string;
     tenantId: string;
     costCenterCode: string | null;
     periodKey: string;
@@ -10761,7 +10782,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     createdAt: string;
   }): TenantQuotaLedgerEntry {
     return {
-      ledgerEntryId: `quota-ledger-${randomUUID()}`,
+      ledgerEntryId: input.ledgerEntryId ?? `quota-ledger-${randomUUID()}`,
       tenantId: input.tenantId,
       costCenterCode: input.costCenterCode,
       periodKey: input.periodKey,
@@ -10772,6 +10793,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       evaluationId: input.evaluationId,
       createdAt: input.createdAt,
     };
+  }
+
+  private buildQuotaConsumptionLedgerEntryId(input: {
+    tenantId: string;
+    bookingId: string;
+    costCenterCode: string | null;
+    periodKey: string;
+    dimension: TenantQuotaLedgerEntry["dimension"];
+  }) {
+    const digest = createHash("sha256")
+      .update(input.tenantId)
+      .update("\u0000")
+      .update(input.bookingId)
+      .update("\u0000")
+      .update(input.costCenterCode ?? "~")
+      .update("\u0000")
+      .update(input.periodKey)
+      .update("\u0000")
+      .update(input.dimension)
+      .digest("hex");
+
+    return `quota-ledger-consume-${digest.slice(0, 32)}`;
   }
 
   private buildQuotaPolicyKey(

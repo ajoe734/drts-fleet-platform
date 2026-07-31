@@ -1342,6 +1342,59 @@ export class TenantPartnerRepository {
     );
   }
 
+  async claimQuotaLedgerEntries(
+    executor: TenantPartnerQueryExecutor,
+    entries: readonly TenantQuotaLedgerEntry[],
+  ) {
+    const inserted: TenantQuotaLedgerEntry[] = [];
+
+    for (const entry of entries) {
+      const result = await executor.query<JsonRecordRow>(
+        `
+          INSERT INTO core.phase1_tenant_quota_ledger (
+            ledger_entry_id,
+            tenant_id,
+            cost_center_code,
+            period_key,
+            dimension,
+            entry_type,
+            booking_id,
+            evaluation_id,
+            created_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
+          )
+          ON CONFLICT (ledger_entry_id) DO NOTHING
+          RETURNING record
+        `,
+        [
+          entry.ledgerEntryId,
+          entry.tenantId,
+          entry.costCenterCode,
+          entry.periodKey,
+          entry.dimension,
+          entry.entryType,
+          entry.bookingId,
+          entry.evaluationId,
+          entry.createdAt,
+          JSON.stringify(entry),
+        ],
+      );
+
+      inserted.push(
+        ...result.rows.map((row) =>
+          this.parseRecord<TenantQuotaLedgerEntry>(
+            row.record,
+            "core.phase1_tenant_quota_ledger",
+          ),
+        ),
+      );
+    }
+
+    return inserted;
+  }
+
   async persistQuotaReservation(
     executor: TenantPartnerQueryExecutor,
     changes: {

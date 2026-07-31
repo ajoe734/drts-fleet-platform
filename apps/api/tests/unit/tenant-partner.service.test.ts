@@ -301,6 +301,7 @@ function createDatabaseQuotaRepository(options?: {
       ],
     ),
     loadQuotaLedgerForBookingForUpdate: vi.fn(async () => []),
+    claimQuotaLedgerEntries: vi.fn(async (_tx, entries) => entries),
     persistQuotaReservation: vi.fn(async () => {}),
   };
 
@@ -3206,17 +3207,20 @@ describe("TenantPartnerService approval rules", () => {
       "tenant-demo-001",
       "booking-db-consume-001",
     );
+    expect(repository.claimQuotaLedgerEntries).toHaveBeenCalledWith(
+      tx,
+      [
+        expect.objectContaining({
+          bookingId: "booking-db-consume-001",
+          dimension: "booking_count",
+          amount: 1,
+          entryType: "consume",
+        }),
+      ],
+    );
     expect(repository.persistQuotaReservation).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
-        quotaLedger: [
-          expect.objectContaining({
-            bookingId: "booking-db-consume-001",
-            dimension: "booking_count",
-            amount: 1,
-            entryType: "consume",
-          }),
-        ],
         quotaMonthlySnapshots: [
           expect.objectContaining({
             usage: expect.objectContaining({
@@ -3271,6 +3275,39 @@ describe("TenantPartnerService approval rules", () => {
     });
 
     expect(result.ledgerEntries).toEqual([]);
+    expect(repository.claimQuotaLedgerEntries).not.toHaveBeenCalled();
+    expect(repository.persistQuotaReservation).not.toHaveBeenCalled();
+  });
+
+  it("skips snapshot refresh when a concurrent database-backed consume loses the claim race", async () => {
+    const { repository } = createDatabaseQuotaRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    repository.loadQuotaLedgerForBookingForUpdate.mockResolvedValue([
+      {
+        ledgerEntryId: "quota-ledger-reserve-db-003",
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        periodKey: "2026-05",
+        dimension: "booking_count",
+        amount: 1,
+        entryType: "reserve",
+        bookingId: "booking-db-consume-003",
+        evaluationId: "eval-db-consume-003",
+        createdAt: "2026-05-13T10:00:00.000Z",
+      },
+    ]);
+    repository.claimQuotaLedgerEntries.mockResolvedValue([]);
+
+    const result = await service.consumeTenantQuota({
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-db-consume-003",
+    });
+
+    expect(result.ledgerEntries).toEqual([]);
+    expect(repository.loadQuotaMonthlySnapshotsForUpdate).not.toHaveBeenCalled();
     expect(repository.persistQuotaReservation).not.toHaveBeenCalled();
   });
 

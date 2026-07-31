@@ -14,7 +14,10 @@ import {
   type TenantQuotaMonthlySnapshotRecord,
 } from "../../src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
-import { toTenantQuotaPeriodKey } from "../../src/modules/tenant-partner/tenant-quota-ledger";
+import {
+  createEmptyTenantQuotaUsage,
+  toTenantQuotaPeriodKey,
+} from "../../src/modules/tenant-partner/tenant-quota-ledger";
 
 const TENANT_ID = "tenant-demo-001";
 const COST_CENTER_CODE = "CC-FIN-04";
@@ -292,6 +295,48 @@ class ContendedQuotaRepository {
     );
   }
 
+  async loadQuotaLedgerForBookingForUpdate(
+    tx: TenantPartnerQueryExecutor,
+    tenantId: string,
+    bookingId: string,
+  ) {
+    const transaction = this.requireTransaction(tx);
+    await this.lockRows(
+      tx,
+      this.listVisibleQuotaLedgerEntries(transaction, tenantId, bookingId).map(
+        (entry) => `ledger:${entry.ledgerEntryId}`,
+      ),
+    );
+    await this.waitForContenders(transaction);
+
+    return clone(
+      this.listVisibleQuotaLedgerEntries(transaction, tenantId, bookingId),
+    );
+  }
+
+  async claimQuotaLedgerEntries(
+    tx: TenantPartnerQueryExecutor,
+    entries: readonly TenantQuotaLedgerEntry[],
+  ) {
+    const transaction = this.requireTransaction(tx);
+    const inserted: TenantQuotaLedgerEntry[] = [];
+
+    for (const entry of [...entries].sort((left, right) =>
+      left.ledgerEntryId.localeCompare(right.ledgerEntryId),
+    )) {
+      await this.acquireLock(transaction, `ledger-claim:${entry.ledgerEntryId}`);
+      if (this.hasVisibleQuotaLedgerEntry(transaction, entry.ledgerEntryId)) {
+        continue;
+      }
+
+      const staged = clone(entry);
+      transaction.pendingQuotaLedger.set(staged.ledgerEntryId, staged);
+      inserted.push(staged);
+    }
+
+    return inserted;
+  }
+
   async persistQuotaReservation(
     tx: TenantPartnerQueryExecutor,
     changes: {
@@ -383,6 +428,45 @@ class ContendedQuotaRepository {
     );
   }
 
+  private visibleQuotaLedger(transaction: RepositoryTransaction) {
+    const visible = new Map(
+      this.state.quotaLedger.map((entry) => [entry.ledgerEntryId, clone(entry)]),
+    );
+
+    for (const [key, entry] of transaction.pendingQuotaLedger) {
+      visible.set(key, clone(entry));
+    }
+
+    return visible;
+  }
+
+  private listVisibleQuotaLedgerEntries(
+    transaction: RepositoryTransaction,
+    tenantId: string,
+    bookingId: string,
+  ) {
+    return [...this.visibleQuotaLedger(transaction).values()]
+      .filter(
+        (entry) => entry.tenantId === tenantId && entry.bookingId === bookingId,
+      )
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.ledgerEntryId.localeCompare(right.ledgerEntryId),
+      );
+  }
+
+  private hasVisibleQuotaLedgerEntry(
+    transaction: RepositoryTransaction,
+    ledgerEntryId: string,
+  ) {
+    return (
+      this.state.quotaLedger.some(
+        (entry) => entry.ledgerEntryId === ledgerEntryId,
+      ) || transaction.pendingQuotaLedger.has(ledgerEntryId)
+    );
+  }
+
   private async waitForContenders(transaction: RepositoryTransaction) {
     if (transaction.waitedForContention || this.expectedConcurrency <= 1) {
       return;
@@ -463,8 +547,8 @@ class ContendedQuotaRepository {
   }
 }
 
-function createService() {
-  const repository = new ContendedQuotaRepository(CONCURRENCY);
+function createService(expectedConcurrency = CONCURRENCY) {
+  const repository = new ContendedQuotaRepository(expectedConcurrency);
   const service = new TenantPartnerService(
     new AuditNotificationService(),
     repository as never,
@@ -511,6 +595,26 @@ async function runConcurrentReserves(
           ? { estimatedAmountMinor: input.estimatedAmountMinor }
           : {}),
         ...(input.currency !== undefined ? { currency: input.currency } : {}),
+      }) as Promise<QuotaReserveResult>;
+    })(),
+  );
+
+  gate.release();
+  return Promise.allSettled(attempts);
+}
+
+async function runConcurrentConsumes(
+  service: TenantPartnerService,
+  bookingId: string,
+  concurrency: number,
+) {
+  const gate = createReleaseGate();
+  const attempts = Array.from({ length: concurrency }, () =>
+    (async () => {
+      await gate.wait();
+      return service.consumeTenantQuota({
+        tenantId: TENANT_ID,
+        bookingId,
       }) as Promise<QuotaReserveResult>;
     })(),
   );
@@ -769,5 +873,100 @@ describe("tenant quota concurrent reserve load", () => {
     expect(costCenterSummary.limit.enforcementMode).toBe("warn_only");
     expect(costCenterSummary.usage.pendingReservedBookingCount).toBe(1);
     expectRealContention(repository);
+  });
+
+  it("lets exactly one concurrent completion consume a reservation across transactions", async () => {
+    const { repository, service } = createService(2);
+    const limit = {
+      bookingCountLimit: 1,
+      amountMinorLimit: null,
+      currency: "TWD",
+      enforcementMode: "hard_block" as const,
+    };
+
+    service.upsertTenantQuotaPolicy(TENANT_ID, {
+      period: "monthly",
+      limit,
+    });
+
+    await repository.persistChanges({
+      quotaLedger: [
+        {
+          ledgerEntryId: "quota-ledger-reserve-consume-race-001",
+          tenantId: TENANT_ID,
+          costCenterCode: null,
+          periodKey: PERIOD_KEY,
+          dimension: "booking_count",
+          amount: 1,
+          entryType: "reserve",
+          bookingId: "consume-race-booking-001",
+          evaluationId: "consume-race-eval-001",
+          createdAt: RESERVATION_WINDOW_START,
+        },
+      ],
+      quotaMonthlySnapshots: [
+        {
+          tenantId: TENANT_ID,
+          costCenterCode: null,
+          period: "monthly",
+          periodKey: PERIOD_KEY,
+          limit,
+          usage: {
+            ...createEmptyTenantQuotaUsage(limit),
+            pendingReservedBookingCount: 1,
+            bookingCountRemaining: 0,
+          },
+          refreshedAt: RESERVATION_WINDOW_START,
+        },
+      ],
+    });
+    await service.onModuleInit();
+
+    const results = await runConcurrentConsumes(
+      service,
+      "consume-race-booking-001",
+      2,
+    );
+    const winners = fulfilledResults(results);
+    const consumeWinners = winners.filter(
+      (result) => result.value.ledgerEntries.length > 0,
+    );
+    const noops = winners.filter(
+      (result) => result.value.ledgerEntries.length === 0,
+    );
+    const serviceLedger = service.listTenantQuotaLedger(TENANT_ID, {
+      periodKey: PERIOD_KEY,
+    });
+    const repositoryState = repository.getState();
+    const summary = service.getTenantQuotaSummary(
+      TENANT_ID,
+      RESERVATION_WINDOW_START,
+    );
+    const stats = repository.getStats();
+
+    expect(results).toHaveLength(2);
+    expect(consumeWinners).toHaveLength(1);
+    expect(noops).toHaveLength(1);
+    expect(
+      serviceLedger.filter(
+        (entry) =>
+          entry.bookingId === "consume-race-booking-001" &&
+          entry.entryType === "consume",
+      ),
+    ).toHaveLength(1);
+    expect(
+      repositoryState.quotaLedger.filter(
+        (entry) =>
+          entry.bookingId === "consume-race-booking-001" &&
+          entry.entryType === "consume",
+      ),
+    ).toHaveLength(1);
+    expect(summary.usage).toMatchObject({
+      pendingReservedBookingCount: 0,
+      confirmedBookingCount: 1,
+    });
+    expect(stats.transactionCount).toBe(2);
+    expect(stats.maxConcurrentTransactions).toBe(2);
+    expect(stats.lockWaitCount).toBeGreaterThanOrEqual(1);
   });
 });
