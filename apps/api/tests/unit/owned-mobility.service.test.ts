@@ -3958,7 +3958,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("replays duplicate completion requests idempotently when the request id matches", () => {
+  it("replays duplicate completion requests idempotently when the request id matches", async () => {
     const tenantPartnerService = {
       previewBookingQuotaImpact: vi.fn(() => ({
         impacts: [],
@@ -4030,12 +4030,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
     };
 
-    const completed = service.completeDriverTask(
+    const completed = await service.completeDriverTask(
       assignment.taskId,
       command,
       "req-complete-001",
     );
-    const replayed = service.completeDriverTask(
+    const replayed = await service.completeDriverTask(
       assignment.taskId,
       command,
       "req-complete-001",

@@ -216,6 +216,7 @@ type DriverTaskCompletionCommitResult = {
   quotaConsumption: TenantQuotaConsumptionCommitResult | null;
   outcome: "completed" | "proof_pending";
   errorToThrow: ApiRequestError | null;
+  certificateEvent?: OwnedMobilityMultiTaxiTripCompletedEvent | null;
 };
 
 type DriverTaskCompletionTransactionResult =
@@ -1201,8 +1202,8 @@ export class OwnedMobilityService implements OnModuleInit {
         previousApprovalState,
         requestId,
       );
-      this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
-      this.opsDispatchEventsService?.publishOrderCreated(
+      void this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
+      void this.opsDispatchEventsService?.publishOrderCreated(
         this.cloneOrder(order),
         requestId,
       );
@@ -2660,11 +2661,11 @@ export class OwnedMobilityService implements OnModuleInit {
         },
         requestId,
       );
-      this.publishTenantOrderWebhook(order, "order.cancelled", now, {
+      void this.publishTenantOrderWebhook(order, "order.cancelled", now, {
         cancelledAt: order.cancelledAt,
         cancelReason: order.cancelReason,
       });
-      this.publishLatestDispatchJobUpdate(orderId, requestId);
+      void this.publishLatestDispatchJobUpdate(orderId, requestId);
 
       return this.cloneOrder(order);
     }
@@ -3485,18 +3486,18 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.publishTenantOrderWebhook(order, "order.cancelled", now, {
+    void this.publishTenantOrderWebhook(order, "order.cancelled", now, {
       cancelledAt: order.cancelledAt,
       cancelReason: order.cancelReason,
     });
     if (task) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
+      void this.ownedMobilityTaskEventsService.publishTaskCancelled(
         task,
         order,
         requestId,
       );
     }
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneOrder(order);
   }
@@ -3879,7 +3880,10 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
+  private async publishLatestDispatchJobUpdate(
+    orderId: string,
+    requestId?: string,
+  ): Promise<void> {
     const dispatchJob = this.dispatchJobs.find(
       (job) => job.orderId === orderId,
     );
@@ -3887,7 +3891,7 @@ export class OwnedMobilityService implements OnModuleInit {
       return;
     }
 
-    this.opsDispatchEventsService?.publishDispatchJobUpdated(
+    await this.opsDispatchEventsService?.publishDispatchJobUpdated(
       orderId,
       dispatchJob,
       requestId,
@@ -3946,12 +3950,12 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    void this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -4019,7 +4023,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    void this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
@@ -4066,12 +4070,12 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    void this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -4112,12 +4116,12 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    void this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -4165,12 +4169,12 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    void this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -4305,7 +4309,7 @@ export class OwnedMobilityService implements OnModuleInit {
         ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
         : null;
 
-    const finalizeCompletion = () => {
+    const finalizeCompletion = async () => {
       const now = new Date().toISOString();
       task.status = "completed";
       task.completedAt = command.completedAt;
@@ -4353,24 +4357,24 @@ export class OwnedMobilityService implements OnModuleInit {
         },
         requestId,
       );
-      this.publishTenantOrderWebhook(order, "order.completed", now, {
+      await this.publishTenantOrderWebhook(order, "order.completed", now, {
         completedAt: command.completedAt,
         taskId,
         assignmentId: assignment.assignmentId,
       });
-      this.publishCompletedTripSettlementEvent(order, task);
+      await this.publishCompletedTripSettlementEvent(order, task);
       if (certificateEvent && this.eventEmitter) {
-        this.eventEmitter.emit(
+        await this.eventEmitter.emitAsync(
           OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
           certificateEvent,
         );
       }
-      this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      await this.ownedMobilityTaskEventsService.publishTaskUpdated(
         task,
         order,
         requestId,
       );
-      this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+      await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
       return this.cloneTask(task);
     };
@@ -4624,6 +4628,7 @@ export class OwnedMobilityService implements OnModuleInit {
         quotaConsumption,
         outcome: "completed",
         errorToThrow: null,
+        certificateEvent,
       },
     };
   }
@@ -4693,6 +4698,12 @@ export class OwnedMobilityService implements OnModuleInit {
           assignmentId: committed.assignment.assignmentId,
         });
         await this.publishCompletedTripSettlementEvent(committed.order, committed.task);
+        if (committed.certificateEvent && this.eventEmitter) {
+          await this.eventEmitter.emitAsync(
+            OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+            committed.certificateEvent,
+          );
+        }
       }
     }
     await this.ownedMobilityTaskEventsService.publishTaskUpdated(
@@ -4700,7 +4711,7 @@ export class OwnedMobilityService implements OnModuleInit {
       committed.order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(committed.order.orderId, requestId);
+    await this.publishLatestDispatchJobUpdate(committed.order.orderId, requestId);
   }
 
   private applyReplayedDriverTaskCompletionBundle(
@@ -4784,16 +4795,19 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  private publishCompletedTripSettlementEvent(
+  private async publishCompletedTripSettlementEvent(
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
-  ) {
+  ): Promise<void> {
     const payload = this.buildCompletedTripSettlementEvent(order, task);
     if (!payload || !this.eventEmitter) {
       return;
     }
 
-    this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
+    await this.eventEmitter.emitAsync(
+      OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+      payload,
+    );
   }
 
   private buildCompletedTripSettlementEvent(
@@ -5236,27 +5250,25 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
-  private publishTenantOrderWebhook(
+  private async publishTenantOrderWebhook(
     order: OwnedOrderRecord,
     eventType: "order.created" | "order.cancelled" | "order.completed",
     occurredAt: string,
     extraData: Record<string, unknown> = {},
-  ) {
+  ): Promise<void> {
     if (!order.tenantId || !this.tenantPartnerService) {
       return;
     }
 
-    void this.tenantPartnerService
-      .publishWebhookEvent(
-        order.tenantId,
-        this.buildTenantOrderWebhookPayload(
-          order,
-          eventType,
-          occurredAt,
-          extraData,
-        ),
-      )
-      .catch(() => undefined);
+    await this.tenantPartnerService.publishWebhookEvent(
+      order.tenantId,
+      this.buildTenantOrderWebhookPayload(
+        order,
+        eventType,
+        occurredAt,
+        extraData,
+      ),
+    );
   }
 
   private buildTenantOrderWebhookPayload(
@@ -8974,12 +8986,12 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "driver_task_proof_pending",
     );
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    void this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
       requestId,
     );
-    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
   }
 
   private describeMissingCompletionProof(

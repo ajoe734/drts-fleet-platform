@@ -149,24 +149,24 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  publishOrderCreated(order: OwnedOrderRecord, requestId?: string) {
-    this.publish("order_created", order.orderId, requestId, {
+  async publishOrderCreated(order: OwnedOrderRecord, requestId?: string) {
+    await this.publish("order_created", order.orderId, requestId, {
       order: this.cloneOrder(order),
     });
   }
 
-  publishOrderUpdated(order: OwnedOrderRecord, requestId?: string) {
-    this.publish("order_updated", order.orderId, requestId, {
+  async publishOrderUpdated(order: OwnedOrderRecord, requestId?: string) {
+    await this.publish("order_updated", order.orderId, requestId, {
       order: this.cloneOrder(order),
     });
   }
 
-  publishDispatchJobUpdated(
+  async publishDispatchJobUpdated(
     orderId: string,
     dispatchJob: DispatchJobRecord,
     requestId?: string,
   ) {
-    this.publish(
+    await this.publish(
       "dispatch_job_updated",
       dispatchJob.dispatchJobId,
       requestId,
@@ -178,11 +178,11 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  publishDriverLocationUpdated(
+  async publishDriverLocationUpdated(
     location: DriverLocationSnapshot,
     requestId?: string,
   ) {
-    this.publish(
+    await this.publish(
       "driver_location_updated",
       location.driverId,
       requestId,
@@ -196,11 +196,11 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  publishSupplyLifecycleUpdated(
+  async publishSupplyLifecycleUpdated(
     vehicle: VehicleRegistryRecord,
     requestId?: string,
   ) {
-    this.publish(
+    await this.publish(
       "supply_lifecycle_updated",
       vehicle.vehicleId,
       requestId,
@@ -214,14 +214,14 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  publishIncidentCreated(incident: IncidentRecord, requestId?: string) {
-    this.publish("incident_created", incident.incidentId, requestId, {
+  async publishIncidentCreated(incident: IncidentRecord, requestId?: string) {
+    await this.publish("incident_created", incident.incidentId, requestId, {
       incident: this.cloneIncident(incident),
     });
   }
 
-  publishIncidentUpdated(incident: IncidentRecord, requestId?: string) {
-    this.publish("incident_updated", incident.incidentId, requestId, {
+  async publishIncidentUpdated(incident: IncidentRecord, requestId?: string) {
+    await this.publish("incident_updated", incident.incidentId, requestId, {
       incident: this.cloneIncident(incident),
     });
   }
@@ -245,7 +245,7 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private publish(
+  private async publish(
     eventType: OpsDispatchStreamEventType,
     subjectId: string,
     requestId: string | undefined,
@@ -290,19 +290,19 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
         );
         this.eventEmitter.emit(OPS_DISPATCH_EVENT_CHANNEL, envelope);
       } else {
-        void this.databaseService
-          .query(
+        try {
+          await this.databaseService.query(
             `SELECT pg_notify('${OPS_DISPATCH_EVENT_NOTIFICATION_CHANNEL}', $1)`,
             [payload],
-          )
-          .catch((err) => {
-            this.logger.error(
-              `Postgres NOTIFY failed for ${envelope.eventId}`,
-              err,
-            );
-            // Fallback to local
-            this.eventEmitter.emit(OPS_DISPATCH_EVENT_CHANNEL, envelope);
-          });
+          );
+        } catch (err) {
+          this.logger.error(
+            `Postgres NOTIFY failed for ${envelope.eventId}`,
+            err,
+          );
+          // Fallback to local
+          this.eventEmitter.emit(OPS_DISPATCH_EVENT_CHANNEL, envelope);
+        }
       }
     } else {
       this.eventEmitter.emit(OPS_DISPATCH_EVENT_CHANNEL, envelope);
