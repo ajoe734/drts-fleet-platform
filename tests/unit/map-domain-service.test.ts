@@ -227,6 +227,30 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.createInvocationCount).toBe(0);
   });
 
+  it("fails closed without creating when UNKNOWN error is returned even if requested domain is mentioned", () => {
+    const result = runMapDomain({
+      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) UNKNOWN: An unknown error occurred for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when ABORTED error is returned even if requested domain is mentioned", () => {
+    const result = runMapDomain({
+      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) ABORTED: Operation aborted for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
   it("fails closed without creating when gcloud domain-mappings describe command header is missing", () => {
     const result = runMapDomain({
       describeStderr: "NOT_FOUND: Cannot find domain mapping for [api.smarttransport.tw].",

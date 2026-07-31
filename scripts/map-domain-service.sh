@@ -31,17 +31,22 @@ if [ "$describe_status" -eq 0 ]; then
 else
   is_domain_not_found=0
 
-  # Positively require domain-mappings.describe command header AND NOT_FOUND indicator
-  if grep -Eq '(\(gcloud\.beta\.run\.domain-mappings\.describe\)|gcloud\.beta\.run\.domain-mappings\.describe)' <<<"$describe_output" && \
-     grep -Eiq '(NOT_FOUND|code: 404|code = 404|Cannot find domain mapping)' <<<"$describe_output" && \
-     ! grep -Eiq '(INTERNAL|INVALID_ARGUMENT|PERMISSION_DENIED|UNAUTHENTICATED|RESOURCE_EXHAUSTED|Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$describe_output"; then
+  # Positively require exact domain-mappings.describe NOT_FOUND header
+  if grep -Eq '(\(gcloud\.beta\.run\.domain-mappings\.describe\)|gcloud\.beta\.run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:' <<<"$describe_output"; then
+    # Extract body strictly after the NOT_FOUND: header
+    body_output="$(sed -nE 's/.*(\(gcloud\.beta\.run\.domain-mappings\.describe\)|gcloud\.beta\.run\.domain-mappings\.describe)[[:space:]]*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
+    if [ -z "$body_output" ]; then
+      body_output="$(sed -nE 's/.*NOT_FOUND:[[:space:]]*//p' <<<"$describe_output")"
+    fi
 
     domain_escaped="$(printf '%s\n' "$domain" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
 
-    if grep -Eiq "Cannot find domain mapping for \[${domain_escaped}\]" <<<"$describe_output" || \
-       grep -Eiq "(Resource|DomainMapping) ['\"]?${domain_escaped}['\"]? (was not found|not found)" <<<"$describe_output" || \
-       (grep -Eiq "(Cannot find domain mapping|DomainMapping|domain-mapping|Resource) .*not found" <<<"$describe_output" && grep -Fiq "$domain" <<<"$describe_output"); then
-      is_domain_not_found=1
+    if grep -Eiq "Cannot find domain mapping for \[${domain_escaped}\]" <<<"$body_output" || \
+       grep -Eiq "(Resource|DomainMapping) ['\"]?${domain_escaped}['\"]? (was not found|not found)" <<<"$body_output" || \
+       (grep -Eiq "(Cannot find domain mapping|DomainMapping|domain-mapping|Resource) .*not found" <<<"$body_output" && grep -Fiq "$domain" <<<"$body_output"); then
+      if ! grep -Eiq '(Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$body_output"; then
+        is_domain_not_found=1
+      fi
     fi
   fi
 
