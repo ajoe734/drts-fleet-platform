@@ -49,6 +49,20 @@ test.describe("bank console auth boundary", () => {
     );
     expect(signedOutCookie?.value).toBe("1");
 
+    const prefetchResponse = await page.request.get(
+      "/login?bank=fubon&locale=zh&_rsc=auth-boundary",
+      {
+        headers: {
+          "next-router-prefetch": "1",
+          rsc: "1",
+          "sec-fetch-dest": "empty",
+        },
+        maxRedirects: 0,
+      },
+    );
+    expect(prefetchResponse.status()).toBe(307);
+    expect(prefetchResponse.headers()["set-cookie"]).toBeUndefined();
+
     await page.goto("/bookings?bank=ctbc&locale=zh", {
       waitUntil: "domcontentloaded",
     });

@@ -33,8 +33,13 @@ function clearSignedOut(response: NextResponse) {
 function isPrefetchRequest(request: NextRequest) {
   const purpose = request.headers.get("purpose")?.toLowerCase();
   const secPurpose = request.headers.get("sec-purpose")?.toLowerCase();
+  const fetchDestination = request.headers.get("sec-fetch-dest")?.toLowerCase();
 
+  // Next strips internal flight headers before proxy execution in production,
+  // while the browser's fetch destination survives and still distinguishes
+  // background RSC work from a document navigation.
   return (
+    fetchDestination === "empty" ||
     request.headers.get("rsc") === "1" ||
     request.headers.get("next-router-prefetch") === "1" ||
     purpose === "prefetch" ||
@@ -93,7 +98,9 @@ export function proxy(request: NextRequest) {
   }
 
   if (isSignedOutCookie) {
-    return redirectToSignedOutLogin(request);
+    return redirectToSignedOutLogin(request, {
+      persistCookie: !isPrefetch,
+    });
   }
 
   return withNoStore(NextResponse.next());
