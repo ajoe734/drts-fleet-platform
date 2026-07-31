@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
 
@@ -84,6 +84,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
+    vi.useRealTimers();
     while (cleanups.length > 0) {
       await cleanups.pop()?.();
     }
@@ -98,6 +99,12 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       cleanup,
     } = createHarness();
     cleanups.push(cleanup);
+
+    // Keep every dispatch mutation in the same millisecond. Source snapshots
+    // are newest-first, so reporting must not let a timestamp tie select the
+    // superseded assignment as the final trip.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-31T00:00:00.000Z"));
 
     const completedOrder = ownedMobilityService.createCallCenterOrder({
       callId: "call-int-rep-001",
@@ -205,6 +212,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       { reason: "passenger_cancelled" },
       "req-int-rep-cancel-001",
     );
+    vi.useRealTimers();
 
     const serviceDate = completedOrder.createdAt.slice(0, 10);
     const rebuild = await reportingService.rebuildDailyDispatchRecords({

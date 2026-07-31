@@ -460,10 +460,18 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   ): DispatchDailyRecord {
     const orderDispatchJobs = dispatchJobs
       .filter((job) => job.orderId === order.orderId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          right.createdAt.localeCompare(left.createdAt),
+      );
     const orderAssignments = dispatchAssignments
       .filter((assignment) => assignment.orderId === order.orderId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          right.createdAt.localeCompare(left.createdAt),
+      );
     const orderTasks = driverTasks
       .filter((task) => task.orderId === order.orderId)
       .sort((left, right) => {
@@ -480,9 +488,18 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       .slice()
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 
-    const firstDispatch = orderDispatchJobs[0] ?? null;
-    const firstAssignment = orderAssignments[0] ?? null;
-    const finalAssignment = orderAssignments.at(-1) ?? null;
+    const firstDispatch = orderDispatchJobs.at(-1) ?? null;
+    const firstAssignment = orderAssignments.at(-1) ?? null;
+    const finalDispatch = orderDispatchJobs[0] ?? null;
+    const finalAssignment =
+      (finalDispatch
+        ? orderAssignments.find(
+            (assignment) =>
+              assignment.dispatchJobId === finalDispatch.dispatchJobId,
+          )
+        : null) ??
+      orderAssignments[0] ??
+      null;
     const finalTask =
       (finalAssignment
         ? orderTasks.find(
