@@ -137,6 +137,13 @@ describe("Cloud Run deploy quota retry", () => {
     );
     expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
     expect(domainWorkflow).not.toContain("ride.smarttransport.tw");
+    expect(domainWorkflow).toContain("domain-mappings describe");
+    expect(domainWorkflow).toContain(
+      "Domain mapping already targets ${service}; skipping create.",
+    );
+    expect(domainWorkflow).toContain(
+      "Refusing to mutate a live mapping in this no-deploy workflow",
+    );
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {

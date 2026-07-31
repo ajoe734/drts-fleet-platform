@@ -15,23 +15,23 @@ enterprise-dispatch-web, channel-partner-portal-web, referral-embed-web`.
 
 | App                        | Dev URL                                                           | Role                                                                                                                                               |
 | -------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `platform-admin-web`       | https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app       | 車隊管理 (indigo). Also third-party referral governance: `/partners`, `/partners/[entrySlug]`, `/partners/[entrySlug]/rates`, `/partners/referral` |
-| `ops-console-web`          | https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app          | 營運管理 (coral): dispatch / incidents / maintenance / approvals                                                                                   |
-| `fleet-partner-portal-web` | https://drts-dev-fleet-partner-portal-web-waji3fer3a-uc.a.run.app | 車行管理 (emerald). The referral surface was extracted out — `/referral` now 404 (see channel-partner-portal-web)                                  |
+| `platform-admin-web`       | https://drts-dev-platform-admin-web-4t7rg6fmeq-uc.a.run.app       | 車隊管理 (indigo). Also third-party referral governance: `/partners`, `/partners/[entrySlug]`, `/partners/[entrySlug]/rates`, `/partners/referral` |
+| `ops-console-web`          | https://drts-dev-ops-console-web-4t7rg6fmeq-uc.a.run.app          | 營運管理 (coral): dispatch / incidents / maintenance / approvals                                                                                   |
+| `fleet-partner-portal-web` | https://drts-dev-fleet-partner-portal-web-4t7rg6fmeq-uc.a.run.app | 車行管理 (emerald). The referral surface was extracted out — `/referral` now 404 (see channel-partner-portal-web)                                  |
 
 ## Line A — credit-card airport transfer (信用卡卡友機場接送)
 
 | App                   | Dev URL                                                      | Role                                                                                            |
 | --------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `partner-booking-web` | https://drts-dev-partner-booking-web-waji3fer3a-uc.a.run.app | Cardholder front (`/{tenantSlug}/program/site` official site + `/program/embed` bank-app embed) |
-| `bank-console-web`    | https://drts-dev-bank-console-web-waji3fer3a-uc.a.run.app    | Issuing-bank back office                                                                        |
+| `partner-booking-web` | https://drts-dev-partner-booking-web-4t7rg6fmeq-uc.a.run.app | Cardholder front (`/{tenantSlug}/program/site` official site + `/program/embed` bank-app embed) |
+| `bank-console-web`    | https://drts-dev-bank-console-web-4t7rg6fmeq-uc.a.run.app    | Issuing-bank back office                                                                        |
 
 ## Line B — corporate commute (企業內部派車)
 
 | App                                | Dev URL                                                          | Role                                                                                              |
 | ---------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `tenant-console-web`               | https://drts-dev-tenant-console-web-waji3fer3a-uc.a.run.app      | Enterprise dispatch **admin** back office                                                         |
-| `enterprise-dispatch-web`          | https://drts-dev-enterprise-dispatch-web-waji3fer3a-uc.a.run.app | Enterprise dispatch employee **front** — S1 standalone site (root) + S2 in-app embed (`/embed/*`) |
+| `tenant-console-web`               | https://drts-dev-tenant-console-web-4t7rg6fmeq-uc.a.run.app      | Enterprise dispatch **admin** back office                                                         |
+| `enterprise-dispatch-web`          | https://drts-dev-enterprise-dispatch-web-4t7rg6fmeq-uc.a.run.app | Enterprise dispatch employee **front** — S1 standalone site (root) + S2 in-app embed (`/embed/*`) |
 | ~~`tenant-commute-hub` (Lovable)~~ | ~~tenant-commute-hub.lovable.app~~                               | **Retired** — superseded by enterprise-dispatch-web                                               |
 
 ## Third-party referral channel (物業 / 社區 / 渠道轉介)
@@ -41,14 +41,14 @@ Three independent surfaces (each its own app/route as of 2026-06-16):
 | Surface                                  | Dev URL                                                              | Role                                                                                                                                                                                                                                                |
 | ---------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Embedded ride-hailing front              | https://refer.smarttransport.tw/embed/referral-demo-community        | `referral-embed-web` — resident hails a ride inside the host app's webview. The Cloud Run fallback is `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community`; `/` redirects to the configured canonical entry. |
-| Channel-partner self-service back office | https://drts-dev-channel-partner-portal-web-waji3fer3a-uc.a.run.app  | `channel-partner-portal-web` — partner views usage / revenue share / statements (`/dashboard`, `/usage`, `/statements`). Extracted from fleet-partner-portal `/referral`.                                                                           |
-| Platform-side channel governance         | https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app/partners | `platform-admin-web` `/partners*` — entry / attribution / revenue-share rate admin                                                                                                                                                                  |
+| Channel-partner self-service back office | https://drts-dev-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app  | `channel-partner-portal-web` — partner views usage / revenue share / statements (`/dashboard`, `/usage`, `/statements`). Extracted from fleet-partner-portal `/referral`.                                                                           |
+| Platform-side channel governance         | https://drts-dev-platform-admin-web-4t7rg6fmeq-uc.a.run.app/partners | `platform-admin-web` `/partners*` — entry / attribution / revenue-share rate admin                                                                                                                                                                  |
 
 ## Backend API
 
 | App   | Dev URL                                      | Notes                                                       |
 | ----- | -------------------------------------------- | ----------------------------------------------------------- |
-| `api` | https://drts-dev-api-waji3fer3a-uc.a.run.app | Control-plane API. `/api/health` = 200; root 404 is normal. |
+| `api` | https://drts-dev-api-4t7rg6fmeq-uc.a.run.app | Control-plane API. `/api/health` = 200; root 404 is normal. |
 
 ## Retired / not deployed / non-web
 

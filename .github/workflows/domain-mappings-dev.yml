@@ -62,10 +62,32 @@ jobs:
           REGION="${{ env.DEV_GCP_REGION }}"
 
           map() {  # map <subdomain> <service>
-            echo "::group::$1 -> $2"
-            gcloud --quiet beta run domain-mappings create \
-              --service "$2" --domain "$1" \
-              --region "$REGION" --project "$PROJECT" 2>&1
+            local domain="$1"
+            local service="$2"
+            local existing_service
+
+            echo "::group::${domain} -> ${service}"
+            existing_service="$(
+              gcloud --quiet beta run domain-mappings describe \
+                --domain "$domain" \
+                --region "$REGION" \
+                --project "$PROJECT" \
+                --format='value(spec.routeName)' 2>/dev/null || true
+            )"
+
+            if [ -n "$existing_service" ]; then
+              if [ "$existing_service" = "$service" ]; then
+                echo "Domain mapping already targets ${service}; skipping create."
+              else
+                echo "Existing mapping for ${domain} points at ${existing_service}, expected ${service}." >&2
+                echo "Refusing to mutate a live mapping in this no-deploy workflow; reconcile externally first." >&2
+                exit 1
+              fi
+            else
+              gcloud --quiet beta run domain-mappings create \
+                --service "$service" --domain "$domain" \
+                --region "$REGION" --project "$PROJECT" 2>&1
+            fi
             echo "::endgroup::"
           }
 
