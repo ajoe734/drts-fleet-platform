@@ -33,8 +33,7 @@ fi
 log_info "Closing taskId=${TASK_ID} to produce an invoice-eligible trip"
 
 TMP_DIR=$(mktemp -d /tmp/drts-smoke-billing-XXXXXX)
-FIXTURE_TMP=""
-trap 'rm -rf "$TMP_DIR" "${FIXTURE_TMP:-}"' EXIT
+trap 'rm -rf "$TMP_DIR" "$FIXTURE_TMP"' EXIT
 
 DEPARTED_AT=$(date -u -d "@$(( $(date -u +%s) - 50 ))" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
   || date -u -r "$(( $(date -u +%s) - 50 ))" +"%Y-%m-%dT%H:%M:%SZ")

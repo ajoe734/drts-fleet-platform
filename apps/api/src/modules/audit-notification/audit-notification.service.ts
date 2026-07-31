@@ -720,11 +720,26 @@ export class AuditNotificationService implements OnModuleInit {
 
   recordAuditLog(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
+      auditId?: string;
       requestId?: string;
     },
   ) {
     const auditLog = this.appendAuditLog(input);
     this.applyEvidenceGovernanceLog(auditLog);
+    return auditLog;
+  }
+
+  async recordAuditLogAsync(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
+      auditId?: string;
+      requestId?: string;
+    },
+  ) {
+    const auditLog = this.appendAuditLog(input, true);
+    this.applyEvidenceGovernanceLog(auditLog);
+    if (this.auditLogRepository?.isEnabled()) {
+      await this.auditLogRepository.append(auditLog);
+    }
     return auditLog;
   }
 
@@ -785,10 +800,13 @@ export class AuditNotificationService implements OnModuleInit {
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
       requestId?: string;
     },
+    skipAsyncPersist = false,
   ) {
     const auditLog = createAuditLogRecord(input);
     this.auditLogs = trimAuditLogs([auditLog, ...this.auditLogs]);
-    this.persistAuditLog(auditLog);
+    if (!skipAsyncPersist) {
+      this.persistAuditLog(auditLog);
+    }
     return auditLog;
   }
 

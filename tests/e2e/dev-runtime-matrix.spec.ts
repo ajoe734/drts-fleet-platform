@@ -22,9 +22,11 @@ const skippedRuntimeSurfaces = [] as const;
 type RuntimeSurfaceKey =
   | "api"
   | "bank-console-web"
+  | "channel-partner-portal-web"
   | "enterprise-dispatch-web"
   | "partner-booking-web"
   | "platform-admin-web"
+  | "referral-embed-web"
   | "ops-console-web"
   | "fleet-partner-portal-web"
   | "tenant-console-web";
@@ -34,8 +36,10 @@ type DeviceKey = "desktop" | "tablet" | "mobile";
 
 type ActorProfile = {
   key: string;
-  role: string;
-  tenant?: string;
+  actorType: string;
+  tenantId?: string;
+  partnerEntrySlug?: string;
+  scopes?: string[];
 };
 
 type QueryIntent = {
@@ -102,91 +106,132 @@ const queryIntents: QueryIntent[] = [
 ];
 
 const platformActors: ActorProfile[] = [
-  { key: "platform-admin", role: "platform_admin" },
-  { key: "platform-ops", role: "platform_ops" },
-  { key: "platform-finance", role: "platform_finance" },
-  { key: "platform-compliance", role: "platform_compliance" },
-  { key: "platform-support", role: "platform_support" },
-  { key: "platform-viewer", role: "platform_viewer" },
+  { key: "platform-admin", actorType: "platform_admin" },
+  { key: "platform-ops", actorType: "platform_ops" },
+  { key: "platform-finance", actorType: "platform_finance" },
+  { key: "platform-compliance", actorType: "platform_compliance" },
+  { key: "platform-support", actorType: "platform_support" },
+  { key: "platform-viewer", actorType: "platform_viewer" },
 ];
 
 const opsActors: ActorProfile[] = [
-  { key: "ops-dispatcher", role: "ops_dispatcher" },
-  { key: "ops-supervisor", role: "ops_supervisor" },
-  { key: "ops-callcenter", role: "ops_callcenter" },
-  { key: "ops-incident", role: "ops_incident_manager" },
-  { key: "ops-finance", role: "ops_finance_reviewer" },
-  { key: "ops-maintenance", role: "ops_maintenance" },
-  { key: "ops-readonly", role: "ops_viewer" },
+  { key: "ops-dispatcher", actorType: "ops_dispatcher" },
+  { key: "ops-supervisor", actorType: "ops_supervisor" },
+  { key: "ops-callcenter", actorType: "ops_callcenter" },
+  { key: "ops-incident", actorType: "ops_incident_manager" },
+  { key: "ops-finance", actorType: "ops_finance_reviewer" },
+  { key: "ops-maintenance", actorType: "ops_maintenance" },
+  { key: "ops-readonly", actorType: "ops_viewer" },
 ];
 
 const fleetActors: ActorProfile[] = [
-  { key: "fleet-owner", role: "fleet_owner", tenant: "metro-fleet" },
-  { key: "fleet-dispatch", role: "fleet_dispatch", tenant: "metro-fleet" },
-  { key: "fleet-finance", role: "fleet_finance", tenant: "metro-fleet" },
-  { key: "fleet-compliance", role: "fleet_compliance", tenant: "metro-fleet" },
-  { key: "fleet-viewer", role: "fleet_viewer", tenant: "metro-fleet" },
+  { key: "fleet-owner", actorType: "fleet_owner", tenantId: "metro-fleet" },
+  {
+    key: "fleet-dispatch",
+    actorType: "fleet_dispatch",
+    tenantId: "metro-fleet",
+  },
+  {
+    key: "fleet-finance",
+    actorType: "fleet_finance",
+    tenantId: "metro-fleet",
+  },
+  {
+    key: "fleet-compliance",
+    actorType: "fleet_compliance",
+    tenantId: "metro-fleet",
+  },
+  { key: "fleet-viewer", actorType: "fleet_viewer", tenantId: "metro-fleet" },
 ];
 
 const tenantActors: ActorProfile[] = [
-  { key: "tenant-admin", role: "tenant_admin", tenant: "tenant-demo-001" },
+  {
+    key: "tenant-admin",
+    actorType: "tenant_admin",
+    tenantId: "tenant-demo-001",
+  },
   {
     key: "tenant-operator",
-    role: "tenant_operator",
-    tenant: "tenant-demo-001",
+    actorType: "tenant_operator",
+    tenantId: "tenant-demo-001",
   },
-  { key: "tenant-finance", role: "tenant_finance", tenant: "tenant-demo-001" },
+  {
+    key: "tenant-finance",
+    actorType: "tenant_finance",
+    tenantId: "tenant-demo-001",
+  },
   {
     key: "tenant-approver",
-    role: "tenant_approver",
-    tenant: "tenant-demo-001",
+    actorType: "tenant_approver",
+    tenantId: "tenant-demo-001",
   },
-  { key: "tenant-viewer", role: "tenant_viewer", tenant: "tenant-demo-001" },
+  {
+    key: "tenant-viewer",
+    actorType: "tenant_viewer",
+    tenantId: "tenant-demo-001",
+  },
   {
     key: "tenant-api-owner",
-    role: "tenant_api_owner",
-    tenant: "tenant-demo-001",
+    actorType: "tenant_api_owner",
+    tenantId: "tenant-demo-001",
   },
 ];
 
 const enterpriseActors: ActorProfile[] = [
   {
     key: "enterprise-employee",
-    role: "enterprise_employee",
-    tenant: "hongshuo",
+    actorType: "enterprise_employee",
+    tenantId: "hongshuo",
   },
   {
     key: "enterprise-delegate",
-    role: "enterprise_delegate",
-    tenant: "hongshuo",
+    actorType: "enterprise_delegate",
+    tenantId: "hongshuo",
   },
   {
     key: "enterprise-approver",
-    role: "enterprise_approver",
-    tenant: "hongshuo",
+    actorType: "enterprise_approver",
+    tenantId: "hongshuo",
   },
   {
     key: "enterprise-finance-viewer",
-    role: "enterprise_finance_viewer",
-    tenant: "hongshuo",
+    actorType: "enterprise_finance_viewer",
+    tenantId: "hongshuo",
   },
 ];
 
 const bankActors: ActorProfile[] = [
   {
     key: "bank-program-admin",
-    role: "bank_program_admin",
-    tenant: "tenant-ctbc-001",
+    actorType: "bank_program_admin",
+    tenantId: "tenant-ctbc-001",
   },
 ];
 
 const partnerBookingActors: ActorProfile[] = [
-  { key: "partner-booking-visitor", role: "partner_booking_visitor" },
+  { key: "partner-booking-visitor", actorType: "partner_booking_visitor" },
+];
+
+const channelPartnerActors: ActorProfile[] = [
+  {
+    key: "channel-partner-public-override-attempt",
+    actorType: "platform_admin",
+    partnerEntrySlug: "bogus-public-entry",
+    scopes: ["foundation:write", "dispatch:write"],
+  },
+];
+
+const referralEmbedActors: ActorProfile[] = [
+  {
+    key: "referral-passenger",
+    actorType: "referral_passenger",
+    partnerEntrySlug: "referral-demo-community",
+  },
 ];
 
 const apiActors: ActorProfile[] = [
-  { key: "api-smoke", role: "runtime_smoke" },
-  { key: "api-observer", role: "runtime_observer" },
+  { key: "api-smoke", actorType: "runtime_smoke" },
+  { key: "api-observer", actorType: "runtime_observer" },
 ];
 
 const platformMarker = /DRTS 平台管理|Platform|平台管理|租戶|稽核|健康/i;
@@ -195,14 +240,40 @@ const fleetMarker = /Fleet Partner Portal|車行夥伴入口|車行營運總覽|
 const tenantMarker = /租戶後台|Tenant|訂單|工作面|帳務概覽/i;
 const enterpriseMarker =
   /企業派車|鴻碩科技|建立預約|我的預約|成本中心|身分交付/i;
+const channelPartnerMarker =
+  /Channel Dashboard|渠道總覽|Referral Statements|分潤對帳單|Usage|用量明細/i;
+const referralEmbedMarker =
+  /社區叫車|Referral Embed|轉介嵌入前台|\/embed\/referral-demo-community/i;
+const referralEmbedEntrySlug =
+  process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "referral-demo-community";
+const currentDevHostSuffix = "4t7rg6fmeq-uc.a.run.app";
+const channelPartnerEvidenceMarkers = [
+  /drts-data-source:live/i,
+  /drts-e2e-actor-type:partner_api_key/i,
+  /drts-e2e-entry-slug:referral-demo-community/i,
+  /drts-e2e-scopes:billing:read/i,
+] as const;
+
+function resolveCloudRunBaseUrl(
+  envValue: string | undefined,
+  serviceHost: string,
+): string {
+  const resolved = envValue?.trim();
+  if (resolved) {
+    return resolved;
+  }
+
+  return `https://${serviceHost}-${currentDevHostSuffix}`;
+}
 
 const surfaces: RuntimeSurface[] = [
   {
     key: "api",
     family: "runtime-api-health",
-    baseUrl:
-      process.env.DRTS_DEV_API_BASE_URL ??
-      "https://drts-dev-api-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_API_BASE_URL,
+      "drts-dev-api",
+    ),
     actors: apiActors,
     routes: [
       {
@@ -216,9 +287,10 @@ const surfaces: RuntimeSurface[] = [
   {
     key: "bank-console-web",
     family: "issuer bank management console",
-    baseUrl:
-      process.env.DRTS_DEV_BANK_CONSOLE_BASE_URL ??
-      "https://drts-dev-bank-console-web-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_BANK_CONSOLE_BASE_URL,
+      "drts-dev-bank-console-web",
+    ),
     actors: bankActors,
     routes: [
       {
@@ -274,9 +346,10 @@ const surfaces: RuntimeSurface[] = [
   {
     key: "partner-booking-web",
     family: "partner white-label booking surface",
-    baseUrl:
-      process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL ??
-      "https://drts-dev-partner-booking-web-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL,
+      "drts-dev-partner-booking-web",
+    ),
     actors: partnerBookingActors,
     routes: [
       {
@@ -332,9 +405,10 @@ const surfaces: RuntimeSurface[] = [
   {
     key: "enterprise-dispatch-web",
     family: "enterprise dispatch self-service",
-    baseUrl:
-      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL ??
-      "https://drts-dev-enterprise-dispatch-web-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL,
+      "drts-dev-enterprise-dispatch-web",
+    ),
     actors: enterpriseActors,
     routes: [
       {
@@ -418,11 +492,64 @@ const surfaces: RuntimeSurface[] = [
     ],
   },
   {
+    key: "channel-partner-portal-web",
+    family: "referral channel partner self-service",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL,
+      "drts-channel-partner-portal-web",
+    ),
+    actors: channelPartnerActors,
+    routes: [
+      {
+        key: "dashboard",
+        path: "/dashboard",
+        operation: "channel dashboard",
+        marker: channelPartnerMarker,
+      },
+      {
+        key: "usage",
+        path: "/usage",
+        operation: "referral usage detail",
+        marker: channelPartnerMarker,
+      },
+      {
+        key: "statements",
+        path: "/statements",
+        operation: "referral statements",
+        marker: channelPartnerMarker,
+      },
+    ],
+  },
+  {
+    key: "referral-embed-web",
+    family: "partner-scoped referral embed front",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_REFERRAL_EMBED_BASE_URL,
+      "drts-dev-referral-embed-web",
+    ),
+    actors: referralEmbedActors,
+    routes: [
+      {
+        key: "root",
+        path: "/",
+        operation: "referral root redirects to canonical partner entry",
+        marker: referralEmbedMarker,
+      },
+      {
+        key: "entry",
+        path: `/embed/${referralEmbedEntrySlug}`,
+        operation: "partner-scoped referral entry",
+        marker: referralEmbedMarker,
+      },
+    ],
+  },
+  {
     key: "platform-admin-web",
     family: "platform governance",
-    baseUrl:
-      process.env.DRTS_DEV_PLATFORM_ADMIN_BASE_URL ??
-      "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_PLATFORM_ADMIN_BASE_URL,
+      "drts-dev-platform-admin-web",
+    ),
     actors: platformActors,
     routes: [
       {
@@ -538,9 +665,10 @@ const surfaces: RuntimeSurface[] = [
   {
     key: "ops-console-web",
     family: "operations control",
-    baseUrl:
-      process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
-      "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL,
+      "drts-dev-ops-console-web",
+    ),
     actors: opsActors,
     routes: [
       {
@@ -674,9 +802,10 @@ const surfaces: RuntimeSurface[] = [
   {
     key: "fleet-partner-portal-web",
     family: "fleet partner operations",
-    baseUrl:
-      process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL ??
-      "https://drts-dev-fleet-partner-portal-web-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL,
+      "drts-dev-fleet-partner-portal-web",
+    ),
     actors: fleetActors,
     routes: [
       {
@@ -750,9 +879,10 @@ const surfaces: RuntimeSurface[] = [
   {
     key: "tenant-console-web",
     family: "enterprise dispatch tenant operations",
-    baseUrl:
-      process.env.DRTS_DEV_TENANT_CONSOLE_BASE_URL ??
-      "https://drts-dev-tenant-console-web-waji3fer3a-uc.a.run.app",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_TENANT_CONSOLE_BASE_URL,
+      "drts-dev-tenant-console-web",
+    ),
     actors: tenantActors,
     routes: [
       {
@@ -954,11 +1084,17 @@ function buildUrl(testCase: MatrixCase): string {
   const url = new URL(testCase.route.path, testCase.surface.baseUrl);
   url.searchParams.set("locale", testCase.locale);
   url.searchParams.set("actor", testCase.actor.key);
-  url.searchParams.set("role", testCase.actor.role);
+  url.searchParams.set("actorType", testCase.actor.actorType);
   url.searchParams.set("device", testCase.device);
   url.searchParams.set("e2eCase", testCase.id);
-  if (testCase.actor.tenant) {
-    url.searchParams.set("tenant", testCase.actor.tenant);
+  if (testCase.actor.tenantId) {
+    url.searchParams.set("tenant", testCase.actor.tenantId);
+  }
+  if (testCase.actor.partnerEntrySlug) {
+    url.searchParams.set("entrySlug", testCase.actor.partnerEntrySlug);
+  }
+  if (testCase.actor.scopes?.length) {
+    url.searchParams.set("scopes", testCase.actor.scopes.join(","));
   }
   for (const [key, value] of Object.entries(testCase.intent.params)) {
     url.searchParams.set(key, value);
@@ -992,9 +1128,7 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
 
   const matrixCases = buildCases();
 
-  test(
-    `matrix generation covers exactly ${TARGET_CASE_COUNT} non-excluded cases`,
-    async () => {
+  test(`matrix generation covers exactly ${TARGET_CASE_COUNT} non-excluded cases`, async () => {
     expect(matrixCases).toHaveLength(TARGET_CASE_COUNT);
     expect(
       matrixCases.some((item) =>
@@ -1003,21 +1137,32 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
         ),
       ),
     ).toBe(false);
-    },
-  );
+  });
 
   for (const [index, testCase] of matrixCases.entries()) {
     test(`${String(index + 1).padStart(4, "0")} ${testCase.title}`, async ({
       request,
     }) => {
+      const partnerHeaders =
+        testCase.surface.key === "channel-partner-portal-web"
+          ? {
+              "X-DRTS-E2E-Entry-Slug":
+                testCase.actor.partnerEntrySlug ?? referralEmbedEntrySlug,
+              "X-DRTS-E2E-Partner-Id": "partner-referral-demo-001",
+              "X-DRTS-E2E-Tenant-Id": "tenant-demo-001",
+              "X-DRTS-E2E-Partner-Program-Id": "program-referral-community",
+            }
+          : {};
       const response = await request.get(buildUrl(testCase), {
         headers: {
           "Accept-Language": testCase.locale,
           "User-Agent": userAgents[testCase.device],
           "X-DRTS-E2E-Actor": testCase.actor.key,
-          "X-DRTS-E2E-Role": testCase.actor.role,
+          "X-DRTS-E2E-Actor-Type": testCase.actor.actorType,
+          "X-DRTS-E2E-Scopes": testCase.actor.scopes?.join(",") ?? "",
           "X-DRTS-E2E-Surface": testCase.surface.key,
           "X-DRTS-E2E-Operation": testCase.route.operation,
+          ...partnerHeaders,
         },
         maxRedirects: 3,
       });
@@ -1042,6 +1187,11 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
         expect(visibleText).not.toMatch(marker);
       }
       expect(visibleText).toMatch(testCase.route.marker);
+      if (testCase.surface.key === "channel-partner-portal-web") {
+        for (const marker of channelPartnerEvidenceMarkers) {
+          expect(body).toMatch(marker);
+        }
+      }
     });
   }
 });

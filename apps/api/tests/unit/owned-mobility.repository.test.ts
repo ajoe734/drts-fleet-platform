@@ -5,7 +5,10 @@ import type {
   PassengerDispatchDisclosureSnapshot,
 } from "@drts/contracts";
 
-import { OwnedMobilityRepository } from "../../src/modules/owned-mobility/owned-mobility.repository";
+import {
+  OwnedMobilityRepository,
+  type DriverCompletionOutboxRecord,
+} from "../../src/modules/owned-mobility/owned-mobility.repository";
 
 describe("OwnedMobilityRepository", () => {
   it("loads partner orders by order and tenant-scoped booking ids", async () => {
@@ -76,6 +79,66 @@ describe("OwnedMobilityRepository", () => {
       passengerDisclosureSnapshots: [{ snapshotId: "snapshot-1" }],
       consumerNotificationOutbox: [{ outboxId: "outbox-1" }],
     });
+  });
+
+  it("locks and returns the completion dispatch-job snapshot from the assignment authority", async () => {
+    const recordsByTable = new Map<string, unknown>([
+      [
+        "ops.phase1_driver_tasks",
+        {
+          taskId: "task-complete-1",
+          assignmentId: "assignment-complete-1",
+          orderId: "order-complete-1",
+        },
+      ],
+      [
+        "ops.phase1_dispatch_assignments",
+        {
+          assignmentId: "assignment-complete-1",
+          dispatchJobId: "job-complete-1",
+        },
+      ],
+      [
+        "ops.phase1_dispatch_jobs",
+        {
+          dispatchJobId: "job-complete-1",
+          orderId: "order-complete-1",
+          status: "assigned",
+        },
+      ],
+      ["ops.phase1_owned_orders", { orderId: "order-complete-1" }],
+    ]);
+    const query = vi.fn(async (sql: string) => {
+      const entry = [...recordsByTable.entries()].find(([table]) =>
+        sql.includes(table),
+      );
+      return { rows: entry ? [{ record: entry[1] }] : [] };
+    });
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.loadDriverTaskCompletionBundleForUpdate(
+        { query } as never,
+        "task-complete-1",
+      ),
+    ).resolves.toMatchObject({
+      order: { orderId: "order-complete-1" },
+      dispatchJob: { dispatchJobId: "job-complete-1", status: "assigned" },
+      assignment: { assignmentId: "assignment-complete-1" },
+      task: { taskId: "task-complete-1" },
+    });
+
+    expect(query).toHaveBeenCalledTimes(4);
+    for (const [sql] of query.mock.calls) {
+      expect(sql).toContain("FOR UPDATE");
+    }
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE dispatch_job_id = $1"),
+      ["job-complete-1"],
+    );
   });
 
   it("atomically supersedes only older passenger snapshots before inserting a replacement", async () => {
@@ -180,5 +243,156 @@ describe("OwnedMobilityRepository", () => {
 
     const [outboxSql] = query.mock.calls[1]!;
     expect(outboxSql).toContain("INSERT INTO ops.consumer_notification_outbox");
+  });
+
+  it("serializes writes issued through one transaction client", async () => {
+    const pending: Array<(value: { rows: never[] }) => void> = [];
+    const query = vi.fn(
+      () =>
+        new Promise<{ rows: never[] }>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+    const record = (
+      effectType: DriverCompletionOutboxRecord["effectType"],
+    ): DriverCompletionOutboxRecord => ({
+      outboxId: `outbox-${effectType}`,
+      taskId: "task-serial",
+      orderId: "order-serial",
+      effectType,
+      requestId: "request-serial",
+      payload: { effectType },
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: "2026-07-31T00:00:00.000Z",
+      leaseToken: null,
+      leasedUntil: null,
+      lastError: null,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      deliveredAt: null,
+    });
+
+    const persisted = repository.persistDriverCompletionOutbox(
+      { query } as never,
+      [record("completion_audit_bundle"), record("driver_task_updated")],
+    );
+
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(1));
+    pending.shift()!({ rows: [] });
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    pending.shift()!({ rows: [] });
+    await persisted;
+  });
+
+  it("claims the next recoverable driver-completion outbox globally in retry order", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          outbox_id: "6b6e7b8a-18d4-5d8b-a7ca-c518aa5084f0",
+          task_id: "task-1",
+          order_id: "order-1",
+          effect_type: "tenant_order_completed_webhook",
+          request_id: "req-1",
+          payload: { effectType: "tenant_order_completed_webhook" },
+          status: "processing",
+          attempt_count: 2,
+          next_attempt_at: "2026-07-31T11:59:00.000Z",
+          lease_token: "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+          leased_until: "2026-07-31T12:01:00.000Z",
+          last_error: null,
+          created_at: "2026-07-31T11:58:00.000Z",
+          delivered_at: null,
+        },
+      ],
+    }));
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.claimNextRecoverableDriverCompletionOutbox(
+        { query } as never,
+        "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+        "2026-07-31T12:01:00.000Z",
+        "2026-07-31T12:00:00.000Z",
+        5,
+      ),
+    ).resolves.toMatchObject({
+      action: "dispatch",
+      record: {
+        outboxId: "6b6e7b8a-18d4-5d8b-a7ca-c518aa5084f0",
+        taskId: "task-1",
+        status: "processing",
+        attemptCount: 2,
+      },
+    });
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE ops.driver_completion_outbox AS outbox"),
+      [
+        "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+        "2026-07-31T12:01:00.000Z",
+        "2026-07-31T12:00:00.000Z",
+        5,
+      ],
+    );
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC, outbox_id ASC",
+    );
+  });
+
+  it("dead-letters an expired final-attempt driver-completion outbox before redispatch", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          outbox_id: "c33f14f6-1cee-5a98-84a1-6fc91580c4ea",
+          task_id: "task-final-1",
+          order_id: "order-final-1",
+          effect_type: "tenant_order_completed_webhook",
+          request_id: "req-final-1",
+          payload: { effectType: "tenant_order_completed_webhook" },
+          status: "dead_letter",
+          attempt_count: 5,
+          next_attempt_at: "2026-07-31T11:59:00.000Z",
+          lease_token: null,
+          leased_until: null,
+          last_error:
+            "Lease expired after the final delivery attempt before acknowledgement.",
+          created_at: "2026-07-31T11:58:00.000Z",
+          delivered_at: null,
+        },
+      ],
+      rowCount: 1,
+    }));
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.claimNextRecoverableDriverCompletionOutbox(
+        { query } as never,
+        "befd6741-8894-4f4f-bf08-4bf5de8b67ef",
+        "2026-07-31T12:01:00.000Z",
+        "2026-07-31T12:00:00.000Z",
+        5,
+      ),
+    ).resolves.toMatchObject({
+      action: "dead_letter",
+      record: {
+        outboxId: "c33f14f6-1cee-5a98-84a1-6fc91580c4ea",
+        taskId: "task-final-1",
+        status: "dead_letter",
+        attemptCount: 5,
+      },
+    });
+
+    expect(query.mock.calls[0]?.[0]).toContain("status = 'processing'");
+    expect(query.mock.calls[0]?.[0]).toContain("THEN 'dead_letter'");
   });
 });

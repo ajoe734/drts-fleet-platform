@@ -18,7 +18,7 @@ describe("billing settlement service", () => {
   it("updates the tenant billing profile and generates an invoice with artifact metadata for SC-030", async () => {
     const { auditService, billingSettlementService } = createService();
 
-    const profile = billingSettlementService.updateTenantBillingProfile(
+    const profile = await billingSettlementService.updateTenantBillingProfile(
       "tenant-demo-001",
       {
         invoiceTitle: "Demo Tenant Co., Ltd.",
@@ -64,14 +64,17 @@ describe("billing settlement service", () => {
   it("keeps tenant billing profiles and invoice reads isolated by tenant id", async () => {
     const { billingSettlementService } = createService();
 
-    billingSettlementService.updateTenantBillingProfile("tenant-demo-001", {
-      invoiceTitle: "Tenant Demo Billing",
-      taxId: "11112222",
-      address: "Alpha Road",
-      contactName: "Alpha Owner",
-      email: "billing@alpha.example.com",
-    });
-    billingSettlementService.updateTenantBillingProfile("tenant-beta", {
+    await billingSettlementService.updateTenantBillingProfile(
+      "tenant-demo-001",
+      {
+        invoiceTitle: "Tenant Demo Billing",
+        taxId: "11112222",
+        address: "Alpha Road",
+        contactName: "Alpha Owner",
+        email: "billing@alpha.example.com",
+      },
+    );
+    await billingSettlementService.updateTenantBillingProfile("tenant-beta", {
       invoiceTitle: "Tenant Beta Billing",
       taxId: "33334444",
       address: "Beta Road",
@@ -207,7 +210,7 @@ describe("billing settlement service", () => {
   it("publishes an immutable fee plan and generates driver statements for SC-031", async () => {
     const { auditService, billingSettlementService } = createService();
 
-    const feePlan = billingSettlementService.publishDriverFeePlan(
+    const feePlan = await billingSettlementService.publishDriverFeePlan(
       {
         planName: "Phase1 Driver Fee Plan",
         version: "drv-fee-v1",
@@ -250,7 +253,7 @@ describe("billing settlement service", () => {
     ).toBe(true);
 
     try {
-      billingSettlementService.publishDriverFeePlan({
+      await billingSettlementService.publishDriverFeePlan({
         planName: "Phase1 Driver Fee Plan",
         version: "drv-fee-v1",
         serviceFeeBps: 1800,
@@ -275,7 +278,7 @@ describe("billing settlement service", () => {
   it("creates reimbursement instead of reducing driver net for SC-032", async () => {
     const { auditService, billingSettlementService } = createService();
 
-    billingSettlementService.publishDriverFeePlan({
+    await billingSettlementService.publishDriverFeePlan({
       planName: "Phase1 Driver Fee Plan",
       version: "drv-fee-v1",
       serviceFeeBps: 1500,
@@ -312,7 +315,7 @@ describe("billing settlement service", () => {
   it("approves and marks reimbursement paid without moving finance truth into the UI", async () => {
     const { auditService, billingSettlementService } = createService();
 
-    billingSettlementService.publishDriverFeePlan({
+    await billingSettlementService.publishDriverFeePlan({
       planName: "Phase1 Driver Fee Plan",
       version: "drv-fee-v1",
       serviceFeeBps: 1500,
@@ -326,13 +329,14 @@ describe("billing settlement service", () => {
     const pendingBatch =
       billingSettlementService.getReimbursementBatch(batchId);
 
-    const approvedBatch = billingSettlementService.approveReimbursementBatch(
-      batchId,
-      {
-        statementId: pendingBatch.statementId,
-      },
-      "reimbursement-approve-request",
-    );
+    const approvedBatch =
+      await billingSettlementService.approveReimbursementBatch(
+        batchId,
+        {
+          statementId: pendingBatch.statementId,
+        },
+        "reimbursement-approve-request",
+      );
     const paidBatch = billingSettlementService.markReimbursementPaid(
       batchId,
       {
@@ -404,7 +408,7 @@ describe("billing settlement service", () => {
         .invoiceTitle,
     ).toBe("Persisted Billing Profile");
 
-    billingSettlementService.publishDriverFeePlan({
+    await billingSettlementService.publishDriverFeePlan({
       planName: "Persisted Driver Fee Plan",
       version: "drv-fee-v2",
       serviceFeeBps: 1500,

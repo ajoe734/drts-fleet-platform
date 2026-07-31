@@ -20,6 +20,7 @@ import type { Notification, PoolClient } from "pg";
 import { Observable, filter, fromEvent, map } from "rxjs";
 
 import { DatabaseService } from "../../common/db";
+import { generateDeterministicUuid } from "../../common/durable-identity";
 
 const DRIVER_TASK_EVENT_CHANNEL = "owned-mobility.driver-task";
 const DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL =
@@ -150,48 +151,80 @@ export class OwnedMobilityTaskEventsService
     );
   }
 
-  publishTaskAssigned(
+  async publishTaskAssigned(
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
     requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
   ) {
-    this.publish("task_assigned", task, order, requestId);
+    await this.publish(
+      "task_assigned",
+      task,
+      order,
+      requestId,
+      options?.eventId,
+      options?.correlationId,
+    );
   }
 
-  publishTaskUpdated(
+  async publishTaskUpdated(
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
     requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
   ) {
-    this.publish("task_updated", task, order, requestId);
+    await this.publish(
+      "task_updated",
+      task,
+      order,
+      requestId,
+      options?.eventId,
+      options?.correlationId,
+    );
   }
 
-  publishTaskCancelled(
+  async publishTaskCancelled(
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
     requestId?: string,
+    options?: { eventId?: string; correlationId?: string },
   ) {
-    this.publish("task_cancelled", task, order, requestId);
+    await this.publish(
+      "task_cancelled",
+      task,
+      order,
+      requestId,
+      options?.eventId,
+      options?.correlationId,
+    );
   }
 
-  private publish(
+  private async publish(
     eventType: DriverTaskStreamEventType,
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
     requestId?: string,
+    eventIdOverride?: string,
+    correlationIdOverride?: string,
   ) {
     const occurredAt = new Date().toISOString();
     const publishedAt = new Date().toISOString();
+    const eventId =
+      eventIdOverride ??
+      generateDeterministicUuid(
+        "driver_task_event",
+        `${eventType}:${task.taskId}:${task.status}:${task.completedAt ?? (task as any).updatedAt ?? occurredAt}:${requestId ?? ""}`,
+      );
 
     const envelope: DriverTaskStreamEventEnvelope & { publishedAt: string } = {
-      eventId: randomUUID(),
+      eventId,
       eventType,
       eventVersion: 1,
       occurredAt,
       publishedAt,
       producer: "apps/api/owned-mobility",
       tenantId: order.tenantId,
-      correlationId: requestId ?? randomUUID(),
+      correlationId: correlationIdOverride ?? requestId ?? randomUUID(),
       causationId: requestId ?? task.taskId,
       subjectId: task.taskId,
       data: {
@@ -215,24 +248,22 @@ export class OwnedMobilityTaskEventsService
       }
 
       if (payload.length > 7500) {
-        this.logger.warn(
-          `Payload too large for Postgres NOTIFY even after Gzip (${payload.length} bytes), falling back to local-only for ${envelope.eventId}`,
+        throw new Error(
+          `Payload too large for Postgres NOTIFY even after Gzip (${payload.length} bytes) for ${envelope.eventId}`,
         );
-        this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);
-      } else {
-        void this.databaseService
-          .query(
-            `SELECT pg_notify('${DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL}', $1)`,
-            [payload],
-          )
-          .catch((err) => {
-            this.logger.error(
-              `Postgres NOTIFY failed for ${envelope.eventId}`,
-              err,
-            );
-            // Fallback to local
-            this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);
-          });
+      }
+
+      try {
+        await this.databaseService.query(
+          `SELECT pg_notify('${DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL}', $1)`,
+          [payload],
+        );
+      } catch (err) {
+        this.logger.error(
+          `Postgres NOTIFY failed for ${envelope.eventId}`,
+          err,
+        );
+        throw err;
       }
     } else {
       this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);

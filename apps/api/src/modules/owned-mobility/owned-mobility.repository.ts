@@ -39,7 +39,10 @@ export type OwnedMobilityQueryExecutor = {
 export type DriverCompletionOutboxEffectType =
   | "tenant_order_completed_webhook"
   | "owned_mobility_trip_completed"
-  | "multi_taxi_certificate";
+  | "multi_taxi_certificate"
+  | "completion_audit_bundle"
+  | "driver_task_updated"
+  | "ops_dispatch_job_updated";
 
 export type DriverCompletionOutboxStatus =
   | "pending"
@@ -63,6 +66,10 @@ export type DriverCompletionOutboxRecord = {
   createdAt: string;
   deliveredAt: string | null;
 };
+
+export type DriverCompletionOutboxClaimResult =
+  | { action: "dispatch"; record: DriverCompletionOutboxRecord }
+  | { action: "dead_letter"; record: DriverCompletionOutboxRecord };
 
 type OwnedMobilityState = {
   orders: OwnedOrderRecord[];
@@ -88,6 +95,7 @@ type PersistOwnedMobilityChanges = {
 
 export type DriverTaskCompletionBundleRecord = {
   order: OwnedOrderRecord;
+  dispatchJob: DispatchJobRecord;
   assignment: DispatchAssignmentRecord;
   task: DriverTaskRecord;
 };
@@ -468,6 +476,27 @@ export class OwnedMobilityRepository {
       "ops.phase1_dispatch_assignments",
     );
 
+    const dispatchJobResult = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_dispatch_jobs
+        WHERE dispatch_job_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [assignment.dispatchJobId],
+    );
+    const dispatchJobRow = dispatchJobResult.rows[0];
+    if (!dispatchJobRow) {
+      throw new Error(
+        `Dispatch job ${assignment.dispatchJobId} missing for driver task ${taskId}.`,
+      );
+    }
+    const dispatchJob = this.parseRecord<DispatchJobRecord>(
+      dispatchJobRow.record,
+      "ops.phase1_dispatch_jobs",
+    );
+
     const orderResult = await executor.query<JsonRecordRow>(
       `
         SELECT record
@@ -489,7 +518,7 @@ export class OwnedMobilityRepository {
       "ops.phase1_owned_orders",
     );
 
-    return { order, assignment, task };
+    return { order, dispatchJob, assignment, task };
   }
 
   async hasDriverTaskTraceRequestId(
@@ -522,26 +551,26 @@ export class OwnedMobilityRepository {
     for (const entry of entries) {
       await executor.query(
         `
-          INSERT INTO ops.driver_completion_outbox (
-            outbox_id,
-            task_id,
-            order_id,
-            effect_type,
-            request_id,
-            payload,
-            status,
-            attempt_count,
-            next_attempt_at,
-            lease_token,
-            leased_until,
-            last_error,
-            created_at,
-            delivered_at
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14
-          )
-          ON CONFLICT (task_id, effect_type) DO NOTHING
-        `,
+            INSERT INTO ops.driver_completion_outbox (
+              outbox_id,
+              task_id,
+              order_id,
+              effect_type,
+              request_id,
+              payload,
+              status,
+              attempt_count,
+              next_attempt_at,
+              lease_token,
+              leased_until,
+              last_error,
+              created_at,
+              delivered_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14
+            )
+            ON CONFLICT (task_id, effect_type) DO NOTHING
+          `,
         [
           entry.outboxId,
           entry.taskId,
@@ -562,61 +591,91 @@ export class OwnedMobilityRepository {
     }
   }
 
-  async claimNextDriverCompletionOutbox(
+  async claimNextRecoverableDriverCompletionOutbox(
     executor: OwnedMobilityQueryExecutor,
-    taskId: string,
     leaseToken: string,
     leasedUntil: string,
     now: string,
     maxAttempts: number,
-  ): Promise<DriverCompletionOutboxRecord | null> {
+  ): Promise<DriverCompletionOutboxClaimResult | null> {
     const result = await executor.query<DriverCompletionOutboxRow>(
       `
         WITH candidate AS (
           SELECT outbox_id
           FROM ops.driver_completion_outbox
-          WHERE task_id = $1
-            AND delivered_at IS NULL
+          WHERE delivered_at IS NULL
             AND status IN ('pending', 'processing')
-            AND attempt_count < $5
-            AND next_attempt_at <= $4::timestamptz
+            AND next_attempt_at <= $3::timestamptz
             AND (
               lease_token IS NULL
               OR leased_until IS NULL
-              OR leased_until <= $4::timestamptz
+              OR leased_until <= $3::timestamptz
             )
-          ORDER BY created_at ASC, outbox_id ASC
+            AND (
+              (status = 'pending' AND attempt_count < $4)
+              OR status = 'processing'
+            )
+          ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC, outbox_id ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         )
         UPDATE ops.driver_completion_outbox AS outbox
         SET
-          status = 'processing',
-          attempt_count = outbox.attempt_count + 1,
-          lease_token = $2::uuid,
-          leased_until = $3::timestamptz
+          status = CASE
+            WHEN outbox.attempt_count >= $4 THEN 'dead_letter'
+            ELSE 'processing'
+          END,
+          attempt_count = CASE
+            WHEN outbox.attempt_count >= $4 THEN outbox.attempt_count
+            ELSE outbox.attempt_count + 1
+          END,
+          lease_token = CASE
+            WHEN outbox.attempt_count >= $4 THEN NULL
+            ELSE $1::uuid
+          END,
+          leased_until = CASE
+            WHEN outbox.attempt_count >= $4 THEN NULL
+            ELSE $2::timestamptz
+          END,
+          last_error = CASE
+            WHEN outbox.attempt_count >= $4 THEN
+              left(
+                COALESCE(
+                  outbox.last_error,
+                  'Lease expired after the final delivery attempt before acknowledgement.'
+                ),
+                2000
+              )
+            ELSE outbox.last_error
+          END
         FROM candidate
         WHERE outbox.outbox_id = candidate.outbox_id
         RETURNING
-          outbox_id,
-          task_id,
-          order_id,
-          effect_type,
-          request_id,
-          payload,
-          status,
-          attempt_count,
-          next_attempt_at,
-          lease_token,
-          leased_until,
-          last_error,
-          created_at,
-          delivered_at
+          outbox.outbox_id,
+          outbox.task_id,
+          outbox.order_id,
+          outbox.effect_type,
+          outbox.request_id,
+          outbox.payload,
+          outbox.status,
+          outbox.attempt_count,
+          outbox.next_attempt_at,
+          outbox.lease_token,
+          outbox.leased_until,
+          outbox.last_error,
+          outbox.created_at,
+          outbox.delivered_at
       `,
-      [taskId, leaseToken, leasedUntil, now, maxAttempts],
+      [leaseToken, leasedUntil, now, maxAttempts],
     );
     const row = result.rows[0];
-    return row ? this.mapDriverCompletionOutbox(row) : null;
+    if (!row) {
+      return null;
+    }
+    return {
+      action: row.status === "dead_letter" ? "dead_letter" : "dispatch",
+      record: this.mapDriverCompletionOutbox(row),
+    };
   }
 
   async markDriverCompletionOutboxDelivered(
@@ -625,7 +684,7 @@ export class OwnedMobilityRepository {
     leaseToken: string,
     deliveredAt: string,
   ) {
-    await executor.query(
+    const result = await executor.query(
       `
         UPDATE ops.driver_completion_outbox
         SET
@@ -639,6 +698,7 @@ export class OwnedMobilityRepository {
       `,
       [outboxId, leaseToken, deliveredAt],
     );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async releaseDriverCompletionOutbox(
@@ -649,7 +709,7 @@ export class OwnedMobilityRepository {
     maxAttempts: number,
     lastError: string,
   ) {
-    await executor.query(
+    const result = await executor.query(
       `
         UPDATE ops.driver_completion_outbox
         SET
@@ -669,16 +729,17 @@ export class OwnedMobilityRepository {
       `,
       [outboxId, leaseToken, nextAttemptAt, maxAttempts, lastError],
     );
+    return (result.rowCount ?? 0) > 0;
   }
 
   private async persistChangesWithExecutor(
     executor: OwnedMobilityQueryExecutor,
     changes: PersistOwnedMobilityChanges,
   ) {
-    const writes: Promise<unknown>[] = [];
+    const writes: Array<() => Promise<unknown>> = [];
 
     for (const order of changes.orders ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_owned_orders (
@@ -739,7 +800,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const job of changes.dispatchJobs ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_jobs (
@@ -772,7 +833,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const attempt of changes.dispatchAttempts ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_attempts (
@@ -808,7 +869,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const assignment of changes.dispatchAssignments ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_assignments (
@@ -847,7 +908,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const task of changes.driverTasks ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_driver_tasks (
@@ -886,7 +947,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const traceLog of changes.dispatchTraceLogs ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.phase1_dispatch_trace_logs (
@@ -916,7 +977,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const snapshot of changes.passengerDisclosureSnapshots ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             WITH superseded AS (
@@ -960,7 +1021,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
-      writes.push(
+      writes.push(() =>
         executor.query(
           `
             INSERT INTO ops.consumer_notification_outbox (
@@ -996,7 +1057,7 @@ export class OwnedMobilityRepository {
     }
 
     for (const write of writes) {
-      await write;
+      await write();
     }
   }
 

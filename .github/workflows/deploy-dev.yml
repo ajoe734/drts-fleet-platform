@@ -28,6 +28,14 @@ on:
         type: choice
         options:
           - "current"
+      retired_service_cleanup:
+        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 services plus drts-passenger-web."
+        required: false
+        default: "none"
+        type: choice
+        options:
+          - "none"
+          - "delete-drts-passenger-web"
   push:
     branches:
       - "publish/v*"
@@ -63,6 +71,7 @@ env:
   DEV_REFERRAL_EMBED_ENTRY_SLUG: ${{ vars.DEV_REFERRAL_EMBED_ENTRY_SLUG }}
   DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
+  DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
   DEV_API_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_API_ALLOW_UNAUTHENTICATED }}
   DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
@@ -72,6 +81,7 @@ env:
   DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED }}
   DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED }}
   DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED }}
+  DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
   DEV_IAP_CLIENT_ID: ${{ vars.DEV_IAP_CLIENT_ID }}
   DEV_PLATFORM_ADMIN_ORIGIN: ${{ vars.DEV_PLATFORM_ADMIN_ORIGIN }}
@@ -79,6 +89,7 @@ env:
   DEV_FLEET_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ORIGIN }}
   DEV_TENANT_CONSOLE_ORIGIN: ${{ vars.DEV_TENANT_CONSOLE_ORIGIN }}
   DEV_ENTERPRISE_DISPATCH_ORIGIN: ${{ vars.DEV_ENTERPRISE_DISPATCH_ORIGIN }}
+  DEV_CHANNEL_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ORIGIN }}
   DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME: ${{ vars.DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME }}
   DEV_OPENCLAW_AGENT_MODEL: ${{ vars.DEV_OPENCLAW_AGENT_MODEL }}
   DEV_OPENCLAW_SUMMARIZER_MODEL: ${{ vars.DEV_OPENCLAW_SUMMARIZER_MODEL }}
@@ -116,7 +127,6 @@ jobs:
       referral_embed_service: ${{ steps.resolve.outputs.referral_embed_service }}
       referral_embed_entry_slug: ${{ steps.resolve.outputs.referral_embed_entry_slug }}
       partner_booking_service: ${{ steps.resolve.outputs.partner_booking_service }}
-      passenger_web_service: ${{ steps.resolve.outputs.passenger_web_service }}
       enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
@@ -203,17 +213,16 @@ jobs:
           artifact_region="$(pick "${DEV_ARTIFACT_REGION:-}" "" "$region")"
           artifact_repository="$(pick "${DEV_ARTIFACT_REPOSITORY:-}" "" "drts")"
           secret_prefix="$(pick "${DEV_SECRET_PREFIX:-}" "" "drts-dev")"
-          api_service="$(pick "${DEV_GCP_API_SERVICE:-}" "" "drts-api")"
-          platform_admin_service="$(pick "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-}" "" "drts-platform-admin-web")"
-          ops_console_service="$(pick "${DEV_GCP_OPS_CONSOLE_SERVICE:-}" "" "drts-ops-console-web")"
-          fleet_partner_portal_service="$(pick "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-fleet-partner-portal-web")"
-          tenant_console_service="$(pick "${DEV_GCP_TENANT_CONSOLE_SERVICE:-}" "" "drts-tenant-console-web")"
-          bank_console_service="$(pick "${DEV_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-bank-console-web")"
-          referral_embed_service="$(pick "${DEV_GCP_REFERRAL_EMBED_SERVICE:-}" "" "drts-referral-embed-web")"
+          api_service="$(pick "${DEV_GCP_API_SERVICE:-}" "" "drts-dev-api")"
+          platform_admin_service="$(pick "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-}" "" "drts-dev-platform-admin-web")"
+          ops_console_service="$(pick "${DEV_GCP_OPS_CONSOLE_SERVICE:-}" "" "drts-dev-ops-console-web")"
+          fleet_partner_portal_service="$(pick "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-dev-fleet-partner-portal-web")"
+          tenant_console_service="$(pick "${DEV_GCP_TENANT_CONSOLE_SERVICE:-}" "" "drts-dev-tenant-console-web")"
+          bank_console_service="$(pick "${DEV_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-dev-bank-console-web")"
+          referral_embed_service="$(pick "${DEV_GCP_REFERRAL_EMBED_SERVICE:-}" "" "drts-dev-referral-embed-web")"
           referral_embed_entry_slug="$(pick "${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "referral-demo-community")"
-          partner_booking_service="$(pick "${DEV_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-partner-booking-web")"
-          passenger_web_service="$(pick "${DEV_GCP_PASSENGER_WEB_SERVICE:-}" "" "drts-passenger-web")"
-          enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-enterprise-dispatch-web")"
+          partner_booking_service="$(pick "${DEV_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-dev-partner-booking-web")"
+          enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-dev-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
           api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" true)"
@@ -310,7 +319,6 @@ jobs:
           emit referral_embed_service "$referral_embed_service"
           emit referral_embed_entry_slug "$referral_embed_entry_slug"
           emit partner_booking_service "$partner_booking_service"
-          emit passenger_web_service "$passenger_web_service"
           emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit channel_partner_portal_service "$channel_partner_portal_service"
           emit migration_job "$migration_job"
@@ -464,18 +472,6 @@ jobs:
             ${{ needs.prepare.outputs.registry }}/referral-embed-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache,mode=max
-
-      - name: Build & push — passenger-web
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/passenger-web/Dockerfile
-          push: true
-          tags: |
-            ${{ needs.prepare.outputs.registry }}/passenger-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/passenger-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache,mode=max
 
       - name: Build & push — partner-booking-web
         uses: docker/build-push-action@v5
@@ -897,27 +893,6 @@ jobs:
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
-      - name: Deploy — passenger-web
-        run: |
-          IMAGE="${{ needs.prepare.outputs.registry }}/passenger-web:${{ needs.build-push.outputs.image_tag }}"
-
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_web_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --image "$IMAGE" \
-            --port 3016 \
-            --ingress all \
-            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
-            --allow-unauthenticated \
-            --cpu 1 \
-            --concurrency 80 \
-            --execution-environment gen1 \
-            --no-cpu-boost \
-            --min-instances 0 \
-            --max-instances 1 \
-            --project "${{ needs.prepare.outputs.project_id }}"
-
       - name: Deploy — partner-booking-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/partner-booking-web:${{ needs.build-push.outputs.image_tag }}"
@@ -998,7 +973,6 @@ jobs:
       enterprise_dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
-      passenger_web: ${{ steps.urls.outputs.passenger_web }}
 
     steps:
       - name: Authenticate to GCP
@@ -1087,10 +1061,6 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
-          passenger_web_url="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_web_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --project "${{ needs.prepare.outputs.project_id }}" \
-            --format='value(status.url)')"
           enterprise_dispatch_url="$(gcloud run services describe "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
@@ -1108,7 +1078,6 @@ jobs:
           echo "bank_console=${bank_console_url}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_url}" >> "$GITHUB_OUTPUT"
           echo "partner_booking=${partner_booking_url}" >> "$GITHUB_OUTPUT"
-          echo "passenger_web=${passenger_web_url}" >> "$GITHUB_OUTPUT"
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
 
@@ -1133,7 +1102,6 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/cathay/program/embed" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/taishin/program/embed" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/dbs/program/embed" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.passenger_web }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
@@ -1150,7 +1118,6 @@ jobs:
           echo "  bank-console: ${{ steps.urls.outputs.bank_console }}"
           echo "  referral-embed-web: ${{ steps.urls.outputs.referral_embed }}/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
           echo "  partner-booking: ${{ steps.urls.outputs.partner_booking }}"
-          echo "  passenger-web: ${{ steps.urls.outputs.passenger_web }}"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
 
@@ -1232,3 +1199,36 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  retired-service-cleanup:
+    name: Fail-closed retired service cleanup
+    runs-on: ubuntu-latest
+    needs: [prepare, health-check, ui-smoke]
+    if: ${{ always() && needs.health-check.result == 'success' && needs.ui-smoke.result == 'success' }}
+    environment: dev
+    steps:
+      - name: Checkout deploy source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+
+      - name: Enforce retired service cleanup contract
+        env:
+          RETIRED_SERVICE_CLEANUP: ${{ inputs.retired_service_cleanup || 'none' }}
+        run: |
+          ./scripts/cleanup-retired-dev-service.sh \
+            "${RETIRED_SERVICE_CLEANUP}" \
+            "${{ needs.prepare.outputs.project_id }}" \
+            "${{ needs.prepare.outputs.region }}"
