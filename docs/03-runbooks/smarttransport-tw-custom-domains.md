@@ -100,7 +100,19 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
 
 ## 5. 2026-07-31 實測現況
 
+- Deploy verify source of truth：GitHub Actions run `30663746297` (`Deploy — Dev`), source `publish/v2026.07.31.5` (`2123330182d3`), promoted to `main` by PR `#1211` / merge commit `11db5408`.
 - Authoritative active surface 仍是 `deploy-dev.yml` 內的 10 services：`drts-dev-api`、`drts-dev-platform-admin-web`、`drts-dev-ops-console-web`、`drts-dev-fleet-partner-portal-web`、`drts-dev-tenant-console-web`、`drts-dev-bank-console-web`、`drts-dev-partner-booking-web`、`drts-dev-enterprise-dispatch-web`、`drts-dev-referral-embed-web`、`drts-channel-partner-portal-web`；不含 `passenger-web`、`concierge-portal-web`、`assisted-entry-web`。
+- 該 10 services 在 deploy verify 中全部切到 `-00007-*` revision 並 serving 100% traffic：
+  - `drts-dev-api-00007-6b4`
+  - `drts-dev-platform-admin-web-00007-tlj`
+  - `drts-dev-ops-console-web-00007-r6s`
+  - `drts-dev-fleet-partner-portal-web-00007-vkt`
+  - `drts-dev-tenant-console-web-00007-2vn`
+  - `drts-dev-bank-console-web-00007-bxq`
+  - `drts-dev-referral-embed-web-00007-8ff`
+  - `drts-dev-partner-booking-web-00007-2dk`
+  - `drts-dev-enterprise-dispatch-web-00007-r44`
+  - `drts-channel-partner-portal-web-00007-hcl`
 - GCP target 已固定為 project `drts-dev-ray-tw-20260730`、region `us-central1`。
 - DNS 已存在：
   - `smarttransport.tw` → `185.158.133.1`
@@ -109,5 +121,7 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
 - HTTPS 實測（純觀測，不構成本 task gate）：
   - `https://refer.smarttransport.tw/` 於 2026-07-31 會 `307` 轉到 `/embed/referral-demo-community`
   - `https://refer.smarttransport.tw/embed/referral-demo-community` 回 `200`
+  - deploy verify health step 成功驗證 Cloud Run fallback URLs，其中 referral 只接受 partner-scoped entry `/embed/referral-demo-community`
   - `https://channel.smarttransport.tw`、`https://api.smarttransport.tw/health`、`https://ride.smarttransport.tw`、`https://concierge.smarttransport.tw` 於 2026-07-31 測得 TLS/SSL 連線失敗；這些是外部 live-state observation，不回寫 repo active inventory，也不阻擋本次 repo-only domain-maintenance rails 修復
+- Retired service cleanup step 僅刪除 `drts-passenger-web`；`concierge` 沒有出現在 active Cloud Run inventory，也不得回到 domain mapping 或 smoke inventory。
 - 因此本 runbook 的 machine-truth 職責只有對齊 repo 內 authoritative inventory；外部 DNS、憑證、mapping 存活清理另案處理。

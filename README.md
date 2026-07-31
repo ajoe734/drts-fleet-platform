@@ -30,8 +30,11 @@ says:
 - the protected control-plane auth cutover (`GAP-P2S3-001`) is closed on
   protected staging and the remaining visible delta is limited to
   external-gated integrations plus consciously deferred families
-- Passenger App / Web, Call Point / Concierge Portal, and AV / live-board scope
-  remain explicit deferred or future-gated families
+- the active dev deploy inventory is the verified 10-service set documented in
+  `docs/04-uat/stage1-truth-closeout-20260731.md`; referral remains a
+  partner-scoped entry and concierge is not an active surface
+- Passenger App / Web and AV / live-board scope remain explicit deferred or
+  future-gated families
 
 Current working rule:
 

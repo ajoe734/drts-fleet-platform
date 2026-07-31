@@ -15,6 +15,7 @@ For workflow-family gate interpretation, read this file together with
 - The current executable rollout gate is backend-focused: `pnpm --filter @drts/contracts build`, `pnpm --filter @drts/contracts lint`, `pnpm --filter @drts/api typecheck`, `pnpm --filter @drts/api lint`, `pnpm test:unit`, and `pnpm --filter @drts/api test`.
 - `/api/admin/flags` is implemented and registered: `apps/api/src/modules/feature-flags/feature-flags.controller.ts` (`@Controller("admin")`) is imported via `FeatureFlagsModule` in `app.module.ts`. Platform-admin auth scope required; toggle actions are audited. Tenant, city, and module cutovers that depend on granular per-tenant runtime flags still require the manual rollout matrix until the full flag-evaluation client slice lands.
 - Staging Cloud Run runtime identity must be separate from the GitHub WIF deployer identity: `GCP_RUNTIME_SERVICE_ACCOUNT` needs `roles/cloudsql.client` and `roles/secretmanager.secretAccessor`, and `WIF_SERVICE_ACCOUNT` must have `iam.serviceAccounts.actAs` on that runtime SA (for example via `roles/iam.serviceAccountUser`), or the migration gate can fail before deploy / health-check evidence is produced.
+- For the current dev deploy truth, supersede older staging-only URL assumptions with `docs/04-uat/stage1-truth-closeout-20260731.md`, which records the verified `2026-07-31` active inventory, revisions, URLs, retired-service cleanup, and deployed smoke outcome from run `30663746297`.
 
 ## 2026-04-16 Evidence Closeout Snapshot
 
