@@ -6,7 +6,7 @@
 > **Helper Kind:** `review_packet`
 > **Mutates Canonical:** `false`
 > **Created:** `2026-07-31`
-> **Source of task truth:** `scripts/ai-status.sh show`, parent owner handoff text, parent branch commit `b149badc536665ded68a867c94f728b3a46e2e4c`
+> **Source of task truth:** `scripts/ai-status.sh show`, parent owner handoff text, parent branch commits `b149badc536665ded68a867c94f728b3a46e2e4c` and `1d7e1274a60462713089995bffaa9b23a6348392`
 
 This packet is a support artifact only. It does not modify L1 product truth, runtime contracts, or the main Stage 1 audit output. Its purpose is to give the assigned reviewer a compact evidence map for the already-produced parent audit and to clarify where that audit currently lives.
 
@@ -16,14 +16,16 @@ This packet is a support artifact only. It does not modify L1 product truth, run
 
 ### 1.1 Shared-truth status
 
-- As of `2026-07-31` machine truth currently reports parent task `STAGE1-CONTROLLABLE-AUDIT-20260731` as `review`.
+- As of `2026-07-31T15:04:11Z` machine truth reports parent task `STAGE1-CONTROLLABLE-AUDIT-20260731` as `done`.
 - As of `2026-07-31` machine truth currently reports parent owner / reviewer as `Codex` / `Codex2`.
-- As of `2026-07-31` machine truth currently reports this sidecar task `STAGE1-CONTROLLABLE-AUDIT-20260731-SIDECAR-REVIEW` as `in_progress`, with owner `Codex2` and reviewer `Codex`.
-- Earlier parent handoff evidence in this packet is historical and remains cited with its original timestamps rather than restated as current status.
+- As of `2026-07-31T15:04:55Z` machine truth reports this sidecar task `STAGE1-CONTROLLABLE-AUDIT-20260731-SIDECAR-REVIEW` as `in_progress`, with owner `Codex2` and reviewer `Codex`.
+- The parent task `next` field now reads: `Corrected audit finalized at b149badc; stale SOS gap removed and minimal controllable routing approved. Audit artifact is support evidence for downstream tasks.`
+- Earlier parent handoff evidence in this packet is historical and remains cited with its original timestamps instead of being restated as current machine truth.
 
-### 1.2 Why this packet is needed
+### 1.2 Why this packet is still needed after parent closeout
 
 - The parent branch now points at the corrected audit commit `b149badc536665ded68a867c94f728b3a46e2e4c`, which superseded the earlier `48d319fe` draft.
+- The parent branch subsequently added formal closeout commit `1d7e1274a60462713089995bffaa9b23a6348392`, but that closeout commit still points reviewers back to the same corrected audit artifact content.
 - That audit report file is not present in this isolated sidecar worktree, so a reviewer working only from the sidecar branch would otherwise miss the primary evidence artifact.
 - This packet preserves the review context without rewriting the parent report or touching canonical truth.
 
@@ -32,11 +34,12 @@ This packet is a support artifact only. It does not modify L1 product truth, run
 | Item | Location |
 | --- | --- |
 | Parent pushed branch | `origin/codex/stage1-controllable-audit-20260731` |
-| Parent audit commit | `b149badc536665ded68a867c94f728b3a46e2e4c` |
+| Parent branch HEAD / closeout commit | `1d7e1274a60462713089995bffaa9b23a6348392` |
+| Corrected audit content commit | `b149badc536665ded68a867c94f728b3a46e2e4c` |
 | Audit report path on parent branch | `docs/04-uat/stage1-controllable-audit-20260731.md` |
 | Parent base audited in report | `origin/dev @ 8a40248967bdc37a60a22e6d37c8ad5dca02bd41` |
 
-`git ls-remote --heads origin 'refs/heads/codex/stage1-controllable-audit-20260731'` confirms the remote branch currently points at `b149badc536665ded68a867c94f728b3a46e2e4c`.
+`git ls-remote --heads origin 'refs/heads/codex/stage1-controllable-audit-20260731'` now confirms the remote branch currently points at `1d7e1274a60462713089995bffaa9b23a6348392`.
 
 ---
 
@@ -51,6 +54,8 @@ This packet is a support artifact only. It does not modify L1 product truth, run
 | `2026-07-31T14:55:04Z` | parent commit metadata | `Codex` created commit `b149badc` titled `STAGE1-CONTROLLABLE-AUDIT-20260731: correct current controllable gaps`, updating the report to remove stale findings and align with current `origin/dev`. |
 | `2026-07-31T14:57:23Z` | `scripts/ai-status.sh show STAGE1-CONTROLLABLE-AUDIT-20260731` | Parent machine truth currently reports the task in `review` with owner / reviewer `Codex` / `Codex2`. |
 | `2026-07-31T14:58:04Z` | `AI_NAME=Codex2 scripts/ai-status.sh reopen ...` | Sidecar owner reopened this helper after finding the packet still described the superseded parent draft instead of the corrected report now in review. |
+| `2026-07-31T15:04:06Z` | parent commit metadata | `Codex` created closeout commit `1d7e1274` titled `STAGE1-CONTROLLABLE-AUDIT-20260731: finalize approved controllable audit closeout`. |
+| `2026-07-31T15:04:11Z` | `scripts/ai-status.sh show STAGE1-CONTROLLABLE-AUDIT-20260731` | Parent machine truth now reports the task as `done`, with closeout summary pointing back to corrected audit commit `b149badc`. |
 
 The practical implication is simple: sidecar review should validate that the support packet accurately points to the parent audit evidence, distinguishes historical handoff moments from current machine truth, and does not overstate what exists on this branch.
 
@@ -94,7 +99,7 @@ This sidecar is ready if the reviewer can confirm all of the following:
 
 1. The packet points at a real pushed parent branch and commit.
 2. The packet does not claim the parent audit file exists in this sidecar worktree when it does not.
-3. The summarized findings match the corrected parent report content at commit `b149badc`.
+3. The summarized findings match the corrected parent report content at commit `b149badc`, and the parent branch HEAD `1d7e1274` is only the formal closeout wrapper around that report.
 4. The sidecar itself only adds support material under `support/sidecars/STAGE1-CONTROLLABLE-AUDIT-20260731/`.
 
 Recommended verification commands:
@@ -103,6 +108,7 @@ Recommended verification commands:
 AI_NAME=Codex2 scripts/ai-status.sh show STAGE1-CONTROLLABLE-AUDIT-20260731
 AI_NAME=Codex2 scripts/ai-status.sh show STAGE1-CONTROLLABLE-AUDIT-20260731-SIDECAR-REVIEW
 git ls-remote --heads origin 'refs/heads/codex/stage1-controllable-audit-20260731'
+git show --stat --format=fuller 1d7e1274a60462713089995bffaa9b23a6348392
 git show --stat --format=fuller b149badc536665ded68a867c94f728b3a46e2e4c
 git show b149badc536665ded68a867c94f728b3a46e2e4c:docs/04-uat/stage1-controllable-audit-20260731.md
 git diff --stat
@@ -125,8 +131,8 @@ The assigned reviewer for this helper should review the sidecar as a support-onl
 Suggested review order:
 
 1. Confirm current machine-truth state and reviewer routing for the parent and sidecar tasks.
-2. Confirm the parent branch `origin/codex/stage1-controllable-audit-20260731` exists at `b149badc`.
-3. Spot-check the parent audit file at that commit and verify that the gap summary in section 3 is faithful to the corrected report, especially the removal of the stale driver SOS blocker.
+2. Confirm the parent branch `origin/codex/stage1-controllable-audit-20260731` now exists at `1d7e1274`, and that the closeout commit still wraps corrected audit content from `b149badc`.
+3. Spot-check the parent audit file at `b149badc` and verify that the gap summary in section 3 is faithful to the corrected report, especially the removal of the stale driver SOS blocker.
 4. Confirm the sidecar branch only introduces this support artifact.
 
 If those checks hold, this sidecar should be approved and handed back as a valid reviewer support packet for `STAGE1-CONTROLLABLE-AUDIT-20260731`.
