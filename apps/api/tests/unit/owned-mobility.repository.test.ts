@@ -181,4 +181,32 @@ describe("OwnedMobilityRepository", () => {
     const [outboxSql] = query.mock.calls[1]!;
     expect(outboxSql).toContain("INSERT INTO ops.consumer_notification_outbox");
   });
+
+  it("lists recoverable driver-completion task ids in retry order", async () => {
+    const query = vi.fn(async () => ({
+      rows: [{ task_id: "task-1" }, { task_id: "task-2" }],
+    }));
+    const repository = new OwnedMobilityRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.listRecoverableDriverCompletionTaskIds(
+        { query } as never,
+        "2026-07-31T12:00:00.000Z",
+        5,
+        25,
+      ),
+    ).resolves.toEqual(["task-1", "task-2"]);
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("FROM ops.driver_completion_outbox"),
+      ["2026-07-31T12:00:00.000Z", 5, 25],
+    );
+    expect(query.mock.calls[0]?.[0]).toContain("GROUP BY task_id");
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC",
+    );
+  });
 });

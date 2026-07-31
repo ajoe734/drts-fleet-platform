@@ -4,6 +4,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  OnModuleDestroy,
   Logger,
   OnModuleInit,
   Optional,
@@ -337,6 +338,8 @@ const DEFAULT_AUTHORITY_COMPLAINT_PHONE = "1999";
 const DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS = 5;
 const DRIVER_COMPLETION_OUTBOX_LEASE_MS = 60_000;
 const DRIVER_COMPLETION_OUTBOX_RETRY_MS = 5_000;
+const DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS = 15_000;
+const DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE = 25;
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
@@ -349,7 +352,7 @@ const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
 ]);
 
 @Injectable()
-export class OwnedMobilityService implements OnModuleInit {
+export class OwnedMobilityService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OwnedMobilityService.name);
 
   private orders: OwnedOrderRecord[] = [];
@@ -388,6 +391,13 @@ export class OwnedMobilityService implements OnModuleInit {
 
   /** Maps forwarded mirror order IDs to their source platform codes. */
   private forwarderSourceMap = new Map<string, string>();
+
+  private driverCompletionRecoveryTimer: ReturnType<typeof setInterval> | null =
+    null;
+
+  private driverCompletionRecoveryInFlight = false;
+
+  private readonly driverCompletionOutboxTaskDispatches = new Set<string>();
 
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
@@ -485,12 +495,22 @@ export class OwnedMobilityService implements OnModuleInit {
       this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(
         this.dispatchTraceLogs,
       );
+      this.startDriverCompletionOutboxRecoveryPolling();
+      void this.recoverDriverCompletionOutbox();
     } catch (error) {
       this.ownedMobilityRepository.reportPersistenceFailure(
         error,
         "module init",
       );
     }
+  }
+
+  onModuleDestroy() {
+    if (!this.driverCompletionRecoveryTimer) {
+      return;
+    }
+    clearInterval(this.driverCompletionRecoveryTimer);
+    this.driverCompletionRecoveryTimer = null;
   }
 
   createPassengerOrder(
@@ -4430,13 +4450,13 @@ export class OwnedMobilityService implements OnModuleInit {
 
     if (result.outcome === "replayed") {
       this.applyReplayedDriverTaskCompletionBundle(result.bundle);
-      await this.dispatchDriverCompletionOutbox(result.bundle.task.taskId);
+      await this.triggerDriverCompletionOutboxDispatch(result.bundle.task.taskId);
       return this.cloneTask(result.bundle.task);
     }
 
     const committed = result.committed;
     this.applyCommittedDriverTaskCompletion(committed, requestId);
-    await this.dispatchDriverCompletionOutbox(committed.task.taskId);
+    await this.triggerDriverCompletionOutboxDispatch(committed.task.taskId);
     if (committed.errorToThrow) {
       throw committed.errorToThrow;
     }
@@ -5105,6 +5125,66 @@ export class OwnedMobilityService implements OnModuleInit {
       });
     }
     return payloads;
+  }
+
+  private startDriverCompletionOutboxRecoveryPolling() {
+    if (
+      this.driverCompletionRecoveryTimer ||
+      !this.ownedMobilityRepository?.isEnabled() ||
+      !("listRecoverableDriverCompletionTaskIds" in this.ownedMobilityRepository)
+    ) {
+      return;
+    }
+
+    this.driverCompletionRecoveryTimer = setInterval(() => {
+      void this.recoverDriverCompletionOutbox();
+    }, DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS);
+    this.driverCompletionRecoveryTimer.unref?.();
+  }
+
+  private async recoverDriverCompletionOutbox() {
+    if (
+      this.driverCompletionRecoveryInFlight ||
+      !this.ownedMobilityRepository?.isEnabled() ||
+      !("listRecoverableDriverCompletionTaskIds" in this.ownedMobilityRepository)
+    ) {
+      return;
+    }
+
+    this.driverCompletionRecoveryInFlight = true;
+    try {
+      const taskIds =
+        await this.ownedMobilityRepository.listRecoverableDriverCompletionTaskIds(
+          this.ownedMobilityRepository,
+          new Date().toISOString(),
+          DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+          DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE,
+        );
+      for (const taskId of taskIds) {
+        await this.triggerDriverCompletionOutboxDispatch(taskId);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Driver completion outbox recovery failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      this.driverCompletionRecoveryInFlight = false;
+    }
+  }
+
+  private async triggerDriverCompletionOutboxDispatch(taskId: string) {
+    if (this.driverCompletionOutboxTaskDispatches.has(taskId)) {
+      return;
+    }
+
+    this.driverCompletionOutboxTaskDispatches.add(taskId);
+    try {
+      await this.dispatchDriverCompletionOutbox(taskId);
+    } finally {
+      this.driverCompletionOutboxTaskDispatches.delete(taskId);
+    }
   }
 
   private async dispatchDriverCompletionOutbox(taskId: string) {

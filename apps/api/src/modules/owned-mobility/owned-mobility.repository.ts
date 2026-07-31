@@ -621,6 +621,40 @@ export class OwnedMobilityRepository {
     return row ? this.mapDriverCompletionOutbox(row) : null;
   }
 
+  async listRecoverableDriverCompletionTaskIds(
+    executor: OwnedMobilityQueryExecutor,
+    now: string,
+    maxAttempts: number,
+    limit: number,
+  ): Promise<string[]> {
+    const result = await executor.query<{ task_id: string }>(
+      `
+        SELECT task_id
+        FROM (
+          SELECT
+            task_id,
+            MIN(next_attempt_at) AS next_attempt_at,
+            MIN(created_at) AS created_at
+          FROM ops.driver_completion_outbox
+          WHERE delivered_at IS NULL
+            AND status IN ('pending', 'processing')
+            AND attempt_count < $2
+            AND next_attempt_at <= $1::timestamptz
+            AND (
+              lease_token IS NULL
+              OR leased_until IS NULL
+              OR leased_until <= $1::timestamptz
+            )
+          GROUP BY task_id
+        ) recoverable
+        ORDER BY next_attempt_at ASC, created_at ASC, task_id ASC
+        LIMIT $3
+      `,
+      [now, maxAttempts, limit],
+    );
+    return result.rows.map((row) => row.task_id);
+  }
+
   async markDriverCompletionOutboxDelivered(
     executor: OwnedMobilityQueryExecutor,
     outboxId: string,

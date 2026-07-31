@@ -73,9 +73,17 @@ function createOwnedMobilityService(options?: {
     isEnabled: () => boolean;
     persistChanges: (...args: any[]) => Promise<unknown>;
     persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
+    persistDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
+    loadState?: (...args: any[]) => Promise<unknown>;
     loadDriverTaskCompletionBundleForUpdate?: (...args: any[]) => Promise<unknown>;
     hasDriverTaskTraceRequestId?: (...args: any[]) => Promise<boolean>;
+    listRecoverableDriverCompletionTaskIds?: (
+      ...args: any[]
+    ) => Promise<string[]>;
+    claimNextDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
+    markDriverCompletionOutboxDelivered?: (...args: any[]) => Promise<unknown>;
+    releaseDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     reportPersistenceFailure: (...args: any[]) => void;
     findOrderById?: (...args: any[]) => Promise<unknown>;
     findOrderByBookingId?: (...args: any[]) => Promise<unknown>;
@@ -4105,6 +4113,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           state.set("trace", changes.dispatchTraceLogs[0]);
         }
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {
+        sequence.push("persist_outbox");
+      }),
       withTransaction: vi.fn(async (work) => {
         sequence.push("begin");
         const result = await work({} as never);
@@ -4229,15 +4240,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "begin",
       "quota",
       "persist",
+      "persist_outbox",
       "commit",
       "quota_apply",
-      "webhook",
     ]);
     expect(
       auditNotificationService.recordAuditLog.mock.calls.filter(
         ([input]) => input.actionName === "complete_trip",
       ),
     ).toHaveLength(1);
+    expect(tenantPartnerService.publishWebhookEvent).not.toHaveBeenCalled();
     expect(service.listDriverTasks()[0]).toMatchObject({ status: "completed" });
   });
 
@@ -4276,6 +4288,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           state.set("trace", changes.dispatchTraceLogs[0]);
         }
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => work({} as never)),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
@@ -4395,6 +4408,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       isEnabled: () => true,
       persistChanges: vi.fn(async () => {}),
       persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => work({} as never)),
       loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
         order: state.get("order"),
@@ -4554,6 +4568,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           state.set("task", changes.driverTasks[0]);
         }
       }),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
       withTransaction: vi.fn(async (work) => {
         await work({} as never);
         throw new Error("commit failed");
@@ -4690,6 +4705,89 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(
       tenantPartnerService.applyCommittedQuotaConsumption,
     ).not.toHaveBeenCalled();
+  });
+
+  it("recovers pending driver-completion outbox work on module init", async () => {
+    const tenantPartnerService = {
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const outbox = {
+      outboxId: "outbox-recovery-001",
+      taskId: "task-recovery-001",
+      orderId: "order-recovery-001",
+      effectType: "tenant_order_completed_webhook" as const,
+      requestId: "req-recovery-001",
+      payload: {
+        effectType: "tenant_order_completed_webhook",
+        tenantId: "tenant-demo-001",
+        payload: {
+          eventType: "order.completed",
+          orderId: "order-recovery-001",
+        },
+      },
+      status: "processing" as const,
+      attemptCount: 1,
+      nextAttemptAt: "2026-07-31T00:00:00.000Z",
+      leaseToken: "2b2f6670-d8d0-4c82-af9e-8f75f0275778",
+      leasedUntil: "2026-07-31T00:01:00.000Z",
+      lastError: null,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      deliveredAt: null,
+    };
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => ({
+        orders: [],
+        dispatchJobs: [],
+        dispatchAttempts: [],
+        dispatchAssignments: [],
+        driverTasks: [],
+        dispatchTraceLogs: [],
+        passengerDisclosureSnapshots: [],
+        consumerNotificationOutbox: [],
+      })),
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      persistDriverCompletionOutbox: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      listRecoverableDriverCompletionTaskIds: vi.fn(async () => [
+        outbox.taskId,
+      ]),
+      claimNextDriverCompletionOutbox: vi
+        .fn()
+        .mockResolvedValueOnce(outbox)
+        .mockResolvedValueOnce(null),
+      markDriverCompletionOutboxDelivered: vi.fn(async () => {}),
+      releaseDriverCompletionOutbox: vi.fn(async () => {}),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      repository,
+    });
+
+    await service.onModuleInit();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(
+      repository.listRecoverableDriverCompletionTaskIds,
+    ).toHaveBeenCalledOnce();
+    expect(repository.claimNextDriverCompletionOutbox).toHaveBeenCalled();
+    expect(tenantPartnerService.publishWebhookEvent).toHaveBeenCalledWith(
+      "tenant-demo-001",
+      {
+        eventType: "order.completed",
+        orderId: "order-recovery-001",
+      },
+    );
+    expect(repository.markDriverCompletionOutboxDelivered).toHaveBeenCalledWith(
+      expect.anything(),
+      outbox.outboxId,
+      expect.any(String),
+      expect.any(String),
+    );
+    service.onModuleDestroy();
   });
 
   it("rejects duplicate completion requests after the trip is already completed", () => {
