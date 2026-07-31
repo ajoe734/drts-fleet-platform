@@ -543,7 +543,10 @@ export class OwnedMobilityService
 
   async onApplicationBootstrap() {
     this.isShuttingDown = false;
-    if (!this.ownedMobilityRepository?.isEnabled()) {
+    if (
+      typeof this.ownedMobilityRepository?.isEnabled !== "function" ||
+      !this.ownedMobilityRepository.isEnabled()
+    ) {
       return;
     }
     this.startDriverCompletionOutboxRecoveryPolling();

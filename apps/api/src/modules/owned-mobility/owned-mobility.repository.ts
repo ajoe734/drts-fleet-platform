@@ -653,20 +653,20 @@ export class OwnedMobilityRepository {
         FROM candidate
         WHERE outbox.outbox_id = candidate.outbox_id
         RETURNING
-          outbox_id,
-          task_id,
-          order_id,
-          effect_type,
-          request_id,
-          payload,
-          status,
-          attempt_count,
-          next_attempt_at,
-          lease_token,
-          leased_until,
-          last_error,
-          created_at,
-          delivered_at
+          outbox.outbox_id,
+          outbox.task_id,
+          outbox.order_id,
+          outbox.effect_type,
+          outbox.request_id,
+          outbox.payload,
+          outbox.status,
+          outbox.attempt_count,
+          outbox.next_attempt_at,
+          outbox.lease_token,
+          outbox.leased_until,
+          outbox.last_error,
+          outbox.created_at,
+          outbox.delivered_at
       `,
       [leaseToken, leasedUntil, now, maxAttempts],
     );

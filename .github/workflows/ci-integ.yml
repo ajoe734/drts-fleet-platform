@@ -137,6 +137,8 @@ jobs:
         run: pnpm run test:integration
       - name: Run quota concurrency regression serially
         run: pnpm --filter @drts/api run test:integration:quota-concurrency
+      - name: Run stage1 UAT PostgreSQL gate serially
+        run: pnpm --filter @drts/api run test:integration:pg-gate
 
   build:
     runs-on: ubuntu-latest
