@@ -2,9 +2,9 @@
 
 **Sidecar Kind:** `acceptance_packet`  
 **Parent Task:** `STAGE1-RELEASE-CANDIDATE-20260731` — Prepare Stage 1 Release Candidate baseline  
-**Current Sidecar Owner:** `Codex2` (Lane quota-paused; review handled via `Gemini`)  
+**Current Sidecar Owner:** `Codex2`
 **Assigned Reviewer:** `Gemini`  
-**Last Revised:** `2026-07-31T19:44:00Z (UTC)`  
+**Last Revised:** `2026-07-31T20:02:00Z (UTC)`
 **Status:** `review_approved` (support packet prepared and approved for parent task assembly)
 
 ---
@@ -76,3 +76,17 @@
 ## 6) Change Log
 
 - `2026-07-31T19:44:00Z` — 初版建立：彙整 parent task `STAGE1-RELEASE-CANDIDATE-20260731` 前置依賴與驗收清單，建立 support sidecar acceptance packet。
+- `2026-07-31T20:02:00Z` — owner closeout refresh：補充 support-only closeout evidence，確認本 sidecar 仍僅含 support artifact，供 `review_approved -> done` 正式收尾使用。
+
+---
+
+## 7) Owner Closeout Evidence
+
+- **Closeout Owner:** `Codex2`
+- **Approval Source:** `scripts/ai-status.sh show STAGE1-RELEASE-CANDIDATE-20260731-SIDECAR-ACCEPTANCE` 顯示 `status: review_approved`、`reviewer: Gemini`
+- **Artifact Scope Check:** 僅確認並更新 `support/sidecars/STAGE1-RELEASE-CANDIDATE-20260731/STAGE1-RELEASE-CANDIDATE-20260731-SIDECAR-ACCEPTANCE.md`
+- **Focused Verification:**
+  - `git diff --check -- support/sidecars/STAGE1-RELEASE-CANDIDATE-20260731/STAGE1-RELEASE-CANDIDATE-20260731-SIDECAR-ACCEPTANCE.md`
+  - `git status --short support/sidecars/STAGE1-RELEASE-CANDIDATE-20260731/STAGE1-RELEASE-CANDIDATE-20260731-SIDECAR-ACCEPTANCE.md`
+  - `sed -n '1,260p' support/sidecars/STAGE1-RELEASE-CANDIDATE-20260731/STAGE1-RELEASE-CANDIDATE-20260731-SIDECAR-ACCEPTANCE.md`
+- **Integration Status Intent:** `not_applicable`，因本任務為 sidecar/support-only artifact，無 deploy target，亦未修改 canonical runtime truth。
