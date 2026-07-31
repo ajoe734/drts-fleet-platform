@@ -33,7 +33,7 @@
 
 ---
 
-## 2. 建立 domain mappings（逐條執行）
+## 2. 建立 domain mappings（idempotent；不覆寫既有 live mapping）
 
 ```bash
 PROJECT=drts-dev-ray-tw-20260730
@@ -45,8 +45,31 @@ gcloud auth login   # 前提 1
 gcloud domains verify smarttransport.tw
 
 map() {  # map <subdomain> <service>
+  local domain="$1"
+  local service="$2"
+  local existing_service
+
+  existing_service="$(
+    gcloud --quiet beta run domain-mappings describe \
+      --domain "$domain" \
+      --region "$REGION" \
+      --project "$PROJECT" \
+      --format='value(spec.routeName)' 2>/dev/null || true
+  )"
+
+  if [ -n "$existing_service" ]; then
+    if [ "$existing_service" = "$service" ]; then
+      echo "Domain mapping already targets ${service}; skipping create."
+      return 0
+    fi
+
+    echo "Existing mapping for ${domain} points at ${existing_service}, expected ${service}." >&2
+    echo "Refusing to mutate a live mapping in this no-deploy workflow; reconcile externally first." >&2
+    return 1
+  fi
+
   gcloud beta run domain-mappings create \
-    --service "$2" --domain "$1" \
+    --service "$service" --domain "$domain" \
     --region "$REGION" --project "$PROJECT"
 }
 
@@ -62,7 +85,8 @@ map refer.smarttransport.tw      drts-referral-embed-web
 map api.smarttransport.tw        drts-api
 ```
 
-每條 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
+每條新建 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
+若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed，不在此 no-deploy task 直接覆寫 live target。
 
 ---
 

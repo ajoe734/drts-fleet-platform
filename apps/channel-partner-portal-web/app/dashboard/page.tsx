@@ -10,6 +10,7 @@ import {
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
+  formatReferralPortalEvidence,
   loadReferralDashboard,
   loadReferralRevenue,
 } from "@/lib/channel-portal-data.server";
@@ -49,6 +50,7 @@ export default async function ReferralDashboardPage() {
     loadReferralDashboard(),
     loadReferralRevenue(),
   ]);
+  const evidenceMarker = formatReferralPortalEvidence(dashboard.evidence);
   const { summary, periods } = dashboard;
   const latestRevenue = revenue.rows[0] ?? null;
   const statementStatus =
@@ -121,6 +123,7 @@ export default async function ReferralDashboardPage() {
           gap: 16,
         }}
       >
+        <span hidden>{evidenceMarker}</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <CanvasPill theme={theme} tone="info" dot>
             {t("referral.dashboard.flowPartner", locale)}
@@ -133,6 +136,7 @@ export default async function ReferralDashboardPage() {
           theme={theme}
           source={dashboard.source}
           body={t("data.fixtureNotice", locale)}
+          evidenceMarker={evidenceMarker}
         />
 
         <div

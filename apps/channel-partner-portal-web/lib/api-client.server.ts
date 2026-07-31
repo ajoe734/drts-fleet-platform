@@ -22,6 +22,10 @@ import { headers as nextHeaders } from "next/headers";
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 // Self-service portals read billing/statement data scoped to one partner.
 const PORTAL_SCOPES = ["billing:read"];
+const DEFAULT_PARTNER_ID = "partner-referral-demo-001";
+const DEFAULT_TENANT_ID = "tenant-demo-001";
+const DEFAULT_PARTNER_PROGRAM_ID = "program-referral-community";
+const DEFAULT_PARTNER_ENTRY_SLUG = "referral-demo-community";
 
 function resolveServerApiBaseUrl(): string {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
@@ -58,6 +62,13 @@ export interface ServerReferralPartnerClient {
   client: ApiClient;
   partnerId: string;
   partnerEntrySlug: string;
+  requestEvidence: ReferralPortalRequestEvidence;
+}
+
+export interface ReferralPortalRequestEvidence {
+  actorType: string;
+  partnerEntrySlug: string;
+  scopes: string[];
 }
 
 function resolveHeaderOrEnv(
@@ -82,39 +93,81 @@ function resolveHeaderOrEnv(
 export async function getServerReferralPartnerClient(): Promise<ServerReferralPartnerClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
+  const actorType =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-drts-e2e-actor-type",
+      "DRTS_E2E_ACTOR_TYPE",
+      "partner_api_key",
+    ) ?? "partner_api_key";
+  const rawScopeValue =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-drts-e2e-scopes",
+      "DRTS_E2E_SCOPES",
+      PORTAL_SCOPES.join(","),
+    ) ?? PORTAL_SCOPES.join(",");
+  const scopes = rawScopeValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
   const partnerId =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-drts-e2e-partner-id",
+      "DRTS_E2E_PARTNER_ID",
+    ) ??
     resolveHeaderOrEnv(
       requestHeaders,
       "x-partner-id",
       "DRTS_PARTNER_ID",
-      "partner-referral-demo-001",
-    ) ?? "partner-referral-demo-001";
-  const tenantId = resolveHeaderOrEnv(
-    requestHeaders,
-    "x-tenant-id",
-    "DRTS_TENANT_ID",
-    "tenant-demo-001",
-  );
-  const partnerProgramId = resolveHeaderOrEnv(
-    requestHeaders,
-    "x-partner-program-id",
-    "DRTS_PARTNER_PROGRAM_ID",
-    "program-referral-community",
-  );
-  const partnerEntrySlug = resolveHeaderOrEnv(
-    requestHeaders,
-    "x-partner-entry-slug",
-    "DRTS_PARTNER_ENTRY_SLUG",
-    "referral-demo-community",
-  );
+      DEFAULT_PARTNER_ID,
+    ) ??
+    DEFAULT_PARTNER_ID;
+  const tenantId =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-drts-e2e-tenant-id",
+      "DRTS_E2E_TENANT_ID",
+    ) ??
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-tenant-id",
+      "DRTS_TENANT_ID",
+      DEFAULT_TENANT_ID,
+    );
+  const partnerProgramId =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-drts-e2e-partner-program-id",
+      "DRTS_E2E_PARTNER_PROGRAM_ID",
+    ) ??
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-partner-program-id",
+      "DRTS_PARTNER_PROGRAM_ID",
+      DEFAULT_PARTNER_PROGRAM_ID,
+    );
+  const partnerEntrySlug =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-drts-e2e-entry-slug",
+      "DRTS_E2E_ENTRY_SLUG",
+    ) ??
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-partner-entry-slug",
+      "DRTS_PARTNER_ENTRY_SLUG",
+      DEFAULT_PARTNER_ENTRY_SLUG,
+    );
 
   const defaultHeaders: Record<string, string> = {
-    "x-actor-type": "partner_api_key",
+    "x-actor-type": actorType,
     "x-actor-id": partnerId,
     "x-partner-id": partnerId,
     "x-roles": "partner",
     "x-role-families": "partner",
-    "x-scopes": PORTAL_SCOPES.join(","),
+    "x-scopes": scopes.join(","),
     "x-realm": "partner",
   };
 
@@ -159,6 +212,11 @@ export async function getServerReferralPartnerClient(): Promise<ServerReferralPa
       defaultHeaders,
     }),
     partnerId,
-    partnerEntrySlug: partnerEntrySlug ?? "referral-demo-community",
+    partnerEntrySlug: partnerEntrySlug ?? DEFAULT_PARTNER_ENTRY_SLUG,
+    requestEvidence: {
+      actorType,
+      partnerEntrySlug: partnerEntrySlug ?? DEFAULT_PARTNER_ENTRY_SLUG,
+      scopes,
+    },
   };
 }

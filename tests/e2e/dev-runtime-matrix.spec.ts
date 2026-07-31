@@ -247,6 +247,11 @@ const referralEmbedMarker =
 const referralEmbedEntrySlug =
   process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "referral-demo-community";
 const currentDevHostSuffix = "4t7rg6fmeq-uc.a.run.app";
+const channelPartnerEvidenceMarkers = [
+  /drts-data-source:live/i,
+  /drts-e2e-actor-type:partner_api_key/i,
+  /drts-e2e-entry-slug:referral-demo-community/i,
+] as const;
 
 function resolveCloudRunBaseUrl(
   envValue: string | undefined,
@@ -490,7 +495,7 @@ const surfaces: RuntimeSurface[] = [
     family: "referral channel partner self-service",
     baseUrl: resolveCloudRunBaseUrl(
       process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL,
-      "drts-dev-channel-partner-portal-web",
+      "drts-channel-partner-portal-web",
     ),
     actors: channelPartnerActors,
     routes: [
@@ -519,7 +524,7 @@ const surfaces: RuntimeSurface[] = [
     family: "partner-scoped referral embed front",
     baseUrl: resolveCloudRunBaseUrl(
       process.env.DRTS_DEV_REFERRAL_EMBED_BASE_URL,
-      "drts-dev-referral-embed-web",
+      "drts-referral-embed-web",
     ),
     actors: referralEmbedActors,
     routes: [
@@ -1137,6 +1142,16 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
     test(`${String(index + 1).padStart(4, "0")} ${testCase.title}`, async ({
       request,
     }) => {
+      const partnerHeaders =
+        testCase.surface.key === "channel-partner-portal-web"
+          ? {
+              "X-DRTS-E2E-Entry-Slug":
+                testCase.actor.partnerEntrySlug ?? referralEmbedEntrySlug,
+              "X-DRTS-E2E-Partner-Id": "partner-referral-demo-001",
+              "X-DRTS-E2E-Tenant-Id": "tenant-demo-001",
+              "X-DRTS-E2E-Partner-Program-Id": "program-referral-community",
+            }
+          : {};
       const response = await request.get(buildUrl(testCase), {
         headers: {
           "Accept-Language": testCase.locale,
@@ -1146,6 +1161,7 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
           "X-DRTS-E2E-Scopes": testCase.actor.scopes?.join(",") ?? "",
           "X-DRTS-E2E-Surface": testCase.surface.key,
           "X-DRTS-E2E-Operation": testCase.route.operation,
+          ...partnerHeaders,
         },
         maxRedirects: 3,
       });
@@ -1170,6 +1186,11 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
         expect(visibleText).not.toMatch(marker);
       }
       expect(visibleText).toMatch(testCase.route.marker);
+      if (testCase.surface.key === "channel-partner-portal-web") {
+        for (const marker of channelPartnerEvidenceMarkers) {
+          expect(body).toMatch(marker);
+        }
+      }
     });
   }
 });

@@ -5,7 +5,10 @@ import {
   CanvasPill,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadReferralUsage } from "@/lib/channel-portal-data.server";
+import {
+  formatReferralPortalEvidence,
+  loadReferralUsage,
+} from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import {
   ReferralTripLinesTable,
@@ -21,6 +24,7 @@ export default async function ReferralUsagePage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
   const usage = await loadReferralUsage();
+  const evidenceMarker = formatReferralPortalEvidence(usage.evidence);
   const current = usage.periods[0] ?? null;
 
   return (
@@ -38,10 +42,12 @@ export default async function ReferralUsagePage() {
           gap: 16,
         }}
       >
+        <span hidden>{evidenceMarker}</span>
         <DataSourceNotice
           theme={theme}
           source={usage.source}
           body={t("data.fixtureNotice", locale)}
+          evidenceMarker={evidenceMarker}
         />
         {current && (
           <div

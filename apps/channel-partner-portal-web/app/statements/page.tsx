@@ -1,6 +1,9 @@
 import { CanvasCard, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadReferralStatements } from "@/lib/channel-portal-data.server";
+import {
+  formatReferralPortalEvidence,
+  loadReferralStatements,
+} from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { ReferralStatementsTable } from "@/components/referral-tables";
 import { getServerLocale } from "@/lib/server-locale";
@@ -12,6 +15,7 @@ export default async function ReferralStatementsPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
   const statements = await loadReferralStatements();
+  const evidenceMarker = formatReferralPortalEvidence(statements.evidence);
 
   return (
     <>
@@ -28,10 +32,12 @@ export default async function ReferralStatementsPage() {
           gap: 12,
         }}
       >
+        <span hidden>{evidenceMarker}</span>
         <DataSourceNotice
           theme={theme}
           source={statements.source}
           body={t("data.fixtureNotice", locale)}
+          evidenceMarker={evidenceMarker}
         />
         <CanvasCard theme={theme} padding={0}>
           <ReferralStatementsTable rows={statements.rows} />
