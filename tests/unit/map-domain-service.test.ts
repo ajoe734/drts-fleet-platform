@@ -202,5 +202,40 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.stdout).not.toContain("created domain mapping");
     expect(result.createInvocationCount).toBe(0);
   });
-});
 
+  it("fails closed without creating when INTERNAL error is returned even if requested domain is mentioned", () => {
+    const result = runMapDomain({
+      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) INTERNAL: An internal error occurred for api.smarttransport.tw. Cannot find domain mapping for [api.smarttransport.tw].",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when INVALID_ARGUMENT error is returned even if requested domain is mentioned", () => {
+    const result = runMapDomain({
+      describeStderr: "ERROR: (gcloud.beta.run.domain-mappings.describe) INVALID_ARGUMENT: Invalid domain api.smarttransport.tw. Resource 'api.smarttransport.tw' was not found.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
+  it("fails closed without creating when gcloud domain-mappings describe command header is missing", () => {
+    const result = runMapDomain({
+      describeStderr: "NOT_FOUND: Cannot find domain mapping for [api.smarttransport.tw].",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.");
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+});

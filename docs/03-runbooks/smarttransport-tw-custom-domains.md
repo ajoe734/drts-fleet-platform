@@ -44,63 +44,21 @@ gcloud auth login   # 前提 1
 # （若尚未驗證）先驗證網域，照輸出加 TXT 記錄後再繼續：
 gcloud domains verify smarttransport.tw
 
-map() {  # map <subdomain> <service>
-  local domain="$1"
-  local service="$2"
-  local existing_service
-  local describe_output
-  local describe_status
-
-  set +e
-  describe_output="$(
-    gcloud --quiet beta run domain-mappings describe \
-      --domain "$domain" \
-      --region "$REGION" \
-      --project "$PROJECT" \
-      --format='value(spec.routeName)' 2>&1
-  )"
-  describe_status=$?
-  set -e
-
-  if [ "$describe_status" -eq 0 ]; then
-    existing_service="$describe_output"
-  elif grep -Eiq '(NOT_FOUND|not found)' <<<"$describe_output"; then
-    existing_service=""
-  else
-    printf '%s\n' "$describe_output" >&2
-    return "$describe_status"
-  fi
-
-  if [ -n "$existing_service" ]; then
-    if [ "$existing_service" = "$service" ]; then
-      echo "Domain mapping already targets ${service}; skipping create."
-      return 0
-    fi
-
-    echo "Existing mapping for ${domain} points at ${existing_service}, expected ${service}." >&2
-    echo "Refusing to mutate a live mapping in this domain-maintenance workflow; fail closed and hand off to the single deploy cleanup task." >&2
-    return 1
-  fi
-
-  gcloud beta run domain-mappings create \
-    --service "$service" --domain "$domain" \
-    --region "$REGION" --project "$PROJECT"
-}
-
-map fleets.smarttransport.tw     drts-dev-platform-admin-web
-map ops.smarttransport.tw        drts-dev-ops-console-web
-map partners.smarttransport.tw   drts-dev-fleet-partner-portal-web
-map dispatch.smarttransport.tw   drts-dev-enterprise-dispatch-web
-map book.smarttransport.tw       drts-dev-partner-booking-web
-map bank.smarttransport.tw       drts-dev-bank-console-web
-map channel.smarttransport.tw    drts-channel-partner-portal-web
-map tenant.smarttransport.tw     drts-dev-tenant-console-web
-map refer.smarttransport.tw      drts-dev-referral-embed-web
-map api.smarttransport.tw        drts-dev-api
+# 使用經審核的 helper 進行網域檢查與建立（具備 command header/NOT_FOUND 嚴格比對）
+./scripts/map-domain-service.sh fleets.smarttransport.tw     drts-dev-platform-admin-web       "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh ops.smarttransport.tw        drts-dev-ops-console-web          "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh partners.smarttransport.tw   drts-dev-fleet-partner-portal-web "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh dispatch.smarttransport.tw   drts-dev-enterprise-dispatch-web "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh book.smarttransport.tw       drts-dev-partner-booking-web     "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh bank.smarttransport.tw       drts-dev-bank-console-web        "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh channel.smarttransport.tw    drts-channel-partner-portal-web  "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh tenant.smarttransport.tw     drts-dev-tenant-console-web      "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh refer.smarttransport.tw      drts-dev-referral-embed-web      "$REGION" "$PROJECT"
+./scripts/map-domain-service.sh api.smarttransport.tw        drts-dev-api                     "$REGION" "$PROJECT"
 ```
 
 每條新建 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
-若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed，明確交由單一 deploy cleanup task 處理，不在此 repo-only task 直接覆寫 live target。
+若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed and hand off to the single deploy cleanup task.，不在此 repo-only task 直接覆寫 live target。
 
 ---
 

@@ -29,19 +29,18 @@ existing_service=""
 if [ "$describe_status" -eq 0 ]; then
   existing_service="$describe_output"
 else
-  # Strip gcloud header line prefix: `ERROR: (gcloud.beta.run.domain-mappings.describe) `
-  cleaned_output="$(sed -E 's/^ERROR: \([^)]+\) //' <<<"$describe_output")"
-
   is_domain_not_found=0
 
-  # Escape regex metacharacters in domain for literal matching in ERE
-  domain_escaped="$(printf '%s\n' "$domain" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
+  # Positively require domain-mappings.describe command header AND NOT_FOUND indicator
+  if grep -Eq '(\(gcloud\.beta\.run\.domain-mappings\.describe\)|gcloud\.beta\.run\.domain-mappings\.describe)' <<<"$describe_output" && \
+     grep -Eiq '(NOT_FOUND|code: 404|code = 404|Cannot find domain mapping)' <<<"$describe_output" && \
+     ! grep -Eiq '(INTERNAL|INVALID_ARGUMENT|PERMISSION_DENIED|UNAUTHENTICATED|RESOURCE_EXHAUSTED|Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$describe_output"; then
 
-  # Match specifically when the requested domain is the resource reported as missing
-  if grep -Eiq "Cannot find domain mapping for \\[${domain_escaped}\\]" <<<"$cleaned_output" || \
-     grep -Eiq "(Resource|DomainMapping) ['\"]?${domain_escaped}['\"]? (was not found|not found)" <<<"$cleaned_output" || \
-     (grep -Eiq "(Cannot find domain mapping|DomainMapping|domain-mapping|Resource) .*not found" <<<"$cleaned_output" && grep -Fiq "$domain" <<<"$cleaned_output"); then
-    if ! grep -Eiq '(Service account|Region|Project|Permission|Unauthorized|Access Denied|Quota)' <<<"$cleaned_output"; then
+    domain_escaped="$(printf '%s\n' "$domain" | sed -e 's/\\/\\\\/g' -e 's/[.[\*^$()+?{|]/\\&/g')"
+
+    if grep -Eiq "Cannot find domain mapping for \[${domain_escaped}\]" <<<"$describe_output" || \
+       grep -Eiq "(Resource|DomainMapping) ['\"]?${domain_escaped}['\"]? (was not found|not found)" <<<"$describe_output" || \
+       (grep -Eiq "(Cannot find domain mapping|DomainMapping|domain-mapping|Resource) .*not found" <<<"$describe_output" && grep -Fiq "$domain" <<<"$describe_output"); then
       is_domain_not_found=1
     fi
   fi
