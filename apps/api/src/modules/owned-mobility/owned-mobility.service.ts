@@ -5205,8 +5205,7 @@ export class OwnedMobilityService implements OnModuleInit {
           payload.tenantId,
           {
             ...payload.payload,
-            outboxKey: (outbox as any).outboxKey ?? outbox.outboxId,
-            deliveryId: `wd_${generateDeterministicUuid("webhook_delivery", `outbox:${outbox.outboxId}`)}`,
+            outboxKey: outbox.outboxId,
           },
         );
         return;

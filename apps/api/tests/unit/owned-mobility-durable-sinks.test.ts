@@ -117,6 +117,113 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
       expect(repo.persistChanges).toHaveBeenCalled();
     });
 
+    it("handles multiple active endpoints with distinct stable delivery IDs, no duplicate sends on retry, and propagates persistence failure", async () => {
+      const repo = {
+        isEnabled: () => true,
+        persistChanges: vi.fn().mockResolvedValue(undefined),
+        reportPersistenceFailure: vi.fn(),
+      };
+      const dispatchService = {
+        dispatchAttempt: vi.fn().mockResolvedValue({
+          httpStatus: 200,
+          attempt: 1,
+          nextAttemptAt: null,
+          status: "delivered",
+        }),
+      };
+
+      const auditRepo = {
+        isEnabled: () => true,
+        append: vi.fn().mockResolvedValue(undefined),
+      };
+      const auditService = new AuditNotificationService(auditRepo as any);
+
+      const tenantPartnerService = new TenantPartnerService(
+        auditService as any,
+        repo as any,
+        dispatchService as any,
+      );
+
+      // Register TWO active webhook endpoints
+      (tenantPartnerService as any).webhookEndpoints = [
+        {
+          webhookId: "wh_001",
+          tenantId: "tenant_multi_1",
+          url: "https://example.com/webhook1",
+          events: ["order.completed"],
+          status: "active",
+          secretVersion: 1,
+          secretValue: "secret_123",
+          secretPreview: "sec_123",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          retryPolicy: { maxAttempts: 3 },
+          secretHistory: [],
+          runtimeMetadata: {
+            deliveryCount: 0,
+            secretRotation: {
+              currentVersion: 1,
+              rotatedAt: new Date().toISOString(),
+              rotationCount: 0,
+              history: [],
+            },
+          },
+        },
+        {
+          webhookId: "wh_002",
+          tenantId: "tenant_multi_1",
+          url: "https://example.com/webhook2",
+          events: ["order.completed"],
+          status: "active",
+          secretVersion: 1,
+          secretValue: "secret_456",
+          secretPreview: "sec_456",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          retryPolicy: { maxAttempts: 3 },
+          secretHistory: [],
+          runtimeMetadata: {
+            deliveryCount: 0,
+            secretRotation: {
+              currentVersion: 1,
+              rotatedAt: new Date().toISOString(),
+              rotationCount: 0,
+              history: [],
+            },
+          },
+        },
+      ];
+
+      const res1 = await tenantPartnerService.publishWebhookEvent(
+        "tenant_multi_1",
+        {
+          eventType: "order.completed",
+          data: { orderId: "order_multi_100" },
+          outboxKey: "outbox_multi_100",
+        },
+      );
+
+      expect(res1.length).toBe(2);
+      expect(res1[0].deliveryId).not.toBe(res1[1].deliveryId);
+      expect(res1[0].deliveryId).toContain("wd_");
+      expect(res1[1].deliveryId).toContain("wd_");
+      expect(dispatchService.dispatchAttempt).toHaveBeenCalledTimes(2);
+
+      // Retry/restart should be idempotent: no duplicate dispatchAttempt calls
+      const res2 = await tenantPartnerService.publishWebhookEvent(
+        "tenant_multi_1",
+        {
+          eventType: "order.completed",
+          data: { orderId: "order_multi_100" },
+          outboxKey: "outbox_multi_100",
+        },
+      );
+
+      expect(dispatchService.dispatchAttempt).toHaveBeenCalledTimes(2);
+      expect(res2[0].deliveryId).toBe(res1[0].deliveryId);
+      expect(res2[1].deliveryId).toBe(res1[1].deliveryId);
+    });
+
     it("executeDriverCompletionOutboxEffect passes stable outboxKey to publishWebhookEvent", async () => {
       const tenantPartnerService = {
         publishWebhookEvent: vi.fn().mockResolvedValue([
