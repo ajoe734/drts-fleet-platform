@@ -4435,7 +4435,7 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     const committed = result.committed;
-    this.applyCommittedDriverTaskCompletion(committed, requestId);
+    await this.applyCommittedDriverTaskCompletion(committed, requestId);
     await this.dispatchDriverCompletionOutbox(committed.task.taskId);
     if (committed.errorToThrow) {
       throw committed.errorToThrow;
@@ -4628,7 +4628,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  private applyCommittedDriverTaskCompletion(
+  private async applyCommittedDriverTaskCompletion(
     committed: DriverTaskCompletionCommitResult,
     requestId?: string,
   ) {
@@ -4665,6 +4665,7 @@ export class OwnedMobilityService implements OnModuleInit {
       ),
     ];
 
+    const now = new Date().toISOString();
     if (committed.outcome === "completed") {
       this.recordAudit(
         {
@@ -4682,8 +4683,19 @@ export class OwnedMobilityService implements OnModuleInit {
         },
         requestId,
       );
+      if (
+        !this.ownedMobilityRepository ||
+        !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository)
+      ) {
+        await this.publishTenantOrderWebhook(committed.order, "order.completed", now, {
+          completedAt: committed.task.completedAt,
+          taskId: committed.task.taskId,
+          assignmentId: committed.assignment.assignmentId,
+        });
+        await this.publishCompletedTripSettlementEvent(committed.order, committed.task);
+      }
     }
-    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
       committed.task,
       committed.order,
       requestId,
@@ -5046,7 +5058,9 @@ export class OwnedMobilityService implements OnModuleInit {
       createdAt,
       deliveredAt: null,
     }));
-    await this.ownedMobilityRepository!.persistDriverCompletionOutbox(tx, records);
+    if (this.ownedMobilityRepository?.persistDriverCompletionOutbox) {
+      await this.ownedMobilityRepository.persistDriverCompletionOutbox(tx, records);
+    }
   }
 
   private buildDriverCompletionOutboxPayloads(input: {

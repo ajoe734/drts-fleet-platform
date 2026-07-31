@@ -150,31 +150,31 @@ export class OwnedMobilityTaskEventsService
     );
   }
 
-  publishTaskAssigned(
+  async publishTaskAssigned(
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
     requestId?: string,
   ) {
-    this.publish("task_assigned", task, order, requestId);
+    await this.publish("task_assigned", task, order, requestId);
   }
 
-  publishTaskUpdated(
+  async publishTaskUpdated(
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
     requestId?: string,
   ) {
-    this.publish("task_updated", task, order, requestId);
+    await this.publish("task_updated", task, order, requestId);
   }
 
-  publishTaskCancelled(
+  async publishTaskCancelled(
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
     requestId?: string,
   ) {
-    this.publish("task_cancelled", task, order, requestId);
+    await this.publish("task_cancelled", task, order, requestId);
   }
 
-  private publish(
+  private async publish(
     eventType: DriverTaskStreamEventType,
     task: DriverTaskRecord,
     order: OwnedOrderRecord,
@@ -220,19 +220,19 @@ export class OwnedMobilityTaskEventsService
         );
         this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);
       } else {
-        void this.databaseService
-          .query(
+        try {
+          await this.databaseService.query(
             `SELECT pg_notify('${DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL}', $1)`,
             [payload],
-          )
-          .catch((err) => {
-            this.logger.error(
-              `Postgres NOTIFY failed for ${envelope.eventId}`,
-              err,
-            );
-            // Fallback to local
-            this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);
-          });
+          );
+        } catch (err) {
+          this.logger.error(
+            `Postgres NOTIFY failed for ${envelope.eventId}`,
+            err,
+          );
+          // Fallback to local
+          this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);
+        }
       }
     } else {
       this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);
