@@ -36,6 +36,34 @@ export type OwnedMobilityQueryExecutor = {
   ): Promise<QueryResult<T>>;
 };
 
+export type DriverCompletionOutboxEffectType =
+  | "tenant_order_completed_webhook"
+  | "owned_mobility_trip_completed"
+  | "multi_taxi_certificate";
+
+export type DriverCompletionOutboxStatus =
+  | "pending"
+  | "processing"
+  | "delivered"
+  | "dead_letter";
+
+export type DriverCompletionOutboxRecord = {
+  outboxId: string;
+  taskId: string;
+  orderId: string;
+  effectType: DriverCompletionOutboxEffectType;
+  requestId: string | null;
+  payload: Record<string, unknown>;
+  status: DriverCompletionOutboxStatus;
+  attemptCount: number;
+  nextAttemptAt: string;
+  leaseToken: string | null;
+  leasedUntil: string | null;
+  lastError: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+};
+
 type OwnedMobilityState = {
   orders: OwnedOrderRecord[];
   dispatchJobs: DispatchJobRecord[];
@@ -62,6 +90,23 @@ export type DriverTaskCompletionBundleRecord = {
   order: OwnedOrderRecord;
   assignment: DispatchAssignmentRecord;
   task: DriverTaskRecord;
+};
+
+type DriverCompletionOutboxRow = QueryResultRow & {
+  outbox_id: string;
+  task_id: string;
+  order_id: string;
+  effect_type: DriverCompletionOutboxEffectType;
+  request_id: string | null;
+  payload: unknown;
+  status: DriverCompletionOutboxStatus;
+  attempt_count: number;
+  next_attempt_at: Date | string;
+  lease_token: string | null;
+  leased_until: Date | string | null;
+  last_error: string | null;
+  created_at: Date | string;
+  delivered_at: Date | string | null;
 };
 
 @Injectable()
@@ -470,6 +515,164 @@ export class OwnedMobilityRepository {
     return result.rows[0]?.matched === true;
   }
 
+  async persistDriverCompletionOutbox(
+    executor: OwnedMobilityQueryExecutor,
+    entries: readonly DriverCompletionOutboxRecord[],
+  ) {
+    await Promise.all(
+      entries.map((entry) =>
+        executor.query(
+          `
+            INSERT INTO ops.driver_completion_outbox (
+              outbox_id,
+              task_id,
+              order_id,
+              effect_type,
+              request_id,
+              payload,
+              status,
+              attempt_count,
+              next_attempt_at,
+              lease_token,
+              leased_until,
+              last_error,
+              created_at,
+              delivered_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14
+            )
+            ON CONFLICT (task_id, effect_type) DO NOTHING
+          `,
+          [
+            entry.outboxId,
+            entry.taskId,
+            entry.orderId,
+            entry.effectType,
+            entry.requestId,
+            JSON.stringify(entry.payload),
+            entry.status,
+            entry.attemptCount,
+            entry.nextAttemptAt,
+            entry.leaseToken,
+            entry.leasedUntil,
+            entry.lastError,
+            entry.createdAt,
+            entry.deliveredAt,
+          ],
+        ),
+      ),
+    );
+  }
+
+  async claimNextDriverCompletionOutbox(
+    executor: OwnedMobilityQueryExecutor,
+    taskId: string,
+    leaseToken: string,
+    leasedUntil: string,
+    now: string,
+    maxAttempts: number,
+  ): Promise<DriverCompletionOutboxRecord | null> {
+    const result = await executor.query<DriverCompletionOutboxRow>(
+      `
+        WITH candidate AS (
+          SELECT outbox_id
+          FROM ops.driver_completion_outbox
+          WHERE task_id = $1
+            AND delivered_at IS NULL
+            AND status IN ('pending', 'processing')
+            AND attempt_count < $5
+            AND next_attempt_at <= $4::timestamptz
+            AND (
+              lease_token IS NULL
+              OR leased_until IS NULL
+              OR leased_until <= $4::timestamptz
+            )
+          ORDER BY created_at ASC, outbox_id ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+        )
+        UPDATE ops.driver_completion_outbox AS outbox
+        SET
+          status = 'processing',
+          attempt_count = outbox.attempt_count + 1,
+          lease_token = $2::uuid,
+          leased_until = $3::timestamptz
+        FROM candidate
+        WHERE outbox.outbox_id = candidate.outbox_id
+        RETURNING
+          outbox_id,
+          task_id,
+          order_id,
+          effect_type,
+          request_id,
+          payload,
+          status,
+          attempt_count,
+          next_attempt_at,
+          lease_token,
+          leased_until,
+          last_error,
+          created_at,
+          delivered_at
+      `,
+      [taskId, leaseToken, leasedUntil, now, maxAttempts],
+    );
+    const row = result.rows[0];
+    return row ? this.mapDriverCompletionOutbox(row) : null;
+  }
+
+  async markDriverCompletionOutboxDelivered(
+    executor: OwnedMobilityQueryExecutor,
+    outboxId: string,
+    leaseToken: string,
+    deliveredAt: string,
+  ) {
+    await executor.query(
+      `
+        UPDATE ops.driver_completion_outbox
+        SET
+          status = 'delivered',
+          delivered_at = $3::timestamptz,
+          lease_token = NULL,
+          leased_until = NULL,
+          last_error = NULL
+        WHERE outbox_id = $1
+          AND lease_token = $2::uuid
+      `,
+      [outboxId, leaseToken, deliveredAt],
+    );
+  }
+
+  async releaseDriverCompletionOutbox(
+    executor: OwnedMobilityQueryExecutor,
+    outboxId: string,
+    leaseToken: string,
+    nextAttemptAt: string,
+    maxAttempts: number,
+    lastError: string,
+  ) {
+    await executor.query(
+      `
+        UPDATE ops.driver_completion_outbox
+        SET
+          status = CASE
+            WHEN attempt_count >= $4 THEN 'dead_letter'
+            ELSE 'pending'
+          END,
+          next_attempt_at = CASE
+            WHEN attempt_count >= $4 THEN next_attempt_at
+            ELSE $3::timestamptz
+          END,
+          lease_token = NULL,
+          leased_until = NULL,
+          last_error = left($5, 2000)
+        WHERE outbox_id = $1
+          AND lease_token = $2::uuid
+      `,
+      [outboxId, leaseToken, nextAttemptAt, maxAttempts, lastError],
+    );
+  }
+
   private async persistChangesWithExecutor(
     executor: OwnedMobilityQueryExecutor,
     changes: PersistOwnedMobilityChanges,
@@ -832,5 +1035,33 @@ export class OwnedMobilityRepository {
     }
 
     return record as T;
+  }
+
+  private mapDriverCompletionOutbox(
+    row: DriverCompletionOutboxRow,
+  ): DriverCompletionOutboxRecord {
+    return {
+      outboxId: row.outbox_id,
+      taskId: row.task_id,
+      orderId: row.order_id,
+      effectType: row.effect_type,
+      requestId: row.request_id,
+      payload: this.parseRecord<Record<string, unknown>>(
+        row.payload,
+        "ops.driver_completion_outbox.payload",
+      ),
+      status: row.status,
+      attemptCount: row.attempt_count,
+      nextAttemptAt: new Date(row.next_attempt_at).toISOString(),
+      leaseToken: row.lease_token,
+      leasedUntil: row.leased_until
+        ? new Date(row.leased_until).toISOString()
+        : null,
+      lastError: row.last_error,
+      createdAt: new Date(row.created_at).toISOString(),
+      deliveredAt: row.delivered_at
+        ? new Date(row.delivered_at).toISOString()
+        : null,
+    };
   }
 }

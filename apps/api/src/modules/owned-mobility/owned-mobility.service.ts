@@ -110,6 +110,8 @@ import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
+  type DriverCompletionOutboxEffectType,
+  type DriverCompletionOutboxRecord,
   type DriverTaskCompletionBundleRecord,
   type OwnedMobilityQueryExecutor,
 } from "./owned-mobility.repository";
@@ -211,7 +213,6 @@ type DriverTaskCompletionCommitResult = {
   assignment: DispatchAssignmentRecord;
   task: DriverTaskRecord;
   traceLog: DispatchTraceLogRecord;
-  certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
   quotaConsumption: TenantQuotaConsumptionCommitResult | null;
   outcome: "completed" | "proof_pending";
   errorToThrow: ApiRequestError | null;
@@ -225,6 +226,25 @@ type DriverTaskCompletionTransactionResult =
   | {
       outcome: "committed";
       committed: DriverTaskCompletionCommitResult;
+    };
+
+type DriverCompletionOutboxPayload =
+  | {
+      effectType: "tenant_order_completed_webhook";
+      tenantId: string;
+      payload: {
+        eventType: "order.created" | "order.cancelled" | "order.completed";
+        occurredAt: string;
+        data: Record<string, unknown>;
+      };
+    }
+  | {
+      effectType: "owned_mobility_trip_completed";
+      event: OwnedMobilityTripCompletedEvent;
+    }
+  | {
+      effectType: "multi_taxi_certificate";
+      event: OwnedMobilityMultiTaxiTripCompletedEvent;
     };
 
 type CreateDispatchAssignmentOptions = {
@@ -314,6 +334,9 @@ const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
 const DEFAULT_CERTIFICATE_SERVICE_PHONE = "0800-090-000";
 const DEFAULT_AUTHORITY_COMPLAINT_PHONE = "1999";
+const DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS = 5;
+const DRIVER_COMPLETION_OUTBOX_LEASE_MS = 60_000;
+const DRIVER_COMPLETION_OUTBOX_RETRY_MS = 5_000;
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
@@ -4407,11 +4430,13 @@ export class OwnedMobilityService implements OnModuleInit {
 
     if (result.outcome === "replayed") {
       this.applyReplayedDriverTaskCompletionBundle(result.bundle);
+      await this.dispatchDriverCompletionOutbox(result.bundle.task.taskId);
       return this.cloneTask(result.bundle.task);
     }
 
     const committed = result.committed;
     this.applyCommittedDriverTaskCompletion(committed, requestId);
+    await this.dispatchDriverCompletionOutbox(committed.task.taskId);
     if (committed.errorToThrow) {
       throw committed.errorToThrow;
     }
@@ -4524,7 +4549,6 @@ export class OwnedMobilityService implements OnModuleInit {
           assignment,
           task,
           traceLog,
-          certificateEvent: null,
           quotaConsumption: null,
           outcome: "proof_pending",
           errorToThrow: proofPendingError,
@@ -4582,6 +4606,13 @@ export class OwnedMobilityService implements OnModuleInit {
       driverTasks: [this.cloneTask(task)],
       dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
     });
+    await this.persistDriverCompletionOutbox(tx, {
+      order,
+      assignment,
+      task,
+      requestId: params.requestId ?? null,
+      certificateEvent,
+    });
 
     return {
       outcome: "committed",
@@ -4590,7 +4621,6 @@ export class OwnedMobilityService implements OnModuleInit {
         assignment,
         task,
         traceLog,
-        certificateEvent,
         quotaConsumption,
         outcome: "completed",
         errorToThrow: null,
@@ -4652,23 +4682,6 @@ export class OwnedMobilityService implements OnModuleInit {
         },
         requestId,
       );
-      this.publishTenantOrderWebhook(
-        committed.order,
-        "order.completed",
-        committed.order.updatedAt,
-        {
-          completedAt: committed.task.completedAt,
-          taskId: committed.task.taskId,
-          assignmentId: committed.assignment.assignmentId,
-        },
-      );
-      this.publishCompletedTripSettlementEvent(committed.order, committed.task);
-      if (committed.certificateEvent && this.eventEmitter) {
-        this.eventEmitter.emit(
-          OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
-          committed.certificateEvent,
-        );
-      }
     }
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       committed.task,
@@ -4763,14 +4776,27 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
   ) {
+    const payload = this.buildCompletedTripSettlementEvent(order, task);
+    if (!payload || !this.eventEmitter) {
+      return;
+    }
+
+    this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
+  }
+
+  private buildCompletedTripSettlementEvent(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    dispatchAssignments: readonly DispatchAssignmentRecord[] = this.dispatchAssignments,
+    driverTasks: readonly DriverTaskRecord[] = this.driverTasks,
+  ): OwnedMobilityTripCompletedEvent | null {
     if (
-      !this.eventEmitter ||
       !order.tenantId ||
       order.serviceBucket !== "business_dispatch" ||
       !order.businessDispatchSubtype ||
       !task.completedAt
     ) {
-      return;
+      return null;
     }
 
     const grossEarning = task.fare ??
@@ -4782,6 +4808,8 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       task,
       grossEarning,
+      dispatchAssignments,
+      driverTasks,
     );
     const sandboxBillingTreatment = this.buildSandboxBillingTreatment(
       order,
@@ -4789,7 +4817,7 @@ export class OwnedMobilityService implements OnModuleInit {
       grossEarning,
       sandboxFulfillmentSegments,
     );
-    const payload: OwnedMobilityTripCompletedEvent = {
+    return {
       tenantId: order.tenantId,
       driverId: task.driverId,
       orderId: order.orderId,
@@ -4816,23 +4844,23 @@ export class OwnedMobilityService implements OnModuleInit {
         : {}),
       ...(sandboxBillingTreatment ? { sandboxBillingTreatment } : {}),
     };
-
-    this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
   }
 
   private buildSandboxFulfillmentSegments(
     order: OwnedOrderRecord,
     completedTask: DriverTaskRecord,
     grossEarning: MoneyAmount,
+    dispatchAssignments: readonly DispatchAssignmentRecord[] = this.dispatchAssignments,
+    driverTasks: readonly DriverTaskRecord[] = this.driverTasks,
   ): FulfillmentSegmentRecord[] {
-    const orderAssignments = this.dispatchAssignments
+    const orderAssignments = dispatchAssignments
       .filter((assignment) => assignment.orderId === order.orderId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     const bookingId = order.bookingId ?? order.orderId;
     const sandboxTripId = order.orderId;
 
     return orderAssignments.flatMap((assignment, index) => {
-      const task = this.driverTasks.find(
+      const task = driverTasks.find(
         (candidate) => candidate.assignmentId === assignment.assignmentId,
       );
       const isAvVehicle = this.isSandboxAvVehicle(assignment.vehicleId);
@@ -4987,6 +5015,213 @@ export class OwnedMobilityService implements OnModuleInit {
     return order.partnerProgramId ?? DEFAULT_TENANT_SERVICE_PROGRAM_ID;
   }
 
+  private async persistDriverCompletionOutbox(
+    tx: OwnedMobilityQueryExecutor,
+    input: {
+      order: OwnedOrderRecord;
+      assignment: DispatchAssignmentRecord;
+      task: DriverTaskRecord;
+      requestId: string | null;
+      certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+    },
+  ) {
+    const payloads = this.buildDriverCompletionOutboxPayloads(input);
+    if (payloads.length === 0) {
+      return;
+    }
+    const createdAt = input.order.updatedAt;
+    const records: DriverCompletionOutboxRecord[] = payloads.map((payload) => ({
+      outboxId: randomUUID(),
+      taskId: input.task.taskId,
+      orderId: input.order.orderId,
+      effectType: payload.effectType,
+      requestId: input.requestId,
+      payload: payload as unknown as Record<string, unknown>,
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: createdAt,
+      leaseToken: null,
+      leasedUntil: null,
+      lastError: null,
+      createdAt,
+      deliveredAt: null,
+    }));
+    await this.ownedMobilityRepository!.persistDriverCompletionOutbox(tx, records);
+  }
+
+  private buildDriverCompletionOutboxPayloads(input: {
+    order: OwnedOrderRecord;
+    assignment: DispatchAssignmentRecord;
+    task: DriverTaskRecord;
+    requestId: string | null;
+    certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent | null;
+  }): DriverCompletionOutboxPayload[] {
+    const payloads: DriverCompletionOutboxPayload[] = [];
+    if (input.order.tenantId) {
+      payloads.push({
+        effectType: "tenant_order_completed_webhook",
+        tenantId: input.order.tenantId,
+        payload: this.buildTenantOrderWebhookPayload(
+          input.order,
+          "order.completed",
+          input.order.updatedAt,
+          {
+            completedAt: input.task.completedAt,
+            taskId: input.task.taskId,
+            assignmentId: input.assignment.assignmentId,
+          },
+        ),
+      });
+    }
+
+    const dispatchAssignments = [
+      ...this.dispatchAssignments.filter(
+        (assignment) =>
+          assignment.assignmentId !== input.assignment.assignmentId,
+      ),
+      { ...input.assignment },
+    ];
+    const driverTasks = [
+      ...this.driverTasks.filter((task) => task.taskId !== input.task.taskId),
+      this.cloneTask(input.task),
+    ];
+    const tripCompletedEvent = this.buildCompletedTripSettlementEvent(
+      input.order,
+      input.task,
+      dispatchAssignments,
+      driverTasks,
+    );
+    if (tripCompletedEvent) {
+      payloads.push({
+        effectType: "owned_mobility_trip_completed",
+        event: tripCompletedEvent,
+      });
+    }
+
+    if (input.certificateEvent) {
+      payloads.push({
+        effectType: "multi_taxi_certificate",
+        event: input.certificateEvent,
+      });
+    }
+    return payloads;
+  }
+
+  private async dispatchDriverCompletionOutbox(taskId: string) {
+    if (
+      !this.ownedMobilityRepository ||
+      !this.ownedMobilityRepository.isEnabled() ||
+      !("claimNextDriverCompletionOutbox" in this.ownedMobilityRepository)
+    ) {
+      return;
+    }
+
+    while (true) {
+      const now = new Date();
+      const leaseToken = randomUUID();
+      const leasedUntil = new Date(
+        now.getTime() + DRIVER_COMPLETION_OUTBOX_LEASE_MS,
+      ).toISOString();
+      const claimed = await this.ownedMobilityRepository.withTransaction((tx) =>
+        this.ownedMobilityRepository!.claimNextDriverCompletionOutbox(
+          tx,
+          taskId,
+          leaseToken,
+          leasedUntil,
+          now.toISOString(),
+          DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+        ),
+      );
+      if (!claimed) {
+        return;
+      }
+
+      try {
+        await this.executeDriverCompletionOutboxEffect(claimed);
+        await this.ownedMobilityRepository.withTransaction((tx) =>
+          this.ownedMobilityRepository!.markDriverCompletionOutboxDelivered(
+            tx,
+            claimed.outboxId,
+            leaseToken,
+            new Date().toISOString(),
+          ),
+        );
+      } catch (error) {
+        const retryAt = new Date(
+          Date.now() + DRIVER_COMPLETION_OUTBOX_RETRY_MS,
+        ).toISOString();
+        const detail = error instanceof Error ? error.message : String(error);
+        await this.ownedMobilityRepository.withTransaction((tx) =>
+          this.ownedMobilityRepository!.releaseDriverCompletionOutbox(
+            tx,
+            claimed.outboxId,
+            leaseToken,
+            retryAt,
+            DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS,
+            detail,
+          ),
+        );
+        this.logger.warn(
+          `Driver completion outbox delivery failed for ${claimed.effectType} on task ${taskId}: ${detail}`,
+        );
+      }
+    }
+  }
+
+  private async executeDriverCompletionOutboxEffect(
+    outbox: DriverCompletionOutboxRecord,
+  ) {
+    switch (outbox.effectType as DriverCompletionOutboxEffectType) {
+      case "tenant_order_completed_webhook": {
+        const payload =
+          outbox.payload as Extract<
+            DriverCompletionOutboxPayload,
+            { effectType: "tenant_order_completed_webhook" }
+          >;
+        if (!this.tenantPartnerService) {
+          throw new Error("Tenant partner webhook service unavailable.");
+        }
+        await this.tenantPartnerService.publishWebhookEvent(
+          payload.tenantId,
+          payload.payload,
+        );
+        return;
+      }
+      case "owned_mobility_trip_completed": {
+        const payload =
+          outbox.payload as Extract<
+            DriverCompletionOutboxPayload,
+            { effectType: "owned_mobility_trip_completed" }
+          >;
+        if (!this.eventEmitter) {
+          throw new Error("Owned mobility completion event emitter unavailable.");
+        }
+        await this.eventEmitter.emitAsync(
+          OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+          payload.event,
+        );
+        return;
+      }
+      case "multi_taxi_certificate": {
+        const payload =
+          outbox.payload as Extract<
+            DriverCompletionOutboxPayload,
+            { effectType: "multi_taxi_certificate" }
+          >;
+        if (!this.eventEmitter) {
+          throw new Error("Multi-taxi certificate event emitter unavailable.");
+        }
+        await this.eventEmitter.emitAsync(
+          OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+          payload.event,
+        );
+        return;
+      }
+      default:
+        throw new Error(`Unsupported driver completion outbox effect.`);
+    }
+  }
+
   private publishTenantOrderWebhook(
     order: OwnedOrderRecord,
     eventType: "order.created" | "order.cancelled" | "order.completed",
@@ -4998,26 +5233,43 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     void this.tenantPartnerService
-      .publishWebhookEvent(order.tenantId, {
-        eventType,
-        occurredAt,
-        data: {
-          orderId: order.orderId,
-          orderNo: order.orderNo,
-          bookingId: order.bookingId,
-          bookingType: order.bookingType,
-          orderStatus: order.status,
-          serviceBucket: order.serviceBucket,
-          dispatchSemantics: order.dispatchSemantics,
-          businessDispatchSubtype: order.businessDispatchSubtype,
-          reservationWindowStart: order.reservationWindowStart,
-          reservationWindowEnd: order.reservationWindowEnd,
-          createdAt: order.createdAt,
-          updatedAt: order.updatedAt,
-          ...extraData,
-        },
-      })
+      .publishWebhookEvent(
+        order.tenantId,
+        this.buildTenantOrderWebhookPayload(
+          order,
+          eventType,
+          occurredAt,
+          extraData,
+        ),
+      )
       .catch(() => undefined);
+  }
+
+  private buildTenantOrderWebhookPayload(
+    order: OwnedOrderRecord,
+    eventType: "order.created" | "order.cancelled" | "order.completed",
+    occurredAt: string,
+    extraData: Record<string, unknown> = {},
+  ) {
+    return {
+      eventType,
+      occurredAt,
+      data: {
+        orderId: order.orderId,
+        orderNo: order.orderNo,
+        bookingId: order.bookingId,
+        bookingType: order.bookingType,
+        orderStatus: order.status,
+        serviceBucket: order.serviceBucket,
+        dispatchSemantics: order.dispatchSemantics,
+        businessDispatchSubtype: order.businessDispatchSubtype,
+        reservationWindowStart: order.reservationWindowStart,
+        reservationWindowEnd: order.reservationWindowEnd,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        ...extraData,
+      },
+    };
   }
 
   private nextOrderNo() {
