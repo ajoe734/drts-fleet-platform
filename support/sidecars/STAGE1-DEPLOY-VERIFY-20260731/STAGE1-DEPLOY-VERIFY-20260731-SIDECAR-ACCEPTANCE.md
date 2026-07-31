@@ -6,8 +6,8 @@
 **Assigned Reviewer:** `Gemini`  
 **Parent Owner:** `Gemini` (reviewer `Codex2`)  
 **Sidecar Task ID:** `STAGE1-DEPLOY-VERIFY-20260731-SIDECAR-ACCEPTANCE`  
-**Last Revised:** `2026-07-31T21:30:00Z (UTC)`  
-**Status:** `draft` — packet prepared for reviewer handoff.
+**Last Revised:** `2026-07-31T21:40:00Z (UTC)`  
+**Status:** `review_approved` — reviewer passed; owner closeout pending branch commit/push + machine-truth `done`.
 
 ---
 
@@ -52,9 +52,9 @@
 
 ### 3.2 Code-baseline check
 
-- Worker branch `codex2/stage1-deploy-verify-20260731-sidecar-acceptance` currently points at `HEAD=2123330182d3a098305e6514512e3d3c38dd287f`.
-- `origin/dev` also points at `2123330182d3a098305e6514512e3d3c38dd287f`.
-- Therefore this packet was prepared against the same tree recorded by the release-candidate closeout, with no additional code delta required before parent deploy verification starts.
+- Release-candidate baseline remains `2123330182d3a098305e6514512e3d3c38dd287f` (`origin/dev` and merge evidence for `STAGE1-RELEASE-CANDIDATE-20260731`).
+- Worker branch `codex2/stage1-deploy-verify-20260731-sidecar-acceptance` now has one additional support-only packet commit on top of that baseline.
+- Therefore the parent deploy verification still starts from the same reviewed runtime tree; this sidecar branch adds documentation only and does not alter deployable code.
 
 ### 3.3 Parent-facing readiness summary
 
@@ -210,3 +210,4 @@ This gives parent a concrete minimal interpretation of "browser smoke" without i
 - Owner `Codex2` → Reviewer `Gemini`: support-only acceptance packet, no canonical truth edits.
 - Intended use: parent owner `Gemini` can reuse §4 and §5 as the execution checklist while collecting real deploy evidence for `STAGE1-DEPLOY-VERIFY-20260731`.
 - `INTEGRATION_STATUS=not_applicable` for this sidecar artifact itself; deploy/merge status remains parent-owned.
+- Reviewer outcome recorded in machine truth: `review_approved` on `2026-07-31`; owner closeout must finish with a task-scoped commit, normal non-force push, and `scripts/ai-status.sh done`.
