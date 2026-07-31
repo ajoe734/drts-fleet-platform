@@ -8513,16 +8513,16 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  private recordSpatialAuditSnapshot(
+  private async recordSpatialAuditSnapshot(
     order: OwnedOrderRecord,
     context: SpatialAuditContext,
     requestId?: string,
-  ): void {
+  ): Promise<void> {
     if (!order.spatialAudit) {
       return;
     }
 
-    const auditLog = this.recordAudit(
+    const auditLog = await this.recordAudit(
       {
         actorId: context.actorId,
         actorType: context.actorType,

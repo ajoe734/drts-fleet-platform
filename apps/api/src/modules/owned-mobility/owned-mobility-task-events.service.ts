@@ -213,7 +213,7 @@ export class OwnedMobilityTaskEventsService
       eventIdOverride ??
       generateDeterministicUuid(
         "driver_task_event",
-        `${eventType}:${task.taskId}:${task.status}:${task.completedAt ?? task.updatedAt ?? occurredAt}:${requestId ?? ""}`,
+        `${eventType}:${task.taskId}:${task.status}:${task.completedAt ?? (task as any).updatedAt ?? occurredAt}:${requestId ?? ""}`,
       );
 
     const envelope: DriverTaskStreamEventEnvelope & { publishedAt: string } = {

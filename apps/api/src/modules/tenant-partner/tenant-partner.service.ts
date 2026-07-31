@@ -6632,12 +6632,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     createdAt: string,
     context: string,
     deliveryIdOverride?: string,
-  ) {
+  ): Promise<StoredWebhookDelivery> {
     const deliveryId = deliveryIdOverride ?? `wd_${randomUUID()}`;
     const existingIndex = this.webhookDeliveries.findIndex(
       (d) => d.deliveryId === deliveryId,
     );
-    if (existingIndex >= 0) {
+    if (existingIndex >= 0 && this.webhookDeliveries[existingIndex]) {
       return this.webhookDeliveries[existingIndex];
     }
 

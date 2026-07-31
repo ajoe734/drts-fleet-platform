@@ -694,7 +694,7 @@ export class OwnedMobilityController {
     @Body() command: DriverArrivedPickupCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const task = await this.ownedMobilityService.arrivePickup(
+    const task = await this.ownedMobilityService.arrivedPickup(
       taskId,
       command,
       requestId,
