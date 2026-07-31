@@ -319,6 +319,21 @@ describe("Cloud Run domain mapping helper", () => {
     expect(result.createInvocationCount).toBe(0);
   });
 
+  it("fails closed without creating when WARNING line precedes NOT_FOUND header on next line", () => {
+    const result = runMapDomain({
+      describeStderr:
+        "WARNING: Some gcloud warning message\nERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Resource 'api.smarttransport.tw' was not found.",
+      describeExitCode: 1,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Refusing to proceed: error output does not match domain-not-found for api.smarttransport.tw.",
+    );
+    expect(result.stdout).not.toContain("created domain mapping");
+    expect(result.createInvocationCount).toBe(0);
+  });
+
   it("fails closed without creating when NOT_FOUND header is for unrelated-backend resource while mentioning requested domain elsewhere", () => {
     const result = runMapDomain({
       describeStderr:
