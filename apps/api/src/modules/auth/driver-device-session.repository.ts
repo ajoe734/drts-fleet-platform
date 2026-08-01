@@ -21,7 +21,8 @@ type DriverDeviceSessionIssueInput = {
   deviceLabel: string | null;
   riskSummary: CanonicalSessionRecord["riskSummary"];
   issuedAt: string;
-  expiresAt: string;
+  idleExpiresAt: string;
+  absoluteExpiresAt: string;
   refreshToken: string;
 };
 
@@ -30,7 +31,7 @@ type DriverRefreshRotationInput = {
   refreshToken: string;
   nextRefreshToken: string;
   rotatedAt: string;
-  expiresAt: string;
+  idleExpiresAt: string;
   riskSummary: CanonicalSessionRecord["riskSummary"];
 };
 
@@ -87,7 +88,7 @@ export class DriverDeviceSessionRepository {
       riskSummary: input.riskSummary,
       issuedAt: input.issuedAt,
       refreshedAt: input.issuedAt,
-      expiresAt: input.expiresAt,
+      expiresAt: input.idleExpiresAt,
       revokedAt: null,
       revokeReason: null,
       status: "active",
@@ -95,11 +96,11 @@ export class DriverDeviceSessionRepository {
     const family = this.buildFamilyRecord({
       familyId,
       sessionId,
-      currentTokenId: refreshTokenId,
+      currentTokenId: null,
       previousTokenId: null,
       issuedAt: input.issuedAt,
       lastRotatedAt: input.issuedAt,
-      expiresAt: input.expiresAt,
+      absoluteExpiresAt: input.absoluteExpiresAt,
       revokedAt: null,
       revokeReason: null,
       status: "active",
@@ -111,16 +112,24 @@ export class DriverDeviceSessionRepository {
       tokenHash: refreshTokenHash,
       deviceId: input.deviceId,
       issuedAt: input.issuedAt,
-      expiresAt: input.expiresAt,
+      expiresAt: input.idleExpiresAt,
       consumedAt: null,
       revokedAt: null,
     });
 
     if (!this.isEnabled()) {
+      const persistedFamily = this.buildFamilyRecord({
+        ...family,
+        currentTokenId: refreshTokenRecord.refreshTokenId,
+      });
       this.upsertFallbackSession(session);
-      this.upsertFallbackFamily(family);
+      this.upsertFallbackFamily(persistedFamily);
       this.upsertFallbackRefreshToken(refreshTokenRecord);
-      return { session, family, currentRefreshToken: refreshTokenRecord };
+      return {
+        session,
+        family: persistedFamily,
+        currentRefreshToken: refreshTokenRecord,
+      };
     }
 
     const client = await this.databaseService!.connect();
@@ -129,23 +138,35 @@ export class DriverDeviceSessionRepository {
       await this.insertSession(client, session);
       await this.insertFamily(client, family);
       await this.insertRefreshToken(client, refreshTokenRecord);
+      const persistedFamily = this.buildFamilyRecord({
+        ...family,
+        currentTokenId: refreshTokenRecord.refreshTokenId,
+      });
       await client.query(
         `
           UPDATE iam.refresh_families
-          SET current_token_id = $2,
-              updated_at = $3,
+          SET current_token_id = $2::varchar,
+              updated_at = $3::timestamptz,
               record = jsonb_set(
                 jsonb_set(record, '{currentTokenId}', to_jsonb($2::text), true),
                 '{updatedAt}',
                 to_jsonb($3::text),
                 true
               )
-          WHERE family_id = $1
+          WHERE family_id = $1::varchar
         `,
-        [family.familyId, refreshTokenRecord.refreshTokenId, family.updatedAt],
+        [
+          family.familyId,
+          refreshTokenRecord.refreshTokenId,
+          persistedFamily.updatedAt,
+        ],
       );
       await client.query("COMMIT");
-      return { session, family, currentRefreshToken: refreshTokenRecord };
+      return {
+        session,
+        family: persistedFamily,
+        currentRefreshToken: refreshTokenRecord,
+      };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -185,6 +206,11 @@ export class DriverDeviceSessionRepository {
         await client.query("ROLLBACK");
         return { outcome: "invalid" };
       }
+
+      const nextIdleExpiresAt = this.resolveNextIdleExpiry(
+        input.idleExpiresAt,
+        family.absoluteExpiresAt,
+      );
 
       if (
         matchedToken.deviceId !== input.deviceId ||
@@ -246,7 +272,7 @@ export class DriverDeviceSessionRepository {
         tokenHash: nextRefreshTokenHash,
         deviceId: session.deviceId,
         issuedAt: input.rotatedAt,
-        expiresAt: input.expiresAt,
+        expiresAt: nextIdleExpiresAt,
         consumedAt: null,
         revokedAt: null,
       });
@@ -259,7 +285,7 @@ export class DriverDeviceSessionRepository {
         riskSummary: input.riskSummary,
         issuedAt: session.startedAt,
         refreshedAt: input.rotatedAt,
-        expiresAt: input.expiresAt,
+        expiresAt: nextIdleExpiresAt,
         revokedAt: null,
         revokeReason: null,
         status: "active",
@@ -272,7 +298,7 @@ export class DriverDeviceSessionRepository {
         previousTokenId: matchedToken.refreshTokenId,
         issuedAt: family.createdAt,
         lastRotatedAt: input.rotatedAt,
-        expiresAt: input.expiresAt,
+        absoluteExpiresAt: family.absoluteExpiresAt,
         revokedAt: null,
         revokeReason: null,
         status: "active",
@@ -433,6 +459,11 @@ export class DriverDeviceSessionRepository {
       return { outcome: "invalid" };
     }
 
+    const nextIdleExpiresAt = this.resolveNextIdleExpiry(
+      input.idleExpiresAt,
+      family.absoluteExpiresAt,
+    );
+
     if (
       matchedToken.deviceId !== input.deviceId ||
       matchedToken.consumedAt !== null ||
@@ -470,7 +501,7 @@ export class DriverDeviceSessionRepository {
       tokenHash: input.nextRefreshTokenHash,
       deviceId: session.deviceId,
       issuedAt: input.rotatedAt,
-      expiresAt: input.expiresAt,
+      expiresAt: nextIdleExpiresAt,
       consumedAt: null,
       revokedAt: null,
     });
@@ -483,7 +514,7 @@ export class DriverDeviceSessionRepository {
       riskSummary: input.riskSummary,
       issuedAt: session.startedAt,
       refreshedAt: input.rotatedAt,
-      expiresAt: input.expiresAt,
+      expiresAt: nextIdleExpiresAt,
       revokedAt: null,
       revokeReason: null,
       status: "active",
@@ -496,7 +527,7 @@ export class DriverDeviceSessionRepository {
       previousTokenId: consumedToken.refreshTokenId,
       issuedAt: family.createdAt,
       lastRotatedAt: input.rotatedAt,
-      expiresAt: input.expiresAt,
+      absoluteExpiresAt: family.absoluteExpiresAt,
       revokedAt: null,
       revokeReason: null,
       status: "active",
@@ -571,7 +602,7 @@ export class DriverDeviceSessionRepository {
       previousTokenId: family.previousTokenId,
       issuedAt: family.createdAt,
       lastRotatedAt: revokedAt,
-      expiresAt: family.absoluteExpiresAt,
+      absoluteExpiresAt: family.absoluteExpiresAt,
       revokedAt,
       revokeReason,
       status: "revoked",
@@ -630,7 +661,7 @@ export class DriverDeviceSessionRepository {
       previousTokenId: family.previousTokenId,
       issuedAt: family.createdAt,
       lastRotatedAt: revokedAt,
-      expiresAt: family.absoluteExpiresAt,
+      absoluteExpiresAt: family.absoluteExpiresAt,
       revokedAt,
       revokeReason,
       status: "revoked",
@@ -1009,7 +1040,7 @@ export class DriverDeviceSessionRepository {
     previousTokenId: string | null;
     issuedAt: string;
     lastRotatedAt: string;
-    expiresAt: string;
+    absoluteExpiresAt: string;
     revokedAt: string | null;
     revokeReason: string | null;
     status: CanonicalRefreshFamilyRecord["status"];
@@ -1022,7 +1053,7 @@ export class DriverDeviceSessionRepository {
       status: input.status,
       currentTokenId: input.currentTokenId,
       previousTokenId: input.previousTokenId,
-      absoluteExpiresAt: input.expiresAt,
+      absoluteExpiresAt: input.absoluteExpiresAt,
       lastRotatedAt: input.lastRotatedAt,
       revokedAt: input.revokedAt,
       revokeReason: input.revokeReason,
@@ -1068,6 +1099,15 @@ export class DriverDeviceSessionRepository {
 
   private upsertFallbackRefreshToken(record: CanonicalRefreshTokenRecord) {
     this.fallbackRefreshTokens.set(record.refreshTokenId, record);
+  }
+
+  private resolveNextIdleExpiry(
+    candidateIdleExpiresAt: string,
+    absoluteExpiresAt: string,
+  ) {
+    return candidateIdleExpiresAt <= absoluteExpiresAt
+      ? candidateIdleExpiresAt
+      : absoluteExpiresAt;
   }
 
   private queryRecords(
