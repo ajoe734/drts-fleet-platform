@@ -168,7 +168,7 @@ export class DriverDeviceSessionRepository {
               record = jsonb_set(
                 jsonb_set(record, '{currentTokenId}', to_jsonb($2::text), true),
                 '{updatedAt}',
-                to_jsonb($3::text),
+                to_jsonb($4::text),
                 true
               )
           WHERE family_id = $1::varchar
@@ -176,6 +176,7 @@ export class DriverDeviceSessionRepository {
         [
           family.familyId,
           refreshTokenRecord.refreshTokenId,
+          persistedFamily.updatedAt,
           persistedFamily.updatedAt,
         ],
       );
@@ -257,9 +258,9 @@ export class DriverDeviceSessionRepository {
           SET consumed_at = $2,
               updated_at = $2,
               record = jsonb_set(
-                jsonb_set(record, '{consumedAt}', to_jsonb($2::text), true),
+                jsonb_set(record, '{consumedAt}', to_jsonb($3::text), true),
                 '{updatedAt}',
-                to_jsonb($2::text),
+                to_jsonb($3::text),
                 true
               )
           WHERE refresh_token_id = $1
@@ -268,7 +269,7 @@ export class DriverDeviceSessionRepository {
             AND expires_at > $2
           RETURNING record
         `,
-        [matchedToken.refreshTokenId, input.rotatedAt],
+        [matchedToken.refreshTokenId, input.rotatedAt, input.rotatedAt],
       );
 
       if (consumeResult.rowCount !== 1) {
@@ -694,14 +695,14 @@ export class DriverDeviceSessionRepository {
         SET revoked_at = COALESCE(revoked_at, $2),
             updated_at = $2,
             record = jsonb_set(
-              jsonb_set(record, '{revokedAt}', to_jsonb($2::text), true),
+              jsonb_set(record, '{revokedAt}', to_jsonb($3::text), true),
               '{updatedAt}',
-              to_jsonb($2::text),
+              to_jsonb($3::text),
               true
             )
         WHERE family_id = $1
       `,
-      [family.familyId, revokedAt],
+      [family.familyId, revokedAt, revokedAt],
     );
   }
 
