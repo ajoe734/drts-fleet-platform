@@ -192,16 +192,31 @@ export function buildAuthStartupConfigReport(
 
   // Check explicit local/test mode requirement
   const authMode = normalizeString(env.AUTH_MODE)?.toLowerCase();
-  if (
-    !isStrictEnvironment &&
-    authMode &&
-    !["local", "test", "dev", "explicit"].includes(authMode)
-  ) {
-    issues.push({
-      control: "AUTH_MODE",
-      issue: `Invalid AUTH_MODE "${authMode}" specified for ${environment} environment`,
-      code: "INVALID_FORMAT",
-    });
+  if (!isStrictEnvironment) {
+    if (!authMode) {
+      issues.push({
+        control: "AUTH_MODE",
+        issue: `Missing required control: AUTH_MODE must be explicitly specified in local/test environment (e.g. AUTH_MODE=local or AUTH_MODE=test)`,
+        code: "MISSING_CONTROL",
+      });
+    } else if (!["local", "test", "dev", "explicit"].includes(authMode)) {
+      issues.push({
+        control: "AUTH_MODE",
+        issue: `Invalid AUTH_MODE "${authMode}" specified for ${environment} environment`,
+        code: "INVALID_FORMAT",
+      });
+    }
+  } else {
+    if (
+      authMode &&
+      ["local", "test", "dev", "explicit", "mock", "insecure"].includes(authMode)
+    ) {
+      issues.push({
+        control: "AUTH_MODE",
+        issue: `AUTH_MODE="${authMode}" is strictly forbidden in ${environment} environment`,
+        code: "FORBIDDEN_MODE",
+      });
+    }
   }
 
   // 1. Issuer Validation
@@ -317,6 +332,23 @@ export function buildAuthStartupConfigReport(
             "Missing required control: both JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must be configured for asymmetric JWT signing",
           code: "MISSING_CONTROL",
         });
+      } else {
+        if (isWeakSecret(privateKey) || isWeakSecret(publicKey)) {
+          issues.push({
+            control: "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY",
+            issue:
+              "Unsafe control value: JWT asymmetric key material is set to a known insecure default pattern",
+            code: "WEAK_SECRET",
+          });
+        }
+        if (parsedAlgos.some((a) => a.toUpperCase().startsWith("HS"))) {
+          issues.push({
+            control: "JWT_ALGORITHMS",
+            issue:
+              "Unsafe control value: Symmetric algorithm (HS*) specified for asymmetric key pair",
+            code: "UNSAFE_VALUE",
+          });
+        }
       }
     } else if (jwtSecret) {
       if (isWeakSecret(jwtSecret)) {

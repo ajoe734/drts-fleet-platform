@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { generateKeyPairSync } from "node:crypto";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import {
   AuthConfigurationError,
   buildAuthStartupConfigReport,
@@ -78,10 +80,11 @@ describe("isWeakSecret", () => {
 });
 
 describe("validateAuthStartupConfig in local & test mode", () => {
-  it("allows explicit local dev configuration with defaults", () => {
+  it("allows explicit local dev configuration with defaults when AUTH_MODE is provided", () => {
     const report = validateAuthStartupConfig({
       APP_ENV: "local",
       CI: "false",
+      AUTH_MODE: "local",
     });
 
     expect(report.environment).toBe("local");
@@ -91,10 +94,40 @@ describe("validateAuthStartupConfig in local & test mode", () => {
     expect(report.config.audience).toBe("https://api.local.drts.internal");
   });
 
+  it("fails validation when AUTH_MODE is missing in local/test environment", () => {
+    const report = buildAuthStartupConfigReport({
+      APP_ENV: "local",
+      CI: "false",
+    });
+
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (i) => i.control === "AUTH_MODE" && i.code === "MISSING_CONTROL",
+      ),
+    ).toBe(true);
+  });
+
+  it("fails validation when invalid AUTH_MODE is specified in local/test environment", () => {
+    const report = buildAuthStartupConfigReport({
+      APP_ENV: "local",
+      CI: "false",
+      AUTH_MODE: "invalid_mode",
+    });
+
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (i) => i.control === "AUTH_MODE" && i.code === "INVALID_FORMAT",
+      ),
+    ).toBe(true);
+  });
+
   it("strictly rejects JWT algorithm 'none' even in local mode", () => {
     const report = buildAuthStartupConfigReport({
       APP_ENV: "local",
       CI: "false",
+      AUTH_MODE: "local",
       JWT_ALGORITHM: "none",
     });
 
@@ -112,6 +145,49 @@ describe("validateAuthStartupConfig in staging & production (Strict Mode)", () =
     expect(report.isStrictEnvironment).toBe(true);
     expect(report.valid).toBe(true);
     expect(report.issues).toHaveLength(0);
+  });
+
+  it("passes clean validation when production uses asymmetric keys without JWT_SECRET", () => {
+    const env = buildValidProductionEnv();
+    delete env.JWT_SECRET;
+    env.JWT_PRIVATE_KEY = VALID_STRONG_SECRET;
+    env.JWT_PUBLIC_KEY = VALID_STRONG_SECRET;
+    env.JWT_ALGORITHMS = "RS256";
+
+    const report = validateAuthStartupConfig(env);
+    expect(report.valid).toBe(true);
+    expect(report.config.signing.keyType).toBe("asymmetric");
+    expect(report.config.signing.asymmetricKeysConfigured).toBe(true);
+  });
+
+  it("fails when asymmetric keys are paired with a symmetric algorithm like HS256", () => {
+    const env = buildValidProductionEnv();
+    delete env.JWT_SECRET;
+    env.JWT_PRIVATE_KEY = VALID_STRONG_SECRET;
+    env.JWT_PUBLIC_KEY = VALID_STRONG_SECRET;
+    env.JWT_ALGORITHMS = "HS256";
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (i) => i.control === "JWT_ALGORITHMS" && i.code === "UNSAFE_VALUE",
+      ),
+    ).toBe(true);
+  });
+
+  it("fails when AUTH_MODE=local is supplied in production", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      AUTH_MODE: "local",
+    };
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(
+      report.issues.some(
+        (i) => i.control === "AUTH_MODE" && i.code === "FORBIDDEN_MODE",
+      ),
+    ).toBe(true);
   });
 
   it("fails when ALLOW_INSECURE_DEV_AUTH=true is supplied in production", () => {
@@ -292,4 +368,83 @@ describe("Negative configuration matrix & secret leakage prevention", () => {
       }
     });
   }
+});
+
+describe("JwtAuthService key material runtime consistency", () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it("signs and verifies JWT tokens using JWT_SECRET (symmetric)", () => {
+    process.env.JWT_SECRET = VALID_STRONG_SECRET;
+    delete process.env.JWT_PRIVATE_KEY;
+    delete process.env.JWT_PUBLIC_KEY;
+
+    const jwtService = new JwtAuthService();
+    const token = jwtService.sign({
+      actorId: "usr_123",
+      actorType: "tenant_user",
+      realm: "tenant",
+      tenantId: "t_acme",
+      roleFamilies: ["tenant_user"],
+      roles: ["tenant_admin"],
+      scopes: ["identity:read"],
+    });
+
+    expect(token).toBeTypeOf("string");
+    const verified = jwtService.verify(token);
+    expect(verified).not.toBeNull();
+    expect(verified?.sub).toBe("usr_123");
+    expect(verified?.tenantId).toBe("t_acme");
+  });
+
+  it("signs and verifies JWT tokens using asymmetric RSA key pair without JWT_SECRET", () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+
+    delete process.env.JWT_SECRET;
+    process.env.JWT_PRIVATE_KEY = privateKey;
+    process.env.JWT_PUBLIC_KEY = publicKey;
+
+    const jwtService = new JwtAuthService();
+    const token = jwtService.sign({
+      actorId: "usr_asym_123",
+      actorType: "tenant_user",
+      realm: "tenant",
+      tenantId: "t_asym",
+      roleFamilies: ["tenant_user"],
+      roles: ["tenant_admin"],
+      scopes: ["identity:read"],
+    });
+
+    expect(token).toBeTypeOf("string");
+    const verified = jwtService.verify(token);
+    expect(verified).not.toBeNull();
+    expect(verified?.sub).toBe("usr_asym_123");
+    expect(verified?.tenantId).toBe("t_asym");
+  });
+
+  it("throws clear error when signing without any key material configured", () => {
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_PRIVATE_KEY;
+    delete process.env.JWT_PUBLIC_KEY;
+
+    const jwtService = new JwtAuthService();
+    expect(() =>
+      jwtService.sign({
+        actorId: "usr_123",
+        actorType: "tenant_user",
+        realm: "tenant",
+        tenantId: "t_acme",
+        roleFamilies: ["tenant_user"],
+        roles: ["tenant_admin"],
+        scopes: ["identity:read"],
+      }),
+    ).toThrowError(/neither JWT_PRIVATE_KEY nor JWT_SECRET/i);
+  });
 });
