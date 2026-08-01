@@ -2397,6 +2397,82 @@ export function isCanonicalAccountActive(status: CanonicalAccountStatus) {
   return status === "active";
 }
 
+// --- Canonical Identity Sessions & Refresh Families ---
+export const SESSION_STATUSES = [
+  "active",
+  "revoked",
+  "expired",
+  "compromised",
+] as const;
+export type SessionStatus = (typeof SESSION_STATUSES)[number];
+
+export const REFRESH_FAMILY_STATUSES = [
+  "active",
+  "revoked",
+  "expired",
+  "compromised",
+] as const;
+export type RefreshFamilyStatus = (typeof REFRESH_FAMILY_STATUSES)[number];
+
+export interface CanonicalIdentitySessionRecord {
+  sessionId: string;
+  sourceRef: string | null;
+  principalId: string;
+  membershipId: string | null;
+  realm: string;
+  status: SessionStatus;
+  authTime: string;
+  authMethods: string[];
+  tokenVersion: number;
+  idleExpiresAt: string | null;
+  absoluteExpiresAt: string;
+  revokedAt: string | null;
+  revokedByPrincipalId: string | null;
+  revokeReason: string | null;
+  deviceSummary: Record<string, unknown>;
+  riskSummary: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalRefreshFamilyRecord {
+  familyId: string;
+  sourceRef: string | null;
+  sessionId: string;
+  currentTokenHash: string;
+  counter: number;
+  status: RefreshFamilyStatus;
+  expiresAt: string;
+  compromisedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConsumeAndRotateRefreshTokenCommand {
+  familyId?: string;
+  oldTokenRaw?: string;
+  oldTokenHash?: string;
+  newTokenRaw?: string;
+  newTokenHash?: string;
+  newExpiresAt: string;
+  updatedAt?: string;
+}
+
+export interface ConsumeAndRotateRefreshTokenResult {
+  success: boolean;
+  session: CanonicalIdentitySessionRecord | null;
+  family: CanonicalRefreshFamilyRecord | null;
+  reason?:
+    | "INVALID_TOKEN"
+    | "EXPIRED"
+    | "REVOKED"
+    | "COMPROMISED"
+    | "REUSE_DETECTED"
+    | "CONCURRENCY_CONFLICT";
+}
+
+
+
 // --- Tenant User & Roles ---
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 

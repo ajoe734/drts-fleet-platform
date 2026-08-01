@@ -14,6 +14,10 @@ import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import {
+  hashIdentitySecret,
+  IdentityRepository,
+} from "../identity/identity.repository";
 
 type DriverDeviceBindingRecord = {
   bindingId: string;
@@ -52,6 +56,8 @@ export class DriverDeviceSessionService {
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
     @Optional()
     private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
   ) {}
 
   register(
