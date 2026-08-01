@@ -58,12 +58,43 @@ const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
 export class JwtAuthService {
   private readonly logger = new Logger(JwtAuthService.name);
 
-  private getSecret(): string {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      throw new Error("JWT_SECRET environment variable is not set");
+  private getSignKey(): string {
+    const privateKey = process.env.JWT_PRIVATE_KEY;
+    if (privateKey && privateKey.trim().length > 0) {
+      return privateKey.trim();
     }
-    return secret;
+    const secret = process.env.JWT_SECRET;
+    if (secret && secret.trim().length > 0) {
+      return secret.trim();
+    }
+    throw new Error(
+      "JWT key material environment variable is not set (neither JWT_PRIVATE_KEY nor JWT_SECRET)",
+    );
+  }
+
+  private getVerifyKey(): string {
+    const publicKey = process.env.JWT_PUBLIC_KEY;
+    if (publicKey && publicKey.trim().length > 0) {
+      return publicKey.trim();
+    }
+    const privateKey = process.env.JWT_PRIVATE_KEY;
+    if (privateKey && privateKey.trim().length > 0) {
+      return privateKey.trim();
+    }
+    const secret = process.env.JWT_SECRET;
+    if (secret && secret.trim().length > 0) {
+      return secret.trim();
+    }
+    throw new Error(
+      "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)",
+    );
+  }
+
+  private isAsymmetricKeyConfigured(): boolean {
+    return Boolean(
+      (process.env.JWT_PRIVATE_KEY && process.env.JWT_PRIVATE_KEY.trim().length > 0) ||
+        (process.env.JWT_PUBLIC_KEY && process.env.JWT_PUBLIC_KEY.trim().length > 0),
+    );
   }
 
   private getIssuer(): string | undefined {
@@ -74,10 +105,24 @@ export class JwtAuthService {
     return process.env.JWT_AUDIENCE || process.env.OIDC_AUDIENCE || undefined;
   }
 
+  private getAlgorithms(): jwt.Algorithm[] | undefined {
+    const raw = process.env.JWT_ALGORITHMS || process.env.JWT_ALGORITHM;
+    if (!raw) return undefined;
+    const algos = raw
+      .split(/[;,]/)
+      .map((a) => a.trim().toUpperCase())
+      .filter((a) => a.length > 0);
+    return algos.length > 0 ? (algos as jwt.Algorithm[]) : undefined;
+  }
+
   private buildJwtOptions(expiresIn?: JwtExpiresIn): jwt.SignOptions {
     const issuer = this.getIssuer();
     const audience = this.getAudience();
-    const options: jwt.SignOptions = {};
+    const algos = this.getAlgorithms();
+    const defaultAlgorithm = this.isAsymmetricKeyConfigured() ? "RS256" : "HS256";
+    const options: jwt.SignOptions = {
+      algorithm: (algos?.[0] as jwt.Algorithm) || defaultAlgorithm,
+    };
 
     if (expiresIn) {
       options.expiresIn = expiresIn;
@@ -95,7 +140,11 @@ export class JwtAuthService {
   private buildJwtVerifyOptions(): jwt.VerifyOptions {
     const issuer = this.getIssuer();
     const audience = this.getAudience();
-    const options: jwt.VerifyOptions = {};
+    const algos = this.getAlgorithms();
+    const defaultAlgorithm = this.isAsymmetricKeyConfigured() ? "RS256" : "HS256";
+    const options: jwt.VerifyOptions = {
+      algorithms: algos || [defaultAlgorithm as jwt.Algorithm],
+    };
 
     if (issuer) {
       options.issuer = issuer;
@@ -129,14 +178,18 @@ export class JwtAuthService {
         ? SERVICE_EXPIRES_IN
         : DEFAULT_EXPIRES_IN);
 
-    return jwt.sign(payload, this.getSecret(), this.buildJwtOptions(expiresIn));
+    return jwt.sign(
+      payload,
+      this.getSignKey(),
+      this.buildJwtOptions(expiresIn),
+    );
   }
 
   verify(token: string): JwtIdentityPayload | null {
     try {
       return jwt.verify(
         token,
-        this.getSecret(),
+        this.getVerifyKey(),
         this.buildJwtVerifyOptions(),
       ) as JwtIdentityPayload;
     } catch (err) {
