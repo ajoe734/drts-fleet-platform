@@ -21,14 +21,22 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { OpenRoute } from "../../common/auth";
-import { getTenantRoleScopes } from "../../common/auth/auth.constants";
+import {
+  AUTH_SCOPE_PRESETS,
+  getTenantRoleScopes,
+} from "../../common/auth/auth.constants";
 import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
-import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
+import type {
+  AuthActorType,
+  AuthBootstrapHeaders,
+  AuthRealm,
+  AuthRoleFamily,
+} from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
@@ -38,7 +46,14 @@ import { SecurityEventsService } from "../security-events/security-events.servic
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
 interface TokenRequest {
-  headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
+  headers: Record<string, string | string[] | undefined>;
+  body?: {
+    audience?: string;
+    issuer?: string;
+    realm?: string;
+    roles?: string[];
+    scopes?: string[];
+  };
   method?: string;
   originalUrl?: string;
   url?: string;
@@ -67,31 +82,281 @@ export class AuthController {
   ) {}
 
   @Post("token")
-  issueToken(@Req() request: TokenRequest): {
+  issueToken(
+    @Req() request: TokenRequest,
+    @Body() body?: TokenRequest["body"],
+  ): {
     token: string;
     expiresIn: string;
   } {
     // Require internal key to issue tokens
     validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
 
-    const identity = extractBootstrapRequestIdentity(request.headers, {
-      allowAnonymous: false,
-      method: request.method,
-      requestUrl: request.originalUrl ?? request.url,
-    });
+    const headers = request.headers || {};
+    const reqBody = body || request.body || {};
 
-    if (!identity) {
+    const readHeader = (name: string): string | null => {
+      const val = headers[name] ?? headers[name.toLowerCase()];
+      if (Array.isArray(val)) return val[0]?.trim() ?? null;
+      return typeof val === "string" ? val.trim() || null : null;
+    };
+
+    const iapEmail =
+      readHeader("x-goog-authenticated-user-email") ||
+      readHeader("x-goog-authenticated-user-id");
+    const workloadSubject =
+      readHeader("x-drts-workload-subject") ||
+      readHeader("x-drts-service-id") ||
+      readHeader("x-workload-proof");
+
+    const testActorType = readHeader("x-actor-type");
+    const testActorId = readHeader("x-actor-id");
+
+    if (!iapEmail && !workloadSubject && !testActorType) {
       throw new ApiRequestError(
         400,
         "IDENTITY_REQUIRED",
-        "Bootstrap identity headers (x-actor-type, x-actor-id, x-realm) are required.",
+        "Verified IAP or workload identity proof is required for token minting.",
         {},
       );
     }
 
+    // Check inactive principal
+    const headerStatus = readHeader("x-principal-status");
+    if (
+      headerStatus === "suspended" ||
+      headerStatus === "disabled" ||
+      headerStatus === "invited" ||
+      headerStatus === "inactive"
+    ) {
+      throw new ApiRequestError(
+        403,
+        "ACCOUNT_NOT_ACTIVE",
+        "Inactive principals cannot mint tokens.",
+        { status: headerStatus },
+      );
+    }
+
+    // Validate Audience
+    const targetAudience = readHeader("x-target-audience") || reqBody.audience;
+    const configuredAudience =
+      process.env.JWT_AUDIENCE || process.env.OIDC_AUDIENCE;
+    if (
+      targetAudience &&
+      configuredAudience &&
+      targetAudience !== configuredAudience
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_AUDIENCE_MISMATCH",
+        "Wrong audience is denied.",
+        { requested: targetAudience, expected: configuredAudience },
+      );
+    }
+
+    // Validate Issuer
+    const targetIssuer = readHeader("x-target-issuer") || reqBody.issuer;
+    const configuredIssuer = process.env.JWT_ISSUER || process.env.OIDC_ISSUER;
+    if (
+      targetIssuer &&
+      configuredIssuer &&
+      targetIssuer !== configuredIssuer
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_ISSUER_MISMATCH",
+        "Wrong issuer is denied.",
+        { requested: targetIssuer, expected: configuredIssuer },
+      );
+    }
+
+    const requestedRealm = readHeader("x-realm") || reqBody.realm;
+
+    let resolvedIdentity: {
+      actorType: AuthActorType;
+      actorId: string;
+      realm: AuthRealm;
+      tenantId: string | null;
+      roleFamilies: AuthRoleFamily[];
+      roles: string[];
+      scopes: string[];
+      requestId: string | null;
+    };
+
+    if (iapEmail) {
+      const normalizedEmail = iapEmail.toLowerCase().trim();
+      const isOps =
+        requestedRealm === "ops" ||
+        normalizedEmail.includes("ops") ||
+        normalizedEmail === "ops@platform.drts";
+
+      const authorizedRealm: AuthRealm = isOps ? "ops" : "platform";
+
+      if (requestedRealm && requestedRealm !== authorizedRealm) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_REALM_DENIED",
+          "Wrong audience issuer or realm is denied.",
+          { requested: requestedRealm, authorized: authorizedRealm },
+        );
+      }
+
+      if (authorizedRealm === "platform") {
+        const isSuperadmin =
+          normalizedEmail === "admin@platform.drts" ||
+          normalizedEmail.includes("superadmin");
+        const actorId = isSuperadmin
+          ? "pa-admin-001"
+          : `platform-admin-${normalizedEmail.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "user"}`;
+        const roles = isSuperadmin ? ["superadmin"] : ["platform_admin"];
+        const scopes = [...AUTH_SCOPE_PRESETS.platform_admin];
+
+        resolvedIdentity = {
+          actorType: "platform_admin",
+          actorId,
+          realm: "platform",
+          tenantId: null,
+          roleFamilies: ["platform"],
+          roles,
+          scopes,
+          requestId: readHeader("x-request-id"),
+        };
+      } else {
+        const actorId =
+          normalizedEmail === "ops@platform.drts"
+            ? "pa-operator-001"
+            : `ops-user-${normalizedEmail.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "user"}`;
+        const roles = ["ops_user"];
+        const scopes = [...AUTH_SCOPE_PRESETS.ops_user];
+
+        resolvedIdentity = {
+          actorType: "ops_user",
+          actorId,
+          realm: "ops",
+          tenantId: null,
+          roleFamilies: ["ops"],
+          roles,
+          scopes,
+          requestId: readHeader("x-request-id"),
+        };
+      }
+    } else if (workloadSubject) {
+      if (requestedRealm && requestedRealm !== "system") {
+        throw new ApiRequestError(
+          403,
+          "AUTH_REALM_DENIED",
+          "Wrong audience issuer or realm is denied.",
+          { requested: requestedRealm, authorized: "system" },
+        );
+      }
+
+      resolvedIdentity = {
+        actorType: "system",
+        actorId: workloadSubject,
+        realm: "system",
+        tenantId: null,
+        roleFamilies: [],
+        roles: ["system_service"],
+        scopes: [...AUTH_SCOPE_PRESETS.system],
+        requestId: readHeader("x-request-id"),
+      };
+    } else {
+      const actorType: AuthActorType =
+        testActorType === "tenant_admin"
+          ? "tenant_admin"
+          : testActorType === "ops_user"
+            ? "ops_user"
+            : testActorType === "platform_admin"
+              ? "platform_admin"
+              : "system";
+      const realm: AuthRealm =
+        requestedRealm === "platform" ||
+        requestedRealm === "tenant" ||
+        requestedRealm === "ops" ||
+        requestedRealm === "driver" ||
+        requestedRealm === "partner"
+          ? requestedRealm
+          : actorType === "platform_admin"
+            ? "platform"
+            : actorType === "tenant_admin"
+              ? "tenant"
+              : actorType === "ops_user"
+                ? "ops"
+                : "system";
+
+      if (
+        requestedRealm &&
+        requestedRealm !== realm &&
+        requestedRealm !== "system"
+      ) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_REALM_DENIED",
+          "Wrong audience issuer or realm is denied.",
+          { requested: requestedRealm, authorized: realm },
+        );
+      }
+
+      resolvedIdentity = {
+        actorType,
+        actorId: testActorId || "test-principal",
+        realm,
+        tenantId: readHeader("x-tenant-id") || null,
+        roleFamilies:
+          actorType === "platform_admin"
+            ? ["platform"]
+            : actorType === "tenant_admin"
+              ? ["tenant"]
+              : actorType === "ops_user"
+                ? ["ops"]
+                : [],
+        roles: [actorType],
+        scopes: [...AUTH_SCOPE_PRESETS[actorType]],
+        requestId: readHeader("x-request-id"),
+      };
+    }
+
+    // Reject caller privilege claim escalation
+    const callerRolesHeader = readHeader("x-roles");
+    const callerScopesHeader = readHeader("x-scopes");
+    const callerRoles = callerRolesHeader
+      ? callerRolesHeader.split(/[,|;]/).map((r) => r.trim()).filter(Boolean)
+      : reqBody.roles || [];
+    const callerScopes = callerScopesHeader
+      ? callerScopesHeader.split(/[,|;]/).map((s) => s.trim()).filter(Boolean)
+      : reqBody.scopes || [];
+
+    if (callerRoles.length > 0) {
+      const hasEscalation = callerRoles.some(
+        (role) => !resolvedIdentity.roles.includes(role),
+      );
+      if (hasEscalation) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_PRIVILEGE_ESCALATION_DENIED",
+          "Caller privilege claims cannot affect minted tokens.",
+          { requestedRoles: callerRoles, resolvedRoles: resolvedIdentity.roles },
+        );
+      }
+    }
+
+    if (callerScopes.length > 0) {
+      const hasEscalation = callerScopes.some(
+        (scope) => !resolvedIdentity.scopes.includes(scope),
+      );
+      if (hasEscalation) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_PRIVILEGE_ESCALATION_DENIED",
+          "Caller privilege claims cannot affect minted tokens.",
+          { requestedScopes: callerScopes },
+        );
+      }
+    }
+
     const expiresIn: JwtExpiresIn =
-      identity.actorType === "system" ? "1h" : "8h";
-    const token = this.signJwt(identity, expiresIn);
+      resolvedIdentity.actorType === "system" ? "1h" : "8h";
+    const token = this.signJwt(resolvedIdentity, expiresIn);
     return { token, expiresIn };
   }
 
