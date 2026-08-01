@@ -478,17 +478,6 @@ export class AuthController {
       // verification error
     }
 
-    if (!payload) {
-      try {
-        const decoded = jwt.decode(proofHeader);
-        if (decoded && typeof decoded === "object") {
-          payload = decoded as Record<string, unknown>;
-        }
-      } catch {
-        // decode error
-      }
-    }
-
     if (!payload && proofHeader.includes(".")) {
       try {
         const parts = proofHeader.split(".");
