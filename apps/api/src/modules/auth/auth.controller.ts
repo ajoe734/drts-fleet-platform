@@ -23,6 +23,10 @@ import {
 import { OpenRoute } from "../../common/auth";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import {
+  toPublicPartnerAuthError,
+  toPublicTenantAuthError,
+} from "../../common/iam-error-codes";
+import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
@@ -302,7 +306,7 @@ export class AuthController {
           requestedTenantId,
         },
       });
-      throw error;
+      throw toPublicTenantAuthError(error);
     }
   }
 
@@ -415,7 +419,7 @@ export class AuthController {
           apiKey: command.apiKey,
         },
       });
-      throw error;
+      throw toPublicPartnerAuthError(error);
     }
   }
 
