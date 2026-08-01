@@ -5,6 +5,11 @@ Version: `2026-08-01.v1`
 Architecture authority: `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`  
 Machine registration: `scripts/dispatch-stage1-5-identity-access-account-security-20260801.py`
 
+Run the registration script from the canonical checkout. If an isolated
+worktree is required, export `AI_STATUS_ROOT` with the canonical checkout path;
+the script propagates that root to every `ai-status.sh` transaction and verifies
+the resulting canonical task records before reporting success.
+
 ## 1. Execution objective
 
 Stage 1 is functionally close to complete, but the current login, account and

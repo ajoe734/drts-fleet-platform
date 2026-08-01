@@ -9,6 +9,10 @@ Usage:
     AI_NAME=Codex python3 scripts/dispatch-stage1-5-identity-access-account-security-20260801.py --dry-run
     AI_NAME=Codex python3 scripts/dispatch-stage1-5-identity-access-account-security-20260801.py
     AI_NAME=Codex python3 scripts/dispatch-stage1-5-identity-access-account-security-20260801.py --allow-existing
+
+When running from an isolated worktree set AI_STATUS_ROOT to the canonical
+checkout so registration and post-write verification use canonical machine
+truth rather than the worktree's static ai-status.json snapshot.
 """
 
 from __future__ import annotations
@@ -23,7 +27,12 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[1]
-STATUS_FILE = REPO / "ai-status.json"
+STATUS_ROOT = Path(
+    os.environ.get("AI_STATUS_ROOT")
+    or os.environ.get("ORCH_STATUS_ROOT")
+    or REPO
+).expanduser().resolve()
+STATUS_FILE = STATUS_ROOT / "ai-status.json"
 PHASE = "stage1.5-identity-access-account-security-20260801"
 ARCHITECTURE_REF = (
     "docs/02-architecture/"
@@ -473,6 +482,8 @@ def metadata_for(item: Task) -> dict[str, object]:
 def register(item: Task) -> None:
     env = os.environ.copy()
     env.setdefault("AI_NAME", "Codex")
+    env["AI_STATUS_ROOT"] = str(STATUS_ROOT)
+    env["ORCH_STATUS_ROOT"] = str(STATUS_ROOT)
     env.update(
         {
             "TASK_PHASE": PHASE,
