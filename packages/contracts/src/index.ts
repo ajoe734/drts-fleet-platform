@@ -793,6 +793,7 @@ export interface IdentityContext {
     | "ops_user"
     | "driver_user"
     | "partner_api_key"
+    | "partner_user"
     | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
