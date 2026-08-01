@@ -805,7 +805,133 @@ describe("IAPSubjectAdapter", () => {
     expect(caught?.status).toBe(403);
     expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
   });
+
+  it("ignores expired (validTo in past) and future (validFrom in future) role bindings during subject resolution", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const nowMs = Date.now();
+    const pastTime = new Date(nowMs - 3600 * 1000).toISOString();
+    const futureTime = new Date(nowMs + 3600 * 1000).toISOString();
+    const farPastTime = new Date(nowMs - 7200 * 1000).toISOString();
+
+    // User with expired and future bindings only
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_expired_bindings_001",
+        sourceRef: "iap_subject:expired_sub_001",
+        issuer: "google_iap",
+        subject: "expired_sub_001",
+        principalType: "human",
+        email: "expired-bindings@platform.drts",
+        emailVerified: true,
+        displayName: "Expired Bindings User",
+        status: "active",
+        createdAt: pastTime,
+        updatedAt: pastTime,
+      },
+      {
+        membershipId: "membership_expired_001",
+        sourceRef: "iap_membership:expired_sub_001",
+        principalId: "principal_expired_bindings_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: pastTime,
+        updatedAt: pastTime,
+      },
+      [
+        {
+          roleBindingId: "rb_expired_001",
+          sourceRef: "rb_expired_001",
+          membershipId: "membership_expired_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: farPastTime,
+          validTo: pastTime, // Expired!
+          createdAt: farPastTime,
+          updatedAt: farPastTime,
+        },
+        {
+          roleBindingId: "rb_future_001",
+          sourceRef: "rb_future_001",
+          membershipId: "membership_expired_001",
+          roleCode: "platform_admin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: futureTime, // Future!
+          validTo: null,
+          createdAt: pastTime,
+          updatedAt: pastTime,
+        },
+      ],
+    );
+
+    const token = signTestIapToken({
+      sub: "expired_sub_001",
+      email: "expired-bindings@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+  });
+
+  it("correctly classifies security events as actorType=ops_user and realm=ops for ops users", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const token = signTestIapToken({
+      sub: "ops_subject_sec_001",
+      email: "operator1@platform.drts",
+      gcp_ia_groups: ["ops-users@platform.drts"],
+    });
+
+    const result = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+        autoProvision: true,
+      },
+    );
+
+    expect(result.membership.realm).toBe("ops");
+    expect(result.effectiveRoles).toContain("operator");
+
+    const resolvedEvents = await securityEventsService.listEvents(null, {
+      eventType: "iap_subject.resolved",
+    });
+    const opsResolvedEvent = resolvedEvents.find((e) => e.actorId === result.principal.principalId);
+    expect(opsResolvedEvent).toBeDefined();
+    expect(opsResolvedEvent?.actorType).toBe("ops_user");
+    expect(opsResolvedEvent?.realm).toBe("ops");
+  });
 });
+
 
 
 

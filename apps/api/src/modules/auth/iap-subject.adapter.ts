@@ -125,8 +125,10 @@ export class IAPSubjectAdapter {
     }
 
     const subject = payload.sub;
+    const assertionGroups = payload.gcp_ia_groups || payload.groups || [];
     if (options.strictIapMode && !payload.email) {
-      this.emitDeniedEvent("missing_email_in_strict_mode", subject);
+      const { actorType, realm } = this.getActorContext(undefined, undefined, assertionGroups);
+      this.emitDeniedEvent("missing_email_in_strict_mode", subject, undefined, realm, actorType);
       throw new ApiRequestError(
         401,
         "IAP_ASSERTION_INVALID",
@@ -136,7 +138,6 @@ export class IAPSubjectAdapter {
 
     const rawEmail = payload.email || `${subject}@platform.drts`;
     const normalizedEmail = rawEmail.replace(/.*:/, "").trim().toLowerCase();
-    const assertionGroups = payload.gcp_ia_groups || payload.groups || [];
 
     // Durable identity resolution strictly by immutable subject
     let principal = await this.identityRepository.findPrincipalBySubject(
@@ -148,7 +149,14 @@ export class IAPSubjectAdapter {
 
     if (principal) {
       if (this.isInactiveStatus(principal.status)) {
-        this.emitDeniedEvent("user_inactive", principal.email || normalizedEmail, principal.principalId);
+        const { actorType, realm } = this.getActorContext(undefined, undefined, assertionGroups);
+        this.emitDeniedEvent(
+          "user_inactive",
+          principal.email || normalizedEmail,
+          principal.principalId,
+          realm,
+          actorType,
+        );
         throw new ApiRequestError(
           403,
           "IAP_WORKFORCE_USER_INACTIVE",
@@ -157,7 +165,8 @@ export class IAPSubjectAdapter {
       }
     } else {
       if (!options.autoProvision) {
-        this.emitDeniedEvent("user_not_found", normalizedEmail);
+        const { actorType, realm } = this.getActorContext(undefined, undefined, assertionGroups);
+        this.emitDeniedEvent("user_not_found", normalizedEmail, undefined, realm, actorType);
         throw new ApiRequestError(
           403,
           "IAP_WORKFORCE_USER_INACTIVE",
@@ -170,7 +179,8 @@ export class IAPSubjectAdapter {
       const isOpsUserGroup = assertionGroups.includes("ops-users@platform.drts");
 
       if (!isPlatformAdminGroup && !isOpsUserGroup) {
-        this.emitDeniedEvent("unmapped_group_membership", normalizedEmail);
+        const { actorType, realm } = this.getActorContext(undefined, undefined, assertionGroups);
+        this.emitDeniedEvent("unmapped_group_membership", normalizedEmail, undefined, realm, actorType);
         throw new ApiRequestError(
           403,
           "IAP_WORKFORCE_USER_INACTIVE",
@@ -254,7 +264,14 @@ export class IAPSubjectAdapter {
       activeControlPlaneMemberships[0];
 
     if (!activeMembership) {
-      this.emitDeniedEvent("user_inactive", principal.email || normalizedEmail, principal.principalId);
+      const { actorType, realm } = this.getActorContext(undefined, undefined, assertionGroups);
+      this.emitDeniedEvent(
+        "user_inactive",
+        principal.email || normalizedEmail,
+        principal.principalId,
+        realm,
+        actorType,
+      );
       throw new ApiRequestError(
         403,
         "IAP_WORKFORCE_USER_INACTIVE",
@@ -263,6 +280,7 @@ export class IAPSubjectAdapter {
     }
 
     // Lookup durable role bindings across active control-plane memberships
+    const currentTimeMs = new Date(now).getTime();
     const allRoleBindings: CanonicalIdentityRoleBindingRecord[] = [];
     for (const m of activeControlPlaneMemberships) {
       const bindings = await this.identityRepository.findRoleBindingsByMembershipId(
@@ -270,14 +288,37 @@ export class IAPSubjectAdapter {
       );
       allRoleBindings.push(...bindings);
     }
+    const activeRoleBindings = allRoleBindings.filter((b) => {
+      if (b.validFrom) {
+        const validFromMs = new Date(b.validFrom).getTime();
+        if (!isNaN(validFromMs) && validFromMs > currentTimeMs) {
+          return false;
+        }
+      }
+      if (b.validTo) {
+        const validToMs = new Date(b.validTo).getTime();
+        if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
+          return false;
+        }
+      }
+      return true;
+    });
+
     const assignedRoles = Array.from(
-      new Set(allRoleBindings.map((r) => r.roleCode)),
+      new Set(activeRoleBindings.map((r) => r.roleCode)),
     );
     if (assignedRoles.length === 0) {
+      const { actorType, realm } = this.getActorContext(
+        activeMembership?.realm,
+        undefined,
+        assertionGroups,
+      );
       this.emitDeniedEvent(
         "user_inactive",
         principal.email || normalizedEmail,
         principal.principalId,
+        realm,
+        actorType,
       );
       throw new ApiRequestError(
         403,
@@ -308,10 +349,17 @@ export class IAPSubjectAdapter {
     }
 
     if (effectiveRoles.length === 0) {
+      const { actorType, realm } = this.getActorContext(
+        activeMembership?.realm,
+        originalRoles,
+        assertionGroups,
+      );
       this.emitDeniedEvent(
         "unmapped_group_membership",
         principal.email || normalizedEmail,
         principal.principalId,
+        realm,
+        actorType,
       );
       throw new ApiRequestError(
         403,
@@ -336,6 +384,12 @@ export class IAPSubjectAdapter {
       }
     }
 
+    const finalActorContext = this.getActorContext(
+      activeMembership.realm,
+      effectiveRoles,
+      assertionGroups,
+    );
+
     let driftDetails: ResolvedIapWorkforceSubject["driftDetails"];
     if (driftDetected) {
       driftDetails = {
@@ -343,7 +397,12 @@ export class IAPSubjectAdapter {
         effectiveRoles,
         missingGroups,
       };
-      this.emitGroupDriftEvent(principal.principalId, driftDetails);
+      this.emitGroupDriftEvent(
+        principal.principalId,
+        driftDetails,
+        finalActorContext.realm,
+        finalActorContext.actorType,
+      );
     }
 
     // Derive effective scopes strictly from verified roles (ignoring any client spoofed x-scopes)
@@ -353,7 +412,12 @@ export class IAPSubjectAdapter {
       scopes?.forEach((s) => effectiveScopesSet.add(s));
     }
 
-    this.emitResolvedEvent(principal.principalId, effectiveRoles);
+    this.emitResolvedEvent(
+      principal.principalId,
+      effectiveRoles,
+      finalActorContext.realm,
+      finalActorContext.actorType,
+    );
 
     return {
       principal,
@@ -379,13 +443,50 @@ export class IAPSubjectAdapter {
     return typeof val === "string" ? val : null;
   }
 
-  private emitDeniedEvent(reason: string, target: string, actorId?: string) {
+  private getActorContext(
+    realm?: "platform" | "ops" | string | null,
+    roles?: string[],
+    assertionGroups?: string[],
+  ): { actorType: "platform_admin" | "ops_user"; realm: "platform" | "ops" } {
+    if (realm === "ops") {
+      return { actorType: "ops_user", realm: "ops" };
+    }
+    if (realm === "platform") {
+      return { actorType: "platform_admin", realm: "platform" };
+    }
+    if (roles && roles.length > 0) {
+      const hasPlatformRole = roles.some((r) => r === "superadmin" || r === "platform_admin");
+      const hasOpsRole = roles.some((r) => r === "operator" || r === "ops_user");
+      if (!hasPlatformRole && hasOpsRole) {
+        return { actorType: "ops_user", realm: "ops" };
+      }
+      if (hasPlatformRole) {
+        return { actorType: "platform_admin", realm: "platform" };
+      }
+    }
+    if (assertionGroups && assertionGroups.length > 0) {
+      const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
+      const isPlatformGroup = assertionGroups.includes("platform-admins@platform.drts");
+      if (isOpsGroup && !isPlatformGroup) {
+        return { actorType: "ops_user", realm: "ops" };
+      }
+    }
+    return { actorType: "platform_admin", realm: "platform" };
+  }
+
+  private emitDeniedEvent(
+    reason: string,
+    target: string,
+    actorId?: string,
+    realm: "platform" | "ops" = "platform",
+    actorType: "platform_admin" | "ops_user" = "platform_admin",
+  ) {
     if (!this.securityEventsService) return;
     this.securityEventsService.recordEvent({
       actorId: actorId ?? "anonymous",
-      actorType: "platform_admin",
+      actorType,
       subjectId: target,
-      realm: "platform",
+      realm,
       tenantId: null,
       partnerId: null,
       eventType: "iap_subject.denied",
@@ -411,13 +512,18 @@ export class IAPSubjectAdapter {
     });
   }
 
-  private emitGroupDriftEvent(actorId: string, driftDetails: NonNullable<ResolvedIapWorkforceSubject["driftDetails"]>) {
+  private emitGroupDriftEvent(
+    actorId: string,
+    driftDetails: NonNullable<ResolvedIapWorkforceSubject["driftDetails"]>,
+    realm: "platform" | "ops",
+    actorType: "platform_admin" | "ops_user",
+  ) {
     if (!this.securityEventsService) return;
     this.securityEventsService.recordEvent({
       actorId,
-      actorType: "platform_admin",
+      actorType,
       subjectId: actorId,
-      realm: "platform",
+      realm,
       tenantId: null,
       partnerId: null,
       eventType: "iap_group_drift.detected",
@@ -444,13 +550,18 @@ export class IAPSubjectAdapter {
     });
   }
 
-  private emitResolvedEvent(actorId: string, roles: string[]) {
+  private emitResolvedEvent(
+    actorId: string,
+    roles: string[],
+    realm: "platform" | "ops",
+    actorType: "platform_admin" | "ops_user",
+  ) {
     if (!this.securityEventsService) return;
     this.securityEventsService.recordEvent({
       actorId,
-      actorType: "platform_admin",
+      actorType,
       subjectId: actorId,
-      realm: "platform",
+      realm,
       tenantId: null,
       partnerId: null,
       eventType: "iap_subject.resolved",

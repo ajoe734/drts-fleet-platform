@@ -633,6 +633,133 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.IAP_EXPECTED_AUDIENCE;
     delete process.env.IAP_JWT_SECRET;
   });
+
+  it("verifies integration: role bindings validFrom/validTo lifecycle filtering and ops security events classification", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const nowMs = Date.now();
+    const pastTime = new Date(nowMs - 3600 * 1000).toISOString();
+    const futureTime = new Date(nowMs + 3600 * 1000).toISOString();
+
+    // User with 1 active ops binding and 1 expired platform binding
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_mixed_bindings_001",
+        sourceRef: "iap_subject:mixed_sub_001",
+        issuer: "google_iap",
+        subject: "mixed_sub_001",
+        principalType: "human",
+        email: "mixed@platform.drts",
+        emailVerified: true,
+        displayName: "Mixed Bindings User",
+        status: "active",
+        createdAt: pastTime,
+        updatedAt: pastTime,
+      },
+      {
+        membershipId: "membership_mixed_ops_001",
+        sourceRef: "iap_membership:mixed_sub_001_ops",
+        principalId: "principal_mixed_bindings_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: pastTime,
+        updatedAt: pastTime,
+      },
+      [
+        {
+          roleBindingId: "rb_mixed_ops_active",
+          sourceRef: "rb_mixed_ops_active",
+          membershipId: "membership_mixed_ops_001",
+          roleCode: "operator",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: pastTime,
+          validTo: futureTime, // Active!
+          createdAt: pastTime,
+          updatedAt: pastTime,
+        },
+      ],
+    );
+
+    // Also add expired platform admin binding on platform membership
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_mixed_bindings_001",
+        sourceRef: "iap_subject:mixed_sub_001",
+        issuer: "google_iap",
+        subject: "mixed_sub_001",
+        principalType: "human",
+        email: "mixed@platform.drts",
+        emailVerified: true,
+        displayName: "Mixed Bindings User",
+        status: "active",
+        createdAt: pastTime,
+        updatedAt: pastTime,
+      },
+      {
+        membershipId: "membership_mixed_platform_001",
+        sourceRef: "iap_membership:mixed_sub_001_platform",
+        principalId: "principal_mixed_bindings_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: pastTime,
+        updatedAt: pastTime,
+      },
+      [
+        {
+          roleBindingId: "rb_mixed_platform_expired",
+          sourceRef: "rb_mixed_platform_expired",
+          membershipId: "membership_mixed_platform_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: new Date(nowMs - 7200 * 1000).toISOString(),
+          validTo: pastTime, // Expired!
+          createdAt: pastTime,
+          updatedAt: pastTime,
+        },
+      ],
+    );
+
+    const token = signAssertion({
+      sub: "mixed_sub_001",
+      email: "mixed@platform.drts",
+      gcp_ia_groups: ["ops-users@platform.drts"],
+    });
+
+    const resolution = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: INTEGRATION_AUDIENCE,
+        jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+      },
+    );
+
+    // Expired superadmin role should be ignored; only active operator role remains
+    expect(resolution.effectiveRoles).toEqual(["operator"]);
+    expect(resolution.membership.realm).toBe("ops");
+
+    const events = await securityEventsService.listEvents(null, {
+      eventType: "iap_subject.resolved",
+    });
+    const opsEvent = events.find((e) => e.actorId === "principal_mixed_bindings_001");
+    expect(opsEvent).toBeDefined();
+    expect(opsEvent?.actorType).toBe("ops_user");
+    expect(opsEvent?.realm).toBe("ops");
+  });
 });
+
 
 
