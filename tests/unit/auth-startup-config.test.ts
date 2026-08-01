@@ -94,11 +94,12 @@ describe("validateAuthStartupConfig in local & test mode", () => {
     expect(report.config.audience).toBe("https://api.local.drts.internal");
   });
 
-  it("fails validation when AUTH_MODE is missing in local/test environment", () => {
-    const report = buildAuthStartupConfigReport({
+  it("fails validation and throws when AUTH_MODE is missing in local/test environment", () => {
+    const env = {
       APP_ENV: "local",
       CI: "false",
-    });
+    };
+    const report = buildAuthStartupConfigReport(env);
 
     expect(report.valid).toBe(false);
     expect(
@@ -106,14 +107,19 @@ describe("validateAuthStartupConfig in local & test mode", () => {
         (i) => i.control === "AUTH_MODE" && i.code === "MISSING_CONTROL",
       ),
     ).toBe(true);
+
+    expect(() => validateAuthStartupConfig(env)).toThrowError(
+      AuthConfigurationError,
+    );
   });
 
-  it("fails validation when invalid AUTH_MODE is specified in local/test environment", () => {
-    const report = buildAuthStartupConfigReport({
+  it("fails validation and throws when invalid AUTH_MODE is specified in local/test environment", () => {
+    const env = {
       APP_ENV: "local",
       CI: "false",
       AUTH_MODE: "invalid_mode",
-    });
+    };
+    const report = buildAuthStartupConfigReport(env);
 
     expect(report.valid).toBe(false);
     expect(
@@ -121,18 +127,27 @@ describe("validateAuthStartupConfig in local & test mode", () => {
         (i) => i.control === "AUTH_MODE" && i.code === "INVALID_FORMAT",
       ),
     ).toBe(true);
+
+    expect(() => validateAuthStartupConfig(env)).toThrowError(
+      AuthConfigurationError,
+    );
   });
 
   it("strictly rejects JWT algorithm 'none' even in local mode", () => {
-    const report = buildAuthStartupConfigReport({
+    const env = {
       APP_ENV: "local",
       CI: "false",
       AUTH_MODE: "local",
       JWT_ALGORITHM: "none",
-    });
+    };
+    const report = buildAuthStartupConfigReport(env);
 
     expect(report.valid).toBe(false);
     expect(report.issues.some((i) => i.issue.includes("'none'"))).toBe(true);
+
+    expect(() => validateAuthStartupConfig(env)).toThrowError(
+      AuthConfigurationError,
+    );
   });
 });
 

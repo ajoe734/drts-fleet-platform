@@ -652,15 +652,11 @@ export function buildAuthStartupConfigReport(
 
 export function validateAuthStartupConfig(
   env: EnvLike = process.env,
-  options?: { failOnError?: boolean },
+  _options?: { failOnError?: boolean },
 ): AuthStartupConfigReport {
   const report = buildAuthStartupConfigReport(env);
 
-  const shouldFail =
-    !report.valid &&
-    (report.isStrictEnvironment || options?.failOnError === true);
-
-  if (shouldFail) {
+  if (!report.valid) {
     throw new AuthConfigurationError(report.environment, report.issues);
   }
 
