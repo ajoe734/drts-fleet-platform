@@ -1,10 +1,17 @@
 import type {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
+  ConsumeReferralEmbedHandoffArtifactCommand,
   PartnerChannelEntryRecord,
+  RecordReferralEmbedConsentCommand,
 } from "@drts/contracts";
 import type { CreatePartnerIngressHandoffCommand } from "@drts/contracts";
 import type { PartnerIngressHandoffSession } from "@drts/contracts";
+import type {
+  CreateReferralEmbedHandoffArtifactCommand,
+  ReferralEmbedHandoffArtifact,
+  ReferralEmbedSession,
+} from "@drts/contracts";
 import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
@@ -134,6 +141,42 @@ export async function issuePartnerIngressHandoff(
 ) {
   return requestAuthority<PartnerIngressHandoffSession>(
     "/api/partner/ingress/handoff",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function issueReferralEmbedHandoffArtifact(
+  command: CreateReferralEmbedHandoffArtifactCommand,
+) {
+  return requestAuthority<ReferralEmbedHandoffArtifact>(
+    "/api/partner/ingress/referral-embed-handoff",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function consumeReferralEmbedHandoffArtifact(
+  command: ConsumeReferralEmbedHandoffArtifactCommand,
+) {
+  return requestAuthority<ReferralEmbedSession>(
+    "/api/partner/ingress/referral-embed-handoff/consume",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function recordReferralEmbedConsent(
+  command: RecordReferralEmbedConsentCommand,
+) {
+  return requestAuthority<ReferralEmbedSession>(
+    "/api/partner/ingress/referral-embed-handoff/consent",
     {
       method: "POST",
       body: JSON.stringify(command),
