@@ -220,7 +220,7 @@ const referralEmbedActors: ActorProfile[] = [
   {
     key: "referral-passenger",
     actorType: "referral_passenger",
-    partnerEntrySlug: "referral-demo-community",
+    partnerEntrySlug: "yuhe-residence",
   },
 ];
 
@@ -238,9 +238,9 @@ const enterpriseMarker =
 const channelPartnerMarker =
   /Channel Dashboard|渠道總覽|Referral Statements|分潤對帳單|Usage|用量明細/i;
 const referralEmbedMarker =
-  /社區叫車|Referral Embed|轉介嵌入前台|\/embed\/referral-demo-community/i;
+  /社區叫車|御和物業|Referral Embed|轉介嵌入前台|\/embed\/yuhe-residence/i;
 const referralEmbedEntrySlug =
-  process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "referral-demo-community";
+  process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "yuhe-residence";
 const currentDevHostSuffix = "4t7rg6fmeq-uc.a.run.app";
 const channelPartnerEvidenceMarkers = [
   /drts-data-source:live/i,

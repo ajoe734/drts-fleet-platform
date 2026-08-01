@@ -22,10 +22,9 @@ const referralBaseURL =
   "http://127.0.0.1:3014";
 
 const referralEntrySlug =
-  process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_SLUG ?? "referral-demo-community";
+  process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_SLUG ?? "yuhe-residence";
 const referralEntryHost =
-  process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_HOST ??
-  "community-app.example.test";
+  process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_HOST ?? "app.yuhe-living.com.tw";
 const tenantFallbackBookingId =
   process.env.DRTS_V9_VERIFY_TENANT_BOOKING_ID ?? "booking-avf-001";
 const sandboxExperimentFallbackId =

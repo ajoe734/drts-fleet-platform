@@ -220,7 +220,7 @@ jobs:
           tenant_console_service="$(pick "${DEV_GCP_TENANT_CONSOLE_SERVICE:-}" "" "drts-dev-tenant-console-web")"
           bank_console_service="$(pick "${DEV_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-dev-bank-console-web")"
           referral_embed_service="$(pick "${DEV_GCP_REFERRAL_EMBED_SERVICE:-}" "" "drts-dev-referral-embed-web")"
-          referral_embed_entry_slug="$(pick "${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "referral-demo-community")"
+          referral_embed_entry_slug="$(pick "${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "yuhe-residence")"
           enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-dev-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"

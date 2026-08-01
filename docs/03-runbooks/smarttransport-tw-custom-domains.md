@@ -120,3 +120,20 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
   - `https://refer.smarttransport.tw/embed/referral-demo-community` 回 `200`
   - `https://channel.smarttransport.tw`、`https://api.smarttransport.tw/health`、`https://ride.smarttransport.tw`、`https://concierge.smarttransport.tw` 於 2026-07-31 測得 TLS/SSL 連線失敗；這些是外部 live-state observation，不回寫 repo active inventory，也不阻擋本次 repo-only domain-maintenance rails 修復
 - 因此本 runbook 的 machine-truth 職責只有對齊 repo 內 authoritative inventory；外部 DNS、憑證、mapping 存活清理另案處理。
+
+## 6. 2026-08-01 Referral 正式 partner entry（dev acceptance）
+
+- Platform Admin authority 已建立正式非 demo entry：`御和物業` / `yuhe-residence`。
+- Dev acceptance URL：`https://refer.smarttransport.tw/embed/yuhe-residence`；
+  Cloud Run fallback：`https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/yuhe-residence`。
+- Authority 的 primary `entryHost` 是 `app.yuhe-living.com.tw`；dev embed
+  allowlist 同時保留 `app-stg.yuhe-living.com.tw`。允許 host 的請求必須沒有
+  `X-Frame-Options`，且 CSP `frame-ancestors` 只包含該次指定的允許 origin。
+- `deploy-dev.yml` 的 source default 已改為 `yuhe-residence`。在包含此變更的
+  publish snapshot 部署前，既有 revision 的 `/` 仍可能歷史性地導向
+  `referral-demo-community`；直接正式 URL 不受影響。
+- `referral-demo-community` 僅保留為測試 seed／歷史驗收資料，不再是 root
+  default 或對外 partner URL。
+- 本節描述的是 project `drts-dev-ray-tw-20260730` 的 dev acceptance rail。
+  `app.yuhe-living.com.tw` 在設計 authority 中代表 partner primary host，但本
+  runbook 不據此宣稱該外部 host 或 DRTS production rail 已完成 production cutover。

@@ -177,14 +177,16 @@ describe("tenant partner foundation service", () => {
       "bank-demo-alpha-airport",
     );
 
-    // 9 active entries: 2 demo bank flows, the referral demo, 4 canonical
-    // airport-card issuers, and the insurance/travel partner routes.
-    expect(entries).toHaveLength(9);
+    // 10 active entries: 2 demo bank flows, the referral demo, the formal
+    // Yuhe referral entry, 4 canonical airport-card issuers, and the
+    // insurance/travel partner routes.
+    expect(entries).toHaveLength(10);
     expect(entries.map((entry) => entry.entrySlug)).toEqual(
       expect.arrayContaining([
         "bank-demo-alpha-airport",
         "bank-demo-beta-airport",
         "referral-demo-community",
+        "yuhe-residence",
         "ctbc",
         "cathay",
         "taishin",
@@ -198,6 +200,27 @@ describe("tenant partner foundation service", () => {
       partnerCode: "bank_demo_alpha",
       businessDispatchSubtype: "credit_card_airport_transfer",
       eligibilityMode: "bank_card_inline",
+    });
+    expect(
+      tenantPartnerService.getPartnerEntry("yuhe-residence"),
+    ).toMatchObject({
+      partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      partnerCode: "yuhe",
+      partnerType: "referral_channel",
+      tenantId: TENANT_ID,
+      programId: "program-referral-community",
+      entryHost: "app.yuhe-living.com.tw",
+      entryPath: "/embed/yuhe-residence",
+      displayName: "御和物業",
+      themeAccent: "#0F766E",
+      brandingMetadata: {
+        displayName: "御和物業",
+        themeAccent: "#0F766E",
+        supportEmail: null,
+        supportPhone: "0800-911-200",
+      },
+      status: "active",
+      activeFlag: true,
     });
   });
 
@@ -353,7 +376,7 @@ describe("tenant partner foundation service", () => {
     );
     await reloadedService.onModuleInit();
 
-    expect(store.snapshot().partnerEntries).toHaveLength(9);
+    expect(store.snapshot().partnerEntries).toHaveLength(10);
     expect(reloadedService.listPartnerEntries()).toEqual(
       firstService.listPartnerEntries(),
     );
@@ -1412,7 +1435,20 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
   it("lists seeded referral rates and filters by entrySlug", () => {
     const service = new TenantPartnerService(new AuditNotificationService());
     const all = service.listReferralRevenueShareRules();
-    expect(all.length).toBeGreaterThanOrEqual(1);
+    expect(all.length).toBeGreaterThanOrEqual(2);
+    expect(service.listReferralRevenueShareRules("yuhe-residence")).toEqual([
+      expect.objectContaining({
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerEntrySlug: "yuhe-residence",
+        rateType: "percent",
+        value: 10,
+        currency: "TWD",
+        effectiveFrom: "2026-07-01T00:00:00.000Z",
+        effectiveUntil: null,
+        settlementDirection: "drts_pays_partner",
+        channelKey: "partner_referral",
+      }),
+    ]);
     const filtered = service.listReferralRevenueShareRules(
       "referral-demo-community",
     );

@@ -83,6 +83,12 @@ describe("dev active surface contract", () => {
     expect(source).not.toContain(
       "playwright.partner-booking-surfaces.config.ts",
     );
+    expect(source).toContain(
+      'referral_embed_entry_slug="$(pick "${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "yuhe-residence")"',
+    );
+    expect(source).not.toContain(
+      '"${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "referral-demo-community"',
+    );
   });
 
   it("keeps domain mapping defaults and fail-closed wording aligned", () => {
@@ -141,7 +147,7 @@ describe("dev active surface contract", () => {
     );
 
     expect(appEntryIndex).toContain(
-      "https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community",
+      "https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/yuhe-residence",
     );
     expect(appEntryIndex).toContain(
       "https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app",
