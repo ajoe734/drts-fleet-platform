@@ -70,6 +70,85 @@ export interface CreatePartnerIngressHandoffCommand {
   consentScope?: PartnerUserIdentityConsentScope;
 }
 
+export const REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES = [
+  "trip.manage",
+  "pii.trip",
+  "identity.bind",
+] as const;
+export type ReferralEmbedRequiredConsentScope =
+  (typeof REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES)[number];
+
+export interface ReferralEmbedConsentBundle {
+  bundleVersion: string;
+  grantedScopes: ReferralEmbedRequiredConsentScope[];
+  grantedAt: string;
+  actorIp?: string | null;
+  userAgent?: string | null;
+}
+
+export interface CreateReferralEmbedHandoffArtifactCommand {
+  entrySlug: string;
+  entryHost: string;
+  apiKey?: string;
+  partnerUserRef: string;
+  consentBundle?: ReferralEmbedConsentBundle | null;
+}
+
+export interface ReferralEmbedHandoffArtifact {
+  handoffId: string;
+  artifact: string;
+  tokenType: "SingleUse";
+  expiresIn: "120s";
+  expiresAt: string;
+  partnerEntrySlug: string;
+  entryHost: string;
+  drtsPassengerId: string;
+  consentRequired: boolean;
+  consentBundleVersion: string | null;
+}
+
+export interface ConsumeReferralEmbedHandoffArtifactCommand {
+  artifact: string;
+  entrySlug: string;
+  entryHost: string;
+}
+
+export interface RecordReferralEmbedConsentCommand {
+  handoffId: string;
+  entrySlug: string;
+  entryHost: string;
+  consentBundle: ReferralEmbedConsentBundle;
+}
+
+export interface ReferralEmbedSessionIdentity {
+  actorType: "referral_passenger";
+  actorId: string;
+  realm: "partner";
+  authMode: "jwt_bearer";
+  roleFamilies: ["partner"];
+  roles: string[];
+  scopes: string[];
+  tenantId: string | null;
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  partnerEntrySlug: string;
+  drtsPassengerId: string;
+}
+
+export interface ReferralEmbedSession {
+  handoffId: string;
+  partnerEntrySlug: string;
+  entryHost: string;
+  drtsPassengerId: string;
+  identityActive: boolean;
+  consent: {
+    requiredScopes: ReferralEmbedRequiredConsentScope[];
+    bundleVersion: string | null;
+    grantedAt: string | null;
+  };
+  identity: ReferralEmbedSessionIdentity;
+}
+
 export interface PartnerIngressHandoffSession {
   accessToken: string;
   tokenType: "Bearer";

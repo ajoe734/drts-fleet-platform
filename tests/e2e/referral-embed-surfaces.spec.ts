@@ -123,6 +123,28 @@ test.describe("referral embed surfaces", () => {
     ).toContainText("社區叫車");
   });
 
+  test("legacy browser credential query parameters are ignored", async ({
+    page,
+  }) => {
+    test.skip(!usesLocalFixture, "Requires the local controllable authority.");
+
+    const response = await page.goto(
+      `${configuredEmbedPath("yuhe-residence")}&apiKey=spoofed-browser-key&partnerUserRef=spoofed-user`,
+      {
+        waitUntil: "domcontentloaded",
+        referer: `${allowedEmbedOrigin}/mobile`,
+      },
+    );
+
+    expect(response?.ok()).toBeTruthy();
+    await expect(page.locator("body")).toContainText("社區叫車");
+    await expect(page.locator("body")).not.toContainText("fallback_to_web");
+    await expect(page.locator("body")).not.toContainText(
+      "spoofed-browser-key",
+    );
+    await expect(page.locator("body")).not.toContainText("spoofed-user");
+  });
+
   test("returns 404 only for an authority-confirmed missing entry", async ({
     request,
   }) => {

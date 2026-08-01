@@ -22,13 +22,6 @@ function buildHref(context: EmbedContext, next: Record<string, string>) {
     entryHost: context.entry.entryHost?.trim() || "",
   });
 
-  if (context.handoff.apiKey) {
-    params.set("apiKey", context.handoff.apiKey);
-  }
-  if (context.handoff.partnerUserRef) {
-    params.set("partnerUserRef", context.handoff.partnerUserRef);
-  }
-
   for (const [key, value] of Object.entries(next)) {
     params.set(key, value);
   }
@@ -420,6 +413,59 @@ function ActionLink({
   );
 }
 
+function ActionButton({
+  label,
+  tone = "primary",
+}: {
+  label: string;
+  tone?: "primary" | "ghost" | "danger" | "default";
+}) {
+  const palette =
+    tone === "ghost"
+      ? {
+          background: "var(--embed-accent-soft)",
+          color: "var(--embed-accent)",
+          border:
+            "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
+        }
+      : tone === "danger"
+        ? {
+            background: "var(--embed-danger-fg)",
+            color: "white",
+            border: "1px solid var(--embed-danger-fg)",
+          }
+        : tone === "default"
+          ? {
+              background:
+                "color-mix(in srgb, var(--embed-neutral-fg) 7%, white)",
+              color: "var(--embed-neutral-fg)",
+              border:
+                "1px solid color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
+            }
+          : {
+              background: "var(--embed-accent)",
+              color: "white",
+              border: "1px solid var(--embed-accent)",
+            };
+
+  return (
+    <button
+      type="submit"
+      style={{
+        width: "100%",
+        textAlign: "center",
+        borderRadius: 999,
+        padding: "12px 14px",
+        fontWeight: 800,
+        cursor: "pointer",
+        ...palette,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 type BannerTone =
   | "primary"
   | "success"
@@ -570,10 +616,30 @@ function IdentityState({ context }: { context: EmbedContext }) {
       banner: { tone: "primary" as const, icon: "lock" },
       footer: (
         <>
-          <ActionLink
-            href={buildHref(context, { state: "handoff", screen: "book" })}
-            label={t("embed.field.agree")}
-          />
+          <form action="/api/referral/session" method="post">
+            <input type="hidden" name="action" value="grant-consent" />
+            <input
+              type="hidden"
+              name="handoffId"
+              value={context.session?.handoffId ?? ""}
+            />
+            <input
+              type="hidden"
+              name="entrySlug"
+              value={context.entry.entrySlug}
+            />
+            <input
+              type="hidden"
+              name="entryHost"
+              value={context.entry.entryHost?.trim() || ""}
+            />
+            <input
+              type="hidden"
+              name="returnTo"
+              value={buildHref(context, { state: "handoff", screen: "book" })}
+            />
+            <ActionButton label={t("embed.field.agree")} />
+          </form>
           <ActionLink
             href={buildHref(context, { state: "fallback" })}
             label={t("embed.field.notNow")}

@@ -22,6 +22,7 @@ import type {
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
+  CreateReferralEmbedHandoffArtifactCommand,
   CreatePartnerIngressHandoffCommand,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
@@ -52,6 +53,10 @@ import type {
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  RecordReferralEmbedConsentCommand,
+  ReferralEmbedConsentBundle,
+  ReferralEmbedHandoffArtifact,
+  ReferralEmbedSession,
   ResolvePartnerEligibilityReviewCommand,
   ResourceActionDescriptor,
   RevokePartnerIngressCredentialCommand,
@@ -130,6 +135,7 @@ import type {
 } from "@drts/contracts";
 import {
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+  REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES,
   PARTNER_REFERRAL_CHANNEL_KEY,
 } from "@drts/contracts";
 
@@ -213,6 +219,10 @@ import {
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
+import {
+  ReferralEmbedHandoffRepository,
+  type PersistReferralEmbedHandoffCommand,
+} from "./referral-embed-handoff.repository";
 import {
   TenantPartnerRepository,
   type PersistTenantPartnerChanges,
@@ -306,6 +316,13 @@ type PartnerIngressResolution = {
 
 type PartnerIngressHandoffResolution = PartnerIngressResolution & {
   drtsPassengerId: string;
+};
+
+type ReferralEmbedHandoffResolution = PartnerIngressHandoffResolution & {
+  entryHost: string;
+  consentRequired: boolean;
+  consentBundleVersion: string | null;
+  consentGrantedAt: string | null;
 };
 
 type PartnerEligibilityIdentity = Pick<
@@ -416,6 +433,7 @@ const DEFAULT_PARTNER_ELIGIBILITY_SENSITIVE_DATA_POLICY: PartnerEligibilitySensi
 
 const DEFAULT_TENANT_API_KEY_LIFETIME_DAYS = 60;
 const MAX_TENANT_API_KEY_LIFETIME_DAYS = 90;
+const REFERRAL_EMBED_HANDOFF_EXPIRES_IN_SECONDS = 120;
 
 const CANONICAL_TENANT_API_KEY_SCOPES = new Set<string>([
   "audit:read",
@@ -1203,6 +1221,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     ],
     @Optional()
     private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
+    @Optional()
+    private readonly referralEmbedHandoffRepository: ReferralEmbedHandoffRepository = new ReferralEmbedHandoffRepository(),
   ) {
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
@@ -5228,6 +5248,195 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ],
       },
     };
+  }
+
+  async issueReferralEmbedHandoffArtifact(
+    command: CreateReferralEmbedHandoffArtifactCommand,
+    requestId?: string,
+    options?: {
+      allowInternalBootstrap?: boolean;
+    },
+  ): Promise<ReferralEmbedHandoffArtifact> {
+    const resolved = await this.resolveReferralEmbedHandoff(
+      command,
+      requestId,
+      options,
+    );
+    const issuedAt = new Date();
+    const expiresAt = new Date(
+      issuedAt.getTime() + REFERRAL_EMBED_HANDOFF_EXPIRES_IN_SECONDS * 1000,
+    );
+    const artifact = randomBytes(24).toString("base64url");
+    const persistence: PersistReferralEmbedHandoffCommand = {
+      artifact,
+      entrySlug: resolved.partnerEntry.entrySlug,
+      entryHost: resolved.entryHost,
+      partnerUserRef: command.partnerUserRef.trim(),
+      drtsPassengerId: resolved.drtsPassengerId,
+      tenantId: resolved.identity.tenantId,
+      partnerId: resolved.identity.partnerId ?? null,
+      partnerProgramId: resolved.identity.partnerProgramId ?? null,
+      consentRequired: resolved.consentRequired,
+      consentBundleVersion: resolved.consentBundleVersion,
+      consentGrantedAt: resolved.consentGrantedAt,
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    const record = await this.referralEmbedHandoffRepository.issue(persistence);
+    return {
+      handoffId: record.handoffId,
+      artifact,
+      tokenType: "SingleUse",
+      expiresIn: "120s",
+      expiresAt: record.expiresAt,
+      partnerEntrySlug: record.entrySlug,
+      entryHost: record.entryHost,
+      drtsPassengerId: record.drtsPassengerId,
+      consentRequired: record.consentRequired,
+      consentBundleVersion: record.consentBundleVersion,
+    };
+  }
+
+  async consumeReferralEmbedHandoffArtifact(
+    command: {
+      artifact: string;
+      entrySlug: string;
+      entryHost: string;
+    },
+  ): Promise<ReferralEmbedSession> {
+    const result = await this.referralEmbedHandoffRepository.consume(command);
+    if (result.outcome === "consumed") {
+      return result.session;
+    }
+    if (result.outcome === "replayed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REFERRAL_HANDOFF_REPLAYED",
+        "The referral handoff artifact has already been consumed.",
+      );
+    }
+    if (result.outcome === "expired") {
+      throw new ApiRequestError(
+        HttpStatus.GONE,
+        "REFERRAL_HANDOFF_EXPIRED",
+        "The referral handoff artifact has expired.",
+      );
+    }
+    if (result.outcome === "wrong_host") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_HOST_MISMATCH",
+        "The referral handoff artifact is not valid for this entry host.",
+      );
+    }
+    throw new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "REFERRAL_HANDOFF_NOT_FOUND",
+      "The referral handoff artifact is invalid.",
+    );
+  }
+
+  async recordReferralEmbedConsent(
+    command: RecordReferralEmbedConsentCommand,
+  ): Promise<ReferralEmbedSession> {
+    this.assertExactReferralEmbedConsentBundle(command.consentBundle);
+    const result = await this.referralEmbedHandoffRepository.recordConsent(
+      command,
+    );
+    if (result.outcome === "recorded" || result.outcome === "replayed") {
+      return result.session;
+    }
+    if (result.outcome === "wrong_host") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_HOST_MISMATCH",
+        "The referral embed consent can only be recorded for the original entry host.",
+      );
+    }
+    throw new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "REFERRAL_HANDOFF_NOT_FOUND",
+      "The referral embed handoff no longer exists.",
+    );
+  }
+
+  private async resolveReferralEmbedHandoff(
+    command: CreateReferralEmbedHandoffArtifactCommand,
+    requestId?: string,
+    options?: {
+      allowInternalBootstrap?: boolean;
+    },
+  ): Promise<ReferralEmbedHandoffResolution> {
+    const handoff = await this.issuePartnerIngressHandoff(
+      Object.assign(
+        {
+          entrySlug: command.entrySlug,
+          partnerUserRef: command.partnerUserRef,
+          consentScope: "passenger_identity_link" as const,
+        },
+        command.apiKey?.trim() ? { apiKey: command.apiKey } : null,
+      ),
+      requestId,
+      options,
+    );
+    const entryHost = command.entryHost?.trim().toLowerCase();
+    if (!entryHost) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ENTRY_HOST_REQUIRED",
+        "entryHost is required for referral embed handoff issuance.",
+      );
+    }
+    if (handoff.partnerEntry.entryHost?.trim().toLowerCase() !== entryHost) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "ENTRY_HOST_MISMATCH",
+        "entryHost must match the configured partner entry host exactly.",
+        {
+          entrySlug: handoff.partnerEntry.entrySlug,
+          expectedEntryHost: handoff.partnerEntry.entryHost,
+          receivedEntryHost: entryHost,
+        },
+      );
+    }
+
+    const consentBundle = command.consentBundle ?? null;
+    if (consentBundle) {
+      this.assertExactReferralEmbedConsentBundle(consentBundle);
+    }
+
+    return {
+      ...handoff,
+      entryHost,
+      consentRequired: !consentBundle,
+      consentBundleVersion: consentBundle?.bundleVersion ?? null,
+      consentGrantedAt: consentBundle?.grantedAt ?? null,
+    };
+  }
+
+  private assertExactReferralEmbedConsentBundle(
+    consentBundle: ReferralEmbedConsentBundle,
+  ) {
+    const grantedScopes = [...consentBundle.grantedScopes].sort();
+    const requiredScopes = [...REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES].sort();
+    if (JSON.stringify(grantedScopes) !== JSON.stringify(requiredScopes)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REFERRAL_CONSENT_SCOPE_MISMATCH",
+        "The referral embed consent bundle must include the exact required scopes.",
+        {
+          requiredScopes,
+          grantedScopes,
+        },
+      );
+    }
+    if (!consentBundle.bundleVersion?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REFERRAL_CONSENT_VERSION_REQUIRED",
+        "The referral embed consent bundle version is required.",
+      );
+    }
   }
 
   async verifyPartnerEligibility(

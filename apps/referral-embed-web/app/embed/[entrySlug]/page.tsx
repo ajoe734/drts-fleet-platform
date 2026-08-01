@@ -27,10 +27,6 @@ export default async function PassengerEmbedPage({
         typeof query.entryHost === "string"
           ? { entryHost: query.entryHost }
           : null,
-        typeof query.apiKey === "string" ? { apiKey: query.apiKey } : null,
-        typeof query.partnerUserRef === "string"
-          ? { partnerUserRef: query.partnerUserRef }
-          : null,
       ),
     );
   } catch (error) {
