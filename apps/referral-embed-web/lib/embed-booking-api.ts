@@ -11,6 +11,17 @@ import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
 
+function readSuccessfulEnvelopeData<T>(
+  payload: unknown,
+  message: string,
+): T | null {
+  if (payload === null || typeof payload !== "object" || !("data" in payload)) {
+    throw new Error(message);
+  }
+
+  return (payload as { data: T | null }).data;
+}
+
 function buildIdentityHeaders(
   session: NonNullable<Awaited<ReturnType<typeof getReferralEmbedSession>>>,
 ) {
@@ -60,7 +71,7 @@ export async function createReferralBookingServer(
   return payload.data;
 }
 
-export async function getReferralActiveTripServer(): Promise<ReferralPassengerActiveTripResult> {
+export async function getReferralActiveTripServer(): Promise<ReferralPassengerActiveTripResult | null> {
   const session = await getReferralEmbedSession();
   if (!session || !session.identityActive) {
     throw new Error("UNAUTHORIZED: Active referral session required");
@@ -82,7 +93,10 @@ export async function getReferralActiveTripServer(): Promise<ReferralPassengerAc
         `Active trip lookup failed with ${response.status}`,
     );
   }
-  return payload.data;
+  return readSuccessfulEnvelopeData<ReferralPassengerActiveTripResult>(
+    payload,
+    "Active trip lookup returned an invalid response",
+  );
 }
 
 export async function getReferralTripHistoryServer(): Promise<{

@@ -116,6 +116,23 @@ describe("referral embed passenger lifecycle API integration", () => {
     expect(result.trip?.orderId).toBe("order-123");
   });
 
+  it("treats a successful null active-trip envelope as no active trip", async () => {
+    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+      mockSession as never,
+    );
+
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(getReferralActiveTripServer()).resolves.toBeNull();
+  });
+
   it("fetches trip history from authority", async () => {
     vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
       mockSession as never,
