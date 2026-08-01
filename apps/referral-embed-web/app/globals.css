@@ -13,15 +13,9 @@ body {
 }
 
 body {
-  background: #eceef3;
-  color: #19223a;
-  font-family:
-    "Inter",
-    "Noto Sans TC",
-    "PingFang TC",
-    "Microsoft JhengHei",
-    system-ui,
-    sans-serif;
+  background: var(--app-bg, #eceef3);
+  color: var(--app-fg, #19223a);
+  font-family: var(--app-font-sans, system-ui, sans-serif);
 }
 
 a {
@@ -64,6 +58,6 @@ a {
 }
 
 .embed-system-error__reference {
-  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono, ui-monospace, monospace);
   font-size: 0.8rem;
 }

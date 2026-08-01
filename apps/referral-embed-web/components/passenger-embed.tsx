@@ -16,12 +16,11 @@ import {
   embedVehicles,
 } from "@/lib/embed-fixtures";
 import { useTranslation } from "@/lib/i18n";
-import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
-
-const SANS =
-  '"Inter","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif';
-const MONO = '"JetBrains Mono","IBM Plex Mono","SFMono-Regular",monospace';
-const HOST_BLUE = "#1A45AD";
+import {
+  type EmbedTheme,
+  buildEmbedTheme,
+  getEntryHost,
+} from "@/lib/embed-presentation";
 
 const ICONS: Record<string, string> = {
   arrowLeft: "M15 6l-6 6 6 6",
@@ -82,6 +81,53 @@ const NEGATIVE_META = {
 } as const;
 
 type NegativeKind = keyof typeof NEGATIVE_META;
+
+function embedThemeVars(theme: EmbedTheme): CSSProperties {
+  return {
+    ["--app-bg" as string]: theme.pageBg,
+    ["--app-fg" as string]: theme.text,
+    ["--app-font-sans" as string]: theme.typography.sans,
+    ["--app-font-mono" as string]: theme.typography.mono,
+    ["--embed-brand" as string]: theme.brand.fg,
+    ["--embed-brand-hi" as string]: theme.brand.hi,
+    ["--embed-brand-soft" as string]: theme.brand.bg,
+    ["--embed-brand-border" as string]: theme.brand.border,
+    ["--embed-host" as string]: theme.hostChrome.bg,
+    ["--embed-host-fg" as string]: theme.hostChrome.fg,
+    ["--embed-host-chip" as string]: theme.hostChrome.chipBg,
+    ["--embed-host-button" as string]: theme.hostChrome.buttonBg,
+    ["--embed-page-bg" as string]: theme.pageBg,
+    ["--embed-shell-bg" as string]: theme.shellBg,
+    ["--embed-surface" as string]: theme.surface,
+    ["--embed-surface-lo" as string]: theme.surfaceLo,
+    ["--embed-line" as string]: theme.line,
+    ["--embed-line-soft" as string]: theme.lineSoft,
+    ["--embed-text" as string]: theme.text,
+    ["--embed-text-muted" as string]: theme.textMuted,
+    ["--embed-text-dim" as string]: theme.textDim,
+    ["--embed-text-faint" as string]: theme.textFaint,
+    ["--embed-invert" as string]: theme.invert,
+    ["--embed-frame-border" as string]: theme.frameBorder,
+    ["--embed-frame-shadow" as string]: theme.frameShadow,
+    ["--embed-card-shadow" as string]: theme.cardShadow,
+    ["--embed-button-shadow" as string]: theme.buttonShadow,
+    ["--embed-status-info-fg" as string]: theme.status.info.fg,
+    ["--embed-status-info-bg" as string]: theme.status.info.bg,
+    ["--embed-status-info-border" as string]: theme.status.info.border,
+    ["--embed-status-warn-fg" as string]: theme.status.warn.fg,
+    ["--embed-status-warn-bg" as string]: theme.status.warn.bg,
+    ["--embed-status-warn-border" as string]: theme.status.warn.border,
+    ["--embed-status-danger-fg" as string]: theme.status.danger.fg,
+    ["--embed-status-danger-bg" as string]: theme.status.danger.bg,
+    ["--embed-status-danger-border" as string]: theme.status.danger.border,
+    ["--embed-status-success-fg" as string]: theme.status.success.fg,
+    ["--embed-status-success-bg" as string]: theme.status.success.bg,
+    ["--embed-status-success-border" as string]: theme.status.success.border,
+    ["--embed-status-neutral-fg" as string]: theme.status.neutral.fg,
+    ["--embed-status-neutral-bg" as string]: theme.status.neutral.bg,
+    ["--embed-status-neutral-border" as string]: theme.status.neutral.border,
+  };
+}
 
 function buildHref(context: EmbedContext, next: Record<string, string>) {
   const params = new URLSearchParams();
@@ -158,7 +204,7 @@ function ActionButton({
     minHeight: size === "sm" ? 40 : 46,
     borderRadius: 12,
     padding: size === "sm" ? "8px 14px" : "11px 16px",
-    fontFamily: SANS,
+    fontFamily: "var(--app-font-sans)",
     fontSize: size === "sm" ? 13 : 14,
     fontWeight: 700,
     textDecoration: "none",
@@ -166,28 +212,27 @@ function ActionButton({
       tone === "primary"
         ? "1px solid transparent"
         : tone === "danger"
-          ? "1px solid #FECDCA"
+          ? "1px solid var(--embed-status-danger-border)"
           : tone === "ghost"
             ? "1px solid transparent"
-            : "1px solid #E5E7EB",
+            : "1px solid var(--embed-line)",
     background:
       tone === "primary"
         ? "var(--embed-brand)"
         : tone === "danger"
-          ? "#FFFFFF"
+          ? "var(--embed-surface)"
           : tone === "ghost"
             ? "transparent"
-            : "#FFFFFF",
+            : "var(--embed-surface)",
     color:
       tone === "primary"
-        ? "#FFFFFF"
+        ? "var(--embed-invert)"
         : tone === "danger"
-          ? "#B42318"
+          ? "var(--embed-status-danger-fg)"
           : tone === "ghost"
             ? "var(--embed-brand)"
-            : "#19223A",
-    boxShadow:
-      tone === "primary" ? "0 10px 24px rgba(15, 118, 110, 0.24)" : "none",
+            : "var(--embed-text)",
+    boxShadow: tone === "primary" ? "var(--embed-button-shadow)" : "none",
   };
 
   const content = (
@@ -228,24 +273,24 @@ function Card({
   return (
     <section
       style={{
-        background: "#FFFFFF",
-        border: "1px solid #E5E9F1",
-        borderTop: accent ? `2px solid ${accent}` : "1px solid #E5E9F1",
+        background: "var(--embed-surface)",
+        border: "1px solid var(--embed-line)",
+        borderTop: accent ? `2px solid ${accent}` : "1px solid var(--embed-line)",
         borderRadius: 16,
-        boxShadow: "0 1px 2px rgba(16,24,40,.06)",
+        boxShadow: "var(--embed-card-shadow)",
         overflow: "hidden",
       }}
     >
       {title || sub ? (
         <div style={{ padding: "15px 15px 0" }}>
           {title ? (
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#19223A" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--embed-text)" }}>
               {title}
             </div>
           ) : null}
           {sub ? (
             <div
-              style={{ fontSize: 12, color: "#6B7689", marginTop: 2 }}
+              style={{ fontSize: 12, color: "var(--embed-text-muted)", marginTop: 2 }}
             >
               {sub}
             </div>
@@ -268,9 +313,9 @@ function Banner({
 }) {
   const palette = {
     primary: { fg: "var(--embed-brand)", bg: "var(--embed-brand-soft)", bd: "var(--embed-brand-border)" },
-    warn: { fg: "#B54708", bg: "#FFFAEB", bd: "#FEDF89" },
-    danger: { fg: "#B42318", bg: "#FEF3F2", bd: "#FECDCA" },
-    success: { fg: "#15803D", bg: "#ECFDF3", bd: "#ABEFC6" },
+    warn: { fg: "var(--embed-status-warn-fg)", bg: "var(--embed-status-warn-bg)", bd: "var(--embed-status-warn-border)" },
+    danger: { fg: "var(--embed-status-danger-fg)", bg: "var(--embed-status-danger-bg)", bd: "var(--embed-status-danger-border)" },
+    success: { fg: "var(--embed-status-success-fg)", bg: "var(--embed-status-success-bg)", bd: "var(--embed-status-success-border)" },
   }[tone];
   return (
     <div
@@ -286,7 +331,7 @@ function Banner({
       <span style={{ color: palette.fg, marginTop: 1 }}>
         <Icon name={icon} size={16} />
       </span>
-      <div style={{ fontSize: 12.5, color: "#43506B", lineHeight: 1.55 }}>
+      <div style={{ fontSize: 12.5, color: "var(--embed-text-dim)", lineHeight: 1.55 }}>
         {children}
       </div>
     </div>
@@ -314,19 +359,19 @@ function Row({
         alignItems: "baseline",
         gap: 16,
         padding: "9px 0",
-        borderBottom: last ? "none" : "1px solid #EEF1F7",
+        borderBottom: last ? "none" : "1px solid var(--embed-line-soft)",
       }}
     >
-      <span style={{ fontSize: 12.5, color: "#6B7689", flexShrink: 0 }}>
+      <span style={{ fontSize: 12.5, color: "var(--embed-text-muted)", flexShrink: 0 }}>
         {label}
       </span>
       <span
         style={{
           fontSize: 13.5,
-          color: strong ? "var(--embed-brand)" : "#19223A",
+          color: strong ? "var(--embed-brand)" : "var(--embed-text)",
           fontWeight: strong ? 700 : 500,
           textAlign: "right",
-          fontFamily: mono ? MONO : SANS,
+          fontFamily: mono ? "var(--app-font-mono)" : "var(--app-font-sans)",
         }}
       >
         {value}
@@ -353,7 +398,7 @@ function TokenRow({
         alignItems: "center",
         gap: 10,
         padding: "9px 0",
-        borderBottom: "1px solid #EEF1F7",
+        borderBottom: "1px solid var(--embed-line-soft)",
       }}
     >
       <span
@@ -365,21 +410,21 @@ function TokenRow({
           alignItems: "center",
           justifyContent: "center",
           flexShrink: 0,
-          background: ok ? "#ECFDF3" : "#FEF3F2",
-          color: ok ? "#15803D" : "#B42318",
+          background: ok ? "var(--embed-status-success-bg)" : "var(--embed-status-danger-bg)",
+          color: ok ? "var(--embed-status-success-fg)" : "var(--embed-status-danger-fg)",
         }}
       >
         <Icon name={ok ? "check" : "x"} size={11} stroke={3} />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, color: "#19223A", fontWeight: 500 }}>
+        <div style={{ fontSize: 12.5, color: "var(--embed-text)", fontWeight: 500 }}>
           {label}
         </div>
-        <div style={{ fontSize: 9.5, color: "#9AA3B4", fontFamily: MONO }}>
+        <div style={{ fontSize: 9.5, color: "var(--embed-text-faint)", fontFamily: "var(--app-font-mono)" }}>
           {code}
         </div>
       </div>
-      <span style={{ fontSize: 12, fontFamily: MONO, color: "#19223A" }}>
+      <span style={{ fontSize: 12, fontFamily: "var(--app-font-mono)", color: "var(--embed-text)" }}>
         {value}
       </span>
     </div>
@@ -396,7 +441,7 @@ function BrandMark({ context, size = 40 }: { context: EmbedContext; size?: numbe
         borderRadius: size / 3.2,
         background:
           "linear-gradient(150deg, var(--embed-brand), var(--embed-host))",
-        color: "#FFFFFF",
+        color: "var(--embed-invert)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -418,12 +463,12 @@ function StatusPill({
   tone: "success" | "warn" | "danger" | "neutral" | "primary" | "info";
 }) {
   const palette = {
-    success: { fg: "#15803D", bg: "#ECFDF3", bd: "#ABEFC6" },
-    warn: { fg: "#B54708", bg: "#FFFAEB", bd: "#FEDF89" },
-    danger: { fg: "#B42318", bg: "#FEF3F2", bd: "#FECDCA" },
-    neutral: { fg: "#6B7689", bg: "#F7F9FC", bd: "#E5E9F1" },
+    success: { fg: "var(--embed-status-success-fg)", bg: "var(--embed-status-success-bg)", bd: "var(--embed-status-success-border)" },
+    warn: { fg: "var(--embed-status-warn-fg)", bg: "var(--embed-status-warn-bg)", bd: "var(--embed-status-warn-border)" },
+    danger: { fg: "var(--embed-status-danger-fg)", bg: "var(--embed-status-danger-bg)", bd: "var(--embed-status-danger-border)" },
+    neutral: { fg: "var(--embed-status-neutral-fg)", bg: "var(--embed-status-neutral-bg)", bd: "var(--embed-status-neutral-border)" },
     primary: { fg: "var(--embed-brand)", bg: "var(--embed-brand-soft)", bd: "var(--embed-brand-border)" },
-    info: { fg: "#175CD3", bg: "#EFF4FF", bd: "#B2CCFF" },
+    info: { fg: "var(--embed-status-info-fg)", bg: "var(--embed-status-info-bg)", bd: "var(--embed-status-info-border)" },
   }[tone];
   return (
     <span
@@ -466,10 +511,10 @@ function Hero({
   posture?: ReactNode;
 }) {
   const palette = {
-    success: { fg: "#15803D", bg: "#ECFDF3" },
-    warn: { fg: "#B54708", bg: "#FFFAEB" },
-    danger: { fg: "#B42318", bg: "#FEF3F2" },
-    neutral: { fg: "#667085", bg: "#F2F4F7" },
+    success: { fg: "var(--embed-status-success-fg)", bg: "var(--embed-status-success-bg)" },
+    warn: { fg: "var(--embed-status-warn-fg)", bg: "var(--embed-status-warn-bg)" },
+    danger: { fg: "var(--embed-status-danger-fg)", bg: "var(--embed-status-danger-bg)" },
+    neutral: { fg: "var(--embed-status-neutral-fg)", bg: "var(--embed-status-neutral-bg)" },
     primary: { fg: "var(--embed-brand)", bg: "var(--embed-brand-soft)" },
   }[tone];
   return (
@@ -527,7 +572,7 @@ function SurfaceField({
           display: "block",
           fontSize: 12.5,
           fontWeight: 600,
-          color: "#43506B",
+          color: "var(--embed-text-dim)",
           marginBottom: 6,
         }}
       >
@@ -539,15 +584,15 @@ function SurfaceField({
           alignItems: "center",
           gap: 9,
           padding: "11px 13px",
-          background: "#FFFFFF",
-          border: "1px solid #E5E9F1",
+          background: "var(--embed-surface)",
+          border: "1px solid var(--embed-line)",
           borderRadius: 11,
           fontSize: 14,
-          color: "#19223A",
+          color: "var(--embed-text)",
         }}
       >
         {icon ? (
-          <span style={{ color: "#9AA3B4", display: "flex" }}>
+          <span style={{ color: "var(--embed-text-faint)", display: "flex" }}>
             <Icon name={icon} size={16} />
           </span>
         ) : null}
@@ -570,27 +615,24 @@ function Shell({
 }) {
   const dotColor =
     badgeTone === "live"
-      ? "#15803D"
+      ? "var(--embed-status-success-fg)"
       : badgeTone === "warn"
-        ? "#B54708"
+        ? "var(--embed-status-warn-fg)"
         : badgeTone === "err"
-          ? "#B42318"
-          : "#98A2B3";
+          ? "var(--embed-status-danger-fg)"
+          : "var(--embed-text-faint)";
   const theme = buildEmbedTheme(context.accent);
 
   return (
     <main
       style={{
-        ["--embed-brand" as string]: theme.tenantFg,
-        ["--embed-brand-soft" as string]: theme.tenantBg,
-        ["--embed-brand-border" as string]: theme.tenantBorder,
-        ["--embed-host" as string]: HOST_BLUE,
+        ...embedThemeVars(theme),
         minHeight: "100dvh",
         display: "grid",
         placeItems: "center",
-        background: "#ECEEF3",
+        background: "var(--embed-page-bg)",
         padding: "20px 10px",
-        fontFamily: SANS,
+        fontFamily: "var(--app-font-sans)",
       }}
     >
       <div
@@ -599,20 +641,20 @@ function Shell({
           minHeight: 812,
           display: "flex",
           flexDirection: "column",
-          background: "#F4F6FA",
+          background: "var(--embed-shell-bg)",
           borderRadius: 28,
           overflow: "hidden",
-          boxShadow: "0 18px 50px rgba(20,30,60,.14)",
-          border: "1px solid #D8DEE9",
-          color: "#19223A",
+          boxShadow: "var(--embed-frame-shadow)",
+          border: "1px solid var(--embed-frame-border)",
+          color: "var(--embed-text)",
         }}
       >
         <div
           style={{
             height: 44,
             flexShrink: 0,
-            background: HOST_BLUE,
-            color: "#FFFFFF",
+            background: "var(--embed-host)",
+            color: "var(--embed-host-fg)",
             display: "flex",
             alignItems: "flex-end",
             justifyContent: "space-between",
@@ -630,8 +672,8 @@ function Shell({
         <div
           style={{
             flexShrink: 0,
-            background: HOST_BLUE,
-            color: "#FFFFFF",
+            background: "var(--embed-host)",
+            color: "var(--embed-host-fg)",
             padding: "4px 12px 12px",
             display: "flex",
             alignItems: "center",
@@ -644,7 +686,7 @@ function Shell({
               width: 30,
               height: 30,
               borderRadius: 15,
-              background: "rgba(255,255,255,.16)",
+              background: "var(--embed-host-button)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -675,9 +717,9 @@ function Shell({
               maxWidth: 150,
               padding: "4px 8px",
               borderRadius: 999,
-              background: "rgba(255,255,255,.14)",
+              background: "var(--embed-host-chip)",
               fontSize: 9.5,
-              fontFamily: MONO,
+              fontFamily: "var(--app-font-mono)",
               opacity: 0.8,
             }}
           >
@@ -700,10 +742,10 @@ function Shell({
             alignItems: "center",
             gap: 6,
             padding: "6px 14px",
-            background: "#FFFFFF",
-            borderBottom: "1px solid #E5E9F1",
+            background: "var(--embed-surface)",
+            borderBottom: "1px solid var(--embed-line)",
             fontSize: 10.5,
-            color: "#6B7689",
+            color: "var(--embed-text-muted)",
           }}
         >
           <span
@@ -714,8 +756,8 @@ function Shell({
               background: dotColor,
             }}
           />
-          <span style={{ fontFamily: MONO }}>webview</span>
-          <span style={{ color: "#98A2B3" }}>
+          <span style={{ fontFamily: "var(--app-font-mono)" }}>webview</span>
+          <span style={{ color: "var(--embed-text-faint)" }}>
             · embedded · /embed/{context.entry.entrySlug}
           </span>
         </div>
@@ -734,8 +776,8 @@ function Shell({
           <div
             style={{
               flexShrink: 0,
-              borderTop: "1px solid #E5E9F1",
-              background: "#FFFFFF",
+              borderTop: "1px solid var(--embed-line)",
+              background: "var(--embed-surface)",
               padding: 14,
               display: "flex",
               flexDirection: "column",
@@ -841,7 +883,7 @@ function UnsupportedView({ context }: { context: EmbedContext }) {
     >
       <Hero icon="ban" tone="danger" title="無法在此環境開啟" posture="unsupported_host · 已封鎖" />
       <Card title="原因">
-        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+        <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
           叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。
         </div>
       </Card>
@@ -877,7 +919,7 @@ function ConsentView({ context }: { context: EmbedContext }) {
     >
       <div style={{ padding: "6px 0 2px" }}>
         <div style={{ fontSize: 17, fontWeight: 800 }}>授權使用叫車服務</div>
-        <div style={{ fontSize: 12.5, color: "#6B7689", marginTop: 4 }}>
+        <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)", marginTop: 4 }}>
           首次使用 · 請確認以下同意範圍 · consent_required
         </div>
       </div>
@@ -889,7 +931,7 @@ function ConsentView({ context }: { context: EmbedContext }) {
               display: "flex",
               gap: 11,
               padding: "11px 0",
-              borderBottom: index < scopes.length - 1 ? "1px solid #EEF1F7" : "none",
+              borderBottom: index < scopes.length - 1 ? "1px solid var(--embed-line-soft)" : "none",
             }}
           >
             <span
@@ -898,7 +940,7 @@ function ConsentView({ context }: { context: EmbedContext }) {
                 height: 20,
                 borderRadius: 5,
                 background: "var(--embed-brand)",
-                color: "#FFFFFF",
+                color: "var(--embed-invert)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -911,11 +953,11 @@ function ConsentView({ context }: { context: EmbedContext }) {
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{title}</span>
-                <span style={{ fontSize: 9.5, color: "#9AA3B4", fontFamily: MONO }}>
+                <span style={{ fontSize: 9.5, color: "var(--embed-text-faint)", fontFamily: "var(--app-font-mono)" }}>
                   {code}
                 </span>
               </div>
-              <div style={{ marginTop: 2, fontSize: 11.5, color: "#6B7689", lineHeight: 1.45 }}>
+              <div style={{ marginTop: 2, fontSize: 11.5, color: "var(--embed-text-muted)", lineHeight: 1.45 }}>
                 {body}
               </div>
             </div>
@@ -947,7 +989,7 @@ function FallbackView({ context }: { context: EmbedContext }) {
     >
       <Hero icon="ext" tone="neutral" title="內嵌服務暫時無法使用" posture="fallback_to_web · 改用網站" />
       <Card title="接下來">
-        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+        <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
           目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
         </div>
       </Card>
@@ -969,8 +1011,8 @@ function BookView({ context }: { context: EmbedContext }) {
       footer={
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
-            <span style={{ color: "#6B7689" }}>預估車資</span>
-            <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 16 }}>約 NT$ 290</span>
+            <span style={{ color: "var(--embed-text-muted)" }}>預估車資</span>
+            <span style={{ fontFamily: "var(--app-font-mono)", fontWeight: 700, fontSize: 16 }}>約 NT$ 290</span>
           </div>
           <ActionButton href={tripHref} tone="primary" iconRight="car">
             確認叫車
@@ -984,8 +1026,8 @@ function BookView({ context }: { context: EmbedContext }) {
           alignItems: "center",
           gap: 11,
           padding: "10px 12px",
-          background: "#FFFFFF",
-          border: "1px solid #E5E9F1",
+          background: "var(--embed-surface)",
+          border: "1px solid var(--embed-line)",
           borderRadius: 12,
         }}
       >
@@ -994,7 +1036,7 @@ function BookView({ context }: { context: EmbedContext }) {
           <div style={{ fontSize: 13.5, fontWeight: 700 }}>
             {embedResident.name} · {embedResident.unit}
           </div>
-          <div style={{ fontSize: 11, color: "#6B7689" }}>
+          <div style={{ fontSize: 11, color: "var(--embed-text-muted)" }}>
             {context.strings.displayName}
           </div>
         </div>
@@ -1016,9 +1058,9 @@ function BookView({ context }: { context: EmbedContext }) {
               key={place}
               style={{
                 fontSize: 11.5,
-                color: "#6B7689",
-                background: "#F7F9FC",
-                border: "1px solid #E5E9F1",
+                color: "var(--embed-text-muted)",
+                background: "var(--embed-surface-lo)",
+                border: "1px solid var(--embed-line)",
                 padding: "4px 9px",
                 borderRadius: 999,
               }}
@@ -1051,16 +1093,16 @@ function BookView({ context }: { context: EmbedContext }) {
                   gap: 11,
                   padding: "10px 12px",
                   borderRadius: 11,
-                  border: selected ? "1px solid var(--embed-brand)" : "1px solid #E5E9F1",
-                  background: selected ? "var(--embed-brand-soft)" : "#FFFFFF",
+                  border: selected ? "1px solid var(--embed-brand)" : "1px solid var(--embed-line)",
+                  background: selected ? "var(--embed-brand-soft)" : "var(--embed-surface)",
                 }}
               >
-                <span style={{ color: selected ? "var(--embed-brand)" : "#6B7689" }}>
+                <span style={{ color: selected ? "var(--embed-brand)" : "var(--embed-text-muted)" }}>
                   <Icon name="car" size={20} />
                 </span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700 }}>{meta.name}</div>
-                  <div style={{ fontSize: 11, color: "#6B7689" }}>{meta.note}</div>
+                  <div style={{ fontSize: 11, color: "var(--embed-text-muted)" }}>{meta.note}</div>
                 </div>
                 {selected ? (
                   <span style={{ color: "var(--embed-brand)" }}>
@@ -1106,7 +1148,7 @@ function ActiveView({ context }: { context: EmbedContext }) {
         <span style={{ color: "var(--embed-brand)", display: "flex" }}>
           <Icon name="shield" size={14} />
         </span>
-        <span style={{ fontSize: 11.5, color: "#43506B", lineHeight: 1.4 }}>
+        <span style={{ fontSize: 11.5, color: "var(--embed-text-dim)", lineHeight: 1.4 }}>
           此行程已綁定您的身分 · <b>重開 App 仍可找回</b>
         </span>
       </div>
@@ -1114,7 +1156,7 @@ function ActiveView({ context }: { context: EmbedContext }) {
       <Card accent="var(--embed-brand)">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <StatusPill tone="info">前往上車</StatusPill>
-          <span style={{ fontSize: 11, color: "#9AA3B4", fontFamily: MONO }}>
+          <span style={{ fontSize: 11, color: "var(--embed-text-faint)", fontFamily: "var(--app-font-mono)" }}>
             {embedTrip.id}
           </span>
         </div>
@@ -1127,8 +1169,8 @@ function ActiveView({ context }: { context: EmbedContext }) {
           }}
         >
           <div>
-            <div style={{ fontSize: 12.5, color: "#6B7689" }}>預計上車 · ETA</div>
-            <div style={{ fontSize: 11, color: "#9AA3B4", marginTop: 2 }}>估計值，非保證</div>
+            <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)" }}>預計上車 · ETA</div>
+            <div style={{ fontSize: 11, color: "var(--embed-text-faint)", marginTop: 2 }}>估計值，非保證</div>
           </div>
           <div
             style={{
@@ -1139,10 +1181,10 @@ function ActiveView({ context }: { context: EmbedContext }) {
               padding: "8px 16px",
             }}
           >
-            <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, color: "var(--embed-brand)", fontFamily: MONO }}>
+            <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, color: "var(--embed-brand)", fontFamily: "var(--app-font-mono)" }}>
               {embedTrip.etaMin}
             </div>
-            <div style={{ fontSize: 10, color: "#6B7689", marginTop: 3 }}>分鐘</div>
+            <div style={{ fontSize: 10, color: "var(--embed-text-muted)", marginTop: 3 }}>分鐘</div>
           </div>
         </div>
         <div style={{ marginTop: 14 }}>
@@ -1170,16 +1212,16 @@ function TripsView({ context }: { context: EmbedContext }) {
             <div
               key={trip.id}
               style={{
-                border: "1px solid #E5E9F1",
+                border: "1px solid var(--embed-line)",
                 borderRadius: 14,
                 padding: 13,
-                background: "#FFFFFF",
+                background: "var(--embed-surface)",
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                 <div>
                   <div style={{ fontSize: 13.5, fontWeight: 700 }}>{trip.id}</div>
-                  <div style={{ fontSize: 11, color: "#6B7689", marginTop: 2 }}>{trip.date}</div>
+                  <div style={{ fontSize: 11, color: "var(--embed-text-muted)", marginTop: 2 }}>{trip.date}</div>
                 </div>
                 <StatusPill tone={labels[trip.status].tone}>{labels[trip.status].text}</StatusPill>
               </div>
@@ -1248,7 +1290,7 @@ function OutcomeView({
         posture={completed ? "completed" : "cancelled"}
       />
       <Card>
-        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+        <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
           {completed
             ? "本次行程已順利結束，可直接前往收據或歷史行程。"
             : "取消結果與來源脈絡都會被保留，不會遺失既有 handoff 身分。"}
@@ -1287,11 +1329,11 @@ function NegativeView({
     >
       <Hero icon={meta.icon} tone={meta.tone} title={meta.title} posture={meta.posture} />
       <Card>
-        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+        <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
           {meta.body}
         </div>
       </Card>
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 7, fontSize: 11.5, color: "#6B7689" }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 7, fontSize: 11.5, color: "var(--embed-text-muted)" }}>
         <Icon name="phone" size={13} />
         社區叫車客服 {context.strings.supportPhone}
       </div>
@@ -1339,7 +1381,7 @@ function ProgressRail({
                   left: "50%",
                   right: "-50%",
                   height: 2,
-                  background: index < activeIndex ? "var(--embed-brand)" : "#E5E9F1",
+                  background: index < activeIndex ? "var(--embed-brand)" : "var(--embed-line)",
                 }}
               />
             ) : null}
@@ -1352,9 +1394,9 @@ function ProgressRail({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: done ? "var(--embed-brand)" : "#FFFFFF",
-                border: `2px solid ${done ? "var(--embed-brand)" : "#E5E9F1"}`,
-                color: done ? "#FFFFFF" : "#98A2B3",
+                background: done ? "var(--embed-brand)" : "var(--embed-surface)",
+                border: `2px solid ${done ? "var(--embed-brand)" : "var(--embed-line)"}`,
+                color: done ? "var(--embed-invert)" : "var(--embed-text-faint)",
                 fontSize: 11,
                 fontWeight: 700,
               }}
@@ -1367,7 +1409,7 @@ function ProgressRail({
                 fontSize: 10.5,
                 lineHeight: 1.25,
                 fontWeight: index === activeIndex ? 700 : 500,
-                color: index === activeIndex ? "#19223A" : "#6B7689",
+                color: index === activeIndex ? "var(--embed-text)" : "var(--embed-text-muted)",
               }}
             >
               {item.label}
@@ -1396,12 +1438,12 @@ function MessageSlot({
         <span
           style={{
             fontSize: 9.5,
-            color: "#98A2B3",
-            fontFamily: MONO,
-            background: "#F7F9FC",
+            color: "var(--embed-text-faint)",
+            fontFamily: "var(--app-font-mono)",
+            background: "var(--embed-surface-lo)",
             padding: "2px 8px",
             borderRadius: 999,
-            border: "1px dashed #D0D5DD",
+            border: "1px dashed var(--embed-frame-border)",
           }}
         >
           title ← {titleCode}
@@ -1412,8 +1454,8 @@ function MessageSlot({
           position: "relative",
           padding: "11px 13px",
           borderRadius: 10,
-          background: "#F7F9FC",
-          border: "1px dashed #D0D5DD",
+          background: "var(--embed-surface-lo)",
+          border: "1px dashed var(--embed-frame-border)",
         }}
       >
         <div
@@ -1422,20 +1464,20 @@ function MessageSlot({
             top: -8,
             left: 10,
             fontSize: 9,
-            fontFamily: MONO,
+            fontFamily: "var(--app-font-mono)",
             fontWeight: 600,
-            color: "#6B7689",
-            background: "#FFFFFF",
+            color: "var(--embed-text-muted)",
+            background: "var(--embed-surface)",
             padding: "0 5px",
             borderRadius: 4,
           }}
         >
           messageCode · {bodyCode}
         </div>
-        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.55, marginTop: 2 }}>
+        <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.55, marginTop: 2 }}>
           {bodySample}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#98A2B3", marginTop: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "var(--embed-text-faint)", marginTop: 6 }}>
           <Icon name="info" size={11} />
           文案由後端 messageCode 渲染 · 此為示意
         </div>
@@ -1523,8 +1565,8 @@ function TripFallbackView({
               <Icon name="car" size={22} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12.5, color: "#6B7689" }}>預計上車 · ETA</div>
-              <div style={{ fontSize: 11, color: "#98A2B3" }}>估計值，非保證</div>
+              <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)" }}>預計上車 · ETA</div>
+              <div style={{ fontSize: 11, color: "var(--embed-text-faint)" }}>估計值，非保證</div>
             </div>
             <div
               style={{
@@ -1535,10 +1577,10 @@ function TripFallbackView({
                 padding: "8px 16px",
               }}
             >
-              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: MONO, color: "var(--embed-brand)", lineHeight: 1 }}>
+              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--app-font-mono)", color: "var(--embed-brand)", lineHeight: 1 }}>
                 {fallback.etaMin}
               </div>
-              <div style={{ fontSize: 10, color: "#6B7689", marginTop: 3 }}>分鐘</div>
+              <div style={{ fontSize: 10, color: "var(--embed-text-muted)", marginTop: 3 }}>分鐘</div>
             </div>
           </div>
         </Card>
@@ -1556,20 +1598,20 @@ function TripFallbackView({
           alignItems: "flex-start",
           gap: 8,
           padding: "9px 11px",
-          background: "#ECFDF3",
-          border: "1px solid #ABEFC6",
+          background: "var(--embed-status-success-bg)",
+          border: "1px solid var(--embed-status-success-border)",
           borderRadius: 10,
         }}
       >
-        <span style={{ color: "#15803D", marginTop: 1 }}>
+        <span style={{ color: "var(--embed-status-success-fg)", marginTop: 1 }}>
           <Icon name="check" size={14} />
         </span>
-        <span style={{ fontSize: 11, lineHeight: 1.45, color: "#43506B" }}>
+        <span style={{ fontSize: 11, lineHeight: 1.45, color: "var(--embed-text-dim)" }}>
           同一筆行程繼續 · 不會重新下單，也不會加收費用。
         </span>
       </div>
 
-      <div style={{ fontSize: 10, color: "#98A2B3", textAlign: "center", lineHeight: 1.5 }}>
+      <div style={{ fontSize: 10, color: "var(--embed-text-faint)", textAlign: "center", lineHeight: 1.5 }}>
         接送由 智慧運輸科技 DRTS 提供 · 服務狀態僅供參考
       </div>
     </Shell>
