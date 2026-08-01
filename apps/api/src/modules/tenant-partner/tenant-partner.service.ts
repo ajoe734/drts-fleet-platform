@@ -218,7 +218,6 @@ import {
   REFERENCE_TOKEN_ELIGIBILITY_ADAPTER_CODE,
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
-import { IdentityRepository } from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
   ReferralEmbedHandoffRepository,
@@ -1224,8 +1223,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
     @Optional()
     private readonly referralEmbedHandoffRepository: ReferralEmbedHandoffRepository = new ReferralEmbedHandoffRepository(),
-    @Optional()
-    private readonly identityRepository?: IdentityRepository,
   ) {
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
@@ -1316,7 +1313,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           },
           "module init bootstrap",
         );
-        this.syncIdentityTenantUserRoles("module init bootstrap");
         return;
       }
 
@@ -1422,7 +1418,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ? userRoles.map((userRole) => this.cloneUserRole(userRole))
           : USER_ROLE_SEED.map((userRole) => this.cloneUserRole(userRole));
       this.apiKeys = apiKeys.map((apiKey) => this.cloneStoredApiKey(apiKey));
-      this.syncIdentityTenantUserRoles("module init rehydrate");
       if (partnerEntries.length === 0) {
         this.persistChanges(
           {
@@ -6248,7 +6243,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
       "create_tenant_user",
     );
-    this.syncIdentityTenantUserRole(userRole, "create_tenant_user");
     this.recordTenantAudit(
       {
         actorId: null,
@@ -6288,7 +6282,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
       "update_tenant_role",
     );
-    this.syncIdentityTenantUserRole(userRole, "update_tenant_role");
     this.recordTenantAudit(
       {
         actorId: null,
@@ -11736,33 +11729,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             error,
             context,
           );
-        }
-      });
-  }
-
-  private syncIdentityTenantUserRoles(context: string) {
-    for (const userRole of this.userRoles) {
-      this.syncIdentityTenantUserRole(userRole, context);
-    }
-  }
-
-  private syncIdentityTenantUserRole(
-    userRole: TenantUserRoleRecord,
-    context: string,
-  ) {
-    const identityRepository = this.identityRepository;
-    if (
-      !identityRepository ||
-      typeof identityRepository.syncLegacyTenantUserRole !== "function"
-    ) {
-      return;
-    }
-
-    void identityRepository
-      .syncLegacyTenantUserRole(this.cloneUserRole(userRole))
-      .catch((error: unknown) => {
-        if (typeof identityRepository.reportPersistenceFailure === "function") {
-          identityRepository.reportPersistenceFailure(error, context);
         }
       });
   }
