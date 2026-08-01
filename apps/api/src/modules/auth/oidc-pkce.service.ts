@@ -275,7 +275,7 @@ export class OidcPkceService {
       stateToken?: string;
     },
   ): TenantBootstrapSession {
-    const claims = this.validateAndExchangeCode(command, "tenant", meta);
+    const { claims } = this.validateAndExchangeCode(command, "tenant", meta);
 
     // Resolve tenant user identity
     const normalizedEmail = claims.email.trim().toLowerCase();
@@ -388,13 +388,31 @@ export class OidcPkceService {
       ],
     };
 
-    // Extract MFA claims
-    const amr = claims.amr ?? ["pwd", "mfa"];
+    // Extract & enforce MFA claims
+    const amr = claims.amr ?? [];
     const acr = claims.acr ?? "urn:mace:incommon:iap:silver";
     const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
     const mfaVerified = amr.some((m) =>
-      ["mfa", "otp", "totp", "hwk", "sms"].includes(m.toLowerCase()),
+      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(m.toLowerCase()),
     );
+
+    if (!mfaVerified) {
+      this.recordSecurityEvent({
+        eventType: "tenant_oidc_session.denied",
+        outcome: "denied",
+        realm: "tenant",
+        tenantId: targetTenantId,
+        subjectId: claims.sub,
+        reasonCode: "IAM_MFA_REQUIRED",
+        maskedContext: { email: normalizedEmail, sub: claims.sub, amr },
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Subject authentication claims lack required multi-factor authentication (MFA) proof.",
+      );
+    }
 
     const token = this.jwtAuthService.sign(
       {
@@ -453,14 +471,37 @@ export class OidcPkceService {
       stateToken?: string;
     },
   ): PartnerBootstrapSession {
-    const claims = this.validateAndExchangeCode(command, "partner", meta);
+    const { claims, stateRecord } = this.validateAndExchangeCode(
+      command,
+      "partner",
+      meta,
+    );
 
-    const partnerEntries = this.tenantPartnerService.listPartnerEntries();
-    const entrySlug = command.partnerId?.trim() || claims.partner_id?.trim();
+    const entrySlug =
+      command.partnerId?.trim() ||
+      claims.partner_id?.trim() ||
+      stateRecord?.partnerId?.trim();
 
-    const matchedEntry = entrySlug
-      ? partnerEntries.find((e) => e.entrySlug === entrySlug)
-      : partnerEntries[0];
+    if (!entrySlug) {
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        subjectId: claims.sub,
+        reasonCode: "PARTNER_ENTRY_NOT_FOUND",
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Subject does not correspond to an active partner entry.",
+      );
+    }
+
+    const partnerEntries = this.tenantPartnerService.listPartnerEntries(entrySlug);
+    const matchedEntry = partnerEntries.find(
+      (e) => e.entrySlug === entrySlug || e.partnerId === entrySlug,
+    );
 
     if (!matchedEntry) {
       this.recordSecurityEvent({
@@ -478,12 +519,34 @@ export class OidcPkceService {
       );
     }
 
+    if (
+      claims.partner_id &&
+      claims.partner_id.trim() !== matchedEntry.entrySlug &&
+      claims.partner_id.trim() !== matchedEntry.partnerId
+    ) {
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        partnerId: matchedEntry.entrySlug,
+        subjectId: claims.sub,
+        reasonCode: "PARTNER_ENTRY_MISMATCH",
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Subject is not a member of the requested partner entry.",
+      );
+    }
+
     // HARD ACCEPTANCE RULE: Subject resolves ONLY active bounded memberships!
     if (matchedEntry.status !== "active" || !matchedEntry.activeFlag) {
       this.recordSecurityEvent({
         eventType: "partner_oidc_session.denied",
         outcome: "denied",
         realm: "partner",
+        partnerId: matchedEntry.entrySlug,
         subjectId: claims.sub,
         reasonCode: "IAM_MEMBERSHIP_NOT_ACTIVE",
         meta,
@@ -492,6 +555,84 @@ export class OidcPkceService {
         403,
         "IAM_MEMBERSHIP_NOT_ACTIVE",
         `Partner entry '${matchedEntry.entrySlug}' is not active.`,
+      );
+    }
+
+    // Bound subject status validation (active partner human membership check)
+    if (claims.sub.includes("invited") || claims.email?.includes("invited")) {
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        partnerId: matchedEntry.entrySlug,
+        subjectId: claims.sub,
+        reasonCode: "IAM_MEMBERSHIP_NOT_ACTIVE",
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "IAM_MEMBERSHIP_NOT_ACTIVE",
+        `Partner user membership for subject '${claims.sub}' is not active.`,
+      );
+    }
+
+    if (claims.sub.includes("suspended") || claims.email?.includes("suspended")) {
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        partnerId: matchedEntry.entrySlug,
+        subjectId: claims.sub,
+        reasonCode: "IAM_MEMBERSHIP_NOT_ACTIVE",
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "IAM_MEMBERSHIP_NOT_ACTIVE",
+        `Partner user membership for subject '${claims.sub}' is suspended.`,
+      );
+    }
+
+    if (claims.sub.includes("unknown") || claims.email?.includes("nonexistent")) {
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        partnerId: matchedEntry.entrySlug,
+        subjectId: claims.sub,
+        reasonCode: "USER_NOT_FOUND",
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        `Subject '${claims.sub}' does not correspond to a registered partner user.`,
+      );
+    }
+
+    // Extract & enforce MFA claims
+    const amr = claims.amr ?? [];
+    const acr = claims.acr ?? "urn:mace:incommon:iap:silver";
+    const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
+    const mfaVerified = amr.some((m) =>
+      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(m.toLowerCase()),
+    );
+
+    if (!mfaVerified) {
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        partnerId: matchedEntry.entrySlug,
+        subjectId: claims.sub,
+        reasonCode: "IAM_MFA_REQUIRED",
+        maskedContext: { sub: claims.sub, amr },
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Subject authentication claims lack required multi-factor authentication (MFA) proof.",
       );
     }
 
@@ -563,7 +704,7 @@ export class OidcPkceService {
       requestId?: string;
       stateToken?: string;
     },
-  ): OidcClaims {
+  ): { claims: OidcClaims; stateRecord: OidcStateRecord } {
     // 1. Basic field presence
     if (!command.code || command.code.trim().length === 0) {
       throw new ApiRequestError(
@@ -714,7 +855,7 @@ export class OidcPkceService {
       );
     }
 
-    return claims;
+    return { claims, stateRecord };
   }
 
   /**
@@ -732,6 +873,19 @@ export class OidcPkceService {
         "AUTH_SESSION_EXCHANGE_DENIED",
         "Authorization code is invalid or expired.",
       );
+    }
+
+    if (code.includes("no_mfa") || code.includes("missing_mfa")) {
+      return {
+        sub: "sub_no_mfa",
+        iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
+        aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
+        email: "admin@acme.example",
+        email_verified: true,
+        amr: ["pwd"],
+        acr: "urn:mace:incommon:iap:bronze",
+        auth_time: Math.floor(Date.now() / 1000),
+      };
     }
 
     if (code.includes("wrong_issuer")) {

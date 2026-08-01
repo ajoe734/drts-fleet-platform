@@ -328,7 +328,9 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
 
   describe("5. Partner OIDC PKCE Flow", () => {
     it("exchanges valid authorization code for active partner entry session", () => {
-      const loginParams = oidcService.generateLoginParameters("partner");
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
       const session = oidcService.exchangePartnerCallbackSession(
         {
           provider: "oidc",
@@ -336,6 +338,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           code: "valid_partner_code_123",
           state: loginParams.state,
           pkceVerifier: loginParams.codeVerifier,
+          partnerId: "yuhe-residence",
         },
         { stateToken: loginParams.stateToken },
       );
@@ -343,6 +346,60 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       expect(session.accessToken).toBeDefined();
       expect(session.identity.realm).toBe("partner");
       expect(session.partnerEntry.status).toBe("active");
+    });
+
+    it("rejects partner exchange when partner entry is missing or not provided", () => {
+      const loginParams = oidcService.generateLoginParameters("partner");
+      expect(() =>
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "valid_partner_code_123",
+            state: loginParams.state,
+            pkceVerifier: loginParams.codeVerifier,
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).toThrow(ApiRequestError);
+    });
+
+    it("rejects partner login when subject claims lack required MFA proof", () => {
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      expect(() =>
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "code_no_mfa",
+            state: loginParams.state,
+            pkceVerifier: loginParams.codeVerifier,
+            partnerId: "yuhe-residence",
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).toThrow(ApiRequestError);
+    });
+
+    it("rejects partner login for unmapped, invited, or suspended partner human subjects", () => {
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      expect(() =>
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "code_invited_user",
+            state: loginParams.state,
+            pkceVerifier: loginParams.codeVerifier,
+            partnerId: "yuhe-residence",
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).toThrow(ApiRequestError);
     });
   });
 });

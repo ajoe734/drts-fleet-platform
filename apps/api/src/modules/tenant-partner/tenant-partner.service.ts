@@ -4275,9 +4275,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole ? this.cloneUserRole(userRole) : null;
   }
 
-  listPartnerEntries() {
+  listPartnerEntries(entrySlug?: string) {
+    const slug = entrySlug?.trim();
     return this.partnerEntries
-      .filter((entry) => entry.activeFlag && entry.status === "active")
+      .filter(
+        (entry) =>
+          entry.activeFlag &&
+          entry.status === "active" &&
+          (!slug || entry.entrySlug === slug || entry.partnerId === slug),
+      )
       .map((entry) => this.clonePartnerEntry(entry));
   }
 

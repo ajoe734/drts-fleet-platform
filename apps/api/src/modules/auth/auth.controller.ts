@@ -137,22 +137,26 @@ export class AuthController {
       stateToken,
     );
 
-    try {
-      if (realm === "tenant") {
+    if (realm === "tenant") {
+      try {
         const session = this.oidcPkceService.exchangeTenantCallbackSession(
           command,
           meta,
         );
         return toApiSuccessEnvelope(session, requestId);
-      } else {
+      } catch (error) {
+        throw toPublicTenantAuthError(error);
+      }
+    } else {
+      try {
         const session = this.oidcPkceService.exchangePartnerCallbackSession(
           command,
           meta,
         );
         return toApiSuccessEnvelope(session, requestId);
+      } catch (error) {
+        throw toPublicPartnerAuthError(error);
       }
-    } catch (error) {
-      throw toPublicTenantAuthError(error);
     }
   }
 
