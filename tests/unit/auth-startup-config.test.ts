@@ -426,12 +426,17 @@ describe("JwtAuthService key material runtime consistency", () => {
     const jwtService = new JwtAuthService();
     const token = jwtService.sign({
       actorId: "usr_123",
-      actorType: "tenant_user",
+      actorType: "tenant_admin",
       realm: "tenant",
+      authMode: "jwt_bearer",
       tenantId: "t_acme",
-      roleFamilies: ["tenant_user"],
+      roleFamilies: ["tenant"],
       roles: ["tenant_admin"],
       scopes: ["identity:read"],
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
     });
 
     expect(token).toBeTypeOf("string");
@@ -455,12 +460,17 @@ describe("JwtAuthService key material runtime consistency", () => {
     const jwtService = new JwtAuthService();
     const token = jwtService.sign({
       actorId: "usr_asym_123",
-      actorType: "tenant_user",
+      actorType: "tenant_admin",
       realm: "tenant",
+      authMode: "jwt_bearer",
       tenantId: "t_asym",
-      roleFamilies: ["tenant_user"],
+      roleFamilies: ["tenant"],
       roles: ["tenant_admin"],
       scopes: ["identity:read"],
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
     });
 
     expect(token).toBeTypeOf("string");
@@ -479,12 +489,17 @@ describe("JwtAuthService key material runtime consistency", () => {
     expect(() =>
       jwtService.sign({
         actorId: "usr_123",
-        actorType: "tenant_user",
+        actorType: "tenant_admin",
         realm: "tenant",
+        authMode: "jwt_bearer",
         tenantId: "t_acme",
-        roleFamilies: ["tenant_user"],
+        roleFamilies: ["tenant"],
         roles: ["tenant_admin"],
         scopes: ["identity:read"],
+        supportedExecutionModes: [
+          "discussion_planning",
+          "supervisor_managed_execution",
+        ],
       }),
     ).toThrowError(/neither JWT_PRIVATE_KEY nor JWT_SECRET/i);
   });
