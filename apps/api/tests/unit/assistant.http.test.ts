@@ -120,4 +120,21 @@ describe("AssistantController HTTP routing", () => {
       },
     });
   });
+
+  it("routes GET /assistant/tools/runtime-definition with assistant:read scope", async () => {
+    const response = await fetch(`${baseUrl}/assistant/tools/runtime-definition`, {
+      method: "GET",
+      headers: {
+        "x-actor-type": "ops_user",
+        "x-actor-id": "ops-001",
+        "x-realm": "ops",
+        "x-scopes": "assistant:read",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const json = (await response.json()) as { data: { tools: unknown[] } };
+    expect(json.data).toBeDefined();
+    expect(Array.isArray(json.data.tools)).toBe(true);
+  });
 });

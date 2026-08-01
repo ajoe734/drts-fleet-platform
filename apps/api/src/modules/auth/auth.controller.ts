@@ -62,6 +62,8 @@ export class AuthController {
     private readonly securityEventsService?: SecurityEventsService,
   ) {}
 
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("token")
   issueToken(@Req() request: TokenRequest): {
     token: string;

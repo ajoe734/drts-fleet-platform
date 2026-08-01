@@ -4,7 +4,11 @@ import { Controller, Module, Post } from "@nestjs/common";
 import { APP_GUARD, NestFactory, Reflector } from "@nestjs/core";
 import { describe, expect, it } from "vitest";
 
-import { BootstrapAuthGuard } from "../../src/common/auth";
+import {
+  BootstrapAuthGuard,
+  RequireRealms,
+  RequireScopes,
+} from "../../src/common/auth";
 import { AssistantController } from "../../src/modules/assistant/assistant.controller";
 import { AssistantGuardrailService } from "../../src/modules/assistant/assistant.guardrail.service";
 import { AssistantLlmGatewayService } from "../../src/modules/assistant/assistant-llm-gateway.service";
@@ -35,6 +39,8 @@ class TestBootstrapController {
   constructor(private readonly assistantService: AssistantService) {}
 
   @Post("conversation")
+  @RequireRealms("system", "platform", "ops", "tenant")
+  @RequireScopes("assistant:write")
   createConversation() {
     return this.assistantService.createConversation(
       {

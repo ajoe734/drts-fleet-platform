@@ -36,7 +36,7 @@ export class AssistantController {
 
   @Get("tools/runtime-definition")
   @RequireRealms("system", "platform", "ops", "tenant")
-  @RequireScopes("assistant:write")
+  @RequireScopes("assistant:read")
   getRuntimeDefinition(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
