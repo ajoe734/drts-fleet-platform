@@ -31,7 +31,12 @@ export const AUTH_ROLE_FAMILIES = [
 
 export type AuthRoleFamily = (typeof AUTH_ROLE_FAMILIES)[number];
 
-export const AUTH_MODES = ["bootstrap_headers", "jwt_bearer"] as const;
+export const AUTH_MODES = [
+  "bootstrap_headers",
+  "jwt_bearer",
+  "partner_api_key",
+  "referral_bearer",
+] as const;
 
 export type AuthMode = (typeof AUTH_MODES)[number];
 

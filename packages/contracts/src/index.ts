@@ -795,7 +795,11 @@ export interface IdentityContext {
     | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
-  authMode: "bootstrap_headers" | "jwt_bearer";
+  authMode:
+    | "bootstrap_headers"
+    | "jwt_bearer"
+    | "partner_api_key"
+    | "referral_bearer";
   roleFamilies: Array<"platform" | "tenant" | "ops" | "driver" | "partner">;
   roles: string[];
   scopes: string[];
