@@ -4,8 +4,25 @@ import { expect, test } from "@playwright/test";
 // community-app embedded ride-hailing webview, served at /embed/[entrySlug]).
 // Deployed acceptance must exercise a real partner-scoped route. A root-only
 // check can stay green while every usable /embed/[entrySlug] URL returns 404.
-// Local runs without an API continue to exercise the fallback root.
-const deployedEntrySlug = process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG?.trim();
+// Local runs use a deterministic authority fixture so headers, iframe loading,
+// genuine not-found responses, and upstream failures remain controllable.
+const externalBaseURL =
+  process.env.DRTS_DEV_REFERRAL_EMBED_BASE_URL ??
+  process.env.REFERRAL_EMBED_BASE_URL;
+const usesLocalFixture = !externalBaseURL;
+const deployedEntrySlug =
+  process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG?.trim() ??
+  (usesLocalFixture ? "referral-demo-community" : undefined);
+const allowedEmbedHost = usesLocalFixture
+  ? "127.0.0.1:3199"
+  : "app.yuhe-living.com.tw";
+const allowedEmbedOrigin = usesLocalFixture
+  ? `http://${allowedEmbedHost}`
+  : `https://${allowedEmbedHost}`;
+
+function configuredEmbedPath(entrySlug: string) {
+  return `/embed/${encodeURIComponent(entrySlug)}?entryHost=${encodeURIComponent(allowedEmbedHost)}`;
+}
 
 test.describe("referral embed surfaces", () => {
   test("root opens the configured canonical referral entry", async ({
@@ -43,5 +60,94 @@ test.describe("referral embed surfaces", () => {
         /Referral Embed|轉介嵌入前台/,
       );
     }
+  });
+
+  test("authorized partner host receives frameable headers", async ({
+    request,
+  }) => {
+    test.skip(!deployedEntrySlug, "No deployed canonical entry is configured.");
+
+    const response = await request.get(
+      configuredEmbedPath(deployedEntrySlug!),
+      { headers: { referer: `${allowedEmbedOrigin}/mobile` } },
+    );
+
+    expect(response.ok()).toBeTruthy();
+    expect(response.headers()["x-frame-options"]).toBeUndefined();
+    expect(response.headers()["content-security-policy"]).toContain(
+      `frame-ancestors ${allowedEmbedOrigin}`,
+    );
+    expect(response.headers()["x-drts-embed-decision"]).toBe("allowed");
+  });
+
+  test("unauthorized partner host remains fail-closed", async ({ request }) => {
+    const response = await request.get(
+      `/embed/${encodeURIComponent(deployedEntrySlug ?? "referral-demo-community")}?entryHost=evil.example`,
+      { headers: { referer: "https://evil.example/mobile" } },
+    );
+
+    expect(response.status()).toBe(403);
+    expect(response.headers()["x-frame-options"]).toBe("DENY");
+    expect(response.headers()["content-security-policy"]).toContain(
+      "frame-ancestors 'none'",
+    );
+    expect(response.headers()["x-drts-embed-decision"]).toBe("blocked");
+  });
+
+  test("authorized partner host can load the referral entry in a real iframe", async ({
+    page,
+    baseURL,
+  }) => {
+    test.skip(!deployedEntrySlug, "No deployed canonical entry is configured.");
+
+    const iframeUrl = new URL(
+      configuredEmbedPath(deployedEntrySlug!),
+      baseURL,
+    ).toString();
+    if (usesLocalFixture) {
+      await page.goto(
+        `${allowedEmbedOrigin}/embed-host?target=${encodeURIComponent(iframeUrl)}`,
+      );
+    } else {
+      await page.route(`${allowedEmbedOrigin}/**`, async (route) => {
+        await route.fulfill({
+          contentType: "text/html",
+          body: `<iframe title="Referral Embed" src="${iframeUrl}"></iframe>`,
+        });
+      });
+      await page.goto(`${allowedEmbedOrigin}/mobile`);
+    }
+    await expect(
+      page.frameLocator('iframe[title="Referral Embed"]').locator("body"),
+    ).toContainText("社區叫車");
+  });
+
+  test("returns 404 only for an authority-confirmed missing entry", async ({
+    request,
+  }) => {
+    test.skip(!usesLocalFixture, "Requires the local controllable authority.");
+
+    const response = await request.get(configuredEmbedPath("missing-entry"), {
+      headers: { referer: `${allowedEmbedOrigin}/mobile` },
+    });
+
+    expect(response.status()).toBe(404);
+  });
+
+  test("renders the degraded error boundary for an authority failure", async ({
+    page,
+  }) => {
+    test.skip(!usesLocalFixture, "Requires the local controllable authority.");
+
+    const response = await page.goto(configuredEmbedPath("authority-down"), {
+      waitUntil: "domcontentloaded",
+      referer: `${allowedEmbedOrigin}/mobile`,
+    });
+
+    expect(response?.status()).toBe(500);
+    await expect(page.locator('main[role="alert"]')).toContainText(
+      "目前無法載入此轉介入口。",
+    );
+    await expect(page.getByRole("button", { name: "再試一次" })).toBeVisible();
   });
 });
