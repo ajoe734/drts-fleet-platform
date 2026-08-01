@@ -6,9 +6,9 @@
 **Parent Reviewer:** `Gemini2`  
 **Sidecar Owner:** `Gemini2`  
 **Sidecar Reviewer:** `Codex2`  
-**Generated:** `2026-08-01` (UTC, packet rev1)  
+**Generated:** `2026-08-01` (UTC, packet rev2)  
 **Snapshot Anchor (parent `last_update`):** `2026-08-01T10:07:52Z`  
-**Snapshot Anchor (sidecar `last_update`):** `2026-08-01T10:08:10Z`  
+**Snapshot Anchor (sidecar `last_update`):** `2026-08-01T10:10:21Z`  
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT` — support-only; does not modify canonical truth, runtime behavior, contract surface, or parent task implementation files.
 
 ---
@@ -19,7 +19,8 @@
 - Define the formal acceptance checklist and verification criteria for `BE-REF-HANDOFF-001`.
 - Pin upstream machine-truth dependency on `REF-DOC-001` (status: `done`, commit: `1391b6c1f11e7fee0fd5313ff70ea22eaded236b`).
 - Map component boundaries across contract schemas, backend partner services, DB migrations, Referral Embed Web API/middleware, and security test suites.
-- Provide a structured handoff document for reviewer (`Codex2`) evaluation and verification.
+- Explicitly differentiate existing workspace baseline paths from new target artifacts designated for creation under `BE-REF-HANDOFF-001`.
+- Provide a structured handoff document for reviewer (`Codex2`) evaluation and verification reachable on remote branch `gemini2/be-ref-handoff-001-sidecar-acceptance`.
 
 ### Out of Scope
 - Modifying L1 product specs or canonical design documents (`phase1_prd_detailed_v1.md`, `phase1_service_contracts_v1.md`, etc.).
@@ -51,15 +52,23 @@
 - **Reviewer:** `Gemini2`
 - **Status:** `in_progress`
 - **Depends On:** `[REF-DOC-001]`
-- **Target Component Artifacts:**
-  - `packages/contracts/src/`
-  - `apps/api/src/modules/tenant-partner/`
-  - `infra/migrations/`
-  - `apps/referral-embed-web/app/api/referral/session/`
-  - `apps/referral-embed-web/lib/embed-partner-session.ts`
-  - `apps/referral-embed-web/lib/embed-security.ts`
-  - `apps/referral-embed-web/middleware.ts`
-  - `tests/`
+
+#### 2.2.1 Repository Path Audit & Component Mapping
+To prevent ambiguity during review, repository paths associated with `BE-REF-HANDOFF-001` are categorized into existing workspace baseline files vs. target artifacts created during implementation:
+
+1. **Existing Baseline Paths (Already Present in Repository Workspace):**
+   - `packages/contracts/src/` — Base contract definitions and schemas for partner referral handoff.
+   - `apps/api/src/modules/tenant-partner/` — Backend tenant-partner services and controllers.
+   - `infra/migrations/` — Database migrations for tenant partner & consent tables.
+   - `apps/referral-embed-web/lib/embed-security.ts` — Existing security helper module.
+   - `apps/referral-embed-web/lib/embed-runtime.ts` — Existing runtime helper module.
+   - `apps/referral-embed-web/lib/embed-api.ts` — Existing API wrapper helper.
+   - `apps/referral-embed-web/middleware.ts` — Edge middleware handling CSP and routing headers.
+   - `apps/api/tests/` / `tests/` — Test directories for unit, integration, and security E2E suites.
+
+2. **Target Artifact Paths (To Be Created/Implemented by `BE-REF-HANDOFF-001`):**
+   - `apps/referral-embed-web/app/api/referral/session/` — New Next.js API route handler for establishing partner session from single-use handoff token.
+   - `apps/referral-embed-web/lib/embed-partner-session.ts` — New frontend helper for managing Secure HttpOnly session state and cookie verification.
 
 ### 2.3 Upstream Dependency (`REF-DOC-001`)
 - **ID:** `REF-DOC-001`
@@ -81,9 +90,9 @@ The acceptance bar for `BE-REF-HANDOFF-001` requires empirical proof across 6 co
 | --- | --- | --- | --- |
 | **1. Credential Security** | Partner credentials strictly backend-only. No raw secrets or tokens in browser query params or URLs. | `apps/api/src/modules/tenant-partner/`, `apps/referral-embed-web/` | E2E & Route Inspection (`no browser credential URLs`) |
 | **2. Single-Use Handoff Artifact** | 2-minute TTL, single-use token exchange, atomic Postgres consumption (replay prevention). | `infra/migrations/`, `apps/api/src/modules/tenant-partner/` | Postgres Atomic Replay & Expiry Tests |
-| **3. Binding & Host Enforcement** | Exact slug / host / user / consent version binding. Rejection (403) on host mismatch or cross-entry spoofing. | `apps/referral-embed-web/lib/embed-security.ts`, `middleware.ts` | Host Mismatch & Cross-Entry Unit/Integration Tests |
+| **3. Binding & Host Enforcement** | Exact slug / host / user / consent version binding. Rejection (403) on host mismatch or cross-entry spoofing. | `apps/referral-embed-web/lib/embed-security.ts`, `apps/referral-embed-web/middleware.ts` | Host Mismatch & Cross-Entry Unit/Integration Tests |
 | **4. Consent Ledger & Activation** | Exact versioned consent bundle (`trip.manage`, `pii.trip`, `identity.bind`) recorded in ledger prior to persistent identity activation. | `packages/contracts/src/`, `apps/api/src/modules/tenant-partner/` | Consent Ledger Serialization & Audit Assertions |
-| **5. HttpOnly Session & CSP** | Issue Secure HttpOnly session cookie; entry-scoped fail-closed CSP header enforcement. | `apps/referral-embed-web/app/api/referral/session/`, `middleware.ts` | HTTP Header & Cookie Security Assertions |
+| **5. HttpOnly Session & CSP** | Issue Secure HttpOnly session cookie; entry-scoped fail-closed CSP header enforcement. | `apps/referral-embed-web/app/api/referral/session/` (target route), `apps/referral-embed-web/middleware.ts` | HTTP Header & Cookie Security Assertions |
 | **6. Build & Test Suite** | Contracts, API, and Web lint, typecheck, build, and E2E pass clean. | Full repository build pipeline | `pnpm lint`, `pnpm typecheck`, `pnpm test` |
 
 ---
@@ -106,9 +115,15 @@ When reviewing parent task `BE-REF-HANDOFF-001`, the reviewer (`Gemini2` / `Code
 
 ---
 
-## 5. Reviewer Handoff Protocol
+## 5. Reviewer Handoff & Verification Instructions
 
-Upon completion of support artifact creation:
-1. Perform task-scoped git commit and push for this sidecar artifact.
-2. Execute `AI_NAME=Gemini2 scripts/ai-status.sh handoff BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE Codex2 "Acceptance packet and dependency map created and ready for review"`.
-3. Reviewer `Codex2` checks packet completeness and executes `AI_NAME=Codex2 scripts/ai-status.sh approve BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE "Approved sidecar acceptance packet"`.
+1. **Remote Ref Availability**:
+   This sidecar packet is anchored on branch `gemini2/be-ref-handoff-001-sidecar-acceptance` and pushed to remote `origin/gemini2/be-ref-handoff-001-sidecar-acceptance`. Reviewers can inspect the artifact directly via:
+   ```bash
+   git fetch origin gemini2/be-ref-handoff-001-sidecar-acceptance
+   git checkout origin/gemini2/be-ref-handoff-001-sidecar-acceptance -- support/sidecars/BE-REF-HANDOFF-001/BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE.md
+   ```
+
+2. **Handoff Protocol**:
+   - Owner (`Gemini2`) executes `AI_NAME=Gemini2 scripts/ai-status.sh handoff BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE Codex2 "Updated acceptance packet with repository path audit and pushed ref to origin"`.
+   - Reviewer (`Codex2`) verifies the artifact on `origin/gemini2/be-ref-handoff-001-sidecar-acceptance` and approves via `AI_NAME=Codex2 scripts/ai-status.sh approve BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE "Approved sidecar acceptance packet"`.
