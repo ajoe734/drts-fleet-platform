@@ -119,8 +119,17 @@ export class DriverDeviceSessionRepository {
 
     if (!this.isEnabled()) {
       const persistedFamily = this.buildFamilyRecord({
-        ...family,
+        familyId: family.familyId,
+        sessionId: family.sessionId,
         currentTokenId: refreshTokenRecord.refreshTokenId,
+        previousTokenId: family.previousTokenId,
+        issuedAt: family.createdAt,
+        lastRotatedAt: family.lastRotatedAt,
+        absoluteExpiresAt: family.absoluteExpiresAt,
+        revokedAt: family.revokedAt,
+        revokeReason: family.revokeReason,
+        status: family.status,
+        createdAt: family.createdAt,
       });
       this.upsertFallbackSession(session);
       this.upsertFallbackFamily(persistedFamily);
@@ -139,8 +148,17 @@ export class DriverDeviceSessionRepository {
       await this.insertFamily(client, family);
       await this.insertRefreshToken(client, refreshTokenRecord);
       const persistedFamily = this.buildFamilyRecord({
-        ...family,
+        familyId: family.familyId,
+        sessionId: family.sessionId,
         currentTokenId: refreshTokenRecord.refreshTokenId,
+        previousTokenId: family.previousTokenId,
+        issuedAt: family.createdAt,
+        lastRotatedAt: family.lastRotatedAt,
+        absoluteExpiresAt: family.absoluteExpiresAt,
+        revokedAt: family.revokedAt,
+        revokeReason: family.revokeReason,
+        status: family.status,
+        createdAt: family.createdAt,
       });
       await client.query(
         `
@@ -343,7 +361,7 @@ export class DriverDeviceSessionRepository {
           ? await this.getSessionById(client, command.bindingId)
           : await this.getActiveSessionByDeviceId(
               client,
-              "deviceId" in command ? command.deviceId : "",
+              "deviceId" in command ? (command.deviceId ?? "") : "",
             );
       if (!session) {
         await client.query("ROLLBACK");
@@ -895,6 +913,7 @@ export class DriverDeviceSessionRepository {
         SELECT record
         FROM iam.refresh_tokens
         WHERE token_hash = $1
+        FOR UPDATE
         LIMIT 1
       `,
       [tokenHash],
