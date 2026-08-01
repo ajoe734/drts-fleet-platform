@@ -110,7 +110,7 @@ if (isLocalUrl(referralBaseURL, 3014)) {
     command:
       `cd apps/referral-embed-web && ` +
       `DRTS_API_URL=${devApiBaseURL} ` +
-      `REFERRAL_EMBED_ALLOWED_HOSTS=community-app.example.test,localhost:3014,127.0.0.1:3014 ` +
+      `REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw,localhost:3014,127.0.0.1:3014 ` +
       `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3014`,
     url: "http://127.0.0.1:3014",
     reuseExistingServer: !process.env.CI,

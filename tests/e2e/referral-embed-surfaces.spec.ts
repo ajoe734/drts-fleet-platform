@@ -12,7 +12,7 @@ const externalBaseURL =
 const usesLocalFixture = !externalBaseURL;
 const deployedEntrySlug =
   process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG?.trim() ??
-  (usesLocalFixture ? "referral-demo-community" : undefined);
+  (usesLocalFixture ? "yuhe-residence" : undefined);
 const allowedEmbedHost = usesLocalFixture
   ? "127.0.0.1:3199"
   : "app.yuhe-living.com.tw";
@@ -54,6 +54,7 @@ test.describe("referral embed surfaces", () => {
       await expect(page.locator("body")).toContainText(
         `/embed/${deployedEntrySlug}`,
       );
+      await expect(page.locator("body")).toContainText("御和物業");
       await expect(page.locator("body")).toContainText("社區叫車");
     } else {
       await expect(page.locator("body")).toContainText(
@@ -82,7 +83,7 @@ test.describe("referral embed surfaces", () => {
 
   test("unauthorized partner host remains fail-closed", async ({ request }) => {
     const response = await request.get(
-      `/embed/${encodeURIComponent(deployedEntrySlug ?? "referral-demo-community")}?entryHost=evil.example`,
+      `/embed/${encodeURIComponent(deployedEntrySlug ?? "yuhe-residence")}?entryHost=evil.example`,
       { headers: { referer: "https://evil.example/mobile" } },
     );
 

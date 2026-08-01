@@ -20,11 +20,18 @@ Partners iframe one URL per referral entry:
 https://<referral-embed-host>/embed/<entrySlug>
 ```
 
-- **current dev demo / acceptance URL:** `https://refer.smarttransport.tw/embed/referral-demo-community`
-- **current dev Cloud Run demo fallback:** `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community`
+- **formal partner entry on the dev acceptance rail:** `https://refer.smarttransport.tw/embed/yuhe-residence`
+- **dev Cloud Run fallback:** `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/yuhe-residence`
 - `<entrySlug>` is the partner channel entry slug provisioned in platform-admin
-  (`/partners`). `referral-demo-community` is only the seeded dev acceptance
-  identity; it is not a production partner slug or a production URL claim.
+  (`/partners`). `yuhe-residence` is the formal non-demo entry for 御和物業 on
+  the current dev acceptance authority. The legacy `referral-demo-community`
+  seed remains test data only and is not the default or a partner-facing URL.
+- The `refer.smarttransport.tw` URL above is still a **dev acceptance URL**. It
+  does not claim that the Yuhe host app or a DRTS production rail has completed
+  production cutover.
+- Dev keeps `REFERRAL_EMBED_DEMO=true` for deterministic acceptance identity;
+  the partner entry and URL are formal, while authentication remains a dev-only
+  acceptance fixture until a separately delivered host-backend credential flow.
 - No production Referral Embed host is defined by the current production deploy
   rail. A production onboarding URL must use the provisioned partner slug and
   the separately approved production host.
@@ -50,7 +57,7 @@ by `playwright.referral-embed.config.ts`.
 | ----------------------------------- | -------------------------------------------------------------------------------------- |
 | `REFERRAL_EMBED_ALLOWED_HOSTS`      | space/comma-separated allowlist of partner `entryHost`s permitted to iframe `/embed/*` |
 | `REFERRAL_EMBED_DEMO`               | `true` enables the deterministic demo handoff for dev/preview                          |
-| `REFERRAL_EMBED_DEFAULT_ENTRY_SLUG` | optional canonical entry opened from `/`; dev uses `referral-demo-community`           |
+| `REFERRAL_EMBED_DEFAULT_ENTRY_SLUG` | optional canonical entry opened from `/`; dev uses `yuhe-residence`                    |
 
 ## Local commands
 

@@ -137,6 +137,20 @@ import {
 const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
   Object.freeze([
     Object.freeze({
+      ruleId: "referral-rule-342de003-aed1-4f55-8dd2-bbd7738a2731",
+      partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      partnerEntrySlug: "yuhe-residence",
+      rateType: "percent" as const,
+      value: 10,
+      currency: "TWD",
+      effectiveFrom: "2026-07-01T00:00:00.000Z",
+      effectiveUntil: null,
+      settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+      channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
+      createdAt: "2026-08-01T05:25:58.237Z",
+      updatedAt: "2026-08-01T05:25:58.237Z",
+    }),
+    Object.freeze({
       ruleId: "referral-rule-demo-001",
       partnerId: "partner-referral-demo-001",
       partnerEntrySlug: "referral-demo-community",
@@ -633,6 +647,43 @@ const API_KEY_SEED: StoredTenantApiKeyRecord[] = [
 ];
 
 const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
+  {
+    partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+    partnerCode: "yuhe",
+    partnerType: "referral_channel",
+    programId: "program-referral-community",
+    programCode: "REFERRAL_COMMUNITY",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: null,
+    entrySlug: "yuhe-residence",
+    displayName: "御和物業",
+    businessDispatchSubtype: "enterprise_dispatch",
+    authMode: "partner_api_key",
+    eligibilityMode: "none",
+    entryHost: "app.yuhe-living.com.tw",
+    entryPath: "/embed/yuhe-residence",
+    themeAccent: "#0F766E",
+    brandingMetadata: {
+      displayName: "御和物業",
+      themeAccent: "#0F766E",
+      supportEmail: null,
+      supportPhone: "0800-911-200",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-08-01T05:25:49.951Z",
+    updatedAt: "2026-08-01T05:25:49.951Z",
+    auditMetadata: {
+      source: "platform_admin_console",
+      requestId: "codex-yuhe-formal-20260801-create",
+      createdBy: "platform_admin",
+      updatedBy: "platform_admin",
+    },
+  },
   {
     partnerId: "partner-bank-demo-001",
     partnerCode: "bank_demo_alpha",

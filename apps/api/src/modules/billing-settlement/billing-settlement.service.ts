@@ -402,6 +402,20 @@ const SETTLEMENT_TRIP_SEED: BillingSettlementTripRecord[] = [
 const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
   Object.freeze([
     Object.freeze({
+      ruleId: "referral-rule-342de003-aed1-4f55-8dd2-bbd7738a2731",
+      partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      partnerEntrySlug: "yuhe-residence",
+      rateType: "percent" as const,
+      value: 10,
+      currency: "TWD",
+      effectiveFrom: "2026-07-01T00:00:00.000Z",
+      effectiveUntil: null,
+      settlementDirection: REFERRAL_STATEMENT_DIRECTION,
+      channelKey: REFERRAL_STATEMENT_CHANNEL_KEY,
+      createdAt: "2026-08-01T05:25:58.237Z",
+      updatedAt: "2026-08-01T05:25:58.237Z",
+    }),
+    Object.freeze({
       ruleId: "referral-rule-demo-001",
       partnerId: "partner-referral-demo-001",
       partnerEntrySlug: "referral-demo-community",
@@ -849,7 +863,9 @@ export class BillingSettlementService implements OnModuleInit {
     async: true,
     suppressErrors: false,
   })
-  async handleOwnedMobilityTripCompleted(event: OwnedMobilityTripCompletedEvent) {
+  async handleOwnedMobilityTripCompleted(
+    event: OwnedMobilityTripCompletedEvent,
+  ) {
     if (
       !event.tenantId ||
       !event.driverId ||

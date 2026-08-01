@@ -43,7 +43,7 @@ export default defineConfig({
               REFERRAL_EMBED_ALLOWED_HOSTS:
                 "127.0.0.1:3199 app.yuhe-living.com.tw app-stg.yuhe-living.com.tw",
               REFERRAL_EMBED_DEMO: "true",
-              REFERRAL_EMBED_DEFAULT_ENTRY_SLUG: "referral-demo-community",
+              REFERRAL_EMBED_DEFAULT_ENTRY_SLUG: "yuhe-residence",
             },
             reuseExistingServer: false,
             timeout: 120_000,

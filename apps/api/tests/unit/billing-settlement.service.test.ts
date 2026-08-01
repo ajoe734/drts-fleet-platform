@@ -273,11 +273,14 @@ describe("BillingSettlementService settlement matrix", () => {
       "Escalating to settlement lead.",
     );
 
-    const commented = await service.addReconciliationIssueComment(created.issueId, {
-      actorId: "fin-escalations",
-      message: "Attached sponsor-side workbook and issuer screenshot.",
-      artifactIds: ["artifact-issuer-032"],
-    });
+    const commented = await service.addReconciliationIssueComment(
+      created.issueId,
+      {
+        actorId: "fin-escalations",
+        message: "Attached sponsor-side workbook and issuer screenshot.",
+        artifactIds: ["artifact-issuer-032"],
+      },
+    );
     expect(commented.comments.at(-1)?.artifactIds).toEqual([
       "artifact-issuer-032",
     ]);
@@ -671,7 +674,25 @@ describe("BillingSettlementService referral settlement (drts_pays_partner)", () 
     expect(rule?.rateType).toBe("percent");
     expect(rule?.value).toBe(15);
     expect(
-      service.resolveReferralRevenueShareRule("unknown-channel", "2026-06-10T00:00:00Z"),
+      service.resolveReferralRevenueShareRule(
+        "yuhe-residence",
+        "2026-08-01T00:00:00Z",
+      ),
+    ).toMatchObject({
+      partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      partnerEntrySlug: "yuhe-residence",
+      rateType: "percent",
+      value: 10,
+      currency: "TWD",
+      effectiveFrom: "2026-07-01T00:00:00.000Z",
+      settlementDirection: "drts_pays_partner",
+      channelKey: "partner_referral",
+    });
+    expect(
+      service.resolveReferralRevenueShareRule(
+        "unknown-channel",
+        "2026-06-10T00:00:00Z",
+      ),
     ).toBeNull();
   });
 
@@ -681,8 +702,8 @@ describe("BillingSettlementService referral settlement (drts_pays_partner)", () 
       "referral-demo-community",
     );
     expect(statements.length).toBeGreaterThanOrEqual(1);
-    expect(statements.every((s) => s.partnerEntrySlug === "referral-demo-community")).toBe(
-      true,
-    );
+    expect(
+      statements.every((s) => s.partnerEntrySlug === "referral-demo-community"),
+    ).toBe(true);
   });
 });
