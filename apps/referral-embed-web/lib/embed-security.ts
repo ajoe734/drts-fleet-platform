@@ -159,6 +159,8 @@ export function applyEmbedSecurityHeaders(
   decision: EmbedSecurityDecision,
 ) {
   headers.set("Content-Security-Policy", decision.contentSecurityPolicy);
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("X-Content-Type-Options", "nosniff");
   headers.set(
     "X-DRTS-PostMessage-Allowed-Origins",
     decision.allowedPostMessageOrigins.join(","),

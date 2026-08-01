@@ -100,6 +100,10 @@ describe("referral-embed embed security", () => {
     expect(headers.get("X-DRTS-PostMessage-Allowed-Origins")).toBe(
       "https://ride.ctbc.com.tw",
     );
+    expect(headers.get("Referrer-Policy")).toBe(
+      "strict-origin-when-cross-origin",
+    );
+    expect(headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(headers.get("Vary")).toContain("Origin");
   });
 

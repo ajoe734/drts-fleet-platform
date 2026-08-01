@@ -4,7 +4,10 @@ import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
 import { resolveMapProviderRuntimeConfig } from "./common/map-provider";
-import { validateAuthStartupConfig } from "./config/auth-startup-config";
+import {
+  applyApiBrowserSecurity,
+  validateAuthStartupConfig,
+} from "./config";
 import { buildHealthPayload } from "./health/health.controller";
 
 async function bootstrap() {
@@ -12,8 +15,9 @@ async function bootstrap() {
   resolveMapProviderRuntimeConfig(process.env);
 
   const app = await NestFactory.create(AppModule, {
-    cors: true,
+    cors: false,
   });
+  applyApiBrowserSecurity(app, process.env);
   app.setGlobalPrefix("api", {
     exclude: ["health"],
   });
