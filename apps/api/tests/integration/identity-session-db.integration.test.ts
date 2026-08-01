@@ -317,15 +317,19 @@ describe.runIf(Boolean(DATABASE_URL))("Identity Session and Refresh Family Postg
     );
 
     const deviceId = `device_pg_${randomUUID()}`;
-    const driverId = "drv-demo-001";
+    const driverId = `drv_pg_${randomUUID()}`;
     createdPrincipalIds.add(driverId);
+
+    driverProfileService.upsertAdminProfile(driverId, {
+      name: "PG Test Driver",
+    });
 
     await db.query(
       `
         INSERT INTO iam.identity_principals (
           principal_id, source_ref, issuer, subject, principal_type, email_normalized, email_verified, display_name, account_status, created_at, updated_at, record
         ) VALUES (
-          $1, $2, 'test_issuer', $3, 'human', 'driver@example.com', true, 'Demo Driver', 'active', NOW(), NOW(), '{}'::jsonb
+          $1, $2, 'test_issuer', $3, 'human', 'driver_pg@example.com', true, 'PG Test Driver', 'active', NOW(), NOW(), '{}'::jsonb
         ) ON CONFLICT DO NOTHING
       `,
       [driverId, `source_${driverId}`, `sub_${driverId}`],
@@ -333,7 +337,7 @@ describe.runIf(Boolean(DATABASE_URL))("Identity Session and Refresh Family Postg
 
     // 1. Register device via DriverDeviceSessionService
     const registered = await service.register({
-      registrationCode: "demo-driver",
+      registrationCode: driverId,
       deviceId,
       deviceLabel: "PG Test Device",
     });
