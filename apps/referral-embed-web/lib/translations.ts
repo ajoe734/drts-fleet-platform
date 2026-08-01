@@ -629,19 +629,27 @@ const en = {
   "unsupported.card2.body":
     "Where another channel owns settlement, this shell can point to that authority but should not fabricate a passenger download artifact.",
   "embed.chrome.title": "Community ride booking",
+  "embed.operatorName": "DRTS",
   "embed.chrome.webview": "webview",
   "embed.card.handoffSummary": "Identity handoff summary",
+  "embed.card.handoffFromApp": "Identity came from the community app",
   "embed.card.handoffSubtitle": "signed handoff token",
   "embed.card.trip": "Trip",
   "embed.card.tripSubtitle": "pickup · drop-off · time",
   "embed.card.vehicles": "Vehicle type",
   "embed.card.vehiclesSubtitle": "owned mobility",
+  "embed.card.reason": "Reason",
   "embed.card.negatives": "Test negative states",
   "embed.card.history": "Trip history",
   "embed.card.historySubtitle": "persistent identity · reopen safe",
+  "embed.card.myTrips": "My trips",
   "embed.card.receipt": "Receipt",
   "embed.card.completed": "Trip completed",
   "embed.card.cancelled": "Trip cancelled",
+  "embed.card.next": "Next",
+  "embed.card.passengerVehicle": "Passenger and vehicle",
+  "embed.card.fareBreakdown": "Fare breakdown",
+  "embed.card.rateTrip": "Rate this trip",
   "embed.card.negative": "Negative state · {screen}",
   "embed.field.signature": "Community signature valid",
   "embed.field.identity": "Resident identity resolved",
@@ -683,6 +691,12 @@ const en = {
   "embed.field.tryLater": "Try again later",
   "embed.field.agree": "Agree and start",
   "embed.field.notNow": "Not now",
+  "embed.field.verified": "Verified",
+  "embed.field.supportPhoneLine": "Community ride support {phone}",
+  "embed.field.minuteEstimate": "min · estimated",
+  "embed.field.boundName": "Bound {name}",
+  "embed.field.messageCodeHintSample":
+    "Copy is rendered from the backend messageCode · sample only",
   "embed.field.cancelTrip": "Cancel trip · {minutes} min left",
   "embed.nav.book": "Book",
   "embed.nav.trip": "Active",
@@ -701,6 +715,8 @@ const en = {
   "embed.state.unsupported.title": "Cannot open in this environment",
   "embed.state.unsupported.badge": "unsupported_host · blocked",
   "embed.state.consent.title": "Authorize ride-booking access",
+  "embed.state.consent.subtitle":
+    "First-time use · review the consent scope below · consent_required",
   "embed.state.consent.badge": "consent_required",
   "embed.state.fallback.title": "Embedded service is temporarily unavailable",
   "embed.state.fallback.badge": "fallback_to_web · use website",
@@ -708,12 +724,22 @@ const en = {
     "The current source host is not on the authorized allowlist, so embedded loading has been blocked for security reasons.",
   "embed.message.reauth":
     "To protect your resident account, return to {appName} and re-enter ride booking.",
+  "embed.message.reauthLong":
+    "To protect your resident account, return to {appName} and enter ride booking again. This page will not ask for your account or password.",
   "embed.message.consent":
     "First-time use requires consent confirmation. Trips and receipts stay linked to the existing resident identity.",
+  "embed.message.consentLong":
+    "Rides are provided by {operator}. Personal data is only used to complete this trip, and consent can be revoked from the community app.",
   "embed.message.fallback":
     "Ride booking cannot be completed inside the community app right now. The standalone website can still recover the same trips and receipts.",
+  "embed.message.fallbackLong":
+    "Ride booking cannot be completed inside the community app right now. You can continue on the standalone ride-booking website after phone verification, and the trip plus receipt will still stay linked to your identity.",
   "embed.message.handoff":
     "No extra sign-in is needed. Resident identity is securely handed off from {appName}.",
+  "embed.message.handoffLong":
+    "No extra sign-in is needed. {appName} securely hands off the resident identity so ride booking can start immediately. This embedded page will not ask for an account or password.",
+  "embed.message.unsupportedLong":
+    "Ride booking can only be opened inside an authorized community app. The current source is not on the entryHost allowlist, so loading has been blocked for security reasons and no personal data was sent.",
   "embed.book.subtitle": "{name} · {unit}",
   "embed.book.identity": "Bound referral handoff session: {id}",
   "embed.book.now": "Depart now",
@@ -738,6 +764,8 @@ const en = {
   "embed.trip.status.en_route": "Heading to pickup",
   "embed.trip.bound":
     "This trip remains linked to the referral passenger identity and can be recovered after reopening the community app.",
+  "embed.trip.footer":
+    "Arrival time is an estimate, not a guarantee · Transportation is provided by {operator}",
   "embed.field.tripId": "Trip ID",
   "embed.field.destination": "Destination",
   "embed.field.fareLocked": "Fare",
@@ -776,11 +804,16 @@ const en = {
   "embed.history.inProgress": "In progress",
   "embed.history.completed": "Completed",
   "embed.history.cancelled": "Cancelled",
+  "embed.history.recoveryHint":
+    "Trips and receipts can still be recovered after reopening the community app",
   "embed.receipt.pay": "Community monthly billing · linked resident account",
+  "embed.receipt.channelVia": "{payment} · via {channel}",
   "embed.completed.body":
     "This trip has ended successfully. The rider can go directly to the receipt or history view.",
   "embed.cancelled.body":
     "The cancellation outcome and source context are preserved without losing the linked handoff identity.",
+  "embed.cancelled.feePolicy":
+    "This trip was cancelled and no fare was generated. A fee may still apply if cancellation happened after the driver arrived. See the community ride-booking terms for details.",
   "embed.negative.nosupply":
     "No nearby dispatchable vehicle is available. Try again later or pick another time.",
   "embed.negative.ineligible":
@@ -1369,19 +1402,27 @@ const zh: Record<keyof typeof en, string> = {
   "unsupported.card2.body":
     "當其他通道持有結算權責時，此殼層可以指向該權威，但不應捏造供乘客下載的 artifact。",
   "embed.chrome.title": "社區叫車",
+  "embed.operatorName": "智慧運輸科技 DRTS",
   "embed.chrome.webview": "webview",
   "embed.card.handoffSummary": "身分交接摘要",
+  "embed.card.handoffFromApp": "身分由社區 App 帶入",
   "embed.card.handoffSubtitle": "signed handoff token",
   "embed.card.trip": "行程",
   "embed.card.tripSubtitle": "上車 · 下車 · 時間",
   "embed.card.vehicles": "車種",
   "embed.card.vehiclesSubtitle": "owned mobility",
+  "embed.card.reason": "原因",
   "embed.card.negatives": "測試負向狀態",
   "embed.card.history": "歷史行程",
   "embed.card.historySubtitle": "持久身分 · reopen safe",
+  "embed.card.myTrips": "我的行程",
   "embed.card.receipt": "收據",
   "embed.card.completed": "行程已完成",
   "embed.card.cancelled": "行程已取消",
+  "embed.card.next": "接下來",
+  "embed.card.passengerVehicle": "乘客與車輛",
+  "embed.card.fareBreakdown": "費用明細",
+  "embed.card.rateTrip": "為這趟行程評分",
   "embed.card.negative": "負向狀態 · {screen}",
   "embed.field.signature": "社區簽章有效",
   "embed.field.identity": "住戶身分已解析",
@@ -1423,6 +1464,11 @@ const zh: Record<keyof typeof en, string> = {
   "embed.field.tryLater": "稍後再試",
   "embed.field.agree": "同意並開始",
   "embed.field.notNow": "暫不使用",
+  "embed.field.verified": "已驗證",
+  "embed.field.supportPhoneLine": "社區叫車客服 {phone}",
+  "embed.field.minuteEstimate": "分鐘 · 估計",
+  "embed.field.boundName": "綁定 {name}",
+  "embed.field.messageCodeHintSample": "文案由後端 messageCode 渲染 · 此為示意",
   "embed.field.cancelTrip": "取消行程 · 剩 {minutes} 分鐘",
   "embed.nav.book": "叫車",
   "embed.nav.trip": "進行中",
@@ -1441,17 +1487,29 @@ const zh: Record<keyof typeof en, string> = {
   "embed.state.unsupported.title": "無法在此環境開啟",
   "embed.state.unsupported.badge": "unsupported_host · 已封鎖",
   "embed.state.consent.title": "授權使用叫車服務",
+  "embed.state.consent.subtitle":
+    "首次使用 · 請確認以下同意範圍 · consent_required",
   "embed.state.consent.badge": "consent_required",
   "embed.state.fallback.title": "內嵌服務暫時無法使用",
   "embed.state.fallback.badge": "fallback_to_web · 改用網站",
   "embed.message.unsupported":
     "目前來源宿主不在授權白名單中，因此基於安全考量已阻擋內嵌載入。",
   "embed.message.reauth": "為保護您的住戶帳號，請回到 {appName} 重新進入叫車。",
+  "embed.message.reauthLong":
+    "為保護您的住戶帳號，請回到 {appName} 重新進入「叫車」。此頁不會要求輸入帳號或密碼。",
   "embed.message.consent":
     "首次使用需先確認授權範圍，行程與收據會綁定既有住戶身分。",
+  "embed.message.consentLong":
+    "由 {operator} 提供接送 · 個資僅用於完成本次行程，可於社區 App 設定撤回授權。",
   "embed.message.fallback":
     "目前無法在社區 App 內完成叫車，但改用獨立網站後仍可找回同一批行程與收據。",
+  "embed.message.fallbackLong":
+    "目前無法在社區 App 內完成叫車。您可改用獨立叫車網站，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。",
   "embed.message.handoff": "免再登入；住戶身分會由 {appName} 安全交接進來。",
+  "embed.message.handoffLong":
+    "免再登入 · 由 {appName} 安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。",
+  "embed.message.unsupportedLong":
+    "叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。",
   "embed.book.subtitle": "{name} · {unit}",
   "embed.book.identity": "已綁定 referral handoff session：{id}",
   "embed.book.now": "現在出發",
@@ -1475,6 +1533,7 @@ const zh: Record<keyof typeof en, string> = {
   "embed.trip.status.en_route": "前往上車",
   "embed.trip.bound":
     "此行程會維持與 referral passenger 身分綁定，重開社區 App 後仍可找回。",
+  "embed.trip.footer": "抵達時間為估計值，非保證 · 接送由 {operator} 提供",
   "embed.field.tripId": "行程編號",
   "embed.field.destination": "目的地",
   "embed.field.fareLocked": "費用",
@@ -1508,10 +1567,14 @@ const zh: Record<keyof typeof en, string> = {
   "embed.history.inProgress": "進行中",
   "embed.history.completed": "已完成",
   "embed.history.cancelled": "已取消",
+  "embed.history.recoveryHint": "重開 App 後行程與收據仍可找回",
   "embed.receipt.pay": "社區月結 · 綁定住戶帳號",
+  "embed.receipt.channelVia": "{payment} · 經 {channel}",
   "embed.completed.body": "本次行程已順利結束，可直接前往收據或歷史行程。",
   "embed.cancelled.body":
     "取消結果與來源脈絡都會被保留，不會遺失既有 handoff 身分。",
+  "embed.cancelled.feePolicy":
+    "此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。",
   "embed.negative.nosupply": "附近暫無可派車輛，請稍後重試或改約其他時間。",
   "embed.negative.ineligible":
     "此住戶身分目前未開通叫車服務，請洽社區管理中心。",
