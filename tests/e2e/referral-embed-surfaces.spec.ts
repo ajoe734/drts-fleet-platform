@@ -137,10 +137,12 @@ test.describe("referral embed surfaces", () => {
     );
 
     expect(response?.ok()).toBeTruthy();
-    await expect(page.locator("body")).toContainText("fallback_to_web");
+    await expect(page.locator("body")).toContainText("社區叫車");
+    await expect(page.locator("body")).not.toContainText("fallback_to_web");
     await expect(page.locator("body")).not.toContainText(
       "spoofed-browser-key",
     );
+    await expect(page.locator("body")).not.toContainText("spoofed-user");
   });
 
   test("returns 404 only for an authority-confirmed missing entry", async ({
