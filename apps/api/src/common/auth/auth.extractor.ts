@@ -176,6 +176,10 @@ export function extractBootstrapRequestIdentity(
       normalizeHeaderValue(headers["x-partner-program-id"]) || null,
     partnerEntrySlug:
       normalizeHeaderValue(headers["x-partner-entry-slug"]) || null,
+    drtsPassengerId:
+      normalizeHeaderValue(headers["x-drts-passenger-id"]) ||
+      normalizeHeaderValue(headers["x-actor-id"]) ||
+      null,
     roleFamilies: normalizeRoleFamilies(explicitRoleFamilies, actorType),
     roles,
     scopes,

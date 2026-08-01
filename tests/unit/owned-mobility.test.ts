@@ -48,6 +48,76 @@ function createService(
   };
 }
 
+function createMemoryOwnedMobilityRepository() {
+  const state = {
+    orders: [] as Record<string, unknown>[],
+    dispatchJobs: [] as Record<string, unknown>[],
+    dispatchAttempts: [] as Record<string, unknown>[],
+    dispatchAssignments: [] as Record<string, unknown>[],
+    driverTasks: [] as Record<string, unknown>[],
+    dispatchTraceLogs: [] as Record<string, unknown>[],
+  };
+
+  const replaceByKey = <T extends Record<string, unknown>>(
+    current: T[],
+    incoming: readonly T[] | undefined,
+    key: keyof T,
+  ) => {
+    if (!incoming) {
+      return current;
+    }
+
+    const next = new Map<string, T>(
+      current.map((item) => [
+        String(item[key]),
+        JSON.parse(JSON.stringify(item)) as T,
+      ]),
+    );
+    for (const item of incoming) {
+      next.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
+    }
+    return [...next.values()];
+  };
+
+  return {
+    isEnabled: () => true,
+    loadState: vi.fn(async () => JSON.parse(JSON.stringify(state))),
+    persistChanges: vi.fn(async (changes: Record<string, unknown>) => {
+      state.orders = replaceByKey(
+        state.orders,
+        changes.orders as Record<string, unknown>[] | undefined,
+        "orderId",
+      );
+      state.dispatchJobs = replaceByKey(
+        state.dispatchJobs,
+        changes.dispatchJobs as Record<string, unknown>[] | undefined,
+        "dispatchJobId",
+      );
+      state.dispatchAttempts = replaceByKey(
+        state.dispatchAttempts,
+        changes.dispatchAttempts as Record<string, unknown>[] | undefined,
+        "attemptId",
+      );
+      state.dispatchAssignments = replaceByKey(
+        state.dispatchAssignments,
+        changes.dispatchAssignments as Record<string, unknown>[] | undefined,
+        "assignmentId",
+      );
+      state.driverTasks = replaceByKey(
+        state.driverTasks,
+        changes.driverTasks as Record<string, unknown>[] | undefined,
+        "taskId",
+      );
+      state.dispatchTraceLogs = replaceByKey(
+        state.dispatchTraceLogs,
+        changes.dispatchTraceLogs as Record<string, unknown>[] | undefined,
+        "traceLogId",
+      );
+    }),
+    reportPersistenceFailure: vi.fn(),
+  } as unknown as OwnedMobilityRepository;
+}
+
 const TENANT_ACME = "tenant-acme-001";
 const TENANT_NEWCO = "tenant-newco-001";
 const PARTNER_TENANT = "tenant-demo-001";
@@ -193,6 +263,44 @@ function getErrorCode(error: unknown) {
   ).getResponse?.();
 
   return response?.error?.code ?? null;
+}
+
+async function completeOrderForRating(
+  ownedMobilityService: OwnedMobilityService,
+  orderId: string,
+) {
+  const orderStore = (
+    ownedMobilityService as unknown as {
+      orders:
+        | Map<
+            string,
+            {
+              orderId?: string;
+              status: string;
+              completedAt?: string;
+              updatedAt?: string;
+            }
+          >
+        | Array<{
+            orderId: string;
+            status: string;
+            completedAt?: string;
+            updatedAt?: string;
+          }>;
+    }
+  ).orders;
+
+  const order = Array.isArray(orderStore)
+    ? orderStore.find((item) => item.orderId === orderId)
+    : orderStore.get(orderId);
+
+  if (!order) {
+    throw new Error(`Missing order ${orderId}`);
+  }
+
+  order.status = "completed";
+  order.completedAt = "2026-04-10T09:45:00Z";
+  order.updatedAt = "2026-04-10T09:45:00Z";
 }
 
 async function flushWebhookDispatch() {
@@ -1670,5 +1778,423 @@ describe("owned mobility service", () => {
         }),
       }),
     );
+  });
+
+  describe("referral passenger authority and lifecycle endpoints", () => {
+    it("idempotent create replay returns TenantBookingResult shape without PII leak", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
+      };
+
+      const bookingCommand = {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "123 Main St",
+        dropoffAddress: "456 Market St",
+        idempotencyKey: "idemp-test-key-100",
+      };
+
+      const result1 = await ownedMobilityService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+
+      expect(result1.orderId).toBeDefined();
+      expect(result1.bookingId).toBeDefined();
+      expect(result1.serviceBucket).toBe("business_dispatch");
+      expect(result1.replayed).toBe(false);
+
+      const result2 = await ownedMobilityService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+
+      expect(result2.orderId).toBe(result1.orderId);
+      expect(result2.replayed).toBe(true);
+      expect((result2 as any).passenger).toBeUndefined();
+      expect((result2 as any).passengerName).toBeUndefined();
+      expect((result2 as any).passengerPhone).toBeUndefined();
+    });
+
+    it("allows partner_api_key identities to create bookings within the same partner entry scope", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const verification = await tenantPartnerService.verifyPartnerEligibility({
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      });
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "partner_api_key",
+        actorType: "partner_api_key",
+        actorId: "partner-key-001",
+        realm: "partner",
+        tenantId: PARTNER_TENANT,
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        roleFamilies: ["partner"],
+        roles: ["partner_api_key"],
+        scopes: ["partner:book"],
+        requestId: "req-partner-api-booking-001",
+      };
+
+      const created = await ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          eligibilityVerificationId: verification.eligibilityVerificationId,
+          direction: "pickup",
+          pickup: {
+            address: "桃園機場第二航廈",
+          },
+          dropoff: {
+            address: "台北市信義區松高路11號",
+          },
+          reservationWindowStart: "2026-04-18T10:00:00Z",
+          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          passenger: {
+            name: "陳小姐",
+            phone: "0900123456",
+          },
+          flightNo: "CI-001",
+        },
+        PARTNER_TENANT,
+        identity,
+      );
+
+      expect(created).toMatchObject({
+        orderId: expect.any(String),
+        bookingId: expect.any(String),
+        replayed: false,
+      });
+      expect(
+        ownedMobilityService.getOrder(created.orderId, identity),
+      ).toMatchObject({
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+      });
+    });
+
+    it("prevents cross-passenger and cross-partner access", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity1: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
+      };
+
+      const identity2: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-002",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-002",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-002",
+      };
+
+      const booking = await ownedMobilityService.createReferralPassengerBooking(
+        {
+          entrySlug: "yuhe-residence",
+          pickupAddress: "Pickup Spot",
+          dropoffAddress: "Dropoff Spot",
+        },
+        identity1,
+      );
+
+      let caught: any = null;
+      try {
+        ownedMobilityService.getReferralPassengerReceipt(
+          booking.orderId,
+          identity2,
+        );
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).not.toBeNull();
+      expect(caught.getStatus()).toBe(403);
+      expect(caught.getResponse().error.code).toMatch(
+        /PASSENGER_SCOPE_MISMATCH|PARTNER_SCOPE_MISMATCH/,
+      );
+    });
+
+    it("returns dynamic trip details and downloadUrl in receipt", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
+      };
+
+      const booking = await ownedMobilityService.createReferralPassengerBooking(
+        {
+          entrySlug: "yuhe-residence",
+          pickupAddress: "Pickup Spot",
+          dropoffAddress: "Dropoff Spot",
+        },
+        identity,
+      );
+
+      const activeTrip =
+        ownedMobilityService.getReferralPassengerActiveTrip(identity);
+      expect(activeTrip.active).toBe(true);
+      expect(activeTrip.trip?.orderId).toBe(booking.orderId);
+
+      const history =
+        ownedMobilityService.listReferralPassengerHistory(identity);
+      expect(history.items.length).toBeGreaterThan(0);
+      expect(history.items[0]?.orderId).toBe(booking.orderId);
+
+      const receipt = ownedMobilityService.getReferralPassengerReceipt(
+        booking.orderId,
+        identity,
+      );
+      expect(receipt.orderId).toBe(booking.orderId);
+      expect(receipt.downloadUrl).toBe(
+        `/api/referral/receipt/${booking.orderId}/download`,
+      );
+    });
+
+    it("only allows referral ratings after completion and keeps duplicates idempotent", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-rating-001",
+      };
+
+      const booking = await ownedMobilityService.createReferralPassengerBooking(
+        {
+          entrySlug: "yuhe-residence",
+          pickupAddress: "Pickup Spot",
+          dropoffAddress: "Dropoff Spot",
+        },
+        identity,
+      );
+
+      try {
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: " Great ride ",
+            tags: [" polite ", "fast", "fast"],
+          },
+          identity,
+        );
+        expect.unreachable("rating before completion should fail");
+      } catch (error) {
+        expect(getErrorCode(error)).toBe("PASSENGER_RATING_TRIP_NOT_COMPLETED");
+      }
+
+      await completeOrderForRating(ownedMobilityService, booking.orderId);
+
+      const firstRating =
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: " Great ride ",
+            tags: [" polite ", "fast", "fast"],
+            idempotencyKey: "rating-idemp-001",
+          },
+          identity,
+        );
+      expect(firstRating).toMatchObject({
+        orderId: booking.orderId,
+        score: 5,
+        comment: "Great ride",
+        tags: ["fast", "polite"],
+      });
+
+      const replayRating =
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: "Great ride",
+            tags: ["fast", "polite"],
+            idempotencyKey: "rating-idemp-002",
+          },
+          identity,
+        );
+      expect(replayRating).toEqual(firstRating);
+
+      try {
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 4,
+            comment: "Different payload",
+            tags: ["slow"],
+          },
+          identity,
+        );
+        expect.unreachable("different duplicate rating should conflict");
+      } catch (error) {
+        expect(getErrorCode(error)).toBe("PASSENGER_RATING_ALREADY_SUBMITTED");
+      }
+    });
+
+    it("replays referral booking and rating after repository reload", async () => {
+      const repository = createMemoryOwnedMobilityRepository();
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-reload-001",
+      };
+      const bookingCommand = {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "Pickup Spot",
+        dropoffAddress: "Dropoff Spot",
+        idempotencyKey: "referral-create-reload-001",
+      };
+
+      const { ownedMobilityService: firstService } = createService(
+        repository,
+        tenantPartnerService,
+      );
+      await firstService.onModuleInit();
+
+      const created = await firstService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+      await completeOrderForRating(firstService, created.orderId);
+      const firstRating = await firstService.submitReferralPassengerRating(
+        created.orderId,
+        {
+          orderId: created.orderId,
+          score: 5,
+          comment: "Smooth ride",
+          tags: ["clean", "on-time"],
+          idempotencyKey: "referral-rating-reload-001",
+        },
+        identity,
+      );
+
+      const { ownedMobilityService: reloadedService } = createService(
+        repository,
+        tenantPartnerService,
+      );
+      await reloadedService.onModuleInit();
+
+      const replayed = await reloadedService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+      expect(replayed.orderId).toBe(created.orderId);
+      expect(replayed.replayed).toBe(true);
+
+      const replayedRating =
+        await reloadedService.submitReferralPassengerRating(
+          created.orderId,
+          {
+            orderId: created.orderId,
+            score: 5,
+            comment: "Smooth ride",
+            tags: ["clean", "on-time"],
+            idempotencyKey: "referral-rating-reload-002",
+          },
+          identity,
+        );
+      expect(replayedRating).toEqual(firstRating);
+    });
   });
 });

@@ -2,6 +2,11 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type {
+  ReferralPassengerActiveTripResult,
+  ReferralPassengerHistoryItem,
+  ReferralPassengerReceipt,
+} from "@drts/contracts";
 import type { EmbedContext } from "@/lib/embed-context";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
@@ -16,6 +21,12 @@ import {
   type EmbedTripFallbackScreen,
 } from "@/lib/embed-fixtures";
 import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
+
+export type PassengerEmbedLiveData = {
+  activeTrip: ReferralPassengerActiveTripResult | null;
+  history: { items: ReferralPassengerHistoryItem[] } | null;
+  receipt: ReferralPassengerReceipt | null;
+} | null;
 
 function buildHref(context: EmbedContext, next: Record<string, string>) {
   const params = new URLSearchParams({
@@ -34,7 +45,10 @@ function toPhoneHref(phone: string) {
   return `tel:${normalized || phone}`;
 }
 
-function statusDotColor(theme: ReturnType<typeof buildEmbedTheme>, state: string) {
+function statusDotColor(
+  theme: ReturnType<typeof buildEmbedTheme>,
+  state: string,
+) {
   if (state === "unsupported") return theme.dangerFg;
   if (state === "reauth") return theme.warnFg;
   if (state === "fallback") return theme.neutralFg;
@@ -56,7 +70,8 @@ const GLYPHS: Record<string, string> = {
   ext: "M14 4h6v6 M20 4l-8 8 M18 13v6H5V6h6",
   info: "M12 8h.02 M11 12h1v5h1 M12 21a9 9 0 100-18 9 9 0 000 18z",
   lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
-  phone: "M5 4h4l2 5-2.5 2.5a16 16 0 006 6L17 15l5 2v4a2 2 0 01-2 2C10.6 23 1 13.4 1 2a2 2 0 012-2h2z",
+  phone:
+    "M5 4h4l2 5-2.5 2.5a16 16 0 006 6L17 15l5 2v4a2 2 0 01-2 2C10.6 23 1 13.4 1 2a2 2 0 012-2h2z",
   pin: "M12 21s6-5.33 6-11a6 6 0 10-12 0c0 5.67 6 11 6 11z M12 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z",
   refresh:
     "M3 12a9 9 0 0115.3-6.36L21 8 M21 3v5h-5 M21 12a9 9 0 01-15.3 6.36L3 16 M3 21v-5h5",
@@ -371,7 +386,13 @@ function TokenRow({
           {label}
         </div>
         {code ? (
-          <div style={{ fontSize: 9.5, color: theme.faint, fontFamily: theme.mono }}>
+          <div
+            style={{
+              fontSize: 9.5,
+              color: theme.faint,
+              fontFamily: theme.mono,
+            }}
+          >
             {code}
           </div>
         ) : null}
@@ -548,7 +569,11 @@ function StateHero({
         ? { fg: theme.warnFg, bg: theme.warnBg, pill: "warn" as const }
         : tone === "danger"
           ? { fg: theme.dangerFg, bg: theme.dangerBg, pill: "danger" as const }
-          : { fg: theme.neutralFg, bg: theme.neutralBg, pill: "neutral" as const };
+          : {
+              fg: theme.neutralFg,
+              bg: theme.neutralBg,
+              pill: "neutral" as const,
+            };
 
   return (
     <div
@@ -646,7 +671,14 @@ function AppShell({
           }}
         >
           <span>9:41</span>
-          <span style={{ display: "inline-flex", gap: 5, alignItems: "center", opacity: 0.9 }}>
+          <span
+            style={{
+              display: "inline-flex",
+              gap: 5,
+              alignItems: "center",
+              opacity: 0.9,
+            }}
+          >
             <Icon name="bolt" size={12} />
             <Icon name="shield" size={12} />
           </span>
@@ -733,7 +765,9 @@ function AppShell({
           </span>
         </div>
 
-        <div style={{ flex: 1, display: "grid", gap: 13, padding: 16 }}>{children}</div>
+        <div style={{ flex: 1, display: "grid", gap: 13, padding: 16 }}>
+          {children}
+        </div>
 
         {footer ? (
           <div
@@ -779,7 +813,11 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
           padding: "10px 0 2px",
         }}
       >
-        <BrandMark theme={theme} entryName={context.strings.displayName} size={56} />
+        <BrandMark
+          theme={theme}
+          entryName={context.strings.displayName}
+          size={56}
+        />
         <div style={{ fontSize: 16.5, fontWeight: 800, textAlign: "center" }}>
           以 {context.strings.displayName} 身分
           <br />
@@ -795,14 +833,40 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
         title="身分由社區 App 帶入"
         subtitle="signed hand-off token"
       >
-        <TokenRow theme={theme} ok label="社區簽章有效" code="partner_signature" value="valid" />
-        <TokenRow theme={theme} ok label="住戶身分已解析" code="resident_resolved" value={embedResident.name} />
-        <TokenRow theme={theme} ok label="社區 / 戶別" code="community_unit" value={embedResident.unit} />
-        <DetailRow theme={theme} label="參照" value={embedResident.ref} mono strong last />
+        <TokenRow
+          theme={theme}
+          ok
+          label="社區簽章有效"
+          code="partner_signature"
+          value="valid"
+        />
+        <TokenRow
+          theme={theme}
+          ok
+          label="住戶身分已解析"
+          code="resident_resolved"
+          value={embedResident.name}
+        />
+        <TokenRow
+          theme={theme}
+          ok
+          label="社區 / 戶別"
+          code="community_unit"
+          value={embedResident.unit}
+        />
+        <DetailRow
+          theme={theme}
+          label="參照"
+          value={embedResident.ref}
+          mono
+          strong
+          last
+        />
       </Card>
 
       <Banner theme={theme} tone="primary" icon="bolt">
-        免再登入 · 由 {context.strings.appName} 安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+        免再登入 · 由 {context.strings.appName}{" "}
+        安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
       </Banner>
     </AppShell>
   );
@@ -838,11 +902,24 @@ function ReauthScreen({ context }: { context: EmbedContext }) {
         posture="reauth_required"
       />
       <Card theme={theme} title="連線狀態">
-        <TokenRow theme={theme} ok={false} label="社區工作階段過期" code="partner_session" value="expired" />
-        <TokenRow theme={theme} ok={false} label="交付權杖逾時" code="handoff_token" value="stale" />
+        <TokenRow
+          theme={theme}
+          ok={false}
+          label="社區工作階段過期"
+          code="partner_session"
+          value="expired"
+        />
+        <TokenRow
+          theme={theme}
+          ok={false}
+          label="交付權杖逾時"
+          code="handoff_token"
+          value="stale"
+        />
       </Card>
       <Banner theme={theme} tone="warn" icon="shield">
-        為保護您的住戶帳號，請回到 <b>{context.strings.appName}</b> 重新進入「叫車」。此頁不會要求輸入帳號或密碼。
+        為保護您的住戶帳號，請回到 <b>{context.strings.appName}</b>{" "}
+        重新進入「叫車」。此頁不會要求輸入帳號或密碼。
       </Banner>
     </AppShell>
   );
@@ -872,12 +949,25 @@ function UnsupportedScreen({ context }: { context: EmbedContext }) {
       />
       <Card theme={theme} title="原因">
         <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
-          叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。
+          叫車服務僅能於授權的社區 App
+          內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。
         </div>
       </Card>
       <Card theme={theme} title="偵測結果">
-        <TokenRow theme={theme} ok={false} label="來源宿主未授權" code="origin_host" value="未授權" />
-        <TokenRow theme={theme} ok={false} label="社區簽章" code="partner_signature" value="缺少" />
+        <TokenRow
+          theme={theme}
+          ok={false}
+          label="來源宿主未授權"
+          code="origin_host"
+          value="未授權"
+        />
+        <TokenRow
+          theme={theme}
+          ok={false}
+          label="社區簽章"
+          code="partner_signature"
+          value="缺少"
+        />
       </Card>
     </AppShell>
   );
@@ -888,7 +978,11 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
   const scopes = [
     ["建立與管理叫車行程", "為您下單、查詢與取消行程", "trip.manage"],
     ["使用必要個資", "上下車地址、聯絡電話以完成媒合與聯繫", "pii.trip"],
-    ["行程綁定住戶身分", "讓您重開 App 後仍能找回進行中行程與收據", "identity.bind"],
+    [
+      "行程綁定住戶身分",
+      "讓您重開 App 後仍能找回進行中行程與收據",
+      "identity.bind",
+    ],
   ] as const;
 
   return (
@@ -927,7 +1021,10 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
               display: "flex",
               gap: 11,
               padding: "11px 0",
-              borderBottom: index < scopes.length - 1 ? `1px solid ${theme.lineSoft}` : "none",
+              borderBottom:
+                index < scopes.length - 1
+                  ? `1px solid ${theme.lineSoft}`
+                  : "none",
             }}
           >
             <span
@@ -948,11 +1045,24 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{title}</span>
-                <span style={{ fontSize: 9.5, color: theme.faint, fontFamily: theme.mono }}>
+                <span
+                  style={{
+                    fontSize: 9.5,
+                    color: theme.faint,
+                    fontFamily: theme.mono,
+                  }}
+                >
                   {code}
                 </span>
               </div>
-              <div style={{ marginTop: 2, fontSize: 11.5, color: theme.muted, lineHeight: 1.45 }}>
+              <div
+                style={{
+                  marginTop: 2,
+                  fontSize: 11.5,
+                  color: theme.muted,
+                  lineHeight: 1.45,
+                }}
+              >
                 {body}
               </div>
             </div>
@@ -960,7 +1070,8 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
         ))}
       </Card>
       <Banner theme={theme} tone="primary" icon="lock">
-        由智慧運輸科技 DRTS 提供接送 · 個資僅用於完成本次行程，可於社區 App 設定撤回授權。
+        由智慧運輸科技 DRTS 提供接送 · 個資僅用於完成本次行程，可於社區 App
+        設定撤回授權。
       </Banner>
     </AppShell>
   );
@@ -998,11 +1109,17 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
       />
       <Card theme={theme} title="接下來">
         <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
-          目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+          目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>
+          ，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
         </div>
       </Card>
       <Card theme={theme}>
-        <DetailRow theme={theme} label="獨立網站" value="ride.drts.com.tw" mono />
+        <DetailRow
+          theme={theme}
+          label="獨立網站"
+          value="ride.drts.com.tw"
+          mono
+        />
         <DetailRow theme={theme} label="驗證方式" value="手機簡訊 OTP" />
         <DetailRow theme={theme} label="行程資料" value="重開後仍可找回" last />
       </Card>
@@ -1027,7 +1144,14 @@ function BookScreen({ context }: { context: EmbedContext }) {
             }}
           >
             <span style={{ color: theme.muted }}>預估車資</span>
-            <span style={{ fontSize: 16, fontWeight: 700, color: theme.ink, fontFamily: theme.mono }}>
+            <span
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: theme.ink,
+                fontFamily: theme.mono,
+              }}
+            >
               約 NT$ 290
             </span>
           </div>
@@ -1051,7 +1175,11 @@ function BookScreen({ context }: { context: EmbedContext }) {
           borderRadius: 12,
         }}
       >
-        <BrandMark theme={theme} entryName={context.strings.displayName} size={34} />
+        <BrandMark
+          theme={theme}
+          entryName={context.strings.displayName}
+          size={34}
+        />
         <div style={{ flex: 1, lineHeight: 1.25 }}>
           <div style={{ fontSize: 13.5, fontWeight: 700 }}>
             {embedResident.name} · {embedResident.unit}
@@ -1067,14 +1195,33 @@ function BookScreen({ context }: { context: EmbedContext }) {
 
       <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
         <div style={{ display: "grid", gap: 10 }}>
-          <Field theme={theme} label="上車地點" icon="pin" value={embedTrip.from} />
-          <Field theme={theme} label="下車地點" icon="pin" value={embedTrip.to} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Field theme={theme} label="用車時間" icon="clock" value="現在出發" />
+          <Field
+            theme={theme}
+            label="上車地點"
+            icon="pin"
+            value={embedTrip.from}
+          />
+          <Field
+            theme={theme}
+            label="下車地點"
+            icon="pin"
+            value={embedTrip.to}
+          />
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
+          >
+            <Field
+              theme={theme}
+              label="用車時間"
+              icon="clock"
+              value="現在出發"
+            />
             <Field theme={theme} label="乘客人數" icon="user" value="1 人" />
           </div>
         </div>
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 11 }}>
+        <div
+          style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 11 }}
+        >
           {embedSavedPlaces.map((place) => (
             <span
               key={place.label}
@@ -1114,10 +1261,20 @@ function BookScreen({ context }: { context: EmbedContext }) {
                   <Icon name="car" size={20} />
                 </span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{vehicle.name}</div>
-                  <div style={{ fontSize: 11, color: theme.muted }}>{vehicle.sub}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                    {vehicle.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: theme.muted }}>
+                    {vehicle.sub}
+                  </div>
                 </div>
-                {selected ? <Icon name="check" size={17} style={{ color: theme.primary }} /> : null}
+                {selected ? (
+                  <Icon
+                    name="check"
+                    size={17}
+                    style={{ color: theme.primary }}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -1224,7 +1381,10 @@ function NegativeScreen({
   );
 }
 
-const tripStateLabel: Record<string, { zh: string; tone: "warn" | "primary" | "info" | "success" | "neutral" }> = {
+const tripStateLabel: Record<
+  string,
+  { zh: string; tone: "warn" | "primary" | "info" | "success" | "neutral" }
+> = {
   matching: { zh: "媒合中", tone: "warn" },
   assigned: { zh: "已派車", tone: "primary" },
   enroute: { zh: "前往上車", tone: "info" },
@@ -1235,11 +1395,10 @@ const tripStateLabel: Record<string, { zh: string; tone: "warn" | "primary" | "i
 
 function TripScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
-  const state =
-    tripStateLabel[embedTrip.state] || {
-      zh: "媒合中",
-      tone: "warn" as const,
-    };
+  const state = tripStateLabel[embedTrip.state] || {
+    zh: "媒合中",
+    tone: "warn" as const,
+  };
   return (
     <AppShell
       context={context}
@@ -1273,7 +1432,11 @@ function TripScreen({ context }: { context: EmbedContext }) {
           borderRadius: 10,
         }}
       >
-        <Icon name="shield" size={14} style={{ color: theme.primary, flexShrink: 0 }} />
+        <Icon
+          name="shield"
+          size={14}
+          style={{ color: theme.primary, flexShrink: 0 }}
+        />
         <span style={{ fontSize: 11.5, color: theme.ink2, lineHeight: 1.4 }}>
           此行程已綁定您的身分 · <b>重開 App 仍可找回</b>
         </span>
@@ -1291,7 +1454,9 @@ function TripScreen({ context }: { context: EmbedContext }) {
           <Pill theme={theme} tone={state.tone} dot>
             {state.zh}
           </Pill>
-          <span style={{ fontSize: 11, color: theme.faint, fontFamily: theme.mono }}>
+          <span
+            style={{ fontSize: 11, color: theme.faint, fontFamily: theme.mono }}
+          >
             {embedTrip.id}
           </span>
         </div>
@@ -1301,7 +1466,13 @@ function TripScreen({ context }: { context: EmbedContext }) {
             <div style={{ fontSize: 15, fontWeight: 700 }}>
               {embedTrip.driver} · {embedTrip.rating} ★
             </div>
-            <div style={{ fontSize: 12, color: theme.muted, fontFamily: theme.mono }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: theme.muted,
+                fontFamily: theme.mono,
+              }}
+            >
               {embedTrip.vehicle} · {embedTrip.plate}
             </div>
           </div>
@@ -1382,7 +1553,13 @@ function TripScreen({ context }: { context: EmbedContext }) {
             borderTop: `1px solid ${theme.lineSoft}`,
           }}
         >
-          <DetailRow theme={theme} label="預計上車" value={embedTrip.win} mono last />
+          <DetailRow
+            theme={theme}
+            label="預計上車"
+            value={embedTrip.win}
+            mono
+            last
+          />
         </div>
       </Card>
 
@@ -1404,9 +1581,17 @@ function TripsScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
   return (
     <AppShell context={context} badgeTone="live">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
         <div style={{ fontSize: 17, fontWeight: 800 }}>我的行程</div>
-        <Pill theme={theme} tone="neutral">綁定 {embedResident.name}</Pill>
+        <Pill theme={theme} tone="neutral">
+          綁定 {embedResident.name}
+        </Pill>
       </div>
       <div
         style={{
@@ -1422,87 +1607,86 @@ function TripsScreen({ context }: { context: EmbedContext }) {
         重開 App 後行程與收據仍可找回
       </div>
       {embedTripHistory.map((trip) => {
-          const tripState =
-            tripStateLabel[trip.state] || {
-              zh: trip.state,
-              tone: "neutral" as const,
-            };
-          const tone =
-            trip.state === "completed"
-              ? "success"
-              : trip.state === "cancelled"
-                ? "neutral"
-                : "info";
-          return (
-            <Card theme={theme} key={trip.id}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span
+        const tripState = tripStateLabel[trip.state] || {
+          zh: trip.state,
+          tone: "neutral" as const,
+        };
+        const tone =
+          trip.state === "completed"
+            ? "success"
+            : trip.state === "cancelled"
+              ? "neutral"
+              : "info";
+        return (
+          <Card theme={theme} key={trip.id}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  background: theme.surfaceLo,
+                  color: theme.muted,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Icon
+                  name={
+                    trip.state === "cancelled"
+                      ? "x"
+                      : trip.state === "completed"
+                        ? "check"
+                        : "car"
+                  }
+                  size={18}
+                />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
                   style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: 10,
-                    background: theme.surfaceLo,
-                    color: theme.muted,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                   }}
                 >
-                  <Icon
-                    name={
-                      trip.state === "cancelled"
-                        ? "x"
-                        : trip.state === "completed"
-                          ? "check"
-                          : "car"
-                    }
-                    size={18}
-                  />
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {trip.from} → {trip.to}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: theme.muted,
-                      fontFamily: theme.mono,
-                      marginTop: 2,
-                    }}
-                  >
-                    {trip.date} · {trip.id}
-                  </div>
+                  {trip.from} → {trip.to}
                 </div>
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <Pill theme={theme} tone={tone} dot>
-                    {tripState.zh}
-                  </Pill>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontFamily: theme.mono,
-                      color: theme.ink,
-                      marginTop: 5,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {trip.fare}
-                  </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: theme.muted,
+                    fontFamily: theme.mono,
+                    marginTop: 2,
+                  }}
+                >
+                  {trip.date} · {trip.id}
                 </div>
               </div>
-            </Card>
-          );
-        })}
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <Pill theme={theme} tone={tone} dot>
+                  {tripState.zh}
+                </Pill>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    fontFamily: theme.mono,
+                    color: theme.ink,
+                    marginTop: 5,
+                    fontWeight: 600,
+                  }}
+                >
+                  {trip.fare}
+                </div>
+              </div>
+            </div>
+          </Card>
+        );
+      })}
     </AppShell>
   );
 }
@@ -1574,21 +1758,59 @@ function ReceiptScreen({ context }: { context: EmbedContext }) {
             <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 14 }}>
               {embedReceipt.from}
             </div>
-            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{embedReceipt.to}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+              {embedReceipt.to}
+            </div>
           </div>
         </div>
       </Card>
       <Card theme={theme} title="乘客與車輛" subtitle="PII 已遮罩">
         <DetailRow theme={theme} label="乘客" value={embedReceipt.passenger} />
-        <DetailRow theme={theme} label="聯絡電話" value={embedReceipt.maskedPhone} mono />
-        <DetailRow theme={theme} label="司機 / 車牌" value={`${embedReceipt.driver} · ${embedReceipt.plate}`} />
-        <DetailRow theme={theme} label="車種" value={embedReceipt.vehicle} last />
+        <DetailRow
+          theme={theme}
+          label="聯絡電話"
+          value={embedReceipt.maskedPhone}
+          mono
+        />
+        <DetailRow
+          theme={theme}
+          label="司機 / 車牌"
+          value={`${embedReceipt.driver} · ${embedReceipt.plate}`}
+        />
+        <DetailRow
+          theme={theme}
+          label="車種"
+          value={embedReceipt.vehicle}
+          last
+        />
       </Card>
       <Card theme={theme} title="費用明細" subtitle="fare breakdown">
-        <DetailRow theme={theme} label="起步價" value={embedReceipt.fareBase} mono />
-        <DetailRow theme={theme} label="里程" value={embedReceipt.fareDistance} mono />
-        <DetailRow theme={theme} label="時間" value={embedReceipt.fareTime} mono />
-        <DetailRow theme={theme} label="合計" value={embedReceipt.total} strong mono last />
+        <DetailRow
+          theme={theme}
+          label="起步價"
+          value={embedReceipt.fareBase}
+          mono
+        />
+        <DetailRow
+          theme={theme}
+          label="里程"
+          value={embedReceipt.fareDistance}
+          mono
+        />
+        <DetailRow
+          theme={theme}
+          label="時間"
+          value={embedReceipt.fareTime}
+          mono
+        />
+        <DetailRow
+          theme={theme}
+          label="合計"
+          value={embedReceipt.total}
+          strong
+          mono
+          last
+        />
         <div style={{ marginTop: 12 }}>
           <Banner theme={theme} tone="neutral" icon="building">
             {embedReceipt.payment} · 經 {embedReceipt.channel}
@@ -1653,9 +1875,21 @@ function OutcomeScreen({
             <DetailRow theme={theme} label="付款" value="社區月結" last />
           </Card>
           <Card theme={theme} title="為這趟行程評分">
-            <div style={{ display: "flex", justifyContent: "center", gap: 9, padding: "4px 0" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: 9,
+                padding: "4px 0",
+              }}
+            >
               {[1, 2, 3, 4, 5].map((n) => (
-                <Icon key={n} name="spark" size={30} style={{ color: theme.warnFg }} />
+                <Icon
+                  key={n}
+                  name="spark"
+                  size={30}
+                  style={{ color: theme.warnFg }}
+                />
               ))}
             </div>
           </Card>
@@ -1715,7 +1949,14 @@ function MessageSlot({
       >
         messageCode · {code}
       </div>
-      <div style={{ marginTop: 2, fontSize: 13, lineHeight: 1.55, color: theme.ink2 }}>
+      <div
+        style={{
+          marginTop: 2,
+          fontSize: 13,
+          lineHeight: 1.55,
+          color: theme.ink2,
+        }}
+      >
         {sample}
       </div>
       <div
@@ -1918,8 +2159,12 @@ function FallbackTripScreen({
               <Icon name="car" size={22} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12.5, color: theme.muted }}>預計上車 · ETA</div>
-              <div style={{ fontSize: 11, color: theme.faint }}>估計值，非保證</div>
+              <div style={{ fontSize: 12.5, color: theme.muted }}>
+                預計上車 · ETA
+              </div>
+              <div style={{ fontSize: 11, color: theme.faint }}>
+                估計值，非保證
+              </div>
             </div>
             <div
               style={{
@@ -1941,18 +2186,29 @@ function FallbackTripScreen({
               >
                 {fallback.etaMin}
               </div>
-              <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>分鐘</div>
+              <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>
+                分鐘
+              </div>
             </div>
           </div>
         </Card>
       ) : null}
 
-      <MessageSlot theme={theme} code={fallback.bodyCode} sample={fallback.bodySample} />
+      <MessageSlot
+        theme={theme}
+        code={fallback.bodyCode}
+        sample={fallback.bodySample}
+      />
 
       <Card theme={theme}>
         <DetailRow theme={theme} label="行程編號" value={embedTrip.id} mono />
         <DetailRow theme={theme} label="目的地" value="台北榮民總醫院" />
-        <DetailRow theme={theme} label="費用" value="維持原價 · 無額外收費" last />
+        <DetailRow
+          theme={theme}
+          label="費用"
+          value="維持原價 · 無額外收費"
+          last
+        />
       </Card>
 
       <div
@@ -1966,13 +2222,24 @@ function FallbackTripScreen({
           border: `1px solid ${theme.successBorder}`,
         }}
       >
-        <Icon name="check" size={14} style={{ color: theme.successFg, flexShrink: 0, marginTop: 1 }} />
+        <Icon
+          name="check"
+          size={14}
+          style={{ color: theme.successFg, flexShrink: 0, marginTop: 1 }}
+        />
         <span style={{ fontSize: 11, lineHeight: 1.45, color: theme.ink2 }}>
           同一筆行程繼續 · 不會重新下單，也不會加收費用。
         </span>
       </div>
 
-      <div style={{ fontSize: 10, color: theme.faint, textAlign: "center", lineHeight: 1.5 }}>
+      <div
+        style={{
+          fontSize: 10,
+          color: theme.faint,
+          textAlign: "center",
+          lineHeight: 1.5,
+        }}
+      >
         接送由智慧運輸科技 DRTS 提供 · 服務狀態僅供參考
       </div>
     </AppShell>
@@ -1998,7 +2265,12 @@ function isFallbackScreen(screen: string): screen is EmbedTripFallbackScreen {
   return (EMBED_TRIP_FALLBACK_SCREENS as readonly string[]).includes(screen);
 }
 
-export function PassengerEmbed({ context }: { context: EmbedContext }) {
+export function PassengerEmbed({
+  context,
+}: {
+  context: EmbedContext;
+  liveData?: PassengerEmbedLiveData;
+}) {
   if (context.state !== "handoff") {
     return renderIdentitySurface(context);
   }

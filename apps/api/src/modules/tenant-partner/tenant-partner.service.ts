@@ -5321,13 +5321,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async consumeReferralEmbedHandoffArtifact(
-    command: {
-      artifact: string;
-      entrySlug: string;
-      entryHost: string;
-    },
-  ): Promise<ReferralEmbedSession> {
+  async consumeReferralEmbedHandoffArtifact(command: {
+    artifact: string;
+    entrySlug: string;
+    entryHost: string;
+  }): Promise<ReferralEmbedSession> {
     const result = await this.referralEmbedHandoffRepository.consume(command);
     if (result.outcome === "consumed") {
       return result.session;
@@ -5364,9 +5362,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: RecordReferralEmbedConsentCommand,
   ): Promise<ReferralEmbedSession> {
     this.assertExactReferralEmbedConsentBundle(command.consentBundle);
-    const result = await this.referralEmbedHandoffRepository.recordConsent(
-      command,
-    );
+    const result =
+      await this.referralEmbedHandoffRepository.recordConsent(command);
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
     }
@@ -8375,7 +8372,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             executor,
             params.changes,
           );
-          await this.securityEventsService!.recordEventRequired(event, executor);
+          await this.securityEventsService!.recordEventRequired(
+            event,
+            executor,
+          );
         })
         .catch((error) => {
           this.tenantPartnerRepository?.reportPersistenceFailure(
@@ -8990,13 +8990,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      (identity.actorType !== "partner_api_key" &&
-        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
-      identity.tenantId !== entry.tenantId ||
-      identity.partnerId !== entry.partnerId ||
-      identity.partnerProgramId !== entry.programId ||
-      identity.partnerEntrySlug !== entry.entrySlug;
+      (identity.actorType === "referral_passenger"
+        ? identity.tenantId !== entry.tenantId ||
+          identity.partnerId !== entry.partnerId ||
+          identity.partnerProgramId !== entry.programId ||
+          identity.partnerEntrySlug !== entry.entrySlug
+        : identity.actorType !== "partner_api_key" ||
+          (identity.tenantId !== null &&
+            identity.tenantId !== undefined &&
+            identity.tenantId !== entry.tenantId) ||
+          (identity.partnerId !== null &&
+            identity.partnerId !== undefined &&
+            identity.partnerId !== entry.partnerId) ||
+          (identity.partnerProgramId !== null &&
+            identity.partnerProgramId !== undefined &&
+            identity.partnerProgramId !== entry.programId) ||
+          (identity.partnerEntrySlug !== null &&
+            identity.partnerEntrySlug !== undefined &&
+            identity.partnerEntrySlug !== entry.entrySlug));
 
     if (!partnerMismatch) {
       return;
@@ -9031,13 +9043,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      (identity.actorType !== "partner_api_key" &&
-        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
-      identity.tenantId !== verification.tenantId ||
-      identity.partnerId !== verification.partnerId ||
-      identity.partnerProgramId !== verification.partnerProgramId ||
-      identity.partnerEntrySlug !== verification.partnerEntrySlug;
+      (identity.actorType === "referral_passenger"
+        ? identity.tenantId !== verification.tenantId ||
+          identity.partnerId !== verification.partnerId ||
+          identity.partnerProgramId !== verification.partnerProgramId ||
+          identity.partnerEntrySlug !== verification.partnerEntrySlug
+        : identity.actorType !== "partner_api_key" ||
+          (identity.tenantId !== null &&
+            identity.tenantId !== undefined &&
+            identity.tenantId !== verification.tenantId) ||
+          (identity.partnerId !== null &&
+            identity.partnerId !== undefined &&
+            identity.partnerId !== verification.partnerId) ||
+          (identity.partnerProgramId !== null &&
+            identity.partnerProgramId !== undefined &&
+            identity.partnerProgramId !== verification.partnerProgramId) ||
+          (identity.partnerEntrySlug !== null &&
+            identity.partnerEntrySlug !== undefined &&
+            identity.partnerEntrySlug !== verification.partnerEntrySlug));
 
     if (!partnerMismatch) {
       return;

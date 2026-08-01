@@ -1,5 +1,10 @@
 import { notFound } from "next/navigation";
 import { PassengerEmbed } from "@/components/passenger-embed";
+import {
+  getReferralActiveTripServer,
+  getReferralTripHistoryServer,
+  getReferralTripReceiptServer,
+} from "@/lib/embed-booking-api";
 import { resolveEmbedContext } from "@/lib/embed-context";
 import { isPublicPartnerEntryNotFoundError } from "@/lib/embed-api";
 
@@ -36,5 +41,36 @@ export default async function PassengerEmbedPage({
     throw error;
   }
 
-  return <PassengerEmbed context={context} />;
+  let liveData: Parameters<typeof PassengerEmbed>[0]["liveData"] = null;
+
+  if (context.state === "handoff") {
+    const screen = typeof query.screen === "string" ? query.screen : "book";
+    const shouldLoadActive =
+      screen === "trip" ||
+      screen === "receipt" ||
+      screen === "completed" ||
+      screen === "cancelled";
+    const shouldLoadHistory =
+      screen === "trips" ||
+      screen === "receipt" ||
+      screen === "completed" ||
+      screen === "cancelled";
+
+    const activeTrip = shouldLoadActive
+      ? await getReferralActiveTripServer().catch(() => null)
+      : null;
+    const history = shouldLoadHistory
+      ? await getReferralTripHistoryServer().catch(() => null)
+      : null;
+    const receiptOrderId =
+      activeTrip?.trip?.orderId ?? history?.items?.[0]?.orderId ?? null;
+    const receipt =
+      screen === "receipt" && receiptOrderId
+        ? await getReferralTripReceiptServer(receiptOrderId).catch(() => null)
+        : null;
+
+    liveData = { activeTrip, history, receipt };
+  }
+
+  return <PassengerEmbed context={context} liveData={liveData} />;
 }
