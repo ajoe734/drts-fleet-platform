@@ -12,6 +12,30 @@ state machine, and the entry-host allowlist middleware moved here verbatim;
 `passenger-web` and its generic consumer routes (book / trip / receipts / …) are
 gone.
 
+## Design Authority And Historical Source Chain
+
+The historical functional source documents are:
+
+- `docs/05-ui/community-app-referral-channel-spec-20260613.md`
+- `docs/05-ui/community-app-referral-channel-screen-requirements-20260613.md`
+
+Those two files are preserved byte-exact to their original 2026-06-13 commits.
+Do not "modernize" their wording in place just because topology changed later.
+
+Current authority chain is:
+
+1. Functional intent: the two 2026-06-13 docs above
+2. Visual authority: `docs/05-ui/drts-design-canvas/Passenger Embed.html` and
+   `docs/05-ui/drts-design-canvas/passenger-embed-screens.jsx`
+3. Runtime topology: this standalone `apps/referral-embed-web` app, not the
+   retired `apps/passenger-web`
+
+The 2026-06-13 screen requirements still mention `apps/passenger-web` because
+that was the live topology at the time. That topology was explicitly superseded
+by `REFERRAL-EMBED-MIGRATE-20260616`, which moved the embed runtime here. The
+recovery note is tracked in
+`docs/03-runbooks/referral-embed-stage1-recovery-execution-tasks-20260801.md`.
+
 ## Canonical embed contract (source of truth for partner onboarding)
 
 Partners iframe one URL per referral entry:
