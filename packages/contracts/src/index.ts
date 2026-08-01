@@ -795,7 +795,11 @@ export interface IdentityContext {
     | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
-  authMode: "bootstrap_headers" | "jwt_bearer";
+  authMode:
+    | "bootstrap_headers"
+    | "jwt_bearer"
+    | "partner_api_key"
+    | "referral_bearer";
   roleFamilies: Array<"platform" | "tenant" | "ops" | "driver" | "partner">;
   roles: string[];
   scopes: string[];
@@ -1236,8 +1240,7 @@ export const SECURITY_EVENT_FAMILIES = [
   "policy",
   "break_glass",
 ] as const;
-export type SecurityEventFamily =
-  (typeof SECURITY_EVENT_FAMILIES)[number];
+export type SecurityEventFamily = (typeof SECURITY_EVENT_FAMILIES)[number];
 
 export const SECURITY_EVENT_OUTCOMES = [
   "success",
@@ -1246,8 +1249,7 @@ export const SECURITY_EVENT_OUTCOMES = [
   "revoked",
   "expired",
 ] as const;
-export type SecurityEventOutcome =
-  (typeof SECURITY_EVENT_OUTCOMES)[number];
+export type SecurityEventOutcome = (typeof SECURITY_EVENT_OUTCOMES)[number];
 
 export const SECURITY_EVENT_SEVERITIES = [
   "low",
@@ -1255,8 +1257,7 @@ export const SECURITY_EVENT_SEVERITIES = [
   "high",
   "critical",
 ] as const;
-export type SecurityEventSeverity =
-  (typeof SECURITY_EVENT_SEVERITIES)[number];
+export type SecurityEventSeverity = (typeof SECURITY_EVENT_SEVERITIES)[number];
 
 export interface SecurityEventRecord {
   eventId: string;
@@ -3211,6 +3212,17 @@ export interface OwnedOrderRecord {
   lastDispatchFailureReason: string | null;
   noSupplyEscalation: NoSupplyEscalationRecord | null;
   dispatchTimeout: DispatchTimeoutRecord | null;
+  referralPassengerLifecycle?: {
+    bookingIdempotencyKey?: string;
+    rating?: {
+      orderId: string;
+      score: 1 | 2 | 3 | 4 | 5;
+      comment?: string;
+      tags: string[];
+      idempotencyKey?: string;
+      submittedAt: string;
+    };
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

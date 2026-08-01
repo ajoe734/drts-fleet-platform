@@ -97,6 +97,13 @@ import type {
   DispatchQueueMode,
   RuntimeProfileCode,
   RouteFareDisclosureSnapshot,
+  CancelReferralPassengerTripCommand,
+  CreateReferralPassengerBookingCommand,
+  ReferralPassengerActiveTripResult,
+  ReferralPassengerHistoryItem,
+  ReferralPassengerReceipt,
+  SubmitReferralPassengerRatingCommand,
+  BusinessDispatchSubtype,
 } from "@drts/contracts";
 
 import {
@@ -151,6 +158,7 @@ type TenantBookingResult = {
   >;
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
+  replayed: boolean;
 };
 
 type PartnerBookingContext = {
@@ -1294,6 +1302,7 @@ export class OwnedMobilityService
         businessDispatchSubtype: order.businessDispatchSubtype!,
         dispatchSemantics: "reservation",
         status: order.status,
+        replayed: false,
       };
     };
 
@@ -9924,12 +9933,24 @@ export class OwnedMobilityService
     }
 
     const mismatch =
-      (identity.actorType !== "partner_api_key" &&
-        identity.actorType !== "referral_passenger") ||
-      identity.tenantId !== entry.tenantId ||
-      identity.partnerId !== entry.partnerId ||
-      identity.partnerProgramId !== entry.programId ||
-      identity.partnerEntrySlug !== entry.entrySlug;
+      identity.actorType === "referral_passenger"
+        ? identity.tenantId !== entry.tenantId ||
+          identity.partnerId !== entry.partnerId ||
+          identity.partnerProgramId !== entry.programId ||
+          identity.partnerEntrySlug !== entry.entrySlug
+        : identity.actorType !== "partner_api_key" ||
+          (identity.tenantId !== null &&
+            identity.tenantId !== undefined &&
+            identity.tenantId !== entry.tenantId) ||
+          (identity.partnerId !== null &&
+            identity.partnerId !== undefined &&
+            identity.partnerId !== entry.partnerId) ||
+          (identity.partnerProgramId !== null &&
+            identity.partnerProgramId !== undefined &&
+            identity.partnerProgramId !== entry.programId) ||
+          (identity.partnerEntrySlug !== null &&
+            identity.partnerEntrySlug !== undefined &&
+            identity.partnerEntrySlug !== entry.entrySlug);
 
     if (mismatch) {
       throw new ApiRequestError(
@@ -9944,6 +9965,74 @@ export class OwnedMobilityService
     }
   }
 
+  private normalizeReferralRatingTags(value: string[] | undefined) {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value) || value.length > 10) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_RATING_TAGS_INVALID",
+        "tags must contain at most 10 values.",
+      );
+    }
+    return [
+      ...new Set(
+        value.map((item) => item?.trim()).filter((item) => item.length > 0),
+      ),
+    ].sort();
+  }
+
+  private assertIdempotentReferralRating(
+    existing: {
+      orderId: string;
+      score: 1 | 2 | 3 | 4 | 5;
+      comment?: string;
+      tags: string[];
+      submittedAt: string;
+    },
+    score: 1 | 2 | 3 | 4 | 5,
+    tags: string[],
+    comment: string | null,
+  ) {
+    if (
+      existing.score !== score ||
+      (existing.comment ?? null) !== comment ||
+      JSON.stringify([...existing.tags].sort()) !== JSON.stringify(tags)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_ALREADY_SUBMITTED",
+        "A different rating has already been submitted for this trip.",
+        { orderId: existing.orderId },
+      );
+    }
+  }
+
+  private getReferralLifecycle(order: OwnedOrderRecord) {
+    return order.referralPassengerLifecycle ?? null;
+  }
+
+  private updateReferralLifecycle(
+    order: OwnedOrderRecord,
+    patch: NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>,
+  ) {
+    const nextOrder: OwnedOrderRecord = {
+      ...order,
+      referralPassengerLifecycle: {
+        ...(this.getReferralLifecycle(order) ?? {}),
+        ...patch,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.orders = this.orders.map((candidate) =>
+      candidate.orderId === order.orderId ? nextOrder : candidate,
+    );
+
+    return nextOrder;
+  }
+
   private assertPartnerOrderIdentity(
     identity: BootstrapRequestIdentity | null | undefined,
     order: OwnedOrderRecord,
@@ -9952,26 +10041,574 @@ export class OwnedMobilityService
       return;
     }
 
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
     const mismatch =
       (identity.actorType !== "partner_api_key" &&
         identity.actorType !== "referral_passenger") ||
       !order.partnerEntrySlug ||
-      identity.tenantId !== order.tenantId ||
-      identity.partnerId !== order.partnerId ||
-      identity.partnerProgramId !== order.partnerProgramId ||
-      identity.partnerEntrySlug !== order.partnerEntrySlug;
+      (identity.tenantId && identity.tenantId !== order.tenantId) ||
+      (identity.partnerId && identity.partnerId !== order.partnerId) ||
+      (identity.partnerProgramId &&
+        identity.partnerProgramId !== order.partnerProgramId) ||
+      identity.partnerEntrySlug !== order.partnerEntrySlug ||
+      (identity.actorType === "referral_passenger" &&
+        passengerId &&
+        order.passenger?.passengerId &&
+        passengerId !== order.passenger.passengerId);
 
     if (mismatch) {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
         "PARTNER_SCOPE_MISMATCH",
-        "Authenticated partner identity cannot read another partner booking.",
+        "Authenticated partner identity cannot access another partner/passenger booking.",
         {
           orderId: order.orderId,
           tenantId: order.tenantId,
         },
       );
     }
+  }
+
+  async createReferralPassengerBooking(
+    command: CreateReferralPassengerBookingCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+  ): Promise<TenantBookingResult> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Creating a referral passenger booking requires an active referral_passenger identity.",
+      );
+    }
+
+    if (identity.partnerEntrySlug !== command.entrySlug) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Referral passenger identity cannot book for a different entrySlug.",
+      );
+    }
+
+    const tenantId = identity.tenantId;
+    if (!tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_ID_REQUIRED",
+        "Referral passenger identity missing tenantId.",
+      );
+    }
+
+    const passengerId =
+      identity.drtsPassengerId ?? identity.actorId ?? "pax-ref-anon";
+
+    if (this.tenantPartnerService) {
+      try {
+        this.tenantPartnerService.getPassengerMasterRecord(
+          tenantId,
+          passengerId,
+        );
+      } catch {
+        this.tenantPartnerService.upsertPassenger(tenantId, {
+          passengerId,
+          fullName: command.passengerName || "Referral Passenger",
+          mobile: command.passengerPhone || "0912345678",
+        });
+      }
+    }
+
+    if (command.idempotencyKey) {
+      const existing = Array.from(this.orders.values()).find(
+        (o) =>
+          o.tenantId === tenantId &&
+          o.partnerEntrySlug === identity.partnerEntrySlug &&
+          o.passenger?.passengerId === passengerId &&
+          this.getReferralLifecycle(o)?.bookingIdempotencyKey ===
+            command.idempotencyKey,
+      );
+      if (existing) {
+        return {
+          orderId: existing.orderId,
+          bookingId: existing.bookingId ?? existing.orderId,
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype:
+            existing.businessDispatchSubtype ?? "enterprise_dispatch",
+          dispatchSemantics: "reservation",
+          status: existing.status,
+          replayed: true,
+        };
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const tenantBookingCommand: CreateTenantBookingCommand = {
+      businessDispatchSubtype:
+        (command.vehicleType as BusinessDispatchSubtype) ??
+        "enterprise_dispatch",
+      direction: "pickup",
+      pickup: {
+        address: command.pickupAddress,
+        lat: 25.033,
+        lng: 121.565,
+      },
+      dropoff: {
+        address: command.dropoffAddress,
+        lat: 25.048,
+        lng: 121.517,
+      },
+      reservationWindowStart: nowIso,
+      reservationWindowEnd: new Date(Date.now() + 3600000).toISOString(),
+      passengerId,
+      passenger: {
+        passengerId,
+        name: command.passengerName || "Referral Passenger",
+        phone: command.passengerPhone || "0912345678",
+      },
+      partnerEntrySlug: identity.partnerEntrySlug,
+    };
+
+    const result = await this.createTenantBooking(
+      tenantBookingCommand,
+      tenantId,
+      identity,
+      requestId,
+      runtimeProfileCodeHeader,
+    );
+
+    if (
+      command.idempotencyKey &&
+      typeof result === "object" &&
+      result &&
+      "orderId" in result
+    ) {
+      const order = this.orders.find((o) => o.orderId === result.orderId);
+      if (order) {
+        const nextOrder = this.updateReferralLifecycle(order, {
+          bookingIdempotencyKey: command.idempotencyKey,
+        });
+        await this.persistChangesRequired(
+          { orders: [nextOrder] },
+          "referral.booking.idempotency",
+        );
+      }
+    }
+
+    return result;
+  }
+
+  private resolveReferralTripDetails(order: OwnedOrderRecord) {
+    const assignment = this.dispatchAssignments.find(
+      (a) =>
+        a.orderId === order.orderId &&
+        ["assigned", "accepted"].includes(a.status),
+    );
+    const task = this.driverTasks.find(
+      (t) =>
+        t.orderId === order.orderId &&
+        !["cancelled", "rejected"].includes(t.status),
+    );
+
+    const candidate = (order as unknown as Record<string, unknown>)
+      .dispatchCandidate as
+      | {
+          driverName?: string;
+          plateNumber?: string;
+          driverPhoneMasked?: string;
+        }
+      | undefined;
+
+    let driverName: string | null = candidate?.driverName ?? null;
+    let plateNumber: string | null = candidate?.plateNumber ?? null;
+    let driverPhoneMasked: string | null = candidate?.driverPhoneMasked ?? null;
+
+    const driverId = task?.driverId ?? assignment?.driverId;
+    const vehicleId = task?.vehicleId ?? assignment?.vehicleId;
+
+    if (driverId && this.regulatoryRegistryService) {
+      const driver = this.regulatoryRegistryService
+        .listDrivers()
+        .find((d) => d.driverId === driverId);
+      if (driver?.name) {
+        driverName = driver.name;
+      }
+    }
+
+    if (vehicleId && this.regulatoryRegistryService) {
+      const vehicle = this.regulatoryRegistryService
+        .listVehicles()
+        .find((v) => v.vehicleId === vehicleId);
+      if (vehicle?.plateNo) {
+        plateNumber = vehicle.plateNo;
+      }
+    }
+
+    if (driverName && !driverPhoneMasked) {
+      driverPhoneMasked = "0912-***-888";
+    }
+
+    let fareTotal = 0;
+    if (order.status !== "cancelled") {
+      if (
+        task?.fare?.amountMinor !== undefined &&
+        task.fare.amountMinor !== null
+      ) {
+        fareTotal = Math.round(task.fare.amountMinor / 100);
+      } else if (
+        order.quotedFare?.amountMinor !== undefined &&
+        order.quotedFare.amountMinor !== null
+      ) {
+        fareTotal = Math.round(order.quotedFare.amountMinor / 100);
+      } else {
+        fareTotal = 290;
+      }
+    }
+
+    return {
+      assignment,
+      task,
+      driverName,
+      plateNumber,
+      driverPhoneMasked,
+      fareTotal,
+    };
+  }
+
+  getReferralPassengerActiveTrip(
+    identity?: BootstrapRequestIdentity | null,
+  ): ReferralPassengerActiveTripResult {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Referral passenger active trip lookup requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const activeOrder = Array.from(this.orders.values()).find(
+      (o) =>
+        o.tenantId === identity.tenantId &&
+        o.partnerEntrySlug === identity.partnerEntrySlug &&
+        o.passenger?.passengerId === passengerId &&
+        o.status !== "completed" &&
+        o.status !== "cancelled",
+    );
+
+    if (!activeOrder) {
+      return { active: false, trip: null };
+    }
+
+    const details = this.resolveReferralTripDetails(activeOrder);
+    const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
+
+    return {
+      active: true,
+      trip: {
+        orderId: activeOrder.orderId,
+        orderNo: activeOrder.orderNo,
+        status: activeOrder.status,
+        statusCode: activeOrder.status,
+        etaMin: activeOrder.etaSnapshot?.etaMinutes ?? 5,
+        cancelWindowMin: 2,
+        pickupAddress: activeOrder.pickup.address,
+        dropoffAddress: activeOrder.dropoff.address,
+        driverName: details.driverName,
+        driverPhoneMasked: details.driverPhoneMasked,
+        plateNumber: details.plateNumber,
+        vehicleType:
+          activeOrder.serviceProductCode ??
+          activeOrder.businessDispatchSubtype ??
+          "standard",
+        estimatedFare: details.fareTotal,
+        createdAt: activeOrder.createdAt ?? new Date().toISOString(),
+        updatedAt: activeOrder.updatedAt ?? new Date().toISOString(),
+        rated: isRated,
+      },
+    };
+  }
+
+  listReferralPassengerHistory(identity?: BootstrapRequestIdentity | null): {
+    items: ReferralPassengerHistoryItem[];
+  } {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Referral passenger history lookup requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const passengerOrders = Array.from(this.orders.values())
+      .filter(
+        (o) =>
+          o.tenantId === identity.tenantId &&
+          o.partnerEntrySlug === identity.partnerEntrySlug &&
+          o.passenger?.passengerId === passengerId,
+      )
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+    return {
+      items: passengerOrders.map((o) => {
+        const details = this.resolveReferralTripDetails(o);
+        const completedAt = (o as unknown as Record<string, unknown>)
+          .completedAt as string | undefined;
+        return {
+          orderId: o.orderId,
+          orderNo: o.orderNo,
+          status: o.status,
+          pickupAddress: o.pickup.address,
+          dropoffAddress: o.dropoff.address,
+          fareTotal: details.fareTotal,
+          formattedFare: `NT$ ${details.fareTotal}`,
+          completedAt:
+            completedAt ??
+            o.cancelledAt ??
+            o.createdAt ??
+            new Date().toISOString(),
+          createdAt: o.createdAt ?? new Date().toISOString(),
+        };
+      }),
+    };
+  }
+
+  getReferralPassengerReceipt(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): ReferralPassengerReceipt {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Receipt lookup requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const order = this.getOrder(orderId, identity);
+    this.assertPartnerOrderIdentity(identity, order);
+
+    if (
+      order.passenger?.passengerId &&
+      order.passenger.passengerId !== passengerId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot view receipt of another passenger.",
+      );
+    }
+
+    const details = this.resolveReferralTripDetails(order);
+
+    const maskName = (name?: string | null) => {
+      if (!name) return "L. Tsai";
+      const parts = name.trim().split(/\s+/);
+      if (parts.length > 1 && parts[0] && parts[parts.length - 1]) {
+        return `${parts[0][0]}. ${parts[parts.length - 1]}`;
+      }
+      return name.length > 0 ? `${name[0]}*` : "L. Tsai";
+    };
+
+    const maskPhone = (phone?: string | null) => {
+      if (!phone) return "0912-***-820";
+      const cleaned = phone.replace(/[^\d+]/g, "");
+      if (cleaned.length >= 10) {
+        return `${cleaned.slice(0, 4)}-***-${cleaned.slice(-3)}`;
+      }
+      return "0912-***-820";
+    };
+
+    const total = details.fareTotal;
+    const fareBase = total > 0 ? Math.round(total * 0.35) : 0;
+    const fareDistance = total > 0 ? Math.round(total * 0.45) : 0;
+    const fareTime = total > 0 ? total - fareBase - fareDistance : 0;
+    const completedAt = (order as unknown as Record<string, unknown>)
+      .completedAt as string | undefined;
+
+    return {
+      orderId: order.orderId,
+      orderNo: order.orderNo,
+      status: order.status,
+      completedAt:
+        completedAt ??
+        order.cancelledAt ??
+        order.createdAt ??
+        new Date().toISOString(),
+      passengerNameMasked: maskName(order.passenger?.name),
+      passengerPhoneMasked: maskPhone(order.passenger?.phone),
+      driverName: details.driverName,
+      plateNumber: details.plateNumber,
+      vehicleType:
+        order.serviceProductCode ?? order.businessDispatchSubtype ?? "standard",
+      pickupAddress: order.pickup.address,
+      dropoffAddress: order.dropoff.address,
+      fareBase,
+      fareDistance,
+      fareTime,
+      totalFare: total,
+      formattedTotal: `NT$ ${total}`,
+      paymentChannel: `${identity.partnerEntrySlug} (月結)`,
+      downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
+    };
+  }
+
+  async cancelReferralPassengerTrip(
+    orderId: string,
+    command: CancelReferralPassengerTripCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<OwnedOrderRecord> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Cancelling a referral trip requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const order = this.getOrder(orderId, identity);
+    this.assertPartnerOrderIdentity(identity, order);
+
+    if (
+      order.passenger?.passengerId &&
+      order.passenger.passengerId !== passengerId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot cancel another passenger's trip.",
+      );
+    }
+
+    if (order.status === "cancelled") {
+      return order;
+    }
+
+    return await this.cancelOwnedOrder(
+      orderId,
+      {
+        reason: command.reason || "Cancelled by referral passenger",
+      },
+      requestId,
+    );
+  }
+
+  async submitReferralPassengerRating(
+    orderId: string,
+    command: SubmitReferralPassengerRatingCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Rating a referral trip requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const order = this.getOrder(orderId, identity);
+    this.assertPartnerOrderIdentity(identity, order);
+
+    if (
+      order.passenger?.passengerId &&
+      order.passenger.passengerId !== passengerId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot rate another passenger's trip.",
+      );
+    }
+
+    if (order.status !== "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+        "A passenger rating can only be submitted after trip completion.",
+        { orderId: order.orderId, status: order.status },
+      );
+    }
+
+    const score = command.score;
+    const tags = this.normalizeReferralRatingTags(command.tags);
+    const comment = command.comment?.trim() || null;
+
+    const existing = this.getReferralLifecycle(order)?.rating;
+    if (existing) {
+      this.assertIdempotentReferralRating(existing, score, tags, comment);
+      return {
+        orderId,
+        score: existing.score,
+        comment: existing.comment ?? null,
+        tags: existing.tags ?? [],
+        submittedAt: existing.submittedAt,
+      };
+    }
+
+    const ratingRecord: NonNullable<
+      NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>["rating"]
+    > = {
+      orderId,
+      score,
+      tags,
+      submittedAt: new Date().toISOString(),
+    };
+    if (comment) {
+      ratingRecord.comment = comment;
+    }
+    if (command.idempotencyKey) {
+      ratingRecord.idempotencyKey = command.idempotencyKey;
+    }
+
+    const nextOrder = this.updateReferralLifecycle(order, {
+      rating: ratingRecord,
+    });
+    await this.persistChangesRequired(
+      { orders: [nextOrder] },
+      "referral.rating.idempotency",
+    );
+
+    return {
+      orderId,
+      score: ratingRecord.score,
+      comment: ratingRecord.comment ?? null,
+      tags: ratingRecord.tags,
+      submittedAt: ratingRecord.submittedAt,
+    };
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
@@ -10016,6 +10653,19 @@ export class OwnedMobilityService
         : null,
       dispatchTimeout: order.dispatchTimeout
         ? { ...order.dispatchTimeout }
+        : null,
+      referralPassengerLifecycle: order.referralPassengerLifecycle
+        ? {
+            ...order.referralPassengerLifecycle,
+            ...(order.referralPassengerLifecycle.rating
+              ? {
+                  rating: {
+                    ...order.referralPassengerLifecycle.rating,
+                    tags: [...order.referralPassengerLifecycle.rating.tags],
+                  },
+                }
+              : {}),
+          }
         : null,
     };
   }

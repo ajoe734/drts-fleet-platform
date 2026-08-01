@@ -170,3 +170,86 @@ export interface PartnerIngressHandoffSession {
     drtsPassengerId: string;
   };
 }
+
+export interface CreateReferralPassengerBookingCommand {
+  entrySlug: string;
+  partnerUserRef?: string;
+  passengerName?: string;
+  passengerPhone?: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  vehicleType?: string;
+  idempotencyKey?: string;
+  scheduledAt?: string;
+}
+
+export interface CancelReferralPassengerTripCommand {
+  orderId: string;
+  reason?: string;
+  idempotencyKey?: string;
+}
+
+export interface SubmitReferralPassengerRatingCommand {
+  orderId: string;
+  score: 1 | 2 | 3 | 4 | 5;
+  comment?: string;
+  tags?: string[];
+  idempotencyKey?: string;
+}
+
+export interface ReferralPassengerTripSnapshot {
+  orderId: string;
+  orderNo: string;
+  status: string;
+  statusCode: string;
+  etaMin: number | null;
+  cancelWindowMin: number;
+  pickupAddress: string;
+  dropoffAddress: string;
+  driverName: string | null;
+  driverPhoneMasked: string | null;
+  plateNumber: string | null;
+  vehicleType: string;
+  estimatedFare: number | null;
+  createdAt: string;
+  updatedAt: string;
+  rated: boolean;
+}
+
+export interface ReferralPassengerActiveTripResult {
+  active: boolean;
+  trip: ReferralPassengerTripSnapshot | null;
+}
+
+export interface ReferralPassengerHistoryItem {
+  orderId: string;
+  orderNo: string;
+  status: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  fareTotal: number | null;
+  formattedFare: string;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface ReferralPassengerReceipt {
+  orderId: string;
+  orderNo: string;
+  status: string;
+  completedAt: string | null;
+  passengerNameMasked: string;
+  passengerPhoneMasked: string;
+  driverName: string | null;
+  plateNumber: string | null;
+  vehicleType: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  fareBase: number;
+  fareDistance: number;
+  fareTime: number;
+  totalFare: number;
+  formattedTotal: string;
+  paymentChannel: string;
+  downloadUrl?: string;
+}

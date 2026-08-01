@@ -1785,6 +1785,53 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("allows unscoped partner_api_key callers to create partner-entry bookings", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const verification = await tenantPartnerService.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "2468",
+    });
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+        direction: "pickup",
+        pickup: { address: "桃園機場第二航廈" },
+        dropoff: { address: "台北市信義區松高路11號" },
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        passenger: { name: "測試乘客", phone: "0911222333" },
+        flightNo: "CI-001",
+      },
+      "tenant-demo-001",
+      {
+        authMode: "bootstrap_headers",
+        actorType: "partner_api_key",
+        actorId: "partner-key-alpha-demo",
+        realm: "partner",
+        roleFamilies: ["partner"],
+        roles: ["partner"],
+        scopes: ["partner:book"],
+      } as never,
+    );
+
+    expect(service.getOrder(created.orderId)).toMatchObject({
+      tenantId: "tenant-demo-001",
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+    });
+  });
+
   it("validates costCenter against the tenant cost-center directory on create and update", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
