@@ -32,6 +32,7 @@ import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -51,6 +52,9 @@ type JwtExpiresIn = NonNullable<
 >;
 
 const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
+const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
+const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV =
+  "DRTS_TENANT_BOOTSTRAP_MODE" as const;
 
 @Controller("auth")
 export class AuthController {
@@ -157,6 +161,8 @@ export class AuthController {
         });
       }
 
+      this.assertTenantBootstrapFixtureModeEnabled();
+
       const tenantId =
         requestedTenantId || this.tenantPartnerService.getDefaultTenantId();
       const existingUser =
@@ -164,43 +170,19 @@ export class AuthController {
           .listTenantUsers(tenantId)
           .find((user) => user.email === normalizedEmail) ?? null;
 
-      if (existingUser?.status === "suspended") {
-        throw new ApiRequestError(
-          403,
-          "TENANT_USER_SUSPENDED",
-          "The tenant user is suspended and cannot start a portal session.",
-          {
-            email: normalizedEmail,
-            tenantId,
-          },
-        );
-      }
-
       if (!existingUser) {
         const crossTenantUser =
           requestedTenantId &&
           this.tenantPartnerService.findTenantUserByEmail(normalizedEmail);
         if (crossTenantUser && crossTenantUser.tenantId !== tenantId) {
-          throw new ApiRequestError(
-            403,
-            "TENANT_SCOPE_MISMATCH",
-            "The tenant user is not invited under the requested tenant scope.",
-            {
-              email: normalizedEmail,
-              tenantId,
-            },
-          );
+          throw this.buildTenantBootstrapDeniedError();
         }
 
-        throw new ApiRequestError(
-          403,
-          "TENANT_USER_NOT_INVITED",
-          "No active tenant user was found for this email.",
-          {
-            email: normalizedEmail,
-            tenantId,
-          },
-        );
+        throw this.buildTenantBootstrapDeniedError();
+      }
+
+      if (!this.isTenantBootstrapEligibleStatus(existingUser.status)) {
+        throw this.buildTenantBootstrapDeniedError();
       }
 
       const roleCatalog = this.tenantPartnerService.listTenantRoles();
@@ -435,6 +417,44 @@ export class AuthController {
     realIp?: string | null,
   ) {
     return forwardedFor?.trim() || realIp?.trim() || null;
+  }
+
+  private assertTenantBootstrapFixtureModeEnabled() {
+    if (this.isTenantBootstrapFixtureModeEnabled()) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      403,
+      "TENANT_AUTHENTICATION_REQUIRED",
+      "Tenant authentication requires a verified identity proof.",
+      {},
+    );
+  }
+
+  private isTenantBootstrapFixtureModeEnabled() {
+    const environment = detectAuthEnvironment(process.env);
+    if (environment !== "local" && environment !== "test") {
+      return false;
+    }
+
+    const mode =
+      process.env[TENANT_BOOTSTRAP_FIXTURE_MODE_ENV]?.trim().toLowerCase() ??
+      "";
+    return mode === TENANT_BOOTSTRAP_FIXTURE_MODE;
+  }
+
+  private buildTenantBootstrapDeniedError() {
+    return new ApiRequestError(
+      403,
+      "TENANT_AUTHENTICATION_REQUIRED",
+      "Tenant authentication requires a verified identity proof.",
+      {},
+    );
+  }
+
+  private isTenantBootstrapEligibleStatus(status: string | null | undefined) {
+    return status?.trim().toLowerCase() === "active";
   }
 
   private resolveExistingUserRoleCode(

@@ -414,6 +414,7 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
   it("rejects tenant bootstrap identities on call-center order creation", () => {
@@ -506,6 +507,7 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
   it("rejects decorator-scoped endpoints when scopes are missing", () => {
@@ -951,6 +953,7 @@ describe("bootstrap auth guard", () => {
     });
 
     delete process.env.JWT_SECRET;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
   it("rejects bearer tokens with the wrong audience", () => {
@@ -1278,6 +1281,7 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
     const jwtAuthService = new JwtAuthService();
     const { controller } = createAuthFixture(jwtAuthService);
@@ -1333,6 +1337,7 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
     const { controller } = createAuthFixture(new JwtAuthService());
 
@@ -1360,6 +1365,7 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.JWT_SECRET = "test-secret";
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+    process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
     const { controller } = createAuthFixture(new JwtAuthService());
 
@@ -1385,10 +1391,12 @@ describe("tenant bootstrap-session auth controller", () => {
     expect(response.data.accessToken).toMatch(/\S+/);
 
     delete process.env.JWT_SECRET;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
   it("rejects bootstrap session issuance for emails without an invited tenant user", () => {
     process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
     const { controller } = createAuthFixture(new JwtAuthService());
 
@@ -1406,17 +1414,19 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_USER_NOT_INVITED",
-          message: "No active tenant user was found for this email.",
+          code: "TENANT_AUTHENTICATION_REQUIRED",
+          message: "Tenant authentication requires a verified identity proof.",
         },
       });
     }
 
     delete process.env.JWT_SECRET;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
   it("rejects bootstrap session issuance for suspended tenant users", () => {
     process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
     const { controller, tenantPartnerService } = createAuthFixture(
       new JwtAuthService(),
@@ -1460,16 +1470,18 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_USER_SUSPENDED",
+          code: "TENANT_AUTHENTICATION_REQUIRED",
         },
       });
     }
 
     delete process.env.JWT_SECRET;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
   it("rejects bootstrap session issuance when the tenant scope does not match the invited user", () => {
     process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
     const { controller, tenantPartnerService } = createAuthFixture(
       new JwtAuthService(),
@@ -1507,12 +1519,87 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_SCOPE_MISMATCH",
+          code: "TENANT_AUTHENTICATION_REQUIRED",
         },
       });
     }
 
     delete process.env.JWT_SECRET;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
+  });
+
+  it("rejects email-only tenant bootstrap outside explicit local fixture mode", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller } = createAuthFixture(new JwtAuthService());
+
+    expect(() =>
+      controller.issueTenantBootstrapSession(
+        {
+          email: "ops@acme.example",
+        },
+        "req-tenant-bootstrap-no-fixture-001",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      controller.issueTenantBootstrapSession(
+        {
+          email: "ops@acme.example",
+        },
+        "req-tenant-bootstrap-no-fixture-001",
+      );
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "TENANT_AUTHENTICATION_REQUIRED",
+          message: "Tenant authentication requires a verified identity proof.",
+        },
+      });
+    }
+
+    delete process.env.JWT_SECRET;
+  });
+
+  it("rejects email-only tenant bootstrap in production even when fixture mode is configured", () => {
+    process.env.APP_ENV = "production";
+    process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
+
+    const { controller } = createAuthFixture(new JwtAuthService());
+
+    expect(() =>
+      controller.issueTenantBootstrapSession(
+        {
+          email: "ops@acme.example",
+        },
+        "req-tenant-bootstrap-prod-001",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      controller.issueTenantBootstrapSession(
+        {
+          email: "ops@acme.example",
+        },
+        "req-tenant-bootstrap-prod-001",
+      );
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "TENANT_AUTHENTICATION_REQUIRED",
+          message: "Tenant authentication requires a verified identity proof.",
+        },
+      });
+    }
+
+    delete process.env.APP_ENV;
+    delete process.env.JWT_SECRET;
+    delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 });
 
