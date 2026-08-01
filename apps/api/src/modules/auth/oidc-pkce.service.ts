@@ -17,6 +17,7 @@ import { SecurityEventsService } from "../security-events/security-events.servic
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import { ConsumedOidcStateRepository } from "./consumed-oidc-state.repository";
 
 export interface OidcStateRecord {
   state: string;
@@ -36,9 +37,6 @@ export interface OidcLoginUrlResult {
   authorizationUrl: string;
   state: string;
   stateToken: string;
-  nonce: string;
-  codeVerifier: string;
-  codeChallenge: string;
   expiresInSeconds: number;
 }
 
@@ -61,7 +59,6 @@ const DEFAULT_OIDC_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 @Injectable()
 export class OidcPkceService {
   private readonly logger = new Logger(OidcPkceService.name);
-  private readonly consumedStates = new Map<string, number>();
   private jwksCache: { keys: any[]; fetchedAt: number } | null = null;
 
   constructor(
@@ -71,6 +68,8 @@ export class OidcPkceService {
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly partnerUserIdentityLinkRepo: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
+    @Optional()
+    private readonly consumedStateRepo: ConsumedOidcStateRepository = new ConsumedOidcStateRepository(),
   ) {}
 
   /**
@@ -261,9 +260,6 @@ export class OidcPkceService {
       authorizationUrl: authUrl.toString(),
       state,
       stateToken,
-      nonce,
-      codeVerifier,
-      codeChallenge,
       expiresInSeconds: Math.floor(DEFAULT_OIDC_STATE_TTL_MS / 1000),
     };
   }
@@ -754,25 +750,8 @@ export class OidcPkceService {
         "State parameter is missing.",
       );
     }
-    if (!command.pkceVerifier || command.pkceVerifier.trim().length === 0) {
-      throw new ApiRequestError(
-        400,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        "PKCE verifier is missing.",
-      );
-    }
 
-    // 2. PKCE Verifier Format Check (43-128 chars)
-    const verifier = command.pkceVerifier.trim();
-    if (verifier.length < 43 || verifier.length > 128) {
-      throw new ApiRequestError(
-        400,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        "PKCE code verifier length must be between 43 and 128 characters.",
-      );
-    }
-
-    // 3. State & Nonce verification
+    // 2. State & Nonce verification
     const stateToken = meta?.stateToken || (command as any).stateToken;
     if (!stateToken || typeof stateToken !== "string") {
       throw new ApiRequestError(
@@ -791,8 +770,12 @@ export class OidcPkceService {
       );
     }
 
-    // Check state reuse
-    if (this.consumedStates.has(command.state)) {
+    // Check state reuse & consume globally
+    const isFreshState = await this.consumedStateRepo.consumeState(
+      command.state,
+      stateRecord.expiresAt,
+    );
+    if (!isFreshState) {
       throw new ApiRequestError(
         400,
         "AUTH_SESSION_EXCHANGE_DENIED",
@@ -815,6 +798,24 @@ export class OidcPkceService {
         400,
         "AUTH_SESSION_EXCHANGE_DENIED",
         "State realm mismatch.",
+      );
+    }
+
+    // PKCE Verifier Resolution (command verifier or stored in stateRecord)
+    const verifier = (command.pkceVerifier?.trim() || stateRecord.codeVerifier || "").trim();
+    if (!verifier) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "PKCE verifier is missing.",
+      );
+    }
+
+    if (verifier.length < 43 || verifier.length > 128) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "PKCE code verifier length must be between 43 and 128 characters.",
       );
     }
 
@@ -847,9 +848,6 @@ export class OidcPkceService {
         );
       }
     }
-
-    // Mark state as consumed
-    this.consumedStates.set(command.state, Date.now());
 
     // 4. Validate Code & Obtain Claims (Real OIDC or Synthetic Test Matrix)
     const claims = await this.performOidcCodeExchange(command, stateRecord);
@@ -1055,7 +1053,8 @@ export class OidcPkceService {
     if (clientSecret) {
       params.set("client_secret", clientSecret);
     }
-    params.set("code_verifier", command.pkceVerifier.trim());
+    const verifier = (command.pkceVerifier?.trim() || stateRecord?.codeVerifier || "").trim();
+    params.set("code_verifier", verifier);
 
     try {
       const response = await fetch(tokenEndpoint, {

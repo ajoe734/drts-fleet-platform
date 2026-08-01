@@ -48,14 +48,13 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     expect(login.authorizationUrl).toContain("code_challenge_method=S256");
     expect(login.authorizationUrl).toContain("response_type=code");
 
-    // 2. Exchange authorization code & PKCE verifier via BFF callback-session
+    // 2. Exchange authorization code via BFF callback-session using stateToken
     const session = await oidcService.exchangeTenantCallbackSession(
       {
         provider: "oidc",
         callbackUrl: "http://localhost:3000/api/auth/callback",
         code: "e2e_valid_code_001",
         state: login.state,
-        pkceVerifier: login.codeVerifier,
         tenantId: defaultTenantId,
       },
       { stateToken: login.stateToken },
@@ -88,7 +87,6 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
         callbackUrl: "http://localhost:3000/api/auth/callback",
         code: "e2e_valid_partner_code_001",
         state: login.state,
-        pkceVerifier: login.codeVerifier,
         partnerId: "yuhe-residence",
       },
       { stateToken: login.stateToken },
@@ -114,7 +112,6 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
       callbackUrl: "http://localhost:3000/api/auth/callback",
       code: "e2e_valid_code_reuse_check",
       state: login.state,
-      pkceVerifier: login.codeVerifier,
       tenantId: defaultTenantId,
     };
 
@@ -158,7 +155,6 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
           callbackUrl: "http://localhost:3000/api/auth/callback",
           code: "wrong_nonce_code",
           state: login3.state,
-          pkceVerifier: login3.codeVerifier,
         },
         { stateToken: login3.stateToken },
       );
@@ -179,7 +175,6 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
           callbackUrl: "http://localhost:3000/api/auth/callback",
           code: "wrong_issuer_code",
           state: login4.state,
-          pkceVerifier: login4.codeVerifier,
         },
         { stateToken: login4.stateToken },
       );
@@ -203,7 +198,6 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
           callbackUrl: "http://localhost:3000/api/auth/callback",
           code: "invited_user_code",
           state: loginInvited.state,
-          pkceVerifier: loginInvited.codeVerifier,
         },
         { stateToken: loginInvited.stateToken },
       );
@@ -224,7 +218,6 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
           callbackUrl: "http://localhost:3000/api/auth/callback",
           code: "suspended_user_code",
           state: loginSuspended.state,
-          pkceVerifier: loginSuspended.codeVerifier,
         },
         { stateToken: loginSuspended.stateToken },
       );
@@ -253,6 +246,7 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     const login = oidcService.generateLoginParameters("tenant", {
       redirectUri: "http://localhost:3000/api/auth/callback",
     });
+    const stateRec = oidcService.verifyStateToken(login.stateToken)!;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const idTokenPayload = {
@@ -261,7 +255,7 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
       aud: "drts-bff-client",
       email: "admin@acme.example",
       email_verified: true,
-      nonce: login.nonce,
+      nonce: stateRec.nonce,
       amr: ["pwd", "mfa"],
       acr: "urn:mace:incommon:iap:silver",
       auth_time: nowSeconds,
@@ -294,7 +288,6 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
         callbackUrl: "http://localhost:3000/api/auth/callback",
         code: "real_http_auth_code_999",
         state: login.state,
-        pkceVerifier: login.codeVerifier,
       },
       { stateToken: login.stateToken },
     );

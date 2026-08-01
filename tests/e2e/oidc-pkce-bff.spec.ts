@@ -54,7 +54,7 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE End-to-End Suite", () 
 
     const cookieData = JSON.parse(stateCookie!.value);
     expect(cookieData.stateToken).toBeDefined();
-    expect(cookieData.codeVerifier).toBeDefined();
+    expect(cookieData.codeVerifier).toBeUndefined();
     expect(cookieData.returnUrl).toBe("/dashboard");
   });
 
@@ -66,7 +66,6 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE End-to-End Suite", () 
     const req = new NextRequest(`http://localhost:3000/api/auth/callback?code=e2e_valid_code_001&state=${login.state}`);
     const cookiePayload = JSON.stringify({
       stateToken: login.stateToken,
-      codeVerifier: login.codeVerifier,
       returnUrl: "/dashboard",
     });
     req.cookies.set("drts_oidc_state", cookiePayload);
@@ -151,7 +150,6 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE End-to-End Suite", () 
     const callbackReq = new NextRequest(`http://localhost:3001/api/auth/callback?code=e2e_valid_partner_code_001&state=${loginParams.state}`);
     callbackReq.cookies.set("drts_oidc_state", JSON.stringify({
       stateToken: loginParams.stateToken,
-      codeVerifier: loginParams.codeVerifier,
       returnUrl: "/partner-dashboard",
     }));
 

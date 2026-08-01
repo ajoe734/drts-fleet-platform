@@ -37,8 +37,8 @@ export async function GET(
       );
     }
 
-    const { authorizationUrl, stateToken, codeVerifier } = data.data;
-    const cookiePayload = JSON.stringify({ stateToken, codeVerifier, returnUrl });
+    const { authorizationUrl, stateToken } = data.data;
+    const cookiePayload = JSON.stringify({ stateToken, returnUrl });
 
     const redirectRes = NextResponse.redirect(authorizationUrl);
     redirectRes.cookies.set("drts_oidc_state", cookiePayload, {

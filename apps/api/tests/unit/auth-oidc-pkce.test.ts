@@ -32,13 +32,16 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       expect(loginParams.authorizationUrl).toContain("response_type=code");
       expect(loginParams.authorizationUrl).toContain("code_challenge_method=S256");
       expect(loginParams.authorizationUrl).toContain(`state=${loginParams.state}`);
-      expect(loginParams.authorizationUrl).toContain(`nonce=${loginParams.nonce}`);
-      expect(loginParams.codeVerifier.length).toBeGreaterThanOrEqual(43);
-      expect(loginParams.codeVerifier.length).toBeLessThanOrEqual(128);
+
+      const stateRecord = oidcService.verifyStateToken(loginParams.stateToken)!;
+      expect(stateRecord).toBeDefined();
+      expect(loginParams.authorizationUrl).toContain(`nonce=${stateRecord.nonce}`);
+      expect(stateRecord.codeVerifier.length).toBeGreaterThanOrEqual(43);
+      expect(stateRecord.codeVerifier.length).toBeLessThanOrEqual(128);
 
       // Verify S256 computation correctness
-      const expectedChallenge = oidcService.computeCodeChallenge(loginParams.codeVerifier);
-      expect(loginParams.codeChallenge).toBe(expectedChallenge);
+      const expectedChallenge = oidcService.computeCodeChallenge(stateRecord.codeVerifier);
+      expect(stateRecord.codeChallenge).toBe(expectedChallenge);
     });
 
     it("supports state token signing and stateless verification", () => {
@@ -48,7 +51,8 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       const verifiedRecord = oidcService.verifyStateToken(loginParams.stateToken);
       expect(verifiedRecord).not.toBeNull();
       expect(verifiedRecord?.state).toBe(loginParams.state);
-      expect(verifiedRecord?.nonce).toBe(loginParams.nonce);
+      expect(verifiedRecord?.nonce).toBeDefined();
+      expect(typeof verifiedRecord?.nonce).toBe("string");
       expect(verifiedRecord?.realm).toBe("partner");
     });
 
@@ -75,7 +79,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           callbackUrl: "http://localhost:3000/api/auth/callback",
           code: "valid_authorization_code_12345",
           state: loginParams.state,
-          pkceVerifier: loginParams.codeVerifier,
           tenantId: defaultTenantId,
         },
         { stateToken: loginParams.stateToken },
@@ -99,7 +102,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -115,7 +117,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "valid_code",
             state: "",
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -131,7 +132,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "valid_code",
             state: loginParams.state,
-            pkceVerifier: "short_verifier",
+            pkceVerifier: "too_short",
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -164,7 +165,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         callbackUrl: "http://localhost:3000/api/auth/callback",
         code: "valid_code_reuse_test",
         state: loginParams.state,
-        pkceVerifier: loginParams.codeVerifier,
         tenantId: defaultTenantId,
       };
 
@@ -189,7 +189,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           callbackUrl: "http://localhost:3000/api/auth/callback",
           code: "valid_code",
           state: loginParams.state,
-          pkceVerifier: loginParams.codeVerifier,
         }),
       ).rejects.toThrow(ApiRequestError);
     });
@@ -205,7 +204,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/other-callback",
             code: "valid_code",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -223,7 +221,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_wrong_issuer",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -241,7 +238,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_wrong_audience",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -259,7 +255,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_wrong_nonce",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -277,7 +272,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_missing_nonce",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -303,7 +297,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_invited_user",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -330,7 +323,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_suspended_user",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -346,7 +338,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_unknown_sub",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -692,7 +683,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           callbackUrl: "http://localhost:3000/api/auth/callback",
           code: "valid_partner_code_123",
           state: loginParams.state,
-          pkceVerifier: loginParams.codeVerifier,
           partnerId: "yuhe-residence",
         },
         { stateToken: loginParams.stateToken },
@@ -714,7 +704,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "valid_partner_code_123",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
         ),
@@ -732,7 +721,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_no_mfa",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
             partnerId: "yuhe-residence",
           },
           { stateToken: loginParams.stateToken },
@@ -751,7 +739,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "code_invited_user",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
             partnerId: "yuhe-residence",
           },
           { stateToken: loginParams.stateToken },
@@ -770,7 +757,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             callbackUrl: "http://localhost:3000/api/auth/callback",
             code: "brand_new_partner_subject",
             state: loginParams.state,
-            pkceVerifier: loginParams.codeVerifier,
             partnerId: "yuhe-residence",
           },
           { stateToken: loginParams.stateToken },
