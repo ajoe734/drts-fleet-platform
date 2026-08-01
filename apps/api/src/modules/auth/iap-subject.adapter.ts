@@ -273,10 +273,19 @@ export class IAPSubjectAdapter {
     const assignedRoles = Array.from(
       new Set(allRoleBindings.map((r) => r.roleCode)),
     );
-    const originalRoles =
-      assignedRoles.length > 0
-        ? assignedRoles
-        : [isPlatformGroup ? "superadmin" : "ops_user"];
+    if (assignedRoles.length === 0) {
+      this.emitDeniedEvent(
+        "user_inactive",
+        principal.email || normalizedEmail,
+        principal.principalId,
+      );
+      throw new ApiRequestError(
+        403,
+        "IAP_WORKFORCE_USER_INACTIVE",
+        "Workforce user has no active durable role bindings.",
+      );
+    }
+    const originalRoles = assignedRoles;
 
     // Reconcile Group Drift & Least Privilege
     const roleGroupMapping = options.roleGroupMapping ?? DEFAULT_IAP_ROLE_GROUP_MAPPING;

@@ -742,6 +742,69 @@ describe("IAPSubjectAdapter", () => {
     expect(res.membership.membershipId).toBe("membership_stale_ops_001");
     expect(res.membership.realm).toBe("ops");
   });
+
+  it("fails closed with 403 IAP_WORKFORCE_USER_INACTIVE when active control-plane membership has zero durable role bindings", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_no_roles_001",
+        sourceRef: "iap_subject:no_roles_sub",
+        issuer: "google_iap",
+        subject: "no_roles_sub",
+        principalType: "human",
+        email: "noroles@platform.drts",
+        emailVerified: true,
+        displayName: "No Roles User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_no_roles_001",
+        sourceRef: "iap_membership:no_roles_sub",
+        principalId: "principal_no_roles_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [],
+    );
+
+    const token = signTestIapToken({
+      sub: "no_roles_sub",
+      email: "noroles@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+  });
 });
 
 
