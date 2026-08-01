@@ -677,6 +677,7 @@ const en = {
   "embed.field.backToBook": "Back to booking form",
   "embed.field.viewTrip": "View existing trip",
   "embed.field.confirmRide": "Confirm ride request",
+  "embed.field.startRideBooking": "Start booking",
   "embed.field.returnToApp": "Back to community app",
   "embed.field.openStandalone": "Open standalone ride site",
   "embed.field.returnToEntry": "Return to {appName}",
@@ -684,6 +685,17 @@ const en = {
   "embed.field.agree": "Agree and start",
   "embed.field.notNow": "Not now",
   "embed.field.cancelTrip": "Cancel trip · {minutes} min left",
+  "embed.field.cancelTripFree": "Cancel trip · {minutes} min left for free",
+  "embed.field.pickupLocation": "Pickup location",
+  "embed.field.dropoffLocation": "Drop-off location",
+  "embed.field.riderCount": "Riders",
+  "embed.field.riderCountValue": "{count} rider",
+  "embed.field.contactLabel": "Contact",
+  "embed.field.communitySupport": "Community ride support",
+  "embed.field.messageCodeDemo":
+    "Copy is rendered from the backend passenger message code · sample view",
+  "embed.field.serviceProvidedBy":
+    "Trips are provided by DRTS · service status is for reference only",
   "embed.nav.book": "Book",
   "embed.nav.trip": "Active",
   "embed.nav.trips": "History",
@@ -696,6 +708,7 @@ const en = {
   "embed.nav.eta_updated": "ETA updated",
   "embed.state.handoff.title": "Ready to book as {name}",
   "embed.state.handoff.badge": "handoff · linked",
+  "embed.state.verified": "Verified",
   "embed.state.reauth.title": "Sign-in state expired",
   "embed.state.reauth.badge": "reauth_required",
   "embed.state.unsupported.title": "Cannot open in this environment",
@@ -714,6 +727,18 @@ const en = {
     "Ride booking cannot be completed inside the community app right now. The standalone website can still recover the same trips and receipts.",
   "embed.message.handoff":
     "No extra sign-in is needed. Resident identity is securely handed off from {appName}.",
+  "embed.message.handoffDetail":
+    "No extra sign-in is needed. {appName} securely hands off your resident identity and the embedded page will not ask for a password.",
+  "embed.message.reauthDetail":
+    "To protect your resident account, return to {appName} and re-enter ride booking. This page will not ask for your password.",
+  "embed.message.unsupportedDetail":
+    "Ride booking can only be opened inside an authorized community app. The current source host is not on the allowlist, so loading has been blocked and no personal data was sent.",
+  "embed.message.consentHint":
+    "First-time use · review the following consent scope · consent_required",
+  "embed.message.consentDetail":
+    "Trips are provided by DRTS. Personal data is used only to complete this trip and consent can be revoked in the community app settings.",
+  "embed.message.fallbackDetail":
+    "Ride booking cannot be completed inside the community app right now. You can continue on the standalone ride site with SMS verification while keeping trips and receipts linked to your identity.",
   "embed.book.subtitle": "{name} · {unit}",
   "embed.book.identity": "Bound referral handoff session: {id}",
   "embed.book.now": "Depart now",
@@ -726,6 +751,9 @@ const en = {
   "embed.card.fallbackStates": "AV fallback review",
   "embed.card.fallbackStatesSubtitle":
     "Passenger-safe states · same trip · no surcharge",
+  "embed.card.reason": "Reason",
+  "embed.card.next": "Next",
+  "embed.card.receiptSubtitle": "PII masked",
   "embed.vehicle.standard.name": "Standard",
   "embed.vehicle.standard.note": "1-4 riders",
   "embed.vehicle.comfort.name": "Comfort",
@@ -781,6 +809,27 @@ const en = {
     "This trip has ended successfully. The rider can go directly to the receipt or history view.",
   "embed.cancelled.body":
     "The cancellation outcome and source context are preserved without losing the linked handoff identity.",
+  "embed.outcome.completedTitle": "Trip completed. Welcome back anytime.",
+  "embed.outcome.cancelledTitle": "This trip was cancelled",
+  "embed.consent.scope.trip.title": "Create and manage ride trips",
+  "embed.consent.scope.trip.body":
+    "Place bookings, check trip status, and cancel trips on your behalf.",
+  "embed.consent.scope.pii.title": "Use required personal data",
+  "embed.consent.scope.pii.body":
+    "Pickup and drop-off addresses plus contact details are used to match and coordinate the trip.",
+  "embed.consent.scope.identity.title": "Bind trips to resident identity",
+  "embed.consent.scope.identity.body":
+    "Your ongoing trips and receipts can still be recovered after reopening the app.",
+  "embed.negative.title.denied": "Booking could not be created",
+  "embed.negative.title.ineligible": "You are not currently eligible to book",
+  "embed.negative.title.nosupply": "No nearby vehicles are available",
+  "embed.negative.title.degraded": "Service is temporarily unstable",
+  "embed.negative.primary.ineligible": "Contact community management",
+  "embed.negative.secondary.ineligible": "Back",
+  "embed.negative.primary.nosupply": "Try again later",
+  "embed.negative.secondary.nosupply": "Schedule for later",
+  "embed.negative.primary.degraded": "Try again",
+  "embed.negative.secondary.degraded": "View status",
   "embed.negative.nosupply":
     "No nearby dispatchable vehicle is available. Try again later or pick another time.",
   "embed.negative.ineligible":
@@ -1417,6 +1466,7 @@ const zh: Record<keyof typeof en, string> = {
   "embed.field.backToBook": "返回叫車表單",
   "embed.field.viewTrip": "查看既有行程",
   "embed.field.confirmRide": "確認叫車",
+  "embed.field.startRideBooking": "開始叫車",
   "embed.field.returnToApp": "回社區 App",
   "embed.field.openStandalone": "前往獨立叫車網站",
   "embed.field.returnToEntry": "回 {appName} 重新進入",
@@ -1424,6 +1474,15 @@ const zh: Record<keyof typeof en, string> = {
   "embed.field.agree": "同意並開始",
   "embed.field.notNow": "暫不使用",
   "embed.field.cancelTrip": "取消行程 · 剩 {minutes} 分鐘",
+  "embed.field.cancelTripFree": "取消行程 · 剩 {minutes} 分鐘可免費取消",
+  "embed.field.pickupLocation": "上車地點",
+  "embed.field.dropoffLocation": "下車地點",
+  "embed.field.riderCount": "乘客人數",
+  "embed.field.riderCountValue": "{count} 人",
+  "embed.field.contactLabel": "聯絡",
+  "embed.field.communitySupport": "社區叫車客服",
+  "embed.field.messageCodeDemo": "文案由後端 messageCode 渲染 · 此為示意",
+  "embed.field.serviceProvidedBy": "接送由 智慧運輸科技 DRTS 提供 · 服務狀態僅供參考",
   "embed.nav.book": "叫車",
   "embed.nav.trip": "進行中",
   "embed.nav.trips": "歷史",
@@ -1436,6 +1495,7 @@ const zh: Record<keyof typeof en, string> = {
   "embed.nav.eta_updated": "ETA 更新",
   "embed.state.handoff.title": "以 {name} 身分為您準備叫車",
   "embed.state.handoff.badge": "handoff · 已交接",
+  "embed.state.verified": "已驗證",
   "embed.state.reauth.title": "登入狀態已逾時",
   "embed.state.reauth.badge": "reauth_required",
   "embed.state.unsupported.title": "無法在此環境開啟",
@@ -1452,6 +1512,17 @@ const zh: Record<keyof typeof en, string> = {
   "embed.message.fallback":
     "目前無法在社區 App 內完成叫車，但改用獨立網站後仍可找回同一批行程與收據。",
   "embed.message.handoff": "免再登入；住戶身分會由 {appName} 安全交接進來。",
+  "embed.message.handoffDetail":
+    "免再登入，由 {appName} 安全帶入身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。",
+  "embed.message.reauthDetail":
+    "為保護您的住戶帳號，請回到 {appName} 重新進入叫車。此頁不會要求輸入帳號或密碼。",
+  "embed.message.unsupportedDetail":
+    "叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。",
+  "embed.message.consentHint": "首次使用 · 請確認以下同意範圍 · consent_required",
+  "embed.message.consentDetail":
+    "由 智慧運輸科技 DRTS 提供接送，個資僅用於完成本次行程，可於社區 App 設定撤回授權。",
+  "embed.message.fallbackDetail":
+    "目前無法在社區 App 內完成叫車。您可改用獨立叫車網站，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。",
   "embed.book.subtitle": "{name} · {unit}",
   "embed.book.identity": "已綁定 referral handoff session：{id}",
   "embed.book.now": "現在出發",
@@ -1463,6 +1534,9 @@ const zh: Record<keyof typeof en, string> = {
   "embed.book.negative.degraded": "降級",
   "embed.card.fallbackStates": "AV fallback 狀態",
   "embed.card.fallbackStatesSubtitle": "乘客安全文案 · 同一筆行程 · 不加價",
+  "embed.card.reason": "原因",
+  "embed.card.next": "接下來",
+  "embed.card.receiptSubtitle": "PII 遮罩",
   "embed.vehicle.standard.name": "標準車",
   "embed.vehicle.standard.note": "1-4 人",
   "embed.vehicle.comfort.name": "舒適車",
@@ -1512,6 +1586,25 @@ const zh: Record<keyof typeof en, string> = {
   "embed.completed.body": "本次行程已順利結束，可直接前往收據或歷史行程。",
   "embed.cancelled.body":
     "取消結果與來源脈絡都會被保留，不會遺失既有 handoff 身分。",
+  "embed.outcome.completedTitle": "行程已完成，歡迎再次使用",
+  "embed.outcome.cancelledTitle": "此行程已取消",
+  "embed.consent.scope.trip.title": "建立與管理叫車行程",
+  "embed.consent.scope.trip.body": "為您下單、查詢與取消行程",
+  "embed.consent.scope.pii.title": "使用必要個資",
+  "embed.consent.scope.pii.body": "上下車地址、聯絡電話以完成媒合與聯繫",
+  "embed.consent.scope.identity.title": "行程綁定住戶身分",
+  "embed.consent.scope.identity.body":
+    "讓您重開 App 後仍能找回進行中行程與收據",
+  "embed.negative.title.denied": "叫車未能建立",
+  "embed.negative.title.ineligible": "目前不符叫車資格",
+  "embed.negative.title.nosupply": "附近暫無可派車輛",
+  "embed.negative.title.degraded": "服務暫時不穩定",
+  "embed.negative.primary.ineligible": "洽社區管理中心",
+  "embed.negative.secondary.ineligible": "返回",
+  "embed.negative.primary.nosupply": "稍後重試",
+  "embed.negative.secondary.nosupply": "改約時間",
+  "embed.negative.primary.degraded": "重試",
+  "embed.negative.secondary.degraded": "查看狀態",
   "embed.negative.nosupply": "附近暫無可派車輛，請稍後重試或改約其他時間。",
   "embed.negative.ineligible":
     "此住戶身分目前未開通叫車服務，請洽社區管理中心。",
