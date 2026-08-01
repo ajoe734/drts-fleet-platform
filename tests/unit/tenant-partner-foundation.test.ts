@@ -745,7 +745,7 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("manages passengers, addresses, tenant roles, and API keys as tenant source-of-truth records", () => {
+  it("manages passengers, addresses, tenant roles, and API keys as tenant source-of-truth records", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
@@ -770,7 +770,7 @@ describe("tenant partner foundation service", () => {
       },
       "address-upsert-request",
     );
-    const tenantUser = tenantPartnerService.createTenantUser(
+    const tenantUser = await tenantPartnerService.createTenantUser(
       TENANT_ID,
       {
         email: "ops-admin@example.com",
@@ -779,7 +779,7 @@ describe("tenant partner foundation service", () => {
       },
       "tenant-user-create-request",
     );
-    const updatedUser = tenantPartnerService.updateTenantUserRole(
+    const updatedUser = await tenantPartnerService.updateTenantUserRole(
       TENANT_ID,
       tenantUser.userId,
       {
@@ -788,7 +788,7 @@ describe("tenant partner foundation service", () => {
       },
       "tenant-user-update-request",
     );
-    const issuedApiKey = tenantPartnerService.issueApiKey(
+    const issuedApiKey = await tenantPartnerService.issueApiKey(
       TENANT_ID,
       {
         keyName: "Tenant Automation Key",
@@ -796,7 +796,7 @@ describe("tenant partner foundation service", () => {
       },
       "tenant-api-key-issue-request",
     );
-    const rotatedApiKey = tenantPartnerService.rotateApiKey(
+    const rotatedApiKey = await tenantPartnerService.rotateApiKey(
       TENANT_ID,
       issuedApiKey.apiKey.apiKeyId,
       {

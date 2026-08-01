@@ -51,6 +51,7 @@ import { ReportingFilingModule } from "./modules/reporting-filing/reporting-fili
 import { ServiceAreaModule } from "./modules/service-area/service-area.module";
 import { ServiceProductModule } from "./modules/service-product/service-product.module";
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
+import { SecurityEventsModule } from "./modules/security-events/security-events.module";
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-eligibility.module";
@@ -92,6 +93,7 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     BillingSettlementModule,
     ReportingModule,
     ReportingFilingModule,
+    SecurityEventsModule,
     ServiceAreaModule,
     ServiceProductModule,
     ForwarderModule,

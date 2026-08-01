@@ -1120,73 +1120,35 @@ export class TenantPartnerRepository {
       );
     }
 
-    for (const userRole of changes.userRoles ?? []) {
+    if ((changes.userRoles?.length ?? 0) > 0) {
       writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO admin.phase1_tenant_user_roles (
-              user_id,
-              tenant_id,
-              role_code,
-              status,
-              invited_at,
-              updated_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7::jsonb
-            )
-            ON CONFLICT (user_id) DO UPDATE SET
-              tenant_id = EXCLUDED.tenant_id,
-              role_code = EXCLUDED.role_code,
-              status = EXCLUDED.status,
-              invited_at = EXCLUDED.invited_at,
-              updated_at = EXCLUDED.updated_at,
-              record = EXCLUDED.record
-          `,
-          [
-            userRole.userId,
-            userRole.tenantId,
-            userRole.roleCode,
-            userRole.status,
-            userRole.invitedAt,
-            userRole.updatedAt,
-            JSON.stringify(userRole),
-          ],
+        this.persistTenantUserRolesWithExecutor(
+          this.databaseService!,
+          changes.userRoles ?? [],
         ),
       );
     }
 
-    for (const apiKey of changes.apiKeys ?? []) {
+    if ((changes.apiKeys?.length ?? 0) > 0) {
       writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO admin.phase1_tenant_api_keys (
-              api_key_id,
-              tenant_id,
-              revoked_at,
-              created_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5::jsonb
-            )
-            ON CONFLICT (api_key_id) DO UPDATE SET
-              tenant_id = EXCLUDED.tenant_id,
-              revoked_at = EXCLUDED.revoked_at,
-              created_at = EXCLUDED.created_at,
-              record = EXCLUDED.record
-          `,
-          [
-            apiKey.apiKeyId,
-            apiKey.tenantId,
-            apiKey.revokedAt,
-            apiKey.createdAt,
-            JSON.stringify(apiKey),
-          ],
+        this.persistTenantApiKeysWithExecutor(
+          this.databaseService!,
+          changes.apiKeys ?? [],
         ),
       );
     }
 
     await Promise.all(writes);
+  }
+
+  async persistIdentityGovernanceChanges(
+    executor: TenantPartnerQueryExecutor,
+    changes: Pick<PersistTenantPartnerChanges, "userRoles" | "apiKeys">,
+  ) {
+    await Promise.all([
+      this.persistTenantUserRolesWithExecutor(executor, changes.userRoles ?? []),
+      this.persistTenantApiKeysWithExecutor(executor, changes.apiKeys ?? []),
+    ]);
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
@@ -1654,6 +1616,82 @@ export class TenantPartnerRepository {
             decision.reasonCode,
             decision.decidedAt,
             JSON.stringify(decision),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistTenantUserRolesWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    userRoles: readonly TenantUserRoleRecord[],
+  ) {
+    await Promise.all(
+      userRoles.map((userRole) =>
+        executor.query(
+          `
+            INSERT INTO admin.phase1_tenant_user_roles (
+              user_id,
+              tenant_id,
+              role_code,
+              status,
+              invited_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7::jsonb
+            )
+            ON CONFLICT (user_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              role_code = EXCLUDED.role_code,
+              status = EXCLUDED.status,
+              invited_at = EXCLUDED.invited_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            userRole.userId,
+            userRole.tenantId,
+            userRole.roleCode,
+            userRole.status,
+            userRole.invitedAt,
+            userRole.updatedAt,
+            JSON.stringify(userRole),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistTenantApiKeysWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    apiKeys: readonly StoredTenantApiKeyRecord[],
+  ) {
+    await Promise.all(
+      apiKeys.map((apiKey) =>
+        executor.query(
+          `
+            INSERT INTO admin.phase1_tenant_api_keys (
+              api_key_id,
+              tenant_id,
+              revoked_at,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5::jsonb
+            )
+            ON CONFLICT (api_key_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              revoked_at = EXCLUDED.revoked_at,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+          [
+            apiKey.apiKeyId,
+            apiKey.tenantId,
+            apiKey.revokedAt,
+            apiKey.createdAt,
+            JSON.stringify(apiKey),
           ],
         ),
       ),

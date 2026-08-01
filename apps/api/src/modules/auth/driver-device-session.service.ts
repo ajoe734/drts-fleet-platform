@@ -11,6 +11,7 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import { SecurityEventsService } from "../security-events/security-events.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 
@@ -49,6 +50,8 @@ export class DriverDeviceSessionService {
     private readonly driverProfileService: DriverProfileService,
     @Optional()
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
+    @Optional()
+    private readonly securityEventsService?: SecurityEventsService,
   ) {}
 
   register(
@@ -111,7 +114,42 @@ export class DriverDeviceSessionService {
       requestId,
     );
 
-    return this.issueSession(binding);
+    const session = this.issueSession(binding);
+    this.securityEventsService?.recordEvent({
+      actorId: binding.driverId,
+      actorType: "driver_user",
+      subjectId: binding.driverId,
+      realm: "driver",
+      tenantId: null,
+      partnerId: null,
+      eventType: "driver_device_session.registered",
+      eventFamily: "session",
+      outcome: "success",
+      severity: "low",
+      targetType: "driver_device_binding",
+      targetId: binding.bindingId,
+      sessionId: binding.bindingId,
+      tokenId: session.accessToken,
+      authMethods: ["driver_device_registration"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: {
+        bindingId: binding.bindingId,
+        driverId: binding.driverId,
+        status: "active",
+      },
+      maskedContext: {
+        deviceId: binding.deviceId,
+        deviceLabel: binding.deviceLabel,
+        refreshToken: binding.refreshToken,
+      },
+    });
+    return session;
   }
 
   refresh(
@@ -158,7 +196,41 @@ export class DriverDeviceSessionService {
       binding.refreshedAt,
     );
 
-    return this.issueSession(binding);
+    const session = this.issueSession(binding);
+    this.securityEventsService?.recordEvent({
+      actorId: binding.driverId,
+      actorType: "driver_user",
+      subjectId: binding.driverId,
+      realm: "driver",
+      tenantId: null,
+      partnerId: null,
+      eventType: "driver_device_session.refreshed",
+      eventFamily: "session",
+      outcome: "success",
+      severity: "low",
+      targetType: "driver_device_binding",
+      targetId: binding.bindingId,
+      sessionId: binding.bindingId,
+      tokenId: session.accessToken,
+      authMethods: ["driver_refresh_token"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: {
+        bindingId: binding.bindingId,
+        refreshedAt: binding.refreshedAt,
+        status: "active",
+      },
+      maskedContext: {
+        deviceId: binding.deviceId,
+        refreshToken: binding.refreshToken,
+      },
+    });
+    return session;
   }
 
   revoke(
@@ -201,6 +273,42 @@ export class DriverDeviceSessionService {
       this.resolveRevocationAuditActor(binding, identity),
       requestId,
     );
+
+    this.securityEventsService?.recordEvent({
+      actorId: identity?.actorId ?? binding.driverId,
+      actorType: identity?.actorType ?? "system",
+      subjectId: binding.driverId,
+      realm: identity?.realm ?? "driver",
+      tenantId: identity?.tenantId ?? null,
+      partnerId: identity?.partnerId ?? null,
+      eventType: "driver_device_session.revoked",
+      eventFamily: "device",
+      outcome: "revoked",
+      severity: "medium",
+      targetType: "driver_device_binding",
+      targetId: binding.bindingId,
+      sessionId: binding.bindingId,
+      tokenId: null,
+      authMethods: ["driver_device_revoke"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: {
+        bindingId: binding.bindingId,
+        status: "active",
+      },
+      afterSummary: {
+        bindingId: binding.bindingId,
+        status: "revoked",
+        revokedAt,
+      },
+      maskedContext: {
+        deviceId: binding.deviceId,
+      },
+    });
 
     return {
       bindingId: binding.bindingId,
@@ -305,6 +413,41 @@ export class DriverDeviceSessionService {
       },
       requestId,
     );
+    this.securityEventsService?.recordEvent({
+      actorId: existing.driverId,
+      actorType: "system",
+      subjectId: existing.driverId,
+      realm: "driver",
+      tenantId: null,
+      partnerId: null,
+      eventType: "driver_device_session.revoked",
+      eventFamily: "device",
+      outcome: "revoked",
+      severity: "medium",
+      targetType: "driver_device_binding",
+      targetId: existing.bindingId,
+      sessionId: existing.bindingId,
+      tokenId: null,
+      authMethods: ["driver_device_registration"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: "DEVICE_REBOUND",
+      approvalId: null,
+      beforeSummary: {
+        bindingId: existing.bindingId,
+        status: "active",
+      },
+      afterSummary: {
+        bindingId: existing.bindingId,
+        status: "revoked",
+        revokedAt: existing.revokedAt,
+      },
+      maskedContext: {
+        deviceId: existing.deviceId,
+      },
+    });
   }
 
   private toBindingSummary(
