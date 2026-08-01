@@ -1218,6 +1218,7 @@ export interface AuditLogRecord {
     | "tenant_admin"
     | "ops_user"
     | "partner_api_key"
+    | "partner_user"
     | "referral_passenger";
   tenantId: string | null;
   moduleName: string;

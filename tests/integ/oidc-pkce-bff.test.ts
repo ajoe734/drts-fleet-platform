@@ -97,6 +97,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
 
     expect(session.accessToken).toBeDefined();
     expect(session.identity.realm).toBe("partner");
+    expect(session.identity.actorType).toBe("partner_user");
     expect(session.partnerEntry.entrySlug).toBe("yuhe-residence");
   });
 });

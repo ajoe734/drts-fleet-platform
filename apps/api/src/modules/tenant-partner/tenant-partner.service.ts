@@ -5611,6 +5611,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actorId: identity?.actorId ?? null,
         actorType:
           identity?.actorType === "partner_api_key" ||
+          identity?.actorType === "partner_user" ||
           identity?.actorType === "referral_passenger"
             ? identity.actorType
             : "system",
@@ -9002,7 +9003,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           identity.partnerId !== entry.partnerId ||
           identity.partnerProgramId !== entry.programId ||
           identity.partnerEntrySlug !== entry.entrySlug
-        : identity.actorType !== "partner_api_key" ||
+        : (identity.actorType !== "partner_api_key" && identity.actorType !== "partner_user") ||
           (identity.tenantId !== null &&
             identity.tenantId !== undefined &&
             identity.tenantId !== entry.tenantId) ||

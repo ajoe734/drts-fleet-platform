@@ -672,7 +672,7 @@ export class OidcPkceService {
     const scopes = ["partner:read", "partner:write"];
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
-      actorType: "partner_api_key",
+      actorType: "partner_user",
       actorId: linkRecord.drtsPassengerId ?? `partner_user_${claims.sub}`,
       realm: "partner",
       tenantId: matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
@@ -690,7 +690,7 @@ export class OidcPkceService {
     const token = this.jwtAuthService.sign(
       {
         authMode: "jwt_bearer",
-        actorType: "partner_api_key",
+        actorType: "partner_user",
         actorId: identity.actorId,
         realm: "partner",
         tenantId: identity.tenantId,

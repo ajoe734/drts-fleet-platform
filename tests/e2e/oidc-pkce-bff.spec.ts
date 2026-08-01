@@ -65,4 +65,27 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Suite", () => {
       oidcService.exchangeTenantCallbackSession(cmd, { stateToken: login.stateToken }),
     ).rejects.toThrow(ApiRequestError);
   });
+
+  it("emits partner OIDC PKCE session with actorType=partner_user and authMode=jwt_bearer", async () => {
+    process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
+    const login = oidcService.generateLoginParameters("partner", {
+      partnerId: "yuhe-residence",
+    });
+
+    const session = await oidcService.exchangePartnerCallbackSession(
+      {
+        provider: "oidc",
+        callbackUrl: "http://localhost:3000/api/auth/callback",
+        code: "valid_partner_code_123",
+        state: login.state,
+        pkceVerifier: login.codeVerifier,
+        partnerId: "yuhe-residence",
+      },
+      { stateToken: login.stateToken },
+    );
+
+    expect(session.identity.actorType).toBe("partner_user");
+    expect(session.identity.authMode).toBe("jwt_bearer");
+    expect(session.identity.realm).toBe("partner");
+  });
 });

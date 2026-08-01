@@ -697,6 +697,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
 
       expect(session.accessToken).toBeDefined();
       expect(session.identity.realm).toBe("partner");
+      expect(session.identity.actorType).toBe("partner_user");
       expect(session.identity.actorId).toMatch(/^passenger_/);
       expect(session.partnerEntry.status).toBe("active");
     });

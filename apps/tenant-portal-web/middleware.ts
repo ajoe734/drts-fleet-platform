@@ -19,7 +19,7 @@ export function middleware(request: NextRequest) {
   );
 
   // 2. CSRF Token Check for State-Mutating Requests (POST, PUT, DELETE, PATCH)
-  if (["POST", "PUT", "DELETE", "PATCH"].includes(request.method) && !pathname.startsWith("/api/auth")) {
+  if (["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
     const csrfCookie = request.cookies.get(CSRF_COOKIE_NAME)?.value;
     const csrfHeader = request.headers.get("x-csrf-token");
 
