@@ -414,12 +414,15 @@ export class IdentityRepository {
               record = jsonb_set(
                 jsonb_set(
                   jsonb_set(
-                    jsonb_set(record, '{status}', '"revoked"'::jsonb),
-                    '{revokedAt}', to_jsonb($2::text)
+                    jsonb_set(
+                      jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                      '{revokedAt}', to_jsonb($2::text)
+                    ),
+                    '{revokedByPrincipalId}', to_jsonb($3::text)
                   ),
-                  '{revokedByPrincipalId}', to_jsonb($3::text)
+                  '{revokeReason}', to_jsonb($4::text)
                 ),
-                '{revokeReason}', to_jsonb($4::text)
+                '{updatedAt}', to_jsonb($2::text)
               )
           WHERE session_id = $1::text
           RETURNING record
@@ -438,7 +441,10 @@ export class IdentityRepository {
           UPDATE iam.identity_refresh_families
           SET status = 'revoked',
               updated_at = $2::timestamptz,
-              record = jsonb_set(record, '{status}', '"revoked"'::jsonb)
+              record = jsonb_set(
+                jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                '{updatedAt}', to_jsonb($2::text)
+              )
           WHERE session_id = $1::text AND status = 'active'
         `,
         [sessionId, revokedAt],
@@ -1097,8 +1103,11 @@ export class IdentityRepository {
                   compromised_at = $1::timestamptz,
                   updated_at = $1::timestamptz,
                   record = jsonb_set(
-                    jsonb_set(record, '{status}', '"compromised"'::jsonb),
-                    '{compromisedAt}', to_jsonb($1::timestamptz)
+                    jsonb_set(
+                      jsonb_set(record, '{status}', '"compromised"'::jsonb),
+                      '{compromisedAt}', to_jsonb($1::text)
+                    ),
+                    '{updatedAt}', to_jsonb($1::text)
                   )
               WHERE family_id = $2::text
             `,
@@ -1114,10 +1123,13 @@ export class IdentityRepository {
                   updated_at = $1::timestamptz,
                   record = jsonb_set(
                     jsonb_set(
-                      jsonb_set(record, '{status}', '"compromised"'::jsonb),
-                      '{revokedAt}', to_jsonb($1::timestamptz)
+                      jsonb_set(
+                        jsonb_set(record, '{status}', '"compromised"'::jsonb),
+                        '{revokedAt}', to_jsonb($1::text)
+                      ),
+                      '{revokeReason}', '"REFRESH_TOKEN_REUSE_DETECTED"'::jsonb
                     ),
-                    '{revokeReason}', '"REFRESH_TOKEN_REUSE_DETECTED"'::jsonb
+                    '{updatedAt}', to_jsonb($1::text)
                   )
               WHERE session_id = $2::text
             `,
@@ -1129,7 +1141,10 @@ export class IdentityRepository {
               UPDATE iam.identity_refresh_tokens
               SET status = 'compromised',
                   updated_at = $1::timestamptz,
-                  record = jsonb_set(record, '{status}', '"compromised"'::jsonb)
+                  record = jsonb_set(
+                    jsonb_set(record, '{status}', '"compromised"'::jsonb),
+                    '{updatedAt}', to_jsonb($1::text)
+                  )
               WHERE family_id = $2::text
             `,
             [now, row.family_id],
@@ -1206,15 +1221,42 @@ export class IdentityRepository {
       ) {
         const now = new Date().toISOString();
         await client.query(
-          `UPDATE iam.identity_refresh_families SET status = 'expired', updated_at = $1 WHERE family_id = $2`,
+          `
+            UPDATE iam.identity_refresh_families
+            SET status = 'expired',
+                updated_at = $1::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"expired"'::jsonb),
+                  '{updatedAt}', to_jsonb($1::text)
+                )
+            WHERE family_id = $2::text
+          `,
           [now, row.family_id],
         );
         await client.query(
-          `UPDATE iam.identity_sessions SET status = 'expired', updated_at = $1 WHERE session_id = $2`,
+          `
+            UPDATE iam.identity_sessions
+            SET status = 'expired',
+                updated_at = $1::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"expired"'::jsonb),
+                  '{updatedAt}', to_jsonb($1::text)
+                )
+            WHERE session_id = $2::text
+          `,
           [now, row.session_id],
         );
         await client.query(
-          `UPDATE iam.identity_refresh_tokens SET status = 'expired', updated_at = $1 WHERE family_id = $2 AND status = 'active'`,
+          `
+            UPDATE iam.identity_refresh_tokens
+            SET status = 'expired',
+                updated_at = $1::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"expired"'::jsonb),
+                  '{updatedAt}', to_jsonb($1::text)
+                )
+            WHERE family_id = $2::text AND status = 'active'
+          `,
           [now, row.family_id],
         );
         await client.query("COMMIT");
@@ -1236,8 +1278,14 @@ export class IdentityRepository {
               updated_at = $3::timestamptz,
               record = jsonb_set(
                 jsonb_set(
-                  jsonb_set(record, '{currentTokenHash}', to_jsonb($1::text)),
-                  '{counter}', to_jsonb(counter + 1)
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(record, '{currentTokenHash}', to_jsonb($1::text)),
+                      '{counter}', to_jsonb(counter + 1)
+                    ),
+                    '{expiresAt}', to_jsonb($2::text)
+                  ),
+                  '{updatedAt}', to_jsonb($3::text)
                 ),
                 '{previousHashes}',
                 coalesce(record->'previousHashes', '[]'::jsonb) || to_jsonb($4::text)

@@ -284,4 +284,97 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     expect(updatedSession?.revokeReason).toBe("REFRESH_TOKEN_REUSE_DETECTED");
     expect(updatedFamily?.status).toBe("compromised");
   });
+
+  it("enforces expiry by updating both table status columns and record JSON for sessions and refresh families", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const db = new DatabaseService();
+    databases.push(db);
+    const repo = new IdentityRepository(db);
+
+    const principalId = `principal_exp_${randomUUID()}`;
+    const sessionId = `session_exp_${randomUUID()}`;
+    const familyId = `family_exp_${randomUUID()}`;
+    createdPrincipalIds.add(principalId);
+    createdSessionIds.add(sessionId);
+
+    await db.query(
+      `
+        INSERT INTO iam.identity_principals (
+          principal_id, source_ref, issuer, subject, principal_type, email_normalized, email_verified, display_name, account_status, created_at, updated_at, record
+        ) VALUES (
+          $1, $2, 'test_issuer', $3, 'human', 'exp@example.com', true, 'Expired User', 'active', NOW(), NOW(), '{}'::jsonb
+        )
+      `,
+      [principalId, `source_${principalId}`, `sub_${principalId}`],
+    );
+
+    const initialTokenRaw = `expired_refresh_token_${randomUUID()}`;
+    const initialHash = hashIdentitySecret(initialTokenRaw);
+    const pastTime = new Date(Date.now() - 3600000).toISOString();
+
+    await repo.createSession({
+      sessionId,
+      sourceRef: `session_ref_${sessionId}`,
+      principalId,
+      membershipId: null,
+      realm: "driver",
+      status: "active",
+      authTime: new Date(Date.now() - 7200000).toISOString(),
+      authMethods: ["device_binding"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt: pastTime,
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: {},
+      riskSummary: {},
+      createdAt: new Date(Date.now() - 7200000).toISOString(),
+      updatedAt: new Date(Date.now() - 7200000).toISOString(),
+    });
+
+    await repo.createRefreshFamily({
+      familyId,
+      sourceRef: `family_ref_${familyId}`,
+      sessionId,
+      currentTokenHash: initialHash,
+      counter: 0,
+      status: "active",
+      expiresAt: pastTime,
+      compromisedAt: null,
+      createdAt: new Date(Date.now() - 7200000).toISOString(),
+      updatedAt: new Date(Date.now() - 7200000).toISOString(),
+    });
+
+    const rotateResult = await repo.consumeAndRotateRefreshToken({
+      familyId,
+      oldTokenRaw: initialTokenRaw,
+      newTokenRaw: `new_token_${randomUUID()}`,
+      newExpiresAt: new Date(Date.now() + 86400000).toISOString(),
+    });
+
+    expect(rotateResult.success).toBe(false);
+    expect(rotateResult.reason).toBe("EXPIRED");
+
+    const sessionAfterExpiry = await repo.getSession(sessionId);
+    const familyAfterExpiry = await repo.getRefreshFamily(familyId);
+
+    expect(sessionAfterExpiry?.status).toBe("expired");
+    expect(familyAfterExpiry?.status).toBe("expired");
+
+    const sessionDbRow = await db.query<{ status: string; record_status: string }>(
+      `SELECT status, record->>'status' AS record_status FROM iam.identity_sessions WHERE session_id = $1`,
+      [sessionId],
+    );
+    expect(sessionDbRow.rows[0]?.status).toBe("expired");
+    expect(sessionDbRow.rows[0]?.record_status).toBe("expired");
+
+    const familyDbRow = await db.query<{ status: string; record_status: string }>(
+      `SELECT status, record->>'status' AS record_status FROM iam.identity_refresh_families WHERE family_id = $1`,
+      [familyId],
+    );
+    expect(familyDbRow.rows[0]?.status).toBe("expired");
+    expect(familyDbRow.rows[0]?.record_status).toBe("expired");
+  });
 });
