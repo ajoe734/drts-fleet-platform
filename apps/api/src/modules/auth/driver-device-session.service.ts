@@ -216,34 +216,6 @@ export class DriverDeviceSessionService {
       );
     }
 
-    const oldHash = hashIdentitySecret(refreshToken);
-    const existingFamily =
-      await this.identityRepo.getRefreshFamilyByTokenHash(oldHash);
-    if (existingFamily) {
-      const existingSession = await this.identityRepo.getSession(
-        existingFamily.sessionId,
-      );
-      if (existingSession) {
-        const sessionDeviceId = (
-          existingSession.deviceSummary as { deviceId?: string }
-        )?.deviceId;
-        if (
-          sessionDeviceId !== deviceId ||
-          existingSession.status !== "active"
-        ) {
-          throw new ApiRequestError(
-            401,
-            "DRIVER_DEVICE_REFRESH_INVALID",
-            "The driver device refresh token is invalid, expired, or revoked.",
-            { deviceId },
-          );
-        }
-        if (existingSession.principalId) {
-          this.assertDriverAuthEligible(existingSession.principalId);
-        }
-      }
-    }
-
     const newRefreshToken = createOpaqueToken("drvrefresh");
     const newExpiresAt = new Date(
       Date.now() + 30 * 24 * 60 * 60 * 1000,
@@ -255,6 +227,25 @@ export class DriverDeviceSessionService {
       newTokenRaw: newRefreshToken,
       newExpiresAt,
       updatedAt: now,
+      validateSession: (sessionRecord) => {
+        const sessionDeviceId = (
+          sessionRecord.deviceSummary as { deviceId?: string }
+        )?.deviceId;
+        if (
+          sessionDeviceId !== deviceId ||
+          sessionRecord.status !== "active"
+        ) {
+          throw new ApiRequestError(
+            401,
+            "DRIVER_DEVICE_REFRESH_INVALID",
+            "The driver device refresh token is invalid, expired, or revoked.",
+            { deviceId },
+          );
+        }
+        if (sessionRecord.principalId) {
+          this.assertDriverAuthEligible(sessionRecord.principalId);
+        }
+      },
     });
 
     if (!rotateResult.success || !rotateResult.session) {
@@ -267,19 +258,6 @@ export class DriverDeviceSessionService {
     }
 
     const sessionRecord = rotateResult.session;
-    const sessionDeviceId = (
-      sessionRecord.deviceSummary as { deviceId?: string }
-    )?.deviceId;
-    if (sessionDeviceId !== deviceId || sessionRecord.status !== "active") {
-      throw new ApiRequestError(
-        401,
-        "DRIVER_DEVICE_REFRESH_INVALID",
-        "The driver device refresh token is invalid, expired, or revoked.",
-        { deviceId },
-      );
-    }
-
-    this.assertDriverAuthEligible(sessionRecord.principalId);
 
     this.driverProfileService.recordDeviceBindingRefresh(
       sessionRecord.principalId,

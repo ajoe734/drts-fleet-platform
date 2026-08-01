@@ -215,4 +215,121 @@ describe("Identity session and refresh family repository (in-memory mode)", () =
 
     delete process.env.JWT_SECRET;
   });
+
+  it("prevents refresh token rotation/consumption when driver eligibility check fails", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    const repository = new IdentityRepository();
+    const jwtAuthService = new JwtAuthService();
+    const driverProfileService = new DriverProfileService(
+      new AuditNotificationService(),
+    );
+    let isSuspended = false;
+    const mockRegulatoryService = {
+      assertDriverAuthEligible: (_driverId: string) => {
+        if (isSuspended) {
+          throw new ApiRequestError(
+            403,
+            "DRIVER_SUSPENDED",
+            "Driver account is currently suspended.",
+          );
+        }
+      },
+    };
+
+    const service = new DriverDeviceSessionService(
+      jwtAuthService,
+      driverProfileService,
+      mockRegulatoryService as any,
+      undefined,
+      repository,
+    );
+
+    const registered = await service.register({
+      registrationCode: "demo-driver",
+      deviceId: "device-suspended-001",
+    });
+
+    const initialTokenHash = hashIdentitySecret(registered.refreshToken);
+
+    // Driver gets suspended after registration
+    isSuspended = true;
+
+    await expect(
+      service.refresh({
+        deviceId: "device-suspended-001",
+        refreshToken: registered.refreshToken,
+      }),
+    ).rejects.toThrowError(ApiRequestError);
+
+    const family = await repository.getRefreshFamilyByTokenHash(initialTokenHash);
+    expect(family).not.toBeNull();
+    expect(family?.counter).toBe(0);
+
+    delete process.env.JWT_SECRET;
+  });
+
+  it("ensures concurrent refresh token requests have one winner without compromising session", async () => {
+    const repository = new IdentityRepository();
+
+    const session = await repository.createSession({
+      sessionId: "session_conc_winner",
+      sourceRef: "session_source_conc",
+      principalId: "principal_conc",
+      membershipId: null,
+      realm: "driver",
+      status: "active",
+      authTime: new Date().toISOString(),
+      authMethods: ["device_binding"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt: "2099-01-01T00:00:00.000Z",
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: { deviceId: "device-conc-001" },
+      riskSummary: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const initialToken = "raw_refresh_token_conc_v1";
+    const family = await repository.createRefreshFamily({
+      familyId: "family_conc_winner",
+      sourceRef: "family_source_conc",
+      sessionId: session.sessionId,
+      currentTokenHash: hashIdentitySecret(initialToken),
+      counter: 0,
+      status: "active",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      compromisedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const winnerResult = await repository.consumeAndRotateRefreshToken({
+      familyId: family.familyId,
+      oldTokenRaw: initialToken,
+      newTokenRaw: "raw_refresh_token_conc_v2",
+      newExpiresAt: "2099-01-02T00:00:00.000Z",
+    });
+
+    expect(winnerResult.success).toBe(true);
+
+    const loserResult = await repository.consumeAndRotateRefreshToken({
+      familyId: family.familyId,
+      oldTokenRaw: initialToken,
+      newTokenRaw: "raw_refresh_token_conc_v3",
+      newExpiresAt: "2099-01-02T00:00:00.000Z",
+    });
+
+    expect(loserResult.success).toBe(false);
+    expect(loserResult.reason).toBe("CONCURRENCY_CONFLICT");
+
+    const activeSession = await repository.getSession(session.sessionId);
+    const activeFamily = await repository.getRefreshFamily(family.familyId);
+
+    expect(activeSession?.status).toBe("active");
+    expect(activeFamily?.status).toBe("active");
+    expect(activeFamily?.currentTokenHash).toBe(hashIdentitySecret("raw_refresh_token_conc_v2"));
+  });
 });

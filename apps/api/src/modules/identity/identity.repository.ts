@@ -1026,6 +1026,27 @@ export class IdentityRepository {
         if (compromisedFamilyId) {
           const family = this.fallbackRefreshFamilies.get(compromisedFamilyId) || null;
           const session = family ? this.fallbackSessions.get(family.sessionId) || null : null;
+
+          const consumedToken = Array.from(this.fallbackRefreshTokens.values()).find(
+            (t) => t.tokenHash === oldHash && (t.status === "consumed" || t.consumedAt != null),
+          );
+          const consumedAtTime = consumedToken?.consumedAt
+            ? new Date(consumedToken.consumedAt).getTime()
+            : (consumedToken?.updatedAt ? new Date(consumedToken.updatedAt).getTime() : 0);
+          const isWithinGraceWindow = consumedAtTime > 0 && (Date.now() - consumedAtTime <= 30000);
+          const isConcurrentCall = Boolean(
+            command.familyId && command.familyId === compromisedFamilyId && isWithinGraceWindow,
+          );
+
+          if (isConcurrentCall) {
+            return {
+              success: false,
+              session,
+              family,
+              reason: "CONCURRENCY_CONFLICT",
+            };
+          }
+
           const now = new Date().toISOString();
           if (family) {
             family.status = "compromised";
@@ -1093,6 +1114,10 @@ export class IdentityRepository {
           }
         }
         return { success: false, session, family: targetFamily, reason: "EXPIRED" };
+      }
+
+      if (session && command.validateSession) {
+        command.validateSession(session);
       }
 
       this.fallbackPreviousTokenHashes.set(oldHash, targetFamily.familyId);
@@ -1206,6 +1231,37 @@ export class IdentityRepository {
               reason: "INVALID_TOKEN",
             };
           }
+
+          const parsedFamily = this.parseRecord<CanonicalRefreshFamilyRecord>(
+            row.family_record,
+            "iam.identity_refresh_families",
+          );
+          const parsedSession = this.parseRecord<CanonicalIdentitySessionRecord>(
+            row.session_record,
+            "iam.identity_sessions",
+          );
+
+          const tokenCheck = await client.query<{ consumed_at: string | null; updated_at: string }>(
+            `SELECT consumed_at, updated_at FROM iam.identity_refresh_tokens WHERE token_hash = $1`,
+            [oldHash],
+          );
+          const consumedAtStr = tokenCheck.rows[0]?.consumed_at || tokenCheck.rows[0]?.updated_at;
+          const consumedAtMs = consumedAtStr ? new Date(consumedAtStr).getTime() : 0;
+          const isWithinGrace = consumedAtMs > 0 && Date.now() - consumedAtMs <= 30000;
+          const isConcurrentCall = Boolean(
+            command.familyId && command.familyId === row.family_id && isWithinGrace,
+          );
+
+          if (isConcurrentCall) {
+            await client.query("ROLLBACK");
+            return {
+              success: false,
+              session: parsedSession,
+              family: parsedFamily,
+              reason: "CONCURRENCY_CONFLICT",
+            };
+          }
+
           const now = new Date().toISOString();
 
           const updateFamilyResult = await client.query<JsonRecordRow>(
@@ -1383,6 +1439,15 @@ export class IdentityRepository {
           family: updatedFamily,
           reason: "EXPIRED",
         };
+      }
+
+      if (session && command.validateSession) {
+        try {
+          command.validateSession(session);
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw err;
+        }
       }
 
       const now = command.updatedAt || new Date().toISOString();

@@ -2481,6 +2481,7 @@ export interface ConsumeAndRotateRefreshTokenCommand {
   newTokenHash?: string;
   newExpiresAt: string;
   updatedAt?: string;
+  validateSession?: (session: CanonicalIdentitySessionRecord) => void;
 }
 
 export interface ConsumeAndRotateRefreshTokenResult {
