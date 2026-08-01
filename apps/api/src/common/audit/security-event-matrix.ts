@@ -122,4 +122,31 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     tenantScoped: false,
     requiredOutcomes: ["success", "expired", "revoked"],
   },
+  {
+    eventType: "iap_subject.resolved",
+    eventFamily: "auth",
+    description:
+      "Verified IAP workforce subject resolved to durable platform or ops membership.",
+    privileged: false,
+    tenantScoped: false,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "iap_subject.denied",
+    eventFamily: "auth",
+    description:
+      "Rejected IAP workforce assertion, wrong audience, missing token, spoof attempt, or inactive user.",
+    privileged: false,
+    tenantScoped: false,
+    requiredOutcomes: ["denied", "failure"],
+  },
+  {
+    eventType: "iap_group_drift.detected",
+    eventFamily: "role",
+    description:
+      "Group drift detected between IAP assertion groups and durable role bindings; least privilege applied.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["success"],
+  },
 ] as const;

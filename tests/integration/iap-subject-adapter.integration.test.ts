@@ -1,0 +1,258 @@
+import { describe, expect, it } from "vitest";
+
+import { signTestIapJwtAssertion } from "@drts/control-plane-auth";
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
+import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
+import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
+
+const INTEGRATION_TEST_SECRET = "iap_integration_test_secret_key_32chars!";
+const INTEGRATION_AUDIENCE = "/projects/1122334455/apps/drts-control-plane-prod";
+
+function signAssertion(payload: Record<string, unknown>): string {
+  return signTestIapJwtAssertion(
+    {
+      iss: "https://cloud.google.com/iap",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      aud: INTEGRATION_AUDIENCE,
+      ...payload,
+    },
+    INTEGRATION_TEST_SECRET,
+  );
+}
+
+describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
+  it("resolves IAP workforce subject and persists durable identity in repository", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const token = signAssertion({
+      sub: "google_subject_integ_001",
+      email: "ops-lead@platform.drts",
+      gcp_ia_groups: ["ops-users@platform.drts"],
+    });
+
+    const resolution = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: INTEGRATION_AUDIENCE,
+        jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+      },
+    );
+
+    expect(resolution.principal.issuer).toBe("google_iap");
+    expect(resolution.principal.email).toBe("ops-lead@platform.drts");
+    expect(resolution.membership.realm).toBe("ops");
+    expect(resolution.effectiveRoles).toContain("operator");
+
+    const savedPrincipal = await identityRepo.findPrincipalBySubject(
+      "google_iap",
+      "google_subject_integ_001",
+    );
+    expect(savedPrincipal).not.toBeNull();
+    expect(savedPrincipal?.email).toBe("ops-lead@platform.drts");
+  });
+
+  it("verifies negative matrix: missing assertion with spoofed role headers fails", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    let error: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        {
+          "x-goog-authenticated-user-email": "hacker@evil.com",
+          "x-roles": "superadmin,platform_admin",
+        },
+        {
+          expectedAudience: INTEGRATION_AUDIENCE,
+          jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+          strictIapMode: true,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        error = err;
+      }
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.status).toBe(401);
+    expect(error?.code).toBe("IAP_ASSERTION_MISSING");
+
+    const deniedEvents = await securityEventsService.listEvents(null, {
+      eventType: "iap_subject.denied",
+    });
+    expect(deniedEvents.some((e) => e.reasonCode === "spoofed_header_without_assertion")).toBe(true);
+  });
+
+  it("verifies negative matrix: wrong audience fails closed with 403 IAP_AUDIENCE_MISMATCH", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const wrongAudToken = signAssertion({
+      sub: "google_subject_integ_002",
+      email: "user@platform.drts",
+      aud: "wrong-audience-uri",
+    });
+
+    let error: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": wrongAudToken },
+        {
+          expectedAudience: INTEGRATION_AUDIENCE,
+          jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        error = err;
+      }
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.status).toBe(403);
+    expect(error?.code).toBe("IAP_AUDIENCE_MISMATCH");
+  });
+
+  it("verifies negative matrix: inactive workforce user fails closed with 403 IAP_WORKFORCE_USER_INACTIVE", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_inactive_integ",
+        sourceRef: "iap_subject:inactive_subject_001",
+        issuer: "google_iap",
+        subject: "inactive_subject_001",
+        principalType: "human",
+        email: "inactive@platform.drts",
+        emailVerified: true,
+        displayName: "Inactive Ops User",
+        status: "locked",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_inactive_integ",
+        sourceRef: "iap_membership:inactive_subject_001",
+        principalId: "principal_inactive_integ",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "locked",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [],
+    );
+
+    const token = signAssertion({
+      sub: "inactive_subject_001",
+      email: "inactive@platform.drts",
+    });
+
+    let error: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: INTEGRATION_AUDIENCE,
+          jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        error = err;
+      }
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.status).toBe(403);
+    expect(error?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+  });
+
+  it("verifies group drift: missing admin group downgrades role and logs security alert", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_group_drift_integ",
+        sourceRef: "iap_subject:group_drift_subject_001",
+        issuer: "google_iap",
+        subject: "group_drift_subject_001",
+        principalType: "human",
+        email: "demoted-admin@platform.drts",
+        emailVerified: true,
+        displayName: "Demoted Admin",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_group_drift_integ",
+        sourceRef: "iap_membership:group_drift_subject_001",
+        principalId: "principal_group_drift_integ",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_superadmin_integ",
+          sourceRef: "rb_superadmin_integ",
+          membershipId: "membership_group_drift_integ",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const token = signAssertion({
+      sub: "group_drift_subject_001",
+      email: "demoted-admin@platform.drts",
+      gcp_ia_groups: ["standard-employees@platform.drts"],
+    });
+
+    const resolution = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: INTEGRATION_AUDIENCE,
+        jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+      },
+    );
+
+    expect(resolution.driftDetected).toBe(true);
+    expect(resolution.effectiveRoles).not.toContain("superadmin");
+    expect(resolution.effectiveRoles).toEqual(["ops_user"]);
+
+    const driftEvents = await securityEventsService.listEvents(null, {
+      eventType: "iap_group_drift.detected",
+    });
+    expect(driftEvents.length).toBeGreaterThan(0);
+    expect(driftEvents[0]?.actorId).toBe("principal_group_drift_integ");
+  });
+});

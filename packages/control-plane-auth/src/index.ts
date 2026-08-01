@@ -3,6 +3,28 @@ import jwt from "jsonwebtoken";
 export const CONTROL_PLANE_REQUEST_AUTH_HEADER = "x-drts-authorization";
 export const CONTROL_PLANE_IAP_EMAIL_HEADER = "x-goog-authenticated-user-email";
 export const CONTROL_PLANE_IAP_USER_ID_HEADER = "x-goog-authenticated-user-id";
+export const CONTROL_PLANE_IAP_JWT_HEADER = "x-goog-iap-jwt-assertion";
+export const CONTROL_PLANE_IAP_JWT_HEADER_ALT = "x-goog-authenticated-user-jwt";
+
+export interface IapJwtPayload {
+  sub: string;
+  email?: string;
+  aud?: string;
+  iss?: string;
+  exp?: number;
+  iat?: number;
+  hd?: string;
+  gcp_ia_groups?: string[];
+  groups?: string[];
+  [key: string]: unknown;
+}
+
+export interface VerifyIapAssertionOptions {
+  expectedAudience?: string | undefined;
+  expectedIssuer?: string | undefined;
+  jwtSecretOrPublicKey?: string | undefined;
+  allowUnverifiedTokenInDev?: boolean | undefined;
+}
 
 export const CONTROL_PLANE_DEFAULT_EMAILS = {
   platform_admin: "admin@platform.drts",
@@ -24,7 +46,7 @@ export const CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST = new Set([
 
 export type ControlPlaneActorType = "platform_admin" | "ops_user";
 
-type HeaderRecord =
+export type HeaderRecord =
   | Headers
   | Record<string, string | string[] | undefined>
   | undefined
@@ -286,9 +308,113 @@ function buildIdentity(
   };
 }
 
+export function extractIapJwtAssertion(headers: HeaderRecord): string | null {
+  const jwtHeader = readHeader(headers, CONTROL_PLANE_IAP_JWT_HEADER);
+  if (jwtHeader?.trim()) {
+    return jwtHeader.trim();
+  }
+  const altJwtHeader = readHeader(headers, CONTROL_PLANE_IAP_JWT_HEADER_ALT);
+  if (altJwtHeader?.trim()) {
+    return altJwtHeader.trim();
+  }
+  return null;
+}
+
+export function verifyIapJwtAssertion(
+  token: string,
+  options: VerifyIapAssertionOptions = {},
+): IapJwtPayload {
+  const trimmed = token.replace(/^Bearer\s+/i, "").trim();
+  if (!trimmed) {
+    throw new Error("IAP JWT assertion token is empty.");
+  }
+
+  let payload: IapJwtPayload;
+  if (options.jwtSecretOrPublicKey) {
+    try {
+      payload = jwt.verify(
+        trimmed,
+        options.jwtSecretOrPublicKey,
+      ) as IapJwtPayload;
+    } catch (err) {
+      throw new Error(
+        `IAP JWT assertion signature verification failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  } else {
+    const decoded = jwt.decode(trimmed);
+    if (!decoded || typeof decoded !== "object") {
+      throw new Error("Failed to decode IAP JWT assertion.");
+    }
+    payload = decoded as IapJwtPayload;
+  }
+
+  const expectedIssuer = options.expectedIssuer ?? "https://cloud.google.com/iap";
+  if (payload.iss && options.expectedIssuer && payload.iss !== expectedIssuer) {
+    throw new Error(
+      `IAP JWT assertion issuer mismatch: expected ${expectedIssuer}, got ${payload.iss}`,
+    );
+  }
+
+  if (options.expectedAudience) {
+    if (!payload.aud || payload.aud !== options.expectedAudience) {
+      const err = new Error(
+        `IAP JWT assertion audience mismatch: expected ${options.expectedAudience}, got ${payload.aud ?? "none"}`,
+      );
+      (err as any).code = "IAP_AUDIENCE_MISMATCH";
+      throw err;
+    }
+  }
+
+  if (payload.exp && typeof payload.exp === "number") {
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp < now) {
+      throw new Error("IAP JWT assertion is expired.");
+    }
+  }
+
+  if (!payload.sub) {
+    throw new Error("IAP JWT assertion missing subject claim.");
+  }
+
+  return payload;
+}
+
+export function signTestIapJwtAssertion(
+  payload: Record<string, unknown>,
+  secret: string,
+  options?: jwt.SignOptions,
+): string {
+  return jwt.sign(payload, secret, options);
+}
+
 export function extractAuthenticatedUserEmail(
   headers: HeaderRecord,
+  options?: { strictIapMode?: boolean; expectedAudience?: string; jwtSecretOrPublicKey?: string },
 ): string | null {
+  const assertion = extractIapJwtAssertion(headers);
+  if (assertion) {
+    try {
+      const payload = verifyIapJwtAssertion(assertion, {
+        expectedAudience: options?.expectedAudience,
+        jwtSecretOrPublicKey: options?.jwtSecretOrPublicKey,
+      });
+      if (payload.email) {
+        return normalizeAuthenticatedUserEmail(payload.email);
+      }
+    } catch {
+      if (options?.strictIapMode) {
+        return null;
+      }
+    }
+  }
+
+  if (options?.strictIapMode) {
+    return null;
+  }
+
   const emailHeader = readHeader(headers, CONTROL_PLANE_IAP_EMAIL_HEADER);
   const userIdHeader = readHeader(headers, CONTROL_PLANE_IAP_USER_ID_HEADER);
 
