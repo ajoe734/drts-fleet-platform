@@ -5,18 +5,32 @@ info:
   description: >
     Canonical IAM session, account, membership, invitation, approval, access review,
     break-glass, device, and credential contracts for Stage 1.5 hardening.
+  license:
+    name: Proprietary
+servers:
+  - url: https://api.dev.drts.example.com
 tags:
   - name: IAM
+    description: Identity context, access review, and break-glass surfaces.
   - name: Session
+    description: Session exchange, bootstrap, and refresh workflows.
   - name: Account
+    description: Tenant membership and account administration workflows.
   - name: Role
+    description: Tenant role catalog and role assignment mutations.
   - name: Approval
+    description: Approval-request lifecycle and eligibility decision workflows.
   - name: Credential
+    description: API key, device, and partner-ingress credential operations.
+security:
+  - BearerAuth: []
 paths:
   /api/auth/tenant/callback-session:
     post:
+      summary: Exchange a tenant identity-provider callback for an authenticated session.
       operationId: exchangeTenantCallbackSession
       tags: [Session]
+      security: []
       requestBody:
         required: true
         content:
@@ -30,8 +44,10 @@ paths:
           $ref: "#/components/responses/IamPublicAuthDenied"
   /api/auth/tenant/bootstrap-session:
     post:
+      summary: Bootstrap a tenant-authenticated browser session.
       operationId: createTenantBootstrapSession
       tags: [Session]
+      security: []
       responses:
         "201":
           description: Bootstrap session issued.
@@ -39,8 +55,10 @@ paths:
           $ref: "#/components/responses/IamPublicAuthDenied"
   /api/auth/partner/bootstrap-session:
     post:
+      summary: Bootstrap a partner-authenticated browser session.
       operationId: createPartnerBootstrapSession
       tags: [Session]
+      security: []
       responses:
         "201":
           description: Partner bootstrap session issued.
@@ -48,16 +66,22 @@ paths:
           $ref: "#/components/responses/IamPublicCredentialDenied"
   /api/auth/driver/device/register:
     post:
+      summary: Register a driver device and issue its initial device session.
       operationId: registerDriverDeviceSession
       tags: [Session, Credential]
+      security: []
   /api/auth/driver/device/refresh:
     post:
+      summary: Refresh a driver device session without exposing registry state.
       operationId: refreshDriverDeviceSession
       tags: [Session, Credential]
+      security: []
   /api/auth/driver/device/revoke:
     post:
+      summary: Revoke a driver device binding using mutation metadata.
       operationId: revokeDriverDeviceBinding
       tags: [Session, Credential]
+      security: []
       requestBody:
         required: true
         content:
@@ -66,13 +90,16 @@ paths:
               $ref: "#/components/schemas/IamCredentialMutationCommand"
   /api/identity/context:
     get:
+      summary: Return the caller identity context and active IAM authority.
       operationId: getIdentityContext
       tags: [IAM]
   /api/tenant/users:
     get:
+      summary: List tenant users and membership states for the active tenant.
       operationId: listTenantUsers
       tags: [Account]
     post:
+      summary: Create or invite a tenant user under the active tenant.
       operationId: createTenantUser
       tags: [Account]
       requestBody:
@@ -83,6 +110,7 @@ paths:
               $ref: "#/components/schemas/CreateTenantUserCommand"
   /api/tenant/users/{userId}/role:
     post:
+      summary: Update a tenant user's role assignment and membership status.
       operationId: updateTenantUserRole
       tags: [Role]
       parameters:
@@ -99,14 +127,17 @@ paths:
               $ref: "#/components/schemas/UpdateTenantRoleCommand"
   /api/tenant/roles:
     get:
+      summary: List the canonical tenant role catalog.
       operationId: listTenantRoles
       tags: [Role]
   /api/tenant/approval-requests:
     get:
+      summary: List approval requests visible to the active tenant authority.
       operationId: listTenantApprovalRequests
       tags: [Approval]
   /api/tenant/approval-requests/{approvalRequestId}:
     get:
+      summary: Fetch a single tenant approval request.
       operationId: getTenantApprovalRequest
       tags: [Approval]
       parameters:
@@ -117,8 +148,15 @@ paths:
             type: string
   /api/tenant/approval-requests/{approvalRequestId}/approve:
     post:
+      summary: Approve a tenant approval request with mutation metadata.
       operationId: approveTenantApprovalRequest
       tags: [Approval]
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -127,8 +165,15 @@ paths:
               $ref: "#/components/schemas/IamApprovalDecisionCommand"
   /api/tenant/approval-requests/{approvalRequestId}/reject:
     post:
+      summary: Reject a tenant approval request with mutation metadata.
       operationId: rejectTenantApprovalRequest
       tags: [Approval]
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -137,8 +182,15 @@ paths:
               $ref: "#/components/schemas/IamApprovalDecisionCommand"
   /api/tenant/approval-requests/{approvalRequestId}/escalate:
     post:
+      summary: Escalate a tenant approval request for higher-order review.
       operationId: escalateTenantApprovalRequest
       tags: [Approval]
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -147,10 +199,12 @@ paths:
               $ref: "#/components/schemas/IamApprovalDecisionCommand"
   /api/ops/approval-requests:
     get:
+      summary: List approval requests that require operations review.
       operationId: listOpsApprovalRequests
       tags: [Approval]
   /api/ops/partner/eligibility/reviews/resolve:
     post:
+      summary: Resolve a partner eligibility review outcome.
       operationId: resolvePartnerEligibilityReview
       tags: [Approval]
       requestBody:
@@ -161,9 +215,11 @@ paths:
               $ref: "#/components/schemas/ResolvePartnerEligibilityReviewCommand"
   /api/tenant/api-keys:
     get:
+      summary: List tenant API keys available to the active tenant authority.
       operationId: listTenantApiKeys
       tags: [Credential]
     post:
+      summary: Issue a tenant API key with optional expiry metadata.
       operationId: issueTenantApiKey
       tags: [Credential]
       requestBody:
@@ -174,8 +230,15 @@ paths:
               $ref: "#/components/schemas/IssueTenantApiKeyCommand"
   /api/tenant/api-keys/{apiKeyId}/revoke:
     post:
+      summary: Revoke a tenant API key with reason and concurrency metadata.
       operationId: revokeTenantApiKey
       tags: [Credential]
+      parameters:
+        - name: apiKeyId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -184,8 +247,15 @@ paths:
               $ref: "#/components/schemas/IamCredentialMutationCommand"
   /api/tenant/api-keys/{apiKeyId}/rotate:
     post:
+      summary: Rotate a tenant API key and replace its active secret material.
       operationId: rotateTenantApiKey
       tags: [Credential]
+      parameters:
+        - name: apiKeyId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -194,8 +264,15 @@ paths:
               $ref: "#/components/schemas/RotateTenantApiKeyCommand"
   /api/platform-admin/partner-entries/{entrySlug}/credentials/issue:
     post:
+      summary: Issue a partner ingress credential for a published partner entry.
       operationId: issuePartnerIngressCredential
       tags: [Credential]
+      parameters:
+        - name: entrySlug
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -204,8 +281,20 @@ paths:
               $ref: "#/components/schemas/IssuePartnerIngressCredentialCommand"
   /api/platform-admin/partner-entries/{entrySlug}/credentials/{keyId}/revoke:
     post:
+      summary: Revoke a partner ingress credential for a published partner entry.
       operationId: revokePartnerIngressCredential
       tags: [Credential]
+      parameters:
+        - name: entrySlug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -214,12 +303,20 @@ paths:
               $ref: "#/components/schemas/RevokePartnerIngressCredentialCommand"
   /api/platform-admin/access-reviews:
     get:
+      summary: List platform access reviews that require administrative action.
       operationId: listAccessReviews
       tags: [IAM]
   /api/platform-admin/access-reviews/{reviewId}/decision:
     post:
+      summary: Decide a platform access review with auditable mutation metadata.
       operationId: decideAccessReview
       tags: [IAM]
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -228,6 +325,7 @@ paths:
               $ref: "#/components/schemas/IamAccessReviewDecisionCommand"
   /api/platform-admin/break-glass/requests:
     post:
+      summary: Create a break-glass access request.
       operationId: createBreakGlassRequest
       tags: [IAM]
       requestBody:
@@ -238,8 +336,15 @@ paths:
               $ref: "#/components/schemas/IamBreakGlassActivationCommand"
   /api/platform-admin/break-glass/requests/{requestId}/approve:
     post:
+      summary: Approve a break-glass access request.
       operationId: approveBreakGlassRequest
       tags: [IAM]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -287,17 +392,13 @@ components:
           type: integer
           minimum: 0
         approvalId:
-          type: string
-          nullable: true
+          type: [string, "null"]
         approvalRequestId:
-          type: string
-          nullable: true
+          type: [string, "null"]
         stepUpReference:
-          type: string
-          nullable: true
+          type: [string, "null"]
         note:
-          type: string
-          nullable: true
+          type: [string, "null"]
     IamCallbackSessionExchangeCommand:
       type: object
       required:
@@ -338,20 +439,16 @@ components:
         - mutation
       properties:
         credentialId:
-          type: string
-          nullable: true
+          type: [string, "null"]
         keyName:
-          type: string
-          nullable: true
+          type: [string, "null"]
         scopes:
-          type: array
-          nullable: true
+          type: [array, "null"]
           items:
             type: string
         expiresAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
         mutation:
           $ref: "#/components/schemas/IamMutationMetadata"
     IamAccessReviewDecisionCommand:
@@ -426,9 +523,8 @@ components:
           items:
             type: string
         expiresAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
     RotateTenantApiKeyCommand:
       type: object
       properties:
@@ -439,21 +535,18 @@ components:
           items:
             type: string
         expiresAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
     IssuePartnerIngressCredentialCommand:
       type: object
       properties:
         rotationReason:
-          type: string
-          nullable: true
+          type: [string, "null"]
     RevokePartnerIngressCredentialCommand:
       type: object
       properties:
         revokeReason:
-          type: string
-          nullable: true
+          type: [string, "null"]
     ResolvePartnerEligibilityReviewCommand:
       type: object
       required:
@@ -469,8 +562,7 @@ components:
         reasonCode:
           type: string
         notes:
-          type: string
-          nullable: true
+          type: [string, "null"]
     PublicErrorEnvelope:
       type: object
       required:
@@ -506,4 +598,9 @@ components:
             retryable:
               type: boolean
             traceId:
-              type: string
+              type: [string, "null"]
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
