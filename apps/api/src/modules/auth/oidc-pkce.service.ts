@@ -11,7 +11,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
-import type { AuthRealm, BootstrapRequestIdentity } from "../../common/auth/auth.types";
+import type { AuthActorType, AuthRealm, BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -717,6 +717,7 @@ export class OidcPkceService {
       realm: "partner",
       partnerId: matchedEntry.entrySlug,
       actorId: identity.actorId,
+      actorType: "partner_user",
       subjectId: claims.sub,
       tokenId: token,
       meta,
@@ -1321,6 +1322,7 @@ export class OidcPkceService {
     tenantId?: string | null;
     partnerId?: string | null;
     actorId?: string | null;
+    actorType?: AuthActorType | null;
     subjectId?: string | null;
     tokenId?: string | null;
     reasonCode?: string | null;
@@ -1343,9 +1345,17 @@ export class OidcPkceService {
         }
       : undefined;
 
+    const resolvedActorType: AuthActorType =
+      params.actorType ??
+      (params.actorId
+        ? params.realm === "partner"
+          ? "partner_user"
+          : "tenant_admin"
+        : "system");
+
     this.securityEventsService?.recordEvent({
       actorId: params.actorId ?? null,
-      actorType: params.actorId ? "tenant_admin" : "system",
+      actorType: resolvedActorType,
       subjectId: params.subjectId ?? null,
       realm: params.realm,
       tenantId: params.tenantId ?? null,

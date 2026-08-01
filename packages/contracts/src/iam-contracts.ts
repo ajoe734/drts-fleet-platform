@@ -111,12 +111,6 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     domain: "session",
   },
   {
-    operationId: "processOidcCallback",
-    method: "get",
-    path: "/api/auth/{realm}/callback",
-    domain: "session",
-  },
-  {
     operationId: "getAuthSession",
     method: "get",
     path: "/api/auth/session",

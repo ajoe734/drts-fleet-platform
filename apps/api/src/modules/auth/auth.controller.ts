@@ -100,68 +100,6 @@ export class AuthController {
 
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
-  @Get(":realm/callback")
-  async processOidcCallback(
-    @Param("realm") realm: AuthRealm,
-    @Query("code") code?: string,
-    @Query("state") state?: string,
-    @Query("code_verifier") pkceVerifier?: string,
-    @Query("redirect_uri") redirectUri?: string,
-    @Query("state_token") stateToken?: string,
-    @Headers("x-forwarded-for") forwardedFor?: string,
-    @Headers("x-real-ip") realIp?: string,
-    @Headers("user-agent") userAgent?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    if (realm !== "tenant" && realm !== "partner") {
-      throw new ApiRequestError(
-        400,
-        "AUTH_REALM_INVALID",
-        `Unsupported OIDC realm '${realm}'.`,
-      );
-    }
-
-    const command: IamCallbackSessionExchangeCommand = {
-      provider: "oidc",
-      callbackUrl: redirectUri ?? "",
-      code: code ?? "",
-      state: state ?? "",
-      pkceVerifier: pkceVerifier ?? "",
-    };
-
-    const meta = this.buildMeta(
-      forwardedFor,
-      realIp,
-      userAgent,
-      requestId,
-      stateToken,
-    );
-
-    if (realm === "tenant") {
-      try {
-        const session = await this.oidcPkceService.exchangeTenantCallbackSession(
-          command,
-          meta,
-        );
-        return toApiSuccessEnvelope(session, requestId);
-      } catch (error) {
-        throw toPublicTenantAuthError(error);
-      }
-    } else {
-      try {
-        const session = await this.oidcPkceService.exchangePartnerCallbackSession(
-          command,
-          meta,
-        );
-        return toApiSuccessEnvelope(session, requestId);
-      } catch (error) {
-        throw toPublicPartnerAuthError(error);
-      }
-    }
-  }
-
-  @OpenRoute()
-  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("tenant/callback-session")
   async exchangeTenantCallbackSession(
     @Body() command: IamCallbackSessionExchangeCommand,
