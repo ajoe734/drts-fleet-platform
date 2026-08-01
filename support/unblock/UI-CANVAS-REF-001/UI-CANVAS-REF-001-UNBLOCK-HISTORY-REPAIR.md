@@ -8,6 +8,7 @@
 - Reviewer: `Codex2`
 - Initial audit timestamp: `2026-08-01T13:13:12Z`
 - Repair confirmation timestamp: `2026-08-01T13:31:00Z`
+- Review-failure revalidation timestamp: `2026-08-01T13:33:44Z`
 - Canonical machine-truth root:
   `/home/lupin/drts-fleet-platform`
 - Assigned helper worktree:
@@ -34,10 +35,19 @@ UI implementation.
    This repo does not automatically maintain remote-tracking refs for
    `origin/codex/*`, so `refs/remotes/origin/codex/ui-canvas-ref-001` can stay
    stale even when the actual GitHub branch has moved.
-5. The helper worktree itself is also contaminated as an execution surface:
-   `git status --short` reports repo-wide delete/untracked noise instead of a
-   normal checkout, so this worktree is suitable for history audit only, not
-   for treating filesystem state as canonical branch truth.
+5. Review then exposed a second helper-rail drift: the pushed helper branch
+   `origin/codex/ui-canvas-ref-001-unblock-history-repair` had already advanced
+   to `fe309c2e41f5b736257182f1c8ae164f5dae7005`, while the artifact in the
+   previous helper commit still claimed local/remote helper parity at
+   `e3fa22aa07c2faca88b7f081c03cc7f520d2861a`.
+6. The assigned local helper branch had also diverged from the pushed helper
+   rail. Its HEAD was `0117b769f929dc0f5adcf5515371aa1866519361`, a polluted
+   single-parent sibling of `fe309c2` that incorrectly captured a repo-wide
+   snapshot instead of the task-scoped artifact-only delta.
+7. The helper worktree itself remains contaminated as an execution surface:
+   `git status --short` reports repo-wide untracked noise instead of a normal
+   checkout, so this worktree is suitable for history audit only, not for
+   treating filesystem state as canonical branch truth.
 
 ## Exact Contamination
 
@@ -50,7 +60,12 @@ The blocking contamination was:
    `refs/remotes/origin/codex/ui-canvas-ref-001` was not a trustworthy source
    of truth for the non-`dev` branch unless explicitly refreshed or compared via
    `git ls-remote`.
-3. Helper worktree hygiene drift: the assigned helper checkout is not a clean
+3. Helper evidence drift: the pushed helper branch advanced to `fe309c2`, but
+   the artifact text still claimed the helper local/remote head was `e3fa22aa`.
+4. Local helper branch drift: the assigned branch name pointed at polluted
+   local-only commit `0117b769`, which diverged from the pushed helper rail and
+   bundled unrelated repo contents.
+5. Helper worktree hygiene drift: the assigned helper checkout is not a clean
    materialized tree, so history evidence must come from git objects and remote
    refs, not from assuming the worktree filesystem reflects a normal branch
    checkout.
@@ -64,13 +79,21 @@ history.
    `git ls-remote --heads origin refs/heads/codex/ui-canvas-ref-001`
 2. Confirmed the actual remote head now resolves to
    `46dddf75d9058cd35b65075e6aa3fe20d29e5a9d`.
-3. Confirmed the helper branch is also published on the remote as
-   `origin/codex/ui-canvas-ref-001-unblock-history-repair@e3fa22aa07c2faca88b7f081c03cc7f520d2861a`.
-4. Updated the local stale remote-tracking ref
+3. Revalidated the actual pushed helper branch with:
+   `git ls-remote --heads origin refs/heads/codex/ui-canvas-ref-001-unblock-history-repair`
+4. Confirmed the pushed helper branch had advanced to
+   `origin/codex/ui-canvas-ref-001-unblock-history-repair@fe309c2e41f5b736257182f1c8ae164f5dae7005`,
+   so the previous artifact's `e3fa22aa` claim was stale.
+5. Isolated the polluted local helper-only commit by preserving it under a
+   backup local ref, then rebuilt the expected helper branch from the pushed
+   helper rail so this repair remains an additive fast-forward on shared
+   history.
+6. Updated the local stale remote-tracking ref
    `refs/remotes/origin/codex/ui-canvas-ref-001` to `46dddf75` so subsequent
    local evidence matches the real remote branch instead of the old `3968700a`
    snapshot.
-5. Rewrote the parent task next-step evidence to match the repaired truth:
+7. Rewrote the helper artifact and parent task next-step evidence to match the
+   repaired truth:
    parent closeout replay must reference the pushed parent branch at
    `46dddf75`, while reviewers should use `git ls-remote` or an explicit fetch
    refspec for non-`dev` branches in this repo.
@@ -97,10 +120,14 @@ history.
 
 ### Helper task proof
 
-- helper branch local/remote:
-  `codex/ui-canvas-ref-001-unblock-history-repair @ e3fa22aa07c2faca88b7f081c03cc7f520d2861a`
-- helper commit subject:
-  `UI-CANVAS-REF-001-UNBLOCK-HISTORY-REPAIR: document branch/worktree contamination and replay path`
+- previous pushed helper head observed during review failure:
+  `origin/codex/ui-canvas-ref-001-unblock-history-repair @ fe309c2e41f5b736257182f1c8ae164f5dae7005`
+- stale helper head still cited by the previous artifact:
+  `e3fa22aa07c2faca88b7f081c03cc7f520d2861a`
+- polluted local-only helper sibling that must not be pushed as task truth:
+  `0117b769f929dc0f5adcf5515371aa1866519361`
+- previous pushed helper commit subject:
+  `UI-CANVAS-REF-001-UNBLOCK-HISTORY-REPAIR: reconcile remote ref evidence and parent replay path`
 
 ### Repo-config proof for stale tracking ref behavior
 
@@ -140,10 +167,13 @@ worktree:
 - `AI_NAME=Codex /home/lupin/drts-fleet-platform/scripts/ai-status.sh show UI-CANVAS-REF-001-UNBLOCK-HISTORY-REPAIR`
 - `git branch --show-current`
 - `git show --stat --summary e3fa22aa`
+- `git show --stat --summary fe309c2`
+- `git show --stat --summary 0117b769`
 - `git show --stat --summary 46dddf75`
 - `git show --stat --summary 3968700a`
 - `git show 46dddf75 --no-patch --pretty=raw`
 - `git for-each-ref --format='%(refname:short) %(objectname:short) %(upstream:short)' refs/heads/codex/ui-canvas-ref-001 refs/remotes/origin/codex/ui-canvas-ref-001 refs/heads/codex/ui-canvas-ref-001-unblock-history-repair`
+- `git rev-list --left-right --count fe309c2e41f5b736257182f1c8ae164f5dae7005...0117b769f929dc0f5adcf5515371aa1866519361`
 - `git rev-list --left-right --count origin/codex/ui-canvas-ref-001...codex/ui-canvas-ref-001`
 - `git config --get-all remote.origin.fetch`
 - `git ls-remote --heads origin refs/heads/codex/ui-canvas-ref-001`
