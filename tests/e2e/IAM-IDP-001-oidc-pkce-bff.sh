@@ -21,8 +21,8 @@ echo "[2/3] Running Vitest bootstrap auth security matrix..."
 pnpm --filter @drts/api test auth-bootstrap.test.ts
 
 # Step 3: Run E2E integration test suite for OIDC PKCE
-echo "[3/3] Verifying Web BFF Auth routes and middleware boundaries..."
-pnpm vitest run tests/integ/oidc-pkce-bff.test.ts
+echo "[3/3] Verifying Web BFF Auth routes, real provider OIDC exchange, and middleware boundaries..."
+pnpm vitest run tests/integ/oidc-pkce-bff.test.ts tests/e2e/oidc-pkce-bff.spec.ts
 
 echo "============================================================"
 echo "IAM-IDP-001 OIDC PKCE BFF E2E Verification COMPLETE - SUCCESS"

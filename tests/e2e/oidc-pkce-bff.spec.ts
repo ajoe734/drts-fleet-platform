@@ -10,7 +10,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Suite", () => {
   const tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
   const oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
 
-  it("completes OIDC PKCE authorization flow with active tenant membership", () => {
+  it("completes OIDC PKCE authorization flow with active tenant membership", async () => {
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
     const defaultTenantId = tenantPartnerService.getDefaultTenantId();
 
@@ -22,7 +22,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Suite", () => {
     expect(login.authorizationUrl).toContain("code_challenge_method=S256");
 
     // 2. Client receives code and exchanges it via BFF
-    const session = oidcService.exchangeTenantCallbackSession(
+    const session = await oidcService.exchangeTenantCallbackSession(
       {
         provider: "oidc",
         callbackUrl: "http://localhost:3000/api/auth/callback",
@@ -39,7 +39,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Suite", () => {
     expect(session.profile.roleCode).toBeDefined();
   });
 
-  it("enforces negative matrix: rejects reused state token and unmapped subjects", () => {
+  it("enforces negative matrix: rejects reused state token and unmapped subjects", async () => {
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
     const defaultTenantId = tenantPartnerService.getDefaultTenantId();
 
@@ -58,11 +58,11 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Suite", () => {
     };
 
     // First use
-    oidcService.exchangeTenantCallbackSession(cmd, { stateToken: login.stateToken });
+    await oidcService.exchangeTenantCallbackSession(cmd, { stateToken: login.stateToken });
 
     // Second use (state reuse) -> Must fail
-    expect(() =>
+    await expect(
       oidcService.exchangeTenantCallbackSession(cmd, { stateToken: login.stateToken }),
-    ).toThrow(ApiRequestError);
+    ).rejects.toThrow(ApiRequestError);
   });
 });

@@ -282,7 +282,7 @@ export class OidcPkceService {
   /**
    * 2. Exchange callback code & PKCE verifier for Tenant Session
    */
-  public exchangeTenantCallbackSession(
+  public async exchangeTenantCallbackSession(
     command: IamCallbackSessionExchangeCommand,
     meta?: {
       sourceIp?: string;
@@ -290,8 +290,8 @@ export class OidcPkceService {
       requestId?: string;
       stateToken?: string;
     },
-  ): TenantBootstrapSession {
-    const { claims } = this.validateAndExchangeCode(command, "tenant", meta);
+  ): Promise<TenantBootstrapSession> {
+    const { claims } = await this.validateAndExchangeCode(command, "tenant", meta);
 
     // Resolve tenant user identity
     const normalizedEmail = claims.email.trim().toLowerCase();
@@ -487,7 +487,7 @@ export class OidcPkceService {
       stateToken?: string;
     },
   ): Promise<PartnerBootstrapSession> {
-    const { claims, stateRecord } = this.validateAndExchangeCode(
+    const { claims, stateRecord } = await this.validateAndExchangeCode(
       command,
       "partner",
       meta,
@@ -740,7 +740,7 @@ export class OidcPkceService {
   /**
    * Core negative matrix check & token exchange validation
    */
-  private validateAndExchangeCode(
+  private async validateAndExchangeCode(
     command: IamCallbackSessionExchangeCommand,
     expectedRealm: AuthRealm,
     meta?: {
@@ -749,7 +749,7 @@ export class OidcPkceService {
       requestId?: string;
       stateToken?: string;
     },
-  ): { claims: OidcClaims; stateRecord: OidcStateRecord } {
+  ): Promise<{ claims: OidcClaims; stateRecord: OidcStateRecord }> {
     // 1. Basic field presence
     if (!command.code || command.code.trim().length === 0) {
       throw new ApiRequestError(
@@ -863,7 +863,7 @@ export class OidcPkceService {
     this.consumedStates.set(command.state, Date.now());
 
     // 4. Validate Code & Obtain Claims (Real OIDC or Synthetic Test Matrix)
-    const claims = this.performOidcCodeExchange(command, stateRecord);
+    const claims = await this.performOidcCodeExchange(command, stateRecord);
 
     // 5. Issuer & Audience Validation
     const expectedIssuer =
@@ -908,10 +908,10 @@ export class OidcPkceService {
   /**
    * Execute actual HTTP exchange or synthetic test code parsing
    */
-  private performOidcCodeExchange(
+  private async performOidcCodeExchange(
     command: IamCallbackSessionExchangeCommand,
     stateRecord?: OidcStateRecord | null,
-  ): OidcClaims {
+  ): Promise<OidcClaims> {
     const code = command.code.trim();
 
     // Check negative test flags embedded in synthetic test codes
@@ -1020,7 +1020,22 @@ export class OidcPkceService {
       };
     }
 
-    // Default / happy path claims
+    // 2. Check if a real OIDC token endpoint is configured and code is not a synthetic test code
+    const tokenEndpoint =
+      process.env.OIDC_TOKEN_ENDPOINT ??
+      (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/oauth2/v1/token` : null);
+
+    const isMockMode = process.env.OIDC_MOCK_MODE === "true";
+    const isSyntheticCode =
+      code.startsWith("valid_") ||
+      code.startsWith("e2e_") ||
+      code.startsWith("code_");
+
+    if (tokenEndpoint && !isMockMode && !isSyntheticCode) {
+      return await this.exchangeRealOidcTokenEndpoint(command, stateRecord, tokenEndpoint);
+    }
+
+    // Default / happy path synthetic claims (for offline tests)
     return {
       sub: `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`,
       iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
@@ -1032,6 +1047,124 @@ export class OidcPkceService {
       auth_time: Math.floor(Date.now() / 1000),
       nonce: stateRecord?.nonce,
     };
+  }
+
+  /**
+   * Real OIDC Authorization Code Exchange via HTTP POST to OIDC token & userinfo endpoints
+   */
+  public async exchangeRealOidcTokenEndpoint(
+    command: IamCallbackSessionExchangeCommand,
+    stateRecord: OidcStateRecord | null | undefined,
+    tokenEndpoint: string,
+  ): Promise<OidcClaims> {
+    const clientId = process.env.OIDC_CLIENT_ID ?? "drts-bff-client";
+    const clientSecret = process.env.OIDC_CLIENT_SECRET;
+    const redirectUri = command.callbackUrl || stateRecord?.redirectUri || "";
+
+    const params = new URLSearchParams();
+    params.set("grant_type", "authorization_code");
+    params.set("code", command.code.trim());
+    params.set("redirect_uri", redirectUri);
+    params.set("client_id", clientId);
+    if (clientSecret) {
+      params.set("client_secret", clientSecret);
+    }
+    params.set("code_verifier", command.pkceVerifier.trim());
+
+    try {
+      const response = await fetch(tokenEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: params.toString(),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        this.logger.error(`OIDC Token Exchange HTTP ${response.status}: ${errText}`);
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          `OIDC provider token exchange failed with HTTP status ${response.status}.`,
+        );
+      }
+
+      const tokenData = (await response.json()) as {
+        access_token?: string;
+        id_token?: string;
+        token_type?: string;
+        expires_in?: number;
+      };
+
+      let claimsFromToken: Partial<OidcClaims> = {};
+
+      if (tokenData.id_token) {
+        claimsFromToken = this.decodeJwtClaims(tokenData.id_token);
+      }
+
+      const userinfoEndpoint =
+        process.env.OIDC_USERINFO_ENDPOINT ??
+        (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/oauth2/v1/userinfo` : null);
+
+      let userinfoClaims: Partial<OidcClaims> = {};
+      if (userinfoEndpoint && tokenData.access_token) {
+        try {
+          const userinfoRes = await fetch(userinfoEndpoint, {
+            headers: { Authorization: `Bearer ${tokenData.access_token}` },
+          });
+          if (userinfoRes.ok) {
+            userinfoClaims = (await userinfoRes.json()) as Partial<OidcClaims>;
+          }
+        } catch (err) {
+          this.logger.warn(`Failed to fetch userinfo from ${userinfoEndpoint}: ${err}`);
+        }
+      }
+
+      const mergedClaims: OidcClaims = {
+        sub: userinfoClaims.sub || claimsFromToken.sub || "",
+        iss: claimsFromToken.iss || process.env.OIDC_ISSUER || "https://auth.staging.drts.internal",
+        aud: claimsFromToken.aud || clientId,
+        email: userinfoClaims.email || claimsFromToken.email || "",
+        email_verified: userinfoClaims.email_verified ?? claimsFromToken.email_verified ?? true,
+        amr: claimsFromToken.amr || userinfoClaims.amr || ["pwd", "mfa"],
+        acr: claimsFromToken.acr || userinfoClaims.acr || "urn:mace:incommon:iap:silver",
+        auth_time: claimsFromToken.auth_time || Math.floor(Date.now() / 1000),
+        nonce: claimsFromToken.nonce || stateRecord?.nonce,
+        tenant_id: claimsFromToken.tenant_id || userinfoClaims.tenant_id,
+        partner_id: claimsFromToken.partner_id || userinfoClaims.partner_id,
+      };
+
+      if (!mergedClaims.sub) {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "OIDC provider response missing principal subject claim ('sub').",
+        );
+      }
+
+      return mergedClaims;
+    } catch (error) {
+      if (error instanceof ApiRequestError) throw error;
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        `OIDC token exchange request failed: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  public decodeJwtClaims(token: string): Partial<OidcClaims> {
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 3) return {};
+      const payloadB64 = parts[1]!;
+      const jsonStr = Buffer.from(payloadB64, "base64url").toString("utf8");
+      return JSON.parse(jsonStr) as Partial<OidcClaims>;
+    } catch {
+      return {};
+    }
   }
 
   private recordSecurityEvent(params: {

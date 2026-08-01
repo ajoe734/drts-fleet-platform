@@ -58,12 +58,12 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
     };
 
     // First use
-    oidcService.exchangeTenantCallbackSession(cmd, { stateToken: login.stateToken });
+    await oidcService.exchangeTenantCallbackSession(cmd, { stateToken: login.stateToken });
 
     // Second use (state reuse) -> Must fail
-    expect(() =>
+    await expect(
       oidcService.exchangeTenantCallbackSession(cmd, { stateToken: login.stateToken }),
-    ).toThrow(ApiRequestError);
+    ).rejects.toThrow(ApiRequestError);
   });
 
   it("completes partner OIDC PKCE flow with active partner entry and MFA proof", async () => {

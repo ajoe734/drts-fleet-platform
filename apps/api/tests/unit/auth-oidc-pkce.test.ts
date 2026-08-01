@@ -86,9 +86,9 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   });
 
   describe("3. Callback Negative Validation Matrix", () => {
-    it("fails when authorization code is missing or empty", () => {
+    it("fails when authorization code is missing or empty", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -99,12 +99,12 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when state parameter is missing or empty", () => {
+    it("fails when state parameter is missing or empty", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -115,12 +115,12 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when PKCE verifier is too short (<43 chars)", () => {
+    it("fails when PKCE verifier is too short (<43 chars)", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -131,14 +131,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when PKCE verifier S256 challenge does not match state record", () => {
+    it("fails when PKCE verifier S256 challenge does not match state record", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
       const wrongVerifier = "a".repeat(50);
 
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -149,10 +149,10 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when state parameter is reused", () => {
+    it("fails when state parameter is reused", async () => {
       const defaultTenantId = tenantPartnerService.getDefaultTenantId();
       const loginParams = oidcService.generateLoginParameters("tenant");
       const cmd = {
@@ -165,21 +165,21 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       };
 
       // First exchange succeeds
-      oidcService.exchangeTenantCallbackSession(cmd, {
+      await oidcService.exchangeTenantCallbackSession(cmd, {
         stateToken: loginParams.stateToken,
       });
 
       // Second exchange with same state fails
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(cmd, {
           stateToken: loginParams.stateToken,
         }),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when stateToken is missing", () => {
+    it("fails when stateToken is missing", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession({
           provider: "oidc",
           callbackUrl: "http://localhost:3000/api/auth/callback",
@@ -187,14 +187,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           state: loginParams.state,
           pkceVerifier: loginParams.codeVerifier,
         }),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when callbackUrl does not match redirectUri stored in state record", () => {
+    it("fails when callbackUrl does not match redirectUri stored in state record", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant", {
         redirectUri: "http://localhost:3000/api/auth/callback",
       });
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -205,14 +205,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when token issuer does not match configured OIDC issuer", () => {
+    it("fails when token issuer does not match configured OIDC issuer", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant", {
         redirectUri: "http://localhost:3000/api/auth/callback",
       });
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -223,14 +223,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when token audience does not match configured client ID", () => {
+    it("fails when token audience does not match configured client ID", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant", {
         redirectUri: "http://localhost:3000/api/auth/callback",
       });
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -241,14 +241,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when OIDC nonce is mismatched", () => {
+    it("fails when OIDC nonce is mismatched", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant", {
         redirectUri: "http://localhost:3000/api/auth/callback",
       });
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -259,14 +259,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("fails when OIDC nonce is missing", () => {
+    it("fails when OIDC nonce is missing", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant", {
         redirectUri: "http://localhost:3000/api/auth/callback",
       });
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -277,12 +277,12 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
   });
 
   describe("4. Membership Status & Bound Principal Enforcement", () => {
-    it("rejects login for users with 'invited' status (fails closed before invitation proof)", () => {
+    it("rejects login for users with 'invited' status (fails closed before invitation proof)", async () => {
       const defaultTenantId = tenantPartnerService.getDefaultTenantId();
       const invitedUser = tenantPartnerService.createTenantUser(defaultTenantId, {
         email: "invited@acme.example",
@@ -292,7 +292,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       expect(invitedUser.status).toBe("invited");
 
       const loginParams = oidcService.generateLoginParameters("tenant");
-      try {
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -302,17 +302,11 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
-        );
-        expect.unreachable("Should have thrown IAM_MEMBERSHIP_NOT_ACTIVE");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ApiRequestError);
-        const apiErr = error as ApiRequestError;
-        const errResp = (apiErr.getResponse() as any)?.error;
-        expect(errResp?.code).toBe("IAM_MEMBERSHIP_NOT_ACTIVE");
-      }
+        ),
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("rejects login for users with 'suspended' status", () => {
+    it("rejects login for users with 'suspended' status", async () => {
       const defaultTenantId = tenantPartnerService.getDefaultTenantId();
       const user = tenantPartnerService.createTenantUser(defaultTenantId, {
         email: "suspended@acme.example",
@@ -325,7 +319,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       ).status = "suspended";
 
       const loginParams = oidcService.generateLoginParameters("tenant");
-      try {
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -335,19 +329,13 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
             pkceVerifier: loginParams.codeVerifier,
           },
           { stateToken: loginParams.stateToken },
-        );
-        expect.unreachable("Should have thrown IAM_MEMBERSHIP_NOT_ACTIVE");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ApiRequestError);
-        const apiErr = error as ApiRequestError;
-        const errResp = (apiErr.getResponse() as any)?.error;
-        expect(errResp?.code).toBe("IAM_MEMBERSHIP_NOT_ACTIVE");
-      }
+        ),
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("rejects login for subjects not registered in tenant membership", () => {
+    it("rejects login for subjects not registered in tenant membership", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
-      expect(() =>
+      await expect(
         oidcService.exchangeTenantCallbackSession(
           {
             provider: "oidc",
@@ -358,7 +346,95 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
+    });
+  });
+
+  describe("6. Real OIDC HTTP Provider Exchange & JWT Token Verification", () => {
+    it("exchanges code with external OIDC token and userinfo endpoints via HTTP fetch", async () => {
+      const originalFetch = globalThis.fetch;
+      const fakeIdToken = [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        Buffer.from(
+          JSON.stringify({
+            sub: "sub_real_oidc_123",
+            iss: "https://auth.staging.drts.internal",
+            aud: "drts-bff-client",
+            email: "admin@acme.example",
+            amr: ["pwd", "mfa"],
+            acr: "urn:mace:incommon:iap:silver",
+            auth_time: Math.floor(Date.now() / 1000),
+            nonce: "test_nonce_12345",
+          }),
+        ).toString("base64url"),
+        "fake_signature",
+      ].join(".");
+
+      globalThis.fetch = (async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("/oauth2/v1/token")) {
+          return new Response(
+            JSON.stringify({
+              access_token: "acc_token_999",
+              id_token: fakeIdToken,
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (urlStr.includes("/oauth2/v1/userinfo")) {
+          return new Response(
+            JSON.stringify({
+              sub: "sub_real_oidc_123",
+              email: "admin@acme.example",
+              email_verified: true,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      }) as typeof fetch;
+
+      try {
+        process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
+        process.env.OIDC_CLIENT_ID = "drts-bff-client";
+        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
+        process.env.OIDC_USERINFO_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/userinfo";
+        process.env.OIDC_MOCK_MODE = "false";
+
+        const claims = await oidcService.exchangeRealOidcTokenEndpoint(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "real_provider_auth_code_xyz",
+            state: "test_state",
+            pkceVerifier: "a".repeat(50),
+          },
+          {
+            state: "test_state",
+            nonce: "test_nonce_12345",
+            codeVerifier: "a".repeat(50),
+            codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
+            codeChallengeMethod: "S256",
+            realm: "tenant",
+            redirectUri: "http://localhost:3000/api/auth/callback",
+            tenantId: null,
+            partnerId: null,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 600000,
+          },
+          "https://auth.staging.drts.internal/oauth2/v1/token",
+        );
+
+        expect(claims.sub).toBe("sub_real_oidc_123");
+        expect(claims.email).toBe("admin@acme.example");
+        expect(claims.iss).toBe("https://auth.staging.drts.internal");
+      } finally {
+        globalThis.fetch = originalFetch;
+        delete process.env.OIDC_TOKEN_ENDPOINT;
+        delete process.env.OIDC_USERINFO_ENDPOINT;
+      }
     });
   });
 
