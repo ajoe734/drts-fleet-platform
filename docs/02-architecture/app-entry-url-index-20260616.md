@@ -1,15 +1,15 @@
 # DRTS App Entry-URL Index (dev)
 
-_Last verified: 2026-07-31, against the live `deploy-dev` (`drts-dev-ray-tw-20260730`) deployment._
+_Last verified: 2026-08-01, against the repository `deploy-dev` contract for `drts-dev-ray-tw-20260730`._
 
 Authoritative source of truth for **which app serves which surface and at which
 dev URL**. Resolve live URLs from the latest successful `deploy-dev.yml` run,
 not by guessing a previous GCP project's host suffix.
 
-> dev is public / no-auth. `deploy-dev` ships **10 services** (9 web + API):
+> dev is public / no-auth. `deploy-dev` ships **9 active services** (8 web + API):
 > `api, platform-admin-web, ops-console-web, fleet-partner-portal-web,
-tenant-console-web, bank-console-web, partner-booking-web,
-enterprise-dispatch-web, channel-partner-portal-web, referral-embed-web`.
+tenant-console-web, bank-console-web, enterprise-dispatch-web,
+channel-partner-portal-web, referral-embed-web`.
 
 ## Internal management consoles
 
@@ -21,10 +21,9 @@ enterprise-dispatch-web, channel-partner-portal-web, referral-embed-web`.
 
 ## Line A — credit-card airport transfer (信用卡卡友機場接送)
 
-| App                   | Dev URL                                                      | Role                                                                                            |
-| --------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `partner-booking-web` | https://drts-dev-partner-booking-web-4t7rg6fmeq-uc.a.run.app | Cardholder front (`/{tenantSlug}/program/site` official site + `/program/embed` bank-app embed) |
-| `bank-console-web`    | https://drts-dev-bank-console-web-4t7rg6fmeq-uc.a.run.app    | Issuing-bank back office                                                                        |
+| App                | Dev URL                                                   | Role                     |
+| ------------------ | --------------------------------------------------------- | ------------------------ |
+| `bank-console-web` | https://drts-dev-bank-console-web-4t7rg6fmeq-uc.a.run.app | Issuing-bank back office |
 
 ## Line B — corporate commute (企業內部派車)
 
@@ -55,6 +54,16 @@ production deploy rail does not define a Referral Embed host.
 | App   | Dev URL                                      | Notes                                                       |
 | ----- | -------------------------------------------- | ----------------------------------------------------------- |
 | `api` | https://drts-dev-api-4t7rg6fmeq-uc.a.run.app | Control-plane API. `/api/health` = 200; root 404 is normal. |
+
+## Partner Booking — PAUSED
+
+`partner-booking-web` is intentionally paused as of 2026-08-01. This covers
+both the standalone website (`/{tenantSlug}/program/site`) and bank-app embed
+(`/{tenantSlug}/program/embed`). It has no active dev URL: deploy does not
+build, deploy, expose, or smoke it; deploy cleanup removes the stale Cloud Run
+service; and domain maintenance does not recreate `book.smarttransport.tw`.
+The application source and route documentation remain available for a reviewed,
+reversible re-enable change.
 
 ## Retired / not deployed / non-web
 

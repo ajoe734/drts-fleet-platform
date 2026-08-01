@@ -126,7 +126,7 @@ describe("Cloud Run deploy quota retry", () => {
 
     expect(
       workflow.match(/scripts\/deploy-cloud-run-service\.sh/g),
-    ).toHaveLength(10);
+    ).toHaveLength(9);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
     expect(workflow).not.toContain("concierge-portal-web");
     expect(
@@ -135,7 +135,7 @@ describe("Cloud Run deploy quota retry", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
     ]);
     expect(workflow).not.toMatch(/Deploy — .*passenger/i);
@@ -149,6 +149,9 @@ describe("Cloud Run deploy quota retry", () => {
     expect(domainWorkflow).not.toContain("ride.smarttransport.tw");
     expect(domainWorkflow).toContain("uses: actions/checkout@v4");
     expect(domainWorkflow).toContain("./scripts/map-domain-service.sh");
+    expect(domainWorkflow).not.toContain(
+      "./scripts/map-domain-service.sh book.smarttransport.tw",
+    );
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {
@@ -164,7 +167,6 @@ describe("Cloud Run deploy quota retry", () => {
       "tenant-console-web",
       "bank-console-web",
       "referral-embed-web",
-      "partner-booking-web",
       "enterprise-dispatch-web",
       "channel-partner-portal-web",
     ];
@@ -212,10 +214,10 @@ describe("Cloud Run deploy quota retry", () => {
     expect(matrixIndex).toBeGreaterThan(
       uiSmoke.indexOf("playwright.ops-console-parity.config.ts"),
     );
-    expect(matrixIndex).toBeGreaterThan(
-      uiSmoke.indexOf("playwright.partner-booking-surfaces.config.ts"),
-    );
     expect(matrixIndex).toBeGreaterThan(googleMapIndex);
+    expect(uiSmoke).not.toContain(
+      "playwright.partner-booking-surfaces.config.ts",
+    );
     expect(uiSmoke).toContain("smoke_status=0");
     expect(uiSmoke).toContain(
       'PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}"',
@@ -223,7 +225,7 @@ describe("Cloud Run deploy quota retry", () => {
     expect(uiSmoke).toContain("--reporter=list,html");
     expect(uiSmoke).toContain('--output "test-results/${suite}"');
     expect(uiSmoke).toContain('exit "${smoke_status}"');
-    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(12);
+    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(11);
     expect(workflow).not.toContain(
       "Authenticate to GCP for failure diagnostics",
     );
