@@ -395,11 +395,11 @@ export function signTestIapJwtAssertion(
 export function extractAuthenticatedUserEmail(
   headers: HeaderRecord,
   options?: {
-    strictIapMode?: boolean;
-    expectedAudience?: string;
-    expectedIssuer?: string;
-    jwtSecretOrPublicKey?: string;
-    allowUnverifiedTokenInDev?: boolean;
+    strictIapMode?: boolean | undefined;
+    expectedAudience?: string | undefined;
+    expectedIssuer?: string | undefined;
+    jwtSecretOrPublicKey?: string | undefined;
+    allowUnverifiedTokenInDev?: boolean | undefined;
   },
 ): string | null {
   const assertion = extractIapJwtAssertion(headers);
@@ -459,11 +459,11 @@ export function issueControlPlaneRequestAuth(options: {
   jwtAudience?: string | undefined;
   expiresIn?: JwtExpiresIn | undefined;
   requestId?: string | null;
-  strictIapMode?: boolean;
-  iapJwtSecretOrPublicKey?: string;
-  expectedIapAudience?: string;
-  expectedIapIssuer?: string;
-  allowUnverifiedTokenInDev?: boolean;
+  strictIapMode?: boolean | undefined;
+  iapJwtSecretOrPublicKey?: string | undefined;
+  expectedIapAudience?: string | undefined;
+  expectedIapIssuer?: string | undefined;
+  allowUnverifiedTokenInDev?: boolean | undefined;
 }): ControlPlaneRequestAuth {
   let verifiedSubject: string | null = null;
   let verifiedEmail: string | null = null;
@@ -536,11 +536,11 @@ export function issueControlPlaneRequestAuth(options: {
   let authenticatedUserEmail: string | null =
     verifiedEmail ||
     extractAuthenticatedUserEmail(options.headers, {
-      strictIapMode: options.strictIapMode,
-      expectedAudience: options.expectedIapAudience,
-      expectedIssuer: options.expectedIapIssuer,
-      jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
-      allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
+      ...(options.strictIapMode !== undefined && { strictIapMode: options.strictIapMode }),
+      ...(options.expectedIapAudience !== undefined && { expectedAudience: options.expectedIapAudience }),
+      ...(options.expectedIapIssuer !== undefined && { expectedIssuer: options.expectedIapIssuer }),
+      ...(options.iapJwtSecretOrPublicKey !== undefined && { jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey }),
+      ...(options.allowUnverifiedTokenInDev !== undefined && { allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev }),
     });
 
   if (!authenticatedUserEmail) {
