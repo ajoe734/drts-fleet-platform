@@ -1,77 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
-import type { EmbedContext, EmbedState } from "@/lib/embed-context";
-import { useTranslation } from "@/lib/i18n";
+import type { CSSProperties, ReactNode } from "react";
+import type { EmbedContext } from "@/lib/embed-context";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
-  EMBED_TRIP_FALLBACK_SCREENS,
-  embedTripFallbackStates,
+  type EmbedTripFallbackProgressStage,
+  type EmbedTripFallbackScreen,
   embedReceipt,
   embedResident,
   embedSavedPlaces,
   embedTrip,
+  embedTripFallbackStates,
   embedTripHistory,
   embedVehicles,
 } from "@/lib/embed-fixtures";
+import { useTranslation } from "@/lib/i18n";
 import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
 
-function buildHref(context: EmbedContext, next: Record<string, string>) {
-  const params = new URLSearchParams({
-    entryHost: context.entry.entryHost?.trim() || "",
-  });
+const SANS =
+  '"Inter","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif';
+const MONO = '"JetBrains Mono","IBM Plex Mono","SFMono-Regular",monospace';
+const HOST_BLUE = "#1A45AD";
 
-  if (context.handoff.apiKey) {
-    params.set("apiKey", context.handoff.apiKey);
-  }
-  if (context.handoff.partnerUserRef) {
-    params.set("partnerUserRef", context.handoff.partnerUserRef);
-  }
-
-  for (const [key, value] of Object.entries(next)) {
-    params.set(key, value);
-  }
-
-  return `/embed/${context.entry.entrySlug}?${params.toString()}`;
-}
-
-function toneStyle(theme: ReturnType<typeof buildEmbedTheme>, tone: string) {
-  switch (tone) {
-    case "success":
-      return {
-        color: theme.successFg,
-        background: theme.successBg,
-        borderColor: theme.successBorder,
-      };
-    case "warn":
-      return {
-        color: theme.warnFg,
-        background: theme.warnBg,
-        borderColor: theme.warnBorder,
-      };
-    case "danger":
-      return {
-        color: theme.dangerFg,
-        background: theme.dangerBg,
-        borderColor: theme.dangerBorder,
-      };
-    default:
-      return {
-        color: theme.infoFg,
-        background: theme.infoBg,
-        borderColor: theme.infoBorder,
-      };
-  }
-}
-
-const EMBED_MONO = '"IBM Plex Mono", ui-monospace, SFMono-Regular, monospace';
-
-// Minimal inline-SVG glyphs for the embedded webview chrome / hero so the
-// passenger embed matches the canvas (passenger-embed-screens.jsx) without
-// pulling the management icon set into the public passenger bundle.
-const EMBED_GLYPHS: Record<string, string> = {
-  chevL: "M15 6l-6 6 6 6",
+const ICONS: Record<string, string> = {
+  arrowLeft: "M15 6l-6 6 6 6",
   lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
   check: "M5 12l4 4 10-10",
   x: "M6 6l12 12 M18 6L6 18",
@@ -84,18 +37,83 @@ const EMBED_GLYPHS: Record<string, string> = {
   shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z",
   bolt: "M13 3L5 13h6l-1 8 8-10h-6z",
   info: "M12 8h.02 M11 12h1v5h1 M12 21a9 9 0 100-18 9 9 0 000 18z",
+  alert: "M12 3l9.5 17H2.5z M12 10v4 M12 17.5v.5",
+  pin: "M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z M12 12a2 2 0 100-4 2 2 0 000 4z",
+  phone: "M4 5h4l2 5-2.5 1.5a11 11 0 005 5L20 14l1 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 011-1z",
 };
 
-function EmbedGlyph({
+const NEGATIVE_META = {
+  denied: {
+    icon: "x",
+    tone: "danger",
+    title: "叫車未能建立",
+    posture: "denied",
+    body: "此次叫車請求未通過。請確認上下車地點是否在服務範圍內，或稍後再試。",
+    primary: "重新叫車",
+    secondary: "聯絡社區客服",
+  },
+  ineligible: {
+    icon: "ban",
+    tone: "warn",
+    title: "目前不符叫車資格",
+    posture: "ineligible",
+    body: "您的住戶身分目前未開通叫車服務，可能因社區方案尚未生效。請洽社區管理中心確認。",
+    primary: "洽社區管理中心",
+    secondary: "返回",
+  },
+  nosupply: {
+    icon: "car",
+    tone: "warn",
+    title: "附近暫無可派車輛",
+    posture: "no_supply",
+    body: "此時段與地點暫無可派車。請稍後重試或改約時間，系統也會嘗試自動為您補派。",
+    primary: "稍後重試",
+    secondary: "改約時間",
+  },
+  degraded: {
+    icon: "alert",
+    tone: "warn",
+    title: "服務暫時不穩定",
+    posture: "degraded",
+    body: "叫車服務目前回應較慢。您的請求已安全受理，恢復後會自動繼續，無需重複送出。",
+    primary: "重試",
+    secondary: "查看狀態",
+  },
+} as const;
+
+type NegativeKind = keyof typeof NEGATIVE_META;
+
+function buildHref(context: EmbedContext, next: Record<string, string>) {
+  const params = new URLSearchParams();
+  const entryHost = context.entry.entryHost?.trim();
+  if (entryHost) params.set("entryHost", entryHost);
+  if (context.handoff.apiKey) params.set("apiKey", context.handoff.apiKey);
+  if (context.handoff.partnerUserRef) {
+    params.set("partnerUserRef", context.handoff.partnerUserRef);
+  }
+  for (const [key, value] of Object.entries(next)) {
+    params.set(key, value);
+  }
+  const query = params.toString();
+  return `/embed/${context.entry.entrySlug}${query ? `?${query}` : ""}`;
+}
+
+function toPhoneHref(phone: string) {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
+function Icon({
   name,
-  size = 14,
+  size = 16,
   stroke = 2,
+  style,
 }: {
   name: string;
   size?: number;
   stroke?: number;
+  style?: CSSProperties;
 }) {
-  const d = EMBED_GLYPHS[name] ?? EMBED_GLYPHS.info ?? "";
+  const d = ICONS[name] ?? ICONS.info ?? "";
   return (
     <svg
       width={size}
@@ -106,100 +124,514 @@ function EmbedGlyph({
       strokeWidth={stroke}
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
       aria-hidden
     >
-      {d.split(" M").map((seg, index) => (
-        <path key={index} d={index === 0 ? seg : `M${seg}`} />
+      {d.split(" M").map((segment, index) => (
+        <path key={index} d={index === 0 ? segment : `M${segment}`} />
       ))}
     </svg>
   );
 }
 
-function statusDotColor(
-  theme: ReturnType<typeof buildEmbedTheme>,
-  state: string,
-) {
-  if (state === "unsupported") return theme.dangerFg;
-  if (state === "reauth" || state === "fallback") return theme.warnFg;
-  return theme.successFg;
+function ActionButton({
+  children,
+  href,
+  tone = "default",
+  size = "md",
+  icon,
+  iconRight,
+}: {
+  children: ReactNode;
+  href?: string;
+  tone?: "primary" | "default" | "ghost" | "danger";
+  size?: "md" | "sm";
+  icon?: string;
+  iconRight?: string;
+}) {
+  const style: CSSProperties = {
+    width: "100%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: size === "sm" ? 40 : 46,
+    borderRadius: 12,
+    padding: size === "sm" ? "8px 14px" : "11px 16px",
+    fontFamily: SANS,
+    fontSize: size === "sm" ? 13 : 14,
+    fontWeight: 700,
+    textDecoration: "none",
+    border:
+      tone === "primary"
+        ? "1px solid transparent"
+        : tone === "danger"
+          ? "1px solid #FECDCA"
+          : tone === "ghost"
+            ? "1px solid transparent"
+            : "1px solid #E5E7EB",
+    background:
+      tone === "primary"
+        ? "var(--embed-brand)"
+        : tone === "danger"
+          ? "#FFFFFF"
+          : tone === "ghost"
+            ? "transparent"
+            : "#FFFFFF",
+    color:
+      tone === "primary"
+        ? "#FFFFFF"
+        : tone === "danger"
+          ? "#B42318"
+          : tone === "ghost"
+            ? "var(--embed-brand)"
+            : "#19223A",
+    boxShadow:
+      tone === "primary" ? "0 10px 24px rgba(15, 118, 110, 0.24)" : "none",
+  };
+
+  const content = (
+    <>
+      {icon ? <Icon name={icon} size={16} /> : null}
+      <span>{children}</span>
+      {iconRight ? <Icon name={iconRight} size={16} /> : null}
+    </>
+  );
+
+  if (!href) {
+    return <span style={style}>{content}</span>;
+  }
+
+  const external = href.startsWith("tel:");
+  return external ? (
+    <a href={href} style={style}>
+      {content}
+    </a>
+  ) : (
+    <Link href={href} style={style}>
+      {content}
+    </Link>
+  );
 }
 
-function EmbedShell({
-  context,
+function Card({
   children,
-  footer,
+  title,
+  sub,
+  accent,
 }: {
-  context: EmbedContext;
   children: ReactNode;
-  footer?: ReactNode;
+  title?: ReactNode;
+  sub?: ReactNode;
+  accent?: string;
 }) {
-  const theme = buildEmbedTheme(context.accent);
-  const appName = context.strings.appName;
-  const displayName = context.strings.displayName;
-  const { t } = useTranslation();
-  const dotColor = statusDotColor(theme, context.state);
+  return (
+    <section
+      style={{
+        background: "#FFFFFF",
+        border: "1px solid #E5E9F1",
+        borderTop: accent ? `2px solid ${accent}` : "1px solid #E5E9F1",
+        borderRadius: 16,
+        boxShadow: "0 1px 2px rgba(16,24,40,.06)",
+        overflow: "hidden",
+      }}
+    >
+      {title || sub ? (
+        <div style={{ padding: "15px 15px 0" }}>
+          {title ? (
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#19223A" }}>
+              {title}
+            </div>
+          ) : null}
+          {sub ? (
+            <div
+              style={{ fontSize: 12, color: "#6B7689", marginTop: 2 }}
+            >
+              {sub}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <div style={{ padding: 15 }}>{children}</div>
+    </section>
+  );
+}
 
+function Banner({
+  tone,
+  icon,
+  children,
+}: {
+  tone: "primary" | "warn" | "danger" | "success";
+  icon: string;
+  children: ReactNode;
+}) {
+  const palette = {
+    primary: { fg: "var(--embed-brand)", bg: "var(--embed-brand-soft)", bd: "var(--embed-brand-border)" },
+    warn: { fg: "#B54708", bg: "#FFFAEB", bd: "#FEDF89" },
+    danger: { fg: "#B42318", bg: "#FEF3F2", bd: "#FECDCA" },
+    success: { fg: "#15803D", bg: "#ECFDF3", bd: "#ABEFC6" },
+  }[tone];
   return (
     <div
       style={{
-        ["--embed-accent" as string]: theme.accent,
-        ["--embed-accent-soft" as string]: theme.accentSoft,
-        ["--embed-neutral-fg" as string]: theme.neutralFg,
-        ["--embed-neutral-bg" as string]: theme.neutralBg,
-        ["--embed-neutral-border" as string]: theme.neutralBorder,
-        ["--embed-danger-fg" as string]: theme.dangerFg,
-        ["--embed-danger-bg" as string]: theme.dangerBg,
-        minHeight: "100vh",
-        background: theme.neutralBg,
-        padding: "24px 12px",
-        fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
+        display: "flex",
+        gap: 10,
+        padding: "12px 14px",
+        background: palette.bg,
+        border: `1px solid ${palette.bd}`,
+        borderRadius: 12,
+      }}
+    >
+      <span style={{ color: palette.fg, marginTop: 1 }}>
+        <Icon name={icon} size={16} />
+      </span>
+      <div style={{ fontSize: 12.5, color: "#43506B", lineHeight: 1.55 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  mono,
+  strong,
+  last,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  mono?: boolean;
+  strong?: boolean;
+  last?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 16,
+        padding: "9px 0",
+        borderBottom: last ? "none" : "1px solid #EEF1F7",
+      }}
+    >
+      <span style={{ fontSize: 12.5, color: "#6B7689", flexShrink: 0 }}>
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 13.5,
+          color: strong ? "var(--embed-brand)" : "#19223A",
+          fontWeight: strong ? 700 : 500,
+          textAlign: "right",
+          fontFamily: mono ? MONO : SANS,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function TokenRow({
+  label,
+  code,
+  value,
+  ok,
+}: {
+  label: string;
+  code: string;
+  value: string;
+  ok: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "9px 0",
+        borderBottom: "1px solid #EEF1F7",
+      }}
+    >
+      <span
+        style={{
+          width: 19,
+          height: 19,
+          borderRadius: 10,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          background: ok ? "#ECFDF3" : "#FEF3F2",
+          color: ok ? "#15803D" : "#B42318",
+        }}
+      >
+        <Icon name={ok ? "check" : "x"} size={11} stroke={3} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, color: "#19223A", fontWeight: 500 }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 9.5, color: "#9AA3B4", fontFamily: MONO }}>
+          {code}
+        </div>
+      </div>
+      <span style={{ fontSize: 12, fontFamily: MONO, color: "#19223A" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function BrandMark({ context, size = 40 }: { context: EmbedContext; size?: number }) {
+  const mark = (context.strings.displayName || "?").slice(0, 1);
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 3.2,
+        background:
+          "linear-gradient(150deg, var(--embed-brand), var(--embed-host))",
+        color: "#FFFFFF",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontWeight: 800,
+        fontSize: size * 0.42,
+        flexShrink: 0,
+      }}
+    >
+      {mark}
+    </span>
+  );
+}
+
+function StatusPill({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: "success" | "warn" | "danger" | "neutral" | "primary" | "info";
+}) {
+  const palette = {
+    success: { fg: "#15803D", bg: "#ECFDF3", bd: "#ABEFC6" },
+    warn: { fg: "#B54708", bg: "#FFFAEB", bd: "#FEDF89" },
+    danger: { fg: "#B42318", bg: "#FEF3F2", bd: "#FECDCA" },
+    neutral: { fg: "#6B7689", bg: "#F7F9FC", bd: "#E5E9F1" },
+    primary: { fg: "var(--embed-brand)", bg: "var(--embed-brand-soft)", bd: "var(--embed-brand-border)" },
+    info: { fg: "#175CD3", bg: "#EFF4FF", bd: "#B2CCFF" },
+  }[tone];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        width: "fit-content",
+        padding: "3px 9px",
+        borderRadius: 999,
+        fontSize: 11.5,
+        fontWeight: 700,
+        color: palette.fg,
+        background: palette.bg,
+        border: `1px solid ${palette.bd}`,
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: palette.fg,
+        }}
+      />
+      {children}
+    </span>
+  );
+}
+
+function Hero({
+  icon,
+  tone,
+  title,
+  posture,
+}: {
+  icon: string;
+  tone: "success" | "warn" | "danger" | "neutral" | "primary";
+  title: ReactNode;
+  posture?: ReactNode;
+}) {
+  const palette = {
+    success: { fg: "#15803D", bg: "#ECFDF3" },
+    warn: { fg: "#B54708", bg: "#FFFAEB" },
+    danger: { fg: "#B42318", bg: "#FEF3F2" },
+    neutral: { fg: "#667085", bg: "#F2F4F7" },
+    primary: { fg: "var(--embed-brand)", bg: "var(--embed-brand-soft)" },
+  }[tone];
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 9,
+        padding: "14px 0 4px",
       }}
     >
       <div
         style={{
-          width: "100%",
-          maxWidth: 392,
-          margin: "0 auto",
-          borderRadius: 28,
-          overflow: "hidden",
-          background: "white",
-          border: `1px solid ${theme.neutralBorder}`,
-          boxShadow:
-            "0 20px 50px color-mix(in srgb, var(--embed-accent) 12%, transparent)",
+          width: 58,
+          height: 58,
+          borderRadius: 29,
+          background: palette.bg,
+          color: palette.fg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        {/* iOS-style status bar (host device chrome) */}
+        <Icon name={icon} size={28} />
+      </div>
+      <div
+        style={{
+          fontSize: 16.5,
+          lineHeight: 1.35,
+          fontWeight: 800,
+          textAlign: "center",
+        }}
+      >
+        {title}
+      </div>
+      {posture ? <StatusPill tone={tone === "neutral" ? "neutral" : tone}>{posture}</StatusPill> : null}
+    </div>
+  );
+}
+
+function SurfaceField({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon?: string;
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          display: "block",
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: "#43506B",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          padding: "11px 13px",
+          background: "#FFFFFF",
+          border: "1px solid #E5E9F1",
+          borderRadius: 11,
+          fontSize: 14,
+          color: "#19223A",
+        }}
+      >
+        {icon ? (
+          <span style={{ color: "#9AA3B4", display: "flex" }}>
+            <Icon name={icon} size={16} />
+          </span>
+        ) : null}
+        <span>{value}</span>
+      </div>
+    </div>
+  );
+}
+
+function Shell({
+  context,
+  badgeTone,
+  children,
+  footer,
+}: {
+  context: EmbedContext;
+  badgeTone: "live" | "warn" | "err" | "neutral";
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const dotColor =
+    badgeTone === "live"
+      ? "#15803D"
+      : badgeTone === "warn"
+        ? "#B54708"
+        : badgeTone === "err"
+          ? "#B42318"
+          : "#98A2B3";
+  const theme = buildEmbedTheme(context.accent);
+
+  return (
+    <main
+      style={{
+        ["--embed-brand" as string]: theme.tenantFg,
+        ["--embed-brand-soft" as string]: theme.tenantBg,
+        ["--embed-brand-border" as string]: theme.tenantBorder,
+        ["--embed-host" as string]: HOST_BLUE,
+        minHeight: "100dvh",
+        display: "grid",
+        placeItems: "center",
+        background: "#ECEEF3",
+        padding: "20px 10px",
+        fontFamily: SANS,
+      }}
+    >
+      <div
+        style={{
+          width: 392,
+          minHeight: 812,
+          display: "flex",
+          flexDirection: "column",
+          background: "#F4F6FA",
+          borderRadius: 28,
+          overflow: "hidden",
+          boxShadow: "0 18px 50px rgba(20,30,60,.14)",
+          border: "1px solid #D8DEE9",
+          color: "#19223A",
+        }}
+      >
         <div
           style={{
-            background: theme.accent,
-            color: "white",
+            height: 44,
+            flexShrink: 0,
+            background: HOST_BLUE,
+            color: "#FFFFFF",
             display: "flex",
             alignItems: "flex-end",
             justifyContent: "space-between",
-            padding: "10px 18px 6px",
+            padding: "0 22px 6px",
             fontSize: 12.5,
             fontWeight: 600,
           }}
         >
           <span>9:41</span>
-          <span
-            style={{
-              display: "inline-flex",
-              gap: 6,
-              alignItems: "center",
-              opacity: 0.9,
-            }}
-          >
-            <EmbedGlyph name="bolt" size={12} />
-            <EmbedGlyph name="shield" size={12} />
+          <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+            <Icon name="bolt" size={12} />
+            <Icon name="shield" size={12} />
           </span>
         </div>
-
-        {/* host app chrome: back affordance + title + entryHost lock chip */}
         <div
           style={{
-            background: theme.accent,
-            color: "white",
+            flexShrink: 0,
+            background: HOST_BLUE,
+            color: "#FFFFFF",
             padding: "4px 12px 12px",
             display: "flex",
             alignItems: "center",
@@ -212,29 +644,27 @@ function EmbedShell({
               width: 30,
               height: 30,
               borderRadius: 15,
-              background: "color-mix(in srgb, white 16%, transparent)",
+              background: "rgba(255,255,255,.16)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               flexShrink: 0,
             }}
           >
-            <EmbedGlyph name="chevL" size={16} />
+            <Icon name="arrowLeft" size={16} />
           </span>
           <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700 }}>
-              {t("embed.chrome.title")}
-            </div>
+            <div style={{ fontSize: 14.5, fontWeight: 700 }}>社區叫車</div>
             <div
               style={{
                 fontSize: 10,
-                opacity: 0.8,
+                opacity: 0.78,
+                whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
               }}
             >
-              {appName} · {displayName}
+              {context.strings.appName} · {context.strings.displayName}
             </div>
           </div>
           <span
@@ -242,16 +672,16 @@ function EmbedShell({
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
-              fontSize: 9.5,
-              fontFamily: EMBED_MONO,
-              opacity: 0.85,
-              background: "color-mix(in srgb, white 14%, transparent)",
+              maxWidth: 150,
               padding: "4px 8px",
               borderRadius: 999,
-              maxWidth: 150,
+              background: "rgba(255,255,255,.14)",
+              fontSize: 9.5,
+              fontFamily: MONO,
+              opacity: 0.8,
             }}
           >
-            <EmbedGlyph name="lock" size={10} />
+            <Icon name="lock" size={10} />
             <span
               style={{
                 overflow: "hidden",
@@ -263,18 +693,17 @@ function EmbedShell({
             </span>
           </span>
         </div>
-
-        {/* webview surface badge */}
         <div
           style={{
+            flexShrink: 0,
             display: "flex",
             alignItems: "center",
             gap: 6,
             padding: "6px 14px",
+            background: "#FFFFFF",
+            borderBottom: "1px solid #E5E9F1",
             fontSize: 10.5,
-            color: theme.neutralFg,
-            background: theme.neutralBg,
-            borderBottom: `1px solid ${theme.neutralBorder}`,
+            color: "#6B7689",
           }}
         >
           <span
@@ -283,693 +712,616 @@ function EmbedShell({
               height: 6,
               borderRadius: 3,
               background: dotColor,
-              flexShrink: 0,
             }}
           />
-          <span style={{ fontFamily: EMBED_MONO }}>
-            {t("embed.chrome.webview")}
-          </span>
-          <span style={{ opacity: 0.7 }}>
+          <span style={{ fontFamily: MONO }}>webview</span>
+          <span style={{ color: "#98A2B3" }}>
             · embedded · /embed/{context.entry.entrySlug}
           </span>
         </div>
-
-        <div style={{ padding: 16, display: "grid", gap: 12 }}>{children}</div>
-
+        <div
+          style={{
+            flex: 1,
+            padding: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 13,
+          }}
+        >
+          {children}
+        </div>
         {footer ? (
           <div
             style={{
+              flexShrink: 0,
+              borderTop: "1px solid #E5E9F1",
+              background: "#FFFFFF",
               padding: 14,
-              borderTop: `1px solid ${theme.neutralBorder}`,
-              background: theme.neutralBg,
-              display: "grid",
-              gap: 10,
+              display: "flex",
+              flexDirection: "column",
+              gap: 9,
             }}
           >
             {footer}
           </div>
         ) : null}
       </div>
-    </div>
+    </main>
   );
 }
 
-function Card({
-  title,
-  subtitle,
-  children,
-}: {
-  title?: string;
-  subtitle?: string;
-  children: ReactNode;
-}) {
+function HandoffView({ context }: { context: EmbedContext }) {
   return (
-    <section
-      style={{
-        border:
-          "1px solid color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)",
-        borderRadius: 18,
-        background: "white",
-        padding: 14,
-        display: "grid",
-        gap: 10,
-      }}
+    <Shell
+      context={context}
+      badgeTone="live"
+      footer={
+        <ActionButton
+          href={buildHref(context, { state: "handoff", screen: "book" })}
+          tone="primary"
+          iconRight="car"
+        >
+          開始叫車
+        </ActionButton>
+      }
     >
-      {title ? (
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>{title}</div>
-          {subtitle ? (
-            <div style={{ fontSize: 11, color: "var(--embed-neutral-fg)" }}>
-              {subtitle}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {children}
-    </section>
-  );
-}
-
-function ActionLink({
-  href,
-  label,
-  tone = "primary",
-}: {
-  href: string;
-  label: string;
-  tone?: "primary" | "ghost" | "danger" | "default";
-}) {
-  const palette =
-    tone === "ghost"
-      ? {
-          background: "var(--embed-accent-soft)",
-          color: "var(--embed-accent)",
-          border:
-            "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
-        }
-      : tone === "danger"
-        ? {
-            background: "var(--embed-danger-fg)",
-            color: "white",
-            border: "1px solid var(--embed-danger-fg)",
-          }
-        : tone === "default"
-          ? {
-              background:
-                "color-mix(in srgb, var(--embed-neutral-fg) 7%, white)",
-              color: "var(--embed-neutral-fg)",
-              border:
-                "1px solid color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
-            }
-          : {
-              background: "var(--embed-accent)",
-              color: "white",
-              border: "1px solid var(--embed-accent)",
-            };
-
-  return (
-    href.startsWith("tel:") ? (
-      <a
-        href={href}
-        style={{
-          display: "block",
-          textAlign: "center",
-          borderRadius: 999,
-          padding: "12px 14px",
-          fontWeight: 800,
-          ...palette,
-        }}
-      >
-        {label}
-      </a>
-    ) : (
-      <Link
-        href={href}
-        style={{
-          display: "block",
-          textAlign: "center",
-          borderRadius: 999,
-          padding: "12px 14px",
-          fontWeight: 800,
-          ...palette,
-        }}
-      >
-        {label}
-      </Link>
-    )
-  );
-}
-
-type BannerTone =
-  | "primary"
-  | "success"
-  | "warn"
-  | "danger"
-  | "info"
-  | "neutral";
-
-function bannerPalette(
-  theme: ReturnType<typeof buildEmbedTheme>,
-  tone: BannerTone,
-) {
-  switch (tone) {
-    case "primary":
-      return { fg: theme.accent, bg: theme.accentSoft, bd: theme.accent };
-    case "success":
-      return {
-        fg: theme.successFg,
-        bg: theme.successBg,
-        bd: theme.successBorder,
-      };
-    case "warn":
-      return { fg: theme.warnFg, bg: theme.warnBg, bd: theme.warnBorder };
-    case "danger":
-      return { fg: theme.dangerFg, bg: theme.dangerBg, bd: theme.dangerBorder };
-    case "info":
-      return { fg: theme.infoFg, bg: theme.infoBg, bd: theme.infoBorder };
-    default:
-      return {
-        fg: theme.neutralFg,
-        bg: theme.neutralBg,
-        bd: theme.neutralBorder,
-      };
-  }
-}
-
-// Tone-coloured banner (canvas EBanner): tinted background + leading glyph,
-// so each state reads in its own colour instead of a flat white card.
-function EmbedBanner({
-  theme,
-  tone,
-  icon,
-  children,
-}: {
-  theme: ReturnType<typeof buildEmbedTheme>;
-  tone: BannerTone;
-  icon?: string;
-  children: ReactNode;
-}) {
-  const p = bannerPalette(theme, tone);
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 10,
-        padding: "12px 14px",
-        borderRadius: 14,
-        background: `color-mix(in srgb, ${p.bg} 78%, white)`,
-        border: `1px solid color-mix(in srgb, ${p.bd} 55%, transparent)`,
-        color: p.fg,
-      }}
-    >
-      {icon ? (
-        <span style={{ flexShrink: 0, marginTop: 1 }}>
-          <EmbedGlyph name={icon} size={16} stroke={2.2} />
-        </span>
-      ) : null}
-      <div
-        style={{
-          fontSize: 12.5,
-          lineHeight: 1.55,
-          color: "var(--embed-neutral-fg)",
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function IdentityState({ context }: { context: EmbedContext }) {
-  const theme = buildEmbedTheme(context.accent);
-  const { t } = useTranslation();
-  const handoffRows: Array<[string, string]> = [
-    [t("embed.field.signature"), "valid"],
-    [t("embed.field.identity"), embedResident.name],
-    [t("embed.field.unit"), embedResident.unit],
-  ];
-  const bodyByState = {
-    handoff: {
-      title: t("embed.state.handoff.title", {
-        name: context.strings.displayName,
-      }),
-      badge: t("embed.state.handoff.badge"),
-      tone: "success",
-      icon: "check",
-      banner: { tone: "primary" as const, icon: "bolt" },
-      footer: (
-        <ActionLink
-          href={buildHref(context, { screen: "book" })}
-          label={t("embed.field.confirmRide")}
-        />
-      ),
-      message: t("embed.message.handoff", { appName: context.strings.appName }),
-    },
-    reauth: {
-      title: t("embed.state.reauth.title"),
-      badge: t("embed.state.reauth.badge"),
-      tone: "warn",
-      icon: "clock",
-      banner: { tone: "warn" as const, icon: "shield" },
-      footer: (
-        <>
-          <ActionLink
-            href={buildHref(context, { state: "handoff" })}
-            label={t("embed.field.returnToEntry", {
-              appName: context.strings.appName,
-            })}
-          />
-          <ActionLink
-            href={buildHref(context, { state: "fallback" })}
-            label={t("embed.field.tryLater")}
-            tone="ghost"
-          />
-        </>
-      ),
-      message: t("embed.message.reauth", { appName: context.strings.appName }),
-    },
-    unsupported: {
-      title: t("embed.state.unsupported.title"),
-      badge: t("embed.state.unsupported.badge"),
-      tone: "danger",
-      icon: "ban",
-      banner: { tone: "danger" as const, icon: "ban" },
-      footer: (
-        <ActionLink
-          href={buildHref(context, { state: "fallback" })}
-          label={t("embed.field.openStandalone")}
-        />
-      ),
-      message: t("embed.message.unsupported"),
-    },
-    consent: {
-      title: t("embed.state.consent.title"),
-      badge: t("embed.state.consent.badge"),
-      tone: "info",
-      icon: "shield",
-      banner: { tone: "primary" as const, icon: "lock" },
-      footer: (
-        <>
-          <ActionLink
-            href={buildHref(context, { state: "handoff", screen: "book" })}
-            label={t("embed.field.agree")}
-          />
-          <ActionLink
-            href={buildHref(context, { state: "fallback" })}
-            label={t("embed.field.notNow")}
-            tone="ghost"
-          />
-        </>
-      ),
-      message: t("embed.message.consent"),
-    },
-    fallback: {
-      title: t("embed.state.fallback.title"),
-      badge: t("embed.state.fallback.badge"),
-      tone: "warn",
-      icon: "ext",
-      banner: { tone: "neutral" as const, icon: "ext" },
-      footer: (
-        <>
-          <ActionLink
-            href={buildHref(context, { state: "fallback", screen: "receipt" })}
-            label={t("embed.field.openStandalone")}
-          />
-          <ActionLink
-            href={buildHref(context, { state: "handoff" })}
-            label={t("embed.field.returnToApp")}
-            tone="ghost"
-          />
-        </>
-      ),
-      message: t("embed.message.fallback"),
-    },
-  } as const;
-
-  const current = bodyByState[context.state];
-  const tone = toneStyle(theme, current.tone);
-  const isHandoff = context.state === "handoff";
-
-  // canvas PE_Reauth / PE_Unsupported show a status card with failed (x) token
-  // rows alongside the prose. Render the matching detection rows per state.
-  const detectionByState: Partial<
-    Record<EmbedState, { title: string; rows: Array<[string, string]> }>
-  > = {
-    reauth: {
-      title: t("embed.token.connState"),
-      rows: [
-        [t("embed.token.partnerSession"), t("embed.token.partnerSessionValue")],
-        [t("embed.token.handoffToken"), t("embed.token.handoffTokenValue")],
-      ],
-    },
-    unsupported: {
-      title: t("embed.token.detection"),
-      rows: [
-        [t("embed.token.originHost"), t("embed.token.originHostValue")],
-        [
-          t("embed.token.partnerSignature"),
-          t("embed.token.partnerSignatureValue"),
-        ],
-      ],
-    },
-  };
-  const detection = detectionByState[context.state];
-
-  return (
-    <EmbedShell context={context} footer={current.footer}>
-      {/* hero: circular icon tile + title + posture pill (canvas PeHero) */}
       <div
         style={{
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 10,
+          gap: 12,
           padding: "10px 0 2px",
-          textAlign: "center",
         }}
       >
-        <div
-          style={{
-            width: 58,
-            height: 58,
-            borderRadius: 29,
-            background: tone.background,
-            color: tone.color,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <EmbedGlyph name={current.icon} size={28} stroke={2.2} />
+        <BrandMark context={context} size={56} />
+        <div style={{ fontSize: 16.5, fontWeight: 800, textAlign: "center" }}>
+          以 {context.strings.displayName} 身分
+          <br />
+          為您準備叫車
         </div>
-        <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1.25 }}>
-          {current.title}
-        </div>
-        <div
-          style={{
-            ...tone,
-            border: `1px solid ${tone.borderColor}`,
-            borderRadius: 999,
-            padding: "5px 12px",
-            fontSize: 11,
-            fontWeight: 800,
-          }}
-        >
-          {current.badge}
-        </div>
+        <StatusPill tone="success">handoff · 已交接</StatusPill>
       </div>
 
-      {isHandoff ? (
-        <Card
-          title={t("embed.card.handoffSummary")}
-          subtitle={t("embed.card.handoffSubtitle")}
-        >
-          {handoffRows.map(([label, value]) => (
-            <TokenRow
-              key={label}
-              ok
-              theme={theme}
-              label={label}
-              value={value}
-            />
-          ))}
-          <TokenRow
-            theme={theme}
-            ok
-            label={t("embed.field.passengerId")}
-            value={context.session?.drtsPassengerId || t("common.none")}
-          />
-        </Card>
-      ) : null}
+      <Card title="身分由社區 App 帶入" sub="signed hand-off token">
+        <TokenRow label="社區簽章有效" code="partner_signature" value="valid" ok />
+        <TokenRow label="住戶身分已解析" code="resident_resolved" value={embedResident.name} ok />
+        <TokenRow label="社區 / 戶別" code="community_unit" value={embedResident.unit} ok />
+        <Row label="參照" value={embedResident.ref} mono last />
+      </Card>
 
-      <EmbedBanner
-        theme={theme}
-        tone={current.banner.tone}
-        icon={current.banner.icon}
-      >
-        {current.message}
-      </EmbedBanner>
-
-      {detection ? (
-        <Card title={detection.title}>
-          {detection.rows.map(([label, value]) => (
-            <TokenRow
-              key={label}
-              ok={false}
-              theme={theme}
-              label={label}
-              value={value}
-            />
-          ))}
-        </Card>
-      ) : null}
-    </EmbedShell>
+      <Banner tone="primary" icon="bolt">
+        免再登入，由 <b>{context.strings.appName}</b> 安全帶入身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+      </Banner>
+    </Shell>
   );
 }
 
-function TokenRow({
-  theme,
-  ok,
-  label,
-  value,
-}: {
-  theme: ReturnType<typeof buildEmbedTheme>;
-  ok: boolean;
-  label: string;
-  value: string;
-}) {
+function ReauthView({ context }: { context: EmbedContext }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        fontSize: 13,
-      }}
+    <Shell
+      context={context}
+      badgeTone="warn"
+      footer={
+        <>
+          <ActionButton href={buildHref(context, { state: "handoff" })} tone="primary">
+            回 {context.strings.appName} 重新進入
+          </ActionButton>
+          <ActionButton href={buildHref(context, { state: "reauth" })} tone="ghost" size="sm">
+            稍後再試
+          </ActionButton>
+        </>
+      }
     >
-      <span
+      <Hero icon="clock" tone="warn" title="登入狀態已逾時" posture="reauth_required" />
+      <Card title="連線狀態">
+        <TokenRow label="社區工作階段過期" code="partner_session" value="expired" ok={false} />
+        <TokenRow label="交付權杖逾時" code="handoff_token" value="stale" ok={false} />
+      </Card>
+      <Banner tone="warn" icon="shield">
+        為保護您的住戶帳號，請回到 <b>{context.strings.appName}</b> 重新進入「叫車」。此頁不會要求輸入帳號或密碼。
+      </Banner>
+    </Shell>
+  );
+}
+
+function UnsupportedView({ context }: { context: EmbedContext }) {
+  return (
+    <Shell
+      context={{
+        ...context,
+        entry: { ...context.entry, entryHost: "unknown-host" },
+      }}
+      badgeTone="err"
+      footer={
+        <ActionButton href={buildHref(context, { state: "fallback" })} tone="primary" iconRight="ext">
+          前往獨立叫車網站
+        </ActionButton>
+      }
+    >
+      <Hero icon="ban" tone="danger" title="無法在此環境開啟" posture="unsupported_host · 已封鎖" />
+      <Card title="原因">
+        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+          叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。
+        </div>
+      </Card>
+      <Card title="偵測結果">
+        <TokenRow label="來源宿主未授權" code="origin_host" value="未授權" ok={false} />
+        <TokenRow label="社區簽章" code="partner_signature" value="缺少" ok={false} />
+      </Card>
+    </Shell>
+  );
+}
+
+function ConsentView({ context }: { context: EmbedContext }) {
+  const scopes = [
+    ["建立與管理叫車行程", "為您下單、查詢與取消行程", "trip.manage"],
+    ["使用必要個資", "上下車地址、聯絡電話以完成媒合與聯繫", "pii.trip"],
+    ["行程綁定住戶身分", "讓您重開 App 後仍能找回進行中行程與收據", "identity.bind"],
+  ] as const;
+
+  return (
+    <Shell
+      context={context}
+      badgeTone="live"
+      footer={
+        <>
+          <ActionButton href={buildHref(context, { state: "handoff", screen: "book" })} tone="primary">
+            同意並開始
+          </ActionButton>
+          <ActionButton href={buildHref(context, { state: "fallback" })} tone="ghost" size="sm">
+            暫不使用
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ padding: "6px 0 2px" }}>
+        <div style={{ fontSize: 17, fontWeight: 800 }}>授權使用叫車服務</div>
+        <div style={{ fontSize: 12.5, color: "#6B7689", marginTop: 4 }}>
+          首次使用 · 請確認以下同意範圍 · consent_required
+        </div>
+      </div>
+      <Card>
+        {scopes.map(([title, body, code], index) => (
+          <div
+            key={code}
+            style={{
+              display: "flex",
+              gap: 11,
+              padding: "11px 0",
+              borderBottom: index < scopes.length - 1 ? "1px solid #EEF1F7" : "none",
+            }}
+          >
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 5,
+                background: "var(--embed-brand)",
+                color: "#FFFFFF",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                marginTop: 1,
+              }}
+            >
+              <Icon name="check" size={12} stroke={3} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{title}</span>
+                <span style={{ fontSize: 9.5, color: "#9AA3B4", fontFamily: MONO }}>
+                  {code}
+                </span>
+              </div>
+              <div style={{ marginTop: 2, fontSize: 11.5, color: "#6B7689", lineHeight: 1.45 }}>
+                {body}
+              </div>
+            </div>
+          </div>
+        ))}
+      </Card>
+      <Banner tone="primary" icon="lock">
+        由 智慧運輸科技 DRTS 提供接送，個資僅用於完成本次行程，可於社區 App 設定撤回授權。
+      </Banner>
+    </Shell>
+  );
+}
+
+function FallbackView({ context }: { context: EmbedContext }) {
+  return (
+    <Shell
+      context={context}
+      badgeTone="neutral"
+      footer={
+        <>
+          <ActionButton href={buildHref(context, { state: "fallback" })} tone="primary" iconRight="ext">
+            前往獨立叫車網站
+          </ActionButton>
+          <ActionButton href={buildHref(context, { state: "handoff" })} tone="ghost" size="sm">
+            回社區 App
+          </ActionButton>
+        </>
+      }
+    >
+      <Hero icon="ext" tone="neutral" title="內嵌服務暫時無法使用" posture="fallback_to_web · 改用網站" />
+      <Card title="接下來">
+        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+          目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+        </div>
+      </Card>
+      <Card>
+        <Row label="獨立網站" value="ride.drts.com.tw" mono />
+        <Row label="驗證方式" value="手機簡訊 OTP" />
+        <Row label="行程資料" value="重開後仍可找回" last />
+      </Card>
+    </Shell>
+  );
+}
+
+function BookView({ context }: { context: EmbedContext }) {
+  const tripHref = buildHref(context, { state: "handoff", screen: "trip" });
+  return (
+    <Shell
+      context={context}
+      badgeTone="live"
+      footer={
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+            <span style={{ color: "#6B7689" }}>預估車資</span>
+            <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 16 }}>約 NT$ 290</span>
+          </div>
+          <ActionButton href={tripHref} tone="primary" iconRight="car">
+            確認叫車
+          </ActionButton>
+        </>
+      }
+    >
+      <div
         style={{
-          width: 19,
-          height: 19,
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          padding: "10px 12px",
+          background: "#FFFFFF",
+          border: "1px solid #E5E9F1",
+          borderRadius: 12,
+        }}
+      >
+        <BrandMark context={context} size={34} />
+        <div style={{ flex: 1, lineHeight: 1.25 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+            {embedResident.name} · {embedResident.unit}
+          </div>
+          <div style={{ fontSize: 11, color: "#6B7689" }}>
+            {context.strings.displayName}
+          </div>
+        </div>
+        <StatusPill tone="success">已驗證</StatusPill>
+      </div>
+
+      <Card title="行程" sub="上車 · 下車 · 時間">
+        <div style={{ display: "grid", gap: 10 }}>
+          <SurfaceField label="上車地點" value="御和雲峰 A 棟 1F 大廳" icon="pin" />
+          <SurfaceField label="下車地點" value="台北榮民總醫院 · 門診大樓" icon="pin" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <SurfaceField label="用車時間" value="現在出發" icon="clock" />
+            <SurfaceField label="乘客人數" value="1 人" icon="user" />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 11 }}>
+          {embedSavedPlaces.map((place) => (
+            <span
+              key={place}
+              style={{
+                fontSize: 11.5,
+                color: "#6B7689",
+                background: "#F7F9FC",
+                border: "1px solid #E5E9F1",
+                padding: "4px 9px",
+                borderRadius: 999,
+              }}
+            >
+              {{
+                lobby: "社區大廳",
+                station: "台北車站",
+                hospital: "榮總醫院",
+              }[place]}
+            </span>
+          ))}
+        </div>
+      </Card>
+
+      <Card title="車種" sub="owned mobility">
+        <div style={{ display: "grid", gap: 8 }}>
+          {embedVehicles.map((vehicle, index) => {
+            const selected = index === 1;
+            const meta = {
+              standard: { name: "標準車", note: "1-4 人" },
+              comfort: { name: "舒適車", note: "1-4 人 · 大空間" },
+              xl: { name: "六人座", note: "5-6 人 · 行李多" },
+            }[vehicle.id];
+            return (
+              <div
+                key={vehicle.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 11,
+                  padding: "10px 12px",
+                  borderRadius: 11,
+                  border: selected ? "1px solid var(--embed-brand)" : "1px solid #E5E9F1",
+                  background: selected ? "var(--embed-brand-soft)" : "#FFFFFF",
+                }}
+              >
+                <span style={{ color: selected ? "var(--embed-brand)" : "#6B7689" }}>
+                  <Icon name="car" size={20} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{meta.name}</div>
+                  <div style={{ fontSize: 11, color: "#6B7689" }}>{meta.note}</div>
+                </div>
+                {selected ? (
+                  <span style={{ color: "var(--embed-brand)" }}>
+                    <Icon name="check" size={17} />
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </Shell>
+  );
+}
+
+function ActiveView({ context }: { context: EmbedContext }) {
+  return (
+    <Shell
+      context={context}
+      badgeTone="live"
+      footer={
+        <>
+          <ActionButton href={toPhoneHref(context.strings.supportPhone)} tone="default" icon="phone">
+            聯絡司機
+          </ActionButton>
+          <ActionButton href={buildHref(context, { state: "handoff", screen: "cancelled" })} tone="danger" size="sm">
+            取消行程 · 剩 {embedTrip.cancelWindowMin} 分鐘可免費取消
+          </ActionButton>
+        </>
+      }
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 11px",
+          background: "var(--embed-brand-soft)",
+          border: "1px solid var(--embed-brand-border)",
           borderRadius: 10,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: ok ? theme.successBg : theme.dangerBg,
-          color: ok ? theme.successFg : theme.dangerFg,
         }}
       >
-        <EmbedGlyph name={ok ? "check" : "x"} size={11} stroke={3} />
-      </span>
-      <span style={{ flex: 1 }}>{label}</span>
-      <strong style={{ fontFamily: EMBED_MONO, fontSize: 12 }}>{value}</strong>
-    </div>
-  );
-}
-
-type TripFallbackScreen = keyof typeof embedTripFallbackStates;
-
-function isTripFallbackScreen(screen: string): screen is TripFallbackScreen {
-  return Object.prototype.hasOwnProperty.call(embedTripFallbackStates, screen);
-}
-
-function toPassengerMessageKey(code: string, slot: "title" | "body") {
-  return `${code}.${slot}`;
-}
-
-function toPhoneHref(phone: string) {
-  const normalized = phone.replace(/[^\d+]/g, "");
-  return `tel:${normalized || phone}`;
-}
-
-function FlowNav({ context }: { context: EmbedContext }) {
-  const { t } = useTranslation();
-  const screens: Array<[string, string]> = [
-    ["book", t("embed.nav.book")],
-    ["trip", t("embed.nav.trip")],
-    ["trips", t("embed.nav.trips")],
-    ["receipt", t("embed.nav.receipt")],
-    ["completed", t("embed.nav.completed")],
-    ["cancelled", t("embed.nav.cancelled")],
-  ];
-  const fallbackScreens = EMBED_TRIP_FALLBACK_SCREENS.map((screen) => [
-    screen,
-    t(`embed.nav.${screen}`),
-  ]) as Array<[string, string]>;
-  const showFallbackNav =
-    context.screen === "trip" || isTripFallbackScreen(context.screen);
-
-  const renderChip = ([screen, label]: [string, string]) => (
-    <Link
-      key={screen}
-      href={buildHref(context, { state: "handoff", screen })}
-      style={{
-        borderRadius: 999,
-        padding: "6px 10px",
-        fontSize: 11,
-        fontWeight: 700,
-        border:
-          "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
-        background:
-          context.screen === screen ? "var(--embed-accent-soft)" : "white",
-      }}
-    >
-      {label}
-    </Link>
-  );
-
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {screens.map(renderChip)}
+        <span style={{ color: "var(--embed-brand)", display: "flex" }}>
+          <Icon name="shield" size={14} />
+        </span>
+        <span style={{ fontSize: 11.5, color: "#43506B", lineHeight: 1.4 }}>
+          此行程已綁定您的身分 · <b>重開 App 仍可找回</b>
+        </span>
       </div>
-      {showFallbackNav ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {fallbackScreens.map(renderChip)}
+
+      <Card accent="var(--embed-brand)">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <StatusPill tone="info">前往上車</StatusPill>
+          <span style={{ fontSize: 11, color: "#9AA3B4", fontFamily: MONO }}>
+            {embedTrip.id}
+          </span>
         </div>
-      ) : null}
-    </div>
-  );
-}
-
-// circular tone-coloured icon tile + title + optional posture pill (canvas PeHero)
-function StateHero({
-  theme,
-  tone,
-  icon,
-  title,
-  posture,
-}: {
-  theme: ReturnType<typeof buildEmbedTheme>;
-  tone: string;
-  icon: string;
-  title: string;
-  posture?: string;
-}) {
-  const t = toneStyle(theme, tone);
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 9,
-        padding: "10px 0 2px",
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          width: 58,
-          height: 58,
-          borderRadius: 29,
-          background: t.background,
-          color: t.color,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <EmbedGlyph name={icon} size={28} stroke={2.2} />
-      </div>
-      <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.25 }}>
-        {title}
-      </div>
-      {posture ? (
         <div
           style={{
-            ...t,
-            border: `1px solid ${t.borderColor}`,
-            borderRadius: 999,
-            padding: "4px 11px",
-            fontSize: 11,
-            fontWeight: 800,
+            display: "grid",
+            gridTemplateColumns: "1fr auto",
+            gap: 14,
+            alignItems: "center",
           }}
         >
-          {posture}
+          <div>
+            <div style={{ fontSize: 12.5, color: "#6B7689" }}>預計上車 · ETA</div>
+            <div style={{ fontSize: 11, color: "#9AA3B4", marginTop: 2 }}>估計值，非保證</div>
+          </div>
+          <div
+            style={{
+              textAlign: "center",
+              background: "var(--embed-brand-soft)",
+              border: "1px solid var(--embed-brand-border)",
+              borderRadius: 12,
+              padding: "8px 16px",
+            }}
+          >
+            <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, color: "var(--embed-brand)", fontFamily: MONO }}>
+              {embedTrip.etaMin}
+            </div>
+            <div style={{ fontSize: 10, color: "#6B7689", marginTop: 3 }}>分鐘</div>
+          </div>
         </div>
-      ) : null}
-    </div>
+        <div style={{ marginTop: 14 }}>
+          <Row label="上車" value="御和雲峰 A 棟 1F 大廳" />
+          <Row label="下車" value="台北榮民總醫院 · 門診大樓" />
+          <Row label="司機" value={embedTrip.driver} />
+          <Row label="車輛" value={`舒適車 · ${embedTrip.plate}`} last />
+        </div>
+      </Card>
+    </Shell>
   );
 }
 
-const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
-  denied: { tone: "danger", icon: "ban" },
-  ineligible: { tone: "warn", icon: "ban" },
-  nosupply: { tone: "warn", icon: "clock" },
-  degraded: { tone: "warn", icon: "info" },
-};
-
-function PassengerMessageSlot({
-  code,
-  body,
-}: {
-  code: string;
-  body: string;
-}) {
-  const { t } = useTranslation();
+function TripsView({ context }: { context: EmbedContext }) {
+  const labels = {
+    inProgress: { text: "進行中", tone: "info" as const },
+    completed: { text: "已完成", tone: "success" as const },
+    cancelled: { text: "已取消", tone: "neutral" as const },
+  };
   return (
-    <div
-      style={{
-        position: "relative",
-        padding: "12px 14px",
-        borderRadius: 14,
-        background:
-          "color-mix(in srgb, var(--embed-neutral-fg) 4%, var(--embed-neutral-bg))",
-        border:
-          "1px dashed color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          top: -8,
-          left: 12,
-          fontSize: 9.5,
-          fontFamily: EMBED_MONO,
-          fontWeight: 700,
-          color: "var(--embed-neutral-fg)",
-          background: "white",
-          padding: "0 6px",
-          borderRadius: 4,
-        }}
-      >
-        {t("embed.field.messageCodeLabel")} · {code}
-      </div>
-      <div style={{ fontSize: 13, lineHeight: 1.6, marginTop: 2 }}>{body}</div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          marginTop: 8,
-          fontSize: 10.5,
-          color: "var(--embed-neutral-fg)",
-        }}
-      >
-        <EmbedGlyph name="info" size={11} />
-        <span>{t("embed.field.messageCodeHint")}</span>
-      </div>
-    </div>
+    <Shell context={context} badgeTone="live">
+      <Card title="歷史行程" sub="持久身分 · reopen safe">
+        <div style={{ display: "grid", gap: 12 }}>
+          {embedTripHistory.map((trip) => (
+            <div
+              key={trip.id}
+              style={{
+                border: "1px solid #E5E9F1",
+                borderRadius: 14,
+                padding: 13,
+                background: "#FFFFFF",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{trip.id}</div>
+                  <div style={{ fontSize: 11, color: "#6B7689", marginTop: 2 }}>{trip.date}</div>
+                </div>
+                <StatusPill tone={labels[trip.status].tone}>{labels[trip.status].text}</StatusPill>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <Row label="路線" value={`${trip.from === "lobby" ? "社區大廳" : "台北車站"} → ${trip.to === "hospital" ? "台北榮總" : trip.to === "station" ? "台北車站" : "社區大廳"}`} />
+                <Row label="車資" value={trip.fare} mono last />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </Shell>
   );
 }
 
-function FallbackProgressRail({
+function ReceiptView({ context }: { context: EmbedContext }) {
+  return (
+    <Shell context={context} badgeTone="live">
+      <Card title="收據" sub="PII 遮罩">
+        <Row label="行程編號" value={embedReceipt.id} mono />
+        <Row label="完成時間" value={embedReceipt.completedAt} mono />
+        <Row label="乘客" value={embedReceipt.passenger} />
+        <Row label="聯絡" value={embedReceipt.maskedPhone} mono />
+        <Row label="司機" value={embedReceipt.driver} />
+        <Row label="車輛" value={embedReceipt.plate} mono />
+        <Row label="付款" value="社區月結 · 綁定住戶帳號" />
+        <Row label="合計" value={embedReceipt.total} strong mono last />
+      </Card>
+    </Shell>
+  );
+}
+
+function OutcomeView({
+  context,
+  kind,
+}: {
+  context: EmbedContext;
+  kind: "completed" | "cancelled";
+}) {
+  const completed = kind === "completed";
+  return (
+    <Shell
+      context={context}
+      badgeTone={completed ? "live" : "warn"}
+      footer={
+        completed ? (
+          <>
+            <ActionButton href={buildHref(context, { state: "handoff", screen: "receipt" })} tone="primary">
+              查看收據
+            </ActionButton>
+            <ActionButton href={buildHref(context, { state: "handoff", screen: "trips" })} tone="ghost" size="sm">
+              查看歷史行程
+            </ActionButton>
+          </>
+        ) : (
+          <ActionButton href={buildHref(context, { state: "handoff", screen: "book" })} tone="primary">
+            重新叫車
+          </ActionButton>
+        )
+      }
+    >
+      <Hero
+        icon={completed ? "check" : "x"}
+        tone={completed ? "success" : "warn"}
+        title={completed ? "行程已完成，歡迎再次使用" : "此行程已取消"}
+        posture={completed ? "completed" : "cancelled"}
+      />
+      <Card>
+        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+          {completed
+            ? "本次行程已順利結束，可直接前往收據或歷史行程。"
+            : "取消結果與來源脈絡都會被保留，不會遺失既有 handoff 身分。"}
+        </div>
+      </Card>
+    </Shell>
+  );
+}
+
+function NegativeView({
+  context,
+  kind,
+}: {
+  context: EmbedContext;
+  kind: NegativeKind;
+}) {
+  const meta = NEGATIVE_META[kind];
+  return (
+    <Shell
+      context={context}
+      badgeTone={meta.tone === "danger" ? "err" : "warn"}
+      footer={
+        <>
+          <ActionButton href={buildHref(context, { state: "handoff", screen: "book" })} tone="primary">
+            {meta.primary}
+          </ActionButton>
+          <ActionButton
+            href={kind === "denied" ? toPhoneHref(context.strings.supportPhone) : buildHref(context, { state: "handoff", screen: "book" })}
+            tone="ghost"
+            size="sm"
+          >
+            {meta.secondary}
+          </ActionButton>
+        </>
+      }
+    >
+      <Hero icon={meta.icon} tone={meta.tone} title={meta.title} posture={meta.posture} />
+      <Card>
+        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.65 }}>
+          {meta.body}
+        </div>
+      </Card>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 7, fontSize: 11.5, color: "#6B7689" }}>
+        <Icon name="phone" size={13} />
+        社區叫車客服 {context.strings.supportPhone}
+      </div>
+    </Shell>
+  );
+}
+
+function ProgressRail({
   stage,
 }: {
-  stage: (typeof EMBED_TRIP_FALLBACK_PROGRESS)[number];
+  stage: EmbedTripFallbackProgressStage;
 }) {
-  const { t } = useTranslation();
-  const currentIndex = EMBED_TRIP_FALLBACK_PROGRESS.indexOf(stage);
+  const labels = EMBED_TRIP_FALLBACK_PROGRESS.map((item) => ({
+    key: item,
+    label:
+      item === "vehicle_change_in_progress"
+        ? "重新安排車輛"
+        : item === "human_fallback_assigned"
+          ? "新車已指派"
+          : "行程繼續",
+  }));
+  const activeIndex = labels.findIndex((item) => item.key === stage);
 
   return (
     <div style={{ display: "flex", alignItems: "flex-start" }}>
-      {EMBED_TRIP_FALLBACK_PROGRESS.map((item, index) => {
-        const done = index <= currentIndex;
+      {labels.map((item, index) => {
+        const done = index <= activeIndex;
         return (
           <div
-            key={item}
+            key={item.key}
             style={{
               flex: 1,
               display: "flex",
@@ -979,18 +1331,15 @@ function FallbackProgressRail({
               position: "relative",
             }}
           >
-            {index < EMBED_TRIP_FALLBACK_PROGRESS.length - 1 ? (
+            {index < labels.length - 1 ? (
               <span
                 style={{
                   position: "absolute",
-                  top: 11,
+                  top: 12,
                   left: "50%",
                   right: "-50%",
                   height: 2,
-                  background:
-                    index < currentIndex
-                      ? "var(--embed-accent)"
-                      : "color-mix(in srgb, var(--embed-neutral-fg) 16%, transparent)",
+                  background: index < activeIndex ? "var(--embed-brand)" : "#E5E9F1",
                 }}
               />
             ) : null}
@@ -1000,39 +1349,28 @@ function FallbackProgressRail({
                 height: 24,
                 borderRadius: 12,
                 zIndex: 1,
-                background: done ? "var(--embed-accent)" : "white",
-                border: `2px solid ${
-                  done
-                    ? "var(--embed-accent)"
-                    : "color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)"
-                }`,
-                color: done ? "white" : "var(--embed-neutral-fg)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                background: done ? "var(--embed-brand)" : "#FFFFFF",
+                border: `2px solid ${done ? "var(--embed-brand)" : "#E5E9F1"}`,
+                color: done ? "#FFFFFF" : "#98A2B3",
                 fontSize: 11,
                 fontWeight: 700,
               }}
             >
-              {done ? (
-                <EmbedGlyph name="check" size={12} stroke={3} />
-              ) : (
-                index + 1
-              )}
+              {done ? <Icon name="check" size={12} stroke={3} /> : index + 1}
             </span>
             <span
               style={{
-                fontSize: 10.5,
-                fontWeight: index === currentIndex ? 800 : 600,
-                color:
-                  index === currentIndex
-                    ? "var(--embed-neutral-fg)"
-                    : "color-mix(in srgb, var(--embed-neutral-fg) 88%, transparent)",
                 textAlign: "center",
-                lineHeight: 1.3,
+                fontSize: 10.5,
+                lineHeight: 1.25,
+                fontWeight: index === activeIndex ? 700 : 500,
+                color: index === activeIndex ? "#19223A" : "#6B7689",
               }}
             >
-              {t(`embed.avFallback.stage.${item}`)}
+              {item.label}
             </span>
           </div>
         );
@@ -1041,535 +1379,278 @@ function FallbackProgressRail({
   );
 }
 
-function TripFallbackStateView({
+function MessageSlot({
+  titleCode,
+  bodyCode,
+  titleSample,
+  bodySample,
+}: {
+  titleCode: string;
+  bodyCode: string;
+  titleSample: string;
+  bodySample: string;
+}) {
+  return (
+    <>
+      <div style={{ marginTop: -2, display: "flex", justifyContent: "center" }}>
+        <span
+          style={{
+            fontSize: 9.5,
+            color: "#98A2B3",
+            fontFamily: MONO,
+            background: "#F7F9FC",
+            padding: "2px 8px",
+            borderRadius: 999,
+            border: "1px dashed #D0D5DD",
+          }}
+        >
+          title ← {titleCode}
+        </span>
+      </div>
+      <div
+        style={{
+          position: "relative",
+          padding: "11px 13px",
+          borderRadius: 10,
+          background: "#F7F9FC",
+          border: "1px dashed #D0D5DD",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: -8,
+            left: 10,
+            fontSize: 9,
+            fontFamily: MONO,
+            fontWeight: 600,
+            color: "#6B7689",
+            background: "#FFFFFF",
+            padding: "0 5px",
+            borderRadius: 4,
+          }}
+        >
+          messageCode · {bodyCode}
+        </div>
+        <div style={{ fontSize: 13, color: "#43506B", lineHeight: 1.55, marginTop: 2 }}>
+          {bodySample}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#98A2B3", marginTop: 6 }}>
+          <Icon name="info" size={11} />
+          文案由後端 messageCode 渲染 · 此為示意
+        </div>
+      </div>
+      <div style={{ display: "none" }}>{titleSample}</div>
+    </>
+  );
+}
+
+function TripFallbackView({
   context,
   screen,
 }: {
   context: EmbedContext;
-  screen: TripFallbackScreen;
+  screen: EmbedTripFallbackScreen;
 }) {
-  const { t } = useTranslation();
-  const theme = buildEmbedTheme(context.accent);
   const fallback = embedTripFallbackStates[screen];
-  const titleCode = toPassengerMessageKey(
-    fallback.passengerMessageCode,
-    "title",
-  );
-  const bodyCode = toPassengerMessageKey(fallback.passengerMessageCode, "body");
+  const titleKey = `${fallback.passengerMessageCode}.title`;
+  const bodyKey = `${fallback.passengerMessageCode}.body`;
+  const { t } = useTranslation();
 
-  const footer = (() => {
-    switch (screen) {
-      case "vehicle_change_in_progress":
-        return (
-          <ActionLink
-            href={toPhoneHref(context.strings.supportPhone)}
-            label={t("embed.field.contactSupport")}
-            tone="default"
-          />
-        );
-      case "human_fallback_assigned":
-        return (
-          <>
-            <ActionLink
-              href={buildHref(context, { screen: "trip" })}
-              label={t("embed.field.viewTrip")}
-            />
-            <ActionLink
-              href={toPhoneHref(context.strings.supportPhone)}
-              label={t("embed.field.contactDriver")}
-              tone="default"
-            />
-          </>
-        );
-      case "service_continuing":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "trip" })}
-            label={t("embed.field.trackTrip")}
-          />
-        );
-      default:
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "trip" })}
-            label={t("embed.field.viewTrip")}
-          />
-        );
-    }
-  })();
+  const footer =
+    screen === "vehicle_change_in_progress" ? (
+      <ActionButton href={toPhoneHref(context.strings.supportPhone)} tone="default" icon="phone">
+        聯絡客服
+      </ActionButton>
+    ) : screen === "human_fallback_assigned" ? (
+      <>
+        <ActionButton href={buildHref(context, { state: "handoff", screen: "trip" })} tone="primary" icon="car">
+          查看行程
+        </ActionButton>
+        <ActionButton href={toPhoneHref(context.strings.supportPhone)} tone="default" size="sm" icon="phone">
+          聯絡司機
+        </ActionButton>
+      </>
+    ) : screen === "service_continuing" ? (
+      <ActionButton href={buildHref(context, { state: "handoff", screen: "trip" })} tone="primary" icon="car">
+        追蹤行程
+      </ActionButton>
+    ) : (
+      <ActionButton href={buildHref(context, { state: "handoff", screen: "trip" })} tone="primary" icon="car">
+        查看行程
+      </ActionButton>
+    );
 
   return (
-    <EmbedShell context={context} footer={footer}>
-      <FlowNav context={context} />
-      <StateHero
-        theme={theme}
-        tone={fallback.tone}
+    <Shell
+      context={context}
+      badgeTone={fallback.tone === "success" ? "live" : "warn"}
+      footer={footer}
+    >
+      <Hero
         icon={fallback.icon}
-        title={t(titleCode)}
+        tone={fallback.tone === "success" ? "success" : "warn"}
+        title={t(titleKey)}
       />
-      <div style={{ display: "flex", justifyContent: "center", marginTop: -4 }}>
-        <span
-          style={{
-            fontSize: 9.5,
-            fontFamily: EMBED_MONO,
-            color: "var(--embed-neutral-fg)",
-            background:
-              "color-mix(in srgb, var(--embed-neutral-fg) 4%, var(--embed-neutral-bg))",
-            border:
-              "1px dashed color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
-            padding: "3px 9px",
-            borderRadius: 999,
-          }}
-        >
-          {t("embed.field.titleCodeLabel")} ← {titleCode}
-        </span>
-      </div>
+      <MessageSlot
+        titleCode={titleKey}
+        bodyCode={bodyKey}
+        titleSample={t(titleKey)}
+        bodySample={t(bodyKey)}
+      />
 
       {fallback.progressStage ? (
         <Card>
-          <FallbackProgressRail stage={fallback.progressStage} />
+          <ProgressRail stage={fallback.progressStage} />
         </Card>
       ) : null}
 
-      {fallback.etaMin !== null ? (
-        <Card>
+      {fallback.etaMin != null ? (
+        <Card accent="var(--embed-brand)">
           <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
             <div
               style={{
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                background: "var(--embed-accent-soft)",
-                color: "var(--embed-accent)",
+                background: "var(--embed-brand-soft)",
+                color: "var(--embed-brand)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <EmbedGlyph name="car" size={22} />
+              <Icon name="car" size={22} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700 }}>
-                {t("embed.field.etaEstimate")}
-              </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--embed-neutral-fg)",
-                }}
-              >
-                {t("embed.field.etaEstimateNote")}
-              </div>
+              <div style={{ fontSize: 12.5, color: "#6B7689" }}>預計上車 · ETA</div>
+              <div style={{ fontSize: 11, color: "#98A2B3" }}>估計值，非保證</div>
             </div>
             <div
               style={{
                 textAlign: "center",
-                background: "var(--embed-accent-soft)",
-                border:
-                  "1px solid color-mix(in srgb, var(--embed-accent) 30%, transparent)",
+                background: "var(--embed-brand-soft)",
+                border: "1px solid var(--embed-brand-border)",
                 borderRadius: 12,
                 padding: "8px 16px",
               }}
             >
-              <div
-                style={{
-                  fontSize: 26,
-                  fontWeight: 900,
-                  fontFamily: EMBED_MONO,
-                  color: "var(--embed-accent)",
-                  lineHeight: 1,
-                }}
-              >
+              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: MONO, color: "var(--embed-brand)", lineHeight: 1 }}>
                 {fallback.etaMin}
               </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--embed-neutral-fg)",
-                  marginTop: 3,
-                }}
-              >
-                {t("embed.field.minuteUnit")}
-              </div>
+              <div style={{ fontSize: 10, color: "#6B7689", marginTop: 3 }}>分鐘</div>
             </div>
           </div>
         </Card>
       ) : null}
 
-      <PassengerMessageSlot code={bodyCode} body={t(bodyCode)} />
-
       <Card>
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>{t("embed.field.tripId")}</span>
-            <strong style={{ fontFamily: EMBED_MONO }}>{embedTrip.id}</strong>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>{t("embed.field.destination")}</span>
-            <strong>{t("embed.book.dropoff")}</strong>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>{t("embed.field.fareLocked")}</span>
-            <strong>{t("embed.field.fareLockedValue")}</strong>
-          </div>
-        </div>
+        <Row label="行程編號" value={embedTrip.id} mono />
+        <Row label="目的地" value="台北榮民總醫院" />
+        <Row label="費用" value="維持原價 · 無額外收費" last />
       </Card>
-
-      <EmbedBanner theme={theme} tone="success" icon="check">
-        {t("embed.field.sameBooking")} · {t("embed.field.sameBookingNote")}
-      </EmbedBanner>
 
       <div
         style={{
-          textAlign: "center",
-          fontSize: 11,
-          color: "var(--embed-neutral-fg)",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 8,
+          padding: "9px 11px",
+          background: "#ECFDF3",
+          border: "1px solid #ABEFC6",
+          borderRadius: 10,
         }}
       >
-        {t("embed.field.statusReference")}
+        <span style={{ color: "#15803D", marginTop: 1 }}>
+          <Icon name="check" size={14} />
+        </span>
+        <span style={{ fontSize: 11, lineHeight: 1.45, color: "#43506B" }}>
+          同一筆行程繼續 · 不會重新下單，也不會加收費用。
+        </span>
       </div>
-    </EmbedShell>
+
+      <div style={{ fontSize: 10, color: "#98A2B3", textAlign: "center", lineHeight: 1.5 }}>
+        接送由 智慧運輸科技 DRTS 提供 · 服務狀態僅供參考
+      </div>
+    </Shell>
   );
 }
 
-function CompactFlow({ context }: { context: EmbedContext }) {
-  const { t } = useTranslation();
-  const theme = buildEmbedTheme(context.accent);
-
-  const footer = (() => {
-    switch (context.screen) {
-      case "trip":
-        return (
-          <>
-            <ActionLink
-              href={buildHref(context, { screen: "receipt" })}
-              label={t("embed.field.contact")}
-              tone="default"
-            />
-            <ActionLink
-              href={buildHref(context, { screen: "cancelled" })}
-              label={t("embed.field.cancelTrip", {
-                minutes: embedTrip.cancelWindowMin,
-              })}
-              tone="danger"
-            />
-          </>
-        );
-      case "receipt":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "trips" })}
-            label={t("embed.field.viewHistory")}
-          />
-        );
-      case "completed":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "receipt" })}
-            label={t("embed.field.viewReceipt")}
-          />
-        );
-      case "cancelled":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "book" })}
-            label={t("embed.field.rebook")}
-          />
-        );
-      case "nosupply":
-      case "ineligible":
-      case "denied":
-      case "degraded":
-        return (
-          <>
-            <ActionLink
-              href={buildHref(context, { screen: "book" })}
-              label={t("embed.field.backToBook")}
-            />
-            <ActionLink
-              href={buildHref(context, { screen: "trip" })}
-              label={t("embed.field.viewTrip")}
-              tone="ghost"
-            />
-          </>
-        );
-      default:
-        return (
-          <>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 13,
-              }}
-            >
-              <span>{t("common.estimatedFare")}</span>
-              <strong>{t("common.approxNtd", { amount: 290 })}</strong>
-            </div>
-            <ActionLink
-              href={buildHref(context, { screen: "trip" })}
-              label={t("embed.field.confirmRide")}
-            />
-          </>
-        );
-    }
-  })();
-
-  return (
-    <EmbedShell context={context} footer={footer}>
-      <FlowNav context={context} />
-      {context.screen === "book" ? (
-        <>
-          <Card
-            title={t("embed.book.subtitle", {
-              name: embedResident.name,
-              unit: embedResident.unit,
-            })}
-            subtitle={context.strings.displayName}
-          >
-            <div style={{ fontSize: 13, color: "var(--embed-neutral-fg)" }}>
-              {t("embed.book.identity", {
-                id: context.session?.drtsPassengerId || t("common.none"),
-              })}
-            </div>
-          </Card>
-          <Card
-            title={t("embed.card.trip")}
-            subtitle={t("embed.card.tripSubtitle")}
-          >
-            <div>
-              {t("embed.field.pickup")}：{t("embed.book.pickup")}
-            </div>
-            <div>
-              {t("embed.field.dropoff")}：{t("embed.book.dropoff")}
-            </div>
-            <div>
-              {t("embed.field.when")}：{t("embed.book.now")}
-            </div>
-            <div>
-              {t("embed.field.savedPlaces")}：
-              {embedSavedPlaces
-                .map((place) => t(`embed.place.${place}`))
-                .join(" · ")}
-            </div>
-          </Card>
-          <Card
-            title={t("embed.card.vehicles")}
-            subtitle={t("embed.card.vehiclesSubtitle")}
-          >
-            {embedVehicles.map((vehicle) => (
-              <div
-                key={vehicle.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <span>{t(`embed.vehicle.${vehicle.id}.name`)}</span>
-                <span>{t(`embed.vehicle.${vehicle.id}.note`)}</span>
-              </div>
-            ))}
-          </Card>
-          <Card title={t("embed.card.negatives")}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {(["nosupply", "ineligible", "denied", "degraded"] as const).map(
-                (screen) => (
-                  <Link
-                    key={screen}
-                    href={buildHref(context, { screen })}
-                    style={{
-                      borderRadius: 999,
-                      padding: "6px 10px",
-                      border:
-                        "1px solid color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)",
-                    }}
-                  >
-                    {t(`embed.book.negative.${screen}`)}
-                  </Link>
-                ),
-              )}
-            </div>
-          </Card>
-        </>
-      ) : null}
-
-      {context.screen === "trip" ? (
-        <>
-          <Card
-            title={t("trip.snapshot.kicker", { id: embedTrip.id })}
-            subtitle={`${t(`embed.trip.status.${embedTrip.statusCode}`)} · ${embedTrip.statusCode}`}
-          >
-            <div>
-              {t("embed.field.pickup")}：{t("embed.book.pickup")}
-            </div>
-            <div>
-              {t("embed.field.dropoff")}：{t("embed.book.dropoff")}
-            </div>
-            <div>
-              {t("embed.field.eta")}：{embedTrip.etaMin}
-            </div>
-            <div>
-              {t("embed.field.driver")}：{embedTrip.driver} · {embedTrip.plate}
-            </div>
-          </Card>
-          <Card>
-            <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-              {t("embed.trip.bound")}
-            </div>
-          </Card>
-          <Card
-            title={t("embed.card.fallbackStates")}
-            subtitle={t("embed.card.fallbackStatesSubtitle")}
-          >
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {EMBED_TRIP_FALLBACK_SCREENS.map((screen) => (
-                <Link
-                  key={screen}
-                  href={buildHref(context, { screen })}
-                  style={{
-                    borderRadius: 999,
-                    padding: "6px 10px",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    border:
-                      "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
-                    background: "white",
-                  }}
-                >
-                  {t(`embed.nav.${screen}`)}
-                </Link>
-              ))}
-            </div>
-          </Card>
-        </>
-      ) : null}
-
-      {context.screen === "trips" ? (
-        <Card
-          title={t("embed.card.history")}
-          subtitle={t("embed.card.historySubtitle")}
-        >
-          {embedTripHistory.map((trip) => (
-            <div
-              key={trip.id}
-              style={{
-                display: "grid",
-                gap: 2,
-                padding: "8px 0",
-                borderBottom:
-                  "1px solid color-mix(in srgb, var(--embed-neutral-border) 70%, transparent)",
-              }}
-            >
-              <strong>
-                {trip.id} · {t(`embed.history.${trip.status}`)}
-              </strong>
-              <span>
-                {trip.date} · {t(`embed.place.${trip.from}`)} →{" "}
-                {t(`embed.place.${trip.to}`)}
-              </span>
-              <span>{trip.fare}</span>
-            </div>
-          ))}
-        </Card>
-      ) : null}
-
-      {context.screen === "receipt" ? (
-        <Card title={t("embed.card.receipt")} subtitle={embedReceipt.id}>
-          <div>
-            {t("embed.field.completedAt")}：{embedReceipt.completedAt}
-          </div>
-          <div>
-            {t("embed.field.passenger")}：{embedReceipt.passenger} ·{" "}
-            {embedReceipt.maskedPhone}
-          </div>
-          <div>
-            {t("embed.field.route")}：{t("embed.place.station")} →{" "}
-            {t("embed.book.pickup")}
-          </div>
-          <div>
-            {t("embed.field.vehicle")}：{t("embed.vehicle.standard.name")} ·{" "}
-            {embedReceipt.plate}
-          </div>
-          <div>
-            {t("embed.field.payment")}：{t("embed.receipt.pay")}
-          </div>
-          <div style={{ fontWeight: 900 }}>
-            {t("embed.field.total")}：{embedReceipt.total}
-          </div>
-        </Card>
-      ) : null}
-
-      {context.screen === "completed" ? (
-        <>
-          <StateHero
-            theme={theme}
-            tone="success"
-            icon="check"
-            title={t("embed.card.completed")}
-            posture="completed"
-          />
-          <EmbedBanner theme={theme} tone="success" icon="check">
-            {t("embed.completed.body")}
-          </EmbedBanner>
-        </>
-      ) : null}
-
-      {context.screen === "cancelled" ? (
-        <>
-          <StateHero
-            theme={theme}
-            tone="info"
-            icon="x"
-            title={t("embed.card.cancelled")}
-            posture="cancelled"
-          />
-          <EmbedBanner theme={theme} tone="neutral" icon="x">
-            {t("embed.cancelled.body")}
-          </EmbedBanner>
-        </>
-      ) : null}
-
-      {(["nosupply", "ineligible", "denied", "degraded"] as const).includes(
-        context.screen as "nosupply" | "ineligible" | "denied" | "degraded",
-      ) ? (
-        <>
-          <StateHero
-            theme={theme}
-            tone={NEGATIVE_VISUAL[context.screen]?.tone ?? "warn"}
-            icon={NEGATIVE_VISUAL[context.screen]?.icon ?? "info"}
-            title={t("embed.card.negative", { screen: context.screen })}
-            posture={context.screen}
-          />
-          <EmbedBanner
-            theme={theme}
-            tone={NEGATIVE_VISUAL[context.screen]?.tone ?? "warn"}
-            icon={NEGATIVE_VISUAL[context.screen]?.icon ?? "info"}
-          >
-            {t(`embed.negative.${context.screen}`)}
-          </EmbedBanner>
-          <div
-            style={{
-              textAlign: "center",
-              fontSize: 11.5,
-              color: "var(--embed-neutral-fg)",
-            }}
-          >
-            {context.strings.supportPhone}
-          </div>
-        </>
-      ) : null}
-    </EmbedShell>
-  );
+function RideSurface({ context }: { context: EmbedContext }) {
+  switch (context.screen) {
+    case "trip":
+      return <ActiveView context={context} />;
+    case "trips":
+      return <TripsView context={context} />;
+    case "receipt":
+      return <ReceiptView context={context} />;
+    case "completed":
+      return <OutcomeView context={context} kind="completed" />;
+    case "cancelled":
+      return <OutcomeView context={context} kind="cancelled" />;
+    case "nosupply":
+    case "ineligible":
+    case "denied":
+    case "degraded":
+      return <NegativeView context={context} kind={context.screen} />;
+    case "vehicle_change_in_progress":
+    case "human_fallback_assigned":
+    case "service_continuing":
+    case "eta_updated":
+      return <TripFallbackView context={context} screen={context.screen} />;
+    case "book":
+    default:
+      return <BookView context={context} />;
+  }
 }
 
 export function PassengerEmbed({ context }: { context: EmbedContext }) {
-  if (context.state === "handoff") {
-    if (isTripFallbackScreen(context.screen)) {
-      return <TripFallbackStateView context={context} screen={context.screen} />;
-    }
-    return <CompactFlow context={context} />;
+  switch (context.state) {
+    case "reauth":
+      return <ReauthView context={context} />;
+    case "unsupported":
+      return <UnsupportedView context={context} />;
+    case "consent":
+      return <ConsentView context={context} />;
+    case "fallback":
+      return <FallbackView context={context} />;
+    case "handoff":
+      if (context.screen === "book") {
+        return <BookView context={context} />;
+      }
+      if (context.screen === "trip") {
+        return <ActiveView context={context} />;
+      }
+      if (context.screen === "trips") {
+        return <TripsView context={context} />;
+      }
+      if (context.screen === "receipt") {
+        return <ReceiptView context={context} />;
+      }
+      if (context.screen === "completed") {
+        return <OutcomeView context={context} kind="completed" />;
+      }
+      if (context.screen === "cancelled") {
+        return <OutcomeView context={context} kind="cancelled" />;
+      }
+      if (
+        context.screen === "nosupply" ||
+        context.screen === "ineligible" ||
+        context.screen === "denied" ||
+        context.screen === "degraded"
+      ) {
+        return <NegativeView context={context} kind={context.screen} />;
+      }
+      if (
+        context.screen === "vehicle_change_in_progress" ||
+        context.screen === "human_fallback_assigned" ||
+        context.screen === "service_continuing" ||
+        context.screen === "eta_updated"
+      ) {
+        return <TripFallbackView context={context} screen={context.screen} />;
+      }
+      return <HandoffView context={context} />;
+    default:
+      return <RideSurface context={context} />;
   }
-
-  return <IdentityState context={context} />;
 }
