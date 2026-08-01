@@ -209,15 +209,15 @@ export class BootstrapAuthGuard implements CanActivate {
       : baseHeaders;
 
     if (!policy) {
-      const anonymousIdentity = extractBootstrapRequestIdentity(headers, {
-        allowAnonymous: true,
-        method: request.method ?? undefined,
-        requestUrl: requestUrl || undefined,
-      });
-      if (anonymousIdentity) {
-        request.identity = anonymousIdentity;
-      }
-      return true;
+      throw new ApiRequestError(
+        401,
+        "UNCLASSIFIED_ROUTE_DENIED",
+        "Unclassified routes fail closed by global default-deny policy. Route must be classified in auth.policy.ts or decorated with @OpenRoute().",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
     }
 
     const identity = extractBootstrapRequestIdentity(headers, {
