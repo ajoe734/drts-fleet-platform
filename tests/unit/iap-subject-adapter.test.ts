@@ -179,7 +179,7 @@ describe("IAPSubjectAdapter", () => {
     expect(resp?.error?.message).toContain("Unmapped workforce user subject has no valid group membership.");
   });
 
-  it("fails closed when workforce user or membership is inactive/suspended", async () => {
+  it("fails closed when workforce user or membership is inactive/suspended/disabled", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
@@ -195,7 +195,7 @@ describe("IAPSubjectAdapter", () => {
         email: "suspended@platform.drts",
         emailVerified: true,
         displayName: "Suspended User",
-        status: "locked",
+        status: "suspended",
         createdAt: now,
         updatedAt: now,
       },
@@ -207,7 +207,7 @@ describe("IAPSubjectAdapter", () => {
         scopeRef: "platform:control_plane",
         tenantId: null,
         partnerId: null,
-        status: "locked",
+        status: "suspended",
         invitedByPrincipalId: null,
         invitationId: null,
         createdAt: now,
@@ -219,6 +219,70 @@ describe("IAPSubjectAdapter", () => {
     const token = signTestIapToken({
       sub: "suspended_user_sub",
       email: "suspended@platform.drts",
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        {
+          "x-goog-iap-jwt-assertion": token,
+        },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+  });
+
+  it("fails closed when workforce user status is disabled", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_disabled_001",
+        sourceRef: "iap_subject:disabled_user_sub",
+        issuer: "google_iap",
+        subject: "disabled_user_sub",
+        principalType: "human",
+        email: "disabled@platform.drts",
+        emailVerified: true,
+        displayName: "Disabled User",
+        status: "disabled",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_disabled_001",
+        sourceRef: "iap_membership:disabled_user_sub",
+        principalId: "principal_disabled_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [],
+    );
+
+    const token = signTestIapToken({
+      sub: "disabled_user_sub",
+      email: "disabled@platform.drts",
     });
 
     let caught: ApiRequestError | null = null;

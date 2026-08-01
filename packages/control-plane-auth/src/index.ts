@@ -504,10 +504,14 @@ export function issueControlPlaneRequestAuth(options: {
     }
   }
 
-  // Derive authority strictly from verified subject group membership when assertion/groups present
+  // Derive authority strictly from verified subject group membership when assertion/groups present or in strict IAP mode
   let overrideRoles: string[] | undefined = undefined;
 
-  if (verifiedGroups !== null) {
+  if (options.strictIapMode || verifiedGroups !== null) {
+    if (verifiedGroups === null) {
+      throw new Error("Verified IAP subject has no valid workforce group membership.");
+    }
+
     const isPlatformAdmin = verifiedGroups.includes("platform-admins@platform.drts");
     const isOpsUser = verifiedGroups.includes("ops-users@platform.drts");
 

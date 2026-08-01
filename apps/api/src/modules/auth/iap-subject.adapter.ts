@@ -333,7 +333,7 @@ export class IAPSubjectAdapter {
   }
 
   private isInactiveStatus(status: CanonicalAccountStatus): boolean {
-    return status === "locked" || status === "deletion_pending" || status === "deleted";
+    return status !== "active";
   }
 
   private readHeader(headers: HeaderRecord, key: string): string | null {

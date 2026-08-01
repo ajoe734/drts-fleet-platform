@@ -105,6 +105,7 @@ describe("control-plane auth helper", () => {
         sub: "accounts.google.com:10099",
         email: "admin@platform.drts",
         aud: "drts-iap-aud",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
       },
       testSecret,
     );
@@ -122,6 +123,30 @@ describe("control-plane auth helper", () => {
     expect(auth.identity.subject).toBe("accounts.google.com:10099");
     expect(auth.authenticatedUserEmail).toBe("admin@platform.drts");
     expect(auth.identity.actorId).toBe("pa-admin-001");
+  });
+
+  it("rejects assertion without groups claim in strict IAP mode", () => {
+    const testSecret = "iap_test_secret_32bytes_minimum!";
+    const iapTokenNoGroups = signTestIapJwtAssertion(
+      {
+        sub: "accounts.google.com:10099",
+        email: "admin@platform.drts",
+        aud: "drts-iap-aud",
+      },
+      testSecret,
+    );
+
+    expect(() =>
+      issueControlPlaneRequestAuth({
+        actorType: "platform_admin",
+        headers: {
+          "x-goog-iap-jwt-assertion": iapTokenNoGroups,
+        },
+        strictIapMode: true,
+        iapJwtSecretOrPublicKey: testSecret,
+        expectedIapAudience: "drts-iap-aud",
+      }),
+    ).toThrowError("Verified IAP subject has no valid workforce group membership.");
   });
 
   it("rejects assertion when JWT secret is missing and unverified dev mode is disabled", () => {

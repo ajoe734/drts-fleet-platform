@@ -194,7 +194,8 @@ async function forward(
     const isForbidden =
       message.includes("audience mismatch") ||
       message.includes("does not possess") ||
-      message.includes("unmapped");
+      message.includes("unmapped") ||
+      message.includes("no valid workforce group membership");
     const status = isForbidden ? 403 : 401;
     const code = isForbidden
       ? message.includes("audience mismatch")
