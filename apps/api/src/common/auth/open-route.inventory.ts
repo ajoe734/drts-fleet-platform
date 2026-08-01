@@ -160,6 +160,13 @@ function normalizeRoutePath(url: string): string {
   return trimmed.replace(/\/+$/, "");
 }
 
+function candidateMethods(method: string): string[] {
+  const normalizedMethod = method.toUpperCase();
+  return normalizedMethod === "HEAD"
+    ? [normalizedMethod, "GET"]
+    : [normalizedMethod];
+}
+
 function pathToRegExp(path: string) {
   const escaped = path
     .split("/")
@@ -176,11 +183,11 @@ export function resolveOpenRouteInventoryEntry(
   method: string,
   url: string,
 ): OpenRouteInventoryEntry | null {
-  const normalizedMethod = method.toUpperCase();
   const routePath = normalizeRoutePath(url);
+  const methods = candidateMethods(method);
 
   for (const entry of OPEN_ROUTE_INVENTORY) {
-    if (entry.method !== normalizedMethod) {
+    if (!methods.includes(entry.method)) {
       continue;
     }
 

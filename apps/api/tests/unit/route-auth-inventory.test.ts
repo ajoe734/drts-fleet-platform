@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  listControllerFiles,
   readCommittedAuthRouteInventory,
   renderAuthRouteInventoryMarkdown,
   routeSource,
   scanControllerRoutes,
 } from "./route-auth-inventory.helper";
+import { resolveOpenRouteInventoryEntry } from "../../src/common/auth/open-route.inventory";
 
 describe("auth route inventory", () => {
   it("classifies every controller route", () => {
@@ -35,6 +37,20 @@ describe("auth route inventory", () => {
     });
 
     expect(violations).toEqual([]);
+  });
+
+  it("scans every controller file under apps/api/src", () => {
+    const routeFiles = new Set(scanControllerRoutes().map((route) => route.file));
+    expect([...routeFiles].sort((left, right) => left.localeCompare(right))).toEqual(
+      listControllerFiles(),
+    );
+  });
+
+  it("treats HEAD requests as GET for open-route inventory matching", () => {
+    expect(resolveOpenRouteInventoryEntry("HEAD", "/api/health")).toMatchObject({
+      method: "GET",
+      path: "health",
+    });
   });
 
   it("requires explicit rate-limit metadata for every open route", () => {

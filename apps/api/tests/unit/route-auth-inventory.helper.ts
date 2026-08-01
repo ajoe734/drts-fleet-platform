@@ -71,6 +71,14 @@ function walkControllerFiles(dir: string, output: string[]) {
   }
 }
 
+export function listControllerFiles(): string[] {
+  const controllerFiles: string[] = [];
+  walkControllerFiles(API_SRC_ROOT, controllerFiles);
+  return controllerFiles
+    .map((controllerFile) => path.relative(REPO_ROOT, controllerFile))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function stringsFromArg(arg: ts.Expression | undefined): string[] {
   if (!arg) {
     return [""];
@@ -178,13 +186,10 @@ export function routeSource(route: ScannedRoute) {
 }
 
 export function scanControllerRoutes(): ScannedRoute[] {
-  const controllerFiles: string[] = [];
-  walkControllerFiles(path.join(API_SRC_ROOT, "modules"), controllerFiles);
-  walkControllerFiles(path.join(API_SRC_ROOT, "health"), controllerFiles);
-
   const routes: ScannedRoute[] = [];
 
-  for (const controllerFile of controllerFiles) {
+  for (const controllerRelativePath of listControllerFiles()) {
+    const controllerFile = path.join(REPO_ROOT, controllerRelativePath);
     const source = ts.createSourceFile(
       controllerFile,
       fs.readFileSync(controllerFile, "utf8"),
@@ -273,7 +278,7 @@ export function scanControllerRoutes(): ScannedRoute[] {
               method,
               path: routePath || "",
               sampleUrl: `/api/${samplePath}`,
-              file: path.relative(REPO_ROOT, controllerFile),
+              file: controllerRelativePath,
               controllerName: node.name?.text ?? "AnonymousController",
               handlerName: member.name.getText(source),
               open: classOpen || methodOpen,

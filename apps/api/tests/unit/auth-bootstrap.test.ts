@@ -12,6 +12,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { AuthController } from "../../src/modules/auth/auth.controller";
 import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { HealthController } from "../../src/health/health.controller";
 import { IdentityController } from "../../src/modules/identity/identity.controller";
 import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
@@ -909,6 +910,23 @@ describe("bootstrap auth guard", () => {
         },
       });
     }
+  });
+
+  it("allows HEAD requests for canonical open GET routes", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {},
+      method: "HEAD",
+      originalUrl: "/api/health",
+    };
+
+    const context = createExecutionContext(
+      request,
+      HealthController.prototype.getHealth as never,
+      HealthController as never,
+    );
+
+    expect(guard.canActivate(context)).toBe(true);
   });
 
   it("accepts SSE bootstrap identity from query params on ops dispatch streams", () => {
