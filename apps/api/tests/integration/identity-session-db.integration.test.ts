@@ -38,7 +38,7 @@ async function deleteSessionTestData(database: DatabaseService, sessionIds: stri
   }
 }
 
-describe("Identity Session and Refresh Family Postgres Integration", () => {
+describe.runIf(Boolean(DATABASE_URL))("Identity Session and Refresh Family Postgres Integration", () => {
   const databases: DatabaseService[] = [];
   const createdSessionIds = new Set<string>();
   const createdPrincipalIds = new Set<string>();
@@ -68,21 +68,27 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     expect(DATABASE_URL).toBeTruthy();
   });
 
-  it("verifies iam.identity_sessions and iam.identity_refresh_families migration tables exist", async () => {
+  it("verifies iam.identity_sessions, iam.identity_refresh_families, and iam.identity_refresh_tokens migration tables exist", async () => {
     expect(DATABASE_URL).toBeTruthy();
     const db = new DatabaseService();
     databases.push(db);
 
-    const result = await db.query<{ sessions_table: string | null; families_table: string | null }>(
+    const result = await db.query<{
+      sessions_table: string | null;
+      families_table: string | null;
+      tokens_table: string | null;
+    }>(
       `
         SELECT
           to_regclass('iam.identity_sessions')::text AS sessions_table,
-          to_regclass('iam.identity_refresh_families')::text AS families_table
+          to_regclass('iam.identity_refresh_families')::text AS families_table,
+          to_regclass('iam.identity_refresh_tokens')::text AS tokens_table
       `,
     );
 
     expect(result.rows[0]?.sessions_table).toBe("iam.identity_sessions");
     expect(result.rows[0]?.families_table).toBe("iam.identity_refresh_families");
+    expect(result.rows[0]?.tokens_table).toBe("iam.identity_refresh_tokens");
   });
 
   it("persists sessions and hash-only refresh families to PostgreSQL, surviving restart", async () => {

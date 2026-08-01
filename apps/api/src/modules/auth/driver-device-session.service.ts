@@ -346,7 +346,7 @@ export class DriverDeviceSessionService {
     const revokedSession = await this.identityRepo.revokeSession(
       session.sessionId,
       "MANUAL_REVOCATION",
-      identity?.actorId,
+      identity?.actorId ?? undefined,
     );
 
     const revokedAt = revokedSession?.revokedAt ?? new Date().toISOString();
