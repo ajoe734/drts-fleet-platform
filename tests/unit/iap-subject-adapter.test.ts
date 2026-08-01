@@ -428,4 +428,57 @@ describe("IAPSubjectAdapter", () => {
     });
     expect(deniedEvents.some((e) => e.reasonCode === "missing_email_in_strict_mode")).toBe(true);
   });
+
+  it("does NOT allow a different IAP subject with the same email to inherit existing durable membership", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    // First, resolve user A (sub_A)
+    const tokenA = signTestIapToken({
+      sub: "accounts.google.com:sub_A",
+      email: "shared-email@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    const resA = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": tokenA },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+        autoProvision: true,
+      },
+    );
+
+    expect(resA.principal.subject).toBe("accounts.google.com:sub_A");
+
+    // Second, attempt resolve for user B (sub_B) with same email but autoProvision: false
+    const tokenB = signTestIapToken({
+      sub: "accounts.google.com:sub_B",
+      email: "shared-email@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": tokenB },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+          autoProvision: false,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    // Must fail closed because sub_B identity is not provisioned (it cannot inherit sub_A's identity)
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+  });
 });
+

@@ -398,4 +398,45 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.IAP_EXPECTED_AUDIENCE;
     delete process.env.IAP_JWT_SECRET;
   });
+
+  it("verifies AuthController /auth/token allows system realm calls in strict IAP mode without IAP assertion", async () => {
+    process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+    process.env.JWT_SECRET = INTEGRATION_TEST_SECRET;
+    process.env.STRICT_IAP_MODE = "true";
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const jwtAuthService = new JwtAuthService();
+    const tenantPartnerService = new TenantPartnerService(securityEventsService as any);
+    const driverDeviceSessionService = new DriverDeviceSessionService(jwtAuthService, null as any, null as any);
+    const authController = new AuthController(
+      jwtAuthService,
+      tenantPartnerService,
+      driverDeviceSessionService,
+      securityEventsService,
+      adapter,
+    );
+
+    const result = await authController.issueToken({
+      headers: {
+        "x-drts-internal-key": "test_internal_key_123",
+        "x-actor-type": "system",
+        "x-actor-id": "system-service-01",
+        "x-realm": "system",
+      },
+    });
+
+    expect(result.token).toBeTruthy();
+    const payload = jwtAuthService.verify(result.token);
+    expect(payload?.actorType).toBe("system");
+    expect(payload?.realm).toBe("system");
+    expect(payload?.sub).toBe("system-service-01");
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.JWT_SECRET;
+    delete process.env.STRICT_IAP_MODE;
+  });
 });
+

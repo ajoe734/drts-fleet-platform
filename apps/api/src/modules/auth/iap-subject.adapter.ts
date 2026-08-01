@@ -138,15 +138,11 @@ export class IAPSubjectAdapter {
     const normalizedEmail = rawEmail.replace(/.*:/, "").trim().toLowerCase();
     const assertionGroups = payload.gcp_ia_groups || payload.groups || [];
 
-    // Durable identity resolution
+    // Durable identity resolution strictly by immutable subject
     let principal = await this.identityRepository.findPrincipalBySubject(
       "google_iap",
       subject,
     );
-
-    if (!principal) {
-      principal = await this.identityRepository.findPrincipalByEmail(normalizedEmail);
-    }
 
     const now = new Date().toISOString();
 

@@ -129,14 +129,6 @@ export class AuthController {
       return { token, expiresIn };
     }
 
-    if (isStrictIap) {
-      throw new ApiRequestError(
-        401,
-        "IAP_ASSERTION_MISSING",
-        "Verified IAP JWT assertion is required in strict IAP mode.",
-      );
-    }
-
     const identity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
       method: request.method,
@@ -149,6 +141,17 @@ export class AuthController {
         "IDENTITY_REQUIRED",
         "Bootstrap identity headers (x-actor-type, x-actor-id, x-realm) are required.",
         {},
+      );
+    }
+
+    const isSystemRealm =
+      identity.actorType === "system" || identity.realm === "system";
+
+    if (isStrictIap && !isSystemRealm) {
+      throw new ApiRequestError(
+        401,
+        "IAP_ASSERTION_MISSING",
+        "Verified IAP JWT assertion is required in strict IAP mode.",
       );
     }
 
