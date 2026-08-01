@@ -2,7 +2,6 @@ import { Injectable, type NestMiddleware } from "@nestjs/common";
 import { timingSafeEqual } from "node:crypto";
 
 import { ApiRequestError } from "../api-envelope";
-import { extractBootstrapRequestIdentity } from "./auth.extractor";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -22,13 +21,6 @@ const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET tenant/roles",
   "POST auth/tenant/bootstrap-session",
   "POST auth/partner/bootstrap-session",
-]);
-const PUBLIC_BOOTSTRAP_REALMS = new Set([
-  "platform",
-  "tenant",
-  "ops",
-  "driver",
-  "partner",
 ]);
 
 function normalizeHeaderValue(value: HeaderValue): string {
@@ -74,21 +66,6 @@ function isExplicitPublicRequest(
   );
 }
 
-function hasPublicBootstrapRealm(request: RequestLike): boolean {
-  const identity = extractBootstrapRequestIdentity(request.headers ?? {}, {
-    allowAnonymous: false,
-    method: request.method,
-    requestUrl: request.originalUrl ?? request.url,
-  });
-
-  return Boolean(
-    identity &&
-    identity.actorType !== "system" &&
-    identity.actorId &&
-    PUBLIC_BOOTSTRAP_REALMS.has(identity.realm),
-  );
-}
-
 function hasBearerAuthorization(request: RequestLike): boolean {
   const headerValues = [
     normalizeHeaderValue(request.headers?.[AUTHORIZATION_HEADER]),
@@ -109,7 +86,6 @@ export function validateInternalKey(
     isHealthRequest(requestPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, requestPath) ||
-    hasPublicBootstrapRealm(request) ||
     hasBearerAuthorization(request)
   ) {
     return;

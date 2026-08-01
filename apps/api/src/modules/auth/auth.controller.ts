@@ -109,10 +109,7 @@ export class AuthController {
       readHeader("x-drts-service-id") ||
       readHeader("x-workload-proof");
 
-    const testActorType = readHeader("x-actor-type");
-    const testActorId = readHeader("x-actor-id");
-
-    if (!iapEmail && !workloadSubject && !testActorType) {
+    if (!iapEmail && !workloadSubject) {
       throw new ApiRequestError(
         400,
         "IDENTITY_REQUIRED",
@@ -121,7 +118,7 @@ export class AuthController {
       );
     }
 
-    // Check inactive principal
+    // Check inactive principal from header if specified
     const headerStatus = readHeader("x-principal-status");
     if (
       headerStatus === "suspended" ||
@@ -185,62 +182,84 @@ export class AuthController {
 
     if (iapEmail) {
       const normalizedEmail = iapEmail.toLowerCase().trim();
+      const isSuperadmin =
+        normalizedEmail === "admin@platform.drts" ||
+        normalizedEmail.includes("superadmin");
       const isOps =
-        requestedRealm === "ops" ||
-        normalizedEmail.includes("ops") ||
-        normalizedEmail === "ops@platform.drts";
+        normalizedEmail === "ops@platform.drts" ||
+        normalizedEmail.includes("ops");
 
-      const authorizedRealm: AuthRealm = isOps ? "ops" : "platform";
+      if (isSuperadmin) {
+        resolvedIdentity = {
+          actorType: "platform_admin",
+          actorId: "pa-admin-001",
+          realm: "platform",
+          tenantId: null,
+          roleFamilies: ["platform"],
+          roles: ["superadmin"],
+          scopes: [...AUTH_SCOPE_PRESETS.platform_admin],
+          requestId: readHeader("x-request-id"),
+        };
+      } else if (isOps) {
+        resolvedIdentity = {
+          actorType: "ops_user",
+          actorId: "pa-operator-001",
+          realm: "ops",
+          tenantId: null,
+          roleFamilies: ["ops"],
+          roles: ["ops_user"],
+          scopes: [...AUTH_SCOPE_PRESETS.ops_user],
+          requestId: readHeader("x-request-id"),
+        };
+      } else {
+        const tenantUser =
+          typeof this.tenantPartnerService?.findTenantUserByEmail === "function"
+            ? this.tenantPartnerService.findTenantUserByEmail(normalizedEmail)
+            : null;
 
-      if (requestedRealm && requestedRealm !== authorizedRealm) {
+        if (!tenantUser) {
+          throw new ApiRequestError(
+            403,
+            "ACCOUNT_NOT_ACTIVE",
+            "Inactive principals cannot mint tokens.",
+            { email: normalizedEmail },
+          );
+        }
+
+        if (tenantUser.status !== "active") {
+          throw new ApiRequestError(
+            403,
+            "ACCOUNT_NOT_ACTIVE",
+            "Inactive principals cannot mint tokens.",
+            { status: tenantUser.status },
+          );
+        }
+
+        const roles = [tenantUser.roleCode];
+        const scopes = getTenantRoleScopes(tenantUser.roleCode);
+
+        resolvedIdentity = {
+          actorType: "tenant_admin",
+          actorId: tenantUser.userId,
+          realm: "tenant",
+          tenantId: tenantUser.tenantId,
+          roleFamilies: ["tenant"],
+          roles,
+          scopes,
+          requestId: readHeader("x-request-id"),
+        };
+      }
+
+      if (requestedRealm && requestedRealm !== resolvedIdentity.realm) {
         throw new ApiRequestError(
           403,
           "AUTH_REALM_DENIED",
           "Wrong audience issuer or realm is denied.",
-          { requested: requestedRealm, authorized: authorizedRealm },
+          { requested: requestedRealm, authorized: resolvedIdentity.realm },
         );
       }
-
-      if (authorizedRealm === "platform") {
-        const isSuperadmin =
-          normalizedEmail === "admin@platform.drts" ||
-          normalizedEmail.includes("superadmin");
-        const actorId = isSuperadmin
-          ? "pa-admin-001"
-          : `platform-admin-${normalizedEmail.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "user"}`;
-        const roles = isSuperadmin ? ["superadmin"] : ["platform_admin"];
-        const scopes = [...AUTH_SCOPE_PRESETS.platform_admin];
-
-        resolvedIdentity = {
-          actorType: "platform_admin",
-          actorId,
-          realm: "platform",
-          tenantId: null,
-          roleFamilies: ["platform"],
-          roles,
-          scopes,
-          requestId: readHeader("x-request-id"),
-        };
-      } else {
-        const actorId =
-          normalizedEmail === "ops@platform.drts"
-            ? "pa-operator-001"
-            : `ops-user-${normalizedEmail.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "user"}`;
-        const roles = ["ops_user"];
-        const scopes = [...AUTH_SCOPE_PRESETS.ops_user];
-
-        resolvedIdentity = {
-          actorType: "ops_user",
-          actorId,
-          realm: "ops",
-          tenantId: null,
-          roleFamilies: ["ops"],
-          roles,
-          scopes,
-          requestId: readHeader("x-request-id"),
-        };
-      }
-    } else if (workloadSubject) {
+    } else {
+      // Workload proof path
       if (requestedRealm && requestedRealm !== "system") {
         throw new ApiRequestError(
           403,
@@ -252,66 +271,12 @@ export class AuthController {
 
       resolvedIdentity = {
         actorType: "system",
-        actorId: workloadSubject,
+        actorId: workloadSubject!,
         realm: "system",
         tenantId: null,
         roleFamilies: [],
         roles: ["system_service"],
         scopes: [...AUTH_SCOPE_PRESETS.system],
-        requestId: readHeader("x-request-id"),
-      };
-    } else {
-      const actorType: AuthActorType =
-        testActorType === "tenant_admin"
-          ? "tenant_admin"
-          : testActorType === "ops_user"
-            ? "ops_user"
-            : testActorType === "platform_admin"
-              ? "platform_admin"
-              : "system";
-      const realm: AuthRealm =
-        requestedRealm === "platform" ||
-        requestedRealm === "tenant" ||
-        requestedRealm === "ops" ||
-        requestedRealm === "driver" ||
-        requestedRealm === "partner"
-          ? requestedRealm
-          : actorType === "platform_admin"
-            ? "platform"
-            : actorType === "tenant_admin"
-              ? "tenant"
-              : actorType === "ops_user"
-                ? "ops"
-                : "system";
-
-      if (
-        requestedRealm &&
-        requestedRealm !== realm &&
-        requestedRealm !== "system"
-      ) {
-        throw new ApiRequestError(
-          403,
-          "AUTH_REALM_DENIED",
-          "Wrong audience issuer or realm is denied.",
-          { requested: requestedRealm, authorized: realm },
-        );
-      }
-
-      resolvedIdentity = {
-        actorType,
-        actorId: testActorId || "test-principal",
-        realm,
-        tenantId: readHeader("x-tenant-id") || null,
-        roleFamilies:
-          actorType === "platform_admin"
-            ? ["platform"]
-            : actorType === "tenant_admin"
-              ? ["tenant"]
-              : actorType === "ops_user"
-                ? ["ops"]
-                : [],
-        roles: [actorType],
-        scopes: [...AUTH_SCOPE_PRESETS[actorType]],
         requestId: readHeader("x-request-id"),
       };
     }

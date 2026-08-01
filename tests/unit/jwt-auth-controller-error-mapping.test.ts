@@ -49,10 +49,7 @@ describe("JWT controller error mapping", () => {
     try {
       controller.issueToken({
         headers: {
-          "x-actor-type": "tenant_admin",
-          "x-actor-id": "tenant-user-001",
-          "x-realm": "tenant",
-          "x-tenant-id": "tenant-alpha",
+          "x-goog-authenticated-user-email": "admin@platform.drts",
         },
         method: "POST",
         originalUrl: "/api/auth/token",

@@ -212,4 +212,101 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
     expect(validRes.token).toBeDefined();
     expect(validRes.expiresIn).toBe("1h");
   });
+
+  it("6. Direct caller claims (x-actor-type / x-actor-id) without proof cannot mint tokens", () => {
+    let thrown: unknown;
+    try {
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-actor-type": "platform_admin",
+          "x-actor-id": "attacker-001",
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const resp = getErrorResponse(thrown);
+    expect(getHttpStatus(thrown)).toBe(400);
+    expect(resp?.code).toBe("IDENTITY_REQUIRED");
+  });
+
+  it("7. Tenant user durable membership resolution and status check", () => {
+    const mockTenantPartnerService = {
+      findTenantUserByEmail: vi.fn((email: string) => {
+        if (email === "active@tenant.com") {
+          return {
+            userId: "user-active-001",
+            tenantId: "tenant-beta",
+            email: "active@tenant.com",
+            roleCode: "tenant_admin",
+            status: "active",
+          };
+        }
+        if (email === "suspended@tenant.com") {
+          return {
+            userId: "user-suspended-001",
+            tenantId: "tenant-beta",
+            email: "suspended@tenant.com",
+            roleCode: "tenant_admin",
+            status: "suspended",
+          };
+        }
+        return null;
+      }),
+    };
+
+    const tenantController = new AuthController(
+      jwtAuthService,
+      mockTenantPartnerService as never,
+      {} as never,
+    );
+
+    // Active tenant user mints token matching durable membership
+    const activeRes = tenantController.issueToken({
+      headers: {
+        "x-drts-internal-key": "internal-secret",
+        "x-goog-authenticated-user-email": "active@tenant.com",
+      },
+    });
+    expect(activeRes.token).toBeDefined();
+    const payload = jwtAuthService.verify(activeRes.token);
+    expect(payload?.sub).toBe("user-active-001");
+    expect(payload?.realm).toBe("tenant");
+    expect(payload?.tenantId).toBe("tenant-beta");
+
+    // Suspended tenant user is denied
+    let thrownSuspended: unknown;
+    try {
+      tenantController.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-goog-authenticated-user-email": "suspended@tenant.com",
+        },
+      });
+    } catch (error) {
+      thrownSuspended = error;
+    }
+    const respSuspended = getErrorResponse(thrownSuspended);
+    expect(getHttpStatus(thrownSuspended)).toBe(403);
+    expect(respSuspended?.code).toBe("ACCOUNT_NOT_ACTIVE");
+  });
+
+  it("8. Internal key validation fails if x-drts-internal-key is missing even with bootstrap headers", () => {
+    let thrown: unknown;
+    try {
+      controller.issueToken({
+        headers: {
+          "x-goog-authenticated-user-email": "admin@platform.drts",
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const resp = getErrorResponse(thrown);
+    expect(getHttpStatus(thrown)).toBe(401);
+    expect(resp?.code).toBe("INTERNAL_KEY_REQUIRED");
+  });
 });
