@@ -58,14 +58,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   });
 
   describe("2. Tenant OIDC PKCE Callback Happy Path", () => {
-    it("exchanges valid authorization code and PKCE verifier for tenant session", () => {
+    it("exchanges valid authorization code and PKCE verifier for tenant session", async () => {
       const defaultTenantId = tenantPartnerService.getDefaultTenantId();
       const loginParams = oidcService.generateLoginParameters("tenant", {
         redirectUri: "http://localhost:3000/api/auth/callback",
         tenantId: defaultTenantId,
       });
 
-      const session = oidcService.exchangeTenantCallbackSession(
+      const session = await oidcService.exchangeTenantCallbackSession(
         {
           provider: "oidc",
           callbackUrl: "http://localhost:3000/api/auth/callback",
@@ -243,6 +243,42 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         ),
       ).toThrow(ApiRequestError);
     });
+
+    it("fails when OIDC nonce is mismatched", () => {
+      const loginParams = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
+      });
+      expect(() =>
+        oidcService.exchangeTenantCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "code_wrong_nonce",
+            state: loginParams.state,
+            pkceVerifier: loginParams.codeVerifier,
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).toThrow(ApiRequestError);
+    });
+
+    it("fails when OIDC nonce is missing", () => {
+      const loginParams = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
+      });
+      expect(() =>
+        oidcService.exchangeTenantCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "code_missing_nonce",
+            state: loginParams.state,
+            pkceVerifier: loginParams.codeVerifier,
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).toThrow(ApiRequestError);
+    });
   });
 
   describe("4. Membership Status & Bound Principal Enforcement", () => {
@@ -326,12 +362,12 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
     });
   });
 
-  describe("5. Partner OIDC PKCE Flow", () => {
-    it("exchanges valid authorization code for active partner entry session", () => {
+  describe("5. Partner OIDC PKCE Flow & Durable Identity Link Binding", () => {
+    it("exchanges valid authorization code for active partner entry session and binds durable passenger identity", async () => {
       const loginParams = oidcService.generateLoginParameters("partner", {
         partnerId: "yuhe-residence",
       });
-      const session = oidcService.exchangePartnerCallbackSession(
+      const session = await oidcService.exchangePartnerCallbackSession(
         {
           provider: "oidc",
           callbackUrl: "http://localhost:3000/api/auth/callback",
@@ -345,12 +381,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
 
       expect(session.accessToken).toBeDefined();
       expect(session.identity.realm).toBe("partner");
+      expect(session.identity.actorId).toMatch(/^passenger_/);
+      expect(session.identity.subjectId).toBeDefined();
       expect(session.partnerEntry.status).toBe("active");
     });
 
-    it("rejects partner exchange when partner entry is missing or not provided", () => {
+    it("rejects partner exchange when partner entry is missing or not provided", async () => {
       const loginParams = oidcService.generateLoginParameters("partner");
-      expect(() =>
+      await expect(
         oidcService.exchangePartnerCallbackSession(
           {
             provider: "oidc",
@@ -361,14 +399,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("rejects partner login when subject claims lack required MFA proof", () => {
+    it("rejects partner login when subject claims lack required MFA proof", async () => {
       const loginParams = oidcService.generateLoginParameters("partner", {
         partnerId: "yuhe-residence",
       });
-      expect(() =>
+      await expect(
         oidcService.exchangePartnerCallbackSession(
           {
             provider: "oidc",
@@ -380,14 +418,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
 
-    it("rejects partner login for unmapped, invited, or suspended partner human subjects", () => {
+    it("rejects partner login for unmapped, invited, or suspended partner human subjects", async () => {
       const loginParams = oidcService.generateLoginParameters("partner", {
         partnerId: "yuhe-residence",
       });
-      expect(() =>
+      await expect(
         oidcService.exchangePartnerCallbackSession(
           {
             provider: "oidc",
@@ -399,7 +437,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           },
           { stateToken: loginParams.stateToken },
         ),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
   });
 });

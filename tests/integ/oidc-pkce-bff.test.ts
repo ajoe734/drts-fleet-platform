@@ -10,7 +10,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
   const tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
   const oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
 
-  it("completes OIDC PKCE authorization flow with active tenant membership", () => {
+  it("completes OIDC PKCE authorization flow with active tenant membership", async () => {
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
     const defaultTenantId = tenantPartnerService.getDefaultTenantId();
 
@@ -22,7 +22,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
     expect(login.authorizationUrl).toContain("code_challenge_method=S256");
 
     // 2. Client receives code and exchanges it via BFF
-    const session = oidcService.exchangeTenantCallbackSession(
+    const session = await oidcService.exchangeTenantCallbackSession(
       {
         provider: "oidc",
         callbackUrl: "http://localhost:3000/api/auth/callback",
@@ -39,7 +39,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
     expect(session.profile.roleCode).toBeDefined();
   });
 
-  it("enforces negative matrix: rejects reused state token and unmapped subjects", () => {
+  it("enforces negative matrix: rejects reused state token and unmapped subjects", async () => {
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
     const defaultTenantId = tenantPartnerService.getDefaultTenantId();
 
@@ -66,7 +66,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
     ).toThrow(ApiRequestError);
   });
 
-  it("completes partner OIDC PKCE flow with active partner entry and MFA proof", () => {
+  it("completes partner OIDC PKCE flow with active partner entry and MFA proof", async () => {
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
 
     const login = oidcService.generateLoginParameters("partner", {
@@ -74,7 +74,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
       partnerId: "yuhe-residence",
     });
 
-    const session = oidcService.exchangePartnerCallbackSession(
+    const session = await oidcService.exchangePartnerCallbackSession(
       {
         provider: "oidc",
         callbackUrl: "http://localhost:3000/api/auth/callback",

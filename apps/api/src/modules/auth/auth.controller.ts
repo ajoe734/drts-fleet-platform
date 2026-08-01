@@ -139,7 +139,7 @@ export class AuthController {
 
     if (realm === "tenant") {
       try {
-        const session = this.oidcPkceService.exchangeTenantCallbackSession(
+        const session = await this.oidcPkceService.exchangeTenantCallbackSession(
           command,
           meta,
         );
@@ -149,7 +149,7 @@ export class AuthController {
       }
     } else {
       try {
-        const session = this.oidcPkceService.exchangePartnerCallbackSession(
+        const session = await this.oidcPkceService.exchangePartnerCallbackSession(
           command,
           meta,
         );
@@ -163,7 +163,7 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("tenant/callback-session")
-  exchangeTenantCallbackSession(
+  async exchangeTenantCallbackSession(
     @Body() command: IamCallbackSessionExchangeCommand,
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("x-real-ip") realIp?: string,
@@ -180,7 +180,7 @@ export class AuthController {
       stateToken,
     );
     try {
-      const session = this.oidcPkceService.exchangeTenantCallbackSession(
+      const session = await this.oidcPkceService.exchangeTenantCallbackSession(
         command,
         meta,
       );
@@ -193,7 +193,7 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("partner/callback-session")
-  exchangePartnerCallbackSession(
+  async exchangePartnerCallbackSession(
     @Body() command: IamCallbackSessionExchangeCommand,
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("x-real-ip") realIp?: string,
@@ -210,7 +210,7 @@ export class AuthController {
       stateToken,
     );
     try {
-      const session = this.oidcPkceService.exchangePartnerCallbackSession(
+      const session = await this.oidcPkceService.exchangePartnerCallbackSession(
         command,
         meta,
       );

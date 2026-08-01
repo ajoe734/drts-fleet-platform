@@ -14,6 +14,7 @@ import type { AuthRealm, BootstrapRequestIdentity } from "../../common/auth/auth
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 export interface OidcStateRecord {
@@ -66,6 +67,8 @@ export class OidcPkceService {
     private readonly tenantPartnerService: TenantPartnerService,
     @Optional()
     private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly partnerUserIdentityLinkRepo: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
   ) {}
 
   /**
@@ -462,7 +465,7 @@ export class OidcPkceService {
   /**
    * 3. Exchange callback code & PKCE verifier for Partner Session
    */
-  public exchangePartnerCallbackSession(
+  public async exchangePartnerCallbackSession(
     command: IamCallbackSessionExchangeCommand,
     meta?: {
       sourceIp?: string;
@@ -470,7 +473,7 @@ export class OidcPkceService {
       requestId?: string;
       stateToken?: string;
     },
-  ): PartnerBootstrapSession {
+  ): Promise<PartnerBootstrapSession> {
     const { claims, stateRecord } = this.validateAndExchangeCode(
       command,
       "partner",
@@ -610,6 +613,34 @@ export class OidcPkceService {
       );
     }
 
+    // Resolve or create durable partner-human identity link
+    const linkRecord = await this.partnerUserIdentityLinkRepo.resolveOrCreate({
+      entrySlug: matchedEntry.entrySlug,
+      partnerUserRef: claims.sub,
+    });
+
+    if (linkRecord.status !== "active") {
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        partnerId: matchedEntry.entrySlug,
+        subjectId: claims.sub,
+        reasonCode: "IAM_MEMBERSHIP_NOT_ACTIVE",
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "IAM_MEMBERSHIP_NOT_ACTIVE",
+        `Partner user identity link for subject '${claims.sub}' is not active (status: ${linkRecord.status}).`,
+      );
+    }
+
+    await this.partnerUserIdentityLinkRepo.touchLastSeen(
+      matchedEntry.entrySlug,
+      claims.sub,
+    );
+
     // Extract & enforce MFA claims
     const amr = claims.amr ?? [];
     const acr = claims.acr ?? "urn:mace:incommon:iap:silver";
@@ -640,7 +671,8 @@ export class OidcPkceService {
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
       actorType: "partner_api_key",
-      actorId: `partner_user_${claims.sub}`,
+      actorId: linkRecord.drtsPassengerId ?? `partner_user_${claims.sub}`,
+      subjectId: claims.sub,
       realm: "partner",
       tenantId: matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
       partnerId: matchedEntry.entrySlug,
@@ -818,7 +850,7 @@ export class OidcPkceService {
     this.consumedStates.set(command.state, Date.now());
 
     // 4. Validate Code & Obtain Claims (Real OIDC or Synthetic Test Matrix)
-    const claims = this.performOidcCodeExchange(command);
+    const claims = this.performOidcCodeExchange(command, stateRecord);
 
     // 5. Issuer & Audience Validation
     const expectedIssuer =
@@ -846,13 +878,15 @@ export class OidcPkceService {
       );
     }
 
-    // Nonce check if state record exists
-    if (stateRecord && claims.nonce && claims.nonce !== stateRecord.nonce) {
-      throw new ApiRequestError(
-        400,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        "OIDC nonce mismatch.",
-      );
+    // STRICT Nonce check whenever stateRecord exists
+    if (stateRecord) {
+      if (!claims.nonce || claims.nonce !== stateRecord.nonce) {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "OIDC nonce missing or mismatch.",
+        );
+      }
     }
 
     return { claims, stateRecord };
@@ -863,6 +897,7 @@ export class OidcPkceService {
    */
   private performOidcCodeExchange(
     command: IamCallbackSessionExchangeCommand,
+    stateRecord?: OidcStateRecord | null,
   ): OidcClaims {
     const code = command.code.trim();
 
@@ -875,6 +910,25 @@ export class OidcPkceService {
       );
     }
 
+    if (code.includes("wrong_nonce")) {
+      return {
+        sub: "sub_wrong_nonce",
+        iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
+        aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
+        email: "admin@acme.example",
+        nonce: "invalid_mismatched_nonce_value",
+      };
+    }
+
+    if (code.includes("missing_nonce")) {
+      return {
+        sub: "sub_missing_nonce",
+        iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
+        aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
+        email: "admin@acme.example",
+      };
+    }
+
     if (code.includes("no_mfa") || code.includes("missing_mfa")) {
       return {
         sub: "sub_no_mfa",
@@ -885,6 +939,7 @@ export class OidcPkceService {
         amr: ["pwd"],
         acr: "urn:mace:incommon:iap:bronze",
         auth_time: Math.floor(Date.now() / 1000),
+        nonce: stateRecord?.nonce,
       };
     }
 
@@ -894,6 +949,7 @@ export class OidcPkceService {
         iss: "https://untrusted-attacker-idp.example.com",
         aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
         email: "admin@acme.example",
+        nonce: stateRecord?.nonce,
       };
     }
 
@@ -903,6 +959,7 @@ export class OidcPkceService {
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
         aud: "malicious-app-client-id",
         email: "admin@acme.example",
+        nonce: stateRecord?.nonce,
       };
     }
 
@@ -912,6 +969,7 @@ export class OidcPkceService {
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
         aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
         email: "invited@acme.example",
+        nonce: stateRecord?.nonce,
       };
     }
 
@@ -921,6 +979,7 @@ export class OidcPkceService {
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
         aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
         email: "suspended@acme.example",
+        nonce: stateRecord?.nonce,
       };
     }
 
@@ -930,6 +989,7 @@ export class OidcPkceService {
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
         aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
         email: "nonexistent@unknown.example",
+        nonce: stateRecord?.nonce,
       };
     }
 
@@ -943,6 +1003,7 @@ export class OidcPkceService {
       amr: ["pwd", "mfa"],
       acr: "urn:mace:incommon:iap:silver",
       auth_time: Math.floor(Date.now() / 1000),
+      nonce: stateRecord?.nonce,
     };
   }
 
