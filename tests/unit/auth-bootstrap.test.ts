@@ -102,9 +102,9 @@ describe("tenant bootstrap session fixture gate", () => {
 
     const envelope = getErrorEnvelope(thrown);
     expect(getHttpStatus(thrown)).toBe(403);
-    expect(envelope?.code).toBe("TENANT_AUTHENTICATION_REQUIRED");
+    expect(envelope?.code).toBe("AUTH_SESSION_EXCHANGE_DENIED");
     expect(envelope?.message).toBe(
-      "Tenant authentication requires a verified identity proof.",
+      "The authentication proof could not be matched to an active session exchange.",
     );
   });
 
@@ -125,9 +125,9 @@ describe("tenant bootstrap session fixture gate", () => {
 
     const envelope = getErrorEnvelope(thrown);
     expect(getHttpStatus(thrown)).toBe(403);
-    expect(envelope?.code).toBe("TENANT_AUTHENTICATION_REQUIRED");
+    expect(envelope?.code).toBe("AUTH_SESSION_EXCHANGE_DENIED");
     expect(envelope?.message).toBe(
-      "Tenant authentication requires a verified identity proof.",
+      "The authentication proof could not be matched to an active session exchange.",
     );
   });
 
@@ -190,11 +190,9 @@ describe("tenant bootstrap session fixture gate", () => {
 
       const envelope = getErrorEnvelope(thrown);
       expect(getHttpStatus(thrown), testCase.label).toBe(403);
-      expect(envelope?.code, testCase.label).toBe(
-        "TENANT_AUTHENTICATION_REQUIRED",
-      );
+      expect(envelope?.code, testCase.label).toBe("AUTH_SESSION_EXCHANGE_DENIED");
       expect(envelope?.message, testCase.label).toBe(
-        "Tenant authentication requires a verified identity proof.",
+        "The authentication proof could not be matched to an active session exchange.",
       );
     }
   });

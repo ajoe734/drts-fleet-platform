@@ -1414,8 +1414,8 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_AUTHENTICATION_REQUIRED",
-          message: "Tenant authentication requires a verified identity proof.",
+          code: "AUTH_SESSION_EXCHANGE_DENIED",
+          message: "The authentication proof could not be matched to an active session exchange.",
         },
       });
     }
@@ -1470,7 +1470,7 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_AUTHENTICATION_REQUIRED",
+          code: "AUTH_SESSION_EXCHANGE_DENIED",
         },
       });
     }
@@ -1519,7 +1519,7 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_AUTHENTICATION_REQUIRED",
+          code: "AUTH_SESSION_EXCHANGE_DENIED",
         },
       });
     }
@@ -1554,8 +1554,8 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_AUTHENTICATION_REQUIRED",
-          message: "Tenant authentication requires a verified identity proof.",
+          code: "AUTH_SESSION_EXCHANGE_DENIED",
+          message: "The authentication proof could not be matched to an active session exchange.",
         },
       });
     }
@@ -1591,8 +1591,8 @@ describe("tenant bootstrap-session auth controller", () => {
       expect(apiError.getStatus()).toBe(403);
       expect(apiError.getResponse()).toMatchObject({
         error: {
-          code: "TENANT_AUTHENTICATION_REQUIRED",
-          message: "Tenant authentication requires a verified identity proof.",
+          code: "AUTH_SESSION_EXCHANGE_DENIED",
+          message: "The authentication proof could not be matched to an active session exchange.",
         },
       });
     }

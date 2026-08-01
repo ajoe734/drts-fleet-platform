@@ -23,6 +23,10 @@ import {
 import { OpenRoute } from "../../common/auth";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import {
+  toPublicPartnerAuthError,
+  toPublicTenantAuthError,
+} from "../../common/iam-error-codes";
+import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
@@ -284,7 +288,7 @@ export class AuthController {
           requestedTenantId,
         },
       });
-      throw error;
+      throw toPublicTenantAuthError(error);
     }
   }
 
@@ -397,7 +401,7 @@ export class AuthController {
           apiKey: command.apiKey,
         },
       });
-      throw error;
+      throw toPublicPartnerAuthError(error);
     }
   }
 
@@ -426,8 +430,8 @@ export class AuthController {
 
     throw new ApiRequestError(
       403,
-      "TENANT_AUTHENTICATION_REQUIRED",
-      "Tenant authentication requires a verified identity proof.",
+      "AUTH_SESSION_EXCHANGE_DENIED",
+      "The authentication proof could not be matched to an active session exchange.",
       {},
     );
   }
@@ -447,8 +451,8 @@ export class AuthController {
   private buildTenantBootstrapDeniedError() {
     return new ApiRequestError(
       403,
-      "TENANT_AUTHENTICATION_REQUIRED",
-      "Tenant authentication requires a verified identity proof.",
+      "AUTH_SESSION_EXCHANGE_DENIED",
+      "The authentication proof could not be matched to an active session exchange.",
       {},
     );
   }
