@@ -4,9 +4,11 @@ import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
 import { resolveMapProviderRuntimeConfig } from "./common/map-provider";
+import { validateAuthStartupConfig } from "./config/auth-startup-config";
 import { buildHealthPayload } from "./health/health.controller";
 
 async function bootstrap() {
+  validateAuthStartupConfig(process.env);
   resolveMapProviderRuntimeConfig(process.env);
 
   const app = await NestFactory.create(AppModule, {
