@@ -9056,7 +9056,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           identity.partnerId !== verification.partnerId ||
           identity.partnerProgramId !== verification.partnerProgramId ||
           identity.partnerEntrySlug !== verification.partnerEntrySlug
-        : identity.actorType !== "partner_api_key" ||
+        : (identity.actorType !== "partner_api_key" &&
+            identity.actorType !== "partner_user") ||
           (identity.tenantId !== null &&
             identity.tenantId !== undefined &&
             identity.tenantId !== verification.tenantId) ||
@@ -9111,7 +9112,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     if (
       !identity ||
-      identity.actorType !== "partner_api_key" ||
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "partner_user") ||
       identity.realm !== "partner" ||
       !identity.partnerEntrySlug
     ) {
