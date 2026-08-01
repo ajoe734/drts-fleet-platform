@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Post, Req } from "@nestjs/common";
+import { Body, Controller, Headers, Optional, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
@@ -30,6 +30,7 @@ import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.consta
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
+import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
 interface TokenRequest {
@@ -54,6 +55,8 @@ export class AuthController {
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly driverDeviceSessionService: DriverDeviceSessionService,
+    @Optional()
+    private readonly securityEventsService?: SecurityEventsService,
   ) {}
 
   @Post("token")
@@ -135,44 +138,34 @@ export class AuthController {
   @Post("tenant/bootstrap-session")
   issueTenantBootstrapSession(
     @Body() command: CreateTenantBootstrapSessionCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const normalizedEmail = command.email?.trim().toLowerCase();
-    if (!normalizedEmail) {
-      throw new ApiRequestError(400, "FIELD_REQUIRED", "email is required.", {
-        field: "email",
-      });
-    }
-
+    const normalizedEmail = command.email?.trim().toLowerCase() ?? null;
     const requestedTenantId = command.tenantId?.trim() || null;
-    const tenantId =
-      requestedTenantId || this.tenantPartnerService.getDefaultTenantId();
-    const existingUser =
-      this.tenantPartnerService
-        .listTenantUsers(tenantId)
-        .find((user) => user.email === normalizedEmail) ?? null;
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
 
-    if (existingUser?.status === "suspended") {
-      throw new ApiRequestError(
-        403,
-        "TENANT_USER_SUSPENDED",
-        "The tenant user is suspended and cannot start a portal session.",
-        {
-          email: normalizedEmail,
-          tenantId,
-        },
-      );
-    }
+    try {
+      if (!normalizedEmail) {
+        throw new ApiRequestError(400, "FIELD_REQUIRED", "email is required.", {
+          field: "email",
+        });
+      }
 
-    if (!existingUser) {
-      const crossTenantUser =
-        requestedTenantId &&
-        this.tenantPartnerService.findTenantUserByEmail(normalizedEmail);
-      if (crossTenantUser && crossTenantUser.tenantId !== tenantId) {
+      const tenantId =
+        requestedTenantId || this.tenantPartnerService.getDefaultTenantId();
+      const existingUser =
+        this.tenantPartnerService
+          .listTenantUsers(tenantId)
+          .find((user) => user.email === normalizedEmail) ?? null;
+
+      if (existingUser?.status === "suspended") {
         throw new ApiRequestError(
           403,
-          "TENANT_SCOPE_MISMATCH",
-          "The tenant user is not invited under the requested tenant scope.",
+          "TENANT_USER_SUSPENDED",
+          "The tenant user is suspended and cannot start a portal session.",
           {
             email: normalizedEmail,
             tenantId,
@@ -180,52 +173,134 @@ export class AuthController {
         );
       }
 
-      throw new ApiRequestError(
-        403,
-        "TENANT_USER_NOT_INVITED",
-        "No active tenant user was found for this email.",
+      if (!existingUser) {
+        const crossTenantUser =
+          requestedTenantId &&
+          this.tenantPartnerService.findTenantUserByEmail(normalizedEmail);
+        if (crossTenantUser && crossTenantUser.tenantId !== tenantId) {
+          throw new ApiRequestError(
+            403,
+            "TENANT_SCOPE_MISMATCH",
+            "The tenant user is not invited under the requested tenant scope.",
+            {
+              email: normalizedEmail,
+              tenantId,
+            },
+          );
+        }
+
+        throw new ApiRequestError(
+          403,
+          "TENANT_USER_NOT_INVITED",
+          "No active tenant user was found for this email.",
+          {
+            email: normalizedEmail,
+            tenantId,
+          },
+        );
+      }
+
+      const roleCatalog = this.tenantPartnerService.listTenantRoles();
+      const resolvedRoleCode = this.resolveExistingUserRoleCode(
+        roleCatalog,
+        existingUser,
+      );
+      const profile = this.buildTenantPortalProfile(
+        tenantId,
+        normalizedEmail,
+        existingUser,
+        resolvedRoleCode,
+      );
+      const identity = this.buildIdentityContext(profile);
+      const token = this.signJwt(
         {
-          email: normalizedEmail,
+          authMode: "jwt_bearer",
+          actorType: identity.actorType,
+          actorId: identity.actorId,
+          realm: identity.realm,
+          tenantId: identity.tenantId,
+          roleFamilies: identity.roleFamilies,
+          roles: identity.roles,
+          scopes: identity.scopes,
+          requestId: requestId ?? null,
+        },
+        TENANT_BOOTSTRAP_EXPIRES_IN,
+      );
+      const session: TenantBootstrapSession = {
+        accessToken: token,
+        tokenType: "Bearer",
+        expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
+        profile,
+        identity,
+      };
+
+      this.securityEventsService?.recordEvent({
+        actorId: identity.actorId,
+        actorType: identity.actorType,
+        subjectId: normalizedEmail,
+        realm: "tenant",
+        tenantId,
+        partnerId: null,
+        eventType: "tenant_bootstrap_session.issued",
+        eventFamily: "auth",
+        outcome: "success",
+        severity: "low",
+        targetType: "tenant_portal_session",
+        targetId: profile.id,
+        sessionId: null,
+        tokenId: token,
+        authMethods: ["tenant_bootstrap_exchange"],
+        sourceIp,
+        userAgent: userAgent ?? null,
+        requestId: requestId ?? null,
+        traceId: null,
+        reasonCode: null,
+        approvalId: null,
+        beforeSummary: null,
+        afterSummary: {
+          actorId: identity.actorId,
+          roleCode: profile.roleCode,
           tenantId,
         },
-      );
-    }
+        maskedContext: {
+          email: normalizedEmail,
+        },
+      });
 
-    const roleCatalog = this.tenantPartnerService.listTenantRoles();
-    const resolvedRoleCode = this.resolveExistingUserRoleCode(
-      roleCatalog,
-      existingUser,
-    );
-    const profile = this.buildTenantPortalProfile(
-      tenantId,
-      normalizedEmail,
-      existingUser,
-      resolvedRoleCode,
-    );
-    const identity = this.buildIdentityContext(profile);
-    const token = this.signJwt(
-      {
-        authMode: "jwt_bearer",
-        actorType: identity.actorType,
-        actorId: identity.actorId,
-        realm: identity.realm,
-        tenantId: identity.tenantId,
-        roleFamilies: identity.roleFamilies,
-        roles: identity.roles,
-        scopes: identity.scopes,
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      this.securityEventsService?.recordEvent({
+        actorId: null,
+        actorType: "system",
+        subjectId: normalizedEmail,
+        realm: "tenant",
+        tenantId:
+          requestedTenantId || this.tenantPartnerService.getDefaultTenantId(),
+        partnerId: null,
+        eventType: "tenant_bootstrap_session.denied",
+        eventFamily: "auth",
+        outcome: "denied",
+        severity: "medium",
+        targetType: "tenant_portal_session",
+        targetId: null,
+        sessionId: null,
+        tokenId: null,
+        authMethods: ["tenant_bootstrap_exchange"],
+        sourceIp,
+        userAgent: userAgent ?? null,
         requestId: requestId ?? null,
-      },
-      TENANT_BOOTSTRAP_EXPIRES_IN,
-    );
-    const session: TenantBootstrapSession = {
-      accessToken: token,
-      tokenType: "Bearer",
-      expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
-      profile,
-      identity,
-    };
-
-    return toApiSuccessEnvelope(session, requestId);
+        traceId: null,
+        reasonCode: this.extractErrorCode(error),
+        approvalId: null,
+        beforeSummary: null,
+        afterSummary: null,
+        maskedContext: {
+          email: normalizedEmail,
+          requestedTenantId,
+        },
+      });
+      throw error;
+    }
   }
 
   @OpenRoute()
@@ -233,41 +308,130 @@ export class AuthController {
   @Post("partner/bootstrap-session")
   issuePartnerBootstrapSession(
     @Body() command: CreatePartnerBootstrapSessionCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const resolved = this.tenantPartnerService.authenticatePartnerBootstrap(
-      command,
-      requestId,
-    );
-    const token = this.signJwt(
-      {
-        authMode: resolved.identity.authMode,
-        actorType: resolved.identity.actorType,
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+
+    try {
+      const resolved = this.tenantPartnerService.authenticatePartnerBootstrap(
+        command,
+        requestId,
+      );
+      const token = this.signJwt(
+        {
+          authMode: resolved.identity.authMode,
+          actorType: resolved.identity.actorType,
+          actorId: resolved.identity.actorId,
+          realm: resolved.identity.realm,
+          tenantId: resolved.identity.tenantId,
+          partnerId: resolved.identity.partnerId ?? null,
+          partnerProgramId: resolved.identity.partnerProgramId ?? null,
+          partnerEntrySlug: resolved.identity.partnerEntrySlug ?? null,
+          roleFamilies: resolved.identity.roleFamilies,
+          roles: resolved.identity.roles,
+          scopes: resolved.identity.scopes,
+          requestId: requestId ?? null,
+        },
+        "1h",
+      );
+      const session: PartnerBootstrapSession = {
+        accessToken: token,
+        tokenType: "Bearer",
+        expiresIn: "1h",
+        partnerEntry: resolved.partnerEntry,
+        identity: {
+          ...resolved.identity,
+          authMode: "jwt_bearer",
+        },
+      };
+
+      this.securityEventsService?.recordEvent({
         actorId: resolved.identity.actorId,
-        realm: resolved.identity.realm,
+        actorType: resolved.identity.actorType,
+        subjectId: resolved.identity.actorId,
+        realm: "partner",
         tenantId: resolved.identity.tenantId,
         partnerId: resolved.identity.partnerId ?? null,
-        partnerProgramId: resolved.identity.partnerProgramId ?? null,
-        partnerEntrySlug: resolved.identity.partnerEntrySlug ?? null,
-        roleFamilies: resolved.identity.roleFamilies,
-        roles: resolved.identity.roles,
-        scopes: resolved.identity.scopes,
+        eventType: "partner_bootstrap_session.issued",
+        eventFamily: "auth",
+        outcome: "success",
+        severity: "low",
+        targetType: "partner_entry",
+        targetId: resolved.partnerEntry.entrySlug,
+        sessionId: null,
+        tokenId: token,
+        authMethods: ["partner_api_key"],
+        sourceIp,
+        userAgent: userAgent ?? null,
         requestId: requestId ?? null,
-      },
-      "1h",
-    );
-    const session: PartnerBootstrapSession = {
-      accessToken: token,
-      tokenType: "Bearer",
-      expiresIn: "1h",
-      partnerEntry: resolved.partnerEntry,
-      identity: {
-        ...resolved.identity,
-        authMode: "jwt_bearer",
-      },
-    };
+        traceId: null,
+        reasonCode: null,
+        approvalId: null,
+        beforeSummary: null,
+        afterSummary: {
+          partnerEntrySlug: resolved.partnerEntry.entrySlug,
+          partnerProgramId: resolved.identity.partnerProgramId ?? null,
+        },
+        maskedContext: {
+          entrySlug: command.entrySlug,
+          apiKey: command.apiKey,
+        },
+      });
 
-    return toApiSuccessEnvelope(session, requestId);
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      this.securityEventsService?.recordEvent({
+        actorId: null,
+        actorType: "system",
+        subjectId: command.entrySlug,
+        realm: "partner",
+        tenantId: null,
+        partnerId: null,
+        eventType: "partner_bootstrap_session.denied",
+        eventFamily: "auth",
+        outcome: "denied",
+        severity: "medium",
+        targetType: "partner_entry",
+        targetId: command.entrySlug?.trim() || null,
+        sessionId: null,
+        tokenId: null,
+        authMethods: ["partner_api_key"],
+        sourceIp,
+        userAgent: userAgent ?? null,
+        requestId: requestId ?? null,
+        traceId: null,
+        reasonCode: this.extractErrorCode(error),
+        approvalId: null,
+        beforeSummary: null,
+        afterSummary: null,
+        maskedContext: {
+          entrySlug: command.entrySlug,
+          apiKey: command.apiKey,
+        },
+      });
+      throw error;
+    }
+  }
+
+  private extractErrorCode(error: unknown) {
+    if (!(error instanceof ApiRequestError)) {
+      return null;
+    }
+
+    return (
+      ((error.getResponse() as { error?: { code?: string } })?.error?.code ??
+        null)
+    );
+  }
+
+  private resolveSourceIp(
+    forwardedFor?: string | null,
+    realIp?: string | null,
+  ) {
+    return forwardedFor?.trim() || realIp?.trim() || null;
   }
 
   private resolveExistingUserRoleCode(

@@ -92,15 +92,19 @@ describe("tenant partner dual-write to canonical identity", () => {
       identityRepository,
     );
 
-    const created = tenantPartnerService.createTenantUser("tenant_demo", {
+    const created = await tenantPartnerService.createTenantUser("tenant_demo", {
       email: "viewer@example.com",
       displayName: "Viewer",
       roleCode: "tenant_viewer",
     });
-    tenantPartnerService.updateTenantUserRole("tenant_demo", created.userId, {
-      roleCode: "tenant_finance_admin",
-      status: "active",
-    });
+    await tenantPartnerService.updateTenantUserRole(
+      "tenant_demo",
+      created.userId,
+      {
+        roleCode: "tenant_finance_admin",
+        status: "active",
+      },
+    );
 
     await Promise.resolve();
     await Promise.resolve();
