@@ -461,6 +461,88 @@ export class IdentityRepository {
     );
   }
 
+  async findActiveSessionByDevice(
+    deviceId: string,
+  ): Promise<CanonicalIdentitySessionRecord | null> {
+    if (!deviceId) {
+      return null;
+    }
+
+    if (!this.isEnabled()) {
+      for (const session of this.fallbackSessions.values()) {
+        if (
+          session.status === "active" &&
+          (session.deviceSummary as { deviceId?: string })?.deviceId === deviceId
+        ) {
+          return { ...session };
+        }
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_sessions WHERE status = 'active' AND device_summary->>'deviceId' = $1 ORDER BY updated_at DESC LIMIT 1`,
+      [deviceId],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return this.parseRecord<CanonicalIdentitySessionRecord>(
+      result.rows[0].record,
+      "iam.identity_sessions",
+    );
+  }
+
+  async revokeSessionsForDevice(
+    deviceId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ): Promise<CanonicalIdentitySessionRecord[]> {
+    if (!deviceId) {
+      return [];
+    }
+
+    const revokedSessions: CanonicalIdentitySessionRecord[] = [];
+    if (!this.isEnabled()) {
+      for (const session of Array.from(this.fallbackSessions.values())) {
+        if (
+          session.status === "active" &&
+          (session.deviceSummary as { deviceId?: string })?.deviceId === deviceId
+        ) {
+          const updated = await this.revokeSession(
+            session.sessionId,
+            reason,
+            revokedByPrincipalId,
+          );
+          if (updated) {
+            revokedSessions.push(updated);
+          }
+        }
+      }
+      return revokedSessions;
+    }
+
+    const result = await this.databaseService!.query<{ session_id: string }>(
+      `SELECT session_id FROM iam.identity_sessions WHERE status = 'active' AND device_summary->>'deviceId' = $1`,
+      [deviceId],
+    );
+
+    for (const row of result.rows) {
+      const updated = await this.revokeSession(
+        row.session_id,
+        reason,
+        revokedByPrincipalId,
+      );
+      if (updated) {
+        revokedSessions.push(updated);
+      }
+    }
+
+    return revokedSessions;
+  }
+
   async createRefreshFamily(
     family: CanonicalRefreshFamilyRecord,
   ): Promise<CanonicalRefreshFamilyRecord> {

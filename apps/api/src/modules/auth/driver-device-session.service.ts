@@ -1,11 +1,11 @@
 import { Injectable, Optional } from "@nestjs/common";
 
 import type {
-  DriverDeviceBindingSummary,
   DriverDeviceProvisioningSession,
   RefreshDriverDeviceSessionCommand,
   RegisterDriverDeviceCommand,
   RevokeDriverDeviceBindingCommand,
+  CanonicalIdentitySessionRecord,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -18,18 +18,6 @@ import {
   hashIdentitySecret,
   IdentityRepository,
 } from "../identity/identity.repository";
-
-type DriverDeviceBindingRecord = {
-  bindingId: string;
-  driverId: string;
-  deviceId: string;
-  deviceLabel: string | null;
-  refreshToken: string;
-  active: boolean;
-  issuedAt: string;
-  refreshedAt: string;
-  revokedAt: string | null;
-};
 
 const DRIVER_ACCESS_TOKEN_EXPIRES_IN = "15m";
 const DRIVER_REFRESH_TOKEN_EXPIRES_IN = "30d";
@@ -45,9 +33,7 @@ function createOpaqueToken(prefix: string): string {
 
 @Injectable()
 export class DriverDeviceSessionService {
-  private readonly bindingsById = new Map<string, DriverDeviceBindingRecord>();
-
-  private readonly activeBindingIdsByDeviceId = new Map<string, string>();
+  private readonly identityRepo: IdentityRepository;
 
   constructor(
     private readonly jwtAuthService: JwtAuthService,
@@ -57,13 +43,15 @@ export class DriverDeviceSessionService {
     @Optional()
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
-    private readonly identityRepository?: IdentityRepository,
-  ) {}
+    identityRepository?: IdentityRepository,
+  ) {
+    this.identityRepo = identityRepository ?? new IdentityRepository();
+  }
 
-  register(
+  async register(
     command: RegisterDriverDeviceCommand,
     requestId?: string,
-  ): DriverDeviceProvisioningSession {
+  ): Promise<DriverDeviceProvisioningSession> {
     const registrationCode = command.registrationCode?.trim();
     const deviceId = command.deviceId?.trim();
     if (!registrationCode) {
@@ -97,34 +85,80 @@ export class DriverDeviceSessionService {
     }
 
     this.assertDriverAuthEligible(driverId);
-    this.revokeActiveBindingForDevice(deviceId, requestId);
+    await this.revokeActiveBindingForDevice(deviceId, requestId);
 
     const now = new Date().toISOString();
-    const binding: DriverDeviceBindingRecord = {
-      bindingId: createOpaqueToken("drvbind"),
-      driverId,
-      deviceId,
-      deviceLabel: command.deviceLabel?.trim() || null,
-      refreshToken: createOpaqueToken("drvrefresh"),
-      active: true,
-      issuedAt: now,
-      refreshedAt: now,
-      revokedAt: null,
-    };
+    const absoluteExpiresAt = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const bindingId = createOpaqueToken("drvbind");
+    const refreshTokenRaw = createOpaqueToken("drvrefresh");
+    const refreshTokenHash = hashIdentitySecret(refreshTokenRaw);
+    const familyId = createOpaqueToken("fam");
 
-    this.bindingsById.set(binding.bindingId, binding);
-    this.activeBindingIdsByDeviceId.set(deviceId, binding.bindingId);
+    await this.identityRepo.createSession({
+      sessionId: bindingId,
+      sourceRef: `driver_device:${bindingId}`,
+      principalId: driverId,
+      membershipId: null,
+      realm: "driver",
+      status: "active",
+      authTime: now,
+      authMethods: ["driver_device_registration"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt,
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: {
+        deviceId,
+        deviceLabel: command.deviceLabel?.trim() || null,
+      },
+      riskSummary: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await this.identityRepo.createRefreshFamily({
+      familyId,
+      sourceRef: `driver_device_family:${familyId}`,
+      sessionId: bindingId,
+      currentTokenHash: refreshTokenHash,
+      counter: 0,
+      status: "active",
+      expiresAt: absoluteExpiresAt,
+      compromisedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
     this.driverProfileService.recordDeviceBinding(
       driverId,
-      this.toBindingSummary(binding),
+      {
+        bindingId,
+        deviceId,
+        deviceLabel: command.deviceLabel?.trim() || null,
+        status: "active",
+        issuedAt: now,
+        refreshedAt: now,
+        revokedAt: null,
+      },
       requestId,
     );
 
-    const session = this.issueSession(binding);
+    const session = this.issueSession(
+      bindingId,
+      driverId,
+      deviceId,
+      refreshTokenRaw,
+      now,
+    );
+
     this.securityEventsService?.recordEvent({
-      actorId: binding.driverId,
+      actorId: driverId,
       actorType: "driver_user",
-      subjectId: binding.driverId,
+      subjectId: driverId,
       realm: "driver",
       tenantId: null,
       partnerId: null,
@@ -133,8 +167,8 @@ export class DriverDeviceSessionService {
       outcome: "success",
       severity: "low",
       targetType: "driver_device_binding",
-      targetId: binding.bindingId,
-      sessionId: binding.bindingId,
+      targetId: bindingId,
+      sessionId: bindingId,
       tokenId: session.accessToken,
       authMethods: ["driver_device_registration"],
       sourceIp: null,
@@ -145,22 +179,22 @@ export class DriverDeviceSessionService {
       approvalId: null,
       beforeSummary: null,
       afterSummary: {
-        bindingId: binding.bindingId,
-        driverId: binding.driverId,
+        bindingId,
+        driverId,
         status: "active",
       },
       maskedContext: {
-        deviceId: binding.deviceId,
-        deviceLabel: binding.deviceLabel,
-        refreshToken: binding.refreshToken,
+        deviceId,
+        deviceLabel: command.deviceLabel?.trim() || null,
       },
     });
+
     return session;
   }
 
-  refresh(
+  async refresh(
     command: RefreshDriverDeviceSessionCommand,
-  ): DriverDeviceProvisioningSession {
+  ): Promise<DriverDeviceProvisioningSession> {
     const deviceId = command.deviceId?.trim();
     const refreshToken = command.refreshToken?.trim();
     if (!deviceId) {
@@ -182,8 +216,32 @@ export class DriverDeviceSessionService {
       );
     }
 
-    const binding = this.getActiveBindingByDeviceId(deviceId);
-    if (!binding || binding.refreshToken !== refreshToken) {
+    const oldHash = hashIdentitySecret(refreshToken);
+    const existingFamily =
+      await this.identityRepo.getRefreshFamilyByTokenHash(oldHash);
+    if (existingFamily) {
+      const existingSession = await this.identityRepo.getSession(
+        existingFamily.sessionId,
+      );
+      if (existingSession?.principalId) {
+        this.assertDriverAuthEligible(existingSession.principalId);
+      }
+    }
+
+    const newRefreshToken = createOpaqueToken("drvrefresh");
+    const newExpiresAt = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const now = new Date().toISOString();
+
+    const rotateResult = await this.identityRepo.consumeAndRotateRefreshToken({
+      oldTokenRaw: refreshToken,
+      newTokenRaw: newRefreshToken,
+      newExpiresAt,
+      updatedAt: now,
+    });
+
+    if (!rotateResult.success || !rotateResult.session) {
       throw new ApiRequestError(
         401,
         "DRIVER_DEVICE_REFRESH_INVALID",
@@ -192,21 +250,39 @@ export class DriverDeviceSessionService {
       );
     }
 
-    this.assertDriverAuthEligible(binding.driverId);
-    binding.refreshToken = createOpaqueToken("drvrefresh");
-    binding.refreshedAt = new Date().toISOString();
-    this.bindingsById.set(binding.bindingId, binding);
+    const sessionRecord = rotateResult.session;
+    const sessionDeviceId = (
+      sessionRecord.deviceSummary as { deviceId?: string }
+    )?.deviceId;
+    if (sessionDeviceId !== deviceId || sessionRecord.status !== "active") {
+      throw new ApiRequestError(
+        401,
+        "DRIVER_DEVICE_REFRESH_INVALID",
+        "The driver device refresh token is invalid, expired, or revoked.",
+        { deviceId },
+      );
+    }
+
+    this.assertDriverAuthEligible(sessionRecord.principalId);
+
     this.driverProfileService.recordDeviceBindingRefresh(
-      binding.driverId,
-      binding.bindingId,
-      binding.refreshedAt,
+      sessionRecord.principalId,
+      sessionRecord.sessionId,
+      now,
     );
 
-    const session = this.issueSession(binding);
+    const session = this.issueSession(
+      sessionRecord.sessionId,
+      sessionRecord.principalId,
+      deviceId,
+      newRefreshToken,
+      now,
+    );
+
     this.securityEventsService?.recordEvent({
-      actorId: binding.driverId,
+      actorId: sessionRecord.principalId,
       actorType: "driver_user",
-      subjectId: binding.driverId,
+      subjectId: sessionRecord.principalId,
       realm: "driver",
       tenantId: null,
       partnerId: null,
@@ -215,8 +291,8 @@ export class DriverDeviceSessionService {
       outcome: "success",
       severity: "low",
       targetType: "driver_device_binding",
-      targetId: binding.bindingId,
-      sessionId: binding.bindingId,
+      targetId: sessionRecord.sessionId,
+      sessionId: sessionRecord.sessionId,
       tokenId: session.accessToken,
       authMethods: ["driver_refresh_token"],
       sourceIp: null,
@@ -227,30 +303,30 @@ export class DriverDeviceSessionService {
       approvalId: null,
       beforeSummary: null,
       afterSummary: {
-        bindingId: binding.bindingId,
-        refreshedAt: binding.refreshedAt,
+        bindingId: sessionRecord.sessionId,
+        refreshedAt: now,
         status: "active",
       },
       maskedContext: {
-        deviceId: binding.deviceId,
-        refreshToken: binding.refreshToken,
+        deviceId,
       },
     });
+
     return session;
   }
 
-  revoke(
+  async revoke(
     command: RevokeDriverDeviceBindingCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
-  ): {
+  ): Promise<{
     bindingId: string;
     deviceId: string;
     driverId: string;
     revokedAt: string;
-  } {
-    const binding = this.resolveBindingForRevoke(command);
-    if (!binding) {
+  }> {
+    const session = await this.resolveSessionForRevoke(command);
+    if (!session) {
       throw new ApiRequestError(
         404,
         "DRIVER_DEVICE_BINDING_NOT_FOUND",
@@ -259,31 +335,34 @@ export class DriverDeviceSessionService {
       );
     }
 
-    this.assertIdentityCanRevokeBinding(binding, identity);
+    const deviceId =
+      (session.deviceSummary as { deviceId?: string })?.deviceId ??
+      command.deviceId ??
+      "";
+    const driverId = session.principalId;
 
-    const revokedAt = new Date().toISOString();
-    binding.active = false;
-    binding.revokedAt = revokedAt;
-    binding.refreshedAt = revokedAt;
-    this.bindingsById.set(binding.bindingId, binding);
-    if (
-      this.activeBindingIdsByDeviceId.get(binding.deviceId) ===
-      binding.bindingId
-    ) {
-      this.activeBindingIdsByDeviceId.delete(binding.deviceId);
-    }
+    this.assertIdentityCanRevokeBinding(session, identity);
+
+    const revokedSession = await this.identityRepo.revokeSession(
+      session.sessionId,
+      "MANUAL_REVOCATION",
+      identity?.actorId,
+    );
+
+    const revokedAt = revokedSession?.revokedAt ?? new Date().toISOString();
+
     this.driverProfileService.recordDeviceBindingRevocation(
-      binding.driverId,
-      binding.bindingId,
+      driverId,
+      session.sessionId,
       revokedAt,
-      this.resolveRevocationAuditActor(binding, identity),
+      this.resolveRevocationAuditActor(session, identity),
       requestId,
     );
 
     this.securityEventsService?.recordEvent({
-      actorId: identity?.actorId ?? binding.driverId,
+      actorId: identity?.actorId ?? driverId,
       actorType: identity?.actorType ?? "system",
-      subjectId: binding.driverId,
+      subjectId: driverId,
       realm: identity?.realm ?? "driver",
       tenantId: identity?.tenantId ?? null,
       partnerId: identity?.partnerId ?? null,
@@ -292,8 +371,8 @@ export class DriverDeviceSessionService {
       outcome: "revoked",
       severity: "medium",
       targetType: "driver_device_binding",
-      targetId: binding.bindingId,
-      sessionId: binding.bindingId,
+      targetId: session.sessionId,
+      sessionId: session.sessionId,
       tokenId: null,
       authMethods: ["driver_device_revoke"],
       sourceIp: null,
@@ -303,32 +382,32 @@ export class DriverDeviceSessionService {
       reasonCode: null,
       approvalId: null,
       beforeSummary: {
-        bindingId: binding.bindingId,
+        bindingId: session.sessionId,
         status: "active",
       },
       afterSummary: {
-        bindingId: binding.bindingId,
+        bindingId: session.sessionId,
         status: "revoked",
         revokedAt,
       },
       maskedContext: {
-        deviceId: binding.deviceId,
+        deviceId,
       },
     });
 
     return {
-      bindingId: binding.bindingId,
-      deviceId: binding.deviceId,
-      driverId: binding.driverId,
+      bindingId: session.sessionId,
+      deviceId,
+      driverId,
       revokedAt,
     };
   }
 
-  isBindingActive(
+  async isBindingActive(
     bindingId: string | null | undefined,
     deviceId: string | null | undefined,
     driverId: string | null | undefined,
-  ): boolean {
+  ): Promise<boolean> {
     const resolvedBindingId = bindingId?.trim();
     const resolvedDeviceId = deviceId?.trim();
     const resolvedDriverId = driverId?.trim();
@@ -336,26 +415,33 @@ export class DriverDeviceSessionService {
       return false;
     }
 
-    const binding = this.bindingsById.get(resolvedBindingId);
-    if (!binding || !binding.active) {
+    const session = await this.identityRepo.getSession(resolvedBindingId);
+    if (!session || session.status !== "active") {
       return false;
     }
 
+    if (new Date(session.absoluteExpiresAt).getTime() <= Date.now()) {
+      return false;
+    }
+
+    const sessionDeviceId = (
+      session.deviceSummary as { deviceId?: string }
+    )?.deviceId;
+
     return (
-      binding.deviceId === resolvedDeviceId &&
-      binding.driverId === resolvedDriverId &&
-      this.activeBindingIdsByDeviceId.get(resolvedDeviceId) ===
-        resolvedBindingId
+      session.principalId === resolvedDriverId &&
+      sessionDeviceId === resolvedDeviceId
     );
   }
 
-  assertSessionAccessAllowed(
+  async assertSessionAccessAllowed(
     bindingId: string | null | undefined,
     deviceId: string | null | undefined,
     driverId: string | null | undefined,
     route: string,
-  ) {
-    if (!this.isBindingActive(bindingId, deviceId, driverId)) {
+  ): Promise<void> {
+    const active = await this.isBindingActive(bindingId, deviceId, driverId);
+    if (!active) {
       throw new ApiRequestError(
         401,
         "DRIVER_DEVICE_SESSION_INVALID",
@@ -374,136 +460,120 @@ export class DriverDeviceSessionService {
     }
   }
 
-  private resolveBindingForRevoke(
+  private async resolveSessionForRevoke(
     command: RevokeDriverDeviceBindingCommand,
-  ): DriverDeviceBindingRecord | null {
+  ): Promise<CanonicalIdentitySessionRecord | null> {
     const bindingId = command.bindingId?.trim();
     if (bindingId) {
-      return this.bindingsById.get(bindingId) ?? null;
+      return this.identityRepo.getSession(bindingId);
     }
 
-    return this.getActiveBindingByDeviceId(command.deviceId?.trim() || "");
+    const deviceId = command.deviceId?.trim();
+    if (deviceId) {
+      return this.identityRepo.findActiveSessionByDevice(deviceId);
+    }
+
+    return null;
   }
 
-  private getActiveBindingByDeviceId(
+  private async revokeActiveBindingForDevice(
     deviceId: string,
-  ): DriverDeviceBindingRecord | null {
-    const bindingId = this.activeBindingIdsByDeviceId.get(deviceId);
-    if (!bindingId) {
-      return null;
-    }
-
-    const binding = this.bindingsById.get(bindingId);
-    return binding?.active ? binding : null;
-  }
-
-  private revokeActiveBindingForDevice(deviceId: string, requestId?: string) {
-    const existing = this.getActiveBindingByDeviceId(deviceId);
-    if (!existing) {
-      return;
-    }
-
-    existing.active = false;
-    existing.revokedAt = new Date().toISOString();
-    existing.refreshedAt = existing.revokedAt;
-    this.bindingsById.set(existing.bindingId, existing);
-    this.activeBindingIdsByDeviceId.delete(deviceId);
-    this.driverProfileService.recordDeviceBindingRevocation(
-      existing.driverId,
-      existing.bindingId,
-      existing.revokedAt,
-      {
-        actorId: existing.driverId,
-        actorType: "system",
-        tenantId: null,
-      },
-      requestId,
+    requestId?: string,
+  ): Promise<void> {
+    const existingSessions = await this.identityRepo.revokeSessionsForDevice(
+      deviceId,
+      "DEVICE_REBOUND",
     );
-    this.securityEventsService?.recordEvent({
-      actorId: existing.driverId,
-      actorType: "system",
-      subjectId: existing.driverId,
-      realm: "driver",
-      tenantId: null,
-      partnerId: null,
-      eventType: "driver_device_session.revoked",
-      eventFamily: "device",
-      outcome: "revoked",
-      severity: "medium",
-      targetType: "driver_device_binding",
-      targetId: existing.bindingId,
-      sessionId: existing.bindingId,
-      tokenId: null,
-      authMethods: ["driver_device_registration"],
-      sourceIp: null,
-      userAgent: null,
-      requestId: requestId ?? null,
-      traceId: null,
-      reasonCode: "DEVICE_REBOUND",
-      approvalId: null,
-      beforeSummary: {
-        bindingId: existing.bindingId,
-        status: "active",
-      },
-      afterSummary: {
-        bindingId: existing.bindingId,
-        status: "revoked",
-        revokedAt: existing.revokedAt,
-      },
-      maskedContext: {
-        deviceId: existing.deviceId,
-      },
-    });
-  }
 
-  private toBindingSummary(
-    binding: DriverDeviceBindingRecord,
-  ): DriverDeviceBindingSummary {
-    return {
-      bindingId: binding.bindingId,
-      deviceId: binding.deviceId,
-      deviceLabel: binding.deviceLabel,
-      status: binding.active ? "active" : "revoked",
-      issuedAt: binding.issuedAt,
-      refreshedAt: binding.refreshedAt,
-      revokedAt: binding.revokedAt,
-    };
+    for (const session of existingSessions) {
+      const driverId = session.principalId;
+      const revokedAt = session.revokedAt ?? new Date().toISOString();
+      this.driverProfileService.recordDeviceBindingRevocation(
+        driverId,
+        session.sessionId,
+        revokedAt,
+        {
+          actorId: driverId,
+          actorType: "system",
+          tenantId: null,
+        },
+        requestId,
+      );
+      this.securityEventsService?.recordEvent({
+        actorId: driverId,
+        actorType: "system",
+        subjectId: driverId,
+        realm: "driver",
+        tenantId: null,
+        partnerId: null,
+        eventType: "driver_device_session.revoked",
+        eventFamily: "device",
+        outcome: "revoked",
+        severity: "medium",
+        targetType: "driver_device_binding",
+        targetId: session.sessionId,
+        sessionId: session.sessionId,
+        tokenId: null,
+        authMethods: ["driver_device_registration"],
+        sourceIp: null,
+        userAgent: null,
+        requestId: requestId ?? null,
+        traceId: null,
+        reasonCode: "DEVICE_REBOUND",
+        approvalId: null,
+        beforeSummary: {
+          bindingId: session.sessionId,
+          status: "active",
+        },
+        afterSummary: {
+          bindingId: session.sessionId,
+          status: "revoked",
+          revokedAt,
+        },
+        maskedContext: {
+          deviceId,
+        },
+      });
+    }
   }
 
   private issueSession(
-    binding: DriverDeviceBindingRecord,
+    bindingId: string,
+    driverId: string,
+    deviceId: string,
+    refreshTokenRaw: string,
+    issuedAt: string,
   ): DriverDeviceProvisioningSession {
-    const issuedAt = new Date().toISOString();
     const accessToken = this.jwtAuthService.sign(
       {
         authMode: "jwt_bearer",
         actorType: "driver_user",
-        actorId: binding.driverId,
+        actorId: driverId,
         realm: "driver",
         tenantId: null,
         roleFamilies: ["driver"],
         roles: ["driver_user"],
         scopes: ["driver:read", "driver:write", "dispatch:read"],
         requestId: null,
-        driverBindingId: binding.bindingId,
-        driverDeviceId: binding.deviceId,
+        driverBindingId: bindingId,
+        driverDeviceId: deviceId,
       },
       { expiresIn: DRIVER_ACCESS_TOKEN_EXPIRES_IN },
     );
 
     return {
       accessToken,
-      refreshToken: binding.refreshToken,
+      refreshToken: refreshTokenRaw,
       tokenType: "Bearer",
       expiresIn: DRIVER_ACCESS_TOKEN_EXPIRES_IN,
       refreshExpiresIn: DRIVER_REFRESH_TOKEN_EXPIRES_IN,
-      driverId: binding.driverId,
-      deviceId: binding.deviceId,
-      bindingId: binding.bindingId,
+      driverId,
+      deviceId,
+      bindingId,
       issuedAt,
       identity: {
         actorType: "driver_user",
-        actorId: binding.driverId,
+        actorId: driverId,
         realm: "driver",
         authMode: "jwt_bearer",
         roleFamilies: ["driver"],
@@ -523,7 +593,7 @@ export class DriverDeviceSessionService {
   }
 
   private assertIdentityCanRevokeBinding(
-    binding: DriverDeviceBindingRecord,
+    session: CanonicalIdentitySessionRecord,
     identity?: BootstrapRequestIdentity | null,
   ) {
     if (!identity) {
@@ -532,15 +602,16 @@ export class DriverDeviceSessionService {
         "DRIVER_DEVICE_BINDING_FORBIDDEN",
         "Only the bound driver or an authorized control-plane actor can revoke this driver device binding.",
         {
-          bindingId: binding.bindingId,
-          deviceId: binding.deviceId,
+          bindingId: session.sessionId,
+          deviceId:
+            (session.deviceSummary as { deviceId?: string })?.deviceId ?? null,
         },
       );
     }
 
     if (identity.realm === "driver") {
       if (
-        identity.actorId === binding.driverId &&
+        identity.actorId === session.principalId &&
         identity.scopes.includes("driver:write")
       ) {
         return;
@@ -552,8 +623,8 @@ export class DriverDeviceSessionService {
         "The current driver identity cannot revoke another driver's device binding.",
         {
           actorId: identity.actorId,
-          driverId: binding.driverId,
-          bindingId: binding.bindingId,
+          driverId: session.principalId,
+          bindingId: session.sessionId,
         },
       );
     }
@@ -580,18 +651,18 @@ export class DriverDeviceSessionService {
         actorType: identity.actorType,
         actorId: identity.actorId,
         realm: identity.realm,
-        bindingId: binding.bindingId,
+        bindingId: session.sessionId,
       },
     );
   }
 
   private resolveRevocationAuditActor(
-    binding: DriverDeviceBindingRecord,
+    session: CanonicalIdentitySessionRecord,
     identity?: BootstrapRequestIdentity | null,
   ) {
     if (!identity) {
       return {
-        actorId: binding.driverId,
+        actorId: session.principalId,
         actorType: "system" as const,
         tenantId: null,
       };
@@ -620,7 +691,7 @@ export class DriverDeviceSessionService {
     }
 
     return {
-      actorId: binding.driverId,
+      actorId: session.principalId,
       actorType: "system" as const,
       tenantId: identity.tenantId,
     };

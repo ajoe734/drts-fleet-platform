@@ -8,6 +8,10 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../src/common/db";
+import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
+import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
+import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import {
   hashIdentitySecret,
   IdentityRepository,
@@ -283,5 +287,136 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     expect(updatedSession?.status).toBe("compromised");
     expect(updatedSession?.revokeReason).toBe("REFRESH_TOKEN_REUSE_DETECTED");
     expect(updatedFamily?.status).toBe("compromised");
+  });
+
+  it("proves DriverDeviceSessionService runtime flow against PostgreSQL DB, surviving restart", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    process.env.JWT_SECRET = "test-secret";
+
+    const db = new DatabaseService();
+    databases.push(db);
+
+    const repo = new IdentityRepository(db);
+    const jwtAuthService = new JwtAuthService();
+    const auditNotificationService = new AuditNotificationService();
+    const driverProfileService = new DriverProfileService(
+      auditNotificationService,
+    );
+    const service = new DriverDeviceSessionService(
+      jwtAuthService,
+      driverProfileService,
+      undefined,
+      undefined,
+      repo,
+    );
+
+    const deviceId = `device_pg_${randomUUID()}`;
+    const driverId = "drv-demo-001";
+    createdPrincipalIds.add(driverId);
+
+    await db.query(
+      `
+        INSERT INTO iam.identity_principals (
+          principal_id, source_ref, issuer, subject, principal_type, email_normalized, email_verified, display_name, account_status, created_at, updated_at, record
+        ) VALUES (
+          $1, $2, 'test_issuer', $3, 'human', 'driver@example.com', true, 'Demo Driver', 'active', NOW(), NOW(), '{}'::jsonb
+        ) ON CONFLICT DO NOTHING
+      `,
+      [driverId, `source_${driverId}`, `sub_${driverId}`],
+    );
+
+    // 1. Register device via DriverDeviceSessionService
+    const registered = await service.register({
+      registrationCode: "demo-driver",
+      deviceId,
+      deviceLabel: "PG Test Device",
+    });
+
+    createdSessionIds.add(registered.bindingId);
+
+    // Verify DB state directly: raw refresh secret must NOT be stored
+    const familyRow = await db.query<{ current_token_hash: string; record: unknown }>(
+      `SELECT current_token_hash, record FROM iam.identity_refresh_families WHERE session_id = $1`,
+      [registered.bindingId],
+    );
+
+    expect(familyRow.rows.length).toBe(1);
+    expect(familyRow.rows[0].current_token_hash).toBe(
+      hashIdentitySecret(registered.refreshToken),
+    );
+    expect(JSON.stringify(familyRow.rows[0].record)).not.toContain(
+      registered.refreshToken,
+    );
+
+    // 2. Validate active binding
+    await expect(
+      service.isBindingActive(registered.bindingId, deviceId, registered.driverId),
+    ).resolves.toBe(true);
+
+    // 3. Refresh via DriverDeviceSessionService
+    const refreshed = await service.refresh({
+      deviceId,
+      refreshToken: registered.refreshToken,
+    });
+
+    expect(refreshed.bindingId).toBe(registered.bindingId);
+    expect(refreshed.refreshToken).not.toBe(registered.refreshToken);
+
+    // 4. Simulate process restart with new DatabaseService & DriverDeviceSessionService
+    const dbRestart = new DatabaseService();
+    databases.push(dbRestart);
+    const repoRestart = new IdentityRepository(dbRestart);
+    const serviceRestart = new DriverDeviceSessionService(
+      jwtAuthService,
+      driverProfileService,
+      undefined,
+      undefined,
+      repoRestart,
+    );
+
+    // Verify session active on restart instance
+    await expect(
+      serviceRestart.isBindingActive(
+        registered.bindingId,
+        deviceId,
+        registered.driverId,
+      ),
+    ).resolves.toBe(true);
+
+    // 5. Revoke session via service
+    await service.revoke(
+      {
+        bindingId: registered.bindingId,
+        deviceId,
+      },
+      {
+        actorType: "driver_user",
+        actorId: registered.driverId,
+        authMode: "jwt_bearer",
+        realm: "driver",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        partnerEntrySlug: null,
+        roleFamilies: ["driver"],
+        roles: ["driver_user"],
+        scopes: ["driver:read", "driver:write"],
+        requestId: null,
+      },
+    );
+
+    // Verify revoked status persists across restart instance
+    await expect(
+      serviceRestart.isBindingActive(
+        registered.bindingId,
+        deviceId,
+        registered.driverId,
+      ),
+    ).resolves.toBe(false);
+
+    const dbRevokedSession = await repoRestart.getSession(registered.bindingId);
+    expect(dbRevokedSession?.status).toBe("revoked");
+
+    delete process.env.JWT_SECRET;
   });
 });
