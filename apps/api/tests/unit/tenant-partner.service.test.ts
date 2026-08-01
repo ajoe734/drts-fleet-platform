@@ -1339,6 +1339,43 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
   });
 
+  it("allows unscoped partner_api_key callers to hydrate partner eligibility verifications", async () => {
+    const producer = new TenantPartnerService(new AuditNotificationService());
+    const persistedVerification = await producer.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "2468",
+    });
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findPartnerEligibilityVerification: vi.fn(
+        async () => persistedVerification,
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const consumer = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await expect(
+      consumer.hydratePartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+        {
+          actorType: "partner_api_key",
+          actorId: "partner-key-alpha-demo",
+          realm: "partner",
+          scopes: ["partner:book"],
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(
+      consumer.getPartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+      ),
+    ).toEqual(persistedVerification);
+  });
+
   it("loads and atomically resolves a review created by another API instance", async () => {
     const producer = new TenantPartnerService(new AuditNotificationService());
     const verified = await producer.verifyPartnerEligibility({
@@ -3215,17 +3252,14 @@ describe("TenantPartnerService approval rules", () => {
       "tenant-demo-001",
       "booking-db-consume-001",
     );
-    expect(repository.claimQuotaLedgerEntries).toHaveBeenCalledWith(
-      tx,
-      [
-        expect.objectContaining({
-          bookingId: "booking-db-consume-001",
-          dimension: "booking_count",
-          amount: 1,
-          entryType: "consume",
-        }),
-      ],
-    );
+    expect(repository.claimQuotaLedgerEntries).toHaveBeenCalledWith(tx, [
+      expect.objectContaining({
+        bookingId: "booking-db-consume-001",
+        dimension: "booking_count",
+        amount: 1,
+        entryType: "consume",
+      }),
+    ]);
     expect(repository.persistQuotaReservation).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
@@ -3247,10 +3281,7 @@ describe("TenantPartnerService approval rules", () => {
   it("does not mutate in-memory quota state when a database-backed consume rolls back", async () => {
     const { repository } = createDatabaseQuotaRepository();
     const auditNotificationService = new AuditNotificationService();
-    const recordAuditLog = vi.spyOn(
-      auditNotificationService,
-      "recordAuditLog",
-    );
+    const recordAuditLog = vi.spyOn(auditNotificationService, "recordAuditLog");
     const service = new TenantPartnerService(
       auditNotificationService,
       repository as never,
@@ -3371,7 +3402,9 @@ describe("TenantPartnerService approval rules", () => {
     });
 
     expect(result.ledgerEntries).toEqual([]);
-    expect(repository.loadQuotaMonthlySnapshotsForUpdate).not.toHaveBeenCalled();
+    expect(
+      repository.loadQuotaMonthlySnapshotsForUpdate,
+    ).not.toHaveBeenCalled();
     expect(repository.persistQuotaReservation).not.toHaveBeenCalled();
   });
 

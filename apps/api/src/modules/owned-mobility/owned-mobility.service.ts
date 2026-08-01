@@ -9931,12 +9931,24 @@ export class OwnedMobilityService
     }
 
     const mismatch =
-      (identity.actorType !== "partner_api_key" &&
-        identity.actorType !== "referral_passenger") ||
-      identity.tenantId !== entry.tenantId ||
-      identity.partnerId !== entry.partnerId ||
-      identity.partnerProgramId !== entry.programId ||
-      identity.partnerEntrySlug !== entry.entrySlug;
+      identity.actorType === "referral_passenger"
+        ? identity.tenantId !== entry.tenantId ||
+          identity.partnerId !== entry.partnerId ||
+          identity.partnerProgramId !== entry.programId ||
+          identity.partnerEntrySlug !== entry.entrySlug
+        : identity.actorType !== "partner_api_key" ||
+          (identity.tenantId !== null &&
+            identity.tenantId !== undefined &&
+            identity.tenantId !== entry.tenantId) ||
+          (identity.partnerId !== null &&
+            identity.partnerId !== undefined &&
+            identity.partnerId !== entry.partnerId) ||
+          (identity.partnerProgramId !== null &&
+            identity.partnerProgramId !== undefined &&
+            identity.partnerProgramId !== entry.programId) ||
+          (identity.partnerEntrySlug !== null &&
+            identity.partnerEntrySlug !== undefined &&
+            identity.partnerEntrySlug !== entry.entrySlug);
 
     if (mismatch) {
       throw new ApiRequestError(
