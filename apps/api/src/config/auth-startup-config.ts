@@ -651,7 +651,6 @@ export function buildAuthStartupConfigReport(
 
 export function validateAuthStartupConfig(
   env: EnvLike = process.env,
-  _options?: { failOnError?: boolean },
 ): AuthStartupConfigReport {
   const report = buildAuthStartupConfigReport(env);
 
