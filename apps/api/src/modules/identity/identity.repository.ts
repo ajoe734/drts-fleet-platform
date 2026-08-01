@@ -11,6 +11,7 @@ import type {
   CanonicalIdentityRoleBindingRecord,
   CanonicalIdentitySessionRecord,
   CanonicalRefreshFamilyRecord,
+  CanonicalRefreshTokenRecord,
   CanonicalTenantUserIdentitySnapshot,
   ConsumeAndRotateRefreshTokenCommand,
   ConsumeAndRotateRefreshTokenResult,
@@ -61,6 +62,11 @@ export class IdentityRepository {
   private readonly fallbackRefreshFamilies = new Map<
     string,
     CanonicalRefreshFamilyRecord
+  >();
+
+  private readonly fallbackRefreshTokens = new Map<
+    string,
+    CanonicalRefreshTokenRecord
   >();
 
   private readonly fallbackPreviousTokenHashes = new Map<string, string>();
@@ -339,12 +345,13 @@ export class IdentityRepository {
       [sessionId],
     );
 
-    if (result.rows.length === 0) {
+    const firstRow = result.rows[0];
+    if (!firstRow) {
       return null;
     }
 
     return this.parseRecord<CanonicalIdentitySessionRecord>(
-      result.rows[0].record,
+      firstRow.record,
       "iam.identity_sessions",
     );
   }
@@ -380,6 +387,16 @@ export class IdentityRepository {
           });
         }
       }
+      for (const [tId, token] of this.fallbackRefreshTokens.entries()) {
+        if (token.sessionId === sessionId && token.status === "active") {
+          this.fallbackRefreshTokens.set(tId, {
+            ...token,
+            status: "revoked",
+            revokedAt,
+            updatedAt: revokedAt,
+          });
+        }
+      }
       return updated;
     }
 
@@ -410,7 +427,8 @@ export class IdentityRepository {
         [sessionId, revokedAt, revokedByPrincipalId || null, reason],
       );
 
-      if (sessionResult.rows.length === 0) {
+      const sessionRow = sessionResult.rows[0];
+      if (!sessionRow) {
         await client.query("ROLLBACK");
         return null;
       }
@@ -426,9 +444,24 @@ export class IdentityRepository {
         [sessionId, revokedAt],
       );
 
+      await client.query(
+        `
+          UPDATE iam.identity_refresh_tokens
+          SET status = 'revoked',
+              revoked_at = $2::timestamptz,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                '{revokedAt}', to_jsonb($2::text)
+              )
+          WHERE session_id = $1::text AND status = 'active'
+        `,
+        [sessionId, revokedAt],
+      );
+
       await client.query("COMMIT");
       return this.parseRecord<CanonicalIdentitySessionRecord>(
-        sessionResult.rows[0].record,
+        sessionRow.record,
         "iam.identity_sessions",
       );
     } catch (err) {
@@ -485,12 +518,13 @@ export class IdentityRepository {
       [deviceId],
     );
 
-    if (result.rows.length === 0) {
+    const firstRow = result.rows[0];
+    if (!firstRow) {
       return null;
     }
 
     return this.parseRecord<CanonicalIdentitySessionRecord>(
-      result.rows[0].record,
+      firstRow.record,
       "iam.identity_sessions",
     );
   }
@@ -546,8 +580,27 @@ export class IdentityRepository {
   async createRefreshFamily(
     family: CanonicalRefreshFamilyRecord,
   ): Promise<CanonicalRefreshFamilyRecord> {
+    const initialTokenRecord: CanonicalRefreshTokenRecord = {
+      tokenId: `token_${randomUUID()}`,
+      familyId: family.familyId,
+      sessionId: family.sessionId,
+      tokenHash: family.currentTokenHash,
+      sequenceNumber: family.counter,
+      status: family.status === "active" ? "active" : (family.status as any),
+      issuedAt: family.createdAt,
+      expiresAt: family.expiresAt,
+      consumedAt: null,
+      revokedAt: family.status === "revoked" ? family.updatedAt : null,
+      createdAt: family.createdAt,
+      updatedAt: family.updatedAt,
+    };
+
     if (!this.isEnabled()) {
       this.fallbackRefreshFamilies.set(family.familyId, { ...family });
+      this.fallbackRefreshTokens.set(
+        initialTokenRecord.tokenId,
+        initialTokenRecord,
+      );
       return { ...family };
     }
 
@@ -595,13 +648,176 @@ export class IdentityRepository {
         ],
       );
 
+      await client.query(
+        `
+          INSERT INTO iam.identity_refresh_tokens (
+            token_id, family_id, session_id, token_hash, sequence_number, status, issued_at, expires_at, consumed_at, revoked_at, created_at, updated_at, record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz, $9::timestamptz, $10::timestamptz, $11::timestamptz, $12::timestamptz, $13::jsonb
+          ) ON CONFLICT (token_id) DO NOTHING
+        `,
+        [
+          initialTokenRecord.tokenId,
+          initialTokenRecord.familyId,
+          initialTokenRecord.sessionId,
+          initialTokenRecord.tokenHash,
+          initialTokenRecord.sequenceNumber,
+          initialTokenRecord.status,
+          initialTokenRecord.issuedAt,
+          initialTokenRecord.expiresAt,
+          initialTokenRecord.consumedAt,
+          initialTokenRecord.revokedAt,
+          initialTokenRecord.createdAt,
+          initialTokenRecord.updatedAt,
+          JSON.stringify(initialTokenRecord),
+        ],
+      );
+
+      const firstRow = result.rows[0];
       return this.parseRecord<CanonicalRefreshFamilyRecord>(
-        result.rows[0]?.record,
+        firstRow?.record,
         "iam.identity_refresh_families",
       );
     } finally {
       client.release();
     }
+  }
+
+  async createRefreshToken(
+    tokenRecord: CanonicalRefreshTokenRecord,
+  ): Promise<CanonicalRefreshTokenRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackRefreshTokens.set(tokenRecord.tokenId, { ...tokenRecord });
+      return { ...tokenRecord };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          INSERT INTO iam.identity_refresh_tokens (
+            token_id,
+            family_id,
+            session_id,
+            token_hash,
+            sequence_number,
+            status,
+            issued_at,
+            expires_at,
+            consumed_at,
+            revoked_at,
+            created_at,
+            updated_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz, $9::timestamptz, $10::timestamptz, $11::timestamptz, $12::timestamptz, $13::jsonb
+          )
+          ON CONFLICT (token_id) DO UPDATE SET
+            status = EXCLUDED.status,
+            consumed_at = EXCLUDED.consumed_at,
+            revoked_at = EXCLUDED.revoked_at,
+            updated_at = EXCLUDED.updated_at,
+            record = EXCLUDED.record
+          RETURNING record
+        `,
+        [
+          tokenRecord.tokenId,
+          tokenRecord.familyId,
+          tokenRecord.sessionId,
+          tokenRecord.tokenHash,
+          tokenRecord.sequenceNumber,
+          tokenRecord.status,
+          tokenRecord.issuedAt,
+          tokenRecord.expiresAt,
+          tokenRecord.consumedAt,
+          tokenRecord.revokedAt,
+          tokenRecord.createdAt,
+          tokenRecord.updatedAt,
+          JSON.stringify(tokenRecord),
+        ],
+      );
+      const row = result.rows[0];
+      return this.parseRecord<CanonicalRefreshTokenRecord>(
+        row?.record,
+        "iam.identity_refresh_tokens",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async getRefreshToken(
+    tokenId: string,
+  ): Promise<CanonicalRefreshTokenRecord | null> {
+    if (!this.isEnabled()) {
+      const found = this.fallbackRefreshTokens.get(tokenId);
+      return found ? { ...found } : null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_refresh_tokens WHERE token_id = $1`,
+      [tokenId],
+    );
+
+    const firstRow = result.rows[0];
+    if (!firstRow) {
+      return null;
+    }
+
+    return this.parseRecord<CanonicalRefreshTokenRecord>(
+      firstRow.record,
+      "iam.identity_refresh_tokens",
+    );
+  }
+
+  async getRefreshTokenByHash(
+    tokenHash: string,
+  ): Promise<CanonicalRefreshTokenRecord | null> {
+    if (!this.isEnabled()) {
+      for (const token of this.fallbackRefreshTokens.values()) {
+        if (token.tokenHash === tokenHash) {
+          return { ...token };
+        }
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_refresh_tokens WHERE token_hash = $1`,
+      [tokenHash],
+    );
+
+    const firstRow = result.rows[0];
+    if (!firstRow) {
+      return null;
+    }
+
+    return this.parseRecord<CanonicalRefreshTokenRecord>(
+      firstRow.record,
+      "iam.identity_refresh_tokens",
+    );
+  }
+
+  async listRefreshTokensByFamily(
+    familyId: string,
+  ): Promise<CanonicalRefreshTokenRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackRefreshTokens.values())
+        .filter((t) => t.familyId === familyId)
+        .map((t) => ({ ...t }));
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_refresh_tokens WHERE family_id = $1 ORDER BY sequence_number DESC`,
+      [familyId],
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<CanonicalRefreshTokenRecord>(
+        row.record,
+        "iam.identity_refresh_tokens",
+      ),
+    );
   }
 
   async getRefreshFamily(
@@ -617,12 +833,13 @@ export class IdentityRepository {
       [familyId],
     );
 
-    if (result.rows.length === 0) {
+    const firstRow = result.rows[0];
+    if (!firstRow) {
       return null;
     }
 
     return this.parseRecord<CanonicalRefreshFamilyRecord>(
-      result.rows[0].record,
+      firstRow.record,
       "iam.identity_refresh_families",
     );
   }
@@ -644,12 +861,13 @@ export class IdentityRepository {
       [tokenHash],
     );
 
-    if (result.rows.length === 0) {
+    const firstRow = result.rows[0];
+    if (!firstRow) {
       return null;
     }
 
     return this.parseRecord<CanonicalRefreshFamilyRecord>(
-      result.rows[0].record,
+      firstRow.record,
       "iam.identity_refresh_families",
     );
   }
@@ -695,6 +913,15 @@ export class IdentityRepository {
             family.status = "compromised";
             family.compromisedAt = now;
             family.updatedAt = now;
+            for (const [tId, token] of this.fallbackRefreshTokens.entries()) {
+              if (token.familyId === family.familyId) {
+                this.fallbackRefreshTokens.set(tId, {
+                  ...token,
+                  status: "compromised",
+                  updatedAt: now,
+                });
+              }
+            }
           }
           if (session) {
             session.status = "compromised";
@@ -738,11 +965,48 @@ export class IdentityRepository {
           session.status = "expired";
           session.updatedAt = now;
         }
+        for (const [tId, token] of this.fallbackRefreshTokens.entries()) {
+          if (token.familyId === targetFamily.familyId && token.status === "active") {
+            this.fallbackRefreshTokens.set(tId, {
+              ...token,
+              status: "expired",
+              updatedAt: now,
+            });
+          }
+        }
         return { success: false, session, family: targetFamily, reason: "EXPIRED" };
       }
 
       this.fallbackPreviousTokenHashes.set(oldHash, targetFamily.familyId);
       const now = command.updatedAt || new Date().toISOString();
+
+      for (const [tId, token] of this.fallbackRefreshTokens.entries()) {
+        if (token.familyId === targetFamily.familyId && token.tokenHash === oldHash) {
+          this.fallbackRefreshTokens.set(tId, {
+            ...token,
+            status: "consumed",
+            consumedAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+
+      const newTokenRecord: CanonicalRefreshTokenRecord = {
+        tokenId: `token_${randomUUID()}`,
+        familyId: targetFamily.familyId,
+        sessionId: targetFamily.sessionId,
+        tokenHash: newHash,
+        sequenceNumber: targetFamily.counter + 1,
+        status: "active",
+        issuedAt: now,
+        expiresAt: command.newExpiresAt,
+        consumedAt: null,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.fallbackRefreshTokens.set(newTokenRecord.tokenId, newTokenRecord);
+
       targetFamily.currentTokenHash = newHash;
       targetFamily.counter += 1;
       targetFamily.expiresAt = command.newExpiresAt;
@@ -815,6 +1079,15 @@ export class IdentityRepository {
 
         if (historicalResult.rows.length > 0) {
           const row = historicalResult.rows[0];
+          if (!row) {
+            await client.query("ROLLBACK");
+            return {
+              success: false,
+              session: null,
+              family: null,
+              reason: "INVALID_TOKEN",
+            };
+          }
           const now = new Date().toISOString();
 
           await client.query(
@@ -849,6 +1122,17 @@ export class IdentityRepository {
               WHERE session_id = $2::text
             `,
             [now, row.session_id],
+          );
+
+          await client.query(
+            `
+              UPDATE iam.identity_refresh_tokens
+              SET status = 'compromised',
+                  updated_at = $1::timestamptz,
+                  record = jsonb_set(record, '{status}', '"compromised"'::jsonb)
+              WHERE family_id = $2::text
+            `,
+            [now, row.family_id],
           );
 
           await client.query("COMMIT");
@@ -887,6 +1171,15 @@ export class IdentityRepository {
       }
 
       const row = familyResult.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          session: null,
+          family: null,
+          reason: "INVALID_TOKEN",
+        };
+      }
       const family = this.parseRecord<CanonicalRefreshFamilyRecord>(
         row.family_record,
         "iam.identity_refresh_families",
@@ -920,6 +1213,10 @@ export class IdentityRepository {
           `UPDATE iam.identity_sessions SET status = 'expired', updated_at = $1 WHERE session_id = $2`,
           [now, row.session_id],
         );
+        await client.query(
+          `UPDATE iam.identity_refresh_tokens SET status = 'expired', updated_at = $1 WHERE family_id = $2 AND status = 'active'`,
+          [now, row.family_id],
+        );
         await client.query("COMMIT");
         return {
           success: false,
@@ -951,7 +1248,8 @@ export class IdentityRepository {
         [newHash, command.newExpiresAt, now, oldHash, row.family_id],
       );
 
-      if (updateFamilyResult.rows.length === 0) {
+      const updateFamilyRow = updateFamilyResult.rows[0];
+      if (!updateFamilyRow) {
         await client.query("ROLLBACK");
         return {
           success: false,
@@ -960,6 +1258,56 @@ export class IdentityRepository {
           reason: "CONCURRENCY_CONFLICT",
         };
       }
+
+      await client.query(
+        `
+          UPDATE iam.identity_refresh_tokens
+          SET status = 'consumed',
+              consumed_at = $1::timestamptz,
+              updated_at = $1::timestamptz,
+              record = jsonb_set(
+                jsonb_set(record, '{status}', '"consumed"'::jsonb),
+                '{consumedAt}', to_jsonb($1::text)
+              )
+          WHERE family_id = $2::text AND token_hash = $3::text
+        `,
+        [now, row.family_id, oldHash],
+      );
+
+      const newTokenRecord: CanonicalRefreshTokenRecord = {
+        tokenId: `token_${randomUUID()}`,
+        familyId: row.family_id,
+        sessionId: row.session_id,
+        tokenHash: newHash,
+        sequenceNumber: row.counter + 1,
+        status: "active",
+        issuedAt: now,
+        expiresAt: command.newExpiresAt,
+        consumedAt: null,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await client.query(
+        `
+          INSERT INTO iam.identity_refresh_tokens (
+            token_id, family_id, session_id, token_hash, sequence_number, status, issued_at, expires_at, consumed_at, revoked_at, created_at, updated_at, record
+          ) VALUES (
+            $1, $2, $3, $4, $5, 'active', $6::timestamptz, $7::timestamptz, NULL, NULL, $6::timestamptz, $6::timestamptz, $8::jsonb
+          ) ON CONFLICT (token_id) DO NOTHING
+        `,
+        [
+          newTokenRecord.tokenId,
+          newTokenRecord.familyId,
+          newTokenRecord.sessionId,
+          newTokenRecord.tokenHash,
+          newTokenRecord.sequenceNumber,
+          now,
+          command.newExpiresAt,
+          JSON.stringify(newTokenRecord),
+        ],
+      );
 
       const updateSessionResult = await client.query<JsonRecordRow>(
         `
@@ -972,13 +1320,24 @@ export class IdentityRepository {
         [now, row.session_id],
       );
 
+      const updateSessionRow = updateSessionResult.rows[0];
+      if (!updateSessionRow) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          session: null,
+          family: null,
+          reason: "CONCURRENCY_CONFLICT",
+        };
+      }
+
       await client.query("COMMIT");
       const updatedFamily = this.parseRecord<CanonicalRefreshFamilyRecord>(
-        updateFamilyResult.rows[0].record,
+        updateFamilyRow.record,
         "iam.identity_refresh_families",
       );
       const updatedSession = this.parseRecord<CanonicalIdentitySessionRecord>(
-        updateSessionResult.rows[0].record,
+        updateSessionRow.record,
         "iam.identity_sessions",
       );
 

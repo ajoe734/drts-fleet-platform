@@ -2448,6 +2448,31 @@ export interface CanonicalRefreshFamilyRecord {
   updatedAt: string;
 }
 
+export const REFRESH_TOKEN_STATUSES = [
+  "active",
+  "consumed",
+  "revoked",
+  "expired",
+  "compromised",
+] as const;
+export type RefreshTokenStatus = (typeof REFRESH_TOKEN_STATUSES)[number];
+
+export interface CanonicalRefreshTokenRecord {
+  tokenId: string;
+  familyId: string;
+  sessionId: string;
+  tokenHash: string;
+  sequenceNumber: number;
+  status: RefreshTokenStatus;
+  issuedAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+
 export interface ConsumeAndRotateRefreshTokenCommand {
   familyId?: string;
   oldTokenRaw?: string;
