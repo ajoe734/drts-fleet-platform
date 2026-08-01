@@ -192,3 +192,15 @@ Do not force-push, rebase, or rename any existing shared branch.
   - `gh pr create --base dev --head codex/be-ref-passenger-001-replay --title "BE-REF-PASSENGER-001: replay reviewed referral passenger authority on clean history" ...`
   - `gh pr view 1230 --json number,title,headRefName,baseRefName,state,url,mergeStateStatus,commits,statusCheckRollup`
   - `gh pr view 1232 --json number,title,headRefName,baseRefName,state,url,commits,statusCheckRollup`
+
+## Owner Closeout
+
+- Closeout timestamp: `2026-08-01T16:01:37Z`
+- Approved scope still matches the task branch: this helper branch only carries
+  the unblock evidence artifact, while the canonical repaired merge rail remains
+  `codex/be-ref-passenger-001-replay @ 2c988eb2280b5ee6b52053c79bcb6d5b206be926`
+  via PR `#1232`.
+- Parent machine truth already points `BE-REF-PASSENGER-001` at the repaired
+  replay rail and the remaining inherited `dev` `i18n-guard` blocker.
+- This closeout branch has no deploy target of its own; integration remains
+  branch-level evidence only until the parent merges PR `#1232`.
