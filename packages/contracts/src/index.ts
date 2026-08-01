@@ -2292,6 +2292,111 @@ export interface TenantBookingQuotaImpactPreview {
   combinedTriggered: "none" | "warn" | "approval" | "block";
 }
 
+// --- Canonical Identity & Membership ---
+export const CANONICAL_ACCOUNT_STATUSES = [
+  "invited",
+  "pending_verification",
+  "active",
+  "locked",
+  "suspended",
+  "disabled",
+  "deletion_pending",
+  "deleted",
+  "migration_pending",
+] as const;
+export type CanonicalAccountStatus =
+  (typeof CANONICAL_ACCOUNT_STATUSES)[number];
+
+export const CANONICAL_PRINCIPAL_TYPES = [
+  "human",
+  "service",
+  "device",
+  "partner_machine",
+] as const;
+export type CanonicalPrincipalType = (typeof CANONICAL_PRINCIPAL_TYPES)[number];
+
+export interface CanonicalIdentityPrincipalRecord {
+  principalId: string;
+  sourceRef: string | null;
+  issuer: string;
+  subject: string;
+  principalType: CanonicalPrincipalType;
+  email: string | null;
+  emailVerified: boolean;
+  displayName: string | null;
+  status: CanonicalAccountStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalIdentityMembershipRecord {
+  membershipId: string;
+  sourceRef: string | null;
+  principalId: string;
+  realm: string;
+  scopeRef: string;
+  tenantId: string | null;
+  partnerId: string | null;
+  status: CanonicalAccountStatus;
+  invitedByPrincipalId: string | null;
+  invitationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalIdentityRoleBindingRecord {
+  roleBindingId: string;
+  sourceRef: string | null;
+  membershipId: string;
+  roleCode: string;
+  grantedByPrincipalId: string | null;
+  approvalId: string | null;
+  validFrom: string;
+  validTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const CANONICAL_INVITATION_DELIVERY_STATUSES = [
+  "pending_delivery",
+  "delivered",
+  "legacy_backfill",
+  "delivery_failed",
+] as const;
+export type CanonicalInvitationDeliveryStatus =
+  (typeof CANONICAL_INVITATION_DELIVERY_STATUSES)[number];
+
+export interface CanonicalIdentityInvitationRecord {
+  invitationId: string;
+  sourceRef: string | null;
+  membershipId: string;
+  issuerPrincipalId: string | null;
+  realm: string;
+  scopeRef: string;
+  tenantId: string | null;
+  partnerId: string | null;
+  email: string;
+  roleCode: string;
+  tokenHash: string;
+  deliveryStatus: CanonicalInvitationDeliveryStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalTenantUserIdentitySnapshot {
+  principal: CanonicalIdentityPrincipalRecord;
+  membership: CanonicalIdentityMembershipRecord;
+  roleBinding: CanonicalIdentityRoleBindingRecord;
+  invitation: CanonicalIdentityInvitationRecord | null;
+}
+
+export function isCanonicalAccountActive(status: CanonicalAccountStatus) {
+  return status === "active";
+}
+
 // --- Tenant User & Roles ---
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 
