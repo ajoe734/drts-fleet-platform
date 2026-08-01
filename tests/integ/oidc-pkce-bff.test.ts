@@ -29,6 +29,7 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
     process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
     process.env.OIDC_CLIENT_ID = "drts-bff-client";
+    process.env.OIDC_MOCK_MODE = "true";
   });
 
   afterEach(() => {

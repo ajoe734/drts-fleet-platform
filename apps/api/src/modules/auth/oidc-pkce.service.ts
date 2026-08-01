@@ -903,7 +903,19 @@ export class OidcPkceService {
   ): Promise<OidcClaims> {
     const code = command.code.trim();
 
-    // Check negative test flags embedded in synthetic test codes
+    // 1. Check if a real OIDC token endpoint is configured and mock mode is disabled.
+    // In real provider mode, EVERY code must be exchanged with the real IdP token endpoint via HTTP POST.
+    const tokenEndpoint =
+      process.env.OIDC_TOKEN_ENDPOINT ??
+      (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/oauth2/v1/token` : null);
+
+    const isMockMode = process.env.OIDC_MOCK_MODE === "true";
+
+    if (tokenEndpoint && !isMockMode) {
+      return await this.exchangeRealOidcTokenEndpoint(command, stateRecord, tokenEndpoint);
+    }
+
+    // 2. Offline synthetic test codes (active when OIDC_MOCK_MODE=true or tokenEndpoint is null)
     if (code.includes("invalid_code") || code === "invalid") {
       throw new ApiRequestError(
         400,
@@ -1007,21 +1019,6 @@ export class OidcPkceService {
         auth_time: Math.floor(Date.now() / 1000),
         nonce: stateRecord?.nonce,
       };
-    }
-
-    // 2. Check if a real OIDC token endpoint is configured and code is not a synthetic test code
-    const tokenEndpoint =
-      process.env.OIDC_TOKEN_ENDPOINT ??
-      (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/oauth2/v1/token` : null);
-
-    const isMockMode = process.env.OIDC_MOCK_MODE === "true";
-    const isSyntheticCode =
-      code.startsWith("valid_") ||
-      code.startsWith("e2e_") ||
-      code.startsWith("code_");
-
-    if (tokenEndpoint && !isMockMode && !isSyntheticCode) {
-      return await this.exchangeRealOidcTokenEndpoint(command, stateRecord, tokenEndpoint);
     }
 
     // Default / happy path synthetic claims (for offline tests)

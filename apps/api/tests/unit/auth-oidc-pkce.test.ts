@@ -12,7 +12,10 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   let jwtAuthService: JwtAuthService;
   let tenantPartnerService: TenantPartnerService;
 
+  const originalEnv = { ...process.env };
+
   beforeEach(() => {
+    process.env = { ...originalEnv };
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
     jwtAuthService = new JwtAuthService();
     tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
