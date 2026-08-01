@@ -760,7 +760,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     expect(opsEvent?.realm).toBe("ops");
   });
 
-  it("verifies BootstrapAuthGuard respects ops surface choice for platform-admin assertions without 403 AUTH_REALM_DENIED", async () => {
+  it("verifies BootstrapAuthGuard fails closed with 403 when ops surface is requested but user has no durable ops membership", async () => {
     process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
     process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
 
@@ -852,12 +852,16 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       getClass: () => class {},
     };
 
-    const allowed = await guard.canActivate(context);
-    expect(allowed).toBe(true);
-    expect(mockRequest.identity).toBeDefined();
-    expect(mockRequest.identity.realm).toBe("ops");
-    expect(mockRequest.identity.actorType).toBe("ops_user");
-    expect(mockRequest.identity.roles).toContain("operator");
+    let caughtError: any = null;
+    try {
+      await guard.canActivate(context);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeInstanceOf(ApiRequestError);
+    expect(caughtError?.getStatus()).toBe(403);
+    expect(caughtError?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
 
     delete process.env.IAP_EXPECTED_AUDIENCE;
     delete process.env.IAP_JWT_SECRET;

@@ -297,11 +297,8 @@ export class IAPSubjectAdapter {
     const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
 
     let activeMembership =
-      (requestedRealm === "ops"
-        ? activeControlPlaneMemberships.find((m) => m.realm === "ops") ||
-          (isPlatformGroup || isOpsGroup
-            ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
-            : null)
+      requestedRealm === "ops"
+        ? activeControlPlaneMemberships.find((m) => m.realm === "ops")
         : requestedRealm === "platform"
         ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
         : (isPlatformGroup
@@ -309,8 +306,8 @@ export class IAPSubjectAdapter {
             : null) ||
           (isOpsGroup
             ? activeControlPlaneMemberships.find((m) => m.realm === "ops")
-            : null)) ||
-      activeControlPlaneMemberships[0];
+            : null) ||
+          activeControlPlaneMemberships[0];
 
     if (!activeMembership) {
       const { actorType, realm } = this.getActorContext(requestedRealm, undefined, assertionGroups);
@@ -324,7 +321,7 @@ export class IAPSubjectAdapter {
       throw new ApiRequestError(
         403,
         "IAP_WORKFORCE_USER_INACTIVE",
-        "Workforce user membership is inactive or suspended.",
+        "Workforce user has no active durable membership for requested realm.",
       );
     }
 
@@ -436,11 +433,24 @@ export class IAPSubjectAdapter {
       );
       if (matchingMembership) {
         activeMembership = matchingMembership;
-      } else if (expectedRealm === "ops") {
-        activeMembership = {
-          ...activeMembership,
-          realm: "ops",
-        };
+      } else {
+        const { actorType, realm } = this.getActorContext(
+          expectedRealm,
+          effectiveRoles,
+          assertionGroups,
+        );
+        this.emitDeniedEvent(
+          "user_inactive",
+          principal.email || normalizedEmail,
+          principal.principalId,
+          realm,
+          actorType,
+        );
+        throw new ApiRequestError(
+          403,
+          "IAP_WORKFORCE_USER_INACTIVE",
+          "Workforce user has no active durable membership for requested realm.",
+        );
       }
     }
 
