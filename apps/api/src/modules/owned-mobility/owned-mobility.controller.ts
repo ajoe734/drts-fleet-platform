@@ -333,6 +333,19 @@ export class OwnedMobilityController {
     );
   }
 
+  @Get("partner/referral/passenger/orders/:orderId/receipt/download")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  downloadReferralPassengerReceipt(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      requestId,
+    );
+  }
+
   @Post("partner/referral/passenger/orders/:orderId/cancel")
   async cancelReferralPassengerTrip(
     @Param("orderId") orderId: string,

@@ -10000,12 +10000,12 @@ export class OwnedMobilityService
     }
   }
 
-  createReferralPassengerBooking(
+  async createReferralPassengerBooking(
     command: CreateReferralPassengerBookingCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-  ): MaybePromise<TenantBookingResult> {
+  ): Promise<TenantBookingResult> {
     if (
       !identity ||
       identity.realm !== "partner" ||
@@ -10038,6 +10038,18 @@ export class OwnedMobilityService
     const passengerId =
       identity.drtsPassengerId ?? identity.actorId ?? "pax-ref-anon";
 
+    if (this.tenantPartnerService) {
+      try {
+        this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
+      } catch {
+        this.tenantPartnerService.upsertPassenger(tenantId, {
+          passengerId,
+          fullName: command.passengerName || "Referral Passenger",
+          mobile: command.passengerPhone || "0912345678",
+        });
+      }
+    }
+
     if (command.idempotencyKey) {
       const existing = Array.from(this.orders.values()).find(
         (o) =>
@@ -10048,7 +10060,15 @@ export class OwnedMobilityService
             command.idempotencyKey,
       );
       if (existing) {
-        return existing as unknown as TenantBookingResult;
+        return {
+          orderId: existing.orderId,
+          bookingId: existing.bookingId ?? existing.orderId,
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype:
+            existing.businessDispatchSubtype ?? "enterprise_dispatch",
+          dispatchSemantics: "reservation",
+          status: existing.status,
+        };
       }
     }
 
@@ -10070,6 +10090,7 @@ export class OwnedMobilityService
       },
       reservationWindowStart: nowIso,
       reservationWindowEnd: new Date(Date.now() + 3600000).toISOString(),
+      passengerId,
       passenger: {
         passengerId,
         name: command.passengerName || "Referral Passenger",
@@ -10078,7 +10099,7 @@ export class OwnedMobilityService
       partnerEntrySlug: identity.partnerEntrySlug,
     };
 
-    const result = this.createTenantBooking(
+    const result = await this.createTenantBooking(
       tenantBookingCommand,
       tenantId,
       identity,
@@ -10104,6 +10125,78 @@ export class OwnedMobilityService
     }
 
     return result;
+  }
+
+  private resolveReferralTripDetails(order: OwnedOrderRecord) {
+    const assignment = this.dispatchAssignments.find(
+      (a) =>
+        a.orderId === order.orderId && ["assigned", "accepted"].includes(a.status),
+    );
+    const task = this.driverTasks.find(
+      (t) =>
+        t.orderId === order.orderId &&
+        !["cancelled", "rejected"].includes(t.status),
+    );
+
+    const candidate = (order as unknown as Record<string, unknown>)
+      .dispatchCandidate as
+      | { driverName?: string; plateNumber?: string; driverPhoneMasked?: string }
+      | undefined;
+
+    let driverName: string | null = candidate?.driverName ?? null;
+    let plateNumber: string | null = candidate?.plateNumber ?? null;
+    let driverPhoneMasked: string | null = candidate?.driverPhoneMasked ?? null;
+
+    const driverId = task?.driverId ?? assignment?.driverId;
+    const vehicleId = task?.vehicleId ?? assignment?.vehicleId;
+
+    if (driverId && this.regulatoryRegistryService) {
+      const driver = this.regulatoryRegistryService
+        .listDrivers()
+        .find((d) => d.driverId === driverId);
+      if (driver?.name) {
+        driverName = driver.name;
+      }
+    }
+
+    if (vehicleId && this.regulatoryRegistryService) {
+      const vehicle = this.regulatoryRegistryService
+        .listVehicles()
+        .find((v) => v.vehicleId === vehicleId);
+      if (vehicle?.plateNo) {
+        plateNumber = vehicle.plateNo;
+      }
+    }
+
+    if (driverName && !driverPhoneMasked) {
+      driverPhoneMasked = "0912-***-888";
+    }
+
+    let fareTotal = 0;
+    if (order.status !== "cancelled") {
+      if (
+        task?.fare?.amountMinor !== undefined &&
+        task.fare.amountMinor !== null
+      ) {
+        fareTotal = Math.round(task.fare.amountMinor / 100);
+      } else if (
+        order.quotedFare?.amountMinor !== undefined &&
+        order.quotedFare.amountMinor !== null
+      ) {
+        fareTotal = Math.round(order.quotedFare.amountMinor / 100);
+      } else {
+        fareTotal = 290;
+      }
+    }
+
+    return {
+      assignment,
+      task,
+      driverName,
+      plateNumber,
+      driverPhoneMasked,
+      fareTotal,
+    };
   }
 
   getReferralPassengerActiveTrip(
@@ -10136,11 +10229,8 @@ export class OwnedMobilityService
       return { active: false, trip: null };
     }
 
+    const details = this.resolveReferralTripDetails(activeOrder);
     const isRated = this.referralRatingsByOrderId.has(activeOrder.orderId);
-    const candidate = (activeOrder as unknown as Record<string, unknown>)
-      .dispatchCandidate as
-      | { driverName?: string; plateNumber?: string }
-      | undefined;
 
     return {
       active: true,
@@ -10153,11 +10243,14 @@ export class OwnedMobilityService
         cancelWindowMin: 2,
         pickupAddress: activeOrder.pickup.address,
         dropoffAddress: activeOrder.dropoff.address,
-        driverName: candidate?.driverName ?? "Minghan Wu",
-        driverPhoneMasked: "0912-***-888",
-        plateNumber: candidate?.plateNumber ?? "BKR-2208",
-        vehicleType: activeOrder.serviceProductCode ?? "standard",
-        estimatedFare: 290,
+        driverName: details.driverName,
+        driverPhoneMasked: details.driverPhoneMasked,
+        plateNumber: details.plateNumber,
+        vehicleType:
+          activeOrder.serviceProductCode ??
+          activeOrder.businessDispatchSubtype ??
+          "standard",
+        estimatedFare: details.fareTotal,
         createdAt: activeOrder.createdAt ?? new Date().toISOString(),
         updatedAt: activeOrder.updatedAt ?? new Date().toISOString(),
         rated: isRated,
@@ -10193,6 +10286,7 @@ export class OwnedMobilityService
 
     return {
       items: passengerOrders.map((o) => {
+        const details = this.resolveReferralTripDetails(o);
         const completedAt = (o as unknown as Record<string, unknown>)
           .completedAt as string | undefined;
         return {
@@ -10201,8 +10295,8 @@ export class OwnedMobilityService
           status: o.status,
           pickupAddress: o.pickup.address,
           dropoffAddress: o.dropoff.address,
-          fareTotal: o.status === "cancelled" ? 0 : 285,
-          formattedFare: o.status === "cancelled" ? "NT$ 0" : "NT$ 285",
+          fareTotal: details.fareTotal,
+          formattedFare: `NT$ ${details.fareTotal}`,
           completedAt:
             completedAt ??
             o.cancelledAt ??
@@ -10246,6 +10340,8 @@ export class OwnedMobilityService
       );
     }
 
+    const details = this.resolveReferralTripDetails(order);
+
     const maskName = (name?: string | null) => {
       if (!name) return "L. Tsai";
       const parts = name.trim().split(/\s+/);
@@ -10264,11 +10360,10 @@ export class OwnedMobilityService
       return "0912-***-820";
     };
 
-    const total = order.status === "cancelled" ? 0 : 285;
-    const candidate = (order as unknown as Record<string, unknown>)
-      .dispatchCandidate as
-      | { driverName?: string; plateNumber?: string }
-      | undefined;
+    const total = details.fareTotal;
+    const fareBase = total > 0 ? Math.round(total * 0.35) : 0;
+    const fareDistance = total > 0 ? Math.round(total * 0.45) : 0;
+    const fareTime = total > 0 ? total - fareBase - fareDistance : 0;
     const completedAt = (order as unknown as Record<string, unknown>)
       .completedAt as string | undefined;
 
@@ -10283,14 +10378,17 @@ export class OwnedMobilityService
         new Date().toISOString(),
       passengerNameMasked: maskName(order.passenger?.name),
       passengerPhoneMasked: maskPhone(order.passenger?.phone),
-      driverName: candidate?.driverName ?? "Minghan Wu",
-      plateNumber: candidate?.plateNumber ?? "BKR-2208",
-      vehicleType: order.serviceProductCode ?? "standard",
+      driverName: details.driverName,
+      plateNumber: details.plateNumber,
+      vehicleType:
+        order.serviceProductCode ??
+        order.businessDispatchSubtype ??
+        "standard",
       pickupAddress: order.pickup.address,
       dropoffAddress: order.dropoff.address,
-      fareBase: order.status === "cancelled" ? 0 : 100,
-      fareDistance: order.status === "cancelled" ? 0 : 125,
-      fareTime: order.status === "cancelled" ? 0 : 60,
+      fareBase,
+      fareDistance,
+      fareTime,
       totalFare: total,
       formattedTotal: `NT$ ${total}`,
       paymentChannel: `${identity.partnerEntrySlug} (月結)`,
