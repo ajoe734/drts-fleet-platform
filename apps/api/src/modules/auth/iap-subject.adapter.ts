@@ -504,8 +504,13 @@ export class IAPSubjectAdapter {
     );
 
     let driftDetails: ResolvedIapWorkforceSubject["driftDetails"];
-    const missingGroupsList = Array.from(allMissingGroups);
-    const hasDrift = overallDriftDetected || selectedAnalysis.driftDetected || missingGroupsList.length > 0;
+    const missingGroupsList = requestedRealm
+      ? selectedAnalysis.missingGroups
+      : Array.from(allMissingGroups);
+    const hasDrift = requestedRealm
+      ? selectedAnalysis.driftDetected || missingGroupsList.length > 0
+      : overallDriftDetected || selectedAnalysis.driftDetected || missingGroupsList.length > 0;
+
     if (hasDrift) {
       driftDetails = {
         originalRoles,
