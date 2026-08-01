@@ -37,6 +37,9 @@ import type {
   RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
   UpdateTenantBookingCommand,
+  CancelReferralPassengerTripCommand,
+  CreateReferralPassengerBookingCommand,
+  SubmitReferralPassengerRatingCommand,
 } from "@drts/contracts";
 
 import {
@@ -273,6 +276,94 @@ export class OwnedMobilityController {
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.resolvePersistedOrder(orderId, identity),
+      requestId,
+    );
+  }
+
+  @Post("partner/referral/passenger/bookings")
+  createReferralPassengerBooking(
+    @Body() command: CreateReferralPassengerBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+  ) {
+    const result = this.ownedMobilityService.createReferralPassengerBooking(
+      command,
+      identity,
+      requestId,
+      runtimeProfileCode,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("partner/referral/passenger/active")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getReferralPassengerActiveTrip(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getReferralPassengerActiveTrip(identity),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/history")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listReferralPassengerHistory(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.listReferralPassengerHistory(identity),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/orders/:orderId/receipt")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getReferralPassengerReceipt(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      requestId,
+    );
+  }
+
+  @Post("partner/referral/passenger/orders/:orderId/cancel")
+  async cancelReferralPassengerTrip(
+    @Param("orderId") orderId: string,
+    @Body() command: CancelReferralPassengerTripCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.cancelReferralPassengerTrip(
+        orderId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("partner/referral/passenger/orders/:orderId/rating")
+  submitReferralPassengerRating(
+    @Param("orderId") orderId: string,
+    @Body() command: SubmitReferralPassengerRatingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.submitReferralPassengerRating(
+        orderId,
+        command,
+        identity,
+      ),
       requestId,
     );
   }

@@ -118,6 +118,17 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("partner/referral/passenger/")) {
+    const routeSuffix =
+      routePath.slice("partner/referral/passenger/".length) || "root";
+    return {
+      routeKey: `partner:referral-passenger:${routeSuffix}:${upperMethod}`,
+      requiredScopes: ["partner:book"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Referral passenger self-service access",
+    };
+  }
+
   if (routePath.startsWith("partner/referral/")) {
     const routeSuffix = routePath.slice("partner/referral/".length) || "root";
     return {

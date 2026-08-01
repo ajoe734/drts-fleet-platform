@@ -46,6 +46,7 @@ export interface BootstrapRequestIdentity {
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  drtsPassengerId?: string | null;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
