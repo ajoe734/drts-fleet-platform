@@ -2,6 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "moduleResolution": "Bundler",
+    "baseUrl": "../..",
+    "paths": {
+      "@drts/contracts": ["packages/contracts/src/index.ts"]
+    },
     "noEmit": true
   },
   "include": ["src/**/*.ts"]
