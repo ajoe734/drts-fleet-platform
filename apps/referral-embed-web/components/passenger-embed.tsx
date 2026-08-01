@@ -45,38 +45,38 @@ const NEGATIVE_META = {
   denied: {
     icon: "x",
     tone: "danger",
-    title: "叫車未能建立",
+    titleKey: "embed.negative.title.denied",
     posture: "denied",
-    body: "此次叫車請求未通過。請確認上下車地點是否在服務範圍內，或稍後再試。",
-    primary: "重新叫車",
-    secondary: "聯絡社區客服",
+    bodyKey: "embed.negative.denied",
+    primaryKey: "embed.field.rebook",
+    secondaryKey: "embed.field.communitySupport",
   },
   ineligible: {
     icon: "ban",
     tone: "warn",
-    title: "目前不符叫車資格",
+    titleKey: "embed.negative.title.ineligible",
     posture: "ineligible",
-    body: "您的住戶身分目前未開通叫車服務，可能因社區方案尚未生效。請洽社區管理中心確認。",
-    primary: "洽社區管理中心",
-    secondary: "返回",
+    bodyKey: "embed.negative.ineligible",
+    primaryKey: "embed.negative.primary.ineligible",
+    secondaryKey: "embed.negative.secondary.ineligible",
   },
   nosupply: {
     icon: "car",
     tone: "warn",
-    title: "附近暫無可派車輛",
+    titleKey: "embed.negative.title.nosupply",
     posture: "no_supply",
-    body: "此時段與地點暫無可派車。請稍後重試或改約時間，系統也會嘗試自動為您補派。",
-    primary: "稍後重試",
-    secondary: "改約時間",
+    bodyKey: "embed.negative.nosupply",
+    primaryKey: "embed.negative.primary.nosupply",
+    secondaryKey: "embed.negative.secondary.nosupply",
   },
   degraded: {
     icon: "alert",
     tone: "warn",
-    title: "服務暫時不穩定",
+    titleKey: "embed.negative.title.degraded",
     posture: "degraded",
-    body: "叫車服務目前回應較慢。您的請求已安全受理，恢復後會自動繼續，無需重複送出。",
-    primary: "重試",
-    secondary: "查看狀態",
+    bodyKey: "embed.negative.degraded",
+    primaryKey: "embed.negative.primary.degraded",
+    secondaryKey: "embed.negative.secondary.degraded",
   },
 } as const;
 
@@ -613,6 +613,7 @@ function Shell({
   children: ReactNode;
   footer?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const dotColor =
     badgeTone === "live"
       ? "var(--embed-status-success-fg)"
@@ -696,7 +697,7 @@ function Shell({
             <Icon name="arrowLeft" size={16} />
           </span>
           <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700 }}>社區叫車</div>
+            <div style={{ fontSize: 14.5, fontWeight: 700 }}>{t("embed.chrome.title")}</div>
             <div
               style={{
                 fontSize: 10,
@@ -793,6 +794,7 @@ function Shell({
 }
 
 function HandoffView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   return (
     <Shell
       context={context}
@@ -803,7 +805,7 @@ function HandoffView({ context }: { context: EmbedContext }) {
           tone="primary"
           iconRight="car"
         >
-          開始叫車
+          {t("embed.field.startRideBooking")}
         </ActionButton>
       }
     >
@@ -818,14 +820,12 @@ function HandoffView({ context }: { context: EmbedContext }) {
       >
         <BrandMark context={context} size={56} />
         <div style={{ fontSize: 16.5, fontWeight: 800, textAlign: "center" }}>
-          以 {context.strings.displayName} 身分
-          <br />
-          為您準備叫車
+          {t("embed.state.handoff.title", { name: context.strings.displayName })}
         </div>
-        <StatusPill tone="success">handoff · 已交接</StatusPill>
+        <StatusPill tone="success">{t("embed.state.handoff.badge")}</StatusPill>
       </div>
 
-      <Card title="身分由社區 App 帶入" sub="signed hand-off token">
+      <Card title={t("embed.card.handoffSummary")} sub={t("embed.card.handoffSubtitle")}>
         <TokenRow label="社區簽章有效" code="partner_signature" value="valid" ok />
         <TokenRow label="住戶身分已解析" code="resident_resolved" value={embedResident.name} ok />
         <TokenRow label="社區 / 戶別" code="community_unit" value={embedResident.unit} ok />
@@ -833,13 +833,14 @@ function HandoffView({ context }: { context: EmbedContext }) {
       </Card>
 
       <Banner tone="primary" icon="bolt">
-        免再登入，由 <b>{context.strings.appName}</b> 安全帶入身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+        {t("embed.message.handoffDetail", { appName: context.strings.appName })}
       </Banner>
     </Shell>
   );
 }
 
 function ReauthView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   return (
     <Shell
       context={context}
@@ -847,27 +848,28 @@ function ReauthView({ context }: { context: EmbedContext }) {
       footer={
         <>
           <ActionButton href={buildHref(context, { state: "handoff" })} tone="primary">
-            回 {context.strings.appName} 重新進入
+            {t("embed.field.returnToEntry", { appName: context.strings.appName })}
           </ActionButton>
           <ActionButton href={buildHref(context, { state: "reauth" })} tone="ghost" size="sm">
-            稍後再試
+            {t("embed.field.tryLater")}
           </ActionButton>
         </>
       }
     >
-      <Hero icon="clock" tone="warn" title="登入狀態已逾時" posture="reauth_required" />
-      <Card title="連線狀態">
+      <Hero icon="clock" tone="warn" title={t("embed.state.reauth.title")} posture={t("embed.state.reauth.badge")} />
+      <Card title={t("embed.token.connState")}>
         <TokenRow label="社區工作階段過期" code="partner_session" value="expired" ok={false} />
         <TokenRow label="交付權杖逾時" code="handoff_token" value="stale" ok={false} />
       </Card>
       <Banner tone="warn" icon="shield">
-        為保護您的住戶帳號，請回到 <b>{context.strings.appName}</b> 重新進入「叫車」。此頁不會要求輸入帳號或密碼。
+        {t("embed.message.reauthDetail", { appName: context.strings.appName })}
       </Banner>
     </Shell>
   );
 }
 
 function UnsupportedView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   return (
     <Shell
       context={{
@@ -877,17 +879,17 @@ function UnsupportedView({ context }: { context: EmbedContext }) {
       badgeTone="err"
       footer={
         <ActionButton href={buildHref(context, { state: "fallback" })} tone="primary" iconRight="ext">
-          前往獨立叫車網站
+          {t("embed.field.openStandalone")}
         </ActionButton>
       }
     >
-      <Hero icon="ban" tone="danger" title="無法在此環境開啟" posture="unsupported_host · 已封鎖" />
-      <Card title="原因">
+      <Hero icon="ban" tone="danger" title={t("embed.state.unsupported.title")} posture={t("embed.state.unsupported.badge")} />
+      <Card title={t("embed.card.reason")}>
         <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
-          叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。
+          {t("embed.message.unsupportedDetail")}
         </div>
       </Card>
-      <Card title="偵測結果">
+      <Card title={t("embed.token.detection")}>
         <TokenRow label="來源宿主未授權" code="origin_host" value="未授權" ok={false} />
         <TokenRow label="社區簽章" code="partner_signature" value="缺少" ok={false} />
       </Card>
@@ -896,10 +898,11 @@ function UnsupportedView({ context }: { context: EmbedContext }) {
 }
 
 function ConsentView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   const scopes = [
-    ["建立與管理叫車行程", "為您下單、查詢與取消行程", "trip.manage"],
-    ["使用必要個資", "上下車地址、聯絡電話以完成媒合與聯繫", "pii.trip"],
-    ["行程綁定住戶身分", "讓您重開 App 後仍能找回進行中行程與收據", "identity.bind"],
+    [t("embed.consent.scope.trip.title"), t("embed.consent.scope.trip.body"), "trip.manage"],
+    [t("embed.consent.scope.pii.title"), t("embed.consent.scope.pii.body"), "pii.trip"],
+    [t("embed.consent.scope.identity.title"), t("embed.consent.scope.identity.body"), "identity.bind"],
   ] as const;
 
   return (
@@ -909,18 +912,18 @@ function ConsentView({ context }: { context: EmbedContext }) {
       footer={
         <>
           <ActionButton href={buildHref(context, { state: "handoff", screen: "book" })} tone="primary">
-            同意並開始
+            {t("embed.field.agree")}
           </ActionButton>
           <ActionButton href={buildHref(context, { state: "fallback" })} tone="ghost" size="sm">
-            暫不使用
+            {t("embed.field.notNow")}
           </ActionButton>
         </>
       }
     >
       <div style={{ padding: "6px 0 2px" }}>
-        <div style={{ fontSize: 17, fontWeight: 800 }}>授權使用叫車服務</div>
+        <div style={{ fontSize: 17, fontWeight: 800 }}>{t("embed.state.consent.title")}</div>
         <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)", marginTop: 4 }}>
-          首次使用 · 請確認以下同意範圍 · consent_required
+          {t("embed.message.consentHint")}
         </div>
       </div>
       <Card>
@@ -965,13 +968,14 @@ function ConsentView({ context }: { context: EmbedContext }) {
         ))}
       </Card>
       <Banner tone="primary" icon="lock">
-        由 智慧運輸科技 DRTS 提供接送，個資僅用於完成本次行程，可於社區 App 設定撤回授權。
+        {t("embed.message.consentDetail")}
       </Banner>
     </Shell>
   );
 }
 
 function FallbackView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   return (
     <Shell
       context={context}
@@ -979,18 +983,18 @@ function FallbackView({ context }: { context: EmbedContext }) {
       footer={
         <>
           <ActionButton href={buildHref(context, { state: "fallback" })} tone="primary" iconRight="ext">
-            前往獨立叫車網站
+            {t("embed.field.openStandalone")}
           </ActionButton>
           <ActionButton href={buildHref(context, { state: "handoff" })} tone="ghost" size="sm">
-            回社區 App
+            {t("embed.field.returnToApp")}
           </ActionButton>
         </>
       }
     >
-      <Hero icon="ext" tone="neutral" title="內嵌服務暫時無法使用" posture="fallback_to_web · 改用網站" />
-      <Card title="接下來">
+      <Hero icon="ext" tone="neutral" title={t("embed.state.fallback.title")} posture={t("embed.state.fallback.badge")} />
+      <Card title={t("embed.card.next")}>
         <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
-          目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+          {t("embed.message.fallbackDetail")}
         </div>
       </Card>
       <Card>
@@ -1003,6 +1007,7 @@ function FallbackView({ context }: { context: EmbedContext }) {
 }
 
 function BookView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   const tripHref = buildHref(context, { state: "handoff", screen: "trip" });
   return (
     <Shell
@@ -1011,11 +1016,13 @@ function BookView({ context }: { context: EmbedContext }) {
       footer={
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
-            <span style={{ color: "var(--embed-text-muted)" }}>預估車資</span>
-            <span style={{ fontFamily: "var(--app-font-mono)", fontWeight: 700, fontSize: 16 }}>約 NT$ 290</span>
+            <span style={{ color: "var(--embed-text-muted)" }}>{t("common.estimatedFare")}</span>
+            <span style={{ fontFamily: "var(--app-font-mono)", fontWeight: 700, fontSize: 16 }}>
+              {t("common.approxNtd", { amount: 290 })}
+            </span>
           </div>
           <ActionButton href={tripHref} tone="primary" iconRight="car">
-            確認叫車
+            {t("embed.field.confirmRide")}
           </ActionButton>
         </>
       }
@@ -1040,16 +1047,16 @@ function BookView({ context }: { context: EmbedContext }) {
             {context.strings.displayName}
           </div>
         </div>
-        <StatusPill tone="success">已驗證</StatusPill>
+        <StatusPill tone="success">{t("embed.state.verified")}</StatusPill>
       </div>
 
-      <Card title="行程" sub="上車 · 下車 · 時間">
+      <Card title={t("embed.card.trip")} sub={t("embed.card.tripSubtitle")}>
         <div style={{ display: "grid", gap: 10 }}>
-          <SurfaceField label="上車地點" value="御和雲峰 A 棟 1F 大廳" icon="pin" />
-          <SurfaceField label="下車地點" value="台北榮民總醫院 · 門診大樓" icon="pin" />
+          <SurfaceField label={t("embed.field.pickupLocation")} value={t("embed.book.pickup")} icon="pin" />
+          <SurfaceField label={t("embed.field.dropoffLocation")} value={t("embed.book.dropoff")} icon="pin" />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <SurfaceField label="用車時間" value="現在出發" icon="clock" />
-            <SurfaceField label="乘客人數" value="1 人" icon="user" />
+            <SurfaceField label={t("embed.field.when")} value={t("embed.book.now")} icon="clock" />
+            <SurfaceField label={t("embed.field.riderCount")} value={t("embed.field.riderCountValue", { count: 1 })} icon="user" />
           </div>
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 11 }}>
@@ -1065,24 +1072,20 @@ function BookView({ context }: { context: EmbedContext }) {
                 borderRadius: 999,
               }}
             >
-              {{
-                lobby: "社區大廳",
-                station: "台北車站",
-                hospital: "榮總醫院",
-              }[place]}
+              {t(`embed.place.${place}`)}
             </span>
           ))}
         </div>
       </Card>
 
-      <Card title="車種" sub="owned mobility">
+      <Card title={t("embed.card.vehicles")} sub={t("embed.card.vehiclesSubtitle")}>
         <div style={{ display: "grid", gap: 8 }}>
           {embedVehicles.map((vehicle, index) => {
             const selected = index === 1;
             const meta = {
-              standard: { name: "標準車", note: "1-4 人" },
-              comfort: { name: "舒適車", note: "1-4 人 · 大空間" },
-              xl: { name: "六人座", note: "5-6 人 · 行李多" },
+              standard: { name: t("embed.vehicle.standard.name"), note: t("embed.vehicle.standard.note") },
+              comfort: { name: t("embed.vehicle.comfort.name"), note: t("embed.vehicle.comfort.note") },
+              xl: { name: t("embed.vehicle.xl.name"), note: t("embed.vehicle.xl.note") },
             }[vehicle.id];
             return (
               <div
@@ -1119,6 +1122,7 @@ function BookView({ context }: { context: EmbedContext }) {
 }
 
 function ActiveView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   return (
     <Shell
       context={context}
@@ -1126,10 +1130,10 @@ function ActiveView({ context }: { context: EmbedContext }) {
       footer={
         <>
           <ActionButton href={toPhoneHref(context.strings.supportPhone)} tone="default" icon="phone">
-            聯絡司機
+            {t("embed.field.contactDriver")}
           </ActionButton>
           <ActionButton href={buildHref(context, { state: "handoff", screen: "cancelled" })} tone="danger" size="sm">
-            取消行程 · 剩 {embedTrip.cancelWindowMin} 分鐘可免費取消
+            {t("embed.field.cancelTripFree", { minutes: embedTrip.cancelWindowMin })}
           </ActionButton>
         </>
       }
@@ -1149,13 +1153,13 @@ function ActiveView({ context }: { context: EmbedContext }) {
           <Icon name="shield" size={14} />
         </span>
         <span style={{ fontSize: 11.5, color: "var(--embed-text-dim)", lineHeight: 1.4 }}>
-          此行程已綁定您的身分 · <b>重開 App 仍可找回</b>
+          {t("embed.trip.bound")}
         </span>
       </div>
 
       <Card accent="var(--embed-brand)">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <StatusPill tone="info">前往上車</StatusPill>
+          <StatusPill tone="info">{t("embed.trip.status.en_route")}</StatusPill>
           <span style={{ fontSize: 11, color: "var(--embed-text-faint)", fontFamily: "var(--app-font-mono)" }}>
             {embedTrip.id}
           </span>
@@ -1169,8 +1173,8 @@ function ActiveView({ context }: { context: EmbedContext }) {
           }}
         >
           <div>
-            <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)" }}>預計上車 · ETA</div>
-            <div style={{ fontSize: 11, color: "var(--embed-text-faint)", marginTop: 2 }}>估計值，非保證</div>
+            <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)" }}>{t("embed.field.etaEstimate")}</div>
+            <div style={{ fontSize: 11, color: "var(--embed-text-faint)", marginTop: 2 }}>{t("embed.field.etaEstimateNote")}</div>
           </div>
           <div
             style={{
@@ -1184,14 +1188,14 @@ function ActiveView({ context }: { context: EmbedContext }) {
             <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, color: "var(--embed-brand)", fontFamily: "var(--app-font-mono)" }}>
               {embedTrip.etaMin}
             </div>
-            <div style={{ fontSize: 10, color: "var(--embed-text-muted)", marginTop: 3 }}>分鐘</div>
+            <div style={{ fontSize: 10, color: "var(--embed-text-muted)", marginTop: 3 }}>{t("embed.field.minuteUnit")}</div>
           </div>
         </div>
         <div style={{ marginTop: 14 }}>
-          <Row label="上車" value="御和雲峰 A 棟 1F 大廳" />
-          <Row label="下車" value="台北榮民總醫院 · 門診大樓" />
-          <Row label="司機" value={embedTrip.driver} />
-          <Row label="車輛" value={`舒適車 · ${embedTrip.plate}`} last />
+          <Row label={t("embed.field.pickup")} value={t("embed.book.pickup")} />
+          <Row label={t("embed.field.dropoff")} value={t("embed.book.dropoff")} />
+          <Row label={t("embed.field.driver")} value={embedTrip.driver} />
+          <Row label={t("embed.field.vehicle")} value={`${t("embed.vehicle.comfort.name")} · ${embedTrip.plate}`} last />
         </div>
       </Card>
     </Shell>
@@ -1199,14 +1203,15 @@ function ActiveView({ context }: { context: EmbedContext }) {
 }
 
 function TripsView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   const labels = {
-    inProgress: { text: "進行中", tone: "info" as const },
-    completed: { text: "已完成", tone: "success" as const },
-    cancelled: { text: "已取消", tone: "neutral" as const },
+    inProgress: { text: t("embed.history.inProgress"), tone: "info" as const },
+    completed: { text: t("embed.history.completed"), tone: "success" as const },
+    cancelled: { text: t("embed.history.cancelled"), tone: "neutral" as const },
   };
   return (
     <Shell context={context} badgeTone="live">
-      <Card title="歷史行程" sub="持久身分 · reopen safe">
+      <Card title={t("embed.card.history")} sub={t("embed.card.historySubtitle")}>
         <div style={{ display: "grid", gap: 12 }}>
           {embedTripHistory.map((trip) => (
             <div
@@ -1226,8 +1231,8 @@ function TripsView({ context }: { context: EmbedContext }) {
                 <StatusPill tone={labels[trip.status].tone}>{labels[trip.status].text}</StatusPill>
               </div>
               <div style={{ marginTop: 10 }}>
-                <Row label="路線" value={`${trip.from === "lobby" ? "社區大廳" : "台北車站"} → ${trip.to === "hospital" ? "台北榮總" : trip.to === "station" ? "台北車站" : "社區大廳"}`} />
-                <Row label="車資" value={trip.fare} mono last />
+                <Row label={t("embed.field.route")} value={`${t(`embed.place.${trip.from}`)} → ${t(`embed.place.${trip.to}`)}`} />
+                <Row label={t("common.estimatedFare")} value={trip.fare} mono last />
               </div>
             </div>
           ))}
@@ -1238,17 +1243,18 @@ function TripsView({ context }: { context: EmbedContext }) {
 }
 
 function ReceiptView({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   return (
     <Shell context={context} badgeTone="live">
-      <Card title="收據" sub="PII 遮罩">
-        <Row label="行程編號" value={embedReceipt.id} mono />
-        <Row label="完成時間" value={embedReceipt.completedAt} mono />
-        <Row label="乘客" value={embedReceipt.passenger} />
-        <Row label="聯絡" value={embedReceipt.maskedPhone} mono />
-        <Row label="司機" value={embedReceipt.driver} />
-        <Row label="車輛" value={embedReceipt.plate} mono />
-        <Row label="付款" value="社區月結 · 綁定住戶帳號" />
-        <Row label="合計" value={embedReceipt.total} strong mono last />
+      <Card title={t("embed.card.receipt")} sub={t("embed.card.receiptSubtitle")}>
+        <Row label={t("embed.field.tripId")} value={embedReceipt.id} mono />
+        <Row label={t("embed.field.completedAt")} value={embedReceipt.completedAt} mono />
+        <Row label={t("embed.field.passenger")} value={embedReceipt.passenger} />
+        <Row label={t("embed.field.contactLabel")} value={embedReceipt.maskedPhone} mono />
+        <Row label={t("embed.field.driver")} value={embedReceipt.driver} />
+        <Row label={t("embed.field.vehicle")} value={embedReceipt.plate} mono />
+        <Row label={t("embed.field.payment")} value={t("embed.receipt.pay")} />
+        <Row label={t("embed.field.total")} value={embedReceipt.total} strong mono last />
       </Card>
     </Shell>
   );
@@ -1261,6 +1267,7 @@ function OutcomeView({
   context: EmbedContext;
   kind: "completed" | "cancelled";
 }) {
+  const { t } = useTranslation();
   const completed = kind === "completed";
   return (
     <Shell
@@ -1270,15 +1277,15 @@ function OutcomeView({
         completed ? (
           <>
             <ActionButton href={buildHref(context, { state: "handoff", screen: "receipt" })} tone="primary">
-              查看收據
+              {t("embed.field.viewReceipt")}
             </ActionButton>
             <ActionButton href={buildHref(context, { state: "handoff", screen: "trips" })} tone="ghost" size="sm">
-              查看歷史行程
+              {t("embed.field.viewHistory")}
             </ActionButton>
           </>
         ) : (
           <ActionButton href={buildHref(context, { state: "handoff", screen: "book" })} tone="primary">
-            重新叫車
+            {t("embed.field.rebook")}
           </ActionButton>
         )
       }
@@ -1286,14 +1293,12 @@ function OutcomeView({
       <Hero
         icon={completed ? "check" : "x"}
         tone={completed ? "success" : "warn"}
-        title={completed ? "行程已完成，歡迎再次使用" : "此行程已取消"}
+        title={completed ? t("embed.outcome.completedTitle") : t("embed.outcome.cancelledTitle")}
         posture={completed ? "completed" : "cancelled"}
       />
       <Card>
         <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
-          {completed
-            ? "本次行程已順利結束，可直接前往收據或歷史行程。"
-            : "取消結果與來源脈絡都會被保留，不會遺失既有 handoff 身分。"}
+          {completed ? t("embed.completed.body") : t("embed.cancelled.body")}
         </div>
       </Card>
     </Shell>
@@ -1307,6 +1312,7 @@ function NegativeView({
   context: EmbedContext;
   kind: NegativeKind;
 }) {
+  const { t } = useTranslation();
   const meta = NEGATIVE_META[kind];
   return (
     <Shell
@@ -1315,27 +1321,27 @@ function NegativeView({
       footer={
         <>
           <ActionButton href={buildHref(context, { state: "handoff", screen: "book" })} tone="primary">
-            {meta.primary}
+            {t(meta.primaryKey)}
           </ActionButton>
           <ActionButton
             href={kind === "denied" ? toPhoneHref(context.strings.supportPhone) : buildHref(context, { state: "handoff", screen: "book" })}
             tone="ghost"
             size="sm"
           >
-            {meta.secondary}
+            {t(meta.secondaryKey)}
           </ActionButton>
         </>
       }
     >
-      <Hero icon={meta.icon} tone={meta.tone} title={meta.title} posture={meta.posture} />
+      <Hero icon={meta.icon} tone={meta.tone} title={t(meta.titleKey)} posture={meta.posture} />
       <Card>
         <div style={{ fontSize: 13, color: "var(--embed-text-dim)", lineHeight: 1.65 }}>
-          {meta.body}
+          {t(meta.bodyKey)}
         </div>
       </Card>
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 7, fontSize: 11.5, color: "var(--embed-text-muted)" }}>
         <Icon name="phone" size={13} />
-        社區叫車客服 {context.strings.supportPhone}
+        {t("embed.field.communitySupport")} {context.strings.supportPhone}
       </div>
     </Shell>
   );
@@ -1432,6 +1438,7 @@ function MessageSlot({
   titleSample: string;
   bodySample: string;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div style={{ marginTop: -2, display: "flex", justifyContent: "center" }}>
@@ -1479,7 +1486,7 @@ function MessageSlot({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "var(--embed-text-faint)", marginTop: 6 }}>
           <Icon name="info" size={11} />
-          文案由後端 messageCode 渲染 · 此為示意
+          {t("embed.field.messageCodeDemo")}
         </div>
       </div>
       <div style={{ display: "none" }}>{titleSample}</div>
@@ -1502,24 +1509,24 @@ function TripFallbackView({
   const footer =
     screen === "vehicle_change_in_progress" ? (
       <ActionButton href={toPhoneHref(context.strings.supportPhone)} tone="default" icon="phone">
-        聯絡客服
+        {t("embed.field.contactSupport")}
       </ActionButton>
     ) : screen === "human_fallback_assigned" ? (
       <>
         <ActionButton href={buildHref(context, { state: "handoff", screen: "trip" })} tone="primary" icon="car">
-          查看行程
+          {t("embed.field.viewTrip")}
         </ActionButton>
         <ActionButton href={toPhoneHref(context.strings.supportPhone)} tone="default" size="sm" icon="phone">
-          聯絡司機
+          {t("embed.field.contactDriver")}
         </ActionButton>
       </>
     ) : screen === "service_continuing" ? (
       <ActionButton href={buildHref(context, { state: "handoff", screen: "trip" })} tone="primary" icon="car">
-        追蹤行程
+        {t("embed.field.trackTrip")}
       </ActionButton>
     ) : (
       <ActionButton href={buildHref(context, { state: "handoff", screen: "trip" })} tone="primary" icon="car">
-        查看行程
+        {t("embed.field.viewTrip")}
       </ActionButton>
     );
 
@@ -1565,8 +1572,8 @@ function TripFallbackView({
               <Icon name="car" size={22} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)" }}>預計上車 · ETA</div>
-              <div style={{ fontSize: 11, color: "var(--embed-text-faint)" }}>估計值，非保證</div>
+              <div style={{ fontSize: 12.5, color: "var(--embed-text-muted)" }}>{t("embed.field.etaEstimate")}</div>
+              <div style={{ fontSize: 11, color: "var(--embed-text-faint)" }}>{t("embed.field.etaEstimateNote")}</div>
             </div>
             <div
               style={{
@@ -1580,16 +1587,16 @@ function TripFallbackView({
               <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--app-font-mono)", color: "var(--embed-brand)", lineHeight: 1 }}>
                 {fallback.etaMin}
               </div>
-              <div style={{ fontSize: 10, color: "var(--embed-text-muted)", marginTop: 3 }}>分鐘</div>
+              <div style={{ fontSize: 10, color: "var(--embed-text-muted)", marginTop: 3 }}>{t("embed.field.minuteUnit")}</div>
             </div>
           </div>
         </Card>
       ) : null}
 
       <Card>
-        <Row label="行程編號" value={embedTrip.id} mono />
-        <Row label="目的地" value="台北榮民總醫院" />
-        <Row label="費用" value="維持原價 · 無額外收費" last />
+        <Row label={t("embed.field.tripId")} value={embedTrip.id} mono />
+        <Row label={t("embed.field.destination")} value={t("embed.place.hospital")} />
+        <Row label={t("embed.field.fareLocked")} value={t("embed.field.fareLockedValue")} last />
       </Card>
 
       <div
@@ -1607,12 +1614,12 @@ function TripFallbackView({
           <Icon name="check" size={14} />
         </span>
         <span style={{ fontSize: 11, lineHeight: 1.45, color: "var(--embed-text-dim)" }}>
-          同一筆行程繼續 · 不會重新下單，也不會加收費用。
+          {t("embed.field.sameBooking")} · {t("embed.field.sameBookingNote")}
         </span>
       </div>
 
       <div style={{ fontSize: 10, color: "var(--embed-text-faint)", textAlign: "center", lineHeight: 1.5 }}>
-        接送由 智慧運輸科技 DRTS 提供 · 服務狀態僅供參考
+        {t("embed.field.serviceProvidedBy")}
       </div>
     </Shell>
   );
