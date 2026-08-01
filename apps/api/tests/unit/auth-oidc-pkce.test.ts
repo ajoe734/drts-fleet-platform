@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
+import * as jwt from "jsonwebtoken";
 import { OidcPkceService } from "../../src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
@@ -351,24 +352,26 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   });
 
   describe("6. Real OIDC HTTP Provider Exchange & JWT Token Verification", () => {
-    it("exchanges code with external OIDC token and userinfo endpoints via HTTP fetch", async () => {
+    it("exchanges code with external OIDC token and userinfo endpoints via HTTP fetch and verifies JWT signature", async () => {
       const originalFetch = globalThis.fetch;
-      const fakeIdToken = [
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
-        Buffer.from(
-          JSON.stringify({
-            sub: "sub_real_oidc_123",
-            iss: "https://auth.staging.drts.internal",
-            aud: "drts-bff-client",
-            email: "admin@acme.example",
-            amr: ["pwd", "mfa"],
-            acr: "urn:mace:incommon:iap:silver",
-            auth_time: Math.floor(Date.now() / 1000),
-            nonce: "test_nonce_12345",
-          }),
-        ).toString("base64url"),
-        "fake_signature",
-      ].join(".");
+      const secret = "test_jwt_secret_key_32_characters_long_min!";
+      process.env.JWT_SECRET = secret;
+      process.env.OIDC_CLIENT_SECRET = secret;
+
+      const validIdToken = jwt.sign(
+        {
+          sub: "sub_real_oidc_123",
+          iss: "https://auth.staging.drts.internal",
+          aud: "drts-bff-client",
+          email: "admin@acme.example",
+          amr: ["pwd", "mfa"],
+          acr: "urn:mace:incommon:iap:silver",
+          auth_time: Math.floor(Date.now() / 1000),
+          nonce: "test_nonce_12345",
+        },
+        secret,
+        { algorithm: "HS256" },
+      );
 
       globalThis.fetch = (async (url: string | URL | Request) => {
         const urlStr = url.toString();
@@ -376,7 +379,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           return new Response(
             JSON.stringify({
               access_token: "acc_token_999",
-              id_token: fakeIdToken,
+              id_token: validIdToken,
               token_type: "Bearer",
               expires_in: 3600,
             }),
@@ -436,10 +439,53 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         delete process.env.OIDC_USERINFO_ENDPOINT;
       }
     });
+
+    it("rejects id_token with forged signature or unsafe alg", async () => {
+      const forgedIdToken = [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        Buffer.from(
+          JSON.stringify({
+            sub: "attacker_sub",
+            iss: "https://auth.staging.drts.internal",
+            aud: "drts-bff-client",
+            email: "attacker@forged.example",
+          }),
+        ).toString("base64url"),
+        "invalid_forged_signature",
+      ].join(".");
+
+      await expect(
+        oidcService.verifyAndDecodeIdToken(forgedIdToken),
+      ).rejects.toThrow(ApiRequestError);
+
+      const noneAlgIdToken = [
+        "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0",
+        Buffer.from(
+          JSON.stringify({
+            sub: "attacker_sub",
+            iss: "https://auth.staging.drts.internal",
+            aud: "drts-bff-client",
+          }),
+        ).toString("base64url"),
+        "",
+      ].join(".");
+
+      await expect(
+        oidcService.verifyAndDecodeIdToken(noneAlgIdToken),
+      ).rejects.toThrow(ApiRequestError);
+    });
   });
 
   describe("5. Partner OIDC PKCE Flow & Durable Identity Link Binding", () => {
     it("exchanges valid authorization code for active partner entry session and binds durable passenger identity", async () => {
+      const code = "valid_partner_code_123";
+      const partnerUserIdentityLinkRepo = (oidcService as any).partnerUserIdentityLinkRepo;
+      const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+      await partnerUserIdentityLinkRepo.resolveOrCreate({
+        entrySlug: "yuhe-residence",
+        partnerUserRef: sub,
+      });
+
       const loginParams = oidcService.generateLoginParameters("partner", {
         partnerId: "yuhe-residence",
       });
@@ -458,7 +504,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       expect(session.accessToken).toBeDefined();
       expect(session.identity.realm).toBe("partner");
       expect(session.identity.actorId).toMatch(/^passenger_/);
-      expect(session.identity.subjectId).toBeDefined();
       expect(session.partnerEntry.status).toBe("active");
     });
 

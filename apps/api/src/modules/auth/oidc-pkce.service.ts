@@ -1,5 +1,6 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, createPublicKey, type KeyObject, randomBytes, timingSafeEqual } from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import * as jwt from "jsonwebtoken";
 import type {
   IamCallbackSessionExchangeCommand,
   IdentityContext,
@@ -46,13 +47,13 @@ export interface OidcClaims {
   iss: string;
   aud: string;
   email: string;
-  email_verified?: boolean;
-  amr?: string[];
-  acr?: string;
-  auth_time?: number;
-  nonce?: string;
-  tenant_id?: string;
-  partner_id?: string;
+  email_verified?: boolean | undefined;
+  amr?: string[] | undefined;
+  acr?: string | undefined;
+  auth_time?: number | undefined;
+  nonce?: string | undefined;
+  tenant_id?: string | undefined;
+  partner_id?: string | undefined;
 }
 
 const DEFAULT_OIDC_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -61,6 +62,7 @@ const DEFAULT_OIDC_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 export class OidcPkceService {
   private readonly logger = new Logger(OidcPkceService.name);
   private readonly consumedStates = new Map<string, number>();
+  private jwksCache: { keys: any[]; fetchedAt: number } | null = null;
 
   constructor(
     private readonly jwtAuthService: JwtAuthService,
@@ -69,20 +71,7 @@ export class OidcPkceService {
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly partnerUserIdentityLinkRepo: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
-  ) {
-    this.seedDefaultPreBoundPartnerLinks();
-  }
-
-  private seedDefaultPreBoundPartnerLinks() {
-    const seedCodes = ["valid_partner_code_123", "e2e_valid_partner_code_001"];
-    for (const code of seedCodes) {
-      const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
-      void this.partnerUserIdentityLinkRepo.resolveOrCreate({
-        entrySlug: "yuhe-residence",
-        partnerUserRef: sub,
-      });
-    }
-  }
+  ) {}
 
   /**
    * Helper: base64url encode a buffer or string
@@ -685,7 +674,6 @@ export class OidcPkceService {
       authMode: "jwt_bearer",
       actorType: "partner_api_key",
       actorId: linkRecord.drtsPassengerId ?? `partner_user_${claims.sub}`,
-      subjectId: claims.sub,
       realm: "partner",
       tenantId: matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
       partnerId: matchedEntry.entrySlug,
@@ -1101,7 +1089,7 @@ export class OidcPkceService {
       let claimsFromToken: Partial<OidcClaims> = {};
 
       if (tokenData.id_token) {
-        claimsFromToken = this.decodeJwtClaims(tokenData.id_token);
+        claimsFromToken = await this.verifyAndDecodeIdToken(tokenData.id_token, stateRecord);
       }
 
       const userinfoEndpoint =
@@ -1153,6 +1141,135 @@ export class OidcPkceService {
         `OIDC token exchange request failed: ${(error as Error).message}`,
       );
     }
+  }
+
+  public async verifyAndDecodeIdToken(
+    idToken: string,
+    stateRecord?: OidcStateRecord | null,
+  ): Promise<Partial<OidcClaims>> {
+    try {
+      const parts = idToken.split(".");
+      if (parts.length !== 3) {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "Malformed OIDC ID token structure.",
+        );
+      }
+
+      const [headerB64] = parts;
+      let header: { alg?: string; kid?: string; typ?: string };
+      try {
+        const headerJsonStr = Buffer.from(headerB64!, "base64url").toString("utf8");
+        header = JSON.parse(headerJsonStr);
+      } catch {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "Invalid OIDC ID token header JSON.",
+        );
+      }
+
+      if (!header.alg || header.alg.toLowerCase() === "none") {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "OIDC ID token header specifies unsafe 'none' algorithm.",
+        );
+      }
+
+      let secretOrKey: string | Buffer | KeyObject | null = null;
+      if (header.alg.startsWith("HS")) {
+        secretOrKey =
+          process.env.OIDC_CLIENT_SECRET ||
+          process.env.JWT_SECRET ||
+          "drts_oidc_state_secret_key_32bytes_min";
+      } else if (
+        header.alg.startsWith("RS") ||
+        header.alg.startsWith("ES") ||
+        header.alg.startsWith("PS")
+      ) {
+        secretOrKey = await this.resolveJwksPublicKey(header.kid, header.alg);
+      }
+
+      if (!secretOrKey) {
+        secretOrKey = process.env.JWT_SECRET || process.env.OIDC_CLIENT_SECRET || null;
+      }
+
+      if (!secretOrKey) {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "OIDC ID token verification key or secret is missing.",
+        );
+      }
+
+      const expectedIssuer =
+        process.env.OIDC_ISSUER ??
+        process.env.JWT_ISSUER ??
+        "https://auth.staging.drts.internal";
+      const expectedAudience =
+        process.env.OIDC_CLIENT_ID ??
+        process.env.JWT_AUDIENCE ??
+        "drts-bff-client";
+
+      const verifiedPayload = jwt.verify(idToken, secretOrKey as any, {
+        algorithms: [header.alg as jwt.Algorithm],
+        issuer: expectedIssuer,
+        audience: expectedAudience,
+      }) as jwt.JwtPayload;
+
+      return verifiedPayload as Partial<OidcClaims>;
+    } catch (error) {
+      if (error instanceof ApiRequestError) throw error;
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        `OIDC ID token signature/JWKS verification failed: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async resolveJwksPublicKey(
+    kid?: string,
+    alg?: string,
+  ): Promise<KeyObject | null> {
+    try {
+      if (process.env.OIDC_JWKS_JSON) {
+        const parsed = JSON.parse(process.env.OIDC_JWKS_JSON);
+        const keys = parsed.keys || [];
+        const matching = keys.find((k: any) => !kid || k.kid === kid) || keys[0];
+        if (matching) {
+          return createPublicKey({ key: matching, format: "jwk" });
+        }
+      }
+
+      const jwksUri =
+        process.env.OIDC_JWKS_URI ??
+        (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/.well-known/jwks.json` : null);
+
+      if (!jwksUri) return null;
+
+      const now = Date.now();
+      if (!this.jwksCache || now - this.jwksCache.fetchedAt > 5 * 60 * 1000) {
+        const res = await fetch(jwksUri);
+        if (res.ok) {
+          const body = (await res.json()) as { keys?: any[] };
+          this.jwksCache = { keys: body.keys || [], fetchedAt: now };
+        }
+      }
+
+      if (this.jwksCache?.keys?.length) {
+        const matching =
+          this.jwksCache.keys.find((k: any) => !kid || k.kid === kid) || this.jwksCache.keys[0];
+        if (matching) {
+          return createPublicKey({ key: matching, format: "jwk" });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`JWKS key resolution failed: ${err}`);
+    }
+    return null;
   }
 
   public decodeJwtClaims(token: string): Partial<OidcClaims> {

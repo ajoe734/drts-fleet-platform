@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
@@ -68,6 +69,14 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
 
   it("completes partner OIDC PKCE flow with active partner entry and MFA proof", async () => {
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
+
+    const code = "e2e_valid_partner_code_001";
+    const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+    const partnerUserIdentityLinkRepo = (oidcService as any).partnerUserIdentityLinkRepo;
+    await partnerUserIdentityLinkRepo.resolveOrCreate({
+      entrySlug: "yuhe-residence",
+      partnerUserRef: sub,
+    });
 
     const login = oidcService.generateLoginParameters("partner", {
       redirectUri: "http://localhost:3000/api/auth/callback",
