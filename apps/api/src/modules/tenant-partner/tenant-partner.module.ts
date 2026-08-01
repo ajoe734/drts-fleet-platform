@@ -9,6 +9,7 @@ import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
+import { ReferralEmbedHandoffRepository } from "./referral-embed-handoff.repository";
 import { ReferralChannelScaffoldService } from "./referral-channel.scaffold.service";
 import { TenantPartnerController } from "./tenant-partner.controller";
 import { TenantPartnerRepository } from "./tenant-partner.repository";
@@ -32,6 +33,7 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
     JwtAuthService,
     TenantPartnerRepository,
     PartnerUserIdentityLinkRepository,
+    ReferralEmbedHandoffRepository,
     ReferralChannelScaffoldService,
     WebhookDispatchService,
     BankCardInlineEligibilityAdapter,
@@ -56,6 +58,7 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
     TenantPartnerService,
     TenantPartnerRepository,
     PartnerUserIdentityLinkRepository,
+    ReferralEmbedHandoffRepository,
     ReferralChannelScaffoldService,
   ],
 })
