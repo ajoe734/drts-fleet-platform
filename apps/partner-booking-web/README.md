@@ -6,11 +6,17 @@ single deployable can serve any number of partner brands.
 
 ## Status
 
-This app now carries the PBK-UI-003 CTBC reference funnel baseline and the
-2026-06 credit-card airport transfer release extension:
+**Dev deployment state: PAUSED (2026-08-01).** Both the standalone Partner
+Booking website and the bank-app embed are intentionally unavailable. The
+source, local development commands, routes, and test assets remain preserved
+so a reviewed change can re-enable the surface later. While paused,
+`deploy-dev.yml` does not build, deploy, expose, or smoke this app; the deploy
+rail removes any stale `drts-dev-partner-booking-web` Cloud Run service, and
+domain maintenance does not recreate `book.smarttransport.tw`.
 
-- **Dev deployed.** `deploy-dev.yml` builds and deploys this app alongside the
-  shared dev stack so bank cardholder booking can be verified on Cloud Run.
+This app carries the PBK-UI-003 CTBC reference funnel baseline and the 2026-06
+credit-card airport transfer release extension:
+
 - Brand layering now resolves through
   `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / TAISHIN /
   DBS credit-card airport-transfer issuer templates plus FUBON insurance,

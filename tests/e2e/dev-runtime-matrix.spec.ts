@@ -24,7 +24,6 @@ type RuntimeSurfaceKey =
   | "bank-console-web"
   | "channel-partner-portal-web"
   | "enterprise-dispatch-web"
-  | "partner-booking-web"
   | "platform-admin-web"
   | "referral-embed-web"
   | "ops-console-web"
@@ -208,10 +207,6 @@ const bankActors: ActorProfile[] = [
   },
 ];
 
-const partnerBookingActors: ActorProfile[] = [
-  { key: "partner-booking-visitor", actorType: "partner_booking_visitor" },
-];
-
 const channelPartnerActors: ActorProfile[] = [
   {
     key: "channel-partner-public-override-attempt",
@@ -225,7 +220,7 @@ const referralEmbedActors: ActorProfile[] = [
   {
     key: "referral-passenger",
     actorType: "referral_passenger",
-    partnerEntrySlug: "referral-demo-community",
+    partnerEntrySlug: "yuhe-residence",
   },
 ];
 
@@ -243,9 +238,9 @@ const enterpriseMarker =
 const channelPartnerMarker =
   /Channel Dashboard|渠道總覽|Referral Statements|分潤對帳單|Usage|用量明細/i;
 const referralEmbedMarker =
-  /社區叫車|Referral Embed|轉介嵌入前台|\/embed\/referral-demo-community/i;
+  /社區叫車|御和物業|Referral Embed|轉介嵌入前台|\/embed\/yuhe-residence/i;
 const referralEmbedEntrySlug =
-  process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "referral-demo-community";
+  process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "yuhe-residence";
 const currentDevHostSuffix = "4t7rg6fmeq-uc.a.run.app";
 const channelPartnerEvidenceMarkers = [
   /drts-data-source:live/i,
@@ -340,65 +335,6 @@ const surfaces: RuntimeSurface[] = [
         path: "/audit?bank=ctbc",
         operation: "issuer audit trail",
         marker: /稽核|Audit|事件/i,
-      },
-    ],
-  },
-  {
-    key: "partner-booking-web",
-    family: "partner white-label booking surface",
-    baseUrl: resolveCloudRunBaseUrl(
-      process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL,
-      "drts-dev-partner-booking-web",
-    ),
-    actors: partnerBookingActors,
-    routes: [
-      {
-        key: "card-site",
-        path: "/ctbc/program/site",
-        operation: "credit-card website booking",
-        marker: /世界卡禮賓|全年 12 趟免費接送|機場接送禮遇/i,
-      },
-      {
-        key: "card-embed",
-        path: "/ctbc/program/embed",
-        operation: "credit-card bank-app embed handoff",
-        marker: /未偵測到銀行登入|no_embed_session|Bank sign-in not detected/i,
-      },
-      {
-        key: "card-embed-reauth",
-        path: "/ctbc/program/embed/reauth",
-        operation: "credit-card bank-app embed reauth",
-        marker: /issuer_session expired|token_expired|ref_token stale/i,
-      },
-      {
-        key: "card-embed-unsupported",
-        path: "/ctbc/program/embed/embed-unsupported",
-        operation: "credit-card bank-app embed unsupported host",
-        marker: /unknown-host\.example|unsupported host|不受支援/i,
-      },
-      {
-        key: "insurance-review",
-        path: "/fubon/program/site/review",
-        operation: "insurance replacement mobility review",
-        marker: /保險理賠代步|理賠額度|下單前確認/i,
-      },
-      {
-        key: "insurance-pending",
-        path: "/fubon/program/site/insurance_pending",
-        operation: "insurance pending eligibility block",
-        marker: /insurance_pending|理賠審核中|理賠額度/i,
-      },
-      {
-        key: "travel-manual-review",
-        path: "/lion/program/site/manual-review",
-        operation: "travel group transfer manual review",
-        marker: /旅行社團體接送|manual_review|團體席次/i,
-      },
-      {
-        key: "travel-site",
-        path: "/lion/program/site",
-        operation: "travel group transfer website booking",
-        marker: /旅行社團體接送|團體席次|雄獅旅遊/i,
       },
     ],
   },

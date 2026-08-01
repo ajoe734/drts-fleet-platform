@@ -14,6 +14,8 @@ permissions:
 
 env:
   CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+  # Explicit user-approved pause. Re-enabling requires a reviewed workflow change.
+  DEV_PARTNER_BOOKING_STATE: "paused"
   DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
   DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
@@ -23,7 +25,6 @@ env:
   DEV_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.DEV_GCP_TENANT_CONSOLE_SERVICE }}
   DEV_GCP_BANK_CONSOLE_SERVICE: ${{ vars.DEV_GCP_BANK_CONSOLE_SERVICE }}
   DEV_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.DEV_GCP_REFERRAL_EMBED_SERVICE }}
-  DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
   DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
@@ -64,11 +65,16 @@ jobs:
           PROJECT="${{ env.DEV_GCP_PROJECT_ID }}"
           REGION="${{ env.DEV_GCP_REGION }}"
 
+          if [[ "${DEV_PARTNER_BOOKING_STATE}" != "paused" ]]; then
+            echo "::error::Unexpected Partner Booking state: ${DEV_PARTNER_BOOKING_STATE}"
+            exit 1
+          fi
+          echo "::notice::Partner Booking is PAUSED; book.smarttransport.tw is intentionally excluded from domain maintenance."
+
           ./scripts/map-domain-service.sh fleets.smarttransport.tw     "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-drts-dev-platform-admin-web}" "$REGION" "$PROJECT"
           ./scripts/map-domain-service.sh ops.smarttransport.tw        "${DEV_GCP_OPS_CONSOLE_SERVICE:-drts-dev-ops-console-web}" "$REGION" "$PROJECT"
           ./scripts/map-domain-service.sh partners.smarttransport.tw   "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-drts-dev-fleet-partner-portal-web}" "$REGION" "$PROJECT"
           ./scripts/map-domain-service.sh dispatch.smarttransport.tw   "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-drts-dev-enterprise-dispatch-web}" "$REGION" "$PROJECT"
-          ./scripts/map-domain-service.sh book.smarttransport.tw       "${DEV_GCP_PARTNER_BOOKING_SERVICE:-drts-dev-partner-booking-web}" "$REGION" "$PROJECT"
           ./scripts/map-domain-service.sh bank.smarttransport.tw       "${DEV_GCP_BANK_CONSOLE_SERVICE:-drts-dev-bank-console-web}" "$REGION" "$PROJECT"
           ./scripts/map-domain-service.sh channel.smarttransport.tw    "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-drts-channel-partner-portal-web}" "$REGION" "$PROJECT"
           ./scripts/map-domain-service.sh tenant.smarttransport.tw     "${DEV_GCP_TENANT_CONSOLE_SERVICE:-drts-dev-tenant-console-web}" "$REGION" "$PROJECT"
