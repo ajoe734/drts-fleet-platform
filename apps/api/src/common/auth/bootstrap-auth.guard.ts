@@ -128,7 +128,7 @@ export class BootstrapAuthGuard implements CanActivate {
       ]) ?? false;
 
     if (isOpenRoute) {
-      this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
+      await this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
       return true;
     }
 
@@ -252,7 +252,7 @@ export class BootstrapAuthGuard implements CanActivate {
     return true;
   }
 
-  private populateOpenRouteIdentity(
+  private async populateOpenRouteIdentity(
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
@@ -262,7 +262,7 @@ export class BootstrapAuthGuard implements CanActivate {
       if (token) {
         const payload = this.jwtAuthService.verify(token);
         if (payload) {
-          this.assertDriverBindingActive(payload, requestUrl);
+          await this.assertDriverBindingActive(payload, requestUrl);
           request.identity = this.jwtAuthService.toRequestIdentity(payload);
           return;
         }

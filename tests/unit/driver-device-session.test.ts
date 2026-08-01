@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -71,6 +71,40 @@ describe("driver device session service", () => {
     });
   });
 
+  it("keeps family absolute expiry fixed across refresh rotation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+
+    const repository = new DriverDeviceSessionRepository();
+    const service = new DriverDeviceSessionService(
+      new JwtAuthService(),
+      new DriverProfileService(new AuditNotificationService()),
+      repository,
+    );
+
+    const initial = await service.register({
+      registrationCode: "driver-demo-001",
+      deviceId: "device-absolute-001",
+    });
+    const [initialSession] = repository.listFallbackSessions();
+    const [initialFamily] = repository.listFallbackFamilies();
+
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+    await service.refresh({
+      deviceId: "device-absolute-001",
+      refreshToken: initial.refreshToken,
+    });
+
+    const [rotatedSession] = repository.listFallbackSessions();
+    const [rotatedFamily] = repository.listFallbackFamilies();
+
+    expect(rotatedFamily.absoluteExpiresAt).toBe(initialFamily.absoluteExpiresAt);
+    expect(rotatedSession.expiresAt).toBe(initialSession.expiresAt);
+    expect(rotatedSession.lastRefreshedAt).not.toBe(initialSession.lastRefreshedAt);
+
+    vi.useRealTimers();
+  });
+
   it("persists revoked binding state in the durable repository view", async () => {
     const repository = new DriverDeviceSessionRepository();
     const service = new DriverDeviceSessionService(
@@ -119,7 +153,7 @@ describe("durable session migration", () => {
     const migration = readFileSync(
       resolve(
         __dirname,
-        "../../infra/migrations/V0069__durable_session_refresh_families.sql",
+        "../../infra/migrations/V0070__durable_session_refresh_families.sql",
       ),
       "utf8",
     );
@@ -130,5 +164,56 @@ describe("durable session migration", () => {
     expect(migration).toContain("token_hash varchar(128) NOT NULL UNIQUE");
     expect(migration).not.toContain("refresh_token varchar");
     expect(migration).toContain("idx_refresh_tokens_family_active");
+  });
+});
+
+describe("driver device session repository", () => {
+  it("inserts family before token and backfills current token id after token insert", async () => {
+    const calls: Array<{ text: string; values: readonly unknown[] | undefined }> = [];
+    const client = {
+      query: vi.fn(async (text: string, values?: readonly unknown[]) => {
+        calls.push({ text, values });
+        return { rowCount: 1, rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    const databaseService = {
+      isEnabled: () => true,
+      connect: async () => client,
+    };
+    const repository = new DriverDeviceSessionRepository(
+      databaseService as never,
+    );
+
+    const result = await repository.issueDriverDeviceSession({
+      driverId: "drv-demo-001",
+      deviceId: "device-db-001",
+      deviceLabel: "Driver phone",
+      riskSummary: {
+        riskLevel: "low",
+        signals: ["device_registration"],
+      },
+      issuedAt: "2026-08-01T00:00:00.000Z",
+      idleExpiresAt: "2026-08-31T00:00:00.000Z",
+      absoluteExpiresAt: "2026-08-31T00:00:00.000Z",
+      refreshToken: "drvrefresh_seed",
+    });
+
+    const familyInsert = calls.find((entry) =>
+      entry.text.includes("INSERT INTO iam.refresh_families"),
+    );
+    const tokenInsert = calls.find((entry) =>
+      entry.text.includes("INSERT INTO iam.refresh_tokens"),
+    );
+    const familyUpdate = calls.find(
+      (entry) =>
+        entry.text.includes("UPDATE iam.refresh_families") &&
+        entry.text.includes("current_token_id = $2"),
+    );
+
+    expect(familyInsert?.values?.[4]).toBeNull();
+    expect(tokenInsert?.values?.[0]).toBe(result.currentRefreshToken.refreshTokenId);
+    expect(familyUpdate?.values?.[1]).toBe(result.currentRefreshToken.refreshTokenId);
+    expect(result.family.currentTokenId).toBe(result.currentRefreshToken.refreshTokenId);
   });
 });
