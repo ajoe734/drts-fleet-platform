@@ -119,7 +119,7 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
   ) {}
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<AuthenticatedRequestLike>();
@@ -173,62 +173,83 @@ export class BootstrapAuthGuard implements CanActivate {
     // IAP workforce subject resolution if IAP assertion is present
     const rawIapAssertion = extractIapJwtAssertion(baseHeaders);
     if (rawIapAssertion && this.iapSubjectAdapter) {
-      const isStrictIap =
-        process.env.STRICT_IAP_MODE === "true" ||
-        process.env.NODE_ENV === "production";
-      const expectedAudience =
-        process.env.IAP_EXPECTED_AUDIENCE ||
-        process.env.IAP_AUDIENCE ||
-        process.env.JWT_AUDIENCE;
-      const jwtSecretOrPublicKey =
-        process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
-        process.env.IAP_JWT_SECRET ||
-        process.env.JWT_SECRET;
-
-      const resolved = await this.iapSubjectAdapter.resolveSubject(
+      return this.resolveIapAssertionAndActivate(
+        request,
         baseHeaders,
-        {
-          strictIapMode: isStrictIap,
-          ...(expectedAudience ? { expectedAudience } : {}),
-          ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
-          autoProvision: process.env.NODE_ENV !== "production",
-        },
+        policy,
       );
-
-      const identity: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType:
-          resolved.membership.realm === "platform"
-            ? "platform_admin"
-            : "ops_user",
-        actorId: resolved.principal.principalId,
-        subject: resolved.principal.subject,
-        realm: resolved.membership.realm as "platform" | "ops",
-        tenantId: null,
-        roleFamilies: [resolved.membership.realm as "platform" | "ops"],
-        roles: resolved.effectiveRoles,
-        scopes: resolved.effectiveScopes,
-        requestId:
-          (baseHeaders["x-request-id"] as string | undefined) ?? null,
-      };
-
-      request.identity = identity;
-      if (policy) {
-        try {
-          this.assertRealmAllowed(identity, policy.allowedRealms, request);
-          this.assertScopesAllowed(
-            identity,
-            policy.requiredScopes,
-            request,
-          );
-        } catch (error) {
-          this.recordAuthorizationDenialAudit(identity, request, error);
-          throw error;
-        }
-      }
-      return true;
     }
 
+    return this.activateNonIap(request, baseHeaders, requestUrl, policy);
+  }
+
+  private async resolveIapAssertionAndActivate(
+    request: AuthenticatedRequestLike,
+    baseHeaders: Record<string, string | string[] | undefined>,
+    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+  ): Promise<boolean> {
+    const isStrictIap =
+      process.env.STRICT_IAP_MODE === "true" ||
+      process.env.NODE_ENV === "production";
+    const expectedAudience =
+      process.env.IAP_EXPECTED_AUDIENCE ||
+      process.env.IAP_AUDIENCE ||
+      process.env.JWT_AUDIENCE;
+    const jwtSecretOrPublicKey =
+      process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
+      process.env.IAP_JWT_SECRET ||
+      process.env.JWT_SECRET;
+
+    const resolved = await this.iapSubjectAdapter!.resolveSubject(
+      baseHeaders,
+      {
+        strictIapMode: isStrictIap,
+        ...(expectedAudience ? { expectedAudience } : {}),
+        ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
+        autoProvision: process.env.NODE_ENV !== "production",
+      },
+    );
+
+    const identity: BootstrapRequestIdentity = {
+      authMode: "jwt_bearer",
+      actorType:
+        resolved.membership.realm === "platform"
+          ? "platform_admin"
+          : "ops_user",
+      actorId: resolved.principal.principalId,
+      subject: resolved.principal.subject,
+      realm: resolved.membership.realm as "platform" | "ops",
+      tenantId: null,
+      roleFamilies: [resolved.membership.realm as "platform" | "ops"],
+      roles: resolved.effectiveRoles,
+      scopes: resolved.effectiveScopes,
+      requestId:
+        (baseHeaders["x-request-id"] as string | undefined) ?? null,
+    };
+
+    request.identity = identity;
+    if (policy) {
+      try {
+        this.assertRealmAllowed(identity, policy.allowedRealms, request);
+        this.assertScopesAllowed(
+          identity,
+          policy.requiredScopes,
+          request,
+        );
+      } catch (error) {
+        this.recordAuthorizationDenialAudit(identity, request, error);
+        throw error;
+      }
+    }
+    return true;
+  }
+
+  private activateNonIap(
+    request: AuthenticatedRequestLike,
+    baseHeaders: Record<string, string | string[] | undefined>,
+    requestUrl: string,
+    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+  ): boolean {
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
