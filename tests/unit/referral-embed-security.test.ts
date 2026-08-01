@@ -1,5 +1,7 @@
+import { NextRequest } from "next/server";
 import { describe, it, expect } from "vitest";
 
+import { middleware } from "../../apps/referral-embed-web/middleware";
 import {
   applyEmbedSecurityHeaders,
   buildEmbedSecurityDecision,
@@ -99,5 +101,32 @@ describe("referral-embed embed security", () => {
       "https://ride.ctbc.com.tw",
     );
     expect(headers.get("Vary")).toContain("Origin");
+  });
+
+  it("blocks cross-entry session reuse with a 403 before rendering", () => {
+    process.env.REFERRAL_EMBED_ALLOWED_HOSTS = "app.yuhe-living.com.tw";
+    const cookiePayload = Buffer.from(
+      JSON.stringify({
+        partnerEntrySlug: "yuhe-residence",
+        entryHost: "app.yuhe-living.com.tw",
+      }),
+      "utf8",
+    ).toString("base64url");
+    const request = new NextRequest(
+      "https://passenger.drts.test/embed/other-entry?entryHost=app.yuhe-living.com.tw",
+      {
+        headers: {
+          cookie: `drts_referral_embed_session=${cookiePayload}.ignored`,
+          referer: "https://app.yuhe-living.com.tw/mobile",
+        },
+      },
+    );
+
+    const response = middleware(request);
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("X-DRTS-Embed-Block-Reason")).toBe(
+      "cross_entry_session_forbidden",
+    );
   });
 });

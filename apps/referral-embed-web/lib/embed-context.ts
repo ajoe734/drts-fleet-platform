@@ -1,16 +1,13 @@
 import { headers } from "next/headers";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
-import type { PartnerIngressHandoffSession } from "@drts/contracts";
+import type { ReferralEmbedSession } from "@drts/contracts";
 import {
   buildEmbedSecurityDecision,
   type EmbedSecurityDecision,
 } from "./embed-security";
+import { getReferralEmbedSession } from "./embed-partner-session";
 import { resolveAccent } from "./embed-presentation";
-import {
-  getPartnerEntry,
-  isEmbedAuthorityError,
-  issuePartnerIngressHandoff,
-} from "./embed-api";
+import { getPartnerEntry } from "./embed-api";
 import {
   EMBED_TRIP_FALLBACK_SCREENS,
   type EmbedTripFallbackScreen,
@@ -38,7 +35,7 @@ export type EmbedScreen =
 
 export type EmbedContext = {
   entry: PartnerChannelEntryRecord;
-  session: PartnerIngressHandoffSession | null;
+  session: ReferralEmbedSession | null;
   state: EmbedState;
   screen: EmbedScreen;
   requestedScreen: string | null;
@@ -71,7 +68,7 @@ function resolveSupportPhone(entry: PartnerChannelEntryRecord) {
 function toEmbedState(
   requested: string | undefined,
   decision: EmbedSecurityDecision,
-  session: PartnerIngressHandoffSession | null,
+  session: ReferralEmbedSession | null,
   issues: string[],
   demo: boolean,
 ): EmbedState {
@@ -81,6 +78,7 @@ function toEmbedState(
   if (requested === "unsupported") return "unsupported";
   if (decision.block) return "unsupported";
   if (issues.some((issue) => issue.startsWith("reauth:"))) return "reauth";
+  if (session && !session.identityActive) return "consent";
   if (session && requested === "handoff") return "handoff";
   if (session && requested === "book") return "handoff";
   if (session) return "handoff";
@@ -140,33 +138,23 @@ export async function resolveEmbedContext(input: {
 
   const entry = await getPartnerEntry(input.entrySlug);
   const issues: string[] = [];
-  let session: PartnerIngressHandoffSession | null = null;
+  let session = await getReferralEmbedSession();
 
-  if (!decision.block && input.apiKey && input.partnerUserRef) {
-    try {
-      session = await issuePartnerIngressHandoff({
-        entrySlug: input.entrySlug,
-        apiKey: input.apiKey,
-        partnerUserRef: input.partnerUserRef,
-        consentScope: "passenger_identity_link",
-      });
-    } catch (error) {
-      if (isEmbedAuthorityError(error)) {
-        if (
-          error.status === 401 ||
-          error.status === 403 ||
-          error.code === "PARTNER_USER_IDENTITY_REVOKED"
-        ) {
-          issues.push(`reauth:${error.code}`);
-        } else {
-          issues.push(`fallback:${error.code}`);
-        }
-      } else {
-        issues.push("fallback:unknown");
-      }
+  if (session) {
+    if (session.partnerEntrySlug !== input.entrySlug) {
+      issues.push("reauth:cross_entry_session");
+      session = null;
+    } else if (
+      decision.requestedEntryHost &&
+      session.entryHost !== decision.requestedEntryHost
+    ) {
+      issues.push("reauth:entry_host_session_mismatch");
+      session = null;
     }
-  } else if (!decision.block) {
-    issues.push("fallback:missing_handoff_credentials");
+  }
+
+  if (!decision.block && !session) {
+    issues.push("fallback:missing_embed_session");
   }
 
   const demoMode = process.env.REFERRAL_EMBED_DEMO === "true";

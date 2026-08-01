@@ -22,13 +22,6 @@ function buildHref(context: EmbedContext, next: Record<string, string>) {
     entryHost: context.entry.entryHost?.trim() || "",
   });
 
-  if (context.handoff.apiKey) {
-    params.set("apiKey", context.handoff.apiKey);
-  }
-  if (context.handoff.partnerUserRef) {
-    params.set("partnerUserRef", context.handoff.partnerUserRef);
-  }
-
   for (const [key, value] of Object.entries(next)) {
     params.set(key, value);
   }
