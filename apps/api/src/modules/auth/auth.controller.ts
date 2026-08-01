@@ -22,7 +22,10 @@ import {
 } from "../../common/api-envelope";
 import { OpenRoute } from "../../common/auth";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
-import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import {
+  isJwtKeyMaterialNotConfiguredError,
+  JwtAuthService,
+} from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
 import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
@@ -546,16 +549,13 @@ export class AuthController {
     try {
       return this.jwtAuthService.sign(identity, { expiresIn });
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("JWT_SECRET environment variable is not set")
-      ) {
+      if (isJwtKeyMaterialNotConfiguredError(error)) {
         throw new ApiRequestError(
           503,
           "JWT_NOT_CONFIGURED",
           "JWT session issuance is not configured for this environment.",
           {
-            requiredEnv: "JWT_SECRET",
+            requiredEnv: error.requiredEnv.join(" or "),
           },
         );
       }
