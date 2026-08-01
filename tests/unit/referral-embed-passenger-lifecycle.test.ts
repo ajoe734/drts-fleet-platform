@@ -136,7 +136,7 @@ describe("referral embed passenger lifecycle API integration", () => {
 
     const result = await getReferralTripHistoryServer();
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].orderId).toBe("order-123");
+    expect(result.items[0]?.orderId).toBe("order-123");
   });
 
   it("fetches PII-masked trip receipt from authority", async () => {

@@ -1682,6 +1682,7 @@ describe("owned mobility service", () => {
         tenantPartnerService,
       );
       const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         actorType: "referral_passenger",
         actorId: "pax-ref-001",
         realm: "partner",
@@ -1690,6 +1691,10 @@ describe("owned mobility service", () => {
         partnerProgramId: "program-referral-community",
         partnerEntrySlug: "yuhe-residence",
         drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
       };
 
       const bookingCommand = {
@@ -1728,6 +1733,7 @@ describe("owned mobility service", () => {
         tenantPartnerService,
       );
       const identity1: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         actorType: "referral_passenger",
         actorId: "pax-ref-001",
         realm: "partner",
@@ -1736,9 +1742,14 @@ describe("owned mobility service", () => {
         partnerProgramId: "program-referral-community",
         partnerEntrySlug: "yuhe-residence",
         drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
       };
 
       const identity2: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         actorType: "referral_passenger",
         actorId: "pax-ref-002",
         realm: "partner",
@@ -1747,6 +1758,10 @@ describe("owned mobility service", () => {
         partnerProgramId: "program-referral-community",
         partnerEntrySlug: "yuhe-residence",
         drtsPassengerId: "pax-ref-002",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-002",
       };
 
       const booking = await ownedMobilityService.createReferralPassengerBooking(
@@ -1778,6 +1793,7 @@ describe("owned mobility service", () => {
         tenantPartnerService,
       );
       const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         actorType: "referral_passenger",
         actorId: "pax-ref-001",
         realm: "partner",
@@ -1786,6 +1802,10 @@ describe("owned mobility service", () => {
         partnerProgramId: "program-referral-community",
         partnerEntrySlug: "yuhe-residence",
         drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
       };
 
       const booking = await ownedMobilityService.createReferralPassengerBooking(
@@ -1803,7 +1823,7 @@ describe("owned mobility service", () => {
 
       const history = ownedMobilityService.listReferralPassengerHistory(identity);
       expect(history.items.length).toBeGreaterThan(0);
-      expect(history.items[0].orderId).toBe(booking.orderId);
+      expect(history.items[0]?.orderId).toBe(booking.orderId);
 
       const receipt = ownedMobilityService.getReferralPassengerReceipt(booking.orderId, identity);
       expect(receipt.orderId).toBe(booking.orderId);

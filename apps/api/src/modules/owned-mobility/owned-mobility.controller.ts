@@ -281,13 +281,13 @@ export class OwnedMobilityController {
   }
 
   @Post("partner/referral/passenger/bookings")
-  createReferralPassengerBooking(
+  async createReferralPassengerBooking(
     @Body() command: CreateReferralPassengerBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
   ) {
-    const result = this.ownedMobilityService.createReferralPassengerBooking(
+    const result = await this.ownedMobilityService.createReferralPassengerBooking(
       command,
       identity,
       requestId,
