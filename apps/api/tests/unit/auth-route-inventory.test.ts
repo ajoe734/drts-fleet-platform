@@ -40,7 +40,7 @@ function findControllerFiles(dir: string, baseDir: string): string[] {
 function discoverAllControllerRoutes(): DiscoveredRoute[] {
   const controllerPattern = /@Controller\((?:['"]([^'"]*)['"])?\)/;
   const routePattern =
-    /@(Get|Post|Put|Patch|Delete|Options|Head|All)\((?:['"]([^'"]*)['"])?\)/g;
+    /@(Get|Post|Put|Patch|Delete|Options|Head|All|Sse)\((?:['"]([^'"]*)['"])?\)/g;
   const openRoutePattern = /@OpenRoute\(\)/;
   const scopesPattern = /@RequireScopes\(/;
   const realmsPattern = /@RequireRealms\(/;
@@ -78,7 +78,8 @@ function discoverAllControllerRoutes(): DiscoveredRoute[] {
       let rm: RegExpExecArray | null;
       routePattern.lastIndex = 0;
       while ((rm = routePattern.exec(line)) !== null) {
-        const httpMethod = (rm[1] ?? "GET").toUpperCase();
+        const rawMethod = rm[1] ?? "GET";
+        const httpMethod = rawMethod === "Sse" ? "GET" : rawMethod.toUpperCase();
         const subpath = rm[2] ?? "";
 
         const contextWindow = lines.slice(Math.max(0, i - 5), i + 1).join("\n");
@@ -148,6 +149,22 @@ describe("IAM-P0-003 Route Inventory & Global Default-Deny", () => {
     }
 
     expect(unclassified).toHaveLength(0);
+  });
+
+  it("discovers and classifies SSE event stream routes properly", () => {
+    const sseRoutes = [
+      "ops/dispatch-events",
+      "driver/task-events",
+      "passenger-rides/:accessToken/events",
+    ];
+
+    for (const ssePath of sseRoutes) {
+      const route = discoveredRoutes.find((r) => r.path === ssePath);
+      expect(route, `Expected to discover SSE route ${ssePath}`).toBeDefined();
+      const isClassified =
+        route?.isOpenRoute || route?.hasDecoratorAuth || route?.resolvedPolicy !== null;
+      expect(isClassified, `SSE route ${ssePath} must be classified`).toBe(true);
+    }
   });
 
   it("fails closed with 401 UNCLASSIFIED_ROUTE_DENIED for unknown/unclassified routes (Requirement 2)", () => {
