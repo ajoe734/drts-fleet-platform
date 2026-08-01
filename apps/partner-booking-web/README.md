@@ -19,6 +19,8 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline and the
 - The program-specific `card` / `insurance` / `travel` website funnel states
   live under `/[tenantSlug]/program/site`; banking-app embed identity states
   live under `/[tenantSlug]/program/embed`.
+- These are dev/reference surfaces. Their availability does not claim that a
+  partner entry has completed pilot or production cutover.
 - Authority-safe negative paths are implemented as direct gate routes in
   **PBK-UI-004**.
 - The cutover policy between this app and the legacy
@@ -49,12 +51,16 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline and the
   ramps.
 - Credit-card airport-transfer website booking and banking-app embedded
   hand-off are separate surfaces:
-  `http://localhost:3007/ctbc` is the standalone white-label website,
-  `http://localhost:3007/ctbc/program/site` is the seven-screen funnel state
-  QA surface, and `http://localhost:3007/ctbc/program/embed` is the bank-app
-  identity hand-off surface. The same pattern works for `cathay`, `taishin`,
-  and `dbs`; insurance (`fubon`) and travel (`lion`) expose the site funnel but
-  do not expose the banking-app embed surface.
+  `http://localhost:3007/ctbc` is the PBK-UI-003 CTBC reference landing and the
+  route used by the basic deploy smoke;
+  `http://localhost:3007/ctbc/program/site` is the current dev standalone
+  cardholder website surface rendered by `AirportTransferSite`; and
+  `http://localhost:3007/ctbc/program/embed` is the bank-app identity hand-off
+  surface. The same pattern works for `cathay`, `taishin`, and `dbs`;
+  insurance (`fubon`) and travel (`lion`) expose the site funnel but do not
+  expose the banking-app embed surface. Do not present the CTBC reference
+  landing or these dev routes as evidence of a production partner-entry
+  cutover.
 
 ## Dev / Build / Lint / Typecheck
 

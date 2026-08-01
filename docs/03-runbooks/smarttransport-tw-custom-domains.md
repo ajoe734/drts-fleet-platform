@@ -96,7 +96,7 @@ done
 gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray-tw-20260730
 ```
 
-全部 mapping `READY=True` 且憑證 ACTIVE 即完成。若 `book`/`fleets` 需要特定路徑健檢，比照 `deploy-dev` smoke（例如 `book.../ctbc`）。
+全部 mapping `READY=True` 且憑證 ACTIVE 即完成。若 `book`/`fleets` 需要特定路徑健檢，比照 `deploy-dev` smoke。`https://book.smarttransport.tw/ctbc` 僅是 CTBC reference landing／基本 smoke 路徑；目前 dev standalone cardholder website surface 是 `https://book.smarttransport.tw/ctbc/program/site`。兩者皆不構成 partner entry 已完成 production cutover 的證據。
 
 ## 5. 2026-07-31 實測現況
 

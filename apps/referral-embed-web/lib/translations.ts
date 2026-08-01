@@ -6,6 +6,12 @@ const en = {
   "app.title": "Referral Embed",
   "app.description":
     "Embedded DRTS ride-hailing surface for third-party referral channels (community / property-management apps): partner-scoped handoff, booking, trip status, and explicit unsupported states.",
+  "embed.systemError.eyebrow": "Service temporarily unavailable",
+  "embed.systemError.title": "This referral entry cannot be loaded right now.",
+  "embed.systemError.body":
+    "The referral service could not reach its authority backend. No booking action was submitted. Please try again after the service recovers.",
+  "embed.systemError.reference": "Incident reference: {reference}",
+  "embed.systemError.retry": "Try again",
   "common.language.switch": "Switch language",
   "common.language.en": "English",
   "common.language.zh": "Traditional Chinese",
@@ -750,8 +756,7 @@ const en = {
   "embed.field.messageCodeHint":
     "Copy is rendered from the backend passenger message code.",
   "embed.field.titleCodeLabel": "title",
-  "embed.avFallback.stage.vehicle_change_in_progress":
-    "Reassigning vehicle",
+  "embed.avFallback.stage.vehicle_change_in_progress": "Reassigning vehicle",
   "embed.avFallback.stage.human_fallback_assigned": "New vehicle assigned",
   "embed.avFallback.stage.service_continuing": "Service continuing",
   "pax.fallback.vehicle_change_in_progress.title":
@@ -790,6 +795,12 @@ const zh: Record<keyof typeof en, string> = {
   "app.title": "轉介嵌入前台",
   "app.description":
     "供第三方轉介渠道（社區／物業管理 App）內嵌的 DRTS 叫車前台：渠道身分交接、下單、行程狀態與明確的不支援狀態。",
+  "embed.systemError.eyebrow": "服務暫時無法使用",
+  "embed.systemError.title": "目前無法載入此轉介入口。",
+  "embed.systemError.body":
+    "轉介服務目前無法連線至權威後端，且尚未送出任何叫車操作。請待服務恢復後再試一次。",
+  "embed.systemError.reference": "事件參照：{reference}",
+  "embed.systemError.retry": "再試一次",
   "common.language.switch": "切換語言",
   "common.language.en": "English",
   "common.language.zh": "繁體中文",
@@ -1490,8 +1501,7 @@ const zh: Record<keyof typeof en, string> = {
   "pax.fallback.human_fallback_assigned.body":
     "已為您指派新的車輛前往接您，請於原上車點稍候。",
   "pax.fallback.service_continuing.title": "行程繼續進行",
-  "pax.fallback.service_continuing.body":
-    "您的行程正常進行中，感謝耐心等候。",
+  "pax.fallback.service_continuing.body": "您的行程正常進行中，感謝耐心等候。",
   "pax.fallback.eta_updated.title": "預計時間已更新",
   "pax.fallback.eta_updated.body":
     "因重新安排車輛，預計上車時間已更新，造成不便敬請見諒。",

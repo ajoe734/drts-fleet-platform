@@ -12,7 +12,7 @@ state machine, and the entry-host allowlist middleware moved here verbatim;
 `passenger-web` and its generic consumer routes (book / trip / receipts / …) are
 gone.
 
-## Canonical embed endpoint (source of truth for partner onboarding)
+## Canonical embed contract (source of truth for partner onboarding)
 
 Partners iframe one URL per referral entry:
 
@@ -20,10 +20,14 @@ Partners iframe one URL per referral entry:
 https://<referral-embed-host>/embed/<entrySlug>
 ```
 
-- **dev canonical:** `https://refer.smarttransport.tw/embed/referral-demo-community`
-- **dev Cloud Run fallback:** `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community`
+- **current dev demo / acceptance URL:** `https://refer.smarttransport.tw/embed/referral-demo-community`
+- **current dev Cloud Run demo fallback:** `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community`
 - `<entrySlug>` is the partner channel entry slug provisioned in platform-admin
-  (`/partners`). The current dev acceptance slug is `referral-demo-community`.
+  (`/partners`). `referral-demo-community` is only the seeded dev acceptance
+  identity; it is not a production partner slug or a production URL claim.
+- No production Referral Embed host is defined by the current production deploy
+  rail. A production onboarding URL must use the provisioned partner slug and
+  the separately approved production host.
 
 > **Migration note:** this **supersedes** the old `passenger-web` embed host
 > (`…passenger-web…/embed/<entrySlug>`). Any partner iframe still pointing at the
