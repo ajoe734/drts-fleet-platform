@@ -147,7 +147,7 @@ async function requestReferralBookingAuthority<T>(
   }
 
   const envelope = payload as ApiSuccessEnvelope<T> | null;
-  if (!envelope?.data) {
+  if (!envelope || !("data" in envelope)) {
     throw buildEmbedBookingAuthorityError(
       502,
       "EMBED_BOOKING_AUTHORITY_EMPTY_RESPONSE",
