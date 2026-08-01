@@ -51,9 +51,16 @@ The current shared repo state is not yet acceptance-clean for `IAM-P0-003`.
 - `apps/api/src/common/auth/bootstrap-auth.guard.ts` returns `true` when a
   request is neither `@OpenRoute()` nor matched by merged policy metadata.
 - The current guard therefore does not fail closed on unmatched routes.
-- The API surface is broad enough that manual spot-checking is insufficient:
-  52 controller files, 19 `@OpenRoute()` sites, 64 `@RequireScopes()` sites,
-  and 107 `@RequireRealms()` sites under `apps/api/src/modules`.
+- The API surface is broad enough that manual spot-checking is insufficient.
+  A raw scan under `apps/api/src/modules` on 2026-08-01 returned:
+  52 `*controller.ts` files, 53 `@Controller()` classes, 19 `@OpenRoute()`
+  sites, 64 `@RequireScopes()` sites, and 107 raw `@RequireRealms()`
+  decorator occurrences.
+- Those raw counts are scale indicators only, not acceptance proof.
+  `driver-sos.controller.ts` declares two controller classes in one file, and
+  class-level decorators can inflate simple grep totals. Reviewer acceptance
+  should therefore require exhaustive route classification from controller
+  reality, inventory, and tests instead of relying on a snapshot count alone.
 
 ### Evidence Anchors
 
@@ -76,6 +83,10 @@ The current shared repo state is not yet acceptance-clean for `IAM-P0-003`.
 - `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
   - Contains multiple public/bootstrap-style routes that must stay explicitly
     inventoried and bounded.
+- `apps/api/src/modules/driver-sos/driver-sos.controller.ts`
+  - Declares both `DriverSosController` and `OpsDriverSosController` in a
+    single file, which is why raw controller-file and controller-class counts
+    differ.
 
 ### Acceptance Gaps To Close
 
@@ -226,5 +237,11 @@ Reviewer `Codex2` should verify these points first:
 
 - This sidecar performed repo inspection only. No runtime code, canonical truth,
   or control-plane state was modified beyond normal task-status updates.
+- Raw baseline scan commands used for this packet:
+  - `rg --files apps/api/src/modules -g '*controller.ts' | wc -l`
+  - `rg -n '@Controller\\(' apps/api/src/modules | wc -l`
+  - `rg -n '@OpenRoute\\(' apps/api/src/modules | wc -l`
+  - `rg -n '@RequireScopes\\(' apps/api/src/modules | wc -l`
+  - `rg -n '@RequireRealms\\(' apps/api/src/modules | wc -l`
 - No lint/typecheck/test run was required for the sidecar itself because the
   task scope is support material only.
