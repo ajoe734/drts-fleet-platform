@@ -47,8 +47,14 @@ export async function getServerOpsClient(): Promise<ApiClient> {
     defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
     requestId: requestHeaders.get("x-request-id"),
     strictIapMode: process.env.STRICT_IAP_MODE === "true" || process.env.NODE_ENV === "production",
-    iapJwtSecretOrPublicKey: process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY || process.env.JWT_SECRET,
-    expectedIapAudience: process.env.IAP_AUDIENCE || process.env.JWT_AUDIENCE,
+    iapJwtSecretOrPublicKey:
+      process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
+      process.env.IAP_JWT_SECRET ||
+      process.env.JWT_SECRET,
+    expectedIapAudience:
+      process.env.IAP_EXPECTED_AUDIENCE ||
+      process.env.IAP_AUDIENCE ||
+      process.env.JWT_AUDIENCE,
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
     ...(process.env.JWT_AUDIENCE

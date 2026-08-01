@@ -48,6 +48,11 @@ describe("IAPSubjectAdapter", () => {
     expect(result.principal.email).toBe("admin@platform.drts");
     expect(result.effectiveRoles).toContain("superadmin");
     expect(result.effectiveScopes).toContain("foundation:write");
+    expect(result.effectiveScopes).toContain("tenant:webhooks:write");
+    expect(result.effectiveScopes).toContain("tenant:sla:write");
+    expect(result.effectiveScopes).toContain("reports:write");
+    expect(result.effectiveScopes).toContain("forwarder:write");
+    expect(result.effectiveScopes).toContain("multi_taxi_ratings:read");
     expect(result.driftDetected).toBe(false);
 
     const recentEvents = await securityEventsService.listEvents(null, {

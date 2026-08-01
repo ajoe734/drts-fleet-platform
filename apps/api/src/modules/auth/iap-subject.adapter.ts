@@ -18,6 +18,8 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { IdentityRepository } from "../identity/identity.repository";
 import { SecurityEventsService } from "../security-events/security-events.service";
 
+import { AUTH_SCOPE_PRESETS } from "../../common/auth/auth.constants";
+
 export const DEFAULT_IAP_ROLE_GROUP_MAPPING: Record<string, string> = {
   superadmin: "platform-admins@platform.drts",
   operator: "ops-users@platform.drts",
@@ -25,43 +27,11 @@ export const DEFAULT_IAP_ROLE_GROUP_MAPPING: Record<string, string> = {
   ops_user: "ops-users@platform.drts",
 };
 
-export const DEFAULT_ROLE_SCOPES: Record<string, string[]> = {
-  superadmin: [
-    "identity:read",
-    "foundation:read",
-    "foundation:write",
-    "audit:read",
-    "notifications:read",
-    "notifications:write",
-    "tenant:read",
-    "tenant:write",
-    "billing:read",
-    "billing:write",
-    "sandbox.compliance.read",
-    "sandbox.compliance.manage",
-  ],
-  operator: [
-    "identity:read",
-    "audit:read",
-    "notifications:read",
-    "notifications:write",
-    "callcenter:read",
-    "callcenter:write",
-    "dispatch:read",
-    "dispatch:write",
-  ],
-  platform_admin: [
-    "identity:read",
-    "foundation:read",
-    "foundation:write",
-    "audit:read",
-    "tenant:read",
-  ],
-  ops_user: [
-    "identity:read",
-    "audit:read",
-    "dispatch:read",
-  ],
+export const DEFAULT_ROLE_SCOPES: Record<string, readonly string[]> = {
+  superadmin: AUTH_SCOPE_PRESETS.system,
+  platform_admin: AUTH_SCOPE_PRESETS.platform_admin,
+  operator: AUTH_SCOPE_PRESETS.ops_user,
+  ops_user: AUTH_SCOPE_PRESETS.ops_user,
 };
 
 export interface ResolveIapSubjectOptions {

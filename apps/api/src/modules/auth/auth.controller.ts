@@ -89,7 +89,9 @@ export class AuthController {
 
     if (rawAssertion && this.iapSubjectAdapter) {
       const expectedAudience =
-        process.env.IAP_EXPECTED_AUDIENCE || process.env.JWT_AUDIENCE;
+        process.env.IAP_EXPECTED_AUDIENCE ||
+        process.env.IAP_AUDIENCE ||
+        process.env.JWT_AUDIENCE;
       const jwtSecretOrPublicKey =
         process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
         process.env.IAP_JWT_SECRET ||
