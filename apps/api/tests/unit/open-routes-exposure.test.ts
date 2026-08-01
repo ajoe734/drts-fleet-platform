@@ -4,25 +4,97 @@ import {
   THROTTLER_LIMIT,
   THROTTLER_SKIP,
 } from "@nestjs/throttler/dist/throttler.constants";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   AUTH_OPEN_ROUTE_KEY,
   BootstrapAuthGuard,
 } from "../../src/common/auth";
-import { HealthController, buildHealthPayload } from "../../src/health/health.controller";
-import { AuthController } from "../../src/modules/auth/auth.controller";
-import { IdentityController } from "../../src/modules/identity/identity.controller";
-import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
-import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
+import { buildHealthPayload } from "../../src/health/health.controller";
+
+import * as fs from "fs";
+import * as path from "path";
+
+interface DiscoveredOpenRoute {
+  name: string;
+  class: abstract new (...args: any[]) => any;
+  method: string;
+}
+
+function findControllerFiles(dir: string): string[] {
+  const results: string[] = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findControllerFiles(fullPath));
+    } else if (entry.isFile() && entry.name.endsWith(".controller.ts")) {
+      results.push(fullPath);
+    }
+  }
+
+  return results;
+}
+
+async function discoverAllOpenRoutes(): Promise<DiscoveredOpenRoute[]> {
+  const reflector = new Reflector();
+  const srcDir = path.resolve(__dirname, "../../src");
+  const controllerFiles = findControllerFiles(srcDir);
+  const openRoutes: DiscoveredOpenRoute[] = [];
+
+  for (const fullPath of controllerFiles) {
+    const mod = await import(fullPath);
+    for (const exportName of Object.keys(mod)) {
+      const ControllerClass = mod[exportName];
+      if (
+        typeof ControllerClass === "function" &&
+        ControllerClass.prototype &&
+        (exportName.endsWith("Controller") || ControllerClass.name.endsWith("Controller"))
+      ) {
+        const propNames = Object.getOwnPropertyNames(ControllerClass.prototype);
+        for (const prop of propNames) {
+          if (prop === "constructor") continue;
+          const handler = ControllerClass.prototype[prop];
+          if (typeof handler !== "function") continue;
+
+          const isOpen = reflector.getAllAndOverride<boolean>(AUTH_OPEN_ROUTE_KEY, [
+            handler,
+            ControllerClass,
+          ]);
+
+          if (isOpen) {
+            openRoutes.push({
+              name: `${ControllerClass.name}.${prop}`,
+              class: ControllerClass,
+              method: prop,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return openRoutes;
+}
 
 describe("IAM-P0-003 Open Routes Rate & Data Exposure Tests (Requirement 4)", () => {
   const reflector = new Reflector();
+  let openRouteTargets: DiscoveredOpenRoute[] = [];
 
-  function createOpenRouteContext(targetClass: abstract new (...args: any[]) => any, methodName: string) {
+  beforeAll(async () => {
+    openRouteTargets = await discoverAllOpenRoutes();
+  });
+
+  function createOpenRouteContext(
+    targetClass: abstract new (...args: any[]) => any,
+    methodName: string,
+  ) {
     const handler = (targetClass.prototype as Record<string, any>)[methodName];
     if (typeof handler !== "function") {
-      throw new Error(`Handler ${methodName} on ${targetClass.name} is not a function`);
+      throw new Error(
+        `Handler ${methodName} on ${targetClass.name} is not a function`,
+      );
     }
     return {
       switchToHttp: () => ({
@@ -37,29 +109,9 @@ describe("IAM-P0-003 Open Routes Rate & Data Exposure Tests (Requirement 4)", ()
     } as never;
   }
 
-  const openRouteTargets: Array<{ name: string; class: any; method: string }> = [
-    { name: "HealthController.getHealth", class: HealthController, method: "getHealth" },
-    { name: "AuthController.issueToken", class: AuthController, method: "issueToken" },
-    { name: "AuthController.issueDriverDeviceSession", class: AuthController, method: "issueDriverDeviceSession" },
-    { name: "AuthController.refreshDriverDeviceSession", class: AuthController, method: "refreshDriverDeviceSession" },
-    { name: "AuthController.issueTenantBootstrapSession", class: AuthController, method: "issueTenantBootstrapSession" },
-    { name: "AuthController.issuePartnerBootstrapSession", class: AuthController, method: "issuePartnerBootstrapSession" },
-    { name: "IdentityController.getContext", class: IdentityController, method: "getContext" },
-    { name: "MultiTaxiController.createRide", class: MultiTaxiController, method: "createRide" },
-    { name: "MultiTaxiController.getPassengerRide", class: MultiTaxiController, method: "getPassengerRide" },
-    { name: "MultiTaxiController.streamPassengerRide", class: MultiTaxiController, method: "streamPassengerRide" },
-    { name: "MultiTaxiController.cancelPassengerRide", class: MultiTaxiController, method: "cancelPassengerRide" },
-    { name: "MultiTaxiController.submitPassengerRating", class: MultiTaxiController, method: "submitPassengerRating" },
-    { name: "MultiTaxiController.getPassengerContact", class: MultiTaxiController, method: "getPassengerContact" },
-    { name: "MultiTaxiController.getPassengerReceipt", class: MultiTaxiController, method: "getPassengerReceipt" },
-    { name: "TenantPartnerController.listTenantRoles", class: TenantPartnerController, method: "listTenantRoles" },
-    { name: "TenantPartnerController.issuePartnerIngressHandoff", class: TenantPartnerController, method: "issuePartnerIngressHandoff" },
-    { name: "TenantPartnerController.issueReferralEmbedHandoffArtifact", class: TenantPartnerController, method: "issueReferralEmbedHandoffArtifact" },
-    { name: "TenantPartnerController.consumeReferralEmbedHandoffArtifact", class: TenantPartnerController, method: "consumeReferralEmbedHandoffArtifact" },
-    { name: "TenantPartnerController.recordReferralEmbedConsent", class: TenantPartnerController, method: "recordReferralEmbedConsent" },
-    { name: "TenantPartnerController.listPartnerEntries", class: TenantPartnerController, method: "listPartnerEntries" },
-    { name: "TenantPartnerController.getPartnerEntry", class: TenantPartnerController, method: "getPartnerEntry" },
-  ];
+  it("dynamically discovers open routes and verifies count > 0", () => {
+    expect(openRouteTargets.length).toBeGreaterThan(0);
+  });
 
   it("verifies all registered open routes carry explicit @OpenRoute metadata", () => {
     for (const item of openRouteTargets) {

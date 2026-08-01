@@ -122,7 +122,11 @@ export function resolveRouteAuthPolicy(
     const routeSuffix = routePath.slice("partner/referral/".length) || "root";
     return {
       routeKey: `partner:referral:${routeSuffix}:${upperMethod}`,
-      requiredScopes: ["billing:read"],
+      requiredScopes: methodScope(
+        "billing:read",
+        "billing:write",
+        upperMethod,
+      ),
       allowedRealms: baseAllowedRealms("partner"),
       description: "Referral partner self-service access",
     };
@@ -205,7 +209,11 @@ export function resolveRouteAuthPolicy(
     const routeSuffix = routePath.slice("fleet-partner/".length) || "root";
     return {
       routeKey: `fleet-partner:${routeSuffix}:${upperMethod}`,
-      requiredScopes: ["billing:read"],
+      requiredScopes: methodScope(
+        "billing:read",
+        "billing:write",
+        upperMethod,
+      ),
       allowedRealms: baseAllowedRealms("partner"),
       description: "Fleet partner self-service access",
     };

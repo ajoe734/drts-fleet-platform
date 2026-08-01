@@ -38,9 +38,9 @@ function findControllerFiles(dir: string, baseDir: string): string[] {
 }
 
 function discoverAllControllerRoutes(): DiscoveredRoute[] {
-  const controllerPattern = /@Controller\((?:['"]([^'"]*)['"])?\)/;
-  const routePattern =
-    /@(Get|Post|Put|Patch|Delete|Options|Head|All|Sse)\((?:['"]([^'"]*)['"])?\)/g;
+  const controllerPattern = /@Controller\s*\(\s*(?:['"]([^'"]*)['"])?\s*\)/;
+  const routeDecoratorRegex =
+    /@(Get|Post|Put|Patch|Delete|Options|Head|All|Sse)\s*\(([\s\S]*?)\)/g;
   const openRoutePattern = /@OpenRoute\(\)/;
   const scopesPattern = /@RequireScopes\(/;
   const realmsPattern = /@RequireRealms\(/;
@@ -65,59 +65,73 @@ function discoverAllControllerRoutes(): DiscoveredRoute[] {
       controllerName = classMatch[1] ?? "UnknownController";
     }
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? "";
-      const cm = controllerPattern.exec(line);
-      if (cm) {
-        currentControllerPrefix = cm[1] ?? "";
-        const classContext = lines.slice(Math.max(0, i - 5), i + 1).join("\n");
-        classScopes = scopesPattern.test(classContext);
-        classRealms = realmsPattern.test(classContext);
+    const cm = controllerPattern.exec(content);
+    if (cm) {
+      currentControllerPrefix = cm[1] ?? "";
+      const classMatchPos = cm.index;
+      const lineIndex = content.slice(0, classMatchPos).split("\n").length - 1;
+      const classContext = lines.slice(Math.max(0, lineIndex - 5), lineIndex + 1).join("\n");
+      classScopes = scopesPattern.test(classContext);
+      classRealms = realmsPattern.test(classContext);
+    }
+
+    let match: RegExpExecArray | null;
+    routeDecoratorRegex.lastIndex = 0;
+    while ((match = routeDecoratorRegex.exec(content)) !== null) {
+      const rawMethod = match[1] ?? "GET";
+      const httpMethod = rawMethod === "Sse" ? "GET" : rawMethod.toUpperCase();
+      const argsContent = match[2] ?? "";
+
+      const pathMatch = argsContent.match(/['"]([^'"]*)['"]/);
+      const subpath = pathMatch ? (pathMatch[1] ?? "") : "";
+
+      const matchIndex = match.index;
+      const lineIndex = content.slice(0, matchIndex).split("\n").length - 1;
+
+      const contextWindow = lines.slice(Math.max(0, lineIndex - 5), lineIndex + 1).join("\n");
+      const isOpen = openRoutePattern.test(contextWindow);
+      const methodScopes = scopesPattern.test(contextWindow);
+      const methodRealms = realmsPattern.test(contextWindow);
+
+      let handlerName = "unknownHandler";
+      const endPos = matchIndex + match[0].length;
+      const afterDecorator = content.slice(endPos, endPos + 250);
+      const handlerMatch = afterDecorator.match(/(?:async\s+)?([a-zA-Z0-9_]+)\s*\(/);
+      if (handlerMatch && handlerMatch[1]) {
+        const candidate = handlerMatch[1];
+        const keywords = new Set([
+          "Get", "Post", "Put", "Patch", "Delete", "Options", "Head", "All", "Sse",
+          "Header", "Headers", "Param", "Body", "Query", "Req", "Res", "UseGuards", "Throttle", "SkipThrottle"
+        ]);
+        if (!keywords.has(candidate)) {
+          handlerName = candidate;
+        }
       }
 
-      let rm: RegExpExecArray | null;
-      routePattern.lastIndex = 0;
-      while ((rm = routePattern.exec(line)) !== null) {
-        const rawMethod = rm[1] ?? "GET";
-        const httpMethod = rawMethod === "Sse" ? "GET" : rawMethod.toUpperCase();
-        const subpath = rm[2] ?? "";
-
-        const contextWindow = lines.slice(Math.max(0, i - 5), i + 1).join("\n");
-        const isOpen = openRoutePattern.test(contextWindow);
-        const methodScopes = scopesPattern.test(contextWindow);
-        const methodRealms = realmsPattern.test(contextWindow);
-
-        let handlerName = "unknownHandler";
-        const handlerMatch = lines.slice(i + 1, i + 4).join("\n").match(/(\w+)\s*\(/);
-        if (handlerMatch) {
-          handlerName = handlerMatch[1] ?? "unknownHandler";
+      let fullUrlPath = currentControllerPrefix;
+      if (subpath) {
+        if (!fullUrlPath.endsWith("/") && !subpath.startsWith("/")) {
+          fullUrlPath += "/" + subpath;
+        } else if (fullUrlPath.endsWith("/") && subpath.startsWith("/")) {
+          fullUrlPath += subpath.slice(1);
+        } else {
+          fullUrlPath += subpath;
         }
-
-        let fullUrlPath = currentControllerPrefix;
-        if (subpath) {
-          if (!fullUrlPath.endsWith("/") && !subpath.startsWith("/")) {
-            fullUrlPath += "/" + subpath;
-          } else if (fullUrlPath.endsWith("/") && subpath.startsWith("/")) {
-            fullUrlPath += subpath.slice(1);
-          } else {
-            fullUrlPath += subpath;
-          }
-        }
-
-        const normPath = fullUrlPath.replace(/^\/+/, "").replace(/\/+$/, "");
-        const resolvedPolicy = resolveRouteAuthPolicy(httpMethod, normPath);
-
-        routes.push({
-          file: relFile,
-          method: httpMethod,
-          path: normPath,
-          controllerName,
-          handlerName,
-          isOpenRoute: isOpen,
-          hasDecoratorAuth: classScopes || classRealms || methodScopes || methodRealms,
-          resolvedPolicy,
-        });
       }
+
+      const normPath = fullUrlPath.replace(/^\/+/, "").replace(/\/+$/, "");
+      const resolvedPolicy = resolveRouteAuthPolicy(httpMethod, normPath);
+
+      routes.push({
+        file: relFile,
+        method: httpMethod,
+        path: normPath,
+        controllerName,
+        handlerName,
+        isOpenRoute: isOpen,
+        hasDecoratorAuth: classScopes || classRealms || methodScopes || methodRealms,
+        resolvedPolicy,
+      });
     }
   }
 
@@ -207,5 +221,32 @@ describe("IAM-P0-003 Route Inventory & Global Default-Deny", () => {
     for (const route of openRoutes) {
       expect(route.isOpenRoute).toBe(true);
     }
+  });
+
+  it("requires billing:write scope for fleet-partner POST/PUT/DELETE mutations while allowing billing:read for GET", () => {
+    const getPolicy = resolveRouteAuthPolicy("GET", "fleet-partner/supply-submissions");
+    expect(getPolicy?.requiredScopes).toEqual(["billing:read"]);
+
+    const postPolicy = resolveRouteAuthPolicy("POST", "fleet-partner/supply-submissions/drivers");
+    expect(postPolicy?.requiredScopes).toEqual(["billing:write"]);
+
+    const putPolicy = resolveRouteAuthPolicy("PUT", "fleet-partner/supply-submissions/sub-123/driver");
+    expect(putPolicy?.requiredScopes).toEqual(["billing:write"]);
+
+    const deletePolicy = resolveRouteAuthPolicy(
+      "DELETE",
+      "fleet-partner/supply-submissions/sub-123/documents/doc-456",
+    );
+    expect(deletePolicy?.requiredScopes).toEqual(["billing:write"]);
+  });
+
+  it("discovers multi-line route decorators like deleteSupplyDocument @Delete", () => {
+    const deleteDocRoute = discoveredRoutes.find(
+      (r) =>
+        r.method === "DELETE" &&
+        r.path === "fleet-partner/supply-submissions/:submissionId/documents/:documentId",
+    );
+    expect(deleteDocRoute, "deleteSupplyDocument route must be discovered").toBeDefined();
+    expect(deleteDocRoute?.resolvedPolicy?.requiredScopes).toEqual(["billing:write"]);
   });
 });
