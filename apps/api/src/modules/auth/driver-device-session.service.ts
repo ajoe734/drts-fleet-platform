@@ -223,8 +223,24 @@ export class DriverDeviceSessionService {
       const existingSession = await this.identityRepo.getSession(
         existingFamily.sessionId,
       );
-      if (existingSession?.principalId) {
-        this.assertDriverAuthEligible(existingSession.principalId);
+      if (existingSession) {
+        const sessionDeviceId = (
+          existingSession.deviceSummary as { deviceId?: string }
+        )?.deviceId;
+        if (
+          sessionDeviceId !== deviceId ||
+          existingSession.status !== "active"
+        ) {
+          throw new ApiRequestError(
+            401,
+            "DRIVER_DEVICE_REFRESH_INVALID",
+            "The driver device refresh token is invalid, expired, or revoked.",
+            { deviceId },
+          );
+        }
+        if (existingSession.principalId) {
+          this.assertDriverAuthEligible(existingSession.principalId);
+        }
       }
     }
 

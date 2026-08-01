@@ -181,7 +181,18 @@ describe("Identity session and refresh family repository (in-memory mode)", () =
       ),
     ).resolves.toBeUndefined();
 
-    // 3. Refresh session
+    // 2.5 Test refreshing with mismatched deviceId before rotation (must fail without consuming token)
+    await expect(
+      service.refresh({
+        deviceId: "wrong-device-id",
+        refreshToken: registered.refreshToken,
+      }),
+    ).rejects.toThrowError(ApiRequestError);
+
+    const activeSessionAfterMismatch = await repository.getSession(registered.bindingId);
+    expect(activeSessionAfterMismatch?.status).toBe("active");
+
+    // 3. Refresh session with valid deviceId
     const refreshed = await service.refresh({
       deviceId: "device-runtime-001",
       refreshToken: registered.refreshToken,
