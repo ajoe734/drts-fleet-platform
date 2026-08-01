@@ -110,6 +110,9 @@ function createOwnedMobilityService(options?: {
     reportPersistenceFailure: (...args: any[]) => void;
     findOrderById?: (...args: any[]) => Promise<unknown>;
     findOrderByBookingId?: (...args: any[]) => Promise<unknown>;
+    findElectronicReceipt?: (...args: any[]) => Promise<unknown>;
+    findPassengerRating?: (...args: any[]) => Promise<unknown>;
+    persistPassengerRating?: (...args: any[]) => Promise<unknown>;
     // Only the transactional assignment path reaches these, so stubs that never
     // enable a repository can keep omitting them.
     isActiveMultiTaxiAuthorizedVehicle?: (...args: any[]) => Promise<boolean>;
@@ -6514,6 +6517,407 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
     expect(order.partnerEntrySlug).toBeNull();
     const order2 = service.createPassengerOrder(baseCommand as any, null);
     expect(order2.partnerEntrySlug).toBeNull();
+  });
+});
+
+describe("OwnedMobilityService referral passenger lifecycle (BE-REF-PASSENGER-001)", () => {
+  const tenantPartnerService = new TenantPartnerService({
+    recordNotification: vi.fn(),
+    recordAuditLog: vi.fn(),
+  } as never);
+  const referralIdentity = {
+    authMode: "jwt_bearer" as const,
+    actorType: "referral_passenger" as const,
+    actorId: "passenger-referral-001",
+    realm: "partner" as const,
+    tenantId: "tenant-demo-001",
+    partnerId: "partner-referral-demo-001",
+    partnerProgramId: "program-referral-community",
+    partnerEntrySlug: "referral-demo-community",
+    roleFamilies: ["partner"] as const,
+    roles: ["referral_passenger"],
+    scopes: ["partner:book"],
+    requestId: "req-referral-passenger-001",
+  };
+  const otherReferralPassenger = {
+    ...referralIdentity,
+    actorId: "passenger-referral-002",
+    requestId: "req-referral-passenger-002",
+  };
+  const completeDisclosure = {
+    vehicleId: "veh-demo-001",
+    make: "Toyota",
+    model: "Sienta",
+    modelYear: 2024,
+    doorCount: 5,
+    color: "Silver",
+    status: "complete",
+    missingFieldCodes: [] as string[],
+    version: 2,
+  };
+  const activeCredential = {
+    driverId: "drv-demo-001",
+    effectiveUntil: "2027-01-01",
+    status: "verified_active",
+    maskedDisplay: "RE***01",
+    version: 3,
+  };
+
+  function buildReferralCommand() {
+    const startAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const endAt = new Date(startAt.getTime() + 20 * 60 * 1000);
+    return {
+      businessDispatchSubtype: "enterprise_dispatch" as const,
+      pickup: {
+        address: "台北市信義區松仁路100號",
+      },
+      dropoff: {
+        address: "台北市中山區樂群三路200號",
+      },
+      reservationWindowStart: startAt.toISOString(),
+      reservationWindowEnd: endAt.toISOString(),
+      passenger: {
+        name: "林小姐",
+        phone: "0911222333",
+      },
+      notes: "Gate B",
+    };
+  }
+
+  it("replays referral passenger booking create requests idempotently and isolates read access per passenger", async () => {
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+    });
+    const command = buildReferralCommand();
+
+    const first = await Promise.resolve(
+      service.createTenantBooking(
+        command,
+        referralIdentity.tenantId,
+        referralIdentity as never,
+        "req-referral-create-001",
+        undefined,
+        "idem-referral-create-001",
+      ),
+    );
+    const replay = await Promise.resolve(
+      service.createTenantBooking(
+        command,
+        referralIdentity.tenantId,
+        referralIdentity as never,
+        "req-referral-create-002",
+        undefined,
+        "idem-referral-create-001",
+      ),
+    );
+
+    expect(replay).toMatchObject({
+      orderId: first.orderId,
+      bookingId: first.bookingId,
+      replayed: true,
+    });
+    expect(
+      service
+        .listOrders()
+        .filter((order) => order.bookingId === first.bookingId),
+    ).toHaveLength(1);
+    expect(service.getOrder(first.orderId, referralIdentity as never)).toMatchObject(
+      {
+        partnerEntrySlug: "referral-demo-community",
+        passenger: {
+          passengerId: referralIdentity.actorId,
+        },
+      },
+    );
+
+    try {
+      service.getOrder(first.orderId, otherReferralPassenger as never);
+      expect.unreachable("another referral passenger must not read the order");
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(403);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PARTNER_SCOPE_MISMATCH",
+        },
+      });
+    }
+
+    try {
+      await Promise.resolve(
+        service.createTenantBooking(
+          {
+            ...command,
+            dropoff: { address: "台北市內湖區洲子街100號" },
+          },
+          referralIdentity.tenantId,
+          referralIdentity as never,
+          "req-referral-create-003",
+          undefined,
+          "idem-referral-create-001",
+        ),
+      );
+      expect.unreachable("different payload must conflict on reused idempotency key");
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "REFERRAL_BOOKING_IDEMPOTENCY_CONFLICT",
+        },
+      });
+    }
+  });
+
+  it("treats repeated referral passenger cancels as idempotent but rejects conflicting replay reasons", async () => {
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+    });
+    const command = buildReferralCommand();
+    const created = await Promise.resolve(
+      service.createTenantBooking(
+        command,
+        referralIdentity.tenantId,
+        referralIdentity as never,
+      ),
+    );
+
+    const cancelled = await service.cancelReferralPassengerBooking(
+      referralIdentity.tenantId,
+      created.bookingId,
+      { reason: "passenger_requested" },
+      referralIdentity as never,
+      "req-referral-cancel-001",
+    );
+    const replay = await service.cancelReferralPassengerBooking(
+      referralIdentity.tenantId,
+      created.bookingId,
+      { reason: "passenger_requested" },
+      referralIdentity as never,
+      "req-referral-cancel-002",
+    );
+
+    expect(cancelled.booking.status).toBe("cancelled");
+    expect(replay.booking.status).toBe("cancelled");
+    expect(replay.actions.canCancel).toBe(false);
+
+    try {
+      await service.cancelReferralPassengerBooking(
+        referralIdentity.tenantId,
+        created.bookingId,
+        { reason: "duplicate_reason_mismatch" },
+        referralIdentity as never,
+        "req-referral-cancel-003",
+      );
+      expect.unreachable("conflicting cancel replay must fail");
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(409);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "REFERRAL_CANCEL_IDEMPOTENCY_CONFLICT",
+        },
+      });
+    }
+  });
+
+  it("serves active/history/receipt/rating views within the referral passenger scope", async () => {
+    const quotaAwareTenantPartnerService = Object.assign(
+      Object.create(Object.getPrototypeOf(tenantPartnerService)) as TenantPartnerService,
+      tenantPartnerService,
+      {
+        prepareTenantQuotaConsumption: vi.fn(async () => null),
+        applyCommittedQuotaConsumption: vi.fn(),
+      },
+    );
+    const state = new Map<string, unknown>();
+    const outboxQueue: unknown[] = [];
+    const captureWorkflowState = (changes: {
+      orders?: Array<unknown>;
+      dispatchJobs?: Array<unknown>;
+      dispatchAssignments?: Array<unknown>;
+      driverTasks?: Array<unknown>;
+    }) => {
+      if (changes.orders?.[0]) {
+        state.set("order", changes.orders[0]);
+      }
+      if (changes.dispatchJobs?.[0]) {
+        state.set("dispatchJob", changes.dispatchJobs[0]);
+      }
+      if (changes.dispatchAssignments?.[0]) {
+        state.set("assignment", changes.dispatchAssignments[0]);
+      }
+      if (changes.driverTasks?.[0]) {
+        state.set("task", changes.driverTasks[0]);
+      }
+    };
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async (changes: {
+        orders?: Array<unknown>;
+        dispatchJobs?: Array<unknown>;
+        dispatchAssignments?: Array<unknown>;
+        driverTasks?: Array<unknown>;
+      }) => {
+        captureWorkflowState(changes);
+      }),
+      persistOrderWorkflow: vi.fn(async (_tx: unknown, changes: {
+        orders?: Array<unknown>;
+        dispatchJobs?: Array<unknown>;
+        dispatchAssignments?: Array<unknown>;
+        driverTasks?: Array<unknown>;
+      }) => {
+        captureWorkflowState(changes);
+      }),
+      persistDriverCompletionOutbox: vi.fn(async (_tx: unknown, records: Array<unknown>) => {
+        outboxQueue.push(...records);
+      }),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async () => ({
+        order: state.get("order"),
+        dispatchJob: state.get("dispatchJob"),
+        assignment: state.get("assignment"),
+        task: state.get("task"),
+      })),
+      hasDriverTaskTraceRequestId: vi.fn(async () => false),
+      claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => {
+        const record = outboxQueue.shift();
+        return record ? { action: "dispatch", record } : null;
+      }),
+      markDriverCompletionOutboxDelivered: vi.fn(async () => true),
+      releaseDriverCompletionOutbox: vi.fn(async () => true),
+      reportPersistenceFailure: vi.fn(),
+      findPassengerRating: vi.fn().mockResolvedValue(null),
+      persistPassengerRating: vi.fn(async (rating: unknown) => rating),
+      findElectronicReceipt: vi.fn(async (orderId: string) => ({
+        receiptId: "receipt-referral-001",
+        orderId,
+        receiptNo: "RCPT-001",
+        amountMinor: 150000,
+        currency: "NTD",
+        issuedAt: "2026-08-01T09:00:00.000Z",
+        record: {
+          htmlUrl: "/receipts/referral-001.html",
+          pdfUrl: "/receipts/referral-001.pdf",
+        },
+      })),
+    };
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService: quotaAwareTenantPartnerService,
+      repository: repository as never,
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 6,
+          operatingArea: "TPE",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      vehicleDisclosureProfile: completeDisclosure,
+      driverRegistrationCredential: activeCredential,
+    });
+    const command = buildReferralCommand();
+    const pickupTime = new Date(command.reservationWindowStart).getTime();
+
+    const created = await Promise.resolve(
+      service.createTenantBooking(
+        command,
+        referralIdentity.tenantId,
+        referralIdentity as never,
+      ),
+    );
+    const active = await service.getReferralPassengerActiveBooking(
+      referralIdentity.tenantId,
+      referralIdentity as never,
+    );
+
+    expect(active).not.toBeNull();
+    expect(active?.booking.bookingId).toBe(created.bookingId);
+    expect(active?.actions.canCancel).toBe(true);
+
+    const dispatch = service.dispatchOrder(created.orderId, { mode: "auto" });
+    const assignment = await Promise.resolve(
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    );
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: new Date(pickupTime - 15 * 60 * 1000).toISOString(),
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: new Date(pickupTime - 10 * 60 * 1000).toISOString(),
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: new Date(pickupTime - 5 * 60 * 1000).toISOString(),
+    });
+    await service.startDriverTask(assignment.taskId, {
+      startedAt: new Date(pickupTime).toISOString(),
+    });
+    await service.completeDriverTask(assignment.taskId, {
+      completedAt: new Date(pickupTime + 25 * 60 * 1000).toISOString(),
+      actualDistanceKm: 9.8,
+      actualDurationSec: 1500,
+      proof: {
+        photos: [SAMPLE_PROOF_PHOTO],
+      },
+    });
+
+    const rating = await service.submitReferralPassengerRating(
+      referralIdentity.tenantId,
+      created.bookingId,
+      {
+        score: 5,
+        tags: ["clean", "punctual"],
+        comment: "Great ride",
+      },
+      referralIdentity as never,
+    );
+    const replayedRating = await service.submitReferralPassengerRating(
+      referralIdentity.tenantId,
+      created.bookingId,
+      {
+        score: 5,
+        tags: ["punctual", "clean"],
+        comment: "Great ride",
+      },
+      referralIdentity as never,
+    );
+    const receipt = await service.getReferralPassengerReceipt(
+      referralIdentity.tenantId,
+      created.bookingId,
+      referralIdentity as never,
+    );
+    const history = await service.listReferralPassengerBookingHistory(
+      referralIdentity.tenantId,
+      referralIdentity as never,
+    );
+
+    expect(replayedRating.ratingId).toBe(rating.ratingId);
+    expect(receipt).toMatchObject({
+      bookingId: created.bookingId,
+      settlement: {
+        channelKey: "partner_referral",
+        receiptOwner: "drts platform",
+      },
+      passenger: {
+        name: "林*姐",
+        phone: "******2333",
+      },
+      availableFormats: ["html", "pdf"],
+    });
+    expect(history.items[0]).toMatchObject({
+      booking: { bookingId: created.bookingId, status: "completed" },
+      receiptReady: true,
+      rated: true,
+    });
+    expect(
+      await service.getReferralPassengerActiveBooking(
+        referralIdentity.tenantId,
+        referralIdentity as never,
+      ),
+    ).toBeNull();
   });
 });
 

@@ -36,6 +36,7 @@ import type {
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
+  SubmitPassengerTripRatingCommand,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -217,6 +218,7 @@ export class OwnedMobilityController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const resolvedTenantId = this.requireTenantId(tenantId);
     if (command.eligibilityVerificationId && this.tenantPartnerService) {
@@ -231,6 +233,7 @@ export class OwnedMobilityController {
       identity,
       requestId,
       runtimeProfileCode,
+      idempotencyKey,
     );
     return toApiSuccessEnvelope(
       {
@@ -242,6 +245,38 @@ export class OwnedMobilityController {
         ),
         order: this.ownedMobilityService.getOrder(result.orderId, identity),
       },
+      requestId,
+    );
+  }
+
+  @Get("partner/bookings/active")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getReferralPassengerActiveBooking(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getReferralPassengerActiveBooking(
+        this.requireTenantId(tenantId),
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/bookings/history")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async listReferralPassengerBookingHistory(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.listReferralPassengerBookingHistory(
+        this.requireTenantId(tenantId),
+        identity,
+      ),
       requestId,
     );
   }
@@ -258,6 +293,63 @@ export class OwnedMobilityController {
       await this.ownedMobilityService.resolvePersistedTenantBooking(
         this.requireTenantId(tenantId),
         bookingId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/bookings/:bookingId/receipt")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getReferralPassengerReceipt(
+    @Param("bookingId") bookingId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getReferralPassengerReceipt(
+        this.requireTenantId(tenantId),
+        bookingId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("partner/bookings/:bookingId/cancel")
+  async cancelReferralPassengerBooking(
+    @Param("bookingId") bookingId: string,
+    @Body() command: CancelOwnedOrderCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.cancelReferralPassengerBooking(
+        this.requireTenantId(tenantId),
+        bookingId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("partner/bookings/:bookingId/rating")
+  async submitReferralPassengerRating(
+    @Param("bookingId") bookingId: string,
+    @Body() command: SubmitPassengerTripRatingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.submitReferralPassengerRating(
+        this.requireTenantId(tenantId),
+        bookingId,
+        command,
         identity,
       ),
       requestId,

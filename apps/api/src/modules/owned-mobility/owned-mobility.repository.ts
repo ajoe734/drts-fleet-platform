@@ -9,8 +9,10 @@ import type {
   DriverRatingSummary,
   DriverTaskRecord,
   ConsumerNotificationOutboxRecord,
+  MultiTaxiElectronicReceipt,
   OwnedOrderRecord,
   PassengerDispatchDisclosureSnapshot,
+  PassengerTripRatingRecord,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -27,6 +29,30 @@ type DriverRatingSummaryRow = QueryResultRow & {
   last_rated_at: Date | string | null;
   aggregate_version: number;
   calculated_at: Date | string;
+};
+
+type PassengerTripRatingRow = QueryResultRow & {
+  rating_id: string;
+  order_id: string;
+  trip_id: string;
+  driver_id: string;
+  passenger_subject_ref: string;
+  score: PassengerTripRatingRecord["score"];
+  tags: unknown;
+  comment: string | null;
+  status: PassengerTripRatingRecord["status"];
+  submitted_at: Date | string;
+  updated_at: Date | string;
+};
+
+type ElectronicReceiptRow = QueryResultRow & {
+  receipt_id: string;
+  order_id: string;
+  receipt_no: string;
+  amount_minor: string | number;
+  currency: string;
+  issued_at: Date | string;
+  record: unknown;
 };
 
 export type OwnedMobilityQueryExecutor = {
@@ -176,6 +202,82 @@ export class OwnedMobilityRepository {
           "ops.phase1_owned_orders",
         )
       : null;
+  }
+
+  async findPassengerRating(orderId: string, passengerSubjectRef: string) {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<PassengerTripRatingRow>(
+      `
+        SELECT *
+        FROM ops.passenger_trip_ratings
+        WHERE order_id = $1
+          AND passenger_subject_ref = $2
+        LIMIT 1
+      `,
+      [orderId, passengerSubjectRef],
+    );
+    return result.rows[0] ? this.mapPassengerRating(result.rows[0]) : null;
+  }
+
+  async persistPassengerRating(rating: PassengerTripRatingRecord) {
+    if (!this.isEnabled()) {
+      return rating;
+    }
+
+    const result = await this.databaseService!.query<PassengerTripRatingRow>(
+      `
+        INSERT INTO ops.passenger_trip_ratings (
+          rating_id,
+          order_id,
+          trip_id,
+          driver_id,
+          passenger_subject_ref,
+          score,
+          tags,
+          comment,
+          status,
+          submitted_at,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
+        ON CONFLICT (order_id, passenger_subject_ref) DO UPDATE SET
+          updated_at = ops.passenger_trip_ratings.updated_at
+        RETURNING *
+      `,
+      [
+        rating.ratingId,
+        rating.orderId,
+        rating.tripId,
+        rating.driverId,
+        rating.passengerSubjectRef,
+        rating.score,
+        JSON.stringify(rating.tags),
+        rating.comment,
+        rating.status,
+        rating.submittedAt,
+        rating.updatedAt,
+      ],
+    );
+    return this.mapPassengerRating(result.rows[0]!);
+  }
+
+  async findElectronicReceipt(orderId: string) {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<ElectronicReceiptRow>(
+      `
+        SELECT *
+        FROM reporting.multi_taxi_electronic_receipts
+        WHERE order_id = $1
+        LIMIT 1
+      `,
+      [orderId],
+    );
+    return result.rows[0] ? this.mapElectronicReceipt(result.rows[0]) : null;
   }
 
   async loadState(): Promise<OwnedMobilityState> {
@@ -1124,5 +1226,50 @@ export class OwnedMobilityRepository {
         ? new Date(row.delivered_at).toISOString()
         : null,
     };
+  }
+
+  private mapPassengerRating(
+    row: PassengerTripRatingRow,
+  ): PassengerTripRatingRecord {
+    return {
+      ratingId: row.rating_id,
+      orderId: row.order_id,
+      tripId: row.trip_id,
+      driverId: row.driver_id,
+      passengerSubjectRef: row.passenger_subject_ref,
+      score: row.score,
+      tags: this.toStringArray(row.tags),
+      comment: row.comment,
+      status: row.status,
+      submittedAt: new Date(row.submitted_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  private mapElectronicReceipt(
+    row: ElectronicReceiptRow,
+  ): MultiTaxiElectronicReceipt {
+    return {
+      receiptId: row.receipt_id,
+      orderId: row.order_id,
+      receiptNo: row.receipt_no,
+      amountMinor: Number(row.amount_minor),
+      currency: "NTD",
+      issuedAt: new Date(row.issued_at).toISOString(),
+      record:
+        row.record !== null &&
+        typeof row.record === "object" &&
+        !Array.isArray(row.record)
+          ? (row.record as Record<string, unknown>)
+          : {},
+    };
+  }
+
+  private toStringArray(value: unknown): string[] {
+    const parsed =
+      typeof value === "string" ? (JSON.parse(value) as unknown) : value;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
   }
 }

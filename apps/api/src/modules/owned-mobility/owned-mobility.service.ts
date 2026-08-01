@@ -61,6 +61,7 @@ import type {
   FareQuoteAnomalySnapshot,
   FulfillmentSegmentRecord,
   MoneyAmount,
+  MultiTaxiElectronicReceipt,
   MultiTaxiOperatingAuthorizationRecord,
   OverrideRequestRecord,
   PassengerDisclosureChannel,
@@ -68,12 +69,17 @@ import type {
   RejectExceptionOverrideCommand,
   RejectTenantBookingApprovalRequestCommand,
   RecordPassengerAcknowledgementCommand,
+  ReferralPassengerBookingAuthorityView,
+  ReferralPassengerBookingHistoryItem,
+  ReferralPassengerBookingHistoryView,
+  ReferralPassengerReceiptView,
   RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
   PassengerDispatchDisclosureSnapshot,
   PassengerProfile,
+  PassengerTripRatingRecord,
   QueueCheckInCommand,
   QueueCheckOutCommand,
   QueueEntryRecord,
@@ -97,9 +103,12 @@ import type {
   DispatchQueueMode,
   RuntimeProfileCode,
   RouteFareDisclosureSnapshot,
+  SettlementMatrixRecord,
+  SubmitPassengerTripRatingCommand,
 } from "@drts/contracts";
 
 import {
+  PARTNER_REFERRAL_CHANNEL_KEY,
   QUEUE_ENTRY_POLICY_MAP,
   RESERVATION_HOLD_VALID_TRANSITIONS,
   hasAddressCoordinateProvenance,
@@ -109,8 +118,16 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
-import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
+import {
+  maskName,
+  maskPhone,
+  resolvePassengerSubjectRef,
+} from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import {
+  buildSettlementMatrix,
+  settlementChannelKeyForTrip,
+} from "../billing-settlement/settlement-matrix";
 import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
@@ -151,6 +168,7 @@ type TenantBookingResult = {
   >;
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
+  replayed?: boolean;
 };
 
 type PartnerBookingContext = {
@@ -324,6 +342,16 @@ type SpatialAuditContext = {
   surface: GeoResolutionSurface;
 };
 
+type ReferralPassengerIdentity = BootstrapRequestIdentity & {
+  realm: "partner";
+  actorType: "referral_passenger";
+  actorId: string;
+  tenantId: string;
+  partnerId: string;
+  partnerProgramId: string;
+  partnerEntrySlug: string;
+};
+
 const BOOKING_RULES: Record<
   NonNullable<OwnedOrderRecord["businessDispatchSubtype"]>,
   {
@@ -429,6 +457,11 @@ export class OwnedMobilityService
 
   /** Maps forwarded mirror order IDs to their source platform codes. */
   private forwarderSourceMap = new Map<string, string>();
+
+  private passengerRatingsByPassengerOrder = new Map<
+    string,
+    PassengerTripRatingRecord
+  >();
 
   private driverCompletionRecoveryTimer: ReturnType<typeof setInterval> | null =
     null;
@@ -1084,6 +1117,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
+    idempotencyKey?: string,
   ): MaybePromise<TenantBookingResult> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
@@ -1094,6 +1128,11 @@ export class OwnedMobilityService
       command.flightNo,
     );
     this.requireActiveBookingServiceProduct(command.businessDispatchSubtype);
+    const referralIdentity = this.asReferralPassengerIdentity(
+      identity,
+      tenantId,
+    );
+    this.assertReferralPassengerCreatePayload(command, referralIdentity);
     const partnerContext = this.resolvePartnerBookingContext(
       command,
       tenantId,
@@ -1113,283 +1152,309 @@ export class OwnedMobilityService
     );
     const passenger = this.resolveTenantPassengerProfile(
       tenantId,
-      command.passengerId ?? null,
+      referralIdentity ? null : (command.passengerId ?? null),
       command.passenger,
     );
-
-    const now = new Date().toISOString();
-    const orderId = randomUUID();
-    const bookingId = `booking-${randomUUID()}`;
-    const bookingWindow = this.computeBookingWindows(
-      command.businessDispatchSubtype,
-      command.reservationWindowStart,
-    );
-    const reservationHoldId = randomUUID();
-    const order: OwnedOrderRecord = {
-      orderId,
-      orderNo: this.nextOrderNo(),
-      orderSource: "portal",
-      orderDomain: "owned",
-      tenantId,
-      partnerId: partnerContext?.partnerId ?? null,
-      partnerProgramId: partnerContext?.partnerProgramId ?? null,
-      partnerEntrySlug: partnerContext?.partnerEntrySlug ?? null,
-      eligibilityVerificationId:
-        partnerContext?.eligibilityVerificationId ?? null,
-      issuerAuthorizationRef: partnerContext?.issuerAuthorizationRef ?? null,
-      passengerDisclosure: null,
-      serviceBucket: "business_dispatch",
-      dispatchSemantics: "reservation",
-      businessDispatchSubtype: command.businessDispatchSubtype,
-      status: "created",
-      pickup,
-      dropoff,
-      passenger,
-      bookingId,
-      bookingType: "oneway",
-      etaSnapshot: null,
-      callId: null,
-      recordingId: null,
-      reservationWindowStart: command.reservationWindowStart,
-      reservationWindowEnd: command.reservationWindowEnd,
-      recurrenceRule: null,
-      modifiableUntil: bookingWindow.modifiableUntil,
-      cancelableUntil: bookingWindow.cancelableUntil,
-      bookedBy: command.bookedBy
-        ? {
-            ...command.bookedBy,
-          }
-        : null,
-      onsiteContact: command.onsiteContact
-        ? {
-            ...command.onsiteContact,
-          }
-        : null,
-      costCenter: this.resolveTenantBookingCostCenter(
-        tenantId,
-        command.costCenter,
-      ),
-      vehiclePreference: this.normalizeNullableText(command.vehiclePreference),
-      benefitReference:
-        this.normalizeNullableText(command.benefitReference) ??
-        partnerContext?.benefitReference ??
-        null,
-      direction: command.direction ?? null,
-      flightNo: this.normalizeNullableText(command.flightNo),
-      terminal: this.normalizeNullableText(command.terminal),
-      luggageCount: command.luggageCount ?? null,
-      notes: this.normalizeNullableText(command.notes),
-      fixedPrice: true,
-      quotedFare: { ...DEFAULT_PLATFORM_QUOTED_FARE },
-      quotedFareSource: "platform_pricing_rule",
-      quotedFareRuleVersion: DEFAULT_PLATFORM_PRICING_RULE_VERSION,
-      manualFareOverride: null,
-      exceptionHold: null,
-      proofRequirements: {
-        minPhotoCount: command.minPhotoCount ?? 1,
-        signoffRequired: command.signoffRequired ?? false,
-        expenseProofRequired: command.expenseProofRequired ?? false,
-      },
-      approvalState: "not_required",
-      approvalRequestIds: [],
-      complianceFlags: [],
-      cancelledAt: null,
-      cancelReason: null,
-      reservationHoldStatus: "requested",
-      reservationHoldId,
-      reservationHoldExpiresAt: command.reservationWindowStart,
-      dispatchAttemptCount: 0,
-      lastDispatchFailureReason: null,
-      noSupplyEscalation: null,
-      dispatchTimeout: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.applyServiceAreaCreationPolicy(
-      order,
-      this.resolveBookingSpatialAuditContext(order, identity),
-      requestId,
-    );
-    const bookingTraceLog = this.appendTrace(
-      order.orderId,
-      "tenant.booking_created",
-      {
-        bookingId,
-        businessDispatchSubtype: order.businessDispatchSubtype,
-        dispatchSemantics: order.dispatchSemantics,
-      },
-    );
-    const holdTraceLog = this.appendTrace(
-      order.orderId,
-      "reservation.hold.created",
-      {
-        bookingId,
-        reservationHoldId,
-        holdState: order.reservationHoldStatus,
-        confirmationWindowMinutes: bookingWindow.confirmationWindowMinutes,
-      },
-    );
-    const finalizeCreation = (
-      previousApprovalState: TenantBookingApprovalState,
-      approvalRequest: TenantBookingApprovalRequestRecord | null,
-      persistOrderWrite = true,
-    ): MaybePromise<TenantBookingResult> => {
-      order.approvalRequestIds = approvalRequest
-        ? [approvalRequest.approvalRequestId]
-        : [];
-      this.orders = [this.stampServiceProductCode(order), ...this.orders];
-      if (persistOrderWrite) {
-        this.persistChanges(
-          {
-            orders: [order],
-            dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
-          },
-          "create_tenant_booking",
-        );
-      }
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "tenant_admin",
-          tenantId: order.tenantId,
-          moduleName: "order",
-          actionName: "create_tenant_booking",
-          resourceType: "booking",
-          resourceId: bookingId,
-          newValuesSummary: {
-            orderId,
-            subtype: order.businessDispatchSubtype,
-            status: order.status,
-            approvalState: order.approvalState,
-            approvalRequestIds: order.approvalRequestIds,
-            partnerId: order.partnerId,
-            partnerProgramId: order.partnerProgramId,
-            partnerEntrySlug: order.partnerEntrySlug,
-            eligibilityVerificationId: order.eligibilityVerificationId,
-            issuerAuthorizationRef: order.issuerAuthorizationRef,
-            benefitReference: order.benefitReference,
-          },
-        },
-        requestId,
-      );
-      this.recordBookingApprovalStateChanged(
-        order,
-        previousApprovalState,
-        requestId,
-      );
-      void this.publishTenantOrderWebhook(
-        order,
-        "order.created",
-        order.createdAt,
-      );
-      void this.opsDispatchEventsService?.publishOrderCreated(
-        this.cloneOrder(order),
-        requestId,
-      );
-      return {
-        orderId,
-        bookingId,
-        serviceBucket: "business_dispatch",
-        businessDispatchSubtype: order.businessDispatchSubtype!,
-        dispatchSemantics: "reservation",
-        status: order.status,
-      };
-    };
-
-    const previousApprovalState = order.approvalState;
-    const governanceSnapshot = this.captureTenantGovernanceSnapshot();
-    const applyPassengerDisclosure = () =>
-      this.refreshPassengerDisclosureSnapshot(order, false, {
-        channel: this.resolvePassengerDisclosureChannel(order, identity),
-      });
-    const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
-      this.afterMaybePromise(
-        this.evaluateTenantBookingGovernance({
-          tx: tx ?? null,
-          order,
-          operation: "create",
-          ...(requestId ? { requestId } : {}),
-        }),
-        (evaluation) => {
-          order.approvalState =
-            this.resolveApprovalStateFromEvaluation(evaluation);
-          return this.createApprovalRequestForOrder({
-            tx: tx ?? null,
-            order,
-            evaluation,
-            ...(requestId ? { requestId } : {}),
-          });
-        },
-      );
-
-    if (
-      this.ownedMobilityRepository?.isEnabled() &&
-      this.tenantPartnerService?.isPersistenceEnabled()
-    ) {
-      return this.ownedMobilityRepository
-        .withTransaction(async (tx) => {
-          await applyPassengerDisclosure();
-          const approvalRequest = await applyGovernance(tx);
-          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-            orders: [this.cloneOrder(order)],
-            dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
-          });
-          if (command.passengerDisclosureAcknowledgement) {
-            await this.acknowledgePassengerDisclosure(
-              tenantId,
-              bookingId,
-              command.passengerDisclosureAcknowledgement,
-              identity,
-              requestId,
-              {
-                order,
-                tx,
-                refreshDisclosure: false,
-              },
-            );
-          }
-          return finalizeCreation(
-            previousApprovalState,
-            approvalRequest,
-            false,
-          );
-        })
-        .catch((error) => {
-          // The DB transaction rolls back persisted rows, but the in-memory
-          // governance state (quota ledger / approval requests) is mutated
-          // eagerly during reservation. Restore the pre-booking snapshot so a
-          // rejected booking (e.g. APPROVAL_NO_RESOLVABLE_APPROVERS or a quota
-          // hard block) leaves no residue in the in-memory read models.
-          this.restoreTenantGovernanceSnapshot(governanceSnapshot);
-          throw error;
-        });
+    if (referralIdentity) {
+      passenger.passengerId = referralIdentity.actorId;
     }
 
-    return this.withRollback(
-      () =>
-        this.afterMaybePromise(applyPassengerDisclosure(), () =>
-          this.afterMaybePromise(applyGovernance(null), (approvalRequest) => {
-            return command.passengerDisclosureAcknowledgement
-              ? this.afterMaybePromise(
-                  this.acknowledgePassengerDisclosure(
-                    tenantId,
-                    bookingId,
-                    command.passengerDisclosureAcknowledgement,
-                    identity,
-                    requestId,
-                    {
-                      order,
-                      refreshDisclosure: false,
-                    },
-                  ),
-                  () =>
-                    finalizeCreation(previousApprovalState, approvalRequest),
-                )
-              : finalizeCreation(previousApprovalState, approvalRequest);
-          }),
-        ),
-      () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),
+    const normalizedIdempotencyKey = referralIdentity
+      ? this.normalizeIdempotencyKey(idempotencyKey)
+      : null;
+
+    return this.afterMaybePromise(
+      referralIdentity && normalizedIdempotencyKey
+        ? this.findReferralPassengerCreateReplay(
+            command,
+            tenantId,
+            referralIdentity,
+            normalizedIdempotencyKey,
+          )
+        : null,
+      (replayedOrder) => {
+        if (replayedOrder) {
+          return this.toTenantBookingResult(replayedOrder, true);
+        }
+
+        const now = new Date().toISOString();
+        const deterministicIds =
+          referralIdentity && normalizedIdempotencyKey
+            ? this.buildReferralPassengerCreateIdentifiers(
+                tenantId,
+                referralIdentity,
+                normalizedIdempotencyKey,
+              )
+            : null;
+        const orderId = deterministicIds?.orderId ?? randomUUID();
+        const bookingId = deterministicIds?.bookingId ?? `booking-${randomUUID()}`;
+        const bookingWindow = this.computeBookingWindows(
+          command.businessDispatchSubtype,
+          command.reservationWindowStart,
+        );
+        const reservationHoldId = randomUUID();
+        const order: OwnedOrderRecord = {
+          orderId,
+          orderNo: this.nextOrderNo(),
+          orderSource: "portal",
+          orderDomain: "owned",
+          tenantId,
+          partnerId: partnerContext?.partnerId ?? null,
+          partnerProgramId: partnerContext?.partnerProgramId ?? null,
+          partnerEntrySlug: partnerContext?.partnerEntrySlug ?? null,
+          eligibilityVerificationId:
+            partnerContext?.eligibilityVerificationId ?? null,
+          issuerAuthorizationRef: partnerContext?.issuerAuthorizationRef ?? null,
+          passengerDisclosure: null,
+          serviceBucket: "business_dispatch",
+          dispatchSemantics: "reservation",
+          businessDispatchSubtype: command.businessDispatchSubtype,
+          status: "created",
+          pickup,
+          dropoff,
+          passenger,
+          bookingId,
+          bookingType: "oneway",
+          etaSnapshot: null,
+          callId: null,
+          recordingId: null,
+          reservationWindowStart: command.reservationWindowStart,
+          reservationWindowEnd: command.reservationWindowEnd,
+          recurrenceRule: null,
+          modifiableUntil: bookingWindow.modifiableUntil,
+          cancelableUntil: bookingWindow.cancelableUntil,
+          bookedBy: command.bookedBy
+            ? {
+                ...command.bookedBy,
+              }
+            : null,
+          onsiteContact: command.onsiteContact
+            ? {
+                ...command.onsiteContact,
+              }
+            : null,
+          costCenter: this.resolveTenantBookingCostCenter(
+            tenantId,
+            command.costCenter,
+          ),
+          vehiclePreference: this.normalizeNullableText(
+            command.vehiclePreference,
+          ),
+          benefitReference:
+            this.normalizeNullableText(command.benefitReference) ??
+            partnerContext?.benefitReference ??
+            null,
+          direction: command.direction ?? null,
+          flightNo: this.normalizeNullableText(command.flightNo),
+          terminal: this.normalizeNullableText(command.terminal),
+          luggageCount: command.luggageCount ?? null,
+          notes: this.normalizeNullableText(command.notes),
+          fixedPrice: true,
+          quotedFare: { ...DEFAULT_PLATFORM_QUOTED_FARE },
+          quotedFareSource: "platform_pricing_rule",
+          quotedFareRuleVersion: DEFAULT_PLATFORM_PRICING_RULE_VERSION,
+          manualFareOverride: null,
+          exceptionHold: null,
+          proofRequirements: {
+            minPhotoCount: command.minPhotoCount ?? 1,
+            signoffRequired: command.signoffRequired ?? false,
+            expenseProofRequired: command.expenseProofRequired ?? false,
+          },
+          approvalState: "not_required",
+          approvalRequestIds: [],
+          complianceFlags: [],
+          cancelledAt: null,
+          cancelReason: null,
+          reservationHoldStatus: "requested",
+          reservationHoldId,
+          reservationHoldExpiresAt: command.reservationWindowStart,
+          dispatchAttemptCount: 0,
+          lastDispatchFailureReason: null,
+          noSupplyEscalation: null,
+          dispatchTimeout: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        this.applyServiceAreaCreationPolicy(
+          order,
+          this.resolveBookingSpatialAuditContext(order, identity),
+          requestId,
+        );
+        const bookingTraceLog = this.appendTrace(
+          order.orderId,
+          "tenant.booking_created",
+          {
+            bookingId,
+            businessDispatchSubtype: order.businessDispatchSubtype,
+            dispatchSemantics: order.dispatchSemantics,
+          },
+        );
+        const holdTraceLog = this.appendTrace(
+          order.orderId,
+          "reservation.hold.created",
+          {
+            bookingId,
+            reservationHoldId,
+            holdState: order.reservationHoldStatus,
+            confirmationWindowMinutes: bookingWindow.confirmationWindowMinutes,
+          },
+        );
+        const finalizeCreation = (
+          previousApprovalState: TenantBookingApprovalState,
+          approvalRequest: TenantBookingApprovalRequestRecord | null,
+          persistOrderWrite = true,
+        ): MaybePromise<TenantBookingResult> => {
+          order.approvalRequestIds = approvalRequest
+            ? [approvalRequest.approvalRequestId]
+            : [];
+          this.orders = [this.stampServiceProductCode(order), ...this.orders];
+          if (persistOrderWrite) {
+            this.persistChanges(
+              {
+                orders: [order],
+                dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
+              },
+              "create_tenant_booking",
+            );
+          }
+          this.recordAudit(
+            {
+              actorId: referralIdentity?.actorId ?? null,
+              actorType: referralIdentity ? "referral_passenger" : "tenant_admin",
+              tenantId: order.tenantId,
+              moduleName: "order",
+              actionName: "create_tenant_booking",
+              resourceType: "booking",
+              resourceId: bookingId,
+              newValuesSummary: {
+                orderId,
+                subtype: order.businessDispatchSubtype,
+                status: order.status,
+                approvalState: order.approvalState,
+                approvalRequestIds: order.approvalRequestIds,
+                partnerId: order.partnerId,
+                partnerProgramId: order.partnerProgramId,
+                partnerEntrySlug: order.partnerEntrySlug,
+                eligibilityVerificationId: order.eligibilityVerificationId,
+                issuerAuthorizationRef: order.issuerAuthorizationRef,
+                benefitReference: order.benefitReference,
+              },
+            },
+            requestId,
+          );
+          this.recordBookingApprovalStateChanged(
+            order,
+            previousApprovalState,
+            requestId,
+          );
+          void this.publishTenantOrderWebhook(
+            order,
+            "order.created",
+            order.createdAt,
+          );
+          void this.opsDispatchEventsService?.publishOrderCreated(
+            this.cloneOrder(order),
+            requestId,
+          );
+          return this.toTenantBookingResult(order);
+        };
+
+        const previousApprovalState = order.approvalState;
+        const governanceSnapshot = this.captureTenantGovernanceSnapshot();
+        const applyPassengerDisclosure = () =>
+          this.refreshPassengerDisclosureSnapshot(order, false, {
+            channel: this.resolvePassengerDisclosureChannel(order, identity),
+          });
+        const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
+          this.afterMaybePromise(
+            this.evaluateTenantBookingGovernance({
+              tx: tx ?? null,
+              order,
+              operation: "create",
+              ...(requestId ? { requestId } : {}),
+            }),
+            (evaluation) => {
+              order.approvalState =
+                this.resolveApprovalStateFromEvaluation(evaluation);
+              return this.createApprovalRequestForOrder({
+                tx: tx ?? null,
+                order,
+                evaluation,
+                ...(requestId ? { requestId } : {}),
+              });
+            },
+          );
+
+        if (
+          this.ownedMobilityRepository?.isEnabled() &&
+          this.tenantPartnerService?.isPersistenceEnabled()
+        ) {
+          return this.ownedMobilityRepository
+            .withTransaction(async (tx) => {
+              await applyPassengerDisclosure();
+              const approvalRequest = await applyGovernance(tx);
+              await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+                orders: [this.cloneOrder(order)],
+                dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
+              });
+              if (command.passengerDisclosureAcknowledgement) {
+                await this.acknowledgePassengerDisclosure(
+                  tenantId,
+                  bookingId,
+                  command.passengerDisclosureAcknowledgement,
+                  identity,
+                  requestId,
+                  {
+                    order,
+                    tx,
+                    refreshDisclosure: false,
+                  },
+                );
+              }
+              return finalizeCreation(
+                previousApprovalState,
+                approvalRequest,
+                false,
+              );
+            })
+            .catch((error) => {
+              // The DB transaction rolls back persisted rows, but the in-memory
+              // governance state (quota ledger / approval requests) is mutated
+              // eagerly during reservation. Restore the pre-booking snapshot so a
+              // rejected booking (e.g. APPROVAL_NO_RESOLVABLE_APPROVERS or a quota
+              // hard block) leaves no residue in the in-memory read models.
+              this.restoreTenantGovernanceSnapshot(governanceSnapshot);
+              throw error;
+            });
+        }
+
+        return this.withRollback(
+          () =>
+            this.afterMaybePromise(applyPassengerDisclosure(), () =>
+              this.afterMaybePromise(applyGovernance(null), (approvalRequest) => {
+                return command.passengerDisclosureAcknowledgement
+                  ? this.afterMaybePromise(
+                      this.acknowledgePassengerDisclosure(
+                        tenantId,
+                        bookingId,
+                        command.passengerDisclosureAcknowledgement,
+                        identity,
+                        requestId,
+                        {
+                          order,
+                          refreshDisclosure: false,
+                        },
+                      ),
+                      () =>
+                        finalizeCreation(previousApprovalState, approvalRequest),
+                    )
+                  : finalizeCreation(previousApprovalState, approvalRequest);
+              }),
+            ),
+          () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),
+        );
+      },
     );
   }
 
@@ -1557,6 +1622,189 @@ export class OwnedMobilityService
         candidate.orderId === orderId && candidate.supersededAt === null,
     );
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
+  }
+
+  async getReferralPassengerActiveBooking(
+    tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralPassengerBookingAuthorityView | null> {
+    const referralIdentity = this.requireReferralPassengerIdentity(
+      identity,
+      tenantId,
+    );
+    const order =
+      this.orders
+        .filter((candidate) =>
+          this.isReferralPassengerOrder(candidate, referralIdentity),
+        )
+        .filter(
+          (candidate) =>
+            candidate.bookingId !== null &&
+            !["completed", "cancelled"].includes(candidate.status),
+        )
+        .sort(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            right.createdAt.localeCompare(left.createdAt),
+        )[0] ?? null;
+    return order ? this.buildReferralPassengerBookingView(order) : null;
+  }
+
+  async listReferralPassengerBookingHistory(
+    tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralPassengerBookingHistoryView> {
+    const referralIdentity = this.requireReferralPassengerIdentity(
+      identity,
+      tenantId,
+    );
+    const items = await Promise.all(
+      this.orders
+        .filter((candidate) =>
+          this.isReferralPassengerOrder(candidate, referralIdentity),
+        )
+        .filter(
+          (candidate) =>
+            candidate.bookingId !== null &&
+            ["completed", "cancelled"].includes(candidate.status),
+        )
+        .sort(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            right.createdAt.localeCompare(left.createdAt),
+        )
+        .map((order) => this.buildReferralPassengerHistoryItem(order)),
+    );
+    return { items };
+  }
+
+  async getReferralPassengerReceipt(
+    tenantId: string,
+    bookingId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralPassengerReceiptView> {
+    const order = this.requireReferralPassengerBookingOrder(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    const receipt =
+      (await this.ownedMobilityRepository?.findElectronicReceipt(order.orderId)) ??
+      null;
+    if (!receipt) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "REFERRAL_RECEIPT_NOT_READY",
+        "Electronic receipt is not ready for this booking.",
+        {
+          bookingId,
+          orderId: order.orderId,
+        },
+      );
+    }
+
+    const settlement = this.resolveReferralReceiptSettlement(order);
+    return {
+      bookingId,
+      orderId: order.orderId,
+      settlement,
+      passenger: {
+        passengerId: order.passenger.passengerId ?? null,
+        name: maskName(order.passenger.name),
+        phone: maskPhone(order.passenger.phone),
+      },
+      receipt,
+      availableFormats: this.resolveReceiptFormats(receipt),
+    };
+  }
+
+  async cancelReferralPassengerBooking(
+    tenantId: string,
+    bookingId: string,
+    command: CancelOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReferralPassengerBookingAuthorityView> {
+    const order = this.requireReferralPassengerBookingOrder(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    if (order.status === "cancelled") {
+      this.assertIdempotentReferralCancellation(order, command);
+      return this.buildReferralPassengerBookingView(order);
+    }
+
+    await this.cancelOwnedOrder(order.orderId, command, requestId);
+    return this.buildReferralPassengerBookingView(order);
+  }
+
+  async submitReferralPassengerRating(
+    tenantId: string,
+    bookingId: string,
+    command: SubmitPassengerTripRatingCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<PassengerTripRatingRecord> {
+    const order = this.requireReferralPassengerBookingOrder(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    if (order.status !== "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+        "A passenger rating can only be submitted after trip completion.",
+        { orderId: order.orderId, status: order.status },
+      );
+    }
+
+    const ratingAuthority = this.resolvePassengerRatingAuthority(order.orderId);
+    if (!ratingAuthority) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_ASSIGNMENT_MISSING",
+        "The completed trip has no passenger assignment authority.",
+        { orderId: order.orderId },
+      );
+    }
+
+    const score = this.requireRatingScore(command.score);
+    const tags = this.normalizeRatingTags(command.tags);
+    const comment = command.comment?.trim() || null;
+    const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
+    const existing = await this.findPassengerRatingForOrder(
+      order.orderId,
+      passengerSubjectRef,
+    );
+    if (existing) {
+      this.assertIdempotentRating(existing, score, tags, comment);
+      return existing;
+    }
+
+    const now = new Date().toISOString();
+    const rating: PassengerTripRatingRecord = {
+      ratingId: randomUUID(),
+      orderId: order.orderId,
+      tripId: ratingAuthority.assignmentId,
+      driverId: ratingAuthority.driverId,
+      passengerSubjectRef,
+      score,
+      tags,
+      comment,
+      status: "active",
+      submittedAt: now,
+      updatedAt: now,
+    };
+    const persisted =
+      (await this.ownedMobilityRepository?.persistPassengerRating(rating)) ??
+      rating;
+    this.assertIdempotentRating(persisted, score, tags, comment);
+    this.passengerRatingsByPassengerOrder.set(
+      this.passengerRatingKey(order.orderId, passengerSubjectRef),
+      persisted,
+    );
+    return persisted;
   }
 
   listTenantBookings(tenantId: string) {
@@ -8367,6 +8615,544 @@ export class OwnedMobilityService
     return next(value);
   }
 
+  private asReferralPassengerIdentity(
+    identity: BootstrapRequestIdentity | null | undefined,
+    tenantId: string,
+  ): ReferralPassengerIdentity | null {
+    if (!identity || identity.realm !== "partner") {
+      return null;
+    }
+    if (
+      identity.actorType !== "referral_passenger" ||
+      !identity.actorId ||
+      identity.tenantId !== tenantId ||
+      !identity.partnerId ||
+      !identity.partnerProgramId ||
+      !identity.partnerEntrySlug
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated referral passenger identity is not valid for this tenant or partner entry.",
+        {
+          tenantId,
+        },
+      );
+    }
+    return {
+      ...identity,
+      realm: "partner",
+      actorType: "referral_passenger",
+      actorId: identity.actorId,
+      tenantId: identity.tenantId,
+      partnerId: identity.partnerId,
+      partnerProgramId: identity.partnerProgramId,
+      partnerEntrySlug: identity.partnerEntrySlug,
+    };
+  }
+
+  private requireReferralPassengerIdentity(
+    identity: BootstrapRequestIdentity | null | undefined,
+    tenantId: string,
+  ) {
+    const referralIdentity = this.asReferralPassengerIdentity(identity, tenantId);
+    if (!referralIdentity) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "A referral passenger identity is required for this endpoint.",
+        {
+          tenantId,
+        },
+      );
+    }
+    return referralIdentity;
+  }
+
+  private assertReferralPassengerCreatePayload(
+    command: CreateTenantBookingCommand,
+    identity: ReferralPassengerIdentity | null,
+  ) {
+    if (!identity) {
+      return;
+    }
+
+    const forbiddenField =
+      this.normalizeNullableText(command.passengerId) !== null
+        ? "passengerId"
+        : this.normalizeNullableText(command.pickupAddressId) !== null
+          ? "pickupAddressId"
+          : this.normalizeNullableText(command.dropoffAddressId) !== null
+            ? "dropoffAddressId"
+            : null;
+    if (!forbiddenField) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "REFERRAL_PASSENGER_FIELD_NOT_ALLOWED",
+      `${forbiddenField} is not allowed for referral passenger bookings.`,
+      {
+        field: forbiddenField,
+      },
+    );
+  }
+
+  private normalizeIdempotencyKey(value: string | null | undefined) {
+    const normalized = value?.trim() ?? "";
+    if (!normalized) {
+      return null;
+    }
+    if (normalized.length > 255) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "IDEMPOTENCY_KEY_INVALID",
+        "Idempotency-Key must not exceed 255 characters.",
+      );
+    }
+    return normalized;
+  }
+
+  private buildReferralPassengerCreateIdentifiers(
+    tenantId: string,
+    identity: ReferralPassengerIdentity,
+    idempotencyKey: string,
+  ) {
+    const key = [
+      tenantId,
+      identity.partnerId,
+      identity.partnerProgramId,
+      identity.partnerEntrySlug,
+      identity.actorId,
+      idempotencyKey,
+    ].join("\0");
+    return {
+      orderId: generateDeterministicUuid("referral-passenger-order", key),
+      bookingId: `booking-${generateDeterministicUuid(
+        "referral-passenger-booking",
+        key,
+      )}`,
+    };
+  }
+
+  private async findReferralPassengerCreateReplay(
+    command: CreateTenantBookingCommand,
+    tenantId: string,
+    identity: ReferralPassengerIdentity,
+    idempotencyKey: string,
+  ) {
+    const identifiers = this.buildReferralPassengerCreateIdentifiers(
+      tenantId,
+      identity,
+      idempotencyKey,
+    );
+    let order = this.orders.find(
+      (candidate) =>
+        candidate.bookingId === identifiers.bookingId &&
+        candidate.tenantId === tenantId,
+    );
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const persistedOrder =
+        (await this.ownedMobilityRepository.findOrderByBookingId(
+          identifiers.bookingId,
+          tenantId,
+        )) ?? undefined;
+      order = this.pickNewestOrder(order, persistedOrder);
+    }
+    if (!order) {
+      return null;
+    }
+    this.assertPartnerOrderIdentity(identity, order);
+    this.assertIdempotentReferralCreate(order, command, identity);
+    return order;
+  }
+
+  private assertIdempotentReferralCreate(
+    order: OwnedOrderRecord,
+    command: CreateTenantBookingCommand,
+    identity: ReferralPassengerIdentity,
+  ) {
+    const commandSnapshot = {
+      businessDispatchSubtype: command.businessDispatchSubtype,
+      partnerEntrySlug:
+        this.normalizeNullableText(command.partnerEntrySlug) ??
+        identity.partnerEntrySlug,
+      eligibilityVerificationId: this.normalizeNullableText(
+        command.eligibilityVerificationId,
+      ),
+      pickup: this.normalizeAddressSnapshot(command.pickup),
+      dropoff: this.normalizeAddressSnapshot(command.dropoff),
+      passenger: {
+        name: command.passenger.name.trim(),
+        phone: command.passenger.phone.trim(),
+      },
+      reservationWindowStart: command.reservationWindowStart,
+      reservationWindowEnd: command.reservationWindowEnd,
+      bookedBy: command.bookedBy ?? null,
+      onsiteContact: command.onsiteContact ?? null,
+      costCenter: this.normalizeNullableText(command.costCenter),
+      vehiclePreference: this.normalizeNullableText(command.vehiclePreference),
+      benefitReference: this.normalizeNullableText(command.benefitReference),
+      direction: command.direction ?? null,
+      flightNo: this.normalizeNullableText(command.flightNo),
+      terminal: this.normalizeNullableText(command.terminal),
+      luggageCount: command.luggageCount ?? null,
+      notes: this.normalizeNullableText(command.notes),
+      minPhotoCount: command.minPhotoCount ?? 1,
+      signoffRequired: command.signoffRequired ?? false,
+      expenseProofRequired: command.expenseProofRequired ?? false,
+    };
+    const orderSnapshot = {
+      businessDispatchSubtype: order.businessDispatchSubtype,
+      partnerEntrySlug: order.partnerEntrySlug,
+      eligibilityVerificationId: order.eligibilityVerificationId,
+      pickup: this.normalizeAddressSnapshot(order.pickup),
+      dropoff: this.normalizeAddressSnapshot(order.dropoff),
+      passenger: {
+        name: order.passenger.name.trim(),
+        phone: order.passenger.phone.trim(),
+      },
+      reservationWindowStart: order.reservationWindowStart,
+      reservationWindowEnd: order.reservationWindowEnd,
+      bookedBy: order.bookedBy,
+      onsiteContact: order.onsiteContact,
+      costCenter: order.costCenter,
+      vehiclePreference: order.vehiclePreference,
+      benefitReference: order.benefitReference,
+      direction: order.direction,
+      flightNo: order.flightNo,
+      terminal: order.terminal,
+      luggageCount: order.luggageCount,
+      notes: order.notes,
+      minPhotoCount: order.proofRequirements.minPhotoCount,
+      signoffRequired: order.proofRequirements.signoffRequired,
+      expenseProofRequired: order.proofRequirements.expenseProofRequired,
+    };
+    if (JSON.stringify(commandSnapshot) === JSON.stringify(orderSnapshot)) {
+      return;
+    }
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "REFERRAL_BOOKING_IDEMPOTENCY_CONFLICT",
+      "The Idempotency-Key is already bound to a different referral booking request.",
+      {
+        bookingId: order.bookingId,
+        orderId: order.orderId,
+      },
+    );
+  }
+
+  private normalizeAddressSnapshot(address: AddressPayload) {
+    return {
+      addressId: this.normalizeNullableText(address.addressId),
+      addressName: this.normalizeNullableText(address.addressName),
+      address: address.address.trim(),
+      normalizedAddress: this.normalizeNullableText(address.normalizedAddress),
+      maskedAddress: this.normalizeNullableText(address.maskedAddress),
+      sensitive: Boolean(address.sensitive),
+      lat: address.lat ?? null,
+      lng: address.lng ?? null,
+    };
+  }
+
+  private toTenantBookingResult(
+    order: OwnedOrderRecord,
+    replayed = false,
+  ): TenantBookingResult {
+    if (!order.bookingId || !order.businessDispatchSubtype) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+        {
+          orderId: order.orderId,
+        },
+      );
+    }
+    return {
+      orderId: order.orderId,
+      bookingId: order.bookingId,
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: order.businessDispatchSubtype,
+      dispatchSemantics: "reservation",
+      status: order.status,
+      ...(replayed ? { replayed: true } : {}),
+    };
+  }
+
+  private isReferralPassengerOrder(
+    order: OwnedOrderRecord,
+    identity: ReferralPassengerIdentity,
+  ) {
+    return (
+      order.tenantId === identity.tenantId &&
+      order.partnerId === identity.partnerId &&
+      order.partnerProgramId === identity.partnerProgramId &&
+      order.partnerEntrySlug === identity.partnerEntrySlug &&
+      order.passenger.passengerId === identity.actorId
+    );
+  }
+
+  private requireReferralPassengerBookingOrder(
+    tenantId: string,
+    bookingId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const referralIdentity = this.requireReferralPassengerIdentity(
+      identity,
+      tenantId,
+    );
+    const order = this.requireBookingOrder(bookingId, tenantId);
+    if (!this.isReferralPassengerOrder(order, referralIdentity)) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot access another passenger booking.",
+        {
+          bookingId,
+          tenantId,
+        },
+      );
+    }
+    return order;
+  }
+
+  private async buildReferralPassengerBookingView(
+    order: OwnedOrderRecord,
+  ): Promise<ReferralPassengerBookingAuthorityView> {
+    const receipt =
+      (await this.ownedMobilityRepository?.findElectronicReceipt(order.orderId)) ??
+      null;
+    const rating = await this.findPassengerRatingForOrder(
+      order.orderId,
+      resolvePassengerSubjectRef(order.passenger),
+    );
+    const assignment = this.findPassengerAssignmentDisclosure(order.orderId);
+    const ratingAuthority = this.resolvePassengerRatingAuthority(order.orderId);
+    return {
+      booking: this.mapOrderToBooking(order),
+      order: this.cloneOrder(order),
+      assignment,
+      rating,
+      receiptReady: receipt !== null,
+      actions: {
+        canCancel: this.isOrderCurrentlyCancelable(order),
+        canRate:
+          order.status === "completed" &&
+          ratingAuthority !== null &&
+          rating === null,
+        canReadReceipt: receipt !== null,
+      },
+    };
+  }
+
+  private async buildReferralPassengerHistoryItem(
+    order: OwnedOrderRecord,
+  ): Promise<ReferralPassengerBookingHistoryItem> {
+    const [receipt, rating] = await Promise.all([
+      this.ownedMobilityRepository?.findElectronicReceipt(order.orderId) ?? null,
+      this.findPassengerRatingForOrder(
+        order.orderId,
+        resolvePassengerSubjectRef(order.passenger),
+      ),
+    ]);
+    return {
+      booking: this.mapOrderToBooking(order),
+      order: {
+        orderId: order.orderId,
+        orderNo: order.orderNo,
+        status: order.status,
+        cancelledAt: order.cancelledAt,
+        cancelReason: order.cancelReason,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      },
+      receiptReady: receipt !== null,
+      rated: rating !== null,
+    };
+  }
+
+  private resolveReferralReceiptSettlement(
+    order: OwnedOrderRecord,
+  ): ReferralPassengerReceiptView["settlement"] {
+    let channelKey: SettlementMatrixRecord["channelKey"] =
+      settlementChannelKeyForTrip({
+        orderSource: order.orderSource,
+        businessDispatchSubtype: order.businessDispatchSubtype,
+        partnerId: order.partnerId,
+      });
+    if (order.partnerEntrySlug) {
+      channelKey = PARTNER_REFERRAL_CHANNEL_KEY;
+      if (this.tenantPartnerService) {
+        try {
+          const entry = this.tenantPartnerService.getPartnerEntry(
+            order.partnerEntrySlug,
+          );
+          if (entry.partnerType !== "referral_channel") {
+            channelKey = settlementChannelKeyForTrip({
+              orderSource: order.orderSource,
+              businessDispatchSubtype: order.businessDispatchSubtype,
+              partnerId: order.partnerId,
+            });
+          }
+        } catch {
+          // Referral authority receipts should keep the referral settlement
+          // owner even when the current process lacks partner-entry cache state.
+        }
+      }
+    }
+
+    const matrix =
+      buildSettlementMatrix().find((record) => record.channelKey === channelKey) ??
+      null;
+    return {
+      channelKey,
+      receiptOwner: matrix?.receiptOwner ?? "drts platform",
+    };
+  }
+
+  private resolveReceiptFormats(receipt: MultiTaxiElectronicReceipt) {
+    const formats: Array<"html" | "pdf"> = [];
+    if (typeof receipt.record.htmlUrl === "string" && receipt.record.htmlUrl) {
+      formats.push("html");
+    }
+    if (typeof receipt.record.pdfUrl === "string" && receipt.record.pdfUrl) {
+      formats.push("pdf");
+    }
+    return formats;
+  }
+
+  private assertIdempotentReferralCancellation(
+    order: OwnedOrderRecord,
+    command: CancelOwnedOrderCommand,
+  ) {
+    if (order.cancelReason === this.normalizeNullableText(command.reason)) {
+      return;
+    }
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "REFERRAL_CANCEL_IDEMPOTENCY_CONFLICT",
+      "The booking was already cancelled with a different reason.",
+      {
+        orderId: order.orderId,
+        bookingId: order.bookingId,
+      },
+    );
+  }
+
+  private async findPassengerRatingForOrder(
+    orderId: string,
+    passengerSubjectRef: string,
+  ) {
+    const key = this.passengerRatingKey(orderId, passengerSubjectRef);
+    const rating =
+      this.passengerRatingsByPassengerOrder.get(key) ??
+      (await this.ownedMobilityRepository?.findPassengerRating(
+        orderId,
+        passengerSubjectRef,
+      )) ??
+      null;
+    if (rating) {
+      this.passengerRatingsByPassengerOrder.set(key, rating);
+    }
+    return rating;
+  }
+
+  private resolvePassengerRatingAuthority(orderId: string): {
+    assignmentId: string;
+    driverId: string;
+  } | null {
+    const disclosure = this.findPassengerAssignmentDisclosure(orderId);
+    if (disclosure) {
+      return {
+        assignmentId: disclosure.assignmentId,
+        driverId: disclosure.driver.driverId,
+      };
+    }
+
+    const completedTask = this.driverTasks.find(
+      (task) => task.orderId === orderId && task.status === "completed",
+    );
+    if (!completedTask) {
+      return null;
+    }
+
+    const assignment = this.dispatchAssignments.find(
+      (candidate) => candidate.assignmentId === completedTask.assignmentId,
+    );
+    if (!assignment) {
+      return null;
+    }
+
+    return {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driverId,
+    };
+  }
+
+  private passengerRatingKey(orderId: string, passengerSubjectRef: string) {
+    return `${orderId}\0${passengerSubjectRef}`;
+  }
+
+  private isOrderCurrentlyCancelable(order: OwnedOrderRecord) {
+    try {
+      this.assertOrderCancelable(order);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private requireRatingScore(value: number): 1 | 2 | 3 | 4 | 5 {
+    if (!Number.isInteger(value) || value < 1 || value > 5) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_RATING_SCORE_INVALID",
+        "score must be an integer from 1 through 5.",
+      );
+    }
+    return value as 1 | 2 | 3 | 4 | 5;
+  }
+
+  private normalizeRatingTags(value: string[] | undefined) {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value) || value.length > 10) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_RATING_TAGS_INVALID",
+        "tags must contain at most 10 values.",
+      );
+    }
+    return [
+      ...new Set(
+        value.map((item) => item?.trim()).filter((item) => item.length > 0),
+      ),
+    ].sort();
+  }
+
+  private assertIdempotentRating(
+    existing: PassengerTripRatingRecord,
+    score: number,
+    tags: string[],
+    comment: string | null,
+  ) {
+    if (
+      existing.score !== score ||
+      existing.comment !== comment ||
+      JSON.stringify([...existing.tags].sort()) !== JSON.stringify(tags)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_ALREADY_SUBMITTED",
+        "A different rating has already been submitted for this trip.",
+        { orderId: existing.orderId },
+      );
+    }
+  }
+
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
     if (
       !order.bookingId ||
@@ -9785,12 +10571,24 @@ export class OwnedMobilityService
     tenantId: string,
     identity?: BootstrapRequestIdentity | null,
   ): PartnerBookingContext | null {
-    const entrySlug = this.normalizeNullableText(command.partnerEntrySlug);
+    const entrySlug =
+      this.normalizeNullableText(command.partnerEntrySlug) ??
+      this.normalizeNullableText(identity?.partnerEntrySlug);
     const eligibilityVerificationId = this.normalizeNullableText(
       command.eligibilityVerificationId,
     );
 
     if (!entrySlug && !eligibilityVerificationId) {
+      if (identity?.realm === "partner") {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "PARTNER_ENTRY_REQUIRED",
+          "Partner-scoped booking requests must be bound to a partner entry.",
+          {
+            tenantId,
+          },
+        );
+      }
       return null;
     }
 
@@ -9966,6 +10764,21 @@ export class OwnedMobilityService
         HttpStatus.FORBIDDEN,
         "PARTNER_SCOPE_MISMATCH",
         "Authenticated partner identity cannot read another partner booking.",
+        {
+          orderId: order.orderId,
+          tenantId: order.tenantId,
+        },
+      );
+    }
+
+    if (
+      identity.actorType === "referral_passenger" &&
+      order.passenger.passengerId !== identity.actorId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot access another passenger booking.",
         {
           orderId: order.orderId,
           tenantId: order.tenantId,

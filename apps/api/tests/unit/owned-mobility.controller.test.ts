@@ -111,6 +111,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       identity,
       "req-e2e-partner",
       undefined,
+      undefined,
     );
     expect(
       tenantPartnerService.hydratePartnerEligibilityVerification,
