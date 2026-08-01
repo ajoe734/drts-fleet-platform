@@ -40,6 +40,7 @@ describe("IAPSubjectAdapter", () => {
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
+        autoProvision: true,
       },
     );
 
@@ -53,6 +54,36 @@ describe("IAPSubjectAdapter", () => {
       eventType: "iap_subject.resolved",
     });
     expect(recentEvents.length).toBeGreaterThan(0);
+  });
+
+  it("fails closed when unmapped subject attempts login without autoProvision", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const unmappedToken = signTestIapToken({
+      sub: "unmapped_sub_9999",
+      email: "unknown-user@platform.drts",
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": unmappedToken },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
   });
 
   it("ignores spoofed email and role headers without valid assertion token", async () => {

@@ -181,7 +181,7 @@ export class IAPSubjectAdapter {
         );
       }
     } else {
-      if (options.autoProvision === false) {
+      if (!options.autoProvision) {
         this.emitDeniedEvent("user_not_found", normalizedEmail);
         throw new ApiRequestError(
           403,
@@ -190,7 +190,17 @@ export class IAPSubjectAdapter {
         );
       }
 
-      // Provision new principal
+      // Provision new principal strictly from verified IAP groups, not email substring
+      const isPlatformAdminGroup = assertionGroups.includes("platform-admins@platform.drts");
+      const isOpsUserGroup = assertionGroups.includes("ops-users@platform.drts");
+
+      const defaultRole = isPlatformAdminGroup
+        ? "superadmin"
+        : isOpsUserGroup
+        ? "operator"
+        : "ops_user";
+      const defaultRealm = isPlatformAdminGroup ? "platform" : "ops";
+
       const newPrincipal: CanonicalIdentityPrincipalRecord = {
         principalId: `principal_iap_${randomUUID()}`,
         sourceRef: `iap_subject:${subject}`,
@@ -205,12 +215,11 @@ export class IAPSubjectAdapter {
         updatedAt: now,
       };
 
-      const defaultRole = normalizedEmail.includes("admin") ? "superadmin" : "operator";
       const newMembership: CanonicalIdentityMembershipRecord = {
         membershipId: `membership_iap_${randomUUID()}`,
         sourceRef: `iap_membership:${subject}`,
         principalId: newPrincipal.principalId,
-        realm: normalizedEmail.includes("admin") ? "platform" : "ops",
+        realm: defaultRealm,
         scopeRef: "platform:control_plane",
         tenantId: null,
         partnerId: null,
@@ -270,22 +279,18 @@ export class IAPSubjectAdapter {
     const missingGroups: string[] = [];
     let driftDetected = false;
 
-    if (assertionGroups.length > 0) {
-      for (const role of originalRoles) {
-        const requiredGroup = roleGroupMapping[role];
-        if (requiredGroup) {
-          if (assertionGroups.includes(requiredGroup)) {
-            effectiveRoles.push(role);
-          } else {
-            driftDetected = true;
-            missingGroups.push(requiredGroup);
-          }
-        } else {
+    for (const role of originalRoles) {
+      const requiredGroup = roleGroupMapping[role];
+      if (requiredGroup) {
+        if (assertionGroups.includes(requiredGroup)) {
           effectiveRoles.push(role);
+        } else {
+          driftDetected = true;
+          missingGroups.push(requiredGroup);
         }
+      } else {
+        effectiveRoles.push(role);
       }
-    } else {
-      effectiveRoles = [...originalRoles];
     }
 
     if (effectiveRoles.length === 0) {

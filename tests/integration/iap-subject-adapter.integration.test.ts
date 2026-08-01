@@ -38,6 +38,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       {
         expectedAudience: INTEGRATION_AUDIENCE,
         jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+        autoProvision: true,
       },
     );
 

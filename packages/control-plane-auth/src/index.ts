@@ -61,6 +61,7 @@ export interface ControlPlaneIdentity {
   authMode: "bootstrap_headers" | "jwt_bearer";
   actorType: ControlPlaneActorType;
   actorId: string;
+  subject?: string | null;
   realm: AuthRealm;
   tenantId: null;
   roleFamilies: AuthRoleFamily[];
@@ -126,28 +127,6 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "reports:read",
     "reports:write",
     "forwarder:read",
-    // S3-FIX-PLATFORM-ADMIN-SANDBOX-SCOPE-001: mirrors
-    // `SANDBOX_COMPLIANCE_SCOPES` from the API preset, in the same order.
-    //
-    // These are minted into `x-scopes` (or the JWT `scopes` claim) by
-    // `apps/platform-admin-web/app/control-plane-proxy`, and the API's
-    // `deriveScopes()` honours explicit scopes verbatim — so for a browser
-    // request this list REPLACES, rather than supplements,
-    // `AUTH_SCOPE_PRESETS.platform_admin`. Omitting them 403'd every
-    // platform-admin sandbox compliance / investigation / evidence /
-    // legal-hold / regulatory-report surface with `AUTH_SCOPE_DENIED`.
-    //
-    // The two dual-control approve rights are included deliberately; the full
-    // boundary decision is recorded in
-    // `docs/01-decisions/SD-DP-20260725-008-control-plane-proxy-scope-parity.md`.
-    // Separation of duties for those flows is NOT enforced by withholding the
-    // scope: `platform-admin-compliance.service.ts` compares the requesting
-    // and approving `actorId` and raises `SANDBOX_EXPORT_SELF_APPROVAL_-
-    // FORBIDDEN` / `SANDBOX_LEGAL_HOLD_SELF_APPROVAL_FORBIDDEN`. The proxy
-    // derives `actorId` from the IAP-authenticated email, so two humans still
-    // mint two actor ids and the maker-checker rule holds end to end; without
-    // IAP every caller collapses onto the same default actor id and the same
-    // guard blocks the approval, so the failure mode is closed either way.
     "sandbox.compliance.read",
     "sandbox.compliance.manage",
     "sandbox.investigation.read",
@@ -276,6 +255,7 @@ function buildIdentity(
   authenticatedUserEmail: string,
   requestId?: string | null,
   authMode: ControlPlaneIdentity["authMode"] = "jwt_bearer",
+  subject?: string | null,
 ): ControlPlaneIdentity {
   if (actorType === "platform_admin") {
     const platformIdentity = resolvePlatformAdminIdentity(
@@ -286,6 +266,7 @@ function buildIdentity(
       authMode,
       actorType,
       actorId: platformIdentity.actorId,
+      ...(subject ? { subject } : {}),
       realm: CONTROL_PLANE_REALMS[actorType],
       tenantId: null,
       roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
@@ -299,6 +280,7 @@ function buildIdentity(
     authMode,
     actorType,
     actorId: `ops-user-${toActorSlug(authenticatedUserEmail)}`,
+    ...(subject ? { subject } : {}),
     realm: CONTROL_PLANE_REALMS[actorType],
     tenantId: null,
     roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
@@ -343,18 +325,22 @@ export function verifyIapJwtAssertion(
         }`,
       );
     }
-  } else {
+  } else if (options.allowUnverifiedTokenInDev) {
     const decoded = jwt.decode(trimmed);
     if (!decoded || typeof decoded !== "object") {
       throw new Error("Failed to decode IAP JWT assertion.");
     }
     payload = decoded as IapJwtPayload;
+  } else {
+    throw new Error(
+      "IAP JWT assertion signature verification failed: verification key is required.",
+    );
   }
 
   const expectedIssuer = options.expectedIssuer ?? "https://cloud.google.com/iap";
-  if (payload.iss && options.expectedIssuer && payload.iss !== expectedIssuer) {
+  if (!payload.iss || payload.iss !== expectedIssuer) {
     throw new Error(
-      `IAP JWT assertion issuer mismatch: expected ${expectedIssuer}, got ${payload.iss}`,
+      `IAP JWT assertion issuer mismatch: expected ${expectedIssuer}, got ${payload.iss ?? "none"}`,
     );
   }
 
@@ -387,19 +373,31 @@ export function signTestIapJwtAssertion(
   secret: string,
   options?: jwt.SignOptions,
 ): string {
-  return jwt.sign(payload, secret, options);
+  const fullPayload = {
+    iss: "https://cloud.google.com/iap",
+    ...payload,
+  };
+  return jwt.sign(fullPayload, secret, options);
 }
 
 export function extractAuthenticatedUserEmail(
   headers: HeaderRecord,
-  options?: { strictIapMode?: boolean; expectedAudience?: string; jwtSecretOrPublicKey?: string },
+  options?: {
+    strictIapMode?: boolean;
+    expectedAudience?: string;
+    expectedIssuer?: string;
+    jwtSecretOrPublicKey?: string;
+    allowUnverifiedTokenInDev?: boolean;
+  },
 ): string | null {
   const assertion = extractIapJwtAssertion(headers);
   if (assertion) {
     try {
       const payload = verifyIapJwtAssertion(assertion, {
         expectedAudience: options?.expectedAudience,
+        expectedIssuer: options?.expectedIssuer,
         jwtSecretOrPublicKey: options?.jwtSecretOrPublicKey,
+        allowUnverifiedTokenInDev: options?.allowUnverifiedTokenInDev,
       });
       if (payload.email) {
         return normalizeAuthenticatedUserEmail(payload.email);
@@ -449,9 +447,54 @@ export function issueControlPlaneRequestAuth(options: {
   jwtAudience?: string | undefined;
   expiresIn?: JwtExpiresIn | undefined;
   requestId?: string | null;
+  strictIapMode?: boolean;
+  iapJwtSecretOrPublicKey?: string;
+  expectedIapAudience?: string;
+  expectedIapIssuer?: string;
+  allowUnverifiedTokenInDev?: boolean;
 }): ControlPlaneRequestAuth {
+  let verifiedSubject: string | null = null;
+  let verifiedEmail: string | null = null;
+
+  if (options.headers) {
+    const assertion = extractIapJwtAssertion(options.headers);
+    if (assertion) {
+      try {
+        const payload = verifyIapJwtAssertion(assertion, {
+          expectedAudience: options.expectedIapAudience,
+          expectedIssuer: options.expectedIapIssuer,
+          jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
+          allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
+        });
+        verifiedSubject = payload.sub;
+        if (payload.email) {
+          verifiedEmail = normalizeAuthenticatedUserEmail(payload.email);
+        }
+      } catch (err) {
+        if (options.strictIapMode) {
+          throw new Error(
+            `Control-plane IAP assertion verification failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+    } else if (options.strictIapMode) {
+      throw new Error(
+        "Control-plane strict IAP mode requires a valid x-goog-iap-jwt-assertion header.",
+      );
+    }
+  }
+
   const authenticatedUserEmail =
-    extractAuthenticatedUserEmail(options.headers) ||
+    verifiedEmail ||
+    extractAuthenticatedUserEmail(options.headers, {
+      strictIapMode: options.strictIapMode,
+      expectedAudience: options.expectedIapAudience,
+      expectedIssuer: options.expectedIapIssuer,
+      jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
+      allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
+    }) ||
     normalizeAuthenticatedUserEmail(options.defaultEmail ?? null) ||
     CONTROL_PLANE_DEFAULT_EMAILS[options.actorType];
 
@@ -465,6 +508,7 @@ export function issueControlPlaneRequestAuth(options: {
     authenticatedUserEmail,
     options.requestId,
     hasJwtSecret ? "jwt_bearer" : "bootstrap_headers",
+    verifiedSubject,
   );
 
   if (!hasJwtSecret) {
@@ -515,3 +559,4 @@ export function issueControlPlaneRequestAuth(options: {
     },
   };
 }
+
