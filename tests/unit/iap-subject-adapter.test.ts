@@ -1154,6 +1154,124 @@ describe("IAPSubjectAdapter", () => {
     expect(result.driftDetected).toBe(false);
     expect(result.driftDetails).toBeUndefined();
   });
+
+  it("resolves to platform membership for dual-group admin when requestedRealm is omitted, even when ops membership is created first", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+
+    // Upsert ops membership first
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_dual_no_req_001",
+        sourceRef: "iap_subject:dual_no_req_sub",
+        issuer: "google_iap",
+        subject: "dual_no_req_sub",
+        principalType: "human",
+        email: "dual-admin@platform.drts",
+        emailVerified: true,
+        displayName: "Dual Admin User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_ops_first_001",
+        sourceRef: "iap_membership:dual_no_req_ops",
+        principalId: "principal_dual_no_req_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_ops_first_001",
+          sourceRef: "rb_ops_first_001",
+          membershipId: "membership_ops_first_001",
+          roleCode: "ops_user",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    // Upsert platform membership second
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_dual_no_req_001",
+        sourceRef: "iap_subject:dual_no_req_sub",
+        issuer: "google_iap",
+        subject: "dual_no_req_sub",
+        principalType: "human",
+        email: "dual-admin@platform.drts",
+        emailVerified: true,
+        displayName: "Dual Admin User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_platform_second_001",
+        sourceRef: "iap_membership:dual_no_req_platform",
+        principalId: "principal_dual_no_req_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_platform_second_001",
+          sourceRef: "rb_platform_second_001",
+          membershipId: "membership_platform_second_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const token = signTestIapToken({
+      sub: "dual_no_req_sub",
+      email: "dual-admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts", "ops-users@platform.drts"],
+    });
+
+    const result = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+        // requestedRealm is omitted (as bootstrap-auth.guard & auth.controller do)
+      },
+    );
+
+    expect(result.membership.realm).toBe("platform");
+    expect(result.membership.membershipId).toBe("membership_platform_second_001");
+    expect(result.effectiveRoles).toEqual(["superadmin"]);
+    expect(result.driftDetected).toBe(false);
+  });
 });
 
 

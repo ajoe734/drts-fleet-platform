@@ -442,11 +442,30 @@ export class IAPSubjectAdapter {
       selectedAnalysis = targetAnalysis;
     } else {
       let candidateAnalyses = [...membershipAnalyses];
-      if (isPlatformGroup && !isOpsGroup) {
-        candidateAnalyses.sort((a, b) => (a.membership.realm === "platform" ? -1 : 1));
-      } else if (isOpsGroup && !isPlatformGroup) {
-        candidateAnalyses.sort((a, b) => (a.membership.realm === "ops" ? -1 : 1));
-      }
+      candidateAnalyses.sort((a, b) => {
+        const getRealmPriority = (realm: string): number => {
+          if (isPlatformGroup) {
+            // When user has platform-admins group (or both platform and ops groups),
+            // platform membership takes precedence over ops.
+            return realm === "platform" ? 0 : realm === "ops" ? 1 : 2;
+          }
+          if (isOpsGroup) {
+            // When user has ops-users group but not platform-admins group,
+            // ops membership takes precedence over platform.
+            return realm === "ops" ? 0 : realm === "platform" ? 1 : 2;
+          }
+          // Default order when no explicit platform/ops group signals matched:
+          // platform takes precedence over ops.
+          return realm === "platform" ? 0 : realm === "ops" ? 1 : 2;
+        };
+
+        const priorityDiff =
+          getRealmPriority(a.membership.realm) - getRealmPriority(b.membership.realm);
+        if (priorityDiff !== 0) {
+          return priorityDiff;
+        }
+        return a.membership.membershipId.localeCompare(b.membership.membershipId);
+      });
 
       selectedAnalysis = candidateAnalyses.find((a) => a.effectiveRoles.length > 0);
 
