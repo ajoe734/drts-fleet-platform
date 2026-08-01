@@ -28,7 +28,7 @@ export const DEFAULT_IAP_ROLE_GROUP_MAPPING: Record<string, string> = {
 };
 
 export const DEFAULT_ROLE_SCOPES: Record<string, readonly string[]> = {
-  superadmin: AUTH_SCOPE_PRESETS.system,
+  superadmin: AUTH_SCOPE_PRESETS.platform_admin,
   platform_admin: AUTH_SCOPE_PRESETS.platform_admin,
   operator: AUTH_SCOPE_PRESETS.ops_user,
   ops_user: AUTH_SCOPE_PRESETS.ops_user,
@@ -262,11 +262,17 @@ export class IAPSubjectAdapter {
       );
     }
 
-    // Lookup durable role bindings
-    const roleBindings = await this.identityRepository.findRoleBindingsByMembershipId(
-      activeMembership.membershipId,
+    // Lookup durable role bindings across active control-plane memberships
+    const allRoleBindings: CanonicalIdentityRoleBindingRecord[] = [];
+    for (const m of activeControlPlaneMemberships) {
+      const bindings = await this.identityRepository.findRoleBindingsByMembershipId(
+        m.membershipId,
+      );
+      allRoleBindings.push(...bindings);
+    }
+    const assignedRoles = Array.from(
+      new Set(allRoleBindings.map((r) => r.roleCode)),
     );
-    const assignedRoles = roleBindings.map((r) => r.roleCode);
     const originalRoles =
       assignedRoles.length > 0
         ? assignedRoles
@@ -293,8 +299,16 @@ export class IAPSubjectAdapter {
     }
 
     if (effectiveRoles.length === 0) {
-      effectiveRoles = ["ops_user"];
-      driftDetected = true;
+      this.emitDeniedEvent(
+        "unmapped_group_membership",
+        principal.email || normalizedEmail,
+        principal.principalId,
+      );
+      throw new ApiRequestError(
+        403,
+        "IAP_WORKFORCE_USER_INACTIVE",
+        "Workforce user has no active verified group memberships.",
+      );
     }
 
     // Align membership realm with verified groups and effective roles
@@ -310,11 +324,6 @@ export class IAPSubjectAdapter {
       );
       if (matchingMembership) {
         activeMembership = matchingMembership;
-      } else {
-        activeMembership = {
-          ...activeMembership,
-          realm: expectedRealm,
-        };
       }
     }
 

@@ -51,7 +51,7 @@ describe("IAPSubjectAdapter", () => {
     expect(result.effectiveScopes).toContain("tenant:webhooks:write");
     expect(result.effectiveScopes).toContain("tenant:sla:write");
     expect(result.effectiveScopes).toContain("reports:write");
-    expect(result.effectiveScopes).toContain("forwarder:write");
+    expect(result.effectiveScopes).toContain("forwarder:read");
     expect(result.effectiveScopes).toContain("multi_taxi_ratings:read");
     expect(result.driftDetected).toBe(false);
 
@@ -333,8 +333,8 @@ describe("IAPSubjectAdapter", () => {
         updatedAt: now,
       },
       {
-        membershipId: "membership_drift_001",
-        sourceRef: "iap_membership:drift_user_sub",
+        membershipId: "membership_drift_platform_001",
+        sourceRef: "iap_membership:drift_user_sub_platform",
         principalId: "principal_drift_001",
         realm: "platform",
         scopeRef: "platform:control_plane",
@@ -350,8 +350,52 @@ describe("IAPSubjectAdapter", () => {
         {
           roleBindingId: "rb_drift_001",
           sourceRef: "rb_drift_001",
-          membershipId: "membership_drift_001",
+          membershipId: "membership_drift_platform_001",
           roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_drift_001",
+        sourceRef: "iap_subject:drift_user_sub",
+        issuer: "google_iap",
+        subject: "drift_user_sub",
+        principalType: "human",
+        email: "drifted@platform.drts",
+        emailVerified: true,
+        displayName: "Drifted User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_drift_ops_001",
+        sourceRef: "iap_membership:drift_user_sub_ops",
+        principalId: "principal_drift_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_drift_002",
+          sourceRef: "rb_drift_002",
+          membershipId: "membership_drift_ops_001",
+          roleCode: "ops_user",
           grantedByPrincipalId: null,
           approvalId: null,
           validFrom: now,
@@ -381,6 +425,8 @@ describe("IAPSubjectAdapter", () => {
     expect(result.driftDetected).toBe(true);
     expect(result.effectiveRoles).not.toContain("superadmin");
     expect(result.effectiveRoles).toContain("ops_user");
+    expect(result.membership.membershipId).toBe("membership_drift_ops_001");
+    expect(result.membership.realm).toBe("ops");
     expect(result.driftDetails?.missingGroups).toContain("platform-admins@platform.drts");
 
     const driftEvents = await securityEventsService.listEvents(null, {
@@ -633,6 +679,50 @@ describe("IAPSubjectAdapter", () => {
       ],
     );
 
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_stale_platform_001",
+        sourceRef: "iap_subject:stale_platform_sub",
+        issuer: "google_iap",
+        subject: "stale_platform_sub",
+        principalType: "human",
+        email: "stale-platform@platform.drts",
+        emailVerified: true,
+        displayName: "Stale Platform User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_stale_ops_001",
+        sourceRef: "iap_membership:stale_ops_sub",
+        principalId: "principal_stale_platform_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_stale_ops_001",
+          sourceRef: "rb_stale_ops_001",
+          membershipId: "membership_stale_ops_001",
+          roleCode: "ops_user",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
     const token = signTestIapToken({
       sub: "stale_platform_sub",
       email: "stale-platform@platform.drts",
@@ -649,6 +739,7 @@ describe("IAPSubjectAdapter", () => {
 
     expect(res.driftDetected).toBe(true);
     expect(res.effectiveRoles).toEqual(["ops_user"]);
+    expect(res.membership.membershipId).toBe("membership_stale_ops_001");
     expect(res.membership.realm).toBe("ops");
   });
 });

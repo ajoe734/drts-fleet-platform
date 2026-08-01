@@ -208,8 +208,8 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
         updatedAt: now,
       },
       {
-        membershipId: "membership_group_drift_integ",
-        sourceRef: "iap_membership:group_drift_subject_001",
+        membershipId: "membership_group_drift_platform_integ",
+        sourceRef: "iap_membership:group_drift_subject_001_platform",
         principalId: "principal_group_drift_integ",
         realm: "platform",
         scopeRef: "platform:control_plane",
@@ -225,8 +225,52 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
         {
           roleBindingId: "rb_superadmin_integ",
           sourceRef: "rb_superadmin_integ",
-          membershipId: "membership_group_drift_integ",
+          membershipId: "membership_group_drift_platform_integ",
           roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_group_drift_integ",
+        sourceRef: "iap_subject:group_drift_subject_001",
+        issuer: "google_iap",
+        subject: "group_drift_subject_001",
+        principalType: "human",
+        email: "demoted-admin@platform.drts",
+        emailVerified: true,
+        displayName: "Demoted Admin",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_group_drift_ops_integ",
+        sourceRef: "iap_membership:group_drift_subject_001_ops",
+        principalId: "principal_group_drift_integ",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_ops_user_integ",
+          sourceRef: "rb_ops_user_integ",
+          membershipId: "membership_group_drift_ops_integ",
+          roleCode: "ops_user",
           grantedByPrincipalId: null,
           approvalId: null,
           validFrom: now,
@@ -240,7 +284,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const token = signAssertion({
       sub: "group_drift_subject_001",
       email: "demoted-admin@platform.drts",
-      gcp_ia_groups: ["standard-employees@platform.drts"],
+      gcp_ia_groups: ["ops-users@platform.drts"],
     });
 
     const resolution = await adapter.resolveSubject(
@@ -254,6 +298,8 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     expect(resolution.driftDetected).toBe(true);
     expect(resolution.effectiveRoles).not.toContain("superadmin");
     expect(resolution.effectiveRoles).toEqual(["ops_user"]);
+    expect(resolution.membership.realm).toBe("ops");
+    expect(resolution.membership.membershipId).toBe("membership_group_drift_ops_integ");
 
     const driftEvents = await securityEventsService.listEvents(null, {
       eventType: "iap_group_drift.detected",
@@ -482,6 +528,47 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
           sourceRef: "rb_drift_guard_001",
           membershipId: "membership_drift_guard_001",
           roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+        },
+      ],
+    );
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_drift_guard_001",
+        sourceRef: "iap_subject:drift_guard_sub",
+        issuer: "google_iap",
+        subject: "drift_guard_sub",
+        principalType: "human",
+        email: "drift-guard@platform.drts",
+        emailVerified: true,
+        displayName: "Drift Guard User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_drift_guard_ops_001",
+        sourceRef: "iap_membership:drift_guard_sub_ops",
+        principalId: "principal_drift_guard_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_drift_guard_ops_001",
+          sourceRef: "rb_drift_guard_ops_001",
+          membershipId: "membership_drift_guard_ops_001",
+          roleCode: "ops_user",
           grantedByPrincipalId: null,
           approvalId: null,
           validFrom: now,
