@@ -2315,6 +2315,66 @@ export function isCanonicalAccountActive(status: CanonicalAccountStatus) {
   return status === "active";
 }
 
+// --- Canonical Sessions & Refresh Families ---
+export const CANONICAL_SESSION_STATUSES = ["active", "revoked", "expired"] as const;
+export type CanonicalSessionStatus = (typeof CANONICAL_SESSION_STATUSES)[number];
+
+export type CanonicalSessionRiskSummary = {
+  riskLevel: "low" | "medium" | "high";
+  signals: string[];
+};
+
+export interface CanonicalSessionRecord {
+  sessionId: string;
+  familyId: string;
+  realm: string;
+  actorType: string;
+  actorId: string;
+  tenantId: string | null;
+  partnerId: string | null;
+  driverId: string | null;
+  deviceId: string | null;
+  deviceLabel: string | null;
+  status: CanonicalSessionStatus;
+  revokeReason: string | null;
+  riskSummary: CanonicalSessionRiskSummary | null;
+  startedAt: string;
+  lastRefreshedAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalRefreshFamilyRecord {
+  familyId: string;
+  sessionId: string;
+  familyType: "driver_device";
+  status: CanonicalSessionStatus;
+  currentTokenId: string | null;
+  previousTokenId: string | null;
+  absoluteExpiresAt: string;
+  lastRotatedAt: string;
+  revokedAt: string | null;
+  revokeReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalRefreshTokenRecord {
+  refreshTokenId: string;
+  familyId: string;
+  sessionId: string;
+  tokenHash: string;
+  deviceId: string | null;
+  issuedAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // --- Tenant User & Roles ---
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 

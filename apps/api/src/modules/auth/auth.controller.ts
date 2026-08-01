@@ -88,11 +88,11 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("driver/device/register")
-  issueDriverDeviceSession(
+  async issueDriverDeviceSession(
     @Body() command: RegisterDriverDeviceCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const session = this.driverDeviceSessionService.register(
+    const session = await this.driverDeviceSessionService.register(
       command,
       requestId,
     );
@@ -105,11 +105,11 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("driver/device/refresh")
-  refreshDriverDeviceSession(
+  async refreshDriverDeviceSession(
     @Body() command: RefreshDriverDeviceSessionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const session = this.driverDeviceSessionService.refresh(command);
+    const session = await this.driverDeviceSessionService.refresh(command);
     return toApiSuccessEnvelope<DriverDeviceProvisioningSession>(
       session,
       requestId,
@@ -117,12 +117,12 @@ export class AuthController {
   }
 
   @Post("driver/device/revoke")
-  revokeDriverDeviceSession(
+  async revokeDriverDeviceSession(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: RevokeDriverDeviceBindingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = this.driverDeviceSessionService.revoke(
+    const result = await this.driverDeviceSessionService.revoke(
       command,
       identity,
       requestId,

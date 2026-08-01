@@ -115,7 +115,7 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<AuthenticatedRequestLike>();
@@ -172,7 +172,7 @@ export class BootstrapAuthGuard implements CanActivate {
       if (token) {
         const payload = this.jwtAuthService.verify(token);
         if (payload) {
-          this.assertDriverBindingActive(payload, requestUrl);
+          await this.assertDriverBindingActive(payload, requestUrl);
           const identity = this.jwtAuthService.toRequestIdentity(payload);
           request.identity = identity;
           if (policy) {
@@ -397,7 +397,7 @@ export class BootstrapAuthGuard implements CanActivate {
     );
   }
 
-  private assertDriverBindingActive(
+  private async assertDriverBindingActive(
     payload: JwtIdentityPayload,
     route: string,
   ) {
@@ -408,7 +408,7 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
-    this.driverDeviceSessionService.assertSessionAccessAllowed(
+    await this.driverDeviceSessionService.assertSessionAccessAllowed(
       payload.driverBindingId,
       payload.driverDeviceId,
       payload.sub,
