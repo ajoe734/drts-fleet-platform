@@ -34,7 +34,7 @@ async function deleteSessionTestData(database: DatabaseService, sessionIds: stri
   }
 }
 
-describe("Identity Session and Refresh Family Postgres Integration", () => {
+describe.runIf(Boolean(DATABASE_URL))("Identity Session and Refresh Family Postgres Integration", () => {
   const databases: DatabaseService[] = [];
   const createdSessionIds = new Set<string>();
   const createdPrincipalIds = new Set<string>();
