@@ -50,8 +50,8 @@ Below is the complete classification inventory of all API route groups across al
 | `/partner/eligibility/verify` | `POST` | `partner` | `partner:eligibility:write` | Partner eligibility verification |
 | `/partner/eligibility/*` | `GET` | `partner` | `partner:eligibility:read` | Partner eligibility lookup |
 | `/partner/bookings`, `/partner/orders/*` | `GET, POST` | `partner` | `partner:book` | Partner-scoped booking & order access |
-| `/partner/referral/*` | Any | `partner` | `billing:read` | Referral partner self-service portal |
-| `/fleet-partner/*` | Any | `partner` | `billing:read` | Fleet partner portal self-service |
+| `/partner/referral/*` | Any | `partner` | `billing:read / write` | Referral partner self-service portal |
+| `/fleet-partner/*` | Any | `partner` | `billing:read / write` | Fleet partner portal self-service |
 | `/admin/fleet-partners` | Any | `platform, ops` | `foundation:read / write` | Fleet partner administration |
 | `/admin/fleet-partners/*` | Any | `platform, ops` | `foundation:read / write` (or `billing:*`) | Fleet partner billing & details |
 | `/admin/drivers/*/fleet-affiliations` | Any | `platform, ops` | `foundation:read / write` | Driver fleet affiliation management |
@@ -66,7 +66,7 @@ Below is the complete classification inventory of all API route groups across al
 | `/driver/location-heartbeats/batch`, `/driver/tracking-status` | Any | `platform, ops, driver` | None (Auth Required) | Driver location heartbeat & telemetry |
 | `/ops/drivers/*/tracking-status` | `GET` | `platform, ops` | None (Auth Required) | Ops driver tracking status view |
 | `/driver/tasks/*`, `/driver/task-events` | Any | `ops, driver` | `driver:read / write` | Driver task access & lifecycle |
-| `/driver/task-views/*`, `/driver/forwarded-orders/*` | Any | `ops, driver` | `driver:read / write` | Driver task views & forwarded orders |
+| `/driver/task-views/*`, `/driver/forwarded-orders/*` | Any | `ops, driver` | `forwarder:read / write` | Driver task views & forwarded orders |
 | `/driver/sos-events`, `/driver/sos-events/*` | Any | `driver` | `incident:write` | Driver SOS event & attachment submission |
 | `/ops/driver-sos/*` | Any | `ops` | `incident:read / write` | Ops driver SOS alert latency & render |
 | `/driver-settings/*` | Any | `platform, ops, driver` | `driver:read / write` | Driver preferences & settings |

@@ -240,6 +240,25 @@ describe("IAM-P0-003 Route Inventory & Global Default-Deny", () => {
     expect(deletePolicy?.requiredScopes).toEqual(["billing:write"]);
   });
 
+  it("requires billing:write scope for partner/referral POST/PUT/DELETE mutations while allowing billing:read for GET", () => {
+    const getPolicy = resolveRouteAuthPolicy("GET", "partner/referral/payouts");
+    expect(getPolicy?.requiredScopes).toEqual(["billing:read"]);
+
+    const postPolicy = resolveRouteAuthPolicy("POST", "partner/referral/payouts");
+    expect(postPolicy?.requiredScopes).toEqual(["billing:write"]);
+
+    const putPolicy = resolveRouteAuthPolicy("PUT", "partner/referral/bank-account");
+    expect(putPolicy?.requiredScopes).toEqual(["billing:write"]);
+  });
+
+  it("requires forwarder:read / forwarder:write scopes for driver/task-views and driver/forwarded-orders", () => {
+    const getViewPolicy = resolveRouteAuthPolicy("GET", "driver/task-views/overview");
+    expect(getViewPolicy?.requiredScopes).toEqual(["forwarder:read"]);
+
+    const postOrderPolicy = resolveRouteAuthPolicy("POST", "driver/forwarded-orders/accept");
+    expect(postOrderPolicy?.requiredScopes).toEqual(["forwarder:write"]);
+  });
+
   it("discovers multi-line route decorators like deleteSupplyDocument @Delete", () => {
     const deleteDocRoute = discoveredRoutes.find(
       (r) =>
@@ -248,5 +267,14 @@ describe("IAM-P0-003 Route Inventory & Global Default-Deny", () => {
     );
     expect(deleteDocRoute, "deleteSupplyDocument route must be discovered").toBeDefined();
     expect(deleteDocRoute?.resolvedPolicy?.requiredScopes).toEqual(["billing:write"]);
+  });
+
+  it("ensures docs/02-architecture/auth-route-inventory.md table stays aligned with auth.policy.ts", () => {
+    const docPath = path.resolve(__dirname, "../../../../docs/02-architecture/auth-route-inventory.md");
+    const docContent = fs.readFileSync(docPath, "utf-8");
+
+    expect(docContent).toContain("| `/partner/referral/*` | Any | `partner` | `billing:read / write` | Referral partner self-service portal |");
+    expect(docContent).toContain("| `/fleet-partner/*` | Any | `partner` | `billing:read / write` | Fleet partner portal self-service |");
+    expect(docContent).toContain("| `/driver/task-views/*`, `/driver/forwarded-orders/*` | Any | `ops, driver` | `forwarder:read / write` | Driver task views & forwarded orders |");
   });
 });
