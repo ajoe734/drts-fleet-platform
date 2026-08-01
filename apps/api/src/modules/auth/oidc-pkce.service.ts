@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, createPublicKey, type KeyObject, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createPublicKey, type KeyObject, randomBytes } from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 import type {
@@ -11,7 +11,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
-import type { AuthActorType, AuthRealm, BootstrapRequestIdentity } from "../../common/auth/auth.types";
+import type { AuthActorType, AuthRealm } from "../../common/auth/auth.types";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -362,9 +362,6 @@ export class OidcPkceService {
     }
 
     // Build Tenant Portal Profile & Identity Context
-    const roleCatalog = this.tenantPartnerService.listTenantRoles();
-    const roleRecord = roleCatalog.find((r) => r.roleCode === existingUser.roleCode);
-
     const profile: TenantPortalProfile = {
       id: existingUser.userId,
       tenantId: targetTenantId,
@@ -642,8 +639,6 @@ export class OidcPkceService {
 
     // Extract & enforce MFA claims
     const amr = claims.amr ?? [];
-    const acr = claims.acr ?? "urn:mace:incommon:iap:silver";
-    const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
     const mfaVerified = amr.some((m) =>
       ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(m.toLowerCase()),
     );
@@ -1207,7 +1202,7 @@ export class OidcPkceService {
         header.alg.startsWith("ES") ||
         header.alg.startsWith("PS")
       ) {
-        secretOrKey = await this.resolveJwksPublicKey(header.kid, header.alg);
+        secretOrKey = await this.resolveJwksPublicKey(header.kid);
       }
 
       if (!secretOrKey) {
@@ -1260,7 +1255,6 @@ export class OidcPkceService {
 
   private async resolveJwksPublicKey(
     kid?: string,
-    alg?: string,
   ): Promise<KeyObject | null> {
     try {
       if (process.env.OIDC_JWKS_JSON) {
