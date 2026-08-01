@@ -166,3 +166,12 @@ AI_NAME=Codex2 scripts/ai-status.sh reopen REF-DOC-001-SIDECAR-ACCEPTANCE \
   truth, parent task snapshot, `git show --stat 535b0fbd`, current worktree path
   existence checks, `apps/referral-embed-web/README.md`, and
   `docs/03-runbooks/smarttransport-tw-custom-domains.md` §6.
+
+## 8. Closeout Evidence
+
+- Sidecar reviewer approval is recorded in machine truth as
+  `review_approved` for `REF-DOC-001-SIDECAR-ACCEPTANCE`.
+- Owner closeout for this branch should publish a task-scoped commit and push on
+  `codex/ref-doc-001-sidecar-acceptance`, then mark the sidecar `done` with
+  `INTEGRATION_STATUS=not_applicable` because this packet is support-only and has no
+  runtime or deploy target.
