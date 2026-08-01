@@ -582,6 +582,76 @@ describe("IAPSubjectAdapter", () => {
     expect(res.membership.membershipId).toBe("membership_platform_001");
     expect(res.effectiveRoles).toContain("superadmin");
   });
+
+  it("switches membership realm from platform to ops when assertion loses platform-admins group", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_stale_platform_001",
+        sourceRef: "iap_subject:stale_platform_sub",
+        issuer: "google_iap",
+        subject: "stale_platform_sub",
+        principalType: "human",
+        email: "stale-platform@platform.drts",
+        emailVerified: true,
+        displayName: "Stale Platform User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_stale_platform_001",
+        sourceRef: "iap_membership:stale_platform_sub",
+        principalId: "principal_stale_platform_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_stale_platform_001",
+          sourceRef: "rb_stale_platform_001",
+          membershipId: "membership_stale_platform_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const token = signTestIapToken({
+      sub: "stale_platform_sub",
+      email: "stale-platform@platform.drts",
+      gcp_ia_groups: ["ops-users@platform.drts"],
+    });
+
+    const res = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+      },
+    );
+
+    expect(res.driftDetected).toBe(true);
+    expect(res.effectiveRoles).toEqual(["ops_user"]);
+    expect(res.membership.realm).toBe("ops");
+  });
 });
+
 
 

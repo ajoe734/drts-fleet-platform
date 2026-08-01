@@ -438,5 +438,114 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.JWT_SECRET;
     delete process.env.STRICT_IAP_MODE;
   });
+
+  it("verifies BootstrapAuthGuard denies platform-only route access when group drift downgrades identity to ops realm", async () => {
+    process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+    process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_drift_guard_001",
+        sourceRef: "iap_subject:drift_guard_sub",
+        issuer: "google_iap",
+        subject: "drift_guard_sub",
+        principalType: "human",
+        email: "drift-guard@platform.drts",
+        emailVerified: true,
+        displayName: "Drift Guard User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_drift_guard_001",
+        sourceRef: "iap_membership:drift_guard_sub",
+        principalId: "principal_drift_guard_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_drift_guard_001",
+          sourceRef: "rb_drift_guard_001",
+          membershipId: "membership_drift_guard_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const reflector = {
+      getAllAndOverride: (key: string) => {
+        if (key === "auth:allowed_realms") return ["platform"];
+        if (key === "auth:required_scopes") return ["billing:write"];
+        return undefined;
+      },
+    } as any;
+
+    const guard = new BootstrapAuthGuard(
+      reflector,
+      new JwtAuthService(),
+      undefined,
+      undefined,
+      adapter,
+    );
+
+    const token = signAssertion({
+      sub: "drift_guard_sub",
+      email: "drift-guard@platform.drts",
+      gcp_ia_groups: ["ops-users@platform.drts"],
+    });
+
+    const mockRequest: any = {
+      headers: {
+        "x-goog-iap-jwt-assertion": token,
+      },
+      method: "POST",
+      url: "/api/platform-admin/billing-settlement/recovery",
+    };
+
+    const context: any = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => () => {},
+      getClass: () => class {},
+    };
+
+    let error: ApiRequestError | null = null;
+    try {
+      await guard.canActivate(context);
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        error = err;
+      }
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.status).toBe(403);
+    expect(error?.code).toBe("AUTH_REALM_DENIED");
+    expect(mockRequest.identity.realm).toBe("ops");
+    expect(mockRequest.identity.actorType).toBe("ops_user");
+
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
+  });
 });
+
 

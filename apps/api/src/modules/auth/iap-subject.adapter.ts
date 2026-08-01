@@ -244,7 +244,7 @@ export class IAPSubjectAdapter {
     const isPlatformGroup = assertionGroups.includes("platform-admins@platform.drts");
     const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
 
-    const activeMembership =
+    let activeMembership =
       (isPlatformGroup
         ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
         : null) ||
@@ -267,7 +267,10 @@ export class IAPSubjectAdapter {
       activeMembership.membershipId,
     );
     const assignedRoles = roleBindings.map((r) => r.roleCode);
-    const originalRoles = assignedRoles.length > 0 ? assignedRoles : ["ops_user"];
+    const originalRoles =
+      assignedRoles.length > 0
+        ? assignedRoles
+        : [isPlatformGroup ? "superadmin" : "ops_user"];
 
     // Reconcile Group Drift & Least Privilege
     const roleGroupMapping = options.roleGroupMapping ?? DEFAULT_IAP_ROLE_GROUP_MAPPING;
@@ -292,6 +295,27 @@ export class IAPSubjectAdapter {
     if (effectiveRoles.length === 0) {
       effectiveRoles = ["ops_user"];
       driftDetected = true;
+    }
+
+    // Align membership realm with verified groups and effective roles
+    const hasPlatformRole = effectiveRoles.some(
+      (r) => r === "superadmin" || r === "platform_admin",
+    );
+    const expectedRealm: "platform" | "ops" =
+      isPlatformGroup && hasPlatformRole ? "platform" : "ops";
+
+    if (activeMembership.realm !== expectedRealm) {
+      const matchingMembership = activeControlPlaneMemberships.find(
+        (m) => m.realm === expectedRealm,
+      );
+      if (matchingMembership) {
+        activeMembership = matchingMembership;
+      } else {
+        activeMembership = {
+          ...activeMembership,
+          realm: expectedRealm,
+        };
+      }
     }
 
     let driftDetails: ResolvedIapWorkforceSubject["driftDetails"];
