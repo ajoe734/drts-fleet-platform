@@ -36,7 +36,7 @@ describe("E2E-IAM-IDP-001: Managed OIDC PKCE BFF End-to-End Integration Suite", 
 
     expect(session.accessToken).toBeDefined();
     expect(session.profile.email).toBe("admin@acme.example");
-    expect(session.profile.status).toBe("active");
+    expect(session.profile.roleCode).toBeDefined();
   });
 
   it("enforces negative matrix: rejects reused state token and unmapped subjects", () => {

@@ -21,9 +21,10 @@ export async function GET(
   if (action === "login") {
     const returnUrl = request.nextUrl.searchParams.get("redirect_uri") || "/";
     const tenantId = request.nextUrl.searchParams.get("tenant_id") || "";
+    const callbackUrl = `${request.nextUrl.origin}/api/auth/callback`;
 
     const backendUrl = new URL(`${API_URL}/api/auth/tenant/login`);
-    if (returnUrl) backendUrl.searchParams.set("redirect_uri", returnUrl);
+    backendUrl.searchParams.set("redirect_uri", callbackUrl);
     if (tenantId) backendUrl.searchParams.set("tenant_id", tenantId);
 
     const res = await fetch(backendUrl.toString());
@@ -36,9 +37,11 @@ export async function GET(
       );
     }
 
-    const { authorizationUrl, stateToken } = data.data;
+    const { authorizationUrl, stateToken, codeVerifier } = data.data;
+    const cookiePayload = JSON.stringify({ stateToken, codeVerifier, returnUrl });
+
     const redirectRes = NextResponse.redirect(authorizationUrl);
-    redirectRes.cookies.set("drts_oidc_state", stateToken, {
+    redirectRes.cookies.set("drts_oidc_state", cookiePayload, {
       httpOnly: true,
       secure: isSecureEnvironment(request),
       sameSite: "lax",
@@ -51,18 +54,37 @@ export async function GET(
   if (action === "callback") {
     const code = request.nextUrl.searchParams.get("code") || "";
     const state = request.nextUrl.searchParams.get("state") || "";
-    const codeVerifier = request.nextUrl.searchParams.get("code_verifier") || "";
-    const stateToken = request.cookies.get("drts_oidc_state")?.value || "";
+    const stateCookie = request.cookies.get("drts_oidc_state")?.value || "";
+
+    let stateToken = "";
+    let pkceVerifier = "";
+    let returnUrl = "/";
+
+    if (stateCookie) {
+      try {
+        const parsed = JSON.parse(stateCookie);
+        stateToken = parsed.stateToken || "";
+        pkceVerifier = parsed.codeVerifier || "";
+        returnUrl = parsed.returnUrl || "/";
+      } catch {
+        stateToken = stateCookie;
+      }
+    }
+
+    const callbackUrl = `${request.nextUrl.origin}/api/auth/callback`;
 
     const exchangeRes = await fetch(`${API_URL}/api/auth/tenant/callback-session`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-oidc-state-token": stateToken,
+      },
       body: JSON.stringify({
         provider: "oidc",
-        callbackUrl: request.nextUrl.origin + "/api/auth/callback",
+        callbackUrl,
         code,
         state,
-        pkceVerifier: codeVerifier || "default_pkce_verifier_string_32_bytes_long_min",
+        pkceVerifier,
       }),
     });
 
@@ -79,7 +101,8 @@ export async function GET(
 
     const session = data.data;
     const csrfToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    const response = NextResponse.redirect(new URL("/", request.nextUrl.origin));
+    const targetRedirect = returnUrl.startsWith("/") ? returnUrl : "/";
+    const response = NextResponse.redirect(new URL(targetRedirect, request.nextUrl.origin));
 
     response.cookies.set(SESSION_COOKIE_NAME, session.accessToken, {
       httpOnly: true,

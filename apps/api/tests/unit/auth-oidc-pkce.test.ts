@@ -79,9 +79,9 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
 
       expect(session.accessToken).toBeDefined();
       expect(session.identity.realm).toBe("tenant");
-      expect(session.identity.actorType).toBe("human");
+      expect(session.identity.actorType).toBe("tenant_admin");
       expect(session.profile.email).toBe("admin@acme.example");
-      expect(session.profile.status).toBe("active");
+      expect(session.profile.roleCode).toBeDefined();
     });
   });
 
@@ -177,8 +177,41 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       ).toThrow(ApiRequestError);
     });
 
-    it("fails when token issuer does not match configured OIDC issuer", () => {
+    it("fails when stateToken is missing", () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
+      expect(() =>
+        oidcService.exchangeTenantCallbackSession({
+          provider: "oidc",
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+          code: "valid_code",
+          state: loginParams.state,
+          pkceVerifier: loginParams.codeVerifier,
+        }),
+      ).toThrow(ApiRequestError);
+    });
+
+    it("fails when callbackUrl does not match redirectUri stored in state record", () => {
+      const loginParams = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
+      });
+      expect(() =>
+        oidcService.exchangeTenantCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/other-callback",
+            code: "valid_code",
+            state: loginParams.state,
+            pkceVerifier: loginParams.codeVerifier,
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).toThrow(ApiRequestError);
+    });
+
+    it("fails when token issuer does not match configured OIDC issuer", () => {
+      const loginParams = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
+      });
       expect(() =>
         oidcService.exchangeTenantCallbackSession(
           {
@@ -194,7 +227,9 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
     });
 
     it("fails when token audience does not match configured client ID", () => {
-      const loginParams = oidcService.generateLoginParameters("tenant");
+      const loginParams = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
+      });
       expect(() =>
         oidcService.exchangeTenantCallbackSession(
           {

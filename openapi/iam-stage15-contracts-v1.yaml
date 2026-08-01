@@ -419,6 +419,10 @@ components:
           type: string
         pkceVerifier:
           type: string
+        tenantId:
+          type: [string, "null"]
+        partnerId:
+          type: [string, "null"]
     IamApprovalDecisionCommand:
       type: object
       required:

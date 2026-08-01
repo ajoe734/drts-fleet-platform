@@ -33,6 +33,8 @@ export interface IamCallbackSessionExchangeCommand {
   code: string;
   state: string;
   pkceVerifier: string;
+  tenantId?: string | null;
+  partnerId?: string | null;
 }
 
 export interface IamSessionInventoryQuery {

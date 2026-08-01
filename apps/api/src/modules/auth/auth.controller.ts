@@ -91,9 +91,9 @@ export class AuthController {
       );
     }
     const result = this.oidcPkceService.generateLoginParameters(realm, {
-      redirectUri,
-      tenantId,
-      partnerId,
+      redirectUri: redirectUri ?? null,
+      tenantId: tenantId ?? null,
+      partnerId: partnerId ?? null,
     });
     return toApiSuccessEnvelope(result, requestId);
   }
@@ -129,8 +129,13 @@ export class AuthController {
       pkceVerifier: pkceVerifier ?? "",
     };
 
-    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
-    const meta = { sourceIp, userAgent, requestId, stateToken };
+    const meta = this.buildMeta(
+      forwardedFor,
+      realIp,
+      userAgent,
+      requestId,
+      stateToken,
+    );
 
     try {
       if (realm === "tenant") {
@@ -160,12 +165,20 @@ export class AuthController {
     @Headers("x-real-ip") realIp?: string,
     @Headers("user-agent") userAgent?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("x-oidc-state-token") stateTokenHeader?: string,
   ) {
-    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    const stateToken = stateTokenHeader || (command as any).stateToken;
+    const meta = this.buildMeta(
+      forwardedFor,
+      realIp,
+      userAgent,
+      requestId,
+      stateToken,
+    );
     try {
       const session = this.oidcPkceService.exchangeTenantCallbackSession(
         command,
-        { sourceIp, userAgent, requestId },
+        meta,
       );
       return toApiSuccessEnvelope(session, requestId);
     } catch (error) {
@@ -182,17 +195,46 @@ export class AuthController {
     @Headers("x-real-ip") realIp?: string,
     @Headers("user-agent") userAgent?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("x-oidc-state-token") stateTokenHeader?: string,
   ) {
-    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    const stateToken = stateTokenHeader || (command as any).stateToken;
+    const meta = this.buildMeta(
+      forwardedFor,
+      realIp,
+      userAgent,
+      requestId,
+      stateToken,
+    );
     try {
       const session = this.oidcPkceService.exchangePartnerCallbackSession(
         command,
-        { sourceIp, userAgent, requestId },
+        meta,
       );
       return toApiSuccessEnvelope(session, requestId);
     } catch (error) {
       throw toPublicPartnerAuthError(error);
     }
+  }
+
+  private buildMeta(
+    forwardedFor?: string,
+    realIp?: string,
+    userAgent?: string,
+    requestId?: string,
+    stateToken?: string,
+  ) {
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    const meta: {
+      sourceIp?: string;
+      userAgent?: string;
+      requestId?: string;
+      stateToken?: string;
+    } = {};
+    if (sourceIp) meta.sourceIp = sourceIp;
+    if (userAgent) meta.userAgent = userAgent;
+    if (requestId) meta.requestId = requestId;
+    if (stateToken) meta.stateToken = stateToken;
+    return meta;
   }
 
   @Get("session")

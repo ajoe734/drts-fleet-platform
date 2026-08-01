@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   IamCallbackSessionExchangeCommand,
+  IdentityContext,
   PartnerBootstrapSession,
   TenantBootstrapSession,
   TenantPortalProfile,
@@ -18,6 +19,7 @@ import { detectAuthEnvironment } from "../../config/auth-startup-config";
 export interface OidcStateRecord {
   state: string;
   nonce: string;
+  codeVerifier: string;
   codeChallenge: string;
   codeChallengeMethod: "S256";
   realm: AuthRealm;
@@ -218,6 +220,7 @@ export class OidcPkceService {
     const stateRecord: OidcStateRecord = {
       state,
       nonce,
+      codeVerifier,
       codeChallenge,
       codeChallengeMethod: "S256",
       realm,
@@ -363,28 +366,26 @@ export class OidcPkceService {
     const profile: TenantPortalProfile = {
       id: existingUser.userId,
       tenantId: targetTenantId,
-      email: normalizedEmail,
       fullName: existingUser.displayName,
+      email: normalizedEmail,
       roleCode: existingUser.roleCode,
-      roleName: roleRecord?.roleName ?? existingUser.roleCode,
-      status: existingUser.status,
-      invitedAt: existingUser.invitedAt,
-      updatedAt: existingUser.updatedAt,
     };
 
     const scopes = getTenantRoleScopes(existingUser.roleCode);
-    const nowIso = new Date().toISOString();
-
-    const identity: BootstrapRequestIdentity = {
+    const scopesList = [...(scopes ?? [])];
+    const identity: IdentityContext = {
       authMode: "jwt_bearer",
-      actorType: "human",
+      actorType: "tenant_admin",
       actorId: existingUser.userId,
       realm: "tenant",
       tenantId: targetTenantId,
       roleFamilies: ["tenant"],
       roles: [existingUser.roleCode],
-      scopes,
-      requestId: meta?.requestId ?? null,
+      scopes: scopesList,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
     };
 
     // Extract MFA claims
@@ -397,14 +398,15 @@ export class OidcPkceService {
 
     const token = this.jwtAuthService.sign(
       {
-        sub: claims.sub,
-        actorType: "human",
+        authMode: "jwt_bearer",
+        actorType: "tenant_admin",
         actorId: existingUser.userId,
         realm: "tenant",
         tenantId: targetTenantId,
         roleFamilies: ["tenant"],
         roles: [existingUser.roleCode],
-        scopes,
+        scopes: scopesList,
+        requestId: meta?.requestId ?? null,
       },
       { expiresIn: "8h" },
     );
@@ -494,9 +496,9 @@ export class OidcPkceService {
     }
 
     const scopes = ["partner:read", "partner:write"];
-    const identity: BootstrapRequestIdentity = {
+    const identity: IdentityContext = {
       authMode: "jwt_bearer",
-      actorType: "human",
+      actorType: "partner_api_key",
       actorId: `partner_user_${claims.sub}`,
       realm: "partner",
       tenantId: matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
@@ -505,13 +507,16 @@ export class OidcPkceService {
       roleFamilies: ["partner"],
       roles: ["partner_admin"],
       scopes,
-      requestId: meta?.requestId ?? null,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
     };
 
     const token = this.jwtAuthService.sign(
       {
-        sub: claims.sub,
-        actorType: "human",
+        authMode: "jwt_bearer",
+        actorType: "partner_api_key",
         actorId: identity.actorId,
         realm: "partner",
         tenantId: identity.tenantId,
@@ -519,6 +524,7 @@ export class OidcPkceService {
         roleFamilies: ["partner"],
         roles: ["partner_admin"],
         scopes,
+        requestId: meta?.requestId ?? null,
       },
       { expiresIn: "8h" },
     );
@@ -592,9 +598,22 @@ export class OidcPkceService {
     }
 
     // 3. State & Nonce verification
-    let stateRecord: OidcStateRecord | null = null;
-    if (meta?.stateToken) {
-      stateRecord = this.verifyStateToken(meta.stateToken);
+    const stateToken = meta?.stateToken || (command as any).stateToken;
+    if (!stateToken || typeof stateToken !== "string") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Missing OIDC state token. Session exchange requires valid stateToken.",
+      );
+    }
+
+    const stateRecord = this.verifyStateToken(stateToken);
+    if (!stateRecord) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "OIDC state token is invalid or expired.",
+      );
     }
 
     // Check state reuse
@@ -606,43 +625,50 @@ export class OidcPkceService {
       );
     }
 
-    if (stateRecord) {
-      // Validate state matching
-      if (stateRecord.state !== command.state.trim()) {
+    // Validate state matching
+    if (stateRecord.state !== command.state.trim()) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "State parameter mismatch.",
+      );
+    }
+
+    // Validate realm matching
+    if (stateRecord.realm !== expectedRealm) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "State realm mismatch.",
+      );
+    }
+
+    // Validate PKCE code verifier match & challenge
+    if (stateRecord.codeVerifier && verifier !== stateRecord.codeVerifier) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "PKCE code verifier verification failed.",
+      );
+    }
+
+    const computedChallenge = this.computeCodeChallenge(verifier);
+    if (computedChallenge !== stateRecord.codeChallenge) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "PKCE code verifier verification failed.",
+      );
+    }
+
+    // Validate exact callbackUrl / redirectUri matching
+    if (stateRecord.redirectUri) {
+      const trimmedCallbackUrl = command.callbackUrl?.trim() || "";
+      if (trimmedCallbackUrl !== stateRecord.redirectUri) {
         throw new ApiRequestError(
           400,
           "AUTH_SESSION_EXCHANGE_DENIED",
-          "State parameter mismatch.",
-        );
-      }
-      // Validate realm matching
-      if (stateRecord.realm !== expectedRealm) {
-        throw new ApiRequestError(
-          400,
-          "AUTH_SESSION_EXCHANGE_DENIED",
-          "State realm mismatch.",
-        );
-      }
-      // Validate PKCE challenge S256
-      const computedChallenge = this.computeCodeChallenge(verifier);
-      if (computedChallenge !== stateRecord.codeChallenge) {
-        throw new ApiRequestError(
-          400,
-          "AUTH_SESSION_EXCHANGE_DENIED",
-          "PKCE code verifier verification failed.",
-        );
-      }
-      // Validate callbackUrl / redirectUri
-      if (command.callbackUrl && stateRecord.redirectUri) {
-        this.validateRedirectUri(command.callbackUrl);
-      }
-    } else {
-      // If state token is missing or expired, check synthetic test code or verify fallback
-      if (command.state.includes("invalid") || command.state.includes("expired")) {
-        throw new ApiRequestError(
-          400,
-          "AUTH_SESSION_EXCHANGE_DENIED",
-          "OIDC state is invalid or expired.",
+          `Callback URL '${trimmedCallbackUrl}' does not match expected authorization redirect URI '${stateRecord.redirectUri}'.`,
         );
       }
     }
@@ -778,15 +804,26 @@ export class OidcPkceService {
     reasonCode?: string | null;
     afterSummary?: unknown;
     maskedContext?: unknown;
-    meta?: {
-      sourceIp?: string;
-      userAgent?: string;
-      requestId?: string;
-    };
+    meta?:
+      | {
+          sourceIp?: string;
+          userAgent?: string;
+          requestId?: string;
+          stateToken?: string;
+        }
+      | undefined;
   }) {
+    const metaPayload = params.meta
+      ? {
+          sourceIp: params.meta.sourceIp ?? null,
+          userAgent: params.meta.userAgent ?? null,
+          requestId: params.meta.requestId ?? null,
+        }
+      : undefined;
+
     this.securityEventsService?.recordEvent({
       actorId: params.actorId ?? null,
-      actorType: params.actorId ? "human" : "system",
+      actorType: params.actorId ? "tenant_admin" : "system",
       subjectId: params.subjectId ?? null,
       realm: params.realm,
       tenantId: params.tenantId ?? null,
@@ -800,15 +837,15 @@ export class OidcPkceService {
       sessionId: null,
       tokenId: params.tokenId ?? null,
       authMethods: ["oidc_pkce"],
-      sourceIp: params.meta?.sourceIp ?? null,
-      userAgent: params.meta?.userAgent ?? null,
-      requestId: params.meta?.requestId ?? null,
+      sourceIp: metaPayload?.sourceIp ?? null,
+      userAgent: metaPayload?.userAgent ?? null,
+      requestId: metaPayload?.requestId ?? null,
       traceId: null,
       reasonCode: params.reasonCode ?? null,
       approvalId: null,
       beforeSummary: null,
-      afterSummary: params.afterSummary ?? null,
-      maskedContext: params.maskedContext ?? null,
+      afterSummary: (params.afterSummary as Record<string, unknown>) ?? null,
+      maskedContext: (params.maskedContext as Record<string, unknown>) ?? null,
     });
   }
 }
