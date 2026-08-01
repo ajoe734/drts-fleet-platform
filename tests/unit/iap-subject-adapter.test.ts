@@ -480,5 +480,108 @@ describe("IAPSubjectAdapter", () => {
     expect(caught?.status).toBe(403);
     expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
   });
+
+  it("deterministically selects active platform/ops control-plane membership for multi-membership principal", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    // Provision principal with both tenant (first) and platform (second) memberships
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_multi_mem_001",
+        sourceRef: "iap_subject:multi_mem_sub",
+        issuer: "google_iap",
+        subject: "multi_mem_sub",
+        principalType: "human",
+        email: "multi@platform.drts",
+        emailVerified: true,
+        displayName: "Multi Membership User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_tenant_001",
+        sourceRef: "tenant_membership:multi_mem_sub",
+        principalId: "principal_multi_mem_001",
+        realm: "tenant",
+        scopeRef: "tenant:t1",
+        tenantId: "t1",
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [],
+    );
+
+    // Add a platform control plane membership
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_multi_mem_001",
+        sourceRef: "iap_subject:multi_mem_sub",
+        issuer: "google_iap",
+        subject: "multi_mem_sub",
+        principalType: "human",
+        email: "multi@platform.drts",
+        emailVerified: true,
+        displayName: "Multi Membership User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_platform_001",
+        sourceRef: "iap_membership:multi_mem_sub",
+        principalId: "principal_multi_mem_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_platform_001",
+          sourceRef: "rb_platform_001",
+          membershipId: "membership_platform_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const token = signTestIapToken({
+      sub: "multi_mem_sub",
+      email: "multi@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    const res = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+      },
+    );
+
+    expect(res.membership.realm).toBe("platform");
+    expect(res.membership.membershipId).toBe("membership_platform_001");
+    expect(res.effectiveRoles).toContain("superadmin");
+  });
 });
+
 

@@ -124,8 +124,7 @@ async function applyUpstreamAuth(
     process.env.IAP_EXPECTED_AUDIENCE ||
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
-  const expectedIapIssuer =
-    process.env.IAP_EXPECTED_ISSUER || process.env.JWT_ISSUER;
+  const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
   const allowUnverifiedTokenInDev =
     process.env.NODE_ENV !== "production" &&
     process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";

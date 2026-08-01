@@ -231,11 +231,27 @@ export class IAPSubjectAdapter {
       principal = created.principal;
     }
 
-    // Lookup memberships
+    // Lookup active control-plane (platform/ops) memberships deterministically
     const memberships = await this.identityRepository.findMembershipsByPrincipalId(
       principal.principalId,
     );
-    const activeMembership = memberships.find((m) => !this.isInactiveStatus(m.status));
+    const activeControlPlaneMemberships = memberships.filter(
+      (m) =>
+        !this.isInactiveStatus(m.status) &&
+        (m.realm === "platform" || m.realm === "ops"),
+    );
+
+    const isPlatformGroup = assertionGroups.includes("platform-admins@platform.drts");
+    const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
+
+    const activeMembership =
+      (isPlatformGroup
+        ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
+        : null) ||
+      (isOpsGroup
+        ? activeControlPlaneMemberships.find((m) => m.realm === "ops")
+        : null) ||
+      activeControlPlaneMemberships[0];
 
     if (!activeMembership) {
       this.emitDeniedEvent("user_inactive", principal.email || normalizedEmail, principal.principalId);
