@@ -190,7 +190,15 @@ export function buildAuthStartupConfigReport(
   // Check explicit local/test mode requirement
   const authMode = normalizeString(env.AUTH_MODE)?.toLowerCase();
   if (!isStrictEnvironment) {
-    if (authMode && !["local", "test", "dev", "explicit"].includes(authMode)) {
+    if (!authMode) {
+      issues.push({
+        control: "AUTH_MODE",
+        issue: `Missing required control: AUTH_MODE must be explicitly configured in ${environment} environment`,
+        code: "MISSING_CONTROL",
+      });
+    } else if (
+      !["local", "test", "dev", "explicit", "mock"].includes(authMode)
+    ) {
       issues.push({
         control: "AUTH_MODE",
         issue: `Invalid AUTH_MODE "${authMode}" specified for ${environment} environment`,

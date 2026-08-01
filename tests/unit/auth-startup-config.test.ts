@@ -100,19 +100,25 @@ describe("validateAuthStartupConfig in local & test mode", () => {
     expect(report.config.audience).toBe("https://api.local.drts.internal");
   });
 
-  it("allows local dev configuration with defaults when AUTH_MODE is omitted", () => {
+  it("fails validation when AUTH_MODE is omitted in local or test environment", () => {
     const env = {
       APP_ENV: "local",
       CI: "false",
     };
-    const report = validateAuthStartupConfig(env);
+    const report = buildAuthStartupConfigReport(env);
 
     expect(report.environment).toBe("local");
     expect(report.isStrictEnvironment).toBe(false);
-    expect(report.valid).toBe(true);
-    expect(report.issues).toHaveLength(0);
-    expect(report.config.issuer).toBe("https://auth.local.drts.internal");
-    expect(report.config.audience).toBe("https://api.local.drts.internal");
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (i) => i.control === "AUTH_MODE" && i.code === "MISSING_CONTROL",
+      ),
+    ).toBe(true);
+
+    expect(() => validateAuthStartupConfig(env)).toThrowError(
+      AuthConfigurationError,
+    );
   });
 
   it("fails validation and throws when invalid AUTH_MODE is specified in local/test environment", () => {
