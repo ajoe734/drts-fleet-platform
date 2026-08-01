@@ -27,6 +27,17 @@ export interface JwtIdentityPayload {
 
 type JwtExpiresIn = Extract<NonNullable<jwt.SignOptions["expiresIn"]>, string>;
 
+const SIGN_KEY_REQUIRED_ENV = ["JWT_PRIVATE_KEY", "JWT_SECRET"] as const;
+const VERIFY_KEY_REQUIRED_ENV = [
+  "JWT_PUBLIC_KEY",
+  "JWT_PRIVATE_KEY",
+  "JWT_SECRET",
+] as const;
+const SIGN_KEY_MATERIAL_ERROR_MESSAGE =
+  "JWT key material environment variable is not set (neither JWT_PRIVATE_KEY nor JWT_SECRET)";
+const VERIFY_KEY_MATERIAL_ERROR_MESSAGE =
+  "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)";
+
 type JwtSignIdentityBase =
   | Pick<
       BootstrapRequestIdentity,
@@ -54,6 +65,23 @@ type JwtSignIdentity = JwtSignIdentityBase & {
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
 const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
 
+export class JwtKeyMaterialNotConfiguredError extends Error {
+  public readonly code = "JWT_KEY_MATERIAL_NOT_CONFIGURED";
+  public readonly requiredEnv: readonly string[];
+
+  constructor(message: string, requiredEnv: readonly string[]) {
+    super(message);
+    this.name = "JwtKeyMaterialNotConfiguredError";
+    this.requiredEnv = [...requiredEnv];
+  }
+}
+
+export function isJwtKeyMaterialNotConfiguredError(
+  error: unknown,
+): error is JwtKeyMaterialNotConfiguredError {
+  return error instanceof JwtKeyMaterialNotConfiguredError;
+}
+
 @Injectable()
 export class JwtAuthService {
   private readonly logger = new Logger(JwtAuthService.name);
@@ -67,8 +95,9 @@ export class JwtAuthService {
     if (secret && secret.trim().length > 0) {
       return secret.trim();
     }
-    throw new Error(
-      "JWT key material environment variable is not set (neither JWT_PRIVATE_KEY nor JWT_SECRET)",
+    throw new JwtKeyMaterialNotConfiguredError(
+      SIGN_KEY_MATERIAL_ERROR_MESSAGE,
+      SIGN_KEY_REQUIRED_ENV,
     );
   }
 
@@ -85,8 +114,9 @@ export class JwtAuthService {
     if (secret && secret.trim().length > 0) {
       return secret.trim();
     }
-    throw new Error(
-      "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)",
+    throw new JwtKeyMaterialNotConfiguredError(
+      VERIFY_KEY_MATERIAL_ERROR_MESSAGE,
+      VERIFY_KEY_REQUIRED_ENV,
     );
   }
 

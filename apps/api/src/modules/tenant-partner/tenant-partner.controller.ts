@@ -87,7 +87,10 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
-import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import {
+  isJwtKeyMaterialNotConfiguredError,
+  JwtAuthService,
+} from "../../common/auth/jwt-auth.service";
 import { requireInternalKey } from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
@@ -161,16 +164,13 @@ export class TenantPartnerController {
     try {
       return this.jwtAuthService.sign(identity, { expiresIn });
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("JWT_SECRET environment variable is not set")
-      ) {
+      if (isJwtKeyMaterialNotConfiguredError(error)) {
         throw new ApiRequestError(
           503,
           "JWT_NOT_CONFIGURED",
           "JWT session issuance is not configured for this environment.",
           {
-            requiredEnv: "JWT_SECRET",
+            requiredEnv: error.requiredEnv.join(" or "),
           },
         );
       }

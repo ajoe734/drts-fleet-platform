@@ -154,6 +154,14 @@ function parseCsv(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
+function isSymmetricJwtAlgorithm(algorithm: string): boolean {
+  return algorithm.toUpperCase().startsWith("HS");
+}
+
+function isAsymmetricJwtAlgorithm(algorithm: string): boolean {
+  return /^(RS|ES|PS)/.test(algorithm.toUpperCase());
+}
+
 export function isWeakSecret(value: string | undefined): boolean {
   if (!value) return true;
   const normalized = value.trim().toLowerCase();
@@ -281,6 +289,10 @@ export function buildAuthStartupConfigReport(
   // 3. Algorithms Validation
   const rawAlgo = env.JWT_ALGORITHMS ?? env.JWT_ALGORITHM;
   const parsedAlgos = parseCsv(rawAlgo);
+  const jwtSecret = normalizeString(env.JWT_SECRET);
+  const privateKey = normalizeString(env.JWT_PRIVATE_KEY);
+  const publicKey = normalizeString(env.JWT_PUBLIC_KEY);
+  const runtimeUsesAsymmetricKey = Boolean(privateKey || publicKey);
   let algorithms: string[] = [];
 
   if (parsedAlgos.length > 0) {
@@ -306,14 +318,32 @@ export function buildAuthStartupConfigReport(
   }
 
   if (algorithms.length === 0) {
-    algorithms = ["HS256"];
+    algorithms = [runtimeUsesAsymmetricKey ? "RS256" : "HS256"];
   }
 
   // 4. Signing Key Validation
-  const jwtSecret = normalizeString(env.JWT_SECRET);
-  const privateKey = normalizeString(env.JWT_PRIVATE_KEY);
-  const publicKey = normalizeString(env.JWT_PUBLIC_KEY);
-  const isAsymmetric = Boolean(privateKey || publicKey);
+  const isAsymmetric = runtimeUsesAsymmetricKey;
+  const requestsSymmetricAlgorithms = algorithms.some(isSymmetricJwtAlgorithm);
+  const requestsAsymmetricAlgorithms =
+    algorithms.some(isAsymmetricJwtAlgorithm);
+
+  if (requestsAsymmetricAlgorithms && !isAsymmetric) {
+    issues.push({
+      control: "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY",
+      issue:
+        "Missing required control: JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must be configured when JWT_ALGORITHMS requests asymmetric signing (RS*/ES*/PS*)",
+      code: "MISSING_CONTROL",
+    });
+  }
+
+  if (requestsSymmetricAlgorithms && isAsymmetric) {
+    issues.push({
+      control: "JWT_ALGORITHMS",
+      issue:
+        "Unsafe control value: Symmetric algorithm (HS*) specified while runtime signing will use asymmetric key material",
+      code: "UNSAFE_VALUE",
+    });
+  }
 
   if (isStrictEnvironment) {
     if (!jwtSecret && !isAsymmetric) {
@@ -338,14 +368,6 @@ export function buildAuthStartupConfigReport(
             issue:
               "Unsafe control value: JWT asymmetric key material is set to a known insecure default pattern",
             code: "WEAK_SECRET",
-          });
-        }
-        if (parsedAlgos.some((a) => a.toUpperCase().startsWith("HS"))) {
-          issues.push({
-            control: "JWT_ALGORITHMS",
-            issue:
-              "Unsafe control value: Symmetric algorithm (HS*) specified for asymmetric key pair",
-            code: "UNSAFE_VALUE",
           });
         }
       }

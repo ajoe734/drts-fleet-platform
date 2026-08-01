@@ -179,8 +179,26 @@ describe("validateAuthStartupConfig in staging & production (Strict Mode)", () =
 
     const report = validateAuthStartupConfig(env);
     expect(report.valid).toBe(true);
+    expect(report.config.algorithms).toEqual(["RS256"]);
     expect(report.config.signing.keyType).toBe("asymmetric");
     expect(report.config.signing.asymmetricKeysConfigured).toBe(true);
+  });
+
+  it("fails when JWT_SECRET is paired with an asymmetric algorithm like RS256", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      JWT_ALGORITHMS: "RS256",
+    };
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (i) =>
+          i.control === "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY" &&
+          i.code === "MISSING_CONTROL",
+      ),
+    ).toBe(true);
   });
 
   it("fails when asymmetric keys are paired with a symmetric algorithm like HS256", () => {
