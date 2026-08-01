@@ -32,7 +32,7 @@ export interface IamCallbackSessionExchangeCommand {
   callbackUrl: string;
   code: string;
   state: string;
-  pkceVerifier: string;
+  pkceVerifier?: string | null;
   tenantId?: string | null;
   partnerId?: string | null;
 }

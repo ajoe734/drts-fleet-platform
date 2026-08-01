@@ -471,7 +471,6 @@ components:
         - callbackUrl
         - code
         - state
-        - pkceVerifier
       properties:
         provider:
           type: string
@@ -483,7 +482,7 @@ components:
         state:
           type: string
         pkceVerifier:
-          type: string
+          type: [string, "null"]
         tenantId:
           type: [string, "null"]
         partnerId:

@@ -44,9 +44,13 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       expect(stateRecord.codeChallenge).toBe(expectedChallenge);
     });
 
-    it("supports state token signing and stateless verification", () => {
+    it("supports state token encryption and opaque verification", () => {
       const loginParams = oidcService.generateLoginParameters("partner");
       expect(loginParams.stateToken).toBeDefined();
+
+      // Verify stateToken is encrypted/opaque to external callers (cannot be base64url JSON parsed)
+      const firstPart = loginParams.stateToken.split(".")[0]!;
+      expect(() => JSON.parse(Buffer.from(firstPart, "base64url").toString("utf8"))).toThrow();
 
       const verifiedRecord = oidcService.verifyStateToken(loginParams.stateToken);
       expect(verifiedRecord).not.toBeNull();

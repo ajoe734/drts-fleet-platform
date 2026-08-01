@@ -1,4 +1,4 @@
-import { createHash, createHmac, createPublicKey, type KeyObject, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, createPublicKey, type KeyObject, randomBytes, timingSafeEqual } from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 import type {
@@ -93,37 +93,38 @@ export class OidcPkceService {
   }
 
   /**
-   * Helper: sign OIDC state record to create a stateless tamper-proof token
+   * Helper: encrypt OIDC state record to create an opaque, tamper-proof state token
    */
   public createSignedStateToken(record: OidcStateRecord): string {
     const secret = process.env.COOKIE_SECRET || process.env.JWT_SECRET || "drts_oidc_state_secret_key_32bytes_min";
+    const key = createHash("sha256").update(secret).digest();
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
     const payloadStr = JSON.stringify(record);
-    const payloadB64 = this.base64UrlEncode(payloadStr);
-    const signature = this.base64UrlEncode(
-      createHmac("sha256", secret).update(payloadB64).digest(),
-    );
-    return `${payloadB64}.${signature}`;
+    const encrypted = Buffer.concat([cipher.update(payloadStr, "utf8"), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+    return `${this.base64UrlEncode(iv)}.${this.base64UrlEncode(encrypted)}.${this.base64UrlEncode(authTag)}`;
   }
 
   /**
-   * Helper: verify signed OIDC state token
+   * Helper: decrypt and verify opaque OIDC state token
    */
   public verifyStateToken(stateToken: string): OidcStateRecord | null {
     try {
       const secret = process.env.COOKIE_SECRET || process.env.JWT_SECRET || "drts_oidc_state_secret_key_32bytes_min";
+      const key = createHash("sha256").update(secret).digest();
       const parts = stateToken.split(".");
-      if (parts.length !== 2) return null;
-      const [payloadB64, signature] = parts;
-      const expectedSig = this.base64UrlEncode(
-        createHmac("sha256", secret).update(payloadB64!).digest(),
-      );
-      if (
-        signature!.length !== expectedSig.length ||
-        !timingSafeEqual(Buffer.from(signature!), Buffer.from(expectedSig))
-      ) {
-        return null;
-      }
-      const jsonStr = Buffer.from(payloadB64!, "base64url").toString("utf8");
+      if (parts.length !== 3) return null;
+      const [ivB64, encryptedB64, authTagB64] = parts;
+      const iv = Buffer.from(ivB64!, "base64url");
+      const encrypted = Buffer.from(encryptedB64!, "base64url");
+      const authTag = Buffer.from(authTagB64!, "base64url");
+      if (iv.length !== 12 || authTag.length !== 16) return null;
+
+      const decipher = createDecipheriv("aes-256-gcm", key, iv);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      const jsonStr = decrypted.toString("utf8");
       const record = JSON.parse(jsonStr) as OidcStateRecord;
       if (Date.now() > record.expiresAt) {
         return null;

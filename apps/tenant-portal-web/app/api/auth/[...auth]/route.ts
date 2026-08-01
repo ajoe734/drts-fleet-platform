@@ -84,7 +84,7 @@ export async function GET(
         callbackUrl,
         code,
         state,
-        pkceVerifier,
+        ...(pkceVerifier ? { pkceVerifier } : {}),
       }),
     });
 
