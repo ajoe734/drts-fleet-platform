@@ -5,7 +5,7 @@
 - Sidecar task: `IAM-SES-001-SIDECAR-REVIEW`
 - Sidecar owner / reviewer: `Codex` / `Codex2`
 - Parent task: `IAM-SES-001` - durable sessions, refresh families, and token records
-- Parent owner / reviewer: `Codex2` / `Gemini2`
+- Parent owner / reviewer: `Codex2` / `Codex`
 - Parent dependency: `IAM-ACC-001` (`done` on `origin/dev` at `c1f02ae570e6c6ba19e460af75ddf7d71443dc20`)
 - Artifact scope: `support/sidecars/IAM-SES-001/IAM-SES-001-SIDECAR-REVIEW.md` only
 - Guardrail: support artifact only; do not mutate canonical truth, runtime code, contracts, tests, or parent review state
@@ -45,7 +45,7 @@ Use `scripts/ai-status.sh show IAM-SES-001-SIDECAR-REVIEW` for live `status` / `
 `AI_NAME=Codex scripts/ai-status.sh show IAM-SES-001` currently records:
 
 - status=`review`
-- owner / reviewer=`Codex2` / `Gemini2`
+- owner / reviewer=`Codex2` / `Codex`
 - depends_on=`IAM-ACC-001`
 - acceptance:
   - raw refresh and session secrets are never stored
@@ -54,12 +54,10 @@ Use `scripts/ai-status.sh show IAM-SES-001-SIDECAR-REVIEW` for live `status` / `
   - expiry and family revocation are enforced
   - migration repository and Postgres integration tests pass
 - latest `next` summary:
-  - closeout validation on `2026-08-01` found post-review regressions
-  - owner fixed driver device rebind revocation propagation plus async auth/bootstrap tests
-  - pushed `ae901573ee78ba751247923fa5d97441311424e8` to `origin/codex2/iam-ses-001`
-  - reran `pnpm --filter @drts/api exec vitest run tests/unit/auth-bootstrap.test.ts`
-  - reran `pnpm exec vitest run tests/unit/driver-device-session.test.ts`
-  - `pnpm --filter @drts/api test:integration` still requires `DATABASE_URL` in this workspace
+  - chairman reassigned reviewer from `Gemini2` to `Codex`
+  - `IAM-SES-001` remains in `review`
+  - reassignment keeps owner/reviewer separation from `Codex2`
+  - reason given: fresh verification evidence was already recorded and the reassignment avoids a review deadlock
 
 Dependency baseline:
 
@@ -71,8 +69,8 @@ Dependency baseline:
 Implication:
 
 - parent `IAM-SES-001` is not waiting only for closeout
-- the authoritative parent state is a reopened `review` after regression repair
-- reviewer attention should anchor on the latest handoff, not on the earlier approved snapshot
+- the authoritative parent state is a reopened `review` with `Codex` now assigned as reviewer
+- reviewer attention should anchor on the latest evidence handoff plus the `2026-08-01T16:53:38Z` reviewer reassignment, not on the earlier `Gemini2` approval snapshot
 
 ## 3. Parent Review Timeline
 
@@ -89,11 +87,13 @@ Reconstructed from `ai-activity-log.jsonl` plus current parent `next` text:
 2. `2026-08-01T16:12:35Z` - `Gemini2` marked the parent `review_approved`.
 3. `2026-08-01T16:13:22Z` - `Codex2` recorded closeout validation in progress.
 4. `2026-08-01T16:17:39Z` - `Codex2` found post-review regressions during closeout validation, fixed them, pushed `ae901573ee78ba751247923fa5d97441311424e8` to `origin/codex2/iam-ses-001`, reran the two unit suites above, and handed the parent back to `Gemini2`.
+5. `2026-08-01T16:53:38Z` - the orchestrator chair reassigned the parent reviewer from `Gemini2` to `Codex` because `IAM-SES-001` was already back in `review` with fresh verification evidence and the reassignment avoided a review deadlock while preserving owner/reviewer separation from `Codex2`.
 
 Current reading:
 
 - the `2026-08-01T16:12:35Z` approval is historical context only
-- the latest binding parent state is the `2026-08-01T16:17:39Z` handoff back into `review`
+- the `2026-08-01T16:17:39Z` handoff remains the latest evidence bundle for the parent branch
+- the latest binding parent state is the `2026-08-01T16:53:38Z` reassignment that leaves `IAM-SES-001` in `review` under reviewer `Codex`
 
 ## 4. Change Surface On The Parent Branch
 
@@ -132,20 +132,21 @@ High-signal change summary:
 | AC-2 | Concurrent refresh has one winner | repository rotates inside a transaction, consumes the current token with `consumed_at IS NULL`, and revokes the family on double-consume / invalid reuse; unit test rejects reuse of the first token after rotation | Strongly evidenced |
 | AC-3 | Revoked state survives process restart | durable tables plus repository load / revoke paths are present; initial `2026-08-01T16:11:49Z` handoff also recorded temporary-DB migration smoke | Reviewer should verify whether earlier DB-backed smoke is sufficient for restart confidence after the later regression patch |
 | AC-4 | Expiry and family revocation are enforced | repository rejects expired / revoked / consumed tokens, revokes invalid families, and service rebind now explicitly revokes the prior device session before replacement issuance | Latest patch specifically touched this area; review it first |
-| AC-5 | Migration repository and Postgres integration tests pass | initial handoff recorded contracts build, unit runs, and temporary-DB migration smoke; latest handoff reran only `auth-bootstrap` and `driver-device-session` unit suites; current workspace still lacks `DATABASE_URL` for `pnpm --filter @drts/api test:integration` | This is the main remaining evidence caveat in the parent review |
+| AC-5 | Migration repository and Postgres integration tests pass | initial handoff recorded contracts build, unit runs, and temporary-DB migration smoke; latest handoff reran only `auth-bootstrap` and `driver-device-session` unit suites; current workspace still lacks `DATABASE_URL` for `pnpm --filter @drts/api test:integration` | This remains the main evidence caveat for `Codex` to evaluate during the current parent review |
 
-This sidecar deliberately does not upgrade any parent AC from "review evidence" to "accepted". Only `Gemini2` can decide whether the current post-fix evidence is sufficient for the parent task.
+This sidecar deliberately does not upgrade any parent AC from "review evidence" to "accepted". Only the currently assigned parent reviewer, `Codex`, can decide whether the current post-fix evidence is sufficient for `IAM-SES-001`.
 
 ## 6. Reviewer Hotspots
 
 For parent-task context, the most important things to recheck are:
 
 1. Do not treat the earlier `review_approved` event as final. Parent `IAM-SES-001` is currently back in `review` after the `2026-08-01T16:17:39Z` regression fix handoff.
-2. Inspect the reopened-fix area in `driver-device-session.service.ts`: rebind must revoke the previous binding and propagate that revocation through the driver profile audit/update path.
-3. Inspect the async auth plumbing in `bootstrap-auth.guard.ts` and `auth.controller.ts`: binding validation is now awaited, so stale synchronous test assumptions were corrected in `apps/api/tests/unit/auth-bootstrap.test.ts`.
-4. Verify the repository's single-winner rotation path: the branch should revoke the family when a refresh token is reused or otherwise invalid, not silently allow a second winner.
-5. Keep the DB-backed evidence caveat explicit: the current workspace still cannot rerun `pnpm --filter @drts/api test:integration` without `DATABASE_URL`, so the latest handoff relies on earlier temporary-DB smoke plus fresh unit regression coverage.
-6. Treat `IAM-ACC-001` as a fixed upstream baseline already merged to `dev`; this sidecar is not reopening principal / membership durability.
+2. Keep the reviewer reassignment explicit: the active parent reviewer is now `Codex`, not `Gemini2`, because the chair reassigned the review on `2026-08-01T16:53:38Z`.
+3. Inspect the reopened-fix area in `driver-device-session.service.ts`: rebind must revoke the previous binding and propagate that revocation through the driver profile audit/update path.
+4. Inspect the async auth plumbing in `bootstrap-auth.guard.ts` and `auth.controller.ts`: binding validation is now awaited, so stale synchronous test assumptions were corrected in `apps/api/tests/unit/auth-bootstrap.test.ts`.
+5. Verify the repository's single-winner rotation path: the branch should revoke the family when a refresh token is reused or otherwise invalid, not silently allow a second winner.
+6. Keep the DB-backed evidence caveat explicit: the current workspace still cannot rerun `pnpm --filter @drts/api test:integration` without `DATABASE_URL`, so the latest handoff relies on earlier temporary-DB smoke plus fresh unit regression coverage.
+7. Treat `IAM-ACC-001` as a fixed upstream baseline already merged to `dev`; this sidecar is not reopening principal / membership durability.
 
 For sidecar-task review (`Codex2` reviewing this packet), verify only that this document matches current shared truth and keeps the support-only scope above.
 
@@ -155,7 +156,7 @@ For sidecar-task review (`Codex2` reviewing this packet), verify only that this 
 - [x] no parent implementation, canonical truth, or machine-truth records were edited by hand
 - [x] parent evidence is summarized from machine truth, git history, and task-owned review logs only
 - [x] packet content distinguishes between historical `review_approved` state and the current reopened `review` state
-- [x] packet leaves parent approval authority with `Gemini2`
+- [x] packet leaves parent approval authority with the current reviewer, `Codex`
 
 ## 8. Owner Verification
 
@@ -188,12 +189,12 @@ Owner handoff after packet validation:
 
 ```bash
 AI_NAME=Codex scripts/ai-status.sh handoff IAM-SES-001-SIDECAR-REVIEW Codex2 \
-  "IAM-SES-001 sidecar review packet is ready at support/sidecars/IAM-SES-001/IAM-SES-001-SIDECAR-REVIEW.md. It freezes the current parent shared truth: IAM-SES-001 is back in review after the 2026-08-01 regression-fix handoff, the active branch tip is ae901573ee78ba751247923fa5d97441311424e8 on origin/codex2/iam-ses-001, IAM-ACC-001 remains the merged dependency baseline on origin/dev at c1f02ae570e6, and the packet calls out the main reviewer hotspot that pnpm --filter @drts/api test:integration still needs DATABASE_URL in this workspace."
+  "IAM-SES-001 sidecar review packet is refreshed at support/sidecars/IAM-SES-001/IAM-SES-001-SIDECAR-REVIEW.md. It now matches current machine truth: the parent remains in review, the active evidence handoff is still the 2026-08-01T16:17:39Z regression-fix bundle on ae901573ee78ba751247923fa5d97441311424e8 at origin/codex2/iam-ses-001, and the active parent reviewer was reassigned from Gemini2 to Codex at 2026-08-01T16:53:38Z. IAM-ACC-001 remains the merged dependency baseline on origin/dev at c1f02ae570e6c6ba19e460af75ddf7d71443dc20, and the packet keeps the DATABASE_URL integration-test caveat explicit for the current parent review."
 ```
 
 Reviewer approval command:
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh approve IAM-SES-001-SIDECAR-REVIEW \
-  "IAM-SES-001 sidecar review packet matches current machine truth, correctly distinguishes the historical 2026-08-01T16:12:35Z parent review_approved event from the latest reopened review handoff at 2026-08-01T16:17:39Z, and accurately summarizes the durable-session change surface and DB-backed evidence caveat without mutating canonical truth."
+  "IAM-SES-001 sidecar review packet matches current machine truth, correctly distinguishes the historical 2026-08-01T16:12:35Z parent review_approved event from the latest parent evidence handoff at 2026-08-01T16:17:39Z and the binding reviewer reassignment at 2026-08-01T16:53:38Z, and accurately summarizes the durable-session change surface and DB-backed evidence caveat without mutating canonical truth."
 ```
