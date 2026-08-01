@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { EmbedContext, EmbedState } from "@/lib/embed-context";
-import { useTranslation } from "@/lib/i18n";
+import type { EmbedContext } from "@/lib/embed-context";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
-  embedTripFallbackStates,
   embedReceipt,
   embedResident,
   embedSavedPlaces,
   embedTrip,
+  embedTripFallbackStates,
   embedTripHistory,
   embedVehicles,
+  type EmbedTripFallbackScreen,
 } from "@/lib/embed-fixtures";
 import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
 
@@ -36,66 +36,52 @@ function buildHref(context: EmbedContext, next: Record<string, string>) {
   return `/embed/${context.entry.entrySlug}?${params.toString()}`;
 }
 
-function toneStyle(theme: ReturnType<typeof buildEmbedTheme>, tone: string) {
-  switch (tone) {
-    case "success":
-      return {
-        color: theme.successFg,
-        background: theme.successBg,
-        borderColor: theme.successBorder,
-      };
-    case "warn":
-      return {
-        color: theme.warnFg,
-        background: theme.warnBg,
-        borderColor: theme.warnBorder,
-      };
-    case "danger":
-      return {
-        color: theme.dangerFg,
-        background: theme.dangerBg,
-        borderColor: theme.dangerBorder,
-      };
-    default:
-      return {
-        color: theme.infoFg,
-        background: theme.infoBg,
-        borderColor: theme.infoBorder,
-      };
-  }
+function toPhoneHref(phone: string) {
+  const normalized = phone.replace(/[^\d+]/g, "");
+  return `tel:${normalized || phone}`;
 }
 
-const EMBED_MONO = '"IBM Plex Mono", ui-monospace, SFMono-Regular, monospace';
+function statusDotColor(theme: ReturnType<typeof buildEmbedTheme>, state: string) {
+  if (state === "unsupported") return theme.dangerFg;
+  if (state === "reauth") return theme.warnFg;
+  if (state === "fallback") return theme.neutralFg;
+  return theme.successFg;
+}
 
-// Minimal inline-SVG glyphs for the embedded webview chrome / hero so the
-// passenger embed matches the canvas (passenger-embed-screens.jsx) without
-// pulling the management icon set into the public passenger bundle.
-const EMBED_GLYPHS: Record<string, string> = {
-  chevL: "M15 6l-6 6 6 6",
-  lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
-  check: "M5 12l4 4 10-10",
-  x: "M6 6l12 12 M18 6L6 18",
-  refresh: "M3 12a9 9 0 0115.3-6.36L21 8 M21 3v5h-5 M21 12a9 9 0 01-15.3 6.36L3 16 M3 21v-5h5",
-  user: "M12 12a4 4 0 100-8 4 4 0 000 8z M5.5 20a6.5 6.5 0 0113 0",
-  car: "M5 16l1.5-5a2 2 0 011.93-1.43h7.14A2 2 0 0117.5 11L19 16 M6 16h12 M7 18.5h.01 M17 18.5h.01 M8 16v2 M16 16v2",
-  clock: "M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z",
+const GLYPHS: Record<string, string> = {
+  alert: "M12 9v4 M12 17h.01 M12 3l9 16H3z",
+  arrow: "M5 12h14 M13 6l6 6-6 6",
   ban: "M6 6l12 12 M12 21a9 9 0 100-18 9 9 0 000 18z",
-  ext: "M14 4h6v6 M20 4l-8 8 M18 13v6H5V6h6",
-  shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z",
   bolt: "M13 3L5 13h6l-1 8 8-10h-6z",
+  car: "M5 16l1.5-5a2 2 0 011.93-1.43h7.14A2 2 0 0117.5 11L19 16 M6 16h12 M7 18.5h.01 M17 18.5h.01 M8 16v2 M16 16v2",
+  check: "M5 12l4 4 10-10",
+  chevL: "M15 6l-6 6 6 6",
+  clock: "M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z",
+  ext: "M14 4h6v6 M20 4l-8 8 M18 13v6H5V6h6",
   info: "M12 8h.02 M11 12h1v5h1 M12 21a9 9 0 100-18 9 9 0 000 18z",
+  lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
+  phone: "M5 4h4l2 5-2.5 2.5a16 16 0 006 6L17 15l5 2v4a2 2 0 01-2 2C10.6 23 1 13.4 1 2a2 2 0 012-2h2z",
+  pin: "M12 21s6-5.33 6-11a6 6 0 10-12 0c0 5.67 6 11 6 11z M12 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z",
+  refresh:
+    "M3 12a9 9 0 0115.3-6.36L21 8 M21 3v5h-5 M21 12a9 9 0 01-15.3 6.36L3 16 M3 21v-5h5",
+  shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z",
+  star: "M12 17.2l-5.3 2.8 1-5.9-4.3-4.2 6-.9L12 3.5l2.6 5.5 6 .9-4.3 4.2 1 5.9z",
+  user: "M12 12a4 4 0 100-8 4 4 0 000 8z M5.5 20a6.5 6.5 0 0113 0",
+  x: "M6 6l12 12 M18 6L6 18",
 };
 
-function EmbedGlyph({
+function Icon({
   name,
-  size = 14,
+  size = 16,
   stroke = 2,
+  style,
 }: {
   name: string;
   size?: number;
   stroke?: number;
+  style?: Record<string, string | number>;
 }) {
-  const d = EMBED_GLYPHS[name] ?? EMBED_GLYPHS.info ?? "";
+  const d = GLYPHS[name] || GLYPHS.info || "";
   return (
     <svg
       width={size}
@@ -106,242 +92,129 @@ function EmbedGlyph({
       strokeWidth={stroke}
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
       aria-hidden
     >
-      {d.split(" M").map((seg, index) => (
-        <path key={index} d={index === 0 ? seg : `M${seg}`} />
+      {d.split(" M").map((segment, index) => (
+        <path key={index} d={index === 0 ? segment : `M${segment}`} />
       ))}
     </svg>
   );
 }
 
-function statusDotColor(
+function buttonPalette(
   theme: ReturnType<typeof buildEmbedTheme>,
-  state: string,
+  variant: "primary" | "ghost" | "default" | "danger",
 ) {
-  if (state === "unsupported") return theme.dangerFg;
-  if (state === "reauth" || state === "fallback") return theme.warnFg;
-  return theme.successFg;
+  switch (variant) {
+    case "ghost":
+      return {
+        background: theme.surface,
+        color: theme.primary,
+        border: `1px solid ${theme.line}`,
+      };
+    case "default":
+      return {
+        background: theme.surface,
+        color: theme.ink,
+        border: `1px solid ${theme.line}`,
+      };
+    case "danger":
+      return {
+        background: theme.dangerFg,
+        color: "#fff",
+        border: `1px solid ${theme.dangerFg}`,
+      };
+    default:
+      return {
+        background: theme.primary,
+        color: "#fff",
+        border: `1px solid ${theme.primary}`,
+      };
+  }
 }
 
-function EmbedShell({
-  context,
-  children,
-  footer,
+function ActionButton({
+  href,
+  label,
+  theme,
+  variant = "primary",
+  icon,
+  iconRight,
 }: {
-  context: EmbedContext;
-  children: ReactNode;
-  footer?: ReactNode;
+  href: string;
+  label: string;
+  theme: ReturnType<typeof buildEmbedTheme>;
+  variant?: "primary" | "ghost" | "default" | "danger";
+  icon?: string;
+  iconRight?: string;
 }) {
-  const theme = buildEmbedTheme(context.accent);
-  const appName = context.strings.appName;
-  const displayName = context.strings.displayName;
-  const { t } = useTranslation();
-  const dotColor = statusDotColor(theme, context.state);
+  const palette = buttonPalette(theme, variant);
+  const content = (
+    <>
+      {icon ? <Icon name={icon} size={14} /> : null}
+      <span>{label}</span>
+      {iconRight ? <Icon name={iconRight} size={14} /> : null}
+    </>
+  );
+  const style = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    width: "100%",
+    minHeight: 44,
+    borderRadius: 12,
+    padding: "11px 14px",
+    fontFamily: theme.sans,
+    fontSize: 14,
+    fontWeight: 700,
+    textDecoration: "none",
+    ...palette,
+  } as const;
 
-  return (
-    <div
-      style={{
-        ["--embed-accent" as string]: theme.accent,
-        ["--embed-accent-soft" as string]: theme.accentSoft,
-        ["--embed-neutral-fg" as string]: theme.neutralFg,
-        ["--embed-neutral-bg" as string]: theme.neutralBg,
-        ["--embed-neutral-border" as string]: theme.neutralBorder,
-        ["--embed-danger-fg" as string]: theme.dangerFg,
-        ["--embed-danger-bg" as string]: theme.dangerBg,
-        minHeight: "100vh",
-        background: theme.neutralBg,
-        padding: "24px 12px",
-        fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 392,
-          margin: "0 auto",
-          borderRadius: 28,
-          overflow: "hidden",
-          background: "white",
-          border: `1px solid ${theme.neutralBorder}`,
-          boxShadow:
-            "0 20px 50px color-mix(in srgb, var(--embed-accent) 12%, transparent)",
-        }}
-      >
-        {/* iOS-style status bar (host device chrome) */}
-        <div
-          style={{
-            background: theme.accent,
-            color: "white",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            padding: "10px 18px 6px",
-            fontSize: 12.5,
-            fontWeight: 600,
-          }}
-        >
-          <span>9:41</span>
-          <span
-            style={{
-              display: "inline-flex",
-              gap: 6,
-              alignItems: "center",
-              opacity: 0.9,
-            }}
-          >
-            <EmbedGlyph name="bolt" size={12} />
-            <EmbedGlyph name="shield" size={12} />
-          </span>
-        </div>
-
-        {/* host app chrome: back affordance + title + entryHost lock chip */}
-        <div
-          style={{
-            background: theme.accent,
-            color: "white",
-            padding: "4px 12px 12px",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 15,
-              background: "color-mix(in srgb, white 16%, transparent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <EmbedGlyph name="chevL" size={16} />
-          </span>
-          <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700 }}>
-              {t("embed.chrome.title")}
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                opacity: 0.8,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {appName} · {displayName}
-            </div>
-          </div>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 9.5,
-              fontFamily: EMBED_MONO,
-              opacity: 0.85,
-              background: "color-mix(in srgb, white 14%, transparent)",
-              padding: "4px 8px",
-              borderRadius: 999,
-              maxWidth: 150,
-            }}
-          >
-            <EmbedGlyph name="lock" size={10} />
-            <span
-              style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {getEntryHost(context.entry)}
-            </span>
-          </span>
-        </div>
-
-        {/* webview surface badge */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "6px 14px",
-            fontSize: 10.5,
-            color: theme.neutralFg,
-            background: theme.neutralBg,
-            borderBottom: `1px solid ${theme.neutralBorder}`,
-          }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 3,
-              background: dotColor,
-              flexShrink: 0,
-            }}
-          />
-          <span style={{ fontFamily: EMBED_MONO }}>
-            {t("embed.chrome.webview")}
-          </span>
-          <span style={{ opacity: 0.7 }}>
-            · embedded · /embed/{context.entry.entrySlug}
-          </span>
-        </div>
-
-        <div style={{ padding: 16, display: "grid", gap: 12 }}>{children}</div>
-
-        {footer ? (
-          <div
-            style={{
-              padding: 14,
-              borderTop: `1px solid ${theme.neutralBorder}`,
-              background: theme.neutralBg,
-              display: "grid",
-              gap: 10,
-            }}
-          >
-            {footer}
-          </div>
-        ) : null}
-      </div>
-    </div>
+  return href.startsWith("tel:") ? (
+    <a href={href} style={style}>
+      {content}
+    </a>
+  ) : (
+    <Link href={href} style={style}>
+      {content}
+    </Link>
   );
 }
 
 function Card({
+  theme,
   title,
   subtitle,
+  accent,
   children,
 }: {
+  theme: ReturnType<typeof buildEmbedTheme>;
   title?: string;
   subtitle?: string;
+  accent?: string;
   children: ReactNode;
 }) {
   return (
     <section
       style={{
-        border:
-          "1px solid color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)",
-        borderRadius: 18,
-        background: "white",
-        padding: 14,
         display: "grid",
         gap: 10,
+        padding: 15,
+        borderRadius: 16,
+        background: theme.surface,
+        border: `1px solid ${accent ? accent : theme.line}`,
       }}
     >
       {title ? (
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>{title}</div>
+        <div style={{ display: "grid", gap: 3 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: theme.ink }}>
+            {title}
+          </div>
           {subtitle ? (
-            <div style={{ fontSize: 11, color: "var(--embed-neutral-fg)" }}>
-              {subtitle}
-            </div>
+            <div style={{ fontSize: 11.5, color: theme.muted }}>{subtitle}</div>
           ) : null}
         </div>
       ) : null}
@@ -350,380 +223,110 @@ function Card({
   );
 }
 
-function ActionLink({
-  href,
-  label,
-  tone = "primary",
+function Pill({
+  theme,
+  tone,
+  children,
+  dot = false,
 }: {
-  href: string;
-  label: string;
-  tone?: "primary" | "ghost" | "danger" | "default";
+  theme: ReturnType<typeof buildEmbedTheme>;
+  tone: "primary" | "success" | "warn" | "danger" | "neutral" | "info";
+  children: ReactNode;
+  dot?: boolean;
 }) {
   const palette =
-    tone === "ghost"
-      ? {
-          background: "var(--embed-accent-soft)",
-          color: "var(--embed-accent)",
-          border:
-            "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
-        }
-      : tone === "danger"
-        ? {
-            background: "var(--embed-danger-fg)",
-            color: "white",
-            border: "1px solid var(--embed-danger-fg)",
-          }
-        : tone === "default"
-          ? {
-              background:
-                "color-mix(in srgb, var(--embed-neutral-fg) 7%, white)",
-              color: "var(--embed-neutral-fg)",
-              border:
-                "1px solid color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
-            }
-          : {
-              background: "var(--embed-accent)",
-              color: "white",
-              border: "1px solid var(--embed-accent)",
-            };
+    tone === "primary"
+      ? { fg: theme.primary, bg: theme.primaryBg, bd: theme.primaryBd }
+      : tone === "success"
+        ? { fg: theme.successFg, bg: theme.successBg, bd: theme.successBorder }
+        : tone === "warn"
+          ? { fg: theme.warnFg, bg: theme.warnBg, bd: theme.warnBorder }
+          : tone === "danger"
+            ? { fg: theme.dangerFg, bg: theme.dangerBg, bd: theme.dangerBorder }
+            : tone === "info"
+              ? { fg: theme.infoFg, bg: theme.infoBg, bd: theme.infoBorder }
+              : {
+                  fg: theme.neutralFg,
+                  bg: theme.neutralBg,
+                  bd: theme.neutralBorder,
+                };
 
   return (
-    href.startsWith("tel:") ? (
-      <a
-        href={href}
-        style={{
-          display: "block",
-          textAlign: "center",
-          borderRadius: 999,
-          padding: "12px 14px",
-          fontWeight: 800,
-          ...palette,
-        }}
-      >
-        {label}
-      </a>
-    ) : (
-      <Link
-        href={href}
-        style={{
-          display: "block",
-          textAlign: "center",
-          borderRadius: 999,
-          padding: "12px 14px",
-          fontWeight: 800,
-          ...palette,
-        }}
-      >
-        {label}
-      </Link>
-    )
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        width: "fit-content",
+        borderRadius: 999,
+        padding: "4px 10px",
+        fontSize: 11,
+        fontWeight: 700,
+        color: palette.fg,
+        background: palette.bg,
+        border: `1px solid ${palette.bd}`,
+      }}
+    >
+      {dot ? (
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            background: palette.fg,
+            flexShrink: 0,
+          }}
+        />
+      ) : null}
+      {children}
+    </span>
   );
 }
 
-type BannerTone =
-  | "primary"
-  | "success"
-  | "warn"
-  | "danger"
-  | "info"
-  | "neutral";
-
-function bannerPalette(
-  theme: ReturnType<typeof buildEmbedTheme>,
-  tone: BannerTone,
-) {
-  switch (tone) {
-    case "primary":
-      return { fg: theme.accent, bg: theme.accentSoft, bd: theme.accent };
-    case "success":
-      return {
-        fg: theme.successFg,
-        bg: theme.successBg,
-        bd: theme.successBorder,
-      };
-    case "warn":
-      return { fg: theme.warnFg, bg: theme.warnBg, bd: theme.warnBorder };
-    case "danger":
-      return { fg: theme.dangerFg, bg: theme.dangerBg, bd: theme.dangerBorder };
-    case "info":
-      return { fg: theme.infoFg, bg: theme.infoBg, bd: theme.infoBorder };
-    default:
-      return {
-        fg: theme.neutralFg,
-        bg: theme.neutralBg,
-        bd: theme.neutralBorder,
-      };
-  }
-}
-
-// Tone-coloured banner (canvas EBanner): tinted background + leading glyph,
-// so each state reads in its own colour instead of a flat white card.
-function EmbedBanner({
+function Banner({
   theme,
   tone,
   icon,
   children,
 }: {
   theme: ReturnType<typeof buildEmbedTheme>;
-  tone: BannerTone;
-  icon?: string;
+  tone: "primary" | "success" | "warn" | "danger" | "neutral";
+  icon: string;
   children: ReactNode;
 }) {
-  const p = bannerPalette(theme, tone);
+  const palette =
+    tone === "primary"
+      ? { fg: theme.primary, bg: theme.primaryBg, bd: theme.primaryBd }
+      : tone === "success"
+        ? { fg: theme.successFg, bg: theme.successBg, bd: theme.successBorder }
+        : tone === "warn"
+          ? { fg: theme.warnFg, bg: theme.warnBg, bd: theme.warnBorder }
+          : tone === "danger"
+            ? { fg: theme.dangerFg, bg: theme.dangerBg, bd: theme.dangerBorder }
+            : {
+                fg: theme.neutralFg,
+                bg: theme.neutralBg,
+                bd: theme.neutralBorder,
+              };
+
   return (
     <div
       style={{
         display: "flex",
+        alignItems: "flex-start",
         gap: 10,
         padding: "12px 14px",
         borderRadius: 14,
-        background: `color-mix(in srgb, ${p.bg} 78%, white)`,
-        border: `1px solid color-mix(in srgb, ${p.bd} 55%, transparent)`,
-        color: p.fg,
+        color: palette.fg,
+        background: palette.bg,
+        border: `1px solid ${palette.bd}`,
       }}
     >
-      {icon ? (
-        <span style={{ flexShrink: 0, marginTop: 1 }}>
-          <EmbedGlyph name={icon} size={16} stroke={2.2} />
-        </span>
-      ) : null}
-      <div
-        style={{
-          fontSize: 12.5,
-          lineHeight: 1.55,
-          color: "var(--embed-neutral-fg)",
-        }}
-      >
+      <Icon name={icon} size={16} />
+      <div style={{ fontSize: 12.5, lineHeight: 1.55, color: theme.ink2 }}>
         {children}
       </div>
     </div>
-  );
-}
-
-function IdentityState({ context }: { context: EmbedContext }) {
-  const theme = buildEmbedTheme(context.accent);
-  const { t } = useTranslation();
-  const handoffRows: Array<[string, string]> = [
-    [t("embed.field.signature"), "valid"],
-    [t("embed.field.identity"), embedResident.name],
-    [t("embed.field.unit"), embedResident.unit],
-  ];
-  const bodyByState = {
-    handoff: {
-      title: t("embed.state.handoff.title", {
-        name: context.strings.displayName,
-      }),
-      badge: t("embed.state.handoff.badge"),
-      tone: "success",
-      icon: "check",
-      banner: { tone: "primary" as const, icon: "bolt" },
-      footer: (
-        <ActionLink
-          href={buildHref(context, { screen: "book" })}
-          label={t("embed.field.confirmRide")}
-        />
-      ),
-      message: t("embed.message.handoff", { appName: context.strings.appName }),
-    },
-    reauth: {
-      title: t("embed.state.reauth.title"),
-      badge: t("embed.state.reauth.badge"),
-      tone: "warn",
-      icon: "clock",
-      banner: { tone: "warn" as const, icon: "shield" },
-      footer: (
-        <>
-          <ActionLink
-            href={buildHref(context, { state: "handoff" })}
-            label={t("embed.field.returnToEntry", {
-              appName: context.strings.appName,
-            })}
-          />
-          <ActionLink
-            href={buildHref(context, { state: "fallback" })}
-            label={t("embed.field.tryLater")}
-            tone="ghost"
-          />
-        </>
-      ),
-      message: t("embed.message.reauth", { appName: context.strings.appName }),
-    },
-    unsupported: {
-      title: t("embed.state.unsupported.title"),
-      badge: t("embed.state.unsupported.badge"),
-      tone: "danger",
-      icon: "ban",
-      banner: { tone: "danger" as const, icon: "ban" },
-      footer: (
-        <ActionLink
-          href={buildHref(context, { state: "fallback" })}
-          label={t("embed.field.openStandalone")}
-        />
-      ),
-      message: t("embed.message.unsupported"),
-    },
-    consent: {
-      title: t("embed.state.consent.title"),
-      badge: t("embed.state.consent.badge"),
-      tone: "info",
-      icon: "shield",
-      banner: { tone: "primary" as const, icon: "lock" },
-      footer: (
-        <>
-          <ActionLink
-            href={buildHref(context, { state: "handoff", screen: "book" })}
-            label={t("embed.field.agree")}
-          />
-          <ActionLink
-            href={buildHref(context, { state: "fallback" })}
-            label={t("embed.field.notNow")}
-            tone="ghost"
-          />
-        </>
-      ),
-      message: t("embed.message.consent"),
-    },
-    fallback: {
-      title: t("embed.state.fallback.title"),
-      badge: t("embed.state.fallback.badge"),
-      tone: "warn",
-      icon: "ext",
-      banner: { tone: "neutral" as const, icon: "ext" },
-      footer: (
-        <>
-          <ActionLink
-            href={buildHref(context, { state: "fallback", screen: "receipt" })}
-            label={t("embed.field.openStandalone")}
-          />
-          <ActionLink
-            href={buildHref(context, { state: "handoff" })}
-            label={t("embed.field.returnToApp")}
-            tone="ghost"
-          />
-        </>
-      ),
-      message: t("embed.message.fallback"),
-    },
-  } as const;
-
-  const current = bodyByState[context.state];
-  const tone = toneStyle(theme, current.tone);
-  const isHandoff = context.state === "handoff";
-
-  // canvas PE_Reauth / PE_Unsupported show a status card with failed (x) token
-  // rows alongside the prose. Render the matching detection rows per state.
-  const detectionByState: Partial<
-    Record<EmbedState, { title: string; rows: Array<[string, string]> }>
-  > = {
-    reauth: {
-      title: t("embed.token.connState"),
-      rows: [
-        [t("embed.token.partnerSession"), t("embed.token.partnerSessionValue")],
-        [t("embed.token.handoffToken"), t("embed.token.handoffTokenValue")],
-      ],
-    },
-    unsupported: {
-      title: t("embed.token.detection"),
-      rows: [
-        [t("embed.token.originHost"), t("embed.token.originHostValue")],
-        [
-          t("embed.token.partnerSignature"),
-          t("embed.token.partnerSignatureValue"),
-        ],
-      ],
-    },
-  };
-  const detection = detectionByState[context.state];
-
-  return (
-    <EmbedShell context={context} footer={current.footer}>
-      {/* hero: circular icon tile + title + posture pill (canvas PeHero) */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 10,
-          padding: "10px 0 2px",
-          textAlign: "center",
-        }}
-      >
-        <div
-          style={{
-            width: 58,
-            height: 58,
-            borderRadius: 29,
-            background: tone.background,
-            color: tone.color,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <EmbedGlyph name={current.icon} size={28} stroke={2.2} />
-        </div>
-        <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1.25 }}>
-          {current.title}
-        </div>
-        <div
-          style={{
-            ...tone,
-            border: `1px solid ${tone.borderColor}`,
-            borderRadius: 999,
-            padding: "5px 12px",
-            fontSize: 11,
-            fontWeight: 800,
-          }}
-        >
-          {current.badge}
-        </div>
-      </div>
-
-      {isHandoff ? (
-        <Card
-          title={t("embed.card.handoffSummary")}
-          subtitle={t("embed.card.handoffSubtitle")}
-        >
-          {handoffRows.map(([label, value]) => (
-            <TokenRow
-              key={label}
-              ok
-              theme={theme}
-              label={label}
-              value={value}
-            />
-          ))}
-          <TokenRow
-            theme={theme}
-            ok
-            label={t("embed.field.passengerId")}
-            value={context.session?.drtsPassengerId || t("common.none")}
-          />
-        </Card>
-      ) : null}
-
-      <EmbedBanner
-        theme={theme}
-        tone={current.banner.tone}
-        icon={current.banner.icon}
-      >
-        {current.message}
-      </EmbedBanner>
-
-      {detection ? (
-        <Card title={detection.title}>
-          {detection.rows.map(([label, value]) => (
-            <TokenRow
-              key={label}
-              ok={false}
-              theme={theme}
-              label={label}
-              value={value}
-            />
-          ))}
-        </Card>
-      ) : null}
-    </EmbedShell>
   );
 }
 
@@ -731,11 +334,13 @@ function TokenRow({
   theme,
   ok,
   label,
+  code,
   value,
 }: {
   theme: ReturnType<typeof buildEmbedTheme>;
   ok: boolean;
   label: string;
+  code?: string;
   value: string;
 }) {
   return (
@@ -744,96 +349,156 @@ function TokenRow({
         display: "flex",
         alignItems: "center",
         gap: 10,
-        fontSize: 13,
+        padding: "9px 0",
+        borderBottom: `1px solid ${theme.lineSoft}`,
       }}
     >
       <span
         style={{
           width: 19,
           height: 19,
-          borderRadius: 10,
+          borderRadius: 999,
           flexShrink: 0,
-          display: "flex",
+          display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          background: ok ? theme.successBg : theme.dangerBg,
           color: ok ? theme.successFg : theme.dangerFg,
+          background: ok ? theme.successBg : theme.dangerBg,
         }}
       >
-        <EmbedGlyph name={ok ? "check" : "x"} size={11} stroke={3} />
+        <Icon name={ok ? "check" : "x"} size={11} stroke={3} />
       </span>
-      <span style={{ flex: 1 }}>{label}</span>
-      <strong style={{ fontFamily: EMBED_MONO, fontSize: 12 }}>{value}</strong>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 500, color: theme.ink }}>
+          {label}
+        </div>
+        {code ? (
+          <div style={{ fontSize: 9.5, color: theme.faint, fontFamily: theme.mono }}>
+            {code}
+          </div>
+        ) : null}
+      </div>
+      <span
+        style={{
+          fontSize: 12,
+          color: ok ? theme.ink : theme.dangerFg,
+          fontFamily: theme.mono,
+          textAlign: "right",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-type TripFallbackScreen = keyof typeof embedTripFallbackStates;
-
-function isTripFallbackScreen(screen: string): screen is TripFallbackScreen {
-  return Object.prototype.hasOwnProperty.call(embedTripFallbackStates, screen);
-}
-
-function toPassengerMessageKey(code: string, slot: "title" | "body") {
-  return `${code}.${slot}`;
-}
-
-function toPhoneHref(phone: string) {
-  const normalized = phone.replace(/[^\d+]/g, "");
-  return `tel:${normalized || phone}`;
-}
-
-function FlowNav({ context }: { context: EmbedContext }) {
-  const { t } = useTranslation();
-  const screens: Array<[string, string]> = [
-    ["book", t("embed.nav.book")],
-    ["trip", t("embed.nav.trip")],
-    ["trips", t("embed.nav.trips")],
-    ["receipt", t("embed.nav.receipt")],
-    ["completed", t("embed.nav.completed")],
-    ["cancelled", t("embed.nav.cancelled")],
-  ];
-  const fallbackScreens = EMBED_TRIP_FALLBACK_SCREENS.map((screen) => [
-    screen,
-    t(`embed.nav.${screen}`),
-  ]) as Array<[string, string]>;
-  const showFallbackNav =
-    context.screen === "trip" || isTripFallbackScreen(context.screen);
-
-  const renderChip = ([screen, label]: [string, string]) => (
-    <Link
-      key={screen}
-      href={buildHref(context, { state: "handoff", screen })}
+function DetailRow({
+  theme,
+  label,
+  value,
+  mono = false,
+  strong = false,
+  last = false,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  label: string;
+  value: string;
+  mono?: boolean;
+  strong?: boolean;
+  last?: boolean;
+}) {
+  return (
+    <div
       style={{
-        borderRadius: 999,
-        padding: "6px 10px",
-        fontSize: 11,
-        fontWeight: 700,
-        border:
-          "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
-        background:
-          context.screen === screen ? "var(--embed-accent-soft)" : "white",
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "9px 0",
+        borderBottom: last ? "none" : `1px solid ${theme.lineSoft}`,
       }}
     >
-      {label}
-    </Link>
-  );
-
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {screens.map(renderChip)}
-      </div>
-      {showFallbackNav ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {fallbackScreens.map(renderChip)}
-        </div>
-      ) : null}
+      <span style={{ fontSize: 12.5, color: theme.muted }}>{label}</span>
+      <span
+        style={{
+          fontSize: 12.5,
+          color: theme.ink,
+          fontWeight: strong ? 700 : 500,
+          fontFamily: mono ? theme.mono : theme.sans,
+          textAlign: "right",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-// circular tone-coloured icon tile + title + optional posture pill (canvas PeHero)
+function Field({
+  theme,
+  label,
+  icon,
+  value,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  label: string;
+  icon: string;
+  value: string;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <div style={{ fontSize: 11.5, color: theme.muted, fontWeight: 600 }}>
+        {label}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minHeight: 42,
+          borderRadius: 12,
+          padding: "0 12px",
+          background: theme.surface,
+          border: `1px solid ${theme.line}`,
+          color: theme.ink2,
+        }}
+      >
+        <Icon name={icon} size={15} />
+        <span style={{ fontSize: 14, color: theme.ink }}>{value}</span>
+      </div>
+    </div>
+  );
+}
+
+function BrandMark({
+  theme,
+  entryName,
+  size = 40,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  entryName: string;
+  size?: number;
+}) {
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 3.2,
+        background: `linear-gradient(150deg, ${theme.primary}, ${theme.primaryHi})`,
+        color: "#fff",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: size * 0.42,
+        fontWeight: 800,
+        flexShrink: 0,
+      }}
+    >
+      {entryName.slice(0, 1)}
+    </span>
+  );
+}
+
 function StateHero({
   theme,
   tone,
@@ -842,12 +507,20 @@ function StateHero({
   posture,
 }: {
   theme: ReturnType<typeof buildEmbedTheme>;
-  tone: string;
+  tone: "success" | "warn" | "danger" | "neutral";
   icon: string;
-  title: string;
-  posture?: string;
+  title: ReactNode;
+  posture?: ReactNode;
 }) {
-  const t = toneStyle(theme, tone);
+  const palette =
+    tone === "success"
+      ? { fg: theme.successFg, bg: theme.successBg, pill: "success" as const }
+      : tone === "warn"
+        ? { fg: theme.warnFg, bg: theme.warnBg, pill: "warn" as const }
+        : tone === "danger"
+          ? { fg: theme.dangerFg, bg: theme.dangerBg, pill: "danger" as const }
+          : { fg: theme.neutralFg, bg: theme.neutralBg, pill: "neutral" as const };
+
   return (
     <div
       style={{
@@ -855,7 +528,7 @@ function StateHero({
         flexDirection: "column",
         alignItems: "center",
         gap: 9,
-        padding: "10px 0 2px",
+        padding: "14px 0 4px",
         textAlign: "center",
       }}
     >
@@ -864,109 +537,1007 @@ function StateHero({
           width: 58,
           height: 58,
           borderRadius: 29,
-          background: t.background,
-          color: t.color,
-          display: "flex",
+          background: palette.bg,
+          color: palette.fg,
+          display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
         }}
       >
-        <EmbedGlyph name={icon} size={28} stroke={2.2} />
+        <Icon name={icon} size={28} />
       </div>
-      <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.25 }}>
+      <div style={{ fontSize: 16.5, fontWeight: 800, color: theme.ink }}>
         {title}
       </div>
       {posture ? (
-        <div
-          style={{
-            ...t,
-            border: `1px solid ${t.borderColor}`,
-            borderRadius: 999,
-            padding: "4px 11px",
-            fontSize: 11,
-            fontWeight: 800,
-          }}
-        >
+        <Pill theme={theme} tone={palette.pill} dot>
           {posture}
-        </div>
+        </Pill>
       ) : null}
     </div>
   );
 }
 
-const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
-  denied: { tone: "danger", icon: "ban" },
-  ineligible: { tone: "warn", icon: "ban" },
-  nosupply: { tone: "warn", icon: "clock" },
-  degraded: { tone: "warn", icon: "info" },
+function AppShell({
+  context,
+  badgeTone,
+  children,
+  footer,
+}: {
+  context: EmbedContext;
+  badgeTone?: "live" | "warn" | "err" | "neutral";
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const theme = buildEmbedTheme(context.accent);
+  const dot =
+    badgeTone === "warn"
+      ? theme.warnFg
+      : badgeTone === "err"
+        ? theme.dangerFg
+        : badgeTone === "neutral"
+          ? theme.neutralFg
+          : statusDotColor(theme, context.state);
+
+  return (
+    <main
+      style={{
+        minHeight: "100dvh",
+        background: theme.pageBg,
+        display: "flex",
+        justifyContent: "center",
+        padding: "0 0 24px",
+        fontFamily: theme.sans,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 392,
+          minHeight: 812,
+          background: theme.bg,
+          color: theme.ink,
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: theme.shadow,
+        }}
+      >
+        <div
+          style={{
+            height: 44,
+            background: theme.primaryHi,
+            color: "#fff",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "space-between",
+            padding: "0 22px 6px",
+            fontSize: 12.5,
+            fontWeight: 600,
+            flexShrink: 0,
+          }}
+        >
+          <span>9:41</span>
+          <span style={{ display: "inline-flex", gap: 5, alignItems: "center", opacity: 0.9 }}>
+            <Icon name="bolt" size={12} />
+            <Icon name="shield" size={12} />
+          </span>
+        </div>
+
+        <div
+          style={{
+            background: theme.primaryHi,
+            color: "#fff",
+            padding: "4px 12px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexShrink: 0,
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 15,
+              background: "rgba(255,255,255,.16)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name="chevL" size={16} />
+          </span>
+          <div style={{ flex: 1, lineHeight: 1.2 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 700 }}>社區叫車</div>
+            <div style={{ fontSize: 10, opacity: 0.78 }}>
+              社區 App · {context.strings.displayName}
+            </div>
+          </div>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 9.5,
+              fontFamily: theme.mono,
+              opacity: 0.78,
+              background: "rgba(255,255,255,.14)",
+              padding: "4px 8px",
+              borderRadius: 999,
+              maxWidth: 150,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            <Icon name="lock" size={10} />
+            {getEntryHost(context.entry)}
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 14px",
+            background: theme.surface,
+            borderBottom: `1px solid ${theme.line}`,
+            fontSize: 10.5,
+            color: theme.muted,
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 999,
+              background: dot,
+              flexShrink: 0,
+            }}
+          />
+          <span style={{ fontFamily: theme.mono }}>webview</span>
+          <span style={{ color: theme.faint }}>
+            · embedded · /embed/{context.entry.entrySlug}
+          </span>
+        </div>
+
+        <div style={{ flex: 1, display: "grid", gap: 13, padding: 16 }}>{children}</div>
+
+        {footer ? (
+          <div
+            style={{
+              display: "grid",
+              gap: 9,
+              padding: 14,
+              background: theme.surface,
+              borderTop: `1px solid ${theme.line}`,
+              flexShrink: 0,
+            }}
+          >
+            {footer}
+          </div>
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
+function HandoffScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  return (
+    <AppShell
+      context={context}
+      badgeTone="live"
+      footer={
+        <ActionButton
+          href={buildHref(context, { screen: "book", state: "handoff" })}
+          label="開始叫車"
+          theme={theme}
+          variant="primary"
+          iconRight="arrow"
+        />
+      }
+    >
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 0 2px",
+        }}
+      >
+        <BrandMark theme={theme} entryName={context.strings.displayName} size={56} />
+        <div style={{ fontSize: 16.5, fontWeight: 800, textAlign: "center" }}>
+          以 {context.strings.displayName} 身分
+          <br />
+          為您準備叫車
+        </div>
+        <Pill theme={theme} tone="success" dot>
+          handoff · 已交接
+        </Pill>
+      </div>
+
+      <Card
+        theme={theme}
+        title="身分由社區 App 帶入"
+        subtitle="signed hand-off token"
+      >
+        <TokenRow theme={theme} ok label="社區簽章有效" code="partner_signature" value="valid" />
+        <TokenRow theme={theme} ok label="住戶身分已解析" code="resident_resolved" value={embedResident.name} />
+        <TokenRow theme={theme} ok label="社區 / 戶別" code="community_unit" value={embedResident.unit} />
+        <DetailRow theme={theme} label="參照" value={embedResident.ref} mono strong last />
+      </Card>
+
+      <Banner theme={theme} tone="primary" icon="bolt">
+        免再登入 · 由社區 App 安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+      </Banner>
+    </AppShell>
+  );
+}
+
+function ReauthScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  return (
+    <AppShell
+      context={context}
+      badgeTone="warn"
+      footer={
+        <>
+          <ActionButton
+            href={buildHref(context, { state: "handoff" })}
+            label="回社區 App 重新進入"
+            theme={theme}
+          />
+          <ActionButton
+            href={buildHref(context, { state: "fallback" })}
+            label="稍後再試"
+            theme={theme}
+            variant="ghost"
+          />
+        </>
+      }
+    >
+      <StateHero
+        theme={theme}
+        tone="warn"
+        icon="clock"
+        title="登入狀態已逾時"
+        posture="reauth_required"
+      />
+      <Card theme={theme} title="連線狀態">
+        <TokenRow theme={theme} ok={false} label="社區工作階段過期" code="partner_session" value="expired" />
+        <TokenRow theme={theme} ok={false} label="交付權杖逾時" code="handoff_token" value="stale" />
+      </Card>
+      <Banner theme={theme} tone="warn" icon="shield">
+        為保護您的住戶帳號，請回到 <b>{context.strings.displayName}</b> 重新進入「叫車」。此頁不會要求輸入帳號或密碼。
+      </Banner>
+    </AppShell>
+  );
+}
+
+function UnsupportedScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  return (
+    <AppShell
+      context={context}
+      badgeTone="err"
+      footer={
+        <ActionButton
+          href={buildHref(context, { state: "fallback" })}
+          label="前往獨立叫車網站"
+          theme={theme}
+          iconRight="ext"
+        />
+      }
+    >
+      <StateHero
+        theme={theme}
+        tone="danger"
+        icon="ban"
+        title="無法在此環境開啟"
+        posture="unsupported_host · 已封鎖"
+      />
+      <Card theme={theme} title="原因">
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
+          叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。
+        </div>
+      </Card>
+      <Card theme={theme} title="偵測結果">
+        <TokenRow theme={theme} ok={false} label="來源宿主未授權" code="origin_host" value="未授權" />
+        <TokenRow theme={theme} ok={false} label="社區簽章" code="partner_signature" value="缺少" />
+      </Card>
+    </AppShell>
+  );
+}
+
+function ConsentScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  const scopes = [
+    ["建立與管理叫車行程", "為您下單、查詢與取消行程", "trip.manage"],
+    ["使用必要個資", "上下車地址、聯絡電話以完成媒合與聯繫", "pii.trip"],
+    ["行程綁定住戶身分", "讓您重開 App 後仍能找回進行中行程與收據", "identity.bind"],
+  ] as const;
+
+  return (
+    <AppShell
+      context={context}
+      badgeTone="live"
+      footer={
+        <>
+          <ActionButton
+            href={buildHref(context, { state: "handoff", screen: "book" })}
+            label="同意並開始"
+            theme={theme}
+          />
+          <ActionButton
+            href={buildHref(context, { state: "fallback" })}
+            label="暫不使用"
+            theme={theme}
+            variant="ghost"
+          />
+        </>
+      }
+    >
+      <div style={{ display: "grid", gap: 4, padding: "6px 0 2px" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: theme.ink }}>
+          授權使用叫車服務
+        </div>
+        <div style={{ fontSize: 12.5, color: theme.muted }}>
+          首次使用 · 請確認以下同意範圍 · consent_required
+        </div>
+      </div>
+      <Card theme={theme}>
+        {scopes.map(([title, body, code], index) => (
+          <div
+            key={code}
+            style={{
+              display: "flex",
+              gap: 11,
+              padding: "11px 0",
+              borderBottom: index < scopes.length - 1 ? `1px solid ${theme.lineSoft}` : "none",
+            }}
+          >
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 5,
+                background: theme.primary,
+                color: "#fff",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginTop: 1,
+              }}
+            >
+              <Icon name="check" size={12} stroke={3} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{title}</span>
+                <span style={{ fontSize: 9.5, color: theme.faint, fontFamily: theme.mono }}>
+                  {code}
+                </span>
+              </div>
+              <div style={{ marginTop: 2, fontSize: 11.5, color: theme.muted, lineHeight: 1.45 }}>
+                {body}
+              </div>
+            </div>
+          </div>
+        ))}
+      </Card>
+      <Banner theme={theme} tone="primary" icon="lock">
+        由智慧運輸科技 DRTS 提供接送 · 個資僅用於完成本次行程，可於社區 App 設定撤回授權。
+      </Banner>
+    </AppShell>
+  );
+}
+
+function FallbackScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  return (
+    <AppShell
+      context={context}
+      badgeTone="neutral"
+      footer={
+        <>
+          <ActionButton
+            href={buildHref(context, { state: "fallback" })}
+            label="前往獨立叫車網站"
+            theme={theme}
+            iconRight="ext"
+          />
+          <ActionButton
+            href={buildHref(context, { state: "handoff" })}
+            label="回社區 App"
+            theme={theme}
+            variant="ghost"
+          />
+        </>
+      }
+    >
+      <StateHero
+        theme={theme}
+        tone="neutral"
+        icon="ext"
+        title="內嵌服務暫時無法使用"
+        posture="fallback_to_web · 改用網站"
+      />
+      <Card theme={theme} title="接下來">
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
+          目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+        </div>
+      </Card>
+      <Card theme={theme}>
+        <DetailRow theme={theme} label="獨立網站" value="ride.drts.com.tw" mono />
+        <DetailRow theme={theme} label="驗證方式" value="手機簡訊 OTP" />
+        <DetailRow theme={theme} label="行程資料" value="重開後仍可找回" last />
+      </Card>
+    </AppShell>
+  );
+}
+
+function BookScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  return (
+    <AppShell
+      context={context}
+      badgeTone="live"
+      footer={
+        <>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              fontSize: 12,
+            }}
+          >
+            <span style={{ color: theme.muted }}>預估車資</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: theme.ink, fontFamily: theme.mono }}>
+              約 NT$ 290
+            </span>
+          </div>
+          <ActionButton
+            href={buildHref(context, { screen: "trip", state: "handoff" })}
+            label="確認叫車"
+            theme={theme}
+            iconRight="arrow"
+          />
+        </>
+      }
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          padding: "10px 12px",
+          background: theme.surface,
+          border: `1px solid ${theme.line}`,
+          borderRadius: 12,
+        }}
+      >
+        <BrandMark theme={theme} entryName={context.strings.displayName} size={34} />
+        <div style={{ flex: 1, lineHeight: 1.25 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+            {embedResident.name} · {embedResident.unit}
+          </div>
+          <div style={{ fontSize: 11, color: theme.muted }}>
+            {context.strings.displayName}
+          </div>
+        </div>
+        <Pill theme={theme} tone="success" dot>
+          已驗證
+        </Pill>
+      </div>
+
+      <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
+        <div style={{ display: "grid", gap: 10 }}>
+          <Field theme={theme} label="上車地點" icon="pin" value={embedTrip.from} />
+          <Field theme={theme} label="下車地點" icon="pin" value={embedTrip.to} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Field theme={theme} label="用車時間" icon="clock" value="現在出發" />
+            <Field theme={theme} label="乘客人數" icon="user" value="1 人" />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 11 }}>
+          {embedSavedPlaces.map((place) => (
+            <span
+              key={place.label}
+              style={{
+                fontSize: 11.5,
+                color: theme.muted,
+                background: theme.surfaceLo,
+                border: `1px solid ${theme.line}`,
+                padding: "4px 9px",
+                borderRadius: 999,
+              }}
+            >
+              {place.label}
+            </span>
+          ))}
+        </div>
+      </Card>
+
+      <Card theme={theme} title="車種" subtitle="owned mobility">
+        <div style={{ display: "grid", gap: 8 }}>
+          {embedVehicles.map((vehicle, index) => {
+            const selected = index === 1;
+            return (
+              <div
+                key={vehicle.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 11,
+                  padding: "10px 12px",
+                  borderRadius: 11,
+                  border: `1px solid ${selected ? theme.primary : theme.line}`,
+                  background: selected ? theme.primaryBg : theme.surface,
+                }}
+              >
+                <span style={{ color: selected ? theme.primary : theme.muted }}>
+                  <Icon name="car" size={20} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{vehicle.name}</div>
+                  <div style={{ fontSize: 11, color: theme.muted }}>{vehicle.sub}</div>
+                </div>
+                {selected ? <Icon name="check" size={17} style={{ color: theme.primary }} /> : null}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </AppShell>
+  );
+}
+
+const negativeScreens = {
+  denied: {
+    icon: "x",
+    tone: "danger" as const,
+    title: "叫車未能建立",
+    posture: "denied",
+    body: "此次叫車請求未通過。請確認上下車地點是否在服務範圍內，或稍後再試。",
+    primary: "重新叫車",
+    secondary: "聯絡社區客服",
+  },
+  ineligible: {
+    icon: "ban",
+    tone: "warn" as const,
+    title: "目前不符叫車資格",
+    posture: "ineligible",
+    body: "您的住戶身分目前未開通叫車服務，可能因社區方案尚未生效。請洽社區管理中心確認。",
+    primary: "洽社區管理中心",
+    secondary: "返回",
+  },
+  nosupply: {
+    icon: "car",
+    tone: "warn" as const,
+    title: "附近暫無可派車輛",
+    posture: "no_supply",
+    body: "此時段與地點暫無可派車。請稍後重試或改約時間，系統也會嘗試自動為您補派。",
+    primary: "稍後重試",
+    secondary: "改約時間",
+  },
+  degraded: {
+    icon: "alert",
+    tone: "warn" as const,
+    title: "服務暫時不穩定",
+    posture: "degraded",
+    body: "叫車服務目前回應較慢。您的請求已安全受理，恢復後會自動繼續，無需重複送出。",
+    primary: "重試",
+    secondary: "查看狀態",
+  },
 };
 
-function PassengerMessageSlot({
-  code,
-  body,
+function NegativeScreen({
+  context,
+  kind,
 }: {
-  code: string;
-  body: string;
+  context: EmbedContext;
+  kind: keyof typeof negativeScreens;
 }) {
-  const { t } = useTranslation();
+  const theme = buildEmbedTheme(context.accent);
+  const screen = negativeScreens[kind];
+  return (
+    <AppShell
+      context={context}
+      badgeTone={screen.tone === "danger" ? "err" : "warn"}
+      footer={
+        <>
+          <ActionButton
+            href={buildHref(context, { screen: "book", state: "handoff" })}
+            label={screen.primary}
+            theme={theme}
+          />
+          <ActionButton
+            href={toPhoneHref(context.strings.supportPhone)}
+            label={screen.secondary}
+            theme={theme}
+            variant="ghost"
+          />
+        </>
+      }
+    >
+      <StateHero
+        theme={theme}
+        tone={screen.tone}
+        icon={screen.icon}
+        title={screen.title}
+        posture={screen.posture}
+      />
+      <Card theme={theme}>
+        <div style={{ fontSize: 13, lineHeight: 1.65, color: theme.ink2 }}>
+          {screen.body}
+        </div>
+      </Card>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+          fontSize: 11.5,
+          color: theme.muted,
+        }}
+      >
+        <Icon name="phone" size={13} />
+        社區叫車客服 {context.strings.supportPhone}
+      </div>
+    </AppShell>
+  );
+}
+
+const tripStateLabel: Record<string, { zh: string; tone: "warn" | "primary" | "info" | "success" | "neutral" }> = {
+  matching: { zh: "媒合中", tone: "warn" },
+  assigned: { zh: "已派車", tone: "primary" },
+  enroute: { zh: "前往上車", tone: "info" },
+  inprogress: { zh: "行程中", tone: "info" },
+  completed: { zh: "已完成", tone: "success" },
+  cancelled: { zh: "已取消", tone: "neutral" },
+};
+
+function TripScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  const state =
+    tripStateLabel[embedTrip.state] || {
+      zh: "媒合中",
+      tone: "warn" as const,
+    };
+  return (
+    <AppShell
+      context={context}
+      badgeTone="live"
+      footer={
+        <>
+          <ActionButton
+            href={toPhoneHref(context.strings.supportPhone)}
+            label="聯絡司機"
+            theme={theme}
+            variant="default"
+            icon="phone"
+          />
+          <ActionButton
+            href={buildHref(context, { screen: "cancelled", state: "handoff" })}
+            label={`取消行程 · 剩 ${embedTrip.cancelWindowMin} 分鐘可免費取消`}
+            theme={theme}
+            variant="danger"
+          />
+        </>
+      }
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 11px",
+          background: theme.primaryBg,
+          border: `1px solid ${theme.primaryBd}`,
+          borderRadius: 10,
+        }}
+      >
+        <Icon name="shield" size={14} style={{ color: theme.primary, flexShrink: 0 }} />
+        <span style={{ fontSize: 11.5, color: theme.ink2, lineHeight: 1.4 }}>
+          此行程已綁定您的身分 · <b>重開 App 仍可找回</b>
+        </span>
+      </div>
+
+      <Card theme={theme} accent={theme.primary}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <Pill theme={theme} tone={state.tone} dot>
+            {state.zh}
+          </Pill>
+          <span style={{ fontSize: 11, color: theme.faint, fontFamily: theme.mono }}>
+            {embedTrip.id}
+          </span>
+        </div>
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <div style={{ fontSize: 12, color: theme.muted }}>上車 / 下車</div>
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{embedTrip.from}</div>
+            <div style={{ fontSize: 12.5, color: theme.muted }}>{embedTrip.to}</div>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 10,
+              paddingTop: 4,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 11, color: theme.muted }}>ETA</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: theme.primary, fontFamily: theme.mono }}>
+                {embedTrip.etaMin}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: theme.muted }}>車種</div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>{embedTrip.vehicle}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: theme.muted }}>時間</div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>{embedTrip.win}</div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card theme={theme} title="車輛與司機">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 14,
+              background: theme.primaryBg,
+              color: theme.primary,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name="car" size={22} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{embedTrip.driver}</div>
+            <div style={{ fontSize: 11.5, color: theme.muted }}>
+              {embedTrip.plate} · {embedTrip.vehicle}
+            </div>
+          </div>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 12,
+              fontWeight: 700,
+              color: theme.warnFg,
+            }}
+          >
+            <Icon name="star" size={12} />
+            {embedTrip.rating}
+          </div>
+        </div>
+      </Card>
+    </AppShell>
+  );
+}
+
+function TripsScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  return (
+    <AppShell context={context} badgeTone="live">
+      <Card theme={theme} title="行程歷史" subtitle="最近叫車紀錄">
+        {embedTripHistory.map((trip, index) => {
+          const tripState =
+            tripStateLabel[trip.state] || {
+              zh: trip.state,
+              tone: "neutral" as const,
+            };
+          const tone =
+            trip.state === "completed"
+              ? "success"
+              : trip.state === "cancelled"
+                ? "neutral"
+                : "info";
+          return (
+            <div
+              key={trip.id}
+              style={{
+                display: "grid",
+                gap: 6,
+                padding: "10px 0",
+                borderBottom: index < embedTripHistory.length - 1 ? `1px solid ${theme.lineSoft}` : "none",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700 }}>{trip.id}</span>
+                <Pill theme={theme} tone={tone}>
+                  {tripState.zh}
+                </Pill>
+              </div>
+              <div style={{ fontSize: 11.5, color: theme.muted }}>{trip.date}</div>
+              <div style={{ fontSize: 12.5, color: theme.ink2 }}>
+                {trip.from} → {trip.to}
+              </div>
+              <div style={{ fontSize: 12, color: theme.ink, fontFamily: theme.mono }}>{trip.fare}</div>
+            </div>
+          );
+        })}
+      </Card>
+    </AppShell>
+  );
+}
+
+function ReceiptScreen({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  return (
+    <AppShell
+      context={context}
+      badgeTone="live"
+      footer={
+        <ActionButton
+          href={buildHref(context, { screen: "trips", state: "handoff" })}
+          label="查看歷史行程"
+          theme={theme}
+        />
+      }
+    >
+      <Card theme={theme} title="收據（PII 遮罩）" subtitle={embedReceipt.id}>
+        <DetailRow theme={theme} label="訂單編號" value={embedReceipt.orderId} mono />
+        <DetailRow theme={theme} label="完成日期" value={`${embedReceipt.date} · ${embedReceipt.completedAt}`} />
+        <DetailRow theme={theme} label="乘客" value={`${embedReceipt.passenger} · ${embedReceipt.maskedPhone}`} />
+        <DetailRow theme={theme} label="路線" value={`${embedReceipt.from} → ${embedReceipt.to}`} />
+        <DetailRow theme={theme} label="車輛" value={`${embedReceipt.vehicle} · ${embedReceipt.plate}`} />
+        <DetailRow theme={theme} label="付款方式" value={embedReceipt.payment} />
+        <DetailRow theme={theme} label="通路" value={embedReceipt.channel} last />
+      </Card>
+      <Card theme={theme} title="費用明細">
+        <DetailRow theme={theme} label="起跳" value={embedReceipt.fareBase} />
+        <DetailRow theme={theme} label="里程" value={embedReceipt.fareDistance} />
+        <DetailRow theme={theme} label="時間" value={embedReceipt.fareTime} />
+        <DetailRow theme={theme} label="總計" value={embedReceipt.total} strong mono last />
+      </Card>
+    </AppShell>
+  );
+}
+
+function OutcomeScreen({
+  context,
+  kind,
+}: {
+  context: EmbedContext;
+  kind: "completed" | "cancelled";
+}) {
+  const theme = buildEmbedTheme(context.accent);
+  const completed = kind === "completed";
+  return (
+    <AppShell
+      context={context}
+      badgeTone={completed ? "live" : "neutral"}
+      footer={
+        completed ? (
+          <ActionButton
+            href={buildHref(context, { screen: "receipt", state: "handoff" })}
+            label="查看收據"
+            theme={theme}
+          />
+        ) : (
+          <ActionButton
+            href={buildHref(context, { screen: "book", state: "handoff" })}
+            label="再次叫車"
+            theme={theme}
+          />
+        )
+      }
+    >
+      <StateHero
+        theme={theme}
+        tone={completed ? "success" : "neutral"}
+        icon={completed ? "check" : "x"}
+        title={completed ? "行程已完成" : "行程已取消"}
+        posture={completed ? "completed" : "cancelled"}
+      />
+      <Banner theme={theme} tone={completed ? "success" : "neutral"} icon={completed ? "check" : "x"}>
+        {completed
+          ? "已完成本次接送。您可查看收據與費用明細，必要時於歷史紀錄中再次查找。"
+          : "此行程已取消。若仍需用車，您可重新建立叫車請求。"}
+      </Banner>
+      {completed ? (
+        <Card theme={theme} title="本次行程">
+          <DetailRow theme={theme} label="行程編號" value={embedReceipt.id} mono />
+          <DetailRow theme={theme} label="司機" value={embedReceipt.driver} />
+          <DetailRow theme={theme} label="總計" value={embedReceipt.total} strong mono last />
+        </Card>
+      ) : null}
+    </AppShell>
+  );
+}
+
+function MessageSlot({
+  theme,
+  code,
+  sample,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  code: string;
+  sample: string;
+}) {
   return (
     <div
       style={{
         position: "relative",
-        padding: "12px 14px",
-        borderRadius: 14,
-        background:
-          "color-mix(in srgb, var(--embed-neutral-fg) 4%, var(--embed-neutral-bg))",
-        border:
-          "1px dashed color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
+        padding: "11px 13px",
+        borderRadius: 10,
+        background: theme.surfaceLo,
+        border: `1px dashed ${theme.line}`,
       }}
     >
       <div
         style={{
           position: "absolute",
           top: -8,
-          left: 12,
-          fontSize: 9.5,
-          fontFamily: EMBED_MONO,
-          fontWeight: 700,
-          color: "var(--embed-neutral-fg)",
-          background: "white",
-          padding: "0 6px",
+          left: 10,
+          fontSize: 9,
+          fontWeight: 600,
+          fontFamily: theme.mono,
+          color: theme.muted,
+          background: theme.surface,
+          padding: "0 5px",
           borderRadius: 4,
         }}
       >
-        {t("embed.field.messageCodeLabel")} · {code}
+        messageCode · {code}
       </div>
-      <div style={{ fontSize: 13, lineHeight: 1.6, marginTop: 2 }}>{body}</div>
+      <div style={{ marginTop: 2, fontSize: 13, lineHeight: 1.55, color: theme.ink2 }}>
+        {sample}
+      </div>
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          marginTop: 8,
-          fontSize: 10.5,
-          color: "var(--embed-neutral-fg)",
+          gap: 4,
+          marginTop: 6,
+          fontSize: 10,
+          color: theme.faint,
         }}
       >
-        <EmbedGlyph name="info" size={11} />
-        <span>{t("embed.field.messageCodeHint")}</span>
+        <Icon name="info" size={11} />
+        文案由後端 messageCode 渲染 · 此為示意
       </div>
     </div>
   );
 }
 
 function FallbackProgressRail({
+  theme,
   stage,
 }: {
+  theme: ReturnType<typeof buildEmbedTheme>;
   stage: (typeof EMBED_TRIP_FALLBACK_PROGRESS)[number];
 }) {
-  const { t } = useTranslation();
   const currentIndex = EMBED_TRIP_FALLBACK_PROGRESS.indexOf(stage);
 
   return (
     <div style={{ display: "flex", alignItems: "flex-start" }}>
       {EMBED_TRIP_FALLBACK_PROGRESS.map((item, index) => {
         const done = index <= currentIndex;
+        const label =
+          item === "vehicle_change_in_progress"
+            ? "重新安排車輛"
+            : item === "human_fallback_assigned"
+              ? "新車已指派"
+              : "行程繼續";
+
         return (
           <div
             key={item}
@@ -983,14 +1554,11 @@ function FallbackProgressRail({
               <span
                 style={{
                   position: "absolute",
-                  top: 11,
+                  top: 12,
                   left: "50%",
                   right: "-50%",
                   height: 2,
-                  background:
-                    index < currentIndex
-                      ? "var(--embed-accent)"
-                      : "color-mix(in srgb, var(--embed-neutral-fg) 16%, transparent)",
+                  background: index < currentIndex ? theme.primary : theme.line,
                 }}
               />
             ) : null}
@@ -1000,39 +1568,28 @@ function FallbackProgressRail({
                 height: 24,
                 borderRadius: 12,
                 zIndex: 1,
-                background: done ? "var(--embed-accent)" : "white",
-                border: `2px solid ${
-                  done
-                    ? "var(--embed-accent)"
-                    : "color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)"
-                }`,
-                color: done ? "white" : "var(--embed-neutral-fg)",
-                display: "flex",
+                background: done ? theme.primary : theme.surface,
+                border: `2px solid ${done ? theme.primary : theme.line}`,
+                color: done ? "#fff" : theme.faint,
+                display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontSize: 11,
                 fontWeight: 700,
               }}
             >
-              {done ? (
-                <EmbedGlyph name="check" size={12} stroke={3} />
-              ) : (
-                index + 1
-              )}
+              {done ? <Icon name="check" size={12} stroke={3} /> : index + 1}
             </span>
             <span
               style={{
                 fontSize: 10.5,
-                fontWeight: index === currentIndex ? 800 : 600,
-                color:
-                  index === currentIndex
-                    ? "var(--embed-neutral-fg)"
-                    : "color-mix(in srgb, var(--embed-neutral-fg) 88%, transparent)",
+                fontWeight: index === currentIndex ? 700 : 500,
+                color: index === currentIndex ? theme.ink : theme.muted,
+                lineHeight: 1.25,
                 textAlign: "center",
-                lineHeight: 1.3,
               }}
             >
-              {t(`embed.avFallback.stage.${item}`)}
+              {label}
             </span>
           </div>
         );
@@ -1041,132 +1598,117 @@ function FallbackProgressRail({
   );
 }
 
-function TripFallbackStateView({
+function FallbackTripScreen({
   context,
   screen,
 }: {
   context: EmbedContext;
-  screen: TripFallbackScreen;
+  screen: EmbedTripFallbackScreen;
 }) {
-  const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   const fallback = embedTripFallbackStates[screen];
-  const titleCode = toPassengerMessageKey(
-    fallback.passengerMessageCode,
-    "title",
-  );
-  const bodyCode = toPassengerMessageKey(fallback.passengerMessageCode, "body");
-
-  const footer = (() => {
-    switch (screen) {
-      case "vehicle_change_in_progress":
-        return (
-          <ActionLink
-            href={toPhoneHref(context.strings.supportPhone)}
-            label={t("embed.field.contactSupport")}
-            tone="default"
-          />
-        );
-      case "human_fallback_assigned":
-        return (
-          <>
-            <ActionLink
-              href={buildHref(context, { screen: "trip" })}
-              label={t("embed.field.viewTrip")}
-            />
-            <ActionLink
-              href={toPhoneHref(context.strings.supportPhone)}
-              label={t("embed.field.contactDriver")}
-              tone="default"
-            />
-          </>
-        );
-      case "service_continuing":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "trip" })}
-            label={t("embed.field.trackTrip")}
-          />
-        );
-      default:
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "trip" })}
-            label={t("embed.field.viewTrip")}
-          />
-        );
-    }
-  })();
+  const footer =
+    screen === "vehicle_change_in_progress" ? (
+      <ActionButton
+        href={toPhoneHref(context.strings.supportPhone)}
+        label="聯絡客服"
+        theme={theme}
+        variant="default"
+        icon="phone"
+      />
+    ) : screen === "human_fallback_assigned" ? (
+      <>
+        <ActionButton
+          href={buildHref(context, { screen: "trip", state: "handoff" })}
+          label="查看行程"
+          theme={theme}
+          icon="car"
+        />
+        <ActionButton
+          href={toPhoneHref(context.strings.supportPhone)}
+          label="聯絡司機"
+          theme={theme}
+          variant="default"
+          icon="phone"
+        />
+      </>
+    ) : screen === "service_continuing" ? (
+      <ActionButton
+        href={buildHref(context, { screen: "trip", state: "handoff" })}
+        label="追蹤行程"
+        theme={theme}
+        icon="car"
+      />
+    ) : (
+      <ActionButton
+        href={buildHref(context, { screen: "trip", state: "handoff" })}
+        label="查看行程"
+        theme={theme}
+        icon="car"
+      />
+    );
 
   return (
-    <EmbedShell context={context} footer={footer}>
-      <FlowNav context={context} />
+    <AppShell
+      context={context}
+      badgeTone={fallback.tone === "success" ? "live" : "warn"}
+      footer={footer}
+    >
       <StateHero
         theme={theme}
         tone={fallback.tone}
         icon={fallback.icon}
-        title={t(titleCode)}
+        title={<span style={{ fontSize: 16 }}>{fallback.titleSample}</span>}
       />
-      <div style={{ display: "flex", justifyContent: "center", marginTop: -4 }}>
+
+      <div style={{ marginTop: -2, display: "flex", justifyContent: "center" }}>
         <span
           style={{
             fontSize: 9.5,
-            fontFamily: EMBED_MONO,
-            color: "var(--embed-neutral-fg)",
-            background:
-              "color-mix(in srgb, var(--embed-neutral-fg) 4%, var(--embed-neutral-bg))",
-            border:
-              "1px dashed color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
-            padding: "3px 9px",
+            color: theme.faint,
+            background: theme.surfaceLo,
+            border: `1px dashed ${theme.line}`,
             borderRadius: 999,
+            padding: "2px 8px",
+            fontFamily: theme.mono,
           }}
         >
-          {t("embed.field.titleCodeLabel")} ← {titleCode}
+          title ← {fallback.titleCode}
         </span>
       </div>
 
       {fallback.progressStage ? (
-        <Card>
-          <FallbackProgressRail stage={fallback.progressStage} />
+        <Card theme={theme}>
+          <FallbackProgressRail theme={theme} stage={fallback.progressStage} />
         </Card>
       ) : null}
 
       {fallback.etaMin !== null ? (
-        <Card>
+        <Card theme={theme} accent={theme.primary}>
           <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
             <div
               style={{
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                background: "var(--embed-accent-soft)",
-                color: "var(--embed-accent)",
-                display: "flex",
+                background: theme.primaryBg,
+                color: theme.primary,
+                display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <EmbedGlyph name="car" size={22} />
+              <Icon name="car" size={22} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700 }}>
-                {t("embed.field.etaEstimate")}
-              </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--embed-neutral-fg)",
-                }}
-              >
-                {t("embed.field.etaEstimateNote")}
-              </div>
+              <div style={{ fontSize: 12.5, color: theme.muted }}>預計上車 · ETA</div>
+              <div style={{ fontSize: 11, color: theme.faint }}>估計值，非保證</div>
             </div>
             <div
               style={{
                 textAlign: "center",
-                background: "var(--embed-accent-soft)",
-                border:
-                  "1px solid color-mix(in srgb, var(--embed-accent) 30%, transparent)",
+                background: theme.primaryBg,
+                border: `1px solid ${theme.primaryBd}`,
                 borderRadius: 12,
                 padding: "8px 16px",
               }}
@@ -1174,402 +1716,97 @@ function TripFallbackStateView({
               <div
                 style={{
                   fontSize: 26,
-                  fontWeight: 900,
-                  fontFamily: EMBED_MONO,
-                  color: "var(--embed-accent)",
+                  fontWeight: 800,
                   lineHeight: 1,
+                  fontFamily: theme.mono,
+                  color: theme.primary,
                 }}
               >
                 {fallback.etaMin}
               </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--embed-neutral-fg)",
-                  marginTop: 3,
-                }}
-              >
-                {t("embed.field.minuteUnit")}
-              </div>
+              <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>分鐘</div>
             </div>
           </div>
         </Card>
       ) : null}
 
-      <PassengerMessageSlot code={bodyCode} body={t(bodyCode)} />
+      <MessageSlot theme={theme} code={fallback.bodyCode} sample={fallback.bodySample} />
 
-      <Card>
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>{t("embed.field.tripId")}</span>
-            <strong style={{ fontFamily: EMBED_MONO }}>{embedTrip.id}</strong>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>{t("embed.field.destination")}</span>
-            <strong>{t("embed.book.dropoff")}</strong>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>{t("embed.field.fareLocked")}</span>
-            <strong>{t("embed.field.fareLockedValue")}</strong>
-          </div>
-        </div>
+      <Card theme={theme}>
+        <DetailRow theme={theme} label="行程編號" value={embedTrip.id} mono />
+        <DetailRow theme={theme} label="目的地" value="台北榮民總醫院" />
+        <DetailRow theme={theme} label="費用" value="維持原價 · 無額外收費" last />
       </Card>
-
-      <EmbedBanner theme={theme} tone="success" icon="check">
-        {t("embed.field.sameBooking")} · {t("embed.field.sameBookingNote")}
-      </EmbedBanner>
 
       <div
         style={{
-          textAlign: "center",
-          fontSize: 11,
-          color: "var(--embed-neutral-fg)",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 8,
+          padding: "9px 11px",
+          borderRadius: 10,
+          background: theme.successBg,
+          border: `1px solid ${theme.successBorder}`,
         }}
       >
-        {t("embed.field.statusReference")}
+        <Icon name="check" size={14} style={{ color: theme.successFg, flexShrink: 0, marginTop: 1 }} />
+        <span style={{ fontSize: 11, lineHeight: 1.45, color: theme.ink2 }}>
+          同一筆行程繼續 · 不會重新下單，也不會加收費用。
+        </span>
       </div>
-    </EmbedShell>
+
+      <div style={{ fontSize: 10, color: theme.faint, textAlign: "center", lineHeight: 1.5 }}>
+        接送由智慧運輸科技 DRTS 提供 · 服務狀態僅供參考
+      </div>
+    </AppShell>
   );
 }
 
-function CompactFlow({ context }: { context: EmbedContext }) {
-  const { t } = useTranslation();
-  const theme = buildEmbedTheme(context.accent);
+function renderIdentitySurface(context: EmbedContext) {
+  switch (context.state) {
+    case "reauth":
+      return <ReauthScreen context={context} />;
+    case "unsupported":
+      return <UnsupportedScreen context={context} />;
+    case "consent":
+      return <ConsentScreen context={context} />;
+    case "fallback":
+      return <FallbackScreen context={context} />;
+    default:
+      return <HandoffScreen context={context} />;
+  }
+}
 
-  const footer = (() => {
-    switch (context.screen) {
-      case "trip":
-        return (
-          <>
-            <ActionLink
-              href={buildHref(context, { screen: "receipt" })}
-              label={t("embed.field.contact")}
-              tone="default"
-            />
-            <ActionLink
-              href={buildHref(context, { screen: "cancelled" })}
-              label={t("embed.field.cancelTrip", {
-                minutes: embedTrip.cancelWindowMin,
-              })}
-              tone="danger"
-            />
-          </>
-        );
-      case "receipt":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "trips" })}
-            label={t("embed.field.viewHistory")}
-          />
-        );
-      case "completed":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "receipt" })}
-            label={t("embed.field.viewReceipt")}
-          />
-        );
-      case "cancelled":
-        return (
-          <ActionLink
-            href={buildHref(context, { screen: "book" })}
-            label={t("embed.field.rebook")}
-          />
-        );
-      case "nosupply":
-      case "ineligible":
-      case "denied":
-      case "degraded":
-        return (
-          <>
-            <ActionLink
-              href={buildHref(context, { screen: "book" })}
-              label={t("embed.field.backToBook")}
-            />
-            <ActionLink
-              href={buildHref(context, { screen: "trip" })}
-              label={t("embed.field.viewTrip")}
-              tone="ghost"
-            />
-          </>
-        );
-      default:
-        return (
-          <>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 13,
-              }}
-            >
-              <span>{t("common.estimatedFare")}</span>
-              <strong>{t("common.approxNtd", { amount: 290 })}</strong>
-            </div>
-            <ActionLink
-              href={buildHref(context, { screen: "trip" })}
-              label={t("embed.field.confirmRide")}
-            />
-          </>
-        );
-    }
-  })();
-
-  return (
-    <EmbedShell context={context} footer={footer}>
-      <FlowNav context={context} />
-      {context.screen === "book" ? (
-        <>
-          <Card
-            title={t("embed.book.subtitle", {
-              name: embedResident.name,
-              unit: embedResident.unit,
-            })}
-            subtitle={context.strings.displayName}
-          >
-            <div style={{ fontSize: 13, color: "var(--embed-neutral-fg)" }}>
-              {t("embed.book.identity", {
-                id: context.session?.drtsPassengerId || t("common.none"),
-              })}
-            </div>
-          </Card>
-          <Card
-            title={t("embed.card.trip")}
-            subtitle={t("embed.card.tripSubtitle")}
-          >
-            <div>
-              {t("embed.field.pickup")}：{t("embed.book.pickup")}
-            </div>
-            <div>
-              {t("embed.field.dropoff")}：{t("embed.book.dropoff")}
-            </div>
-            <div>
-              {t("embed.field.when")}：{t("embed.book.now")}
-            </div>
-            <div>
-              {t("embed.field.savedPlaces")}：
-              {embedSavedPlaces
-                .map((place) => t(`embed.place.${place}`))
-                .join(" · ")}
-            </div>
-          </Card>
-          <Card
-            title={t("embed.card.vehicles")}
-            subtitle={t("embed.card.vehiclesSubtitle")}
-          >
-            {embedVehicles.map((vehicle) => (
-              <div
-                key={vehicle.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <span>{t(`embed.vehicle.${vehicle.id}.name`)}</span>
-                <span>{t(`embed.vehicle.${vehicle.id}.note`)}</span>
-              </div>
-            ))}
-          </Card>
-          <Card title={t("embed.card.negatives")}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {(["nosupply", "ineligible", "denied", "degraded"] as const).map(
-                (screen) => (
-                  <Link
-                    key={screen}
-                    href={buildHref(context, { screen })}
-                    style={{
-                      borderRadius: 999,
-                      padding: "6px 10px",
-                      border:
-                        "1px solid color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)",
-                    }}
-                  >
-                    {t(`embed.book.negative.${screen}`)}
-                  </Link>
-                ),
-              )}
-            </div>
-          </Card>
-        </>
-      ) : null}
-
-      {context.screen === "trip" ? (
-        <>
-          <Card
-            title={t("trip.snapshot.kicker", { id: embedTrip.id })}
-            subtitle={`${t(`embed.trip.status.${embedTrip.statusCode}`)} · ${embedTrip.statusCode}`}
-          >
-            <div>
-              {t("embed.field.pickup")}：{t("embed.book.pickup")}
-            </div>
-            <div>
-              {t("embed.field.dropoff")}：{t("embed.book.dropoff")}
-            </div>
-            <div>
-              {t("embed.field.eta")}：{embedTrip.etaMin}
-            </div>
-            <div>
-              {t("embed.field.driver")}：{embedTrip.driver} · {embedTrip.plate}
-            </div>
-          </Card>
-          <Card>
-            <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-              {t("embed.trip.bound")}
-            </div>
-          </Card>
-          <Card
-            title={t("embed.card.fallbackStates")}
-            subtitle={t("embed.card.fallbackStatesSubtitle")}
-          >
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {EMBED_TRIP_FALLBACK_SCREENS.map((screen) => (
-                <Link
-                  key={screen}
-                  href={buildHref(context, { screen })}
-                  style={{
-                    borderRadius: 999,
-                    padding: "6px 10px",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    border:
-                      "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
-                    background: "white",
-                  }}
-                >
-                  {t(`embed.nav.${screen}`)}
-                </Link>
-              ))}
-            </div>
-          </Card>
-        </>
-      ) : null}
-
-      {context.screen === "trips" ? (
-        <Card
-          title={t("embed.card.history")}
-          subtitle={t("embed.card.historySubtitle")}
-        >
-          {embedTripHistory.map((trip) => (
-            <div
-              key={trip.id}
-              style={{
-                display: "grid",
-                gap: 2,
-                padding: "8px 0",
-                borderBottom:
-                  "1px solid color-mix(in srgb, var(--embed-neutral-border) 70%, transparent)",
-              }}
-            >
-              <strong>
-                {trip.id} · {t(`embed.history.${trip.status}`)}
-              </strong>
-              <span>
-                {trip.date} · {t(`embed.place.${trip.from}`)} →{" "}
-                {t(`embed.place.${trip.to}`)}
-              </span>
-              <span>{trip.fare}</span>
-            </div>
-          ))}
-        </Card>
-      ) : null}
-
-      {context.screen === "receipt" ? (
-        <Card title={t("embed.card.receipt")} subtitle={embedReceipt.id}>
-          <div>
-            {t("embed.field.completedAt")}：{embedReceipt.completedAt}
-          </div>
-          <div>
-            {t("embed.field.passenger")}：{embedReceipt.passenger} ·{" "}
-            {embedReceipt.maskedPhone}
-          </div>
-          <div>
-            {t("embed.field.route")}：{t("embed.place.station")} →{" "}
-            {t("embed.book.pickup")}
-          </div>
-          <div>
-            {t("embed.field.vehicle")}：{t("embed.vehicle.standard.name")} ·{" "}
-            {embedReceipt.plate}
-          </div>
-          <div>
-            {t("embed.field.payment")}：{t("embed.receipt.pay")}
-          </div>
-          <div style={{ fontWeight: 900 }}>
-            {t("embed.field.total")}：{embedReceipt.total}
-          </div>
-        </Card>
-      ) : null}
-
-      {context.screen === "completed" ? (
-        <>
-          <StateHero
-            theme={theme}
-            tone="success"
-            icon="check"
-            title={t("embed.card.completed")}
-            posture="completed"
-          />
-          <EmbedBanner theme={theme} tone="success" icon="check">
-            {t("embed.completed.body")}
-          </EmbedBanner>
-        </>
-      ) : null}
-
-      {context.screen === "cancelled" ? (
-        <>
-          <StateHero
-            theme={theme}
-            tone="info"
-            icon="x"
-            title={t("embed.card.cancelled")}
-            posture="cancelled"
-          />
-          <EmbedBanner theme={theme} tone="neutral" icon="x">
-            {t("embed.cancelled.body")}
-          </EmbedBanner>
-        </>
-      ) : null}
-
-      {(["nosupply", "ineligible", "denied", "degraded"] as const).includes(
-        context.screen as "nosupply" | "ineligible" | "denied" | "degraded",
-      ) ? (
-        <>
-          <StateHero
-            theme={theme}
-            tone={NEGATIVE_VISUAL[context.screen]?.tone ?? "warn"}
-            icon={NEGATIVE_VISUAL[context.screen]?.icon ?? "info"}
-            title={t("embed.card.negative", { screen: context.screen })}
-            posture={context.screen}
-          />
-          <EmbedBanner
-            theme={theme}
-            tone={NEGATIVE_VISUAL[context.screen]?.tone ?? "warn"}
-            icon={NEGATIVE_VISUAL[context.screen]?.icon ?? "info"}
-          >
-            {t(`embed.negative.${context.screen}`)}
-          </EmbedBanner>
-          <div
-            style={{
-              textAlign: "center",
-              fontSize: 11.5,
-              color: "var(--embed-neutral-fg)",
-            }}
-          >
-            {context.strings.supportPhone}
-          </div>
-        </>
-      ) : null}
-    </EmbedShell>
-  );
+function isFallbackScreen(screen: string): screen is EmbedTripFallbackScreen {
+  return (EMBED_TRIP_FALLBACK_SCREENS as readonly string[]).includes(screen);
 }
 
 export function PassengerEmbed({ context }: { context: EmbedContext }) {
-  if (context.state === "handoff") {
-    if (isTripFallbackScreen(context.screen)) {
-      return <TripFallbackStateView context={context} screen={context.screen} />;
-    }
-    return <CompactFlow context={context} />;
+  if (context.state !== "handoff") {
+    return renderIdentitySurface(context);
   }
 
-  return <IdentityState context={context} />;
+  if (isFallbackScreen(context.screen)) {
+    return <FallbackTripScreen context={context} screen={context.screen} />;
+  }
+
+  switch (context.screen) {
+    case "trip":
+      return <TripScreen context={context} />;
+    case "trips":
+      return <TripsScreen context={context} />;
+    case "receipt":
+      return <ReceiptScreen context={context} />;
+    case "completed":
+      return <OutcomeScreen context={context} kind="completed" />;
+    case "cancelled":
+      return <OutcomeScreen context={context} kind="cancelled" />;
+    case "nosupply":
+    case "ineligible":
+    case "denied":
+    case "degraded":
+      return <NegativeScreen context={context} kind={context.screen} />;
+    default:
+      return <BookScreen context={context} />;
+  }
 }

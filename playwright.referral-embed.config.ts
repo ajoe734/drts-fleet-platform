@@ -12,7 +12,7 @@ const shouldStartLocalReferralEmbed =
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: /referral-embed-surfaces\.spec\.ts/,
+  testMatch: /referral-embed-(surfaces|parity)\.spec\.ts/,
   fullyParallel: true,
   retries: 0,
   workers: 1,

@@ -60,7 +60,7 @@ function resolveDisplayName(entry: PartnerChannelEntryRecord) {
 }
 
 function resolveAppName(entry: PartnerChannelEntryRecord) {
-  return `${resolveDisplayName(entry)} App`;
+  return resolveDisplayName(entry);
 }
 
 function resolveSupportPhone(entry: PartnerChannelEntryRecord) {
