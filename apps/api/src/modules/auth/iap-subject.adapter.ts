@@ -296,147 +296,93 @@ export class IAPSubjectAdapter {
     const isPlatformGroup = assertionGroups.includes("platform-admins@platform.drts");
     const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
 
-    let activeMembership =
-      requestedRealm === "ops"
-        ? activeControlPlaneMemberships.find((m) => m.realm === "ops")
-        : requestedRealm === "platform"
-        ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
-        : (isPlatformGroup
-            ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
-            : null) ||
-          (isOpsGroup
-            ? activeControlPlaneMemberships.find((m) => m.realm === "ops")
-            : null) ||
-          activeControlPlaneMemberships[0];
+    const currentTimeMs = new Date(now).getTime();
+    const roleGroupMapping = options.roleGroupMapping ?? DEFAULT_IAP_ROLE_GROUP_MAPPING;
 
-    if (!activeMembership) {
-      const { actorType, realm } = this.getActorContext(requestedRealm, undefined, assertionGroups);
-      this.emitDeniedEvent(
-        "user_inactive",
-        principal.email || normalizedEmail,
-        principal.principalId,
-        realm,
-        actorType,
-      );
-      throw new ApiRequestError(
-        403,
-        "IAP_WORKFORCE_USER_INACTIVE",
-        "Workforce user has no active durable membership for requested realm.",
-      );
+    interface MembershipAnalysis {
+      membership: CanonicalIdentityMembershipRecord;
+      originalRoles: string[];
+      effectiveRoles: string[];
+      missingGroups: string[];
+      driftDetected: boolean;
     }
 
-    // Lookup durable role bindings across active control-plane memberships
-    const currentTimeMs = new Date(now).getTime();
-    const allRoleBindings: CanonicalIdentityRoleBindingRecord[] = [];
+    const membershipAnalyses: MembershipAnalysis[] = [];
+    const allMissingGroups = new Set<string>();
+    let overallDriftDetected = false;
+
     for (const m of activeControlPlaneMemberships) {
       const bindings = await this.identityRepository.findRoleBindingsByMembershipId(
         m.membershipId,
       );
-      allRoleBindings.push(...bindings);
-    }
-    const activeRoleBindings = allRoleBindings.filter((b) => {
-      if (b.validFrom) {
-        const validFromMs = new Date(b.validFrom).getTime();
-        if (!isNaN(validFromMs) && validFromMs > currentTimeMs) {
-          return false;
+      const activeBindings = bindings.filter((b) => {
+        if (b.validFrom) {
+          const validFromMs = new Date(b.validFrom).getTime();
+          if (!isNaN(validFromMs) && validFromMs > currentTimeMs) {
+            return false;
+          }
         }
-      }
-      if (b.validTo) {
-        const validToMs = new Date(b.validTo).getTime();
-        if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
-          return false;
+        if (b.validTo) {
+          const validToMs = new Date(b.validTo).getTime();
+          if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
+            return false;
+          }
         }
-      }
-      return true;
-    });
+        return true;
+      });
 
-    const assignedRoles = Array.from(
-      new Set(activeRoleBindings.map((r) => r.roleCode)),
-    );
-    if (assignedRoles.length === 0) {
-      const { actorType, realm } = this.getActorContext(
-        activeMembership?.realm,
-        undefined,
-        assertionGroups,
-      );
-      this.emitDeniedEvent(
-        "user_inactive",
-        principal.email || normalizedEmail,
-        principal.principalId,
-        realm,
-        actorType,
-      );
-      throw new ApiRequestError(
-        403,
-        "IAP_WORKFORCE_USER_INACTIVE",
-        "Workforce user has no active durable role bindings.",
-      );
-    }
-    const originalRoles = assignedRoles;
+      const assignedRoles = Array.from(new Set(activeBindings.map((b) => b.roleCode)));
+      const missingGroupsForM: string[] = [];
+      const effectiveRolesForM: string[] = [];
+      let driftForM = false;
 
-    // Reconcile Group Drift & Least Privilege
-    const roleGroupMapping = options.roleGroupMapping ?? DEFAULT_IAP_ROLE_GROUP_MAPPING;
-    let effectiveRoles: string[] = [];
-    const missingGroups: string[] = [];
-    let driftDetected = false;
-
-    for (const role of originalRoles) {
-      const requiredGroup = roleGroupMapping[role];
-      if (requiredGroup) {
-        if (assertionGroups.includes(requiredGroup)) {
-          effectiveRoles.push(role);
+      for (const role of assignedRoles) {
+        const requiredGroup = roleGroupMapping[role];
+        if (requiredGroup) {
+          if (assertionGroups.includes(requiredGroup)) {
+            effectiveRolesForM.push(role);
+          } else {
+            driftForM = true;
+            overallDriftDetected = true;
+            missingGroupsForM.push(requiredGroup);
+            allMissingGroups.add(requiredGroup);
+          }
         } else {
-          driftDetected = true;
-          missingGroups.push(requiredGroup);
+          effectiveRolesForM.push(role);
         }
-      } else {
-        effectiveRoles.push(role);
       }
+
+      // Filter effective roles to match the membership's realm
+      let realmMatchingRoles = effectiveRolesForM;
+      if (m.realm === "platform") {
+        realmMatchingRoles = effectiveRolesForM.filter(
+          (r) => r === "superadmin" || r === "platform_admin",
+        );
+      } else if (m.realm === "ops") {
+        realmMatchingRoles = effectiveRolesForM.filter(
+          (r) => r === "operator" || r === "ops_user",
+        );
+      }
+
+      membershipAnalyses.push({
+        membership: m,
+        originalRoles: assignedRoles,
+        effectiveRoles: realmMatchingRoles,
+        missingGroups: missingGroupsForM,
+        driftDetected: driftForM,
+      });
     }
 
-    if (effectiveRoles.length === 0) {
-      const { actorType, realm } = this.getActorContext(
-        activeMembership?.realm,
-        originalRoles,
-        assertionGroups,
-      );
-      this.emitDeniedEvent(
-        "unmapped_group_membership",
-        principal.email || normalizedEmail,
-        principal.principalId,
-        realm,
-        actorType,
-      );
-      throw new ApiRequestError(
-        403,
-        "IAP_WORKFORCE_USER_INACTIVE",
-        "Workforce user has no active verified group memberships.",
-      );
-    }
+    let selectedAnalysis: MembershipAnalysis | undefined;
 
-    // Align membership realm with verified groups, requested surface, and effective roles
-    const hasPlatformRole = effectiveRoles.some(
-      (r) => r === "superadmin" || r === "platform_admin",
-    );
-    const expectedRealm: "platform" | "ops" =
-      requestedRealm === "ops"
-        ? "ops"
-        : requestedRealm === "platform"
-        ? "platform"
-        : isPlatformGroup && hasPlatformRole
-        ? "platform"
-        : "ops";
-
-    if (activeMembership.realm !== expectedRealm) {
-      const matchingMembership = activeControlPlaneMemberships.find(
-        (m) => m.realm === expectedRealm,
+    if (requestedRealm) {
+      const targetAnalysis = membershipAnalyses.find(
+        (a) => a.membership.realm === requestedRealm,
       );
-      if (matchingMembership) {
-        activeMembership = matchingMembership;
-      } else {
+      if (!targetAnalysis) {
         const { actorType, realm } = this.getActorContext(
-          expectedRealm,
-          effectiveRoles,
+          requestedRealm,
+          undefined,
           assertionGroups,
         );
         this.emitDeniedEvent(
@@ -452,18 +398,104 @@ export class IAPSubjectAdapter {
           "Workforce user has no active durable membership for requested realm.",
         );
       }
-    }
 
-    if (expectedRealm === "ops") {
-      const opsRoles = effectiveRoles.filter(
-        (r) => r === "operator" || r === "ops_user",
-      );
-      if (opsRoles.length > 0) {
-        effectiveRoles = opsRoles;
-      } else {
-        effectiveRoles = ["operator"];
+      if (targetAnalysis.originalRoles.length === 0) {
+        const { actorType, realm } = this.getActorContext(
+          targetAnalysis.membership.realm,
+          undefined,
+          assertionGroups,
+        );
+        this.emitDeniedEvent(
+          "user_inactive",
+          principal.email || normalizedEmail,
+          principal.principalId,
+          realm,
+          actorType,
+        );
+        throw new ApiRequestError(
+          403,
+          "IAP_WORKFORCE_USER_INACTIVE",
+          "Workforce user has no active durable role bindings.",
+        );
+      }
+
+      if (targetAnalysis.effectiveRoles.length === 0) {
+        const { actorType, realm } = this.getActorContext(
+          targetAnalysis.membership.realm,
+          targetAnalysis.originalRoles,
+          assertionGroups,
+        );
+        this.emitDeniedEvent(
+          "unmapped_group_membership",
+          principal.email || normalizedEmail,
+          principal.principalId,
+          realm,
+          actorType,
+        );
+        throw new ApiRequestError(
+          403,
+          "IAP_WORKFORCE_USER_INACTIVE",
+          "Workforce user has no active verified group memberships.",
+        );
+      }
+
+      selectedAnalysis = targetAnalysis;
+    } else {
+      let candidateAnalyses = [...membershipAnalyses];
+      if (isPlatformGroup && !isOpsGroup) {
+        candidateAnalyses.sort((a, b) => (a.membership.realm === "platform" ? -1 : 1));
+      } else if (isOpsGroup && !isPlatformGroup) {
+        candidateAnalyses.sort((a, b) => (a.membership.realm === "ops" ? -1 : 1));
+      }
+
+      selectedAnalysis = candidateAnalyses.find((a) => a.effectiveRoles.length > 0);
+
+      if (!selectedAnalysis) {
+        const hadRolesCandidate = candidateAnalyses.find((a) => a.originalRoles.length > 0);
+        if (hadRolesCandidate) {
+          const { actorType, realm } = this.getActorContext(
+            hadRolesCandidate.membership.realm,
+            hadRolesCandidate.originalRoles,
+            assertionGroups,
+          );
+          this.emitDeniedEvent(
+            "unmapped_group_membership",
+            principal.email || normalizedEmail,
+            principal.principalId,
+            realm,
+            actorType,
+          );
+          throw new ApiRequestError(
+            403,
+            "IAP_WORKFORCE_USER_INACTIVE",
+            "Workforce user has no active verified group memberships.",
+          );
+        }
+
+        const fallbackCandidate = candidateAnalyses[0];
+        const { actorType, realm } = this.getActorContext(
+          fallbackCandidate?.membership.realm,
+          undefined,
+          assertionGroups,
+        );
+        this.emitDeniedEvent(
+          "user_inactive",
+          principal.email || normalizedEmail,
+          principal.principalId,
+          realm,
+          actorType,
+        );
+        throw new ApiRequestError(
+          403,
+          "IAP_WORKFORCE_USER_INACTIVE",
+          "Workforce user has no active durable role bindings.",
+        );
       }
     }
+
+    const activeMembership = selectedAnalysis.membership;
+    const effectiveRoles = selectedAnalysis.effectiveRoles;
+    const originalRoles = selectedAnalysis.originalRoles;
 
     const finalActorContext = this.getActorContext(
       activeMembership.realm,
@@ -472,11 +504,13 @@ export class IAPSubjectAdapter {
     );
 
     let driftDetails: ResolvedIapWorkforceSubject["driftDetails"];
-    if (driftDetected) {
+    const missingGroupsList = Array.from(allMissingGroups);
+    const hasDrift = overallDriftDetected || selectedAnalysis.driftDetected || missingGroupsList.length > 0;
+    if (hasDrift) {
       driftDetails = {
         originalRoles,
         effectiveRoles,
-        missingGroups,
+        missingGroups: missingGroupsList.length > 0 ? missingGroupsList : selectedAnalysis.missingGroups,
       };
       this.emitGroupDriftEvent(
         principal.principalId,
@@ -505,7 +539,7 @@ export class IAPSubjectAdapter {
       membership: activeMembership,
       effectiveRoles,
       effectiveScopes: Array.from(effectiveScopesSet),
-      driftDetected,
+      driftDetected: hasDrift,
       ...(driftDetails ? { driftDetails } : {}),
     };
   }

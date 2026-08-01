@@ -930,6 +930,114 @@ describe("IAPSubjectAdapter", () => {
     expect(opsResolvedEvent?.actorType).toBe("ops_user");
     expect(opsResolvedEvent?.realm).toBe("ops");
   });
+
+  it("fails closed with 403 when principal has platform superadmin binding plus ops membership with zero role bindings and requests ops realm", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_platform_admin_zero_ops_001",
+        sourceRef: "iap_subject:admin_zero_ops_sub",
+        issuer: "google_iap",
+        subject: "admin_zero_ops_sub",
+        principalType: "human",
+        email: "admin-zero-ops@platform.drts",
+        emailVerified: true,
+        displayName: "Admin Zero Ops User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_platform_admin_001",
+        sourceRef: "iap_membership:admin_zero_ops_sub_platform",
+        principalId: "principal_platform_admin_zero_ops_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_platform_superadmin_001",
+          sourceRef: "rb_platform_superadmin_001",
+          membershipId: "membership_platform_admin_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_platform_admin_zero_ops_001",
+        sourceRef: "iap_subject:admin_zero_ops_sub",
+        issuer: "google_iap",
+        subject: "admin_zero_ops_sub",
+        principalType: "human",
+        email: "admin-zero-ops@platform.drts",
+        emailVerified: true,
+        displayName: "Admin Zero Ops User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_zero_ops_001",
+        sourceRef: "iap_membership:admin_zero_ops_sub_ops",
+        principalId: "principal_platform_admin_zero_ops_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [],
+    );
+
+    const token = signTestIapToken({
+      sub: "admin_zero_ops_sub",
+      email: "admin-zero-ops@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts", "ops-users@platform.drts"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+          requestedRealm: "ops",
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+  });
 });
 
 
