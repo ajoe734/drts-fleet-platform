@@ -1750,6 +1750,7 @@ describe("owned mobility service", () => {
       expect(result1.orderId).toBeDefined();
       expect(result1.bookingId).toBeDefined();
       expect(result1.serviceBucket).toBe("business_dispatch");
+      expect(result1.replayed).toBe(false);
 
       const result2 = await ownedMobilityService.createReferralPassengerBooking(
         bookingCommand,
@@ -1757,9 +1758,76 @@ describe("owned mobility service", () => {
       );
 
       expect(result2.orderId).toBe(result1.orderId);
+      expect(result2.replayed).toBe(true);
       expect((result2 as any).passenger).toBeUndefined();
       expect((result2 as any).passengerName).toBeUndefined();
       expect((result2 as any).passengerPhone).toBeUndefined();
+    });
+
+    it("allows partner_api_key identities to create bookings within the same partner entry scope", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const verification = await tenantPartnerService.verifyPartnerEligibility({
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      });
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "partner_api_key",
+        actorType: "partner_api_key",
+        actorId: "partner-key-001",
+        realm: "partner",
+        tenantId: PARTNER_TENANT,
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        roleFamilies: ["partner"],
+        roles: ["partner_api_key"],
+        scopes: ["partner:book"],
+        requestId: "req-partner-api-booking-001",
+      };
+
+      const created = await ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          eligibilityVerificationId: verification.eligibilityVerificationId,
+          direction: "pickup",
+          pickup: {
+            address: "桃園機場第二航廈",
+          },
+          dropoff: {
+            address: "台北市信義區松高路11號",
+          },
+          reservationWindowStart: "2026-04-18T10:00:00Z",
+          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          passenger: {
+            name: "陳小姐",
+            phone: "0900123456",
+          },
+          flightNo: "CI-001",
+        },
+        PARTNER_TENANT,
+        identity,
+      );
+
+      expect(created).toMatchObject({
+        orderId: expect.any(String),
+        bookingId: expect.any(String),
+        replayed: false,
+      });
+      expect(
+        ownedMobilityService.getOrder(created.orderId, identity),
+      ).toMatchObject({
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+      });
     });
 
     it("prevents cross-passenger and cross-partner access", async () => {

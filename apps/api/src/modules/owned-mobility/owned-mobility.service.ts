@@ -158,6 +158,7 @@ type TenantBookingResult = {
   >;
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
+  replayed: boolean;
 };
 
 type PartnerBookingContext = {
@@ -1301,6 +1302,7 @@ export class OwnedMobilityService
         businessDispatchSubtype: order.businessDispatchSubtype!,
         dispatchSemantics: "reservation",
         status: order.status,
+        replayed: false,
       };
     };
 
@@ -10127,6 +10129,7 @@ export class OwnedMobilityService
             existing.businessDispatchSubtype ?? "enterprise_dispatch",
           dispatchSemantics: "reservation",
           status: existing.status,
+          replayed: true,
         };
       }
     }
