@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type {
+  ReferralPassengerActiveTripResult,
+  ReferralPassengerHistoryItem,
+  ReferralPassengerReceipt,
+} from "@drts/contracts";
 import type { EmbedContext, EmbedState } from "@/lib/embed-context";
 import { useTranslation } from "@/lib/i18n";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
   embedTripFallbackStates,
-  embedReceipt,
   embedResident,
   embedSavedPlaces,
-  embedTrip,
-  embedTripHistory,
   embedVehicles,
 } from "@/lib/embed-fixtures";
 import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
@@ -68,7 +70,8 @@ const EMBED_GLYPHS: Record<string, string> = {
   lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
   check: "M5 12l4 4 10-10",
   x: "M6 6l12 12 M18 6L6 18",
-  refresh: "M3 12a9 9 0 0115.3-6.36L21 8 M21 3v5h-5 M21 12a9 9 0 01-15.3 6.36L3 16 M3 21v-5h5",
+  refresh:
+    "M3 12a9 9 0 0115.3-6.36L21 8 M21 3v5h-5 M21 12a9 9 0 01-15.3 6.36L3 16 M3 21v-5h5",
   user: "M12 12a4 4 0 100-8 4 4 0 000 8z M5.5 20a6.5 6.5 0 0113 0",
   car: "M5 16l1.5-5a2 2 0 011.93-1.43h7.14A2 2 0 0117.5 11L19 16 M6 16h12 M7 18.5h.01 M17 18.5h.01 M8 16v2 M16 16v2",
   clock: "M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z",
@@ -380,36 +383,34 @@ function ActionLink({
               border: "1px solid var(--embed-accent)",
             };
 
-  return (
-    href.startsWith("tel:") ? (
-      <a
-        href={href}
-        style={{
-          display: "block",
-          textAlign: "center",
-          borderRadius: 999,
-          padding: "12px 14px",
-          fontWeight: 800,
-          ...palette,
-        }}
-      >
-        {label}
-      </a>
-    ) : (
-      <Link
-        href={href}
-        style={{
-          display: "block",
-          textAlign: "center",
-          borderRadius: 999,
-          padding: "12px 14px",
-          fontWeight: 800,
-          ...palette,
-        }}
-      >
-        {label}
-      </Link>
-    )
+  return href.startsWith("tel:") ? (
+    <a
+      href={href}
+      style={{
+        display: "block",
+        textAlign: "center",
+        borderRadius: 999,
+        padding: "12px 14px",
+        fontWeight: 800,
+        ...palette,
+      }}
+    >
+      {label}
+    </a>
+  ) : (
+    <Link
+      href={href}
+      style={{
+        display: "block",
+        textAlign: "center",
+        borderRadius: 999,
+        padding: "12px 14px",
+        fontWeight: 800,
+        ...palette,
+      }}
+    >
+      {label}
+    </Link>
   );
 }
 
@@ -836,6 +837,16 @@ function TokenRow({
 
 type TripFallbackScreen = keyof typeof embedTripFallbackStates;
 
+export type PassengerEmbedLiveData = {
+  activeTrip: ReferralPassengerActiveTripResult | null;
+  history: { items: ReferralPassengerHistoryItem[] } | null;
+  receipt: ReferralPassengerReceipt | null;
+} | null;
+
+function formatMoney(amount: number | null | undefined) {
+  return typeof amount === "number" ? `NT$ ${amount}` : "NT$ --";
+}
+
 function isTripFallbackScreen(screen: string): screen is TripFallbackScreen {
   return Object.prototype.hasOwnProperty.call(embedTripFallbackStates, screen);
 }
@@ -967,13 +978,7 @@ const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
   degraded: { tone: "warn", icon: "info" },
 };
 
-function PassengerMessageSlot({
-  code,
-  body,
-}: {
-  code: string;
-  body: string;
-}) {
+function PassengerMessageSlot({ code, body }: { code: string; body: string }) {
   const { t } = useTranslation();
   return (
     <div
@@ -1110,13 +1115,16 @@ function FallbackProgressRail({
 function TripFallbackStateView({
   context,
   screen,
+  liveData,
 }: {
   context: EmbedContext;
   screen: TripFallbackScreen;
+  liveData: PassengerEmbedLiveData;
 }) {
   const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   const fallback = embedTripFallbackStates[screen];
+  const trip = liveData?.activeTrip?.trip ?? null;
   const titleCode = toPassengerMessageKey(
     fallback.passengerMessageCode,
     "title",
@@ -1266,17 +1274,37 @@ function TripFallbackStateView({
 
       <Card>
         <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
             <span>{t("embed.field.tripId")}</span>
-            <strong style={{ fontFamily: EMBED_MONO }}>{embedTrip.id}</strong>
+            <strong style={{ fontFamily: EMBED_MONO }}>
+              {trip?.orderNo ?? trip?.orderId ?? "—"}
+            </strong>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
             <span>{t("embed.field.destination")}</span>
-            <strong>{t("embed.book.dropoff")}</strong>
+            <strong>{trip?.dropoffAddress ?? "—"}</strong>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
             <span>{t("embed.field.fareLocked")}</span>
-            <strong>{t("embed.field.fareLockedValue")}</strong>
+            <strong>{formatMoney(trip?.estimatedFare)}</strong>
           </div>
         </div>
       </Card>
@@ -1298,9 +1326,18 @@ function TripFallbackStateView({
   );
 }
 
-function CompactFlow({ context }: { context: EmbedContext }) {
+function CompactFlow({
+  context,
+  liveData,
+}: {
+  context: EmbedContext;
+  liveData: PassengerEmbedLiveData;
+}) {
   const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
+  const trip = liveData?.activeTrip?.trip ?? null;
+  const historyItems = liveData?.history?.items ?? [];
+  const receipt = liveData?.receipt ?? null;
 
   const footer = (() => {
     switch (context.screen) {
@@ -1315,7 +1352,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
             <ActionLink
               href={buildHref(context, { screen: "cancelled" })}
               label={t("embed.field.cancelTrip", {
-                minutes: embedTrip.cancelWindowMin,
+                minutes: trip?.cancelWindowMin ?? 0,
               })}
               tone="danger"
             />
@@ -1370,7 +1407,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
               }}
             >
               <span>{t("common.estimatedFare")}</span>
-              <strong>{t("common.approxNtd", { amount: 290 })}</strong>
+              <strong>{formatMoney(trip?.estimatedFare)}</strong>
             </div>
             <ActionLink
               href={buildHref(context, { screen: "trip" })}
@@ -1463,20 +1500,27 @@ function CompactFlow({ context }: { context: EmbedContext }) {
       {context.screen === "trip" ? (
         <>
           <Card
-            title={t("trip.snapshot.kicker", { id: embedTrip.id })}
-            subtitle={`${t(`embed.trip.status.${embedTrip.statusCode}`)} · ${embedTrip.statusCode}`}
+            title={t("trip.snapshot.kicker", {
+              id: trip?.orderNo ?? trip?.orderId ?? "—",
+            })}
+            subtitle={
+              trip
+                ? `${t(`embed.trip.status.${trip.statusCode}`)} · ${trip.statusCode}`
+                : "Authority returned no active trip"
+            }
           >
             <div>
-              {t("embed.field.pickup")}：{t("embed.book.pickup")}
+              {t("embed.field.pickup")}：{trip?.pickupAddress ?? "—"}
             </div>
             <div>
-              {t("embed.field.dropoff")}：{t("embed.book.dropoff")}
+              {t("embed.field.dropoff")}：{trip?.dropoffAddress ?? "—"}
             </div>
             <div>
-              {t("embed.field.eta")}：{embedTrip.etaMin}
+              {t("embed.field.eta")}：{trip?.etaMin ?? "—"}
             </div>
             <div>
-              {t("embed.field.driver")}：{embedTrip.driver} · {embedTrip.plate}
+              {t("embed.field.driver")}：{trip?.driverName ?? "—"} ·{" "}
+              {trip?.plateNumber ?? "—"}
             </div>
           </Card>
           <Card>
@@ -1516,9 +1560,9 @@ function CompactFlow({ context }: { context: EmbedContext }) {
           title={t("embed.card.history")}
           subtitle={t("embed.card.historySubtitle")}
         >
-          {embedTripHistory.map((trip) => (
+          {historyItems.map((trip) => (
             <div
-              key={trip.id}
+              key={trip.orderId}
               style={{
                 display: "grid",
                 gap: 2,
@@ -1528,40 +1572,44 @@ function CompactFlow({ context }: { context: EmbedContext }) {
               }}
             >
               <strong>
-                {trip.id} · {t(`embed.history.${trip.status}`)}
+                {(trip.orderNo ?? trip.orderId) || trip.orderId} ·{" "}
+                {t(`embed.history.${trip.status}`)}
               </strong>
               <span>
-                {trip.date} · {t(`embed.place.${trip.from}`)} →{" "}
-                {t(`embed.place.${trip.to}`)}
+                {trip.completedAt} · {trip.pickupAddress} →{" "}
+                {trip.dropoffAddress}
               </span>
-              <span>{trip.fare}</span>
+              <span>{trip.formattedFare}</span>
             </div>
           ))}
         </Card>
       ) : null}
 
       {context.screen === "receipt" ? (
-        <Card title={t("embed.card.receipt")} subtitle={embedReceipt.id}>
+        <Card
+          title={t("embed.card.receipt")}
+          subtitle={receipt?.orderNo ?? receipt?.orderId ?? "—"}
+        >
           <div>
-            {t("embed.field.completedAt")}：{embedReceipt.completedAt}
+            {t("embed.field.completedAt")}：{receipt?.completedAt ?? "—"}
           </div>
           <div>
-            {t("embed.field.passenger")}：{embedReceipt.passenger} ·{" "}
-            {embedReceipt.maskedPhone}
+            {t("embed.field.passenger")}：{receipt?.passengerNameMasked ?? "—"}{" "}
+            · {receipt?.passengerPhoneMasked ?? "—"}
           </div>
           <div>
-            {t("embed.field.route")}：{t("embed.place.station")} →{" "}
-            {t("embed.book.pickup")}
+            {t("embed.field.route")}：{receipt?.pickupAddress ?? "—"} →{" "}
+            {receipt?.dropoffAddress ?? "—"}
           </div>
           <div>
-            {t("embed.field.vehicle")}：{t("embed.vehicle.standard.name")} ·{" "}
-            {embedReceipt.plate}
+            {t("embed.field.vehicle")}：{receipt?.vehicleType ?? "—"} ·{" "}
+            {receipt?.plateNumber ?? "—"}
           </div>
           <div>
-            {t("embed.field.payment")}：{t("embed.receipt.pay")}
+            {t("embed.field.payment")}：{receipt?.paymentChannel ?? "—"}
           </div>
           <div style={{ fontWeight: 900 }}>
-            {t("embed.field.total")}：{embedReceipt.total}
+            {t("embed.field.total")}：{receipt?.formattedTotal ?? "NT$ --"}
           </div>
         </Card>
       ) : null}
@@ -1629,12 +1677,24 @@ function CompactFlow({ context }: { context: EmbedContext }) {
   );
 }
 
-export function PassengerEmbed({ context }: { context: EmbedContext }) {
+export function PassengerEmbed({
+  context,
+  liveData = null,
+}: {
+  context: EmbedContext;
+  liveData?: PassengerEmbedLiveData;
+}) {
   if (context.state === "handoff") {
     if (isTripFallbackScreen(context.screen)) {
-      return <TripFallbackStateView context={context} screen={context.screen} />;
+      return (
+        <TripFallbackStateView
+          context={context}
+          screen={context.screen}
+          liveData={liveData}
+        />
+      );
     }
-    return <CompactFlow context={context} />;
+    return <CompactFlow context={context} liveData={liveData} />;
   }
 
   return <IdentityState context={context} />;

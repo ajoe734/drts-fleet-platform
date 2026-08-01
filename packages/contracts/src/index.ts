@@ -3024,6 +3024,17 @@ export interface OwnedOrderRecord {
   lastDispatchFailureReason: string | null;
   noSupplyEscalation: NoSupplyEscalationRecord | null;
   dispatchTimeout: DispatchTimeoutRecord | null;
+  referralPassengerLifecycle?: {
+    bookingIdempotencyKey?: string;
+    rating?: {
+      orderId: string;
+      score: 1 | 2 | 3 | 4 | 5;
+      comment?: string;
+      tags: string[];
+      idempotencyKey?: string;
+      submittedAt: string;
+    };
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

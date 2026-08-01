@@ -9965,18 +9965,6 @@ export class OwnedMobilityService
     }
   }
 
-  private readonly referralRatingsByOrderId = new Map<
-    string,
-    {
-      orderId: string;
-      score: 1 | 2 | 3 | 4 | 5;
-      comment?: string;
-      tags: string[];
-      idempotencyKey?: string;
-      submittedAt: string;
-    }
-  >();
-
   private normalizeReferralRatingTags(value: string[] | undefined) {
     if (value === undefined) {
       return [];
@@ -10019,6 +10007,30 @@ export class OwnedMobilityService
         { orderId: existing.orderId },
       );
     }
+  }
+
+  private getReferralLifecycle(order: OwnedOrderRecord) {
+    return order.referralPassengerLifecycle ?? null;
+  }
+
+  private updateReferralLifecycle(
+    order: OwnedOrderRecord,
+    patch: NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>,
+  ) {
+    const nextOrder: OwnedOrderRecord = {
+      ...order,
+      referralPassengerLifecycle: {
+        ...(this.getReferralLifecycle(order) ?? {}),
+        ...patch,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.orders = this.orders.map((candidate) =>
+      candidate.orderId === order.orderId ? nextOrder : candidate,
+    );
+
+    return nextOrder;
   }
 
   private assertPartnerOrderIdentity(
@@ -10117,7 +10129,7 @@ export class OwnedMobilityService
           o.tenantId === tenantId &&
           o.partnerEntrySlug === identity.partnerEntrySlug &&
           o.passenger?.passengerId === passengerId &&
-          (o as unknown as Record<string, unknown>).idempotencyKey ===
+          this.getReferralLifecycle(o)?.bookingIdempotencyKey ===
             command.idempotencyKey,
       );
       if (existing) {
@@ -10175,14 +10187,15 @@ export class OwnedMobilityService
       result &&
       "orderId" in result
     ) {
-      const order = Array.isArray(this.orders)
-        ? this.orders.find((o) => o.orderId === result.orderId)
-        : (this.orders as unknown as Map<string, OwnedOrderRecord>).get(
-            result.orderId,
-          );
+      const order = this.orders.find((o) => o.orderId === result.orderId);
       if (order) {
-        (order as unknown as Record<string, unknown>).idempotencyKey =
-          command.idempotencyKey;
+        const nextOrder = this.updateReferralLifecycle(order, {
+          bookingIdempotencyKey: command.idempotencyKey,
+        });
+        await this.persistChangesRequired(
+          { orders: [nextOrder] },
+          "referral.booking.idempotency",
+        );
       }
     }
 
@@ -10297,7 +10310,7 @@ export class OwnedMobilityService
     }
 
     const details = this.resolveReferralTripDetails(activeOrder);
-    const isRated = this.referralRatingsByOrderId.has(activeOrder.orderId);
+    const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
 
     return {
       active: true,
@@ -10508,7 +10521,7 @@ export class OwnedMobilityService
     );
   }
 
-  submitReferralPassengerRating(
+  async submitReferralPassengerRating(
     orderId: string,
     command: SubmitReferralPassengerRatingCommand,
     identity?: BootstrapRequestIdentity | null,
@@ -10554,7 +10567,7 @@ export class OwnedMobilityService
     const tags = this.normalizeReferralRatingTags(command.tags);
     const comment = command.comment?.trim() || null;
 
-    const existing = this.referralRatingsByOrderId.get(orderId);
+    const existing = this.getReferralLifecycle(order)?.rating;
     if (existing) {
       this.assertIdempotentReferralRating(existing, score, tags, comment);
       return {
@@ -10566,14 +10579,9 @@ export class OwnedMobilityService
       };
     }
 
-    const ratingRecord: {
-      orderId: string;
-      score: 1 | 2 | 3 | 4 | 5;
-      comment?: string;
-      tags: string[];
-      idempotencyKey?: string;
-      submittedAt: string;
-    } = {
+    const ratingRecord: NonNullable<
+      NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>["rating"]
+    > = {
       orderId,
       score,
       tags,
@@ -10586,7 +10594,13 @@ export class OwnedMobilityService
       ratingRecord.idempotencyKey = command.idempotencyKey;
     }
 
-    this.referralRatingsByOrderId.set(orderId, ratingRecord);
+    const nextOrder = this.updateReferralLifecycle(order, {
+      rating: ratingRecord,
+    });
+    await this.persistChangesRequired(
+      { orders: [nextOrder] },
+      "referral.rating.idempotency",
+    );
 
     return {
       orderId,
@@ -10639,6 +10653,19 @@ export class OwnedMobilityService
         : null,
       dispatchTimeout: order.dispatchTimeout
         ? { ...order.dispatchTimeout }
+        : null,
+      referralPassengerLifecycle: order.referralPassengerLifecycle
+        ? {
+            ...order.referralPassengerLifecycle,
+            ...(order.referralPassengerLifecycle.rating
+              ? {
+                  rating: {
+                    ...order.referralPassengerLifecycle.rating,
+                    tags: [...order.referralPassengerLifecycle.rating.tags],
+                  },
+                }
+              : {}),
+          }
         : null,
     };
   }

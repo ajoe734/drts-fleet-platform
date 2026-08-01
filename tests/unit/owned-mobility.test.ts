@@ -48,6 +48,76 @@ function createService(
   };
 }
 
+function createMemoryOwnedMobilityRepository() {
+  const state = {
+    orders: [] as Record<string, unknown>[],
+    dispatchJobs: [] as Record<string, unknown>[],
+    dispatchAttempts: [] as Record<string, unknown>[],
+    dispatchAssignments: [] as Record<string, unknown>[],
+    driverTasks: [] as Record<string, unknown>[],
+    dispatchTraceLogs: [] as Record<string, unknown>[],
+  };
+
+  const replaceByKey = <T extends Record<string, unknown>>(
+    current: T[],
+    incoming: readonly T[] | undefined,
+    key: keyof T,
+  ) => {
+    if (!incoming) {
+      return current;
+    }
+
+    const next = new Map<string, T>(
+      current.map((item) => [
+        String(item[key]),
+        JSON.parse(JSON.stringify(item)) as T,
+      ]),
+    );
+    for (const item of incoming) {
+      next.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
+    }
+    return [...next.values()];
+  };
+
+  return {
+    isEnabled: () => true,
+    loadState: vi.fn(async () => JSON.parse(JSON.stringify(state))),
+    persistChanges: vi.fn(async (changes: Record<string, unknown>) => {
+      state.orders = replaceByKey(
+        state.orders,
+        changes.orders as Record<string, unknown>[] | undefined,
+        "orderId",
+      );
+      state.dispatchJobs = replaceByKey(
+        state.dispatchJobs,
+        changes.dispatchJobs as Record<string, unknown>[] | undefined,
+        "dispatchJobId",
+      );
+      state.dispatchAttempts = replaceByKey(
+        state.dispatchAttempts,
+        changes.dispatchAttempts as Record<string, unknown>[] | undefined,
+        "attemptId",
+      );
+      state.dispatchAssignments = replaceByKey(
+        state.dispatchAssignments,
+        changes.dispatchAssignments as Record<string, unknown>[] | undefined,
+        "assignmentId",
+      );
+      state.driverTasks = replaceByKey(
+        state.driverTasks,
+        changes.driverTasks as Record<string, unknown>[] | undefined,
+        "taskId",
+      );
+      state.dispatchTraceLogs = replaceByKey(
+        state.dispatchTraceLogs,
+        changes.dispatchTraceLogs as Record<string, unknown>[] | undefined,
+        "traceLogId",
+      );
+    }),
+    reportPersistenceFailure: vi.fn(),
+  } as unknown as OwnedMobilityRepository;
+}
+
 const TENANT_ACME = "tenant-acme-001";
 const TENANT_NEWCO = "tenant-newco-001";
 const PARTNER_TENANT = "tenant-demo-001";
@@ -1982,7 +2052,7 @@ describe("owned mobility service", () => {
       );
 
       try {
-        ownedMobilityService.submitReferralPassengerRating(
+        await ownedMobilityService.submitReferralPassengerRating(
           booking.orderId,
           {
             orderId: booking.orderId,
@@ -1999,17 +2069,18 @@ describe("owned mobility service", () => {
 
       await completeOrderForRating(ownedMobilityService, booking.orderId);
 
-      const firstRating = ownedMobilityService.submitReferralPassengerRating(
-        booking.orderId,
-        {
-          orderId: booking.orderId,
-          score: 5,
-          comment: " Great ride ",
-          tags: [" polite ", "fast", "fast"],
-          idempotencyKey: "rating-idemp-001",
-        },
-        identity,
-      );
+      const firstRating =
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: " Great ride ",
+            tags: [" polite ", "fast", "fast"],
+            idempotencyKey: "rating-idemp-001",
+          },
+          identity,
+        );
       expect(firstRating).toMatchObject({
         orderId: booking.orderId,
         score: 5,
@@ -2017,21 +2088,22 @@ describe("owned mobility service", () => {
         tags: ["fast", "polite"],
       });
 
-      const replayRating = ownedMobilityService.submitReferralPassengerRating(
-        booking.orderId,
-        {
-          orderId: booking.orderId,
-          score: 5,
-          comment: "Great ride",
-          tags: ["fast", "polite"],
-          idempotencyKey: "rating-idemp-002",
-        },
-        identity,
-      );
+      const replayRating =
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: "Great ride",
+            tags: ["fast", "polite"],
+            idempotencyKey: "rating-idemp-002",
+          },
+          identity,
+        );
       expect(replayRating).toEqual(firstRating);
 
       try {
-        ownedMobilityService.submitReferralPassengerRating(
+        await ownedMobilityService.submitReferralPassengerRating(
           booking.orderId,
           {
             orderId: booking.orderId,
@@ -2045,6 +2117,84 @@ describe("owned mobility service", () => {
       } catch (error) {
         expect(getErrorCode(error)).toBe("PASSENGER_RATING_ALREADY_SUBMITTED");
       }
+    });
+
+    it("replays referral booking and rating after repository reload", async () => {
+      const repository = createMemoryOwnedMobilityRepository();
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-reload-001",
+      };
+      const bookingCommand = {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "Pickup Spot",
+        dropoffAddress: "Dropoff Spot",
+        idempotencyKey: "referral-create-reload-001",
+      };
+
+      const { ownedMobilityService: firstService } = createService(
+        repository,
+        tenantPartnerService,
+      );
+      await firstService.onModuleInit();
+
+      const created = await firstService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+      await completeOrderForRating(firstService, created.orderId);
+      const firstRating = await firstService.submitReferralPassengerRating(
+        created.orderId,
+        {
+          orderId: created.orderId,
+          score: 5,
+          comment: "Smooth ride",
+          tags: ["clean", "on-time"],
+          idempotencyKey: "referral-rating-reload-001",
+        },
+        identity,
+      );
+
+      const { ownedMobilityService: reloadedService } = createService(
+        repository,
+        tenantPartnerService,
+      );
+      await reloadedService.onModuleInit();
+
+      const replayed = await reloadedService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+      expect(replayed.orderId).toBe(created.orderId);
+      expect(replayed.replayed).toBe(true);
+
+      const replayedRating =
+        await reloadedService.submitReferralPassengerRating(
+          created.orderId,
+          {
+            orderId: created.orderId,
+            score: 5,
+            comment: "Smooth ride",
+            tags: ["clean", "on-time"],
+            idempotencyKey: "referral-rating-reload-002",
+          },
+          identity,
+        );
+      expect(replayedRating).toEqual(firstRating);
     });
   });
 });
