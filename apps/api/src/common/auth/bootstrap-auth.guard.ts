@@ -14,6 +14,7 @@ import {
   AUTH_OPEN_ROUTE_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
 } from "./auth.constants";
+import { resolveOpenRouteInventoryEntry } from "./open-route.inventory";
 import type {
   AuthenticatedRequestLike,
   BootstrapRequestIdentity,
@@ -126,8 +127,26 @@ export class BootstrapAuthGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? false;
+    const openRouteInventoryEntry = resolveOpenRouteInventoryEntry(
+      request.method ?? "GET",
+      requestUrl,
+    );
 
-    if (isOpenRoute) {
+    if (isOpenRoute !== Boolean(openRouteInventoryEntry)) {
+      throw new ApiRequestError(
+        500,
+        "AUTH_ROUTE_METADATA_CONFLICT",
+        "Route auth metadata is inconsistent with the canonical open-route inventory.",
+        {
+          route: requestUrl,
+          method: request.method ?? "GET",
+          hasOpenRouteDecorator: isOpenRoute,
+          inventoryMatch: Boolean(openRouteInventoryEntry),
+        },
+      );
+    }
+
+    if (openRouteInventoryEntry) {
       this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
       return true;
     }
@@ -209,15 +228,15 @@ export class BootstrapAuthGuard implements CanActivate {
       : baseHeaders;
 
     if (!policy) {
-      const anonymousIdentity = extractBootstrapRequestIdentity(headers, {
-        allowAnonymous: true,
-        method: request.method ?? undefined,
-        requestUrl: requestUrl || undefined,
-      });
-      if (anonymousIdentity) {
-        request.identity = anonymousIdentity;
-      }
-      return true;
+      throw new ApiRequestError(
+        500,
+        "AUTH_ROUTE_UNCLASSIFIED",
+        "Route is missing canonical authentication classification metadata.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
     }
 
     const identity = extractBootstrapRequestIdentity(headers, {

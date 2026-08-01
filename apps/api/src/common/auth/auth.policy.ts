@@ -58,6 +58,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "notifications/read" && upperMethod === "POST") {
+    return {
+      routeKey: "notifications:read:POST",
+      requiredScopes: ["notifications:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Notification inbox acknowledgment",
+    };
+  }
+
   if (routePath === "tenant-partner/summary") {
     return {
       routeKey: "tenant-partner:summary",
@@ -106,6 +115,21 @@ export function resolveRouteAuthPolicy(
       requiredScopes: [],
       allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
       description: "Authenticated driver-device revoke access",
+    };
+  }
+
+  if (routePath === "auth/token" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:token:exchange",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description: "Internal token exchange",
     };
   }
 
@@ -325,9 +349,23 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath.startsWith("passenger/orders/") &&
+    routePath.endsWith("/cancel")
+  ) {
+    return {
+      routeKey: `passenger:orders:cancel:${upperMethod}`,
+      requiredScopes: ["owned:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Passenger order cancellation",
+    };
+  }
+
+  if (
     routePath === "ops/dispatch-events" ||
     routePath === "driver/task-events" ||
-    routePath.startsWith("driver/tasks")
+    routePath.startsWith("driver/tasks") ||
+    routePath.startsWith("driver/task-views") ||
+    routePath.startsWith("driver/forwarded-orders")
   ) {
     const isOpsDispatchEvents = routePath === "ops/dispatch-events";
     return {
@@ -388,6 +426,15 @@ export function resolveRouteAuthPolicy(
       description: isOpsView
         ? "Ops driver location tracking status access"
         : "Driver location heartbeat ingest + self tracking status",
+    };
+  }
+
+  if (routePath === "driver-settings" || routePath.startsWith("driver-settings/")) {
+    return {
+      routeKey: `driver-settings:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver settings access",
     };
   }
 
@@ -544,9 +591,121 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "system/foundation/manifest") {
+    return {
+      routeKey: "system:foundation:manifest",
+      requiredScopes: ["foundation:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Foundation execution manifest",
+    };
+  }
+
+  if (routePath.startsWith("geo/")) {
+    return {
+      routeKey: `geo:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
+      description: "Authenticated geo provider access",
+    };
+  }
+
+  if (routePath === "admin/tenant-governance/summary") {
+    return {
+      routeKey: "admin:tenant-governance:summary",
+      requiredScopes: ["foundation:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Tenant governance summary",
+    };
+  }
+
+  if (routePath === "product-rule/catalog") {
+    return {
+      routeKey: "product-rule:catalog",
+      requiredScopes: ["foundation:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Product rule catalog read",
+    };
+  }
+
+  if (routePath.startsWith("sandbox/dispatch/")) {
+    return {
+      routeKey: `sandbox-dispatch:${upperMethod}`,
+      requiredScopes: methodScope(
+        "dispatch:read",
+        "dispatch:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Sandbox dispatch gate management",
+    };
+  }
+
+  if (routePath === "service-area/definitions" || routePath === "service-area/geojson") {
+    return {
+      routeKey: `service-area:read:${upperMethod}`,
+      requiredScopes: ["dispatch:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Service-area operational read access",
+    };
+  }
+
+  if (routePath === "service-area/evaluate") {
+    return {
+      routeKey: "service-area:evaluate",
+      requiredScopes: ["dispatch:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Service-area evaluation",
+    };
+  }
+
+  if (
+    routePath === "service-area/admin/geojson" ||
+    routePath.startsWith("service-area/admin/service-areas") ||
+    routePath.startsWith("service-area/admin/stop-policies")
+  ) {
+    return {
+      routeKey: `service-area:admin:${upperMethod}`,
+      requiredScopes: methodScope(
+        "foundation:read",
+        "foundation:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Service-area governance administration",
+    };
+  }
+
+  if (routePath.startsWith("shift-attendance/")) {
+    return {
+      routeKey: `shift-attendance:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("ops", "driver"),
+      description: "Shift attendance access",
+    };
+  }
+
+  if (routePath.startsWith("tesla-integration/")) {
+    return {
+      routeKey: `tesla-integration:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Tesla integration control surfaces",
+    };
+  }
+
   if (
     routePath === "driver-fee-plans" ||
+    routePath === "driver-fee-plans/publish" ||
     routePath.startsWith("driver-statements") ||
+    routePath === "settlement/invoices" ||
+    routePath === "settlement/matrix" ||
+    routePath.startsWith("settlement/reconciliation-issues") ||
     routePath === "reimbursements" ||
     routePath.startsWith("reimbursements/")
   ) {
@@ -555,6 +714,19 @@ export function resolveRouteAuthPolicy(
       requiredScopes: methodScope("billing:read", "billing:write", upperMethod),
       allowedRealms: baseAllowedRealms("platform", "ops"),
       description: "Billing and settlement operational access",
+    };
+  }
+
+  if (routePath.startsWith("admin/flags")) {
+    return {
+      routeKey: `admin:flags:${upperMethod}`,
+      requiredScopes: methodScope(
+        "foundation:read",
+        "foundation:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Feature-flag administration",
     };
   }
 

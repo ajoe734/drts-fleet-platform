@@ -8,7 +8,10 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { AuthController } from "../../src/modules/auth/auth.controller";
 import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { IdentityController } from "../../src/modules/identity/identity.controller";
 import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
+import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
+import { PlatformAdminController } from "../../src/modules/platform-admin/platform-admin.controller";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
@@ -240,6 +243,24 @@ describe("bootstrap auth extraction", () => {
       requiredScopes: [],
       allowedRealms: ["system", "platform", "ops", "driver"],
       description: "Authenticated driver-device revoke access",
+    });
+  });
+
+  it("classifies the internal auth token exchange route", () => {
+    const policy = resolveRouteAuthPolicy("POST", "/api/auth/token");
+
+    expect(policy).toEqual({
+      routeKey: "auth:token:exchange",
+      requiredScopes: [],
+      allowedRealms: [
+        "system",
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ],
+      description: "Internal token exchange",
     });
   });
 
@@ -791,6 +812,84 @@ describe("bootstrap auth guard", () => {
     expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
   });
 
+  it("fails closed for unclassified routes", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {},
+      method: "GET",
+      originalUrl: "/api/unclassified-shadow-route",
+    };
+
+    expect(() => guard.canActivate(createExecutionContext(request))).toThrowError(
+      ApiRequestError,
+    );
+
+    try {
+      guard.canActivate(createExecutionContext(request));
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect(
+        (error as ApiRequestError).getResponse(),
+      ).toMatchObject({
+        error: {
+          code: "AUTH_ROUTE_UNCLASSIFIED",
+        },
+      });
+    }
+  });
+
+  it("fails closed when an @OpenRoute handler is missing from the canonical inventory", () => {
+    class InventoryDriftRoute {
+      handler() {}
+    }
+
+    const descriptor = Object.getOwnPropertyDescriptor(
+      InventoryDriftRoute.prototype,
+      "handler",
+    );
+    expect(descriptor).toBeDefined();
+    if (!descriptor) {
+      throw new Error("expected descriptor");
+    }
+    OpenRoute()(InventoryDriftRoute.prototype, "handler", descriptor);
+
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {},
+      method: "GET",
+      originalUrl: "/api/inventory-drift-route",
+    };
+
+    expect(() =>
+      guard.canActivate(
+        createExecutionContext(
+          request,
+          InventoryDriftRoute.prototype.handler as never,
+          InventoryDriftRoute,
+        ),
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      guard.canActivate(
+        createExecutionContext(
+          request,
+          InventoryDriftRoute.prototype.handler as never,
+          InventoryDriftRoute,
+        ),
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect(
+        (error as ApiRequestError).getResponse(),
+      ).toMatchObject({
+        error: {
+          code: "AUTH_ROUTE_METADATA_CONFLICT",
+        },
+      });
+    }
+  });
+
   it("accepts SSE bootstrap identity from query params on ops dispatch streams", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
@@ -805,7 +904,11 @@ describe("bootstrap auth guard", () => {
       },
     };
 
-    const context = createExecutionContext(request);
+    const context = createExecutionContext(
+      request,
+      OwnedMobilityController.prototype.streamOpsDispatchEvents as never,
+      OwnedMobilityController as never,
+    );
 
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity).toMatchObject({
@@ -845,7 +948,11 @@ describe("bootstrap auth guard", () => {
       originalUrl: "/api/platform-admin/public-info",
     };
 
-    const context = createExecutionContext(request);
+    const context = createExecutionContext(
+      request,
+      PlatformAdminController.prototype.updatePublicInfo as never,
+      PlatformAdminController as never,
+    );
 
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity).toMatchObject({
@@ -941,7 +1048,11 @@ describe("bootstrap auth guard", () => {
       originalUrl: "/api/identity/context",
     };
 
-    const context = createExecutionContext(request);
+    const context = createExecutionContext(
+      request,
+      IdentityController.prototype.getContext as never,
+      IdentityController as never,
+    );
 
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity).toMatchObject({

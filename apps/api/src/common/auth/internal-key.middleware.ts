@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { ApiRequestError } from "../api-envelope";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
+import { resolveOpenRouteInventoryEntry } from "./open-route.inventory";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -17,12 +18,6 @@ const INTERNAL_KEY_HEADER = "x-drts-internal-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
-const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
-  "GET identity/context",
-  "GET tenant/roles",
-  "POST auth/tenant/bootstrap-session",
-  "POST auth/partner/bootstrap-session",
-]);
 const PUBLIC_BOOTSTRAP_REALMS = new Set([
   "platform",
   "tenant",
@@ -41,13 +36,6 @@ function normalizeHeaderValue(value: HeaderValue): string {
 function stripQueryString(path: string): string {
   const queryStart = path.indexOf("?");
   return queryStart >= 0 ? path.slice(0, queryStart) : path;
-}
-
-function normalizeRequestPath(path: string): string {
-  return stripQueryString(path)
-    .replace(/^\/+/, "")
-    .replace(/^api\/+/, "")
-    .replace(/\/+$/, "");
 }
 
 export function isHealthRequest(path: string | undefined): boolean {
@@ -69,9 +57,7 @@ function isExplicitPublicRequest(
     return false;
   }
 
-  return EXPLICIT_PUBLIC_ROUTE_KEYS.has(
-    `${method.toUpperCase()} ${normalizeRequestPath(path)}`,
-  );
+  return Boolean(resolveOpenRouteInventoryEntry(method, path));
 }
 
 function hasPublicBootstrapRealm(request: RequestLike): boolean {
