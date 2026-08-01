@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { getIamActorScopePreset } from "@drts/contracts";
 
 export const CONTROL_PLANE_REQUEST_AUTH_HEADER = "x-drts-authorization";
 export const CONTROL_PLANE_IAP_EMAIL_HEADER = "x-goog-authenticated-user-email";
@@ -161,94 +162,6 @@ const CONTROL_PLANE_REALMS: Record<ControlPlaneActorType, AuthRealm> = {
   ops_user: "ops",
 };
 
-// These presets are minted into `x-scopes` (or the JWT `scopes` claim) by the
-// control-plane proxy, and the API's `deriveScopes()` honours explicit scopes
-// verbatim — so for a browser request these REPLACE, rather than supplement,
-// `AUTH_SCOPE_PRESETS` in `apps/api/src/common/auth/auth.constants.ts`.
-//
-// Source of truth for the grant per actor type is that API table; this copy
-// exists only because the package must stay dependency-free. Any scope added
-// there for `ops_user` / `platform_admin` must be mirrored here or the surface
-// that needs it 403s with `AUTH_SCOPE_DENIED` from the browser while passing
-// every server-side test. Parity is pinned by
-// `apps/api/tests/unit/ops-driver-tasks-scope.test.ts`.
-const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
-  platform_admin: [
-    "identity:break-glass:request",
-    "identity:break-glass:approve",
-    "identity:break-glass:activate",
-    "identity:read",
-    "foundation:read",
-    "foundation:write",
-    "audit:read",
-    "notifications:read",
-    "notifications:write",
-    "tenant:read",
-    "tenant:write",
-    "tenant:webhooks:read",
-    "tenant:webhooks:write",
-    "tenant:sla:read",
-    "tenant:sla:write",
-    "tenant:billing:read",
-    "tenant:billing:write",
-    "billing:read",
-    "billing:write",
-    "regulatory:read",
-    "regulatory:write",
-    "incident:read",
-    "incident:write",
-    "maintenance:read",
-    "maintenance:write",
-    "reports:read",
-    "reports:write",
-    "forwarder:read",
-    "sandbox.compliance.read",
-    "sandbox.compliance.manage",
-    "sandbox.investigation.read",
-    "sandbox.investigation.manage",
-    "sandbox.evidence.preview",
-    "sandbox.evidence.export.request",
-    "sandbox.evidence.export.approve",
-    "sandbox.legal_hold.place",
-    "sandbox.legal_hold.release.request",
-    "sandbox.legal_hold.release.approve",
-    "sandbox.regulatory_report.review",
-    "sandbox.regulatory_report.submit",
-    "multi_taxi_ratings:read",
-    "multi_taxi_ratings:moderate",
-  ],
-  ops_user: [
-    "identity:read",
-    "audit:read",
-    "notifications:read",
-    "notifications:write",
-    "regulatory:read",
-    "regulatory:write",
-    "callcenter:read",
-    "callcenter:write",
-    "complaints:read",
-    "complaints:write",
-    "incident:read",
-    "incident:write",
-    "maintenance:read",
-    "maintenance:write",
-    "owned:read",
-    "owned:write",
-    "dispatch:read",
-    "dispatch:write",
-    "driver:read",
-    "billing:read",
-    "billing:write",
-    "reports:read",
-    "reports:write",
-    "forwarder:read",
-    "forwarder:write",
-    "sandbox.compliance.read",
-    "sandbox.investigation.read",
-    "sandbox.evidence.preview",
-  ],
-};
-
 const PLATFORM_ADMIN_DIRECTORY = {
   "admin@platform.drts": {
     actorId: "pa-admin-001",
@@ -356,7 +269,7 @@ function buildIdentity(
       tenantId: null,
       roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
       roles: overrideRoles ?? platformIdentity.roles,
-      scopes: [...CONTROL_PLANE_SCOPE_PRESETS[actorType]],
+      scopes: [...getIamActorScopePreset(actorType)],
       requestId: requestId ?? null,
     };
   }
@@ -374,7 +287,7 @@ function buildIdentity(
     tenantId: null,
     roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
     roles: overrideRoles ?? ["ops_user"],
-    scopes: [...CONTROL_PLANE_SCOPE_PRESETS[actorType]],
+    scopes: [...getIamActorScopePreset(actorType)],
     requestId: requestId ?? null,
   };
 }

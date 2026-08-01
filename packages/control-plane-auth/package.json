@@ -17,6 +17,7 @@
     "dist"
   ],
   "dependencies": {
+    "@drts/contracts": "workspace:*",
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {

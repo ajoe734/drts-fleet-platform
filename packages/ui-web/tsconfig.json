@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "paths": {
+      "@drts/contracts": ["../contracts/src/index.ts"],
       "@drts/ui-tokens": ["../ui-tokens/src/index.ts"]
     }
   },

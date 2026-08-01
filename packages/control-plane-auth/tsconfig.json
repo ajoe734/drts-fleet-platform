@@ -6,7 +6,11 @@
     "declaration": true,
     "module": "CommonJS",
     "moduleResolution": "Node",
-    "noEmit": false
+    "noEmit": false,
+    "baseUrl": "../..",
+    "paths": {
+      "@drts/contracts": ["packages/contracts/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }
