@@ -2,9 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { signTestIapJwtAssertion } from "@drts/control-plane-auth";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
+import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
 import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 const INTEGRATION_TEST_SECRET = "iap_integration_test_secret_key_32chars!";
 const INTEGRATION_AUDIENCE = "/projects/1122334455/apps/drts-control-plane-prod";
@@ -255,5 +260,142 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     });
     expect(driftEvents.length).toBeGreaterThan(0);
     expect(driftEvents[0]?.actorId).toBe("principal_group_drift_integ");
+  });
+
+  it("verifies AuthController /auth/token uses IAPSubjectAdapter runtime resolution and ignores spoofed headers", async () => {
+    process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+    process.env.JWT_SECRET = INTEGRATION_TEST_SECRET;
+    process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const jwtAuthService = new JwtAuthService();
+    const tenantPartnerService = new TenantPartnerService(securityEventsService as any);
+    const driverDeviceSessionService = new DriverDeviceSessionService(jwtAuthService, null as any, null as any);
+    const authController = new AuthController(
+      jwtAuthService,
+      tenantPartnerService,
+      driverDeviceSessionService,
+      securityEventsService,
+      adapter,
+    );
+
+    const token = signAssertion({
+      sub: "runtime_iap_sub_001",
+      email: "runtime-admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    const result = await authController.issueToken({
+      headers: {
+        "x-drts-internal-key": "test_internal_key_123",
+        "x-goog-iap-jwt-assertion": token,
+        "x-roles": "spoofed_role",
+        "x-scopes": "spoofed:scope",
+      },
+    });
+
+    expect(result.token).toBeTruthy();
+    const payload = jwtAuthService.verify(result.token);
+    expect(payload?.actorType).toBe("platform_admin");
+    expect(payload?.roles).toContain("superadmin");
+    expect(payload?.roles).not.toContain("spoofed_role");
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.JWT_SECRET;
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+  });
+
+  it("verifies AuthController /auth/token fails closed in strict IAP mode without assertion", async () => {
+    process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+    process.env.STRICT_IAP_MODE = "true";
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const jwtAuthService = new JwtAuthService();
+    const tenantPartnerService = new TenantPartnerService(securityEventsService as any);
+    const driverDeviceSessionService = new DriverDeviceSessionService(jwtAuthService, null as any, null as any);
+    const authController = new AuthController(
+      jwtAuthService,
+      tenantPartnerService,
+      driverDeviceSessionService,
+      securityEventsService,
+      adapter,
+    );
+
+    let error: ApiRequestError | null = null;
+    try {
+      await authController.issueToken({
+        headers: {
+          "x-drts-internal-key": "test_internal_key_123",
+          "x-actor-type": "platform_admin",
+          "x-actor-id": "spoofed-id",
+        },
+      });
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        error = err;
+      }
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.status).toBe(401);
+    expect(error?.code).toBe("IAP_ASSERTION_MISSING");
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.STRICT_IAP_MODE;
+  });
+
+  it("verifies BootstrapAuthGuard enforces durable membership and group drift when receiving x-goog-iap-jwt-assertion", async () => {
+    process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+    process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const reflector = {
+      getAllAndOverride: () => undefined,
+    } as any;
+    const guard = new BootstrapAuthGuard(
+      reflector,
+      new JwtAuthService(),
+      undefined,
+      undefined,
+      adapter,
+    );
+
+    const token = signAssertion({
+      sub: "guard_iap_sub_001",
+      email: "admin-guard@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    const mockRequest: any = {
+      headers: {
+        "x-goog-iap-jwt-assertion": token,
+      },
+      method: "GET",
+      url: "/api/platform-admin/health",
+    };
+
+    const context: any = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => () => {},
+      getClass: () => class {},
+    };
+
+    const allowed = await guard.canActivate(context);
+    expect(allowed).toBe(true);
+    expect(mockRequest.identity).toBeDefined();
+    expect(mockRequest.identity.actorType).toBe("platform_admin");
+    expect(mockRequest.identity.roles).toContain("superadmin");
+
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
   });
 });

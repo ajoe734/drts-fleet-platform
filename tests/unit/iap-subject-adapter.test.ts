@@ -384,4 +384,43 @@ describe("IAPSubjectAdapter", () => {
     expect(driftEvents.length).toBeGreaterThan(0);
     expect(driftEvents[0]?.actorId).toBe("principal_drift_001");
   });
+
+  it("fails closed when IAP assertion lacks email in strict IAP mode", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const tokenNoEmail = signTestIapToken({
+      sub: "subject_no_email_123",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": tokenNoEmail },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+          strictIapMode: true,
+        },
+      );
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(401);
+    expect(caught?.code).toBe("IAP_ASSERTION_INVALID");
+    expect(caught?.getResponse() as any).toMatchObject({
+      error: { message: "IAP assertion missing email claim in strict IAP mode." },
+    });
+
+    const deniedEvents = await securityEventsService.listEvents(null, {
+      eventType: "iap_subject.denied",
+    });
+    expect(deniedEvents.some((e) => e.reasonCode === "missing_email_in_strict_mode")).toBe(true);
+  });
 });

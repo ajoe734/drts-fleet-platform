@@ -226,4 +226,49 @@ describe("control-plane auth helper", () => {
       }),
     ).toThrowError("Verified IAP subject has no valid workforce group membership.");
   });
+
+  it("fails closed when a verified assertion lacks email in strict IAP mode or when assertion is present", () => {
+    const testSecret = "iap_test_secret_32bytes_minimum!";
+    const noEmailToken = signTestIapJwtAssertion(
+      {
+        sub: "user-no-email-01",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
+      },
+      testSecret,
+    );
+
+    expect(() =>
+      issueControlPlaneRequestAuth({
+        actorType: "platform_admin",
+        headers: {
+          "x-goog-iap-jwt-assertion": noEmailToken,
+        },
+        strictIapMode: true,
+        iapJwtSecretOrPublicKey: testSecret,
+      }),
+    ).toThrowError("Control-plane strict IAP mode requires a verified user email in assertion.");
+  });
+
+  it("preserves x-goog-iap-jwt-assertion in minted headers when an assertion is present", () => {
+    const testSecret = "iap_test_secret_32bytes_minimum!";
+    const iapToken = signTestIapJwtAssertion(
+      {
+        sub: "user-forward-01",
+        email: "forward@platform.drts",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
+      },
+      testSecret,
+    );
+
+    const auth = issueControlPlaneRequestAuth({
+      actorType: "platform_admin",
+      headers: {
+        "x-goog-iap-jwt-assertion": iapToken,
+      },
+      strictIapMode: true,
+      iapJwtSecretOrPublicKey: testSecret,
+    });
+
+    expect(auth.headers["x-goog-iap-jwt-assertion"]).toBe(iapToken);
+  });
 });

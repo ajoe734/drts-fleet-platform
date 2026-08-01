@@ -155,6 +155,15 @@ export class IAPSubjectAdapter {
     }
 
     const subject = payload.sub;
+    if (options.strictIapMode && !payload.email) {
+      this.emitDeniedEvent("missing_email_in_strict_mode", subject);
+      throw new ApiRequestError(
+        401,
+        "IAP_ASSERTION_INVALID",
+        "IAP assertion missing email claim in strict IAP mode.",
+      );
+    }
+
     const rawEmail = payload.email || `${subject}@platform.drts`;
     const normalizedEmail = rawEmail.replace(/.*:/, "").trim().toLowerCase();
     const assertionGroups = payload.gcp_ia_groups || payload.groups || [];

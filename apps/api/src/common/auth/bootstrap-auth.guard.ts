@@ -9,6 +9,8 @@ import { Reflector } from "@nestjs/core";
 import { ApiRequestError } from "../api-envelope";
 import { DriverDeviceSessionService } from "../../modules/auth/driver-device-session.service";
 import { AuditNotificationService } from "../../modules/audit-notification/audit-notification.service";
+import { IAPSubjectAdapter } from "../../modules/auth/iap-subject.adapter";
+import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
@@ -113,9 +115,11 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly driverDeviceSessionService?: DriverDeviceSessionService,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly iapSubjectAdapter?: IAPSubjectAdapter,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<AuthenticatedRequestLike>();
@@ -165,6 +169,63 @@ export class BootstrapAuthGuard implements CanActivate {
             routeKey: routePolicy?.routeKey ?? "decorator",
           }
         : null;
+
+    // IAP workforce subject resolution if IAP assertion is present
+    const rawIapAssertion = extractIapJwtAssertion(baseHeaders);
+    if (rawIapAssertion && this.iapSubjectAdapter) {
+      const isStrictIap =
+        process.env.STRICT_IAP_MODE === "true" ||
+        process.env.NODE_ENV === "production";
+      const expectedAudience =
+        process.env.IAP_EXPECTED_AUDIENCE || process.env.JWT_AUDIENCE;
+      const jwtSecretOrPublicKey =
+        process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
+        process.env.IAP_JWT_SECRET ||
+        process.env.JWT_SECRET;
+
+      const resolved = await this.iapSubjectAdapter.resolveSubject(
+        baseHeaders,
+        {
+          strictIapMode: isStrictIap,
+          ...(expectedAudience ? { expectedAudience } : {}),
+          ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
+          autoProvision: process.env.NODE_ENV !== "production",
+        },
+      );
+
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType:
+          resolved.membership.realm === "platform"
+            ? "platform_admin"
+            : "ops_user",
+        actorId: resolved.principal.principalId,
+        subject: resolved.principal.subject,
+        realm: resolved.membership.realm as "platform" | "ops",
+        tenantId: null,
+        roleFamilies: [resolved.membership.realm as "platform" | "ops"],
+        roles: resolved.effectiveRoles,
+        scopes: resolved.effectiveScopes,
+        requestId:
+          (baseHeaders["x-request-id"] as string | undefined) ?? null,
+      };
+
+      request.identity = identity;
+      if (policy) {
+        try {
+          this.assertRealmAllowed(identity, policy.allowedRealms, request);
+          this.assertScopesAllowed(
+            identity,
+            policy.requiredScopes,
+            request,
+          );
+        } catch (error) {
+          this.recordAuthorizationDenialAudit(identity, request, error);
+          throw error;
+        }
+      }
+      return true;
+    }
 
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {

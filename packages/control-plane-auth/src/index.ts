@@ -532,7 +532,8 @@ export function issueControlPlaneRequestAuth(options: {
     }
   }
 
-  const authenticatedUserEmail =
+  const assertionPresent = Boolean(options.headers && extractIapJwtAssertion(options.headers));
+  let authenticatedUserEmail: string | null =
     verifiedEmail ||
     extractAuthenticatedUserEmail(options.headers, {
       strictIapMode: options.strictIapMode,
@@ -540,9 +541,16 @@ export function issueControlPlaneRequestAuth(options: {
       expectedIssuer: options.expectedIapIssuer,
       jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
       allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
-    }) ||
-    normalizeAuthenticatedUserEmail(options.defaultEmail ?? null) ||
-    CONTROL_PLANE_DEFAULT_EMAILS[options.actorType];
+    });
+
+  if (!authenticatedUserEmail) {
+    if (options.strictIapMode || assertionPresent) {
+      throw new Error("Control-plane strict IAP mode requires a verified user email in assertion.");
+    }
+    authenticatedUserEmail =
+      normalizeAuthenticatedUserEmail(options.defaultEmail ?? null) ||
+      CONTROL_PLANE_DEFAULT_EMAILS[options.actorType];
+  }
 
   if (!authenticatedUserEmail) {
     throw new Error("Control-plane authenticated user email is unavailable.");
@@ -558,18 +566,24 @@ export function issueControlPlaneRequestAuth(options: {
     overrideRoles,
   );
 
+  const rawAssertion = options.headers ? extractIapJwtAssertion(options.headers) : null;
+
   if (!hasJwtSecret) {
+    const headers: Record<string, string> = {
+      "x-actor-type": identity.actorType,
+      "x-actor-id": identity.actorId,
+      "x-realm": identity.realm,
+      "x-roles": identity.roles.join(","),
+      "x-role-families": identity.roleFamilies.join(","),
+      "x-scopes": identity.scopes.join(","),
+    };
+    if (rawAssertion) {
+      headers[CONTROL_PLANE_IAP_JWT_HEADER] = rawAssertion;
+    }
     return {
       authenticatedUserEmail,
       identity,
-      headers: {
-        "x-actor-type": identity.actorType,
-        "x-actor-id": identity.actorId,
-        "x-realm": identity.realm,
-        "x-roles": identity.roles.join(","),
-        "x-role-families": identity.roleFamilies.join(","),
-        "x-scopes": identity.scopes.join(","),
-      },
+      headers,
     };
   }
 
@@ -598,12 +612,17 @@ export function issueControlPlaneRequestAuth(options: {
     signOptions,
   );
 
+  const headers: Record<string, string> = {
+    [CONTROL_PLANE_REQUEST_AUTH_HEADER]: `Bearer ${token}`,
+  };
+  if (rawAssertion) {
+    headers[CONTROL_PLANE_IAP_JWT_HEADER] = rawAssertion;
+  }
+
   return {
     authenticatedUserEmail,
     identity,
-    headers: {
-      [CONTROL_PLANE_REQUEST_AUTH_HEADER]: `Bearer ${token}`,
-    },
+    headers,
   };
 }
 
