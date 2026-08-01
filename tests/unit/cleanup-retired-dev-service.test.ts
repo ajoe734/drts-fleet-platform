@@ -27,7 +27,6 @@ const intendedServices = [
   "drts-dev-tenant-console-web",
   "drts-dev-bank-console-web",
   "drts-dev-referral-embed-web",
-  "drts-dev-partner-booking-web",
   "drts-dev-enterprise-dispatch-web",
   "drts-channel-partner-portal-web",
 ] as const;
@@ -122,7 +121,7 @@ describe("retired Cloud Run service cleanup", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
     ]);
   });
