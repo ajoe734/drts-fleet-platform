@@ -1041,7 +1041,7 @@ describe("internal key middleware", () => {
     ).not.toThrow();
   });
 
-  it("allows protected routes for validated non-system bootstrap identities without the internal key", () => {
+  it("rejects caller-defined non-system bootstrap headers without proof or internal key", () => {
     expect(() =>
       validateInternalKey(
         {
@@ -1055,7 +1055,7 @@ describe("internal key middleware", () => {
         },
         "staging-secret",
       ),
-    ).not.toThrow();
+    ).toThrowError(ApiRequestError);
   });
 
   it("rejects x-realm-only requests that do not provide a validated bootstrap identity", () => {
@@ -1166,7 +1166,7 @@ describe("internal key middleware", () => {
     ).toThrowError(ApiRequestError);
   });
 
-  it("allows uncovered driver-settings routes for non-system bootstrap realms", () => {
+  it("rejects caller-defined driver-settings bootstrap headers without proof or internal key", () => {
     expect(() =>
       validateInternalKey(
         {
@@ -1180,7 +1180,7 @@ describe("internal key middleware", () => {
         },
         "staging-secret",
       ),
-    ).not.toThrow();
+    ).toThrowError(ApiRequestError);
   });
 
   it("rejects system-scoped protected routes when the internal key header is missing", () => {
