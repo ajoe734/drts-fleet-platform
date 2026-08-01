@@ -109,7 +109,14 @@ export class AuthController {
     @Headers("x-request-id") requestId?: string,
     @Headers("x-oidc-state-token") stateTokenHeader?: string,
   ) {
-    const stateToken = stateTokenHeader || (command as any).stateToken;
+    const stateToken = stateTokenHeader?.trim();
+    if (!stateToken) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Missing x-oidc-state-token header. Managed HttpOnly BFF boundary requires state token in header.",
+      );
+    }
     const meta = this.buildMeta(
       forwardedFor,
       realIp,
@@ -139,7 +146,14 @@ export class AuthController {
     @Headers("x-request-id") requestId?: string,
     @Headers("x-oidc-state-token") stateTokenHeader?: string,
   ) {
-    const stateToken = stateTokenHeader || (command as any).stateToken;
+    const stateToken = stateTokenHeader?.trim();
+    if (!stateToken) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Missing x-oidc-state-token header. Managed HttpOnly BFF boundary requires state token in header.",
+      );
+    }
     const meta = this.buildMeta(
       forwardedFor,
       realIp,

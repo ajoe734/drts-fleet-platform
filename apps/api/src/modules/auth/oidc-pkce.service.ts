@@ -279,18 +279,67 @@ export class OidcPkceService {
   ): Promise<TenantBootstrapSession> {
     const { claims } = await this.validateAndExchangeCode(command, "tenant", meta);
 
-    // Resolve tenant user identity
+    // Resolve tenant user identity by immutable subject binding primary key
+    const subjectId = claims.sub.trim();
     const normalizedEmail = claims.email.trim().toLowerCase();
     const requestedTenantId = command.tenantId?.trim() || claims.tenant_id?.trim();
 
+    // 1. Primary resolution: immutable subject binding
     let existingUser = requestedTenantId
-      ? this.tenantPartnerService
+      ? (this.tenantPartnerService
           .listTenantUsers(requestedTenantId)
-          .find((user) => user.email === normalizedEmail) ?? null
+          .find((user) => user.userId === subjectId || (user as any).subjectId === subjectId) ?? null)
       : null;
 
     if (!existingUser) {
-      existingUser = this.tenantPartnerService.findTenantUserByEmail(normalizedEmail);
+      existingUser = this.tenantPartnerService.findTenantUserBySubject(subjectId);
+    }
+
+    // 2. Secondary resolution: email match only if subject is not bound or in mock test transition
+    if (!existingUser) {
+      existingUser = requestedTenantId
+        ? (this.tenantPartnerService
+            .listTenantUsers(requestedTenantId)
+            .find((user) => user.email === normalizedEmail) ?? null)
+        : null;
+
+      if (!existingUser) {
+        existingUser = this.tenantPartnerService.findTenantUserByEmail(normalizedEmail);
+      }
+
+      if (existingUser) {
+        const boundSubject = (existingUser as any).subjectId;
+        if (boundSubject && boundSubject !== subjectId) {
+          const targetTenantId =
+            existingUser.tenantId ||
+            requestedTenantId ||
+            this.tenantPartnerService.getDefaultTenantId();
+
+          this.recordSecurityEvent({
+            eventType: "tenant_oidc_session.denied",
+            outcome: "denied",
+            realm: "tenant",
+            tenantId: targetTenantId,
+            subjectId: claims.sub,
+            reasonCode: "SUBJECT_BINDING_MISMATCH",
+            meta,
+          });
+          throw new ApiRequestError(
+            403,
+            "AUTH_SESSION_EXCHANGE_DENIED",
+            "Subject identifier does not match the bound account subject.",
+          );
+        }
+
+        (existingUser as any).subjectId = subjectId;
+        const internalUser = this.tenantPartnerService.findTenantUser(
+          existingUser.tenantId,
+          existingUser.userId,
+        );
+        if (internalUser) {
+          (internalUser as any).subjectId = subjectId;
+        }
+      }
     }
 
     const targetTenantId =
@@ -748,12 +797,12 @@ export class OidcPkceService {
     }
 
     // 2. State & Nonce verification
-    const stateToken = meta?.stateToken || (command as any).stateToken;
+    const stateToken = meta?.stateToken?.trim();
     if (!stateToken || typeof stateToken !== "string") {
       throw new ApiRequestError(
         400,
         "AUTH_SESSION_EXCHANGE_DENIED",
-        "Missing OIDC state token. Session exchange requires valid stateToken.",
+        "Missing OIDC state token header. Managed HttpOnly BFF boundary requires x-oidc-state-token header.",
       );
     }
 

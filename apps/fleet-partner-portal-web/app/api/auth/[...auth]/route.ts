@@ -56,19 +56,27 @@ export async function GET(
     const state = request.nextUrl.searchParams.get("state") || "";
     const stateCookie = request.cookies.get("drts_oidc_state")?.value || "";
 
+    if (!stateCookie) {
+      return NextResponse.json(
+        {
+          error: "AUTH_SESSION_EXCHANGE_DENIED",
+          message: "OIDC state cookie missing or expired. Managed HttpOnly BFF state boundary enforced.",
+        },
+        { status: 400 },
+      );
+    }
+
     let stateToken = "";
     let pkceVerifier = "";
     let returnUrl = "/";
 
-    if (stateCookie) {
-      try {
-        const parsed = JSON.parse(stateCookie);
-        stateToken = parsed.stateToken || "";
-        pkceVerifier = parsed.codeVerifier || "";
-        returnUrl = parsed.returnUrl || "/";
-      } catch {
-        stateToken = stateCookie;
-      }
+    try {
+      const parsed = JSON.parse(stateCookie);
+      stateToken = parsed.stateToken || "";
+      pkceVerifier = parsed.codeVerifier || "";
+      returnUrl = parsed.returnUrl || "/";
+    } catch {
+      stateToken = stateCookie;
     }
 
     const callbackUrl = `${request.nextUrl.origin}/api/auth/callback`;
