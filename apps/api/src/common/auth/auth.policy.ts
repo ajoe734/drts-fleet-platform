@@ -783,11 +783,11 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: `safety-operator:${upperMethod}`,
       requiredScopes: methodScope(
-        "incident:read",
-        "incident:write",
+        "driver:read",
+        "driver:write",
         upperMethod,
       ),
-      allowedRealms: baseAllowedRealms("ops"),
+      allowedRealms: baseAllowedRealms("ops", "driver"),
       description: "Safety operator shift and pre-trip checklist access",
     };
   }
