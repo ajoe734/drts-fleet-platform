@@ -164,8 +164,8 @@ export function routeSource(route: ScannedRoute) {
     return {
       inventoryEntry,
       policy,
-      classification: "protected",
-      authSource: "decorators",
+      classification: "unclassified",
+      authSource: "decorators without policy catalog entry",
     } as const;
   }
 

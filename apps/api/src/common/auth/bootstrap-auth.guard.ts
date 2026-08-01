@@ -173,17 +173,14 @@ export class BootstrapAuthGuard implements CanActivate {
       routePolicy?.allowedRealms ?? [],
       decoratorRealms,
     );
-    const policy =
-      mergedScopes.length > 0 || mergedRealms.length > 0
-        ? {
-            requiredScopes: mergedScopes,
-            allowedRealms: mergedRealms,
-            description: routePolicy
-              ? routePolicy.description
-              : "Decorator-authenticated route",
-            routeKey: routePolicy?.routeKey ?? "decorator",
-          }
-        : null;
+    const policy = routePolicy
+      ? {
+          requiredScopes: mergedScopes,
+          allowedRealms: mergedRealms,
+          description: routePolicy.description,
+          routeKey: routePolicy.routeKey,
+        }
+      : null;
 
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {

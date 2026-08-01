@@ -24,7 +24,7 @@ describe("auth route inventory", () => {
       }
 
       if (classification.classification === "unclassified") {
-        labels.push("missing auth policy and explicit decorators");
+        labels.push("missing canonical auth policy catalog entry");
       }
 
       if (classification.classification === "conflict") {

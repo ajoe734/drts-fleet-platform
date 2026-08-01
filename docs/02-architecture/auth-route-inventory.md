@@ -36,17 +36,17 @@ Canonical inventory for `IAM-P0-003`. This file is derived from controller decor
 
 | Method | Path | Classification | Auth Source | Controller | Handler |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/accident-cases` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listAccidentCases |
-| POST | `/accident-cases` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | createAccidentCase |
-| GET | `/accident-cases/:caseId` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | getAccidentCase |
-| POST | `/accident-cases/:caseId/bundles` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | generateInvestigationBundle |
-| GET | `/accident-cases/:caseId/external-documents` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listExternalDocuments |
-| POST | `/accident-cases/:caseId/external-documents` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | importExternalDocument |
-| GET | `/accident-cases/:caseId/timeline` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | getTimeline |
-| POST | `/accident-cases/:caseId/timeline-facts` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | addTimelineFact |
-| POST | `/accident-cases/:caseId/transitions` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | transitionAccidentCase |
-| GET | `/accident-cases/evidence-discrepancies` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listEvidenceDiscrepancyCases |
-| GET | `/accident-cases/takeover-correlations` | protected | decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listCorrelatedTakeoverCases |
+| GET | `/accident-cases` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listAccidentCases |
+| POST | `/accident-cases` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | createAccidentCase |
+| GET | `/accident-cases/:caseId` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | getAccidentCase |
+| POST | `/accident-cases/:caseId/bundles` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | generateInvestigationBundle |
+| GET | `/accident-cases/:caseId/external-documents` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listExternalDocuments |
+| POST | `/accident-cases/:caseId/external-documents` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | importExternalDocument |
+| GET | `/accident-cases/:caseId/timeline` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | getTimeline |
+| POST | `/accident-cases/:caseId/timeline-facts` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | addTimelineFact |
+| POST | `/accident-cases/:caseId/transitions` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | transitionAccidentCase |
+| GET | `/accident-cases/evidence-discrepancies` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listEvidenceDiscrepancyCases |
+| GET | `/accident-cases/takeover-correlations` | protected | policy catalog + decorators | apps/api/src/modules/accident-investigation/accident-investigation.controller.ts#AccidentInvestigationController | listCorrelatedTakeoverCases |
 | POST | `/admin/drivers/:driverId/fleet-affiliations` | protected | policy catalog | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | createDriverFleetAffiliation |
 | GET | `/admin/flags` | protected | policy catalog | apps/api/src/modules/feature-flags/feature-flags.controller.ts#FeatureFlagsController | getAllFlags |
 | GET | `/admin/flags/:key` | protected | policy catalog | apps/api/src/modules/feature-flags/feature-flags.controller.ts#FeatureFlagsController | getFlag |
@@ -118,37 +118,37 @@ Canonical inventory for `IAM-P0-003`. This file is derived from controller decor
 | PUT | `/admin/service-products/:serviceProductId` | protected | policy catalog | apps/api/src/modules/service-product/service-product.controller.ts#ServiceProductController | updateServiceProduct |
 | GET | `/admin/service-products/runtime-policies` | protected | policy catalog | apps/api/src/modules/service-product/service-product.controller.ts#ServiceProductController | listRuntimePolicies |
 | PUT | `/admin/service-products/runtime-policies/:runtimeProfileCode/:serviceProductCode` | protected | policy catalog | apps/api/src/modules/service-product/service-product.controller.ts#ServiceProductController | upsertRuntimePolicy |
-| GET | `/admin/supply-review/submissions` | protected | decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | listSupplyReviewSubmissions |
-| GET | `/admin/supply-review/submissions/:submissionId` | protected | decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | getSupplyReviewSubmission |
-| POST | `/admin/supply-review/submissions/:submissionId/approve` | protected | decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | approveSupplySubmission |
-| POST | `/admin/supply-review/submissions/:submissionId/reject` | protected | decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | rejectSupplySubmission |
-| POST | `/admin/supply-review/submissions/:submissionId/request-revision` | protected | decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | requestSupplyRevision |
-| POST | `/admin/supply-review/submissions/:submissionId/start` | protected | decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | startSupplyReview |
+| GET | `/admin/supply-review/submissions` | protected | policy catalog + decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | listSupplyReviewSubmissions |
+| GET | `/admin/supply-review/submissions/:submissionId` | protected | policy catalog + decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | getSupplyReviewSubmission |
+| POST | `/admin/supply-review/submissions/:submissionId/approve` | protected | policy catalog + decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | approveSupplySubmission |
+| POST | `/admin/supply-review/submissions/:submissionId/reject` | protected | policy catalog + decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | rejectSupplySubmission |
+| POST | `/admin/supply-review/submissions/:submissionId/request-revision` | protected | policy catalog + decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | requestSupplyRevision |
+| POST | `/admin/supply-review/submissions/:submissionId/start` | protected | policy catalog + decorators | apps/api/src/modules/fleet-partner/fleet-partner.controller.ts#FleetPartnerController | startSupplyReview |
 | GET | `/admin/tenant-governance/summary` | protected | policy catalog | apps/api/src/modules/platform-admin/tenant-governance.controller.ts#PlatformTenantGovernanceController | listSummary |
 | GET | `/admin/vehicle-eligibility-matrix` | protected | policy catalog | apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.controller.ts#VehicleEligibilityController | listMatrix |
 | PUT | `/admin/vehicle-eligibility-matrix` | protected | policy catalog | apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.controller.ts#VehicleEligibilityController | updateMatrix |
-| POST | `/assistant/conversations` | protected | decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | createConversation |
-| POST | `/assistant/conversations/:conversationId/messages` | protected | decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | createMessage |
-| POST | `/assistant/tools/:toolName` | protected | decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | invokeTool |
-| POST | `/assistant/tools/propose-action` | protected | decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | proposeAction |
-| GET | `/assistant/tools/runtime-definition` | protected | decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | getRuntimeDefinition |
+| POST | `/assistant/conversations` | protected | policy catalog + decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | createConversation |
+| POST | `/assistant/conversations/:conversationId/messages` | protected | policy catalog + decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | createMessage |
+| POST | `/assistant/tools/:toolName` | protected | policy catalog + decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | invokeTool |
+| POST | `/assistant/tools/propose-action` | protected | policy catalog + decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | proposeAction |
+| GET | `/assistant/tools/runtime-definition` | protected | policy catalog + decorators | apps/api/src/modules/assistant/assistant.controller.ts#AssistantController | getRuntimeDefinition |
 | GET | `/audit` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | listAuditLogs |
-| GET | `/audit/deletion-exceptions` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | listEvidenceDeletionExceptions |
-| POST | `/audit/deletion-exceptions` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | registerEvidenceDeletionException |
-| POST | `/audit/deletion-exceptions/:exceptionId/resolve` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | resolveEvidenceDeletionException |
-| GET | `/audit/evidence-governance/:family/:subjectId` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | getEvidenceSubjectGovernance |
-| GET | `/audit/evidence-policies` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | listEvidencePolicies |
-| GET | `/audit/evidence-policies/:family` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | getEvidencePolicy |
-| GET | `/audit/legal-holds` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | listEvidenceLegalHolds |
-| POST | `/audit/legal-holds` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | placeEvidenceLegalHold |
-| POST | `/audit/legal-holds/:holdId/release` | protected | decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | releaseEvidenceLegalHold |
+| GET | `/audit/deletion-exceptions` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | listEvidenceDeletionExceptions |
+| POST | `/audit/deletion-exceptions` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | registerEvidenceDeletionException |
+| POST | `/audit/deletion-exceptions/:exceptionId/resolve` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | resolveEvidenceDeletionException |
+| GET | `/audit/evidence-governance/:family/:subjectId` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | getEvidenceSubjectGovernance |
+| GET | `/audit/evidence-policies` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | listEvidencePolicies |
+| GET | `/audit/evidence-policies/:family` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | getEvidencePolicy |
+| GET | `/audit/legal-holds` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | listEvidenceLegalHolds |
+| POST | `/audit/legal-holds` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | placeEvidenceLegalHold |
+| POST | `/audit/legal-holds/:holdId/release` | protected | policy catalog + decorators | apps/api/src/modules/audit-notification/audit.controller.ts#AuditController | releaseEvidenceLegalHold |
 | POST | `/auth/driver/device/refresh` | open | open-route inventory | apps/api/src/modules/auth/auth.controller.ts#AuthController | refreshDriverDeviceSession |
 | POST | `/auth/driver/device/register` | open | open-route inventory | apps/api/src/modules/auth/auth.controller.ts#AuthController | issueDriverDeviceSession |
 | POST | `/auth/driver/device/revoke` | protected | policy catalog | apps/api/src/modules/auth/auth.controller.ts#AuthController | revokeDriverDeviceSession |
 | POST | `/auth/partner/bootstrap-session` | open | open-route inventory | apps/api/src/modules/auth/auth.controller.ts#AuthController | issuePartnerBootstrapSession |
 | POST | `/auth/tenant/bootstrap-session` | open | open-route inventory | apps/api/src/modules/auth/auth.controller.ts#AuthController | issueTenantBootstrapSession |
 | POST | `/auth/token` | protected | policy catalog | apps/api/src/modules/auth/auth.controller.ts#AuthController | issueToken |
-| POST | `/call-center/multi-taxi/rides` | protected | decorators | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | createCallCenterRide |
+| POST | `/call-center/multi-taxi/rides` | protected | policy catalog + decorators | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | createCallCenterRide |
 | POST | `/call-center/orders` | protected | policy catalog | apps/api/src/modules/owned-mobility/owned-mobility.controller.ts#OwnedMobilityController | createCallCenterOrder |
 | GET | `/callcenter/callbacks` | protected | policy catalog | apps/api/src/modules/callcenter/callcenter.controller.ts#CallcenterController | listCallbackTasks |
 | POST | `/callcenter/callbacks/:callbackTaskId/complete` | protected | policy catalog | apps/api/src/modules/callcenter/callcenter.controller.ts#CallcenterController | completeCallbackTask |
@@ -277,24 +277,24 @@ Canonical inventory for `IAM-P0-003`. This file is derived from controller decor
 | GET | `/maintenance/:maintenanceId` | protected | policy catalog | apps/api/src/modules/maintenance/maintenance.controller.ts#MaintenanceController | getMaintenanceLog |
 | PATCH | `/maintenance/:maintenanceId` | protected | policy catalog | apps/api/src/modules/maintenance/maintenance.controller.ts#MaintenanceController | updateMaintenanceLog |
 | POST | `/maintenance/:maintenanceId/update` | protected | policy catalog | apps/api/src/modules/maintenance/maintenance.controller.ts#MaintenanceController | updateMaintenanceLogAlias |
-| POST | `/multi-taxi/dispatch/queue/check-in` | protected | decorators | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | queueCheckIn |
-| POST | `/multi-taxi/dispatch/queue/check-out` | protected | decorators | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | queueCheckOut |
+| POST | `/multi-taxi/dispatch/queue/check-in` | protected | policy catalog + decorators | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | queueCheckIn |
+| POST | `/multi-taxi/dispatch/queue/check-out` | protected | policy catalog + decorators | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | queueCheckOut |
 | POST | `/multi-taxi/rides` | open | open-route inventory | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | createRide |
 | GET | `/notifications` | protected | policy catalog | apps/api/src/modules/audit-notification/notifications.controller.ts#NotificationsController | listNotifications |
 | POST | `/notifications/read` | protected | policy catalog | apps/api/src/modules/audit-notification/notifications.controller.ts#NotificationsController | markNotificationsRead |
-| GET | `/operational-observability` | protected | decorators | apps/api/src/modules/operational-observability/operational-observability.controller.ts#OperationalObservabilityController | getSnapshot |
-| GET | `/ops/approval-requests` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | listOpsPendingApprovalRequests |
-| POST | `/ops/approval-requests/:approvalRequestId/acknowledge-breach` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | acknowledgeOpsApprovalRequestBreach |
-| POST | `/ops/approval-requests/:approvalRequestId/approve` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | approveOpsApprovalRequest |
-| POST | `/ops/approval-requests/:approvalRequestId/escalate` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | escalateOpsApprovalRequest |
-| POST | `/ops/approval-requests/:approvalRequestId/nudge` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | nudgeOpsApprovalRequest |
-| POST | `/ops/approval-requests/:approvalRequestId/reject` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | rejectOpsApprovalRequest |
+| GET | `/operational-observability` | protected | policy catalog + decorators | apps/api/src/modules/operational-observability/operational-observability.controller.ts#OperationalObservabilityController | getSnapshot |
+| GET | `/ops/approval-requests` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | listOpsPendingApprovalRequests |
+| POST | `/ops/approval-requests/:approvalRequestId/acknowledge-breach` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | acknowledgeOpsApprovalRequestBreach |
+| POST | `/ops/approval-requests/:approvalRequestId/approve` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | approveOpsApprovalRequest |
+| POST | `/ops/approval-requests/:approvalRequestId/escalate` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | escalateOpsApprovalRequest |
+| POST | `/ops/approval-requests/:approvalRequestId/nudge` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | nudgeOpsApprovalRequest |
+| POST | `/ops/approval-requests/:approvalRequestId/reject` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | rejectOpsApprovalRequest |
 | GET | `/ops/dispatch-events` | protected | policy catalog | apps/api/src/modules/owned-mobility/owned-mobility.controller.ts#OwnedMobilityController | streamOpsDispatchEvents |
 | POST | `/ops/driver-sos/alerts/rendered` | protected | policy catalog + decorators | apps/api/src/modules/driver-sos/driver-sos.controller.ts#OpsDriverSosController | recordAlertsRendered |
 | GET | `/ops/driver-sos/metrics/alert-latency` | protected | policy catalog + decorators | apps/api/src/modules/driver-sos/driver-sos.controller.ts#OpsDriverSosController | getAlertLatencySummary |
 | GET | `/ops/drivers/:driverId/tracking-status` | protected | policy catalog | apps/api/src/modules/regulatory-registry/ops-driver-tracking.controller.ts#OpsDriverTrackingController | getDriverTrackingStatus |
-| GET | `/ops/partner/eligibility/reviews` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | listPartnerEligibilityReviewQueue |
-| POST | `/ops/partner/eligibility/reviews/resolve` | protected | decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | resolvePartnerEligibilityReview |
+| GET | `/ops/partner/eligibility/reviews` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | listPartnerEligibilityReviewQueue |
+| POST | `/ops/partner/eligibility/reviews/resolve` | protected | policy catalog + decorators | apps/api/src/modules/tenant-partner/tenant-partner.controller.ts#TenantPartnerController | resolvePartnerEligibilityReview |
 | GET | `/orders` | protected | policy catalog | apps/api/src/modules/owned-mobility/owned-mobility.controller.ts#OwnedMobilityController | listOrders |
 | POST | `/orders` | protected | policy catalog | apps/api/src/modules/owned-mobility/owned-mobility.controller.ts#OwnedMobilityController | createOwnedOrder |
 | GET | `/orders/:orderId` | protected | policy catalog | apps/api/src/modules/owned-mobility/owned-mobility.controller.ts#OwnedMobilityController | getOrder |
@@ -331,8 +331,8 @@ Canonical inventory for `IAM-P0-003`. This file is derived from controller decor
 | POST | `/passenger-rides/:accessToken/ratings` | open | open-route inventory | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | submitPassengerRating |
 | GET | `/passenger-rides/:accessToken/receipt` | open | open-route inventory | apps/api/src/modules/multi-taxi/multi-taxi.controller.ts#MultiTaxiController | getPassengerReceipt |
 | POST | `/passenger/orders/:orderId/cancel` | protected | policy catalog | apps/api/src/modules/owned-mobility/owned-mobility.controller.ts#OwnedMobilityController | cancelOwnedOrder |
-| GET | `/payment-exceptions/:orderId` | protected | decorators | apps/api/src/modules/billing-settlement/billing-settlement.controller.ts#BillingSettlementController | getMultiTaxiPaymentException |
-| POST | `/payment-exceptions/:orderId/actions/:action` | protected | decorators | apps/api/src/modules/billing-settlement/billing-settlement.controller.ts#BillingSettlementController | executeMultiTaxiPaymentRecovery |
+| GET | `/payment-exceptions/:orderId` | protected | policy catalog + decorators | apps/api/src/modules/billing-settlement/billing-settlement.controller.ts#BillingSettlementController | getMultiTaxiPaymentException |
+| POST | `/payment-exceptions/:orderId/actions/:action` | protected | policy catalog + decorators | apps/api/src/modules/billing-settlement/billing-settlement.controller.ts#BillingSettlementController | executeMultiTaxiPaymentRecovery |
 | GET | `/platform-admin/assistant/sessions` | protected | policy catalog | apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.controller.ts#PlatformAdminAssistantController | listSessions |
 | POST | `/platform-admin/assistant/sessions` | protected | policy catalog | apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.controller.ts#PlatformAdminAssistantController | createSession |
 | POST | `/platform-admin/assistant/sessions/:sessionId/actions/execute` | protected | policy catalog | apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.controller.ts#PlatformAdminAssistantController | executeAction |
@@ -429,15 +429,15 @@ Canonical inventory for `IAM-P0-003`. This file is derived from controller decor
 | GET | `/platform-admin/users` | protected | policy catalog | apps/api/src/modules/platform-admin/platform-admin.controller.ts#PlatformAdminController | listPlatformAdminUsers |
 | POST | `/platform-admin/users` | protected | policy catalog | apps/api/src/modules/platform-admin/platform-admin.controller.ts#PlatformAdminController | createPlatformAdminUser |
 | POST | `/platform-admin/users/:userId/role` | protected | policy catalog | apps/api/src/modules/platform-admin/platform-admin.controller.ts#PlatformAdminController | updatePlatformAdminUserRole |
-| GET | `/platform-earnings/by-platform` | protected | decorators | apps/api/src/modules/platform-earnings/platform-earnings.controller.ts#PlatformEarningsController | getByPlatform |
-| GET | `/platform-earnings/summary` | protected | decorators | apps/api/src/modules/platform-earnings/platform-earnings.controller.ts#PlatformEarningsController | getSummary |
-| GET | `/platform-presence` | protected | decorators | apps/api/src/modules/platform-presence/platform-presence.controller.ts#PlatformPresenceController | getSummary |
-| POST | `/platform-presence/offline` | protected | decorators | apps/api/src/modules/platform-presence/platform-presence.controller.ts#PlatformPresenceController | setOffline |
-| POST | `/platform-presence/online` | protected | decorators | apps/api/src/modules/platform-presence/platform-presence.controller.ts#PlatformPresenceController | setOnline |
+| GET | `/platform-earnings/by-platform` | protected | policy catalog + decorators | apps/api/src/modules/platform-earnings/platform-earnings.controller.ts#PlatformEarningsController | getByPlatform |
+| GET | `/platform-earnings/summary` | protected | policy catalog + decorators | apps/api/src/modules/platform-earnings/platform-earnings.controller.ts#PlatformEarningsController | getSummary |
+| GET | `/platform-presence` | protected | policy catalog + decorators | apps/api/src/modules/platform-presence/platform-presence.controller.ts#PlatformPresenceController | getSummary |
+| POST | `/platform-presence/offline` | protected | policy catalog + decorators | apps/api/src/modules/platform-presence/platform-presence.controller.ts#PlatformPresenceController | setOffline |
+| POST | `/platform-presence/online` | protected | policy catalog + decorators | apps/api/src/modules/platform-presence/platform-presence.controller.ts#PlatformPresenceController | setOnline |
 | GET | `/product-rule/catalog` | protected | policy catalog | apps/api/src/modules/product-rule/product-rule.controller.ts#ProductRuleController | getCatalog |
-| GET | `/product-rule/fare-anomalies` | protected | decorators | apps/api/src/modules/product-rule/fare-anomaly.controller.ts#FareAnomalyController | list |
-| GET | `/product-rule/fare-anomalies/:quoteSnapshotId` | protected | decorators | apps/api/src/modules/product-rule/fare-anomaly.controller.ts#FareAnomalyController | get |
-| POST | `/product-rule/fare-anomalies/:quoteSnapshotId/actions/retry-quote` | protected | decorators | apps/api/src/modules/product-rule/fare-anomaly.controller.ts#FareAnomalyController | retryQuote |
+| GET | `/product-rule/fare-anomalies` | protected | policy catalog + decorators | apps/api/src/modules/product-rule/fare-anomaly.controller.ts#FareAnomalyController | list |
+| GET | `/product-rule/fare-anomalies/:quoteSnapshotId` | protected | policy catalog + decorators | apps/api/src/modules/product-rule/fare-anomaly.controller.ts#FareAnomalyController | get |
+| POST | `/product-rule/fare-anomalies/:quoteSnapshotId/actions/retry-quote` | protected | policy catalog + decorators | apps/api/src/modules/product-rule/fare-anomaly.controller.ts#FareAnomalyController | retryQuote |
 | GET | `/regulatory-registry/contracts` | protected | policy catalog | apps/api/src/modules/regulatory-registry/regulatory-registry.controller.ts#RegulatoryRegistryController | listContracts |
 | POST | `/regulatory-registry/contracts` | protected | policy catalog | apps/api/src/modules/regulatory-registry/regulatory-registry.controller.ts#RegulatoryRegistryController | createContract |
 | POST | `/regulatory-registry/contracts/:contractId/activate` | protected | policy catalog | apps/api/src/modules/regulatory-registry/regulatory-registry.controller.ts#RegulatoryRegistryController | activateContract |
@@ -508,28 +508,28 @@ Canonical inventory for `IAM-P0-003`. This file is derived from controller decor
 | GET | `/roc/takeovers` | protected | policy catalog + decorators | apps/api/src/modules/roc-operations/roc-operations.controller.ts#RocOperationsController | listTakeovers |
 | GET | `/roc/trips` | protected | policy catalog + decorators | apps/api/src/modules/roc-operations/roc-operations.controller.ts#RocOperationsController | listTrips |
 | GET | `/roc/vehicles` | protected | policy catalog + decorators | apps/api/src/modules/roc-operations/roc-operations.controller.ts#RocOperationsController | listVehicles |
-| GET | `/safety-operator/assignments` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listAssignments |
-| POST | `/safety-operator/assignments` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | createAssignment |
-| POST | `/safety-operator/assignments/:assignmentId/engage` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | engageAssignment |
-| POST | `/safety-operator/assignments/:assignmentId/release` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | releaseAssignment |
-| GET | `/safety-operator/pre-trip-checklists` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listPreTripChecklists |
-| POST | `/safety-operator/pre-trip-checklists` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | submitPreTripChecklist |
-| GET | `/safety-operator/qualification` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | checkQualification |
-| GET | `/safety-operator/shifts` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listShifts |
-| POST | `/safety-operator/shifts/:shiftId/end` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | endShift |
-| POST | `/safety-operator/shifts/start` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | startShift |
-| GET | `/safety-operator/takeover-reports` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listTakeoverReports |
-| POST | `/safety-operator/takeover-reports` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | submitTakeoverReport |
-| GET | `/safety-operator/trip-closeouts` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listTripCloseouts |
-| POST | `/safety-operator/trip-closeouts` | protected | decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | createTripCloseout |
+| GET | `/safety-operator/assignments` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listAssignments |
+| POST | `/safety-operator/assignments` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | createAssignment |
+| POST | `/safety-operator/assignments/:assignmentId/engage` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | engageAssignment |
+| POST | `/safety-operator/assignments/:assignmentId/release` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | releaseAssignment |
+| GET | `/safety-operator/pre-trip-checklists` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listPreTripChecklists |
+| POST | `/safety-operator/pre-trip-checklists` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | submitPreTripChecklist |
+| GET | `/safety-operator/qualification` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | checkQualification |
+| GET | `/safety-operator/shifts` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listShifts |
+| POST | `/safety-operator/shifts/:shiftId/end` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | endShift |
+| POST | `/safety-operator/shifts/start` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | startShift |
+| GET | `/safety-operator/takeover-reports` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listTakeoverReports |
+| POST | `/safety-operator/takeover-reports` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | submitTakeoverReport |
+| GET | `/safety-operator/trip-closeouts` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | listTripCloseouts |
+| POST | `/safety-operator/trip-closeouts` | protected | policy catalog + decorators | apps/api/src/modules/safety-operator/safety-operator.controller.ts#SafetyOperatorController | createTripCloseout |
 | POST | `/sandbox/dispatch/evaluate` | protected | policy catalog | apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.controller.ts#SandboxDispatchGateController | evaluate |
 | POST | `/sandbox/dispatch/manual-release` | protected | policy catalog | apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.controller.ts#SandboxDispatchGateController | manualRelease |
 | GET | `/sandbox/dispatch/passenger-disclosure/catalog` | protected | policy catalog | apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.controller.ts#SandboxDispatchGateController | listPassengerDisclosureCatalog |
 | POST | `/sandbox/dispatch/passenger-disclosure/catalog` | protected | policy catalog | apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.controller.ts#SandboxDispatchGateController | upsertPassengerDisclosureCatalogEntry |
 | POST | `/sandbox/dispatch/passenger-disclosure/policies` | protected | policy catalog | apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.controller.ts#SandboxDispatchGateController | upsertPassengerDisclosurePolicy |
 | GET | `/sandbox/dispatch/passenger-disclosure/policies/:policyId` | protected | policy catalog | apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.controller.ts#SandboxDispatchGateController | getPassengerDisclosurePolicy |
-| GET | `/security-events` | protected | decorators | apps/api/src/modules/security-events/security-events.controller.ts#SecurityEventsController | listSecurityEvents |
-| GET | `/security-events/matrix` | protected | decorators | apps/api/src/modules/security-events/security-events.controller.ts#SecurityEventsController | listSecurityEventMatrix |
+| GET | `/security-events` | protected | policy catalog + decorators | apps/api/src/modules/security-events/security-events.controller.ts#SecurityEventsController | listSecurityEvents |
+| GET | `/security-events/matrix` | protected | policy catalog + decorators | apps/api/src/modules/security-events/security-events.controller.ts#SecurityEventsController | listSecurityEventMatrix |
 | GET | `/service-area/admin/geojson` | protected | policy catalog | apps/api/src/modules/service-area/service-area.controller.ts#ServiceAreaController | exportAdminGeoJson |
 | POST | `/service-area/admin/service-areas` | protected | policy catalog | apps/api/src/modules/service-area/service-area.controller.ts#ServiceAreaController | createServiceArea |
 | POST | `/service-area/admin/service-areas/:serviceAreaId/publish` | protected | policy catalog | apps/api/src/modules/service-area/service-area.controller.ts#ServiceAreaController | publishServiceArea |
@@ -656,12 +656,12 @@ Canonical inventory for `IAM-P0-003`. This file is derived from controller decor
 | GET | `/tesla-integration/vehicles/discover` | protected | policy catalog | apps/api/src/modules/tesla-integration/tesla-integration.controller.ts#TeslaIntegrationController | discoverVehicles |
 | POST | `/tesla-integration/virtual-key/pairing` | protected | policy catalog | apps/api/src/modules/tesla-integration/tesla-integration.controller.ts#TeslaIntegrationController | pairVirtualKey |
 | GET | `/tesla-integration/virtual-key/pairing/:vehicleId` | protected | policy catalog | apps/api/src/modules/tesla-integration/tesla-integration.controller.ts#TeslaIntegrationController | getVirtualKeyStatus |
-| GET | `/vehicle-evidence/bookmarks` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | listBookmarks |
-| POST | `/vehicle-evidence/bookmarks` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | bookmarkEvent |
-| GET | `/vehicle-evidence/recorders` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | listRecorders |
-| POST | `/vehicle-evidence/recorders` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | registerRecorder |
-| GET | `/vehicle-evidence/recorders/:recorderId/health` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | getRecorderHealth |
-| POST | `/vehicle-evidence/recorders/:recorderId/health` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | updateRecorderHealth |
-| GET | `/vehicle-evidence/segments` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | listSegmentIndex |
-| GET | `/vehicle-evidence/signals/no-new-dispatch/:vehicleId` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | getNoNewDispatchSignal |
-| POST | `/vehicle-evidence/uploads/:artifactId/retry` | protected | decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | retryUpload |
+| GET | `/vehicle-evidence/bookmarks` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | listBookmarks |
+| POST | `/vehicle-evidence/bookmarks` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | bookmarkEvent |
+| GET | `/vehicle-evidence/recorders` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | listRecorders |
+| POST | `/vehicle-evidence/recorders` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | registerRecorder |
+| GET | `/vehicle-evidence/recorders/:recorderId/health` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | getRecorderHealth |
+| POST | `/vehicle-evidence/recorders/:recorderId/health` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | updateRecorderHealth |
+| GET | `/vehicle-evidence/segments` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | listSegmentIndex |
+| GET | `/vehicle-evidence/signals/no-new-dispatch/:vehicleId` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | getNoNewDispatchSignal |
+| POST | `/vehicle-evidence/uploads/:artifactId/retry` | protected | policy catalog + decorators | apps/api/src/modules/vehicle-evidence/vehicle-evidence.controller.ts#VehicleEvidenceController | retryUpload |

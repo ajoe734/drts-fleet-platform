@@ -45,6 +45,68 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("accident-cases")) {
+    const requiredScopes =
+      upperMethod === "GET"
+        ? routePath === "accident-cases/evidence-discrepancies" ||
+          routePath === "accident-cases/takeover-correlations"
+          ? ["sandbox.compliance.read"]
+          : ["sandbox.investigation.read"]
+        : ["sandbox.investigation.manage"];
+
+    return {
+      routeKey: `accident-cases:${upperMethod}`,
+      requiredScopes,
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Accident investigation case management",
+    };
+  }
+
+  if (
+    routePath === "audit/evidence-policies" ||
+    routePath.startsWith("audit/evidence-policies/")
+  ) {
+    return {
+      routeKey: `audit:evidence-policies:${upperMethod}`,
+      requiredScopes: ["audit:read"],
+      allowedRealms: baseAllowedRealms("tenant", "platform", "ops", "partner"),
+      description: "Evidence retention policy catalog access",
+    };
+  }
+
+  if (routePath.startsWith("audit/evidence-governance/")) {
+    return {
+      routeKey: `audit:evidence-governance:${upperMethod}`,
+      requiredScopes: ["audit:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Evidence subject governance inspection",
+    };
+  }
+
+  if (
+    routePath === "audit/legal-holds" ||
+    routePath.startsWith("audit/legal-holds/")
+  ) {
+    return {
+      routeKey: `audit:legal-holds:${upperMethod}`,
+      requiredScopes: methodScope("audit:read", "audit:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Evidence legal-hold administration",
+    };
+  }
+
+  if (
+    routePath === "audit/deletion-exceptions" ||
+    routePath.startsWith("audit/deletion-exceptions/")
+  ) {
+    return {
+      routeKey: `audit:deletion-exceptions:${upperMethod}`,
+      requiredScopes: methodScope("audit:read", "audit:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Evidence deletion exception governance",
+    };
+  }
+
   if (routePath === "notifications") {
     return {
       routeKey: `notifications:${upperMethod}`,
@@ -73,6 +135,15 @@ export function resolveRouteAuthPolicy(
       requiredScopes: ["tenant:read"],
       allowedRealms: baseAllowedRealms("platform", "tenant", "ops"),
       description: "Tenant / partner summary",
+    };
+  }
+
+  if (routePath.startsWith("assistant/")) {
+    return {
+      routeKey: `assistant:${upperMethod}`,
+      requiredScopes: ["assistant:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Assistant conversation and tool runtime access",
     };
   }
 
@@ -209,6 +280,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("admin/supply-review/submissions")) {
+    return {
+      routeKey: `admin:supply-review:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Fleet partner supply review operations",
+    };
+  }
+
   if (
     routePath.startsWith("admin/drivers/") &&
     routePath.endsWith("/fleet-affiliations")
@@ -321,6 +401,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "call-center/multi-taxi/rides" && upperMethod === "POST") {
+    return {
+      routeKey: "callcenter:multi-taxi-rides:create",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Call-center multi-taxi ride creation",
+    };
+  }
+
   if (
     upperMethod === "GET" &&
     (routePath === "dispatch/queue" ||
@@ -345,6 +434,15 @@ export function resolveRouteAuthPolicy(
       requiredScopes: scope,
       allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
       description: readRoute ? "Owned mobility read" : "Owned mobility write",
+    };
+  }
+
+  if (routePath.startsWith("multi-taxi/dispatch/queue/")) {
+    return {
+      routeKey: `multi-taxi:dispatch-queue:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Multi-taxi dispatch queue operations",
     };
   }
 
@@ -381,6 +479,24 @@ export function resolveRouteAuthPolicy(
       description: isOpsDispatchEvents
         ? "Ops dispatch event access"
         : "Driver task access",
+    };
+  }
+
+  if (routePath.startsWith("ops/approval-requests")) {
+    return {
+      routeKey: `ops:approval-requests:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Ops approval request queue management",
+    };
+  }
+
+  if (routePath.startsWith("ops/partner/eligibility/reviews")) {
+    return {
+      routeKey: `ops:partner-eligibility-reviews:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Ops partner eligibility review workflow",
     };
   }
 
@@ -447,6 +563,27 @@ export function resolveRouteAuthPolicy(
       requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
       allowedRealms: baseAllowedRealms("driver"),
       description: "Driver self-service profile access",
+    };
+  }
+
+  if (
+    routePath === "platform-presence" ||
+    routePath.startsWith("platform-presence/")
+  ) {
+    return {
+      routeKey: `platform-presence:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver platform presence self-service access",
+    };
+  }
+
+  if (routePath.startsWith("platform-earnings/")) {
+    return {
+      routeKey: `platform-earnings:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver platform earnings summary access",
     };
   }
 
@@ -591,6 +728,33 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "operational-observability") {
+    return {
+      routeKey: "operational-observability:GET",
+      requiredScopes: ["audit:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Operational observability snapshot access",
+    };
+  }
+
+  if (routePath.startsWith("safety-operator/")) {
+    return {
+      routeKey: `safety-operator:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("ops", "driver"),
+      description: "Safety operator shift and assignment operations",
+    };
+  }
+
+  if (routePath.startsWith("security-events")) {
+    return {
+      routeKey: `security-events:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Security event audit feed access",
+    };
+  }
+
   if (routePath === "system/foundation/manifest") {
     return {
       routeKey: "system:foundation:manifest",
@@ -630,6 +794,19 @@ export function resolveRouteAuthPolicy(
       requiredScopes: ["foundation:read"],
       allowedRealms: baseAllowedRealms("platform", "ops"),
       description: "Product rule catalog read",
+    };
+  }
+
+  if (routePath.startsWith("product-rule/fare-anomalies")) {
+    return {
+      routeKey: `product-rule:fare-anomalies:${upperMethod}`,
+      requiredScopes: methodScope(
+        "foundation:read",
+        "foundation:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Fare anomaly governance and recovery",
     };
   }
 
@@ -714,6 +891,53 @@ export function resolveRouteAuthPolicy(
       requiredScopes: methodScope("billing:read", "billing:write", upperMethod),
       allowedRealms: baseAllowedRealms("platform", "ops"),
       description: "Billing and settlement operational access",
+    };
+  }
+
+  if (routePath.startsWith("payment-exceptions/")) {
+    const isActionRoute = routePath.includes("/actions/");
+    return {
+      routeKey: isActionRoute
+        ? `payment-exceptions:actions:${upperMethod}`
+        : `payment-exceptions:${upperMethod}`,
+      requiredScopes: isActionRoute ? ["billing:write"] : ["billing:read"],
+      allowedRealms: isActionRoute
+        ? baseAllowedRealms("platform")
+        : baseAllowedRealms("platform", "ops"),
+      description: isActionRoute
+        ? "Payment exception recovery operations"
+        : "Payment exception read access",
+    };
+  }
+
+  if (routePath.startsWith("vehicle-evidence/")) {
+    let requiredScopes: string[];
+    if (
+      routePath === "vehicle-evidence/segments" ||
+      routePath === "vehicle-evidence/bookmarks"
+    ) {
+      requiredScopes =
+        upperMethod === "GET"
+          ? ["sandbox.evidence.preview"]
+          : ["sandbox.investigation.manage"];
+    } else if (
+      routePath === "vehicle-evidence/recorders" ||
+      routePath.startsWith("vehicle-evidence/recorders/")
+    ) {
+      requiredScopes = upperMethod === "GET"
+        ? ["sandbox.compliance.read"]
+        : ["sandbox.compliance.manage"];
+    } else if (routePath.startsWith("vehicle-evidence/signals/")) {
+      requiredScopes = ["sandbox.compliance.read"];
+    } else {
+      requiredScopes = ["sandbox.investigation.manage"];
+    }
+
+    return {
+      routeKey: `vehicle-evidence:${upperMethod}`,
+      requiredScopes,
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Vehicle evidence governance and recorder operations",
     };
   }
 

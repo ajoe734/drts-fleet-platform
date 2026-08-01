@@ -3,6 +3,10 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import {
+  AUTH_ALLOWED_REALMS_KEY,
+  AUTH_REQUIRED_SCOPES_KEY,
+} from "../../src/common/auth/auth.constants";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../src/modules/auth/auth.controller";
@@ -12,6 +16,7 @@ import { IdentityController } from "../../src/modules/identity/identity.controll
 import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
 import { PlatformAdminController } from "../../src/modules/platform-admin/platform-admin.controller";
+import { PlatformAdminComplianceController } from "../../src/modules/platform-admin/platform-admin-compliance.controller";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
@@ -261,6 +266,20 @@ describe("bootstrap auth extraction", () => {
         "partner",
       ],
       description: "Internal token exchange",
+    });
+  });
+
+  it("resolves safety-operator protected routes through the canonical policy catalog", () => {
+    const policy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/safety-operator/assignments/assignment-001/engage",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "safety-operator:POST",
+      requiredScopes: [],
+      allowedRealms: ["system", "ops", "driver"],
+      description: "Safety operator shift and assignment operations",
     });
   });
 
@@ -568,7 +587,7 @@ describe("bootstrap auth guard", () => {
     expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
   });
 
-  it("allows protected endpoints when the bootstrap identity has matching scopes", () => {
+  it("rejects decorator-only protected endpoints that are missing a canonical policy", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -591,6 +610,16 @@ describe("bootstrap auth guard", () => {
     if (!descriptor) {
       throw new Error("expected descriptor");
     }
+    Reflect.defineMetadata(
+      AUTH_ALLOWED_REALMS_KEY,
+      ["tenant"],
+      ScopedHandler.prototype.handler,
+    );
+    Reflect.defineMetadata(
+      AUTH_REQUIRED_SCOPES_KEY,
+      ["tenant:webhooks:write"],
+      ScopedHandler.prototype.handler,
+    );
     RequireScopes("tenant:webhooks:write")(
       ScopedHandler.prototype,
       "handler",
@@ -603,9 +632,17 @@ describe("bootstrap auth guard", () => {
       ScopedHandler,
     );
 
-    expect(guard.canActivate(context)).toBe(true);
-    expect(request.identity?.actorType).toBe("tenant_admin");
-    expect(request.identity?.scopes).toContain("tenant:webhooks:write");
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    try {
+      guard.canActivate(context);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_ROUTE_UNCLASSIFIED",
+        },
+      });
+    }
   });
 
   it("returns 403 when rating moderation capability is missing", () => {
@@ -618,7 +655,8 @@ describe("bootstrap auth guard", () => {
         "x-scopes": "audit:read",
       },
       method: "POST",
-      originalUrl: "/api/unmatched-route",
+      originalUrl:
+        "/api/platform-admin/multi-taxi-ratings/rating-001/invalidate",
     };
     const context = createExecutionContext(
       request,
@@ -747,30 +785,13 @@ describe("bootstrap auth guard", () => {
         "x-scopes": "sandbox.investigation.read sandbox.evidence.preview",
       },
       method: "POST",
-      originalUrl: "/api/unmatched-route",
+      originalUrl:
+        "/api/platform-admin/evidence/legal-holds/hold-001/release-request",
     };
-    class ScopedHandler {
-      handler() {}
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(
-      ScopedHandler.prototype,
-      "handler",
-    );
-    expect(descriptor).toBeDefined();
-    if (!descriptor) {
-      throw new Error("expected descriptor");
-    }
-    RequireRealms("platform")(ScopedHandler);
-    RequireScopes("sandbox.legal_hold.release.request")(
-      ScopedHandler.prototype,
-      "handler",
-      descriptor,
-    );
-
     const context = createExecutionContext(
       request,
-      ScopedHandler.prototype.handler,
-      ScopedHandler,
+      PlatformAdminComplianceController.prototype.requestLegalHoldRelease as never,
+      PlatformAdminComplianceController as never,
     );
 
     expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
