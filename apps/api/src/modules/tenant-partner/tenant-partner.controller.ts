@@ -17,6 +17,7 @@ import type {
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerIngressHandoffCommand,
+  CreateReferralEmbedHandoffArtifactCommand,
   IdentityContext,
   EscalateTenantBookingApprovalRequestCommand,
   IssuePartnerIngressCredentialCommand,
@@ -43,6 +44,9 @@ import type {
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
   PartnerIngressHandoffSession,
+  RecordReferralEmbedConsentCommand,
+  ReferralEmbedHandoffArtifact,
+  ReferralEmbedSession,
   RecalculateTenantSlaBookingsCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
@@ -253,6 +257,81 @@ export class TenantPartnerController {
       },
     };
 
+    return toApiSuccessEnvelope(session, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/ingress/referral-embed-handoff")
+  async issueReferralEmbedHandoffArtifact(
+    @Body() command: CreateReferralEmbedHandoffArtifactCommand,
+    @Req()
+    request?: {
+      headers?: Record<string, string | string[] | undefined>;
+      method?: string;
+      originalUrl?: string;
+      url?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const allowInternalBootstrap = !command.apiKey?.trim();
+    if (allowInternalBootstrap) {
+      requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+    }
+    const artifact: ReferralEmbedHandoffArtifact =
+      await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
+        command,
+        requestId,
+        { allowInternalBootstrap },
+      );
+    return toApiSuccessEnvelope(artifact, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/ingress/referral-embed-handoff/consume")
+  async consumeReferralEmbedHandoffArtifact(
+    @Body()
+    command: {
+      artifact: string;
+      entrySlug: string;
+      entryHost: string;
+    },
+    @Req()
+    request?: {
+      headers?: Record<string, string | string[] | undefined>;
+      method?: string;
+      originalUrl?: string;
+      url?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+    const session: ReferralEmbedSession =
+      await this.tenantPartnerService.consumeReferralEmbedHandoffArtifact(
+        command,
+      );
+    return toApiSuccessEnvelope(session, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/ingress/referral-embed-handoff/consent")
+  async recordReferralEmbedConsent(
+    @Body() command: RecordReferralEmbedConsentCommand,
+    @Req()
+    request?: {
+      headers?: Record<string, string | string[] | undefined>;
+      method?: string;
+      originalUrl?: string;
+      url?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+    const session = await this.tenantPartnerService.recordReferralEmbedConsent(
+      command,
+    );
     return toApiSuccessEnvelope(session, requestId);
   }
 
