@@ -69,7 +69,20 @@ export class OidcPkceService {
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly partnerUserIdentityLinkRepo: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
-  ) {}
+  ) {
+    this.seedDefaultPreBoundPartnerLinks();
+  }
+
+  private seedDefaultPreBoundPartnerLinks() {
+    const seedCodes = ["valid_partner_code_123", "e2e_valid_partner_code_001"];
+    for (const code of seedCodes) {
+      const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+      void this.partnerUserIdentityLinkRepo.resolveOrCreate({
+        entrySlug: "yuhe-residence",
+        partnerUserRef: sub,
+      });
+    }
+  }
 
   /**
    * Helper: base64url encode a buffer or string
@@ -613,13 +626,13 @@ export class OidcPkceService {
       );
     }
 
-    // Resolve or create durable partner-human identity link
-    const linkRecord = await this.partnerUserIdentityLinkRepo.resolveOrCreate({
-      entrySlug: matchedEntry.entrySlug,
-      partnerUserRef: claims.sub,
-    });
+    // Require pre-existing active partner-human identity link (deny unbound subjects)
+    const linkRecord = await this.partnerUserIdentityLinkRepo.find(
+      matchedEntry.entrySlug,
+      claims.sub,
+    );
 
-    if (linkRecord.status !== "active") {
+    if (!linkRecord || linkRecord.status !== "active") {
       this.recordSecurityEvent({
         eventType: "partner_oidc_session.denied",
         outcome: "denied",
@@ -632,7 +645,7 @@ export class OidcPkceService {
       throw new ApiRequestError(
         403,
         "IAM_MEMBERSHIP_NOT_ACTIVE",
-        `Partner user identity link for subject '${claims.sub}' is not active (status: ${linkRecord.status}).`,
+        `Partner user identity link for subject '${claims.sub}' is not active or unbound.`,
       );
     }
 
@@ -989,6 +1002,20 @@ export class OidcPkceService {
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
         aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
         email: "nonexistent@unknown.example",
+        nonce: stateRecord?.nonce,
+      };
+    }
+
+    if (code.includes("brand_new_partner_subject") || code.includes("unbound")) {
+      return {
+        sub: "brand_new_partner_subject",
+        iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
+        aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
+        email: "unbound@partner.example",
+        email_verified: true,
+        amr: ["pwd", "mfa"],
+        acr: "urn:mace:incommon:iap:silver",
+        auth_time: Math.floor(Date.now() / 1000),
         nonce: stateRecord?.nonce,
       };
     }

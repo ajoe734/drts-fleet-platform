@@ -101,7 +101,7 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Get(":realm/callback")
-  processOidcCallback(
+  async processOidcCallback(
     @Param("realm") realm: AuthRealm,
     @Query("code") code?: string,
     @Query("state") state?: string,

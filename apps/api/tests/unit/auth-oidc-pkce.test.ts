@@ -439,5 +439,24 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         ),
       ).rejects.toThrow(ApiRequestError);
     });
+
+    it("rejects partner login when subject has no pre-existing active identity link (unbound subject)", async () => {
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      await expect(
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "brand_new_partner_subject",
+            state: loginParams.state,
+            pkceVerifier: loginParams.codeVerifier,
+            partnerId: "yuhe-residence",
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
   });
 });
