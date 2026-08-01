@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { PassengerEmbed } from "@/components/passenger-embed";
 import { resolveEmbedContext } from "@/lib/embed-context";
+import { isPublicPartnerEntryNotFoundError } from "@/lib/embed-api";
 
 export default async function PassengerEmbedPage({
   params,
@@ -11,11 +12,11 @@ export default async function PassengerEmbedPage({
 }) {
   const { entrySlug } = await params;
   const query = await searchParams;
-  // resolveEmbedContext resolves the partner entry by slug; an unknown/invalid
-  // entrySlug means there is no such referral channel → 404, not a 500. (The
-  // embed component hard-depends on a present entry, so it cannot render a
-  // degraded state without one.) Auth/handoff failures for a VALID entry are
-  // already handled inside resolveEmbedContext as reauth/fallback states.
+  // Only authority-confirmed missing/revoked/inactive entries become a 404.
+  // Connectivity, gateway, and other upstream failures must reach error.tsx so
+  // operators and riders do not receive a misleading "entry missing" result.
+  // Auth/handoff failures for a valid entry remain explicit reauth/fallback
+  // states inside resolveEmbedContext.
   let context: Awaited<ReturnType<typeof resolveEmbedContext>>;
   try {
     context = await resolveEmbedContext(
@@ -32,8 +33,11 @@ export default async function PassengerEmbedPage({
           : null,
       ),
     );
-  } catch {
-    notFound();
+  } catch (error) {
+    if (isPublicPartnerEntryNotFoundError(error)) {
+      notFound();
+    }
+    throw error;
   }
 
   return <PassengerEmbed context={context} />;
