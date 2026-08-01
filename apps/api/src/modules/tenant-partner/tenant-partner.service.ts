@@ -184,6 +184,7 @@ export interface UpsertReferralRevenueShareRuleCommand {
 }
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { CreateSecurityEventInput } from "../../common/audit/security-event-sanitizer";
 import { generateDeterministicUuid } from "../../common/durable-identity";
 import type { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import {
@@ -202,6 +203,7 @@ import {
   AuditNotificationService,
   type ApprovalNotificationRecipient,
 } from "../audit-notification/audit-notification.service";
+import { SecurityEventsService } from "../security-events/security-events.service";
 import type { ApprovalNotificationTemplateKey } from "../audit-notification/templates/approval-notification.templates";
 import {
   BANK_CARD_INLINE_ELIGIBILITY_ADAPTER_CODE,
@@ -1223,6 +1225,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
     @Optional()
     private readonly referralEmbedHandoffRepository: ReferralEmbedHandoffRepository = new ReferralEmbedHandoffRepository(),
+    @Optional()
+    private readonly securityEventsService?: SecurityEventsService,
   ) {
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
@@ -6200,6 +6204,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     command: CreateTenantUserCommand,
     requestId?: string,
+    identity?: IdentityContext | null,
   ) {
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
@@ -6223,6 +6228,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const previousUserRoles = this.userRoles.map((userRole) =>
+      this.cloneUserRole(userRole),
+    );
     const now = new Date().toISOString();
     const userRole: TenantUserRoleRecord = {
       userId: `tenant_user_${randomUUID()}`,
@@ -6237,27 +6246,65 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     this.userRoles = [this.cloneUserRole(userRole), ...this.userRoles];
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         userRoles: [this.cloneUserRole(userRole)],
       },
-      "create_tenant_user",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "create_tenant_user",
-        resourceType: "tenant_user_role",
-        resourceId: userRole.userId,
-        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      context: "create_tenant_user",
+      rollback: () => {
+        this.userRoles = previousUserRoles.map((entry) =>
+          this.cloneUserRole(entry),
+        );
       },
-      requestId,
-    );
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: userRole.email,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_user.invited",
+            eventFamily: "invitation",
+            outcome: "success",
+            severity: "medium",
+            targetType: "tenant_user_role",
+            targetId: userRole.userId,
+            sessionId: null,
+            tokenId: null,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: null,
+            afterSummary: this.buildTenantUserAuditSummary(userRole),
+            maskedContext: {
+              email: userRole.email,
+            },
+          }
+        : null,
+    });
 
-    return this.cloneUserRole(userRole);
+    return this.afterPersistence(persisted, () => {
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "create_tenant_user",
+          resourceType: "tenant_user_role",
+          resourceId: userRole.userId,
+          newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+        },
+        requestId,
+      );
+
+      return this.cloneUserRole(userRole);
+    });
   }
 
   updateTenantUserRole(
@@ -6265,38 +6312,82 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     command: UpdateTenantRoleCommand,
     requestId?: string,
+    identity?: IdentityContext | null,
   ) {
     this.assertNonBlank(command.roleCode, "roleCode");
     this.assertSupportedTenantRoleCode(command.roleCode);
 
     const userRole = this.requireTenantUser(tenantId, userId);
+    const before = this.cloneUserRole(userRole);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const previousUserRoles = this.userRoles.map((entry) =>
+      this.cloneUserRole(entry),
+    );
     userRole.roleCode = command.roleCode.trim();
     userRole.status = command.status ?? userRole.status;
     userRole.approvalNotificationOptOut =
       command.approvalNotificationOptOut ?? userRole.approvalNotificationOptOut;
     userRole.updatedAt = new Date().toISOString();
 
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         userRoles: [this.cloneUserRole(userRole)],
       },
-      "update_tenant_role",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "update_tenant_role",
-        resourceType: "tenant_user_role",
-        resourceId: userRole.userId,
-        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      context: "update_tenant_role",
+      rollback: () => {
+        this.userRoles = previousUserRoles.map((entry) =>
+          this.cloneUserRole(entry),
+        );
       },
-      requestId,
-    );
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: userRole.email,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_user.role_updated",
+            eventFamily: "role",
+            outcome: "success",
+            severity: "high",
+            targetType: "tenant_user_role",
+            targetId: userRole.userId,
+            sessionId: null,
+            tokenId: null,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: this.buildTenantUserAuditSummary(before),
+            afterSummary: this.buildTenantUserAuditSummary(userRole),
+            maskedContext: {
+              email: userRole.email,
+            },
+          }
+        : null,
+    });
 
-    return this.cloneUserRole(userRole);
+    return this.afterPersistence(persisted, () => {
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "update_tenant_role",
+          resourceType: "tenant_user_role",
+          resourceId: userRole.userId,
+          newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+        },
+        requestId,
+      );
+
+      return this.cloneUserRole(userRole);
+    });
   }
 
   listApiKeys(tenantId: string) {
@@ -6309,9 +6400,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     command: IssueTenantApiKeyCommand,
     requestId?: string,
-  ): TenantApiKeyIssued {
+    identity?: IdentityContext | null,
+  ): MaybePromise<TenantApiKeyIssued> {
     this.assertNonBlank(command.keyName, "keyName");
 
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const previousApiKeys = this.apiKeys.map((apiKey) =>
+      this.cloneStoredApiKey(apiKey),
+    );
     const issued = this.buildIssuedApiKey(
       tenantId,
       {
@@ -6325,31 +6421,69 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       this.cloneStoredApiKey(issued.storedApiKey),
       ...this.apiKeys,
     ];
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         apiKeys: [this.cloneStoredApiKey(issued.storedApiKey)],
       },
-      "issue_api_key",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "issue_api_key",
-        resourceType: "tenant_api_key",
-        resourceId: issued.storedApiKey.apiKeyId,
-        newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+      context: "issue_api_key",
+      rollback: () => {
+        this.apiKeys = previousApiKeys.map((apiKey) =>
+          this.cloneStoredApiKey(apiKey),
+        );
       },
-      requestId,
-    );
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: securityActor.actorId,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_api_key.issued",
+            eventFamily: "credential",
+            outcome: "success",
+            severity: "high",
+            targetType: "tenant_api_key",
+            targetId: issued.storedApiKey.apiKeyId,
+            sessionId: null,
+            tokenId: issued.plaintextKey,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: null,
+            afterSummary: this.toApiKeyResponse(issued.storedApiKey),
+            maskedContext: {
+              plaintextKey: issued.plaintextKey,
+            },
+          }
+        : null,
+    });
 
-    return {
-      apiKey: this.toApiKeyResponse(issued.storedApiKey),
-      plaintextKey: issued.plaintextKey,
-      revokedApiKeyId: null,
-    };
+    return this.afterPersistence(persisted, () => {
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "issue_api_key",
+          resourceType: "tenant_api_key",
+          resourceId: issued.storedApiKey.apiKeyId,
+          newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+        },
+        requestId,
+      );
+
+      return {
+        apiKey: this.toApiKeyResponse(issued.storedApiKey),
+        plaintextKey: issued.plaintextKey,
+        revokedApiKeyId: null,
+      };
+    });
   }
 
   rotateApiKey(
@@ -6357,8 +6491,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     apiKeyId: string,
     command: RotateTenantApiKeyCommand,
     requestId?: string,
-  ): TenantApiKeyIssued {
+    identity?: IdentityContext | null,
+  ): MaybePromise<TenantApiKeyIssued> {
     const currentApiKey = this.requireApiKey(tenantId, apiKeyId);
+    const before = this.cloneStoredApiKey(currentApiKey);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const previousApiKeys = this.apiKeys.map((apiKey) =>
+      this.cloneStoredApiKey(apiKey),
+    );
     const rotatedAt = new Date().toISOString();
     currentApiKey.revokedAt = rotatedAt;
 
@@ -6385,35 +6525,74 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         (apiKey) => apiKey.apiKeyId !== currentApiKey.apiKeyId,
       ),
     ];
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         apiKeys: [
           this.cloneStoredApiKey(currentApiKey),
           this.cloneStoredApiKey(issued.storedApiKey),
         ],
       },
-      "rotate_api_key",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "rotate_api_key",
-        resourceType: "tenant_api_key",
-        resourceId: issued.storedApiKey.apiKeyId,
-        oldValuesSummary: this.toApiKeyResponse(currentApiKey),
-        newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+      context: "rotate_api_key",
+      rollback: () => {
+        this.apiKeys = previousApiKeys.map((apiKey) =>
+          this.cloneStoredApiKey(apiKey),
+        );
       },
-      requestId,
-    );
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: securityActor.actorId,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_api_key.rotated",
+            eventFamily: "credential",
+            outcome: "success",
+            severity: "high",
+            targetType: "tenant_api_key",
+            targetId: issued.storedApiKey.apiKeyId,
+            sessionId: null,
+            tokenId: issued.plaintextKey,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: this.toApiKeyResponse(before),
+            afterSummary: this.toApiKeyResponse(issued.storedApiKey),
+            maskedContext: {
+              plaintextKey: issued.plaintextKey,
+              revokedApiKeyId: currentApiKey.apiKeyId,
+            },
+          }
+        : null,
+    });
 
-    return {
-      apiKey: this.toApiKeyResponse(issued.storedApiKey),
-      plaintextKey: issued.plaintextKey,
-      revokedApiKeyId: currentApiKey.apiKeyId,
-    };
+    return this.afterPersistence(persisted, () => {
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "rotate_api_key",
+          resourceType: "tenant_api_key",
+          resourceId: issued.storedApiKey.apiKeyId,
+          oldValuesSummary: this.toApiKeyResponse(currentApiKey),
+          newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+        },
+        requestId,
+      );
+
+      return {
+        apiKey: this.toApiKeyResponse(issued.storedApiKey),
+        plaintextKey: issued.plaintextKey,
+        revokedApiKeyId: currentApiKey.apiKeyId,
+      };
+    });
   }
 
   listWebhookEndpoints(tenantId: string, identity?: IdentityContext | null) {
@@ -7613,27 +7792,77 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  revokeApiKey(tenantId: string, apiKeyId: string, requestId?: string) {
+  revokeApiKey(
+    tenantId: string,
+    apiKeyId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
     const apiKey = this.requireApiKey(tenantId, apiKeyId);
     if (!apiKey.revokedAt) {
+      const before = this.cloneStoredApiKey(apiKey);
+      const previousApiKeys = this.apiKeys.map((entry) =>
+        this.cloneStoredApiKey(entry),
+      );
+      const securityActor = this.requireSecurityEventActor(identity, tenantId);
       apiKey.revokedAt = new Date().toISOString();
-      this.persistChanges(
-        { apiKeys: [this.cloneStoredApiKey(apiKey)] },
-        "revoke_api_key",
-      );
-      this.recordTenantAudit(
-        {
-          actorId: null,
-          actorType: "tenant_admin",
-          tenantId,
-          moduleName: "tenant-partner",
-          actionName: "revoke_api_key",
-          resourceType: "tenant_api_key",
-          resourceId: apiKey.apiKeyId,
-          newValuesSummary: this.toApiKeyResponse(apiKey),
+      const persisted = this.persistIdentityGovernanceMutation({
+        changes: { apiKeys: [this.cloneStoredApiKey(apiKey)] },
+        context: "revoke_api_key",
+        rollback: () => {
+          this.apiKeys = previousApiKeys.map((entry) =>
+            this.cloneStoredApiKey(entry),
+          );
         },
-        requestId,
-      );
+        event: securityActor
+          ? {
+              actorId: securityActor.actorId,
+              actorType: securityActor.actorType,
+              subjectId: securityActor.actorId,
+              realm: securityActor.realm,
+              tenantId,
+              partnerId: null,
+              eventType: "tenant_api_key.revoked",
+              eventFamily: "credential",
+              outcome: "revoked",
+              severity: "high",
+              targetType: "tenant_api_key",
+              targetId: apiKey.apiKeyId,
+              sessionId: null,
+              tokenId: null,
+              authMethods: [securityActor.authMode],
+              sourceIp: null,
+              userAgent: null,
+              requestId: requestId ?? null,
+              traceId: null,
+              reasonCode: null,
+              approvalId: null,
+              beforeSummary: this.toApiKeyResponse(before),
+              afterSummary: this.toApiKeyResponse(apiKey),
+              maskedContext: {
+                keyPrefix: apiKey.keyPrefix,
+              },
+            }
+          : null,
+      });
+
+      return this.afterPersistence(persisted, () => {
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "revoke_api_key",
+            resourceType: "tenant_api_key",
+            resourceId: apiKey.apiKeyId,
+            newValuesSummary: this.toApiKeyResponse(apiKey),
+          },
+          requestId,
+        );
+
+        return { status: "revoked", apiKeyId };
+      });
     }
     return { status: "revoked", apiKeyId };
   }
@@ -8070,6 +8299,81 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       invitedAt: userRole.invitedAt,
       updatedAt: userRole.updatedAt,
     };
+  }
+
+  private requireSecurityEventActor(
+    identity: IdentityContext | null | undefined,
+    tenantId: string,
+  ) {
+    if (!this.securityEventsService) {
+      return null;
+    }
+    if (!identity?.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTHENTICATION_REQUIRED",
+        "Authenticated actor identity is required for privileged identity mutations.",
+        {
+          tenantId,
+        },
+      );
+    }
+
+    return {
+      actorId: identity.actorId,
+      actorType: identity.actorType,
+      realm: identity.realm,
+      authMode: identity.authMode,
+      tenantId: identity.tenantId ?? tenantId,
+      partnerId: identity.partnerId ?? null,
+    };
+  }
+
+  private persistIdentityGovernanceMutation(params: {
+    changes: Pick<PersistTenantPartnerChanges, "userRoles" | "apiKeys">;
+    context: string;
+    rollback: () => void;
+    event: CreateSecurityEventInput | null;
+  }): MaybePromise<void> {
+    const event = params.event;
+
+    if (!this.securityEventsService || !event) {
+      this.persistChanges(params.changes, params.context);
+      return;
+    }
+
+    const canUseTransaction =
+      Boolean(this.tenantPartnerRepository?.isEnabled()) &&
+      this.securityEventsService.isEnabled();
+
+    if (canUseTransaction && this.tenantPartnerRepository) {
+      return this.tenantPartnerRepository
+        .withTransaction(async (executor) => {
+          await this.tenantPartnerRepository!.persistIdentityGovernanceChanges(
+            executor,
+            params.changes,
+          );
+          await this.securityEventsService!.recordEventRequired(event, executor);
+        })
+        .catch((error) => {
+          this.tenantPartnerRepository?.reportPersistenceFailure(
+            error,
+            params.context,
+          );
+          params.rollback();
+          throw error;
+        });
+    }
+
+    return this.securityEventsService
+      .recordEventRequired(event)
+      .then(() => {
+        this.persistChanges(params.changes, params.context);
+      })
+      .catch((error) => {
+        params.rollback();
+        throw error;
+      });
   }
 
   private cloneNotificationPreferences(

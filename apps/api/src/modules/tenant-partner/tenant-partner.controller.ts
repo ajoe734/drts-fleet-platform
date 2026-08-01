@@ -1380,34 +1380,42 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/users")
-  createTenantUser(
+  async createTenantUser(
     @Body() command: CreateTenantUserCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.createTenantUser(
-        this.requireTenantId(tenantId),
-        command,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.createTenantUser(
+          this.requireTenantId(tenantId),
+          command,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("tenant/users/:userId/role")
-  updateTenantRole(
+  async updateTenantRole(
     @Param("userId") userId: string,
     @Body() command: UpdateTenantRoleCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.updateTenantUserRole(
-        this.requireTenantId(tenantId),
-        userId,
-        command,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.updateTenantUserRole(
+          this.requireTenantId(tenantId),
+          userId,
+          command,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
@@ -1426,50 +1434,62 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/api-keys")
-  issueApiKey(
+  async issueApiKey(
     @Body() command: IssueTenantApiKeyCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.issueApiKey(
-        this.requireTenantId(tenantId),
-        command,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.issueApiKey(
+          this.requireTenantId(tenantId),
+          command,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("tenant/api-keys/:apiKeyId/revoke")
-  revokeApiKey(
+  async revokeApiKey(
     @Param("apiKeyId") apiKeyId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.revokeApiKey(
-        this.requireTenantId(tenantId),
-        apiKeyId,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.revokeApiKey(
+          this.requireTenantId(tenantId),
+          apiKeyId,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("tenant/api-keys/:apiKeyId/rotate")
-  rotateApiKey(
+  async rotateApiKey(
     @Param("apiKeyId") apiKeyId: string,
     @Body() command: RotateTenantApiKeyCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.rotateApiKey(
-        this.requireTenantId(tenantId),
-        apiKeyId,
-        command,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.rotateApiKey(
+          this.requireTenantId(tenantId),
+          apiKeyId,
+          command,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );

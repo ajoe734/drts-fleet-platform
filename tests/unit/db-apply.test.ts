@@ -356,4 +356,94 @@ WHERE schemaname = 'ops'
       "(status = ANY (ARRAY['pending'::text, 'processing'::text]))",
     );
   }, 180_000);
+
+  it("creates append-only security events that reject update and delete", () => {
+    const eventId = "33333333-3333-4333-8333-333333333333";
+
+    bash(
+      [
+        "if command -v psql >/dev/null 2>&1; then",
+        `  PGPASSWORD=postgres psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
+        "else",
+        "  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD=postgres postgres \\",
+        `    psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
+        "fi",
+      ].join("\n"),
+    );
+
+    bash("./scripts/db-apply.sh", {
+      DATABASE_URL: databaseUrl,
+    });
+
+    bash(
+      psqlCommand(
+        databaseUrl,
+        `
+INSERT INTO admin.security_events (
+  event_id,
+  occurred_at,
+  event_type,
+  event_family,
+  outcome,
+  severity,
+  actor_type,
+  realm,
+  tenant_id,
+  auth_methods,
+  masked_context
+) VALUES (
+  '${eventId}',
+  '2026-08-01T00:00:00.000Z',
+  'tenant_api_key.issued',
+  'credential',
+  'success',
+  'high',
+  'tenant_admin',
+  'tenant',
+  'tenant-demo-001',
+  ARRAY['jwt_bearer'],
+  '{"keyName":"Ops Key"}'::jsonb
+);
+        `,
+      ),
+    );
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+UPDATE admin.security_events
+SET outcome = 'failure'
+WHERE event_id = '${eventId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+DELETE FROM admin.security_events
+WHERE event_id = '${eventId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    const persisted = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT count(*)::text || '|' || min(outcome)
+FROM admin.security_events
+WHERE event_id = '${eventId}';
+        `,
+      ),
+    ).trim();
+
+    expect(persisted).toBe("1|success");
+  }, 180_000);
 });
