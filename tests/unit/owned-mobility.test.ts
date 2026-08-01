@@ -195,6 +195,44 @@ function getErrorCode(error: unknown) {
   return response?.error?.code ?? null;
 }
 
+async function completeOrderForRating(
+  ownedMobilityService: OwnedMobilityService,
+  orderId: string,
+) {
+  const orderStore = (
+    ownedMobilityService as unknown as {
+      orders:
+        | Map<
+            string,
+            {
+              orderId?: string;
+              status: string;
+              completedAt?: string;
+              updatedAt?: string;
+            }
+          >
+        | Array<{
+            orderId: string;
+            status: string;
+            completedAt?: string;
+            updatedAt?: string;
+          }>;
+    }
+  ).orders;
+
+  const order = Array.isArray(orderStore)
+    ? orderStore.find((item) => item.orderId === orderId)
+    : orderStore.get(orderId);
+
+  if (!order) {
+    throw new Error(`Missing order ${orderId}`);
+  }
+
+  order.status = "completed";
+  order.completedAt = "2026-04-10T09:45:00Z";
+  order.updatedAt = "2026-04-10T09:45:00Z";
+}
+
 async function flushWebhookDispatch() {
   await Promise.resolve();
   await Promise.resolve();
@@ -1775,13 +1813,18 @@ describe("owned mobility service", () => {
 
       let caught: any = null;
       try {
-        ownedMobilityService.getReferralPassengerReceipt(booking.orderId, identity2);
+        ownedMobilityService.getReferralPassengerReceipt(
+          booking.orderId,
+          identity2,
+        );
       } catch (err) {
         caught = err;
       }
       expect(caught).not.toBeNull();
       expect(caught.getStatus()).toBe(403);
-      expect(caught.getResponse().error.code).toMatch(/PASSENGER_SCOPE_MISMATCH|PARTNER_SCOPE_MISMATCH/);
+      expect(caught.getResponse().error.code).toMatch(
+        /PASSENGER_SCOPE_MISMATCH|PARTNER_SCOPE_MISMATCH/,
+      );
     });
 
     it("returns dynamic trip details and downloadUrl in receipt", async () => {
@@ -1817,17 +1860,123 @@ describe("owned mobility service", () => {
         identity,
       );
 
-      const activeTrip = ownedMobilityService.getReferralPassengerActiveTrip(identity);
+      const activeTrip =
+        ownedMobilityService.getReferralPassengerActiveTrip(identity);
       expect(activeTrip.active).toBe(true);
       expect(activeTrip.trip?.orderId).toBe(booking.orderId);
 
-      const history = ownedMobilityService.listReferralPassengerHistory(identity);
+      const history =
+        ownedMobilityService.listReferralPassengerHistory(identity);
       expect(history.items.length).toBeGreaterThan(0);
       expect(history.items[0]?.orderId).toBe(booking.orderId);
 
-      const receipt = ownedMobilityService.getReferralPassengerReceipt(booking.orderId, identity);
+      const receipt = ownedMobilityService.getReferralPassengerReceipt(
+        booking.orderId,
+        identity,
+      );
       expect(receipt.orderId).toBe(booking.orderId);
-      expect(receipt.downloadUrl).toBe(`/api/referral/receipt/${booking.orderId}/download`);
+      expect(receipt.downloadUrl).toBe(
+        `/api/referral/receipt/${booking.orderId}/download`,
+      );
+    });
+
+    it("only allows referral ratings after completion and keeps duplicates idempotent", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-rating-001",
+      };
+
+      const booking = await ownedMobilityService.createReferralPassengerBooking(
+        {
+          entrySlug: "yuhe-residence",
+          pickupAddress: "Pickup Spot",
+          dropoffAddress: "Dropoff Spot",
+        },
+        identity,
+      );
+
+      try {
+        ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: " Great ride ",
+            tags: [" polite ", "fast", "fast"],
+          },
+          identity,
+        );
+        expect.unreachable("rating before completion should fail");
+      } catch (error) {
+        expect(getErrorCode(error)).toBe("PASSENGER_RATING_TRIP_NOT_COMPLETED");
+      }
+
+      await completeOrderForRating(ownedMobilityService, booking.orderId);
+
+      const firstRating = ownedMobilityService.submitReferralPassengerRating(
+        booking.orderId,
+        {
+          orderId: booking.orderId,
+          score: 5,
+          comment: " Great ride ",
+          tags: [" polite ", "fast", "fast"],
+          idempotencyKey: "rating-idemp-001",
+        },
+        identity,
+      );
+      expect(firstRating).toMatchObject({
+        orderId: booking.orderId,
+        score: 5,
+        comment: "Great ride",
+        tags: ["fast", "polite"],
+      });
+
+      const replayRating = ownedMobilityService.submitReferralPassengerRating(
+        booking.orderId,
+        {
+          orderId: booking.orderId,
+          score: 5,
+          comment: "Great ride",
+          tags: ["fast", "polite"],
+          idempotencyKey: "rating-idemp-002",
+        },
+        identity,
+      );
+      expect(replayRating).toEqual(firstRating);
+
+      try {
+        ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 4,
+            comment: "Different payload",
+            tags: ["slow"],
+          },
+          identity,
+        );
+        expect.unreachable("different duplicate rating should conflict");
+      } catch (error) {
+        expect(getErrorCode(error)).toBe("PASSENGER_RATING_ALREADY_SUBMITTED");
+      }
     });
   });
 });

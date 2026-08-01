@@ -9963,6 +9963,50 @@ export class OwnedMobilityService
     }
   >();
 
+  private normalizeReferralRatingTags(value: string[] | undefined) {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value) || value.length > 10) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_RATING_TAGS_INVALID",
+        "tags must contain at most 10 values.",
+      );
+    }
+    return [
+      ...new Set(
+        value.map((item) => item?.trim()).filter((item) => item.length > 0),
+      ),
+    ].sort();
+  }
+
+  private assertIdempotentReferralRating(
+    existing: {
+      orderId: string;
+      score: 1 | 2 | 3 | 4 | 5;
+      comment?: string;
+      tags: string[];
+      submittedAt: string;
+    },
+    score: 1 | 2 | 3 | 4 | 5,
+    tags: string[],
+    comment: string | null,
+  ) {
+    if (
+      existing.score !== score ||
+      (existing.comment ?? null) !== comment ||
+      JSON.stringify([...existing.tags].sort()) !== JSON.stringify(tags)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_ALREADY_SUBMITTED",
+        "A different rating has already been submitted for this trip.",
+        { orderId: existing.orderId },
+      );
+    }
+  }
+
   private assertPartnerOrderIdentity(
     identity: BootstrapRequestIdentity | null | undefined,
     order: OwnedOrderRecord,
@@ -10040,7 +10084,10 @@ export class OwnedMobilityService
 
     if (this.tenantPartnerService) {
       try {
-        this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
+        this.tenantPartnerService.getPassengerMasterRecord(
+          tenantId,
+          passengerId,
+        );
       } catch {
         this.tenantPartnerService.upsertPassenger(tenantId, {
           passengerId,
@@ -10130,7 +10177,8 @@ export class OwnedMobilityService
   private resolveReferralTripDetails(order: OwnedOrderRecord) {
     const assignment = this.dispatchAssignments.find(
       (a) =>
-        a.orderId === order.orderId && ["assigned", "accepted"].includes(a.status),
+        a.orderId === order.orderId &&
+        ["assigned", "accepted"].includes(a.status),
     );
     const task = this.driverTasks.find(
       (t) =>
@@ -10140,7 +10188,11 @@ export class OwnedMobilityService
 
     const candidate = (order as unknown as Record<string, unknown>)
       .dispatchCandidate as
-      | { driverName?: string; plateNumber?: string; driverPhoneMasked?: string }
+      | {
+          driverName?: string;
+          plateNumber?: string;
+          driverPhoneMasked?: string;
+        }
       | undefined;
 
     let driverName: string | null = candidate?.driverName ?? null;
@@ -10381,9 +10433,7 @@ export class OwnedMobilityService
       driverName: details.driverName,
       plateNumber: details.plateNumber,
       vehicleType:
-        order.serviceProductCode ??
-        order.businessDispatchSubtype ??
-        "standard",
+        order.serviceProductCode ?? order.businessDispatchSubtype ?? "standard",
       pickupAddress: order.pickup.address,
       dropoffAddress: order.dropoff.address,
       fareBase,
@@ -10476,12 +10526,22 @@ export class OwnedMobilityService
       );
     }
 
+    if (order.status !== "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+        "A passenger rating can only be submitted after trip completion.",
+        { orderId: order.orderId, status: order.status },
+      );
+    }
+
+    const score = command.score;
+    const tags = this.normalizeReferralRatingTags(command.tags);
+    const comment = command.comment?.trim() || null;
+
     const existing = this.referralRatingsByOrderId.get(orderId);
-    if (
-      existing &&
-      command.idempotencyKey &&
-      existing.idempotencyKey === command.idempotencyKey
-    ) {
+    if (existing) {
+      this.assertIdempotentReferralRating(existing, score, tags, comment);
       return {
         orderId,
         score: existing.score,
@@ -10500,12 +10560,12 @@ export class OwnedMobilityService
       submittedAt: string;
     } = {
       orderId,
-      score: command.score,
-      tags: command.tags ?? [],
+      score,
+      tags,
       submittedAt: new Date().toISOString(),
     };
-    if (command.comment) {
-      ratingRecord.comment = command.comment;
+    if (comment) {
+      ratingRecord.comment = comment;
     }
     if (command.idempotencyKey) {
       ratingRecord.idempotencyKey = command.idempotencyKey;
