@@ -112,6 +112,9 @@ describe("referral embed passenger lifecycle API integration", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await getReferralActiveTripServer();
+    if (!result) {
+      throw new Error("expected active trip payload");
+    }
     expect(result.active).toBe(true);
     expect(result.trip?.orderId).toBe("order-123");
   });
