@@ -41,6 +41,7 @@ export type EmbedContext = {
   session: PartnerIngressHandoffSession | null;
   state: EmbedState;
   screen: EmbedScreen;
+  requestedScreen: string | null;
   handoff: {
     apiKey: string | null;
     partnerUserRef: string | null;
@@ -176,6 +177,7 @@ export async function resolveEmbedContext(input: {
     session,
     state,
     screen: toEmbedScreen(input.screen),
+    requestedScreen: input.screen ?? null,
     handoff: {
       apiKey: input.apiKey ?? null,
       partnerUserRef: input.partnerUserRef ?? null,

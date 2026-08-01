@@ -1786,6 +1786,15 @@ export function PassengerEmbed({ context }: { context: EmbedContext }) {
     return renderIdentitySurface(context);
   }
 
+  if (
+    context.screen === "book" &&
+    !context.requestedScreen &&
+    !context.handoff.apiKey &&
+    !context.handoff.partnerUserRef
+  ) {
+    return <HandoffScreen context={context} />;
+  }
+
   if (isFallbackScreen(context.screen)) {
     return <FallbackTripScreen context={context} screen={context.screen} />;
   }
