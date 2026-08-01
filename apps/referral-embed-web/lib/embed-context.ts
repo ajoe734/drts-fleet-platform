@@ -38,6 +38,11 @@ export type EmbedContext = {
   session: ReferralEmbedSession | null;
   state: EmbedState;
   screen: EmbedScreen;
+  requestedScreen: string | null;
+  handoff: {
+    apiKey: string | null;
+    partnerUserRef: string | null;
+  };
   decision: EmbedSecurityDecision;
   accent: string;
   strings: {
@@ -53,7 +58,7 @@ function resolveDisplayName(entry: PartnerChannelEntryRecord) {
 }
 
 function resolveAppName(entry: PartnerChannelEntryRecord) {
-  return `${resolveDisplayName(entry)} App`;
+  return resolveDisplayName(entry);
 }
 
 function resolveSupportPhone(entry: PartnerChannelEntryRecord) {
@@ -114,6 +119,8 @@ export async function resolveEmbedContext(input: {
   state?: string;
   screen?: string;
   entryHost?: string;
+  apiKey?: string;
+  partnerUserRef?: string;
 }): Promise<EmbedContext> {
   const requestHeaders = await headers();
   const host = requestHeaders.get("host") || "localhost:3005";
@@ -158,6 +165,11 @@ export async function resolveEmbedContext(input: {
     session,
     state,
     screen: toEmbedScreen(input.screen),
+    requestedScreen: input.screen ?? null,
+    handoff: {
+      apiKey: input.apiKey ?? null,
+      partnerUserRef: input.partnerUserRef ?? null,
+    },
     decision,
     accent: resolveAccent(entry),
     strings: {
