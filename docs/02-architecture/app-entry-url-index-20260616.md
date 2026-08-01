@@ -38,11 +38,17 @@ enterprise-dispatch-web, channel-partner-portal-web, referral-embed-web`.
 
 Three independent surfaces (each its own app/route as of 2026-06-16):
 
-| Surface                                  | Dev URL                                                              | Role                                                                                                                                                                                                                                                |
-| ---------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Embedded ride-hailing front              | https://refer.smarttransport.tw/embed/referral-demo-community        | `referral-embed-web` — resident hails a ride inside the host app's webview. The Cloud Run fallback is `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community`; `/` redirects to the configured canonical entry. |
-| Channel-partner self-service back office | https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app      | `channel-partner-portal-web` — partner views usage / revenue share / statements (`/dashboard`, `/usage`, `/statements`). `channel.smarttransport.tw` remains the custom-domain target, but the Cloud Run host above is the current ready URL.       |
-| Platform-side channel governance         | https://drts-dev-platform-admin-web-4t7rg6fmeq-uc.a.run.app/partners | `platform-admin-web` `/partners*` — entry / attribution / revenue-share rate admin                                                                                                                                                                  |
+The canonical onboarding contract is
+`https://<referral-embed-host>/embed/<entrySlug>`, with one platform-admin
+provisioned slug per partner. The concrete URL below is the seeded **dev demo /
+acceptance** entry only; it is not a production URL claim. The current
+production deploy rail does not define a Referral Embed host.
+
+| Surface                                             | Dev URL                                                              | Role                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Embedded ride-hailing front (dev demo / acceptance) | https://refer.smarttransport.tw/embed/referral-demo-community        | `referral-embed-web` — resident hails a ride inside the host app's webview. This seeded dev entry is not a production partner URL. The dev Cloud Run fallback is `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/referral-demo-community`; `/` redirects to the configured dev acceptance entry. |
+| Channel-partner self-service back office            | https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app      | `channel-partner-portal-web` — partner views usage / revenue share / statements (`/dashboard`, `/usage`, `/statements`). `channel.smarttransport.tw` remains the custom-domain target, but the Cloud Run host above is the current ready URL.                                                                       |
+| Platform-side channel governance                    | https://drts-dev-platform-admin-web-4t7rg6fmeq-uc.a.run.app/partners | `platform-admin-web` `/partners*` — entry / attribution / revenue-share rate admin                                                                                                                                                                                                                                  |
 
 ## Backend API
 

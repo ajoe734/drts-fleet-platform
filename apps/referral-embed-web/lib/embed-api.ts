@@ -34,7 +34,7 @@ function deepCamelize(value: unknown): unknown {
   return value;
 }
 
-type EmbedAuthorityError = Error & {
+export type EmbedAuthorityError = Error & {
   status: number;
   code: string;
   details: Record<string, unknown> | undefined;
@@ -150,5 +150,25 @@ export function isEmbedAuthorityError(
     "code" in error &&
     typeof (error as EmbedAuthorityError).status === "number" &&
     typeof (error as EmbedAuthorityError).code === "string"
+  );
+}
+
+const PUBLIC_PARTNER_ENTRY_NOT_FOUND_CODES = new Set([
+  "PARTNER_ENTRY_NOT_FOUND",
+  "PARTNER_ENTRY_REVOKED",
+  "PARTNER_ENTRY_INACTIVE",
+]);
+
+/**
+ * The public authority deliberately hides missing, revoked, and inactive
+ * partner entries behind 404 responses. Other 404s (for example, a gateway or
+ * route misconfiguration) and all 5xx responses are service failures and must
+ * reach the route error boundary instead of masquerading as a missing entry.
+ */
+export function isPublicPartnerEntryNotFoundError(error: unknown) {
+  return (
+    isEmbedAuthorityError(error) &&
+    error.status === 404 &&
+    PUBLIC_PARTNER_ENTRY_NOT_FOUND_CODES.has(error.code)
   );
 }

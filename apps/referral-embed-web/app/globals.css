@@ -27,11 +27,59 @@ body {
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(14, 116, 144, 0.12), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(194, 65, 12, 0.12), transparent 22%),
+    radial-gradient(
+      circle at top left,
+      rgba(14, 116, 144, 0.12),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(194, 65, 12, 0.12),
+      transparent 22%
+    ),
     linear-gradient(180deg, #fcfbf8 0%, #eef4f7 100%);
   color: var(--text);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.embed-system-error {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.embed-system-error__card {
+  width: min(100%, 36rem);
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.5rem, 5vw, 2.5rem);
+  border: 1px solid var(--panel-border);
+  border-radius: 1.5rem;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.embed-system-error__card h1,
+.embed-system-error__card p {
+  margin: 0;
+}
+
+.embed-system-error__card p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.embed-system-error__card .primary-link {
+  width: fit-content;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.embed-system-error__reference {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
 }
 
 a {
@@ -210,7 +258,11 @@ a {
   border-radius: 32px;
   padding: 2rem;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(246, 250, 252, 0.96)),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.92),
+      rgba(246, 250, 252, 0.96)
+    ),
     var(--panel-strong);
   border: 1px solid rgba(14, 116, 144, 0.12);
   box-shadow: var(--shadow);
@@ -218,8 +270,16 @@ a {
 
 .hero-gradient {
   background:
-    radial-gradient(circle at top right, rgba(14, 116, 144, 0.12), transparent 28%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 250, 0.98));
+    radial-gradient(
+      circle at top right,
+      rgba(14, 116, 144, 0.12),
+      transparent 28%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.94),
+      rgba(245, 249, 250, 0.98)
+    );
 }
 
 .hero-card h1 {
@@ -374,7 +434,9 @@ a {
   border: 1px solid var(--panel-border);
   background: var(--panel);
   box-shadow: 0 10px 22px rgba(17, 36, 59, 0.05);
-  transition: transform 140ms ease, border-color 140ms ease;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease;
 }
 
 .flow-route-card:hover {
