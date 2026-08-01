@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
+import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
+import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import {
   hashIdentitySecret,
   IdentityRepository,
@@ -126,5 +131,77 @@ describe("Identity session and refresh family repository (in-memory mode)", () =
     expect(reuseResult.reason).toBe("REUSE_DETECTED");
     expect(reuseResult.family?.status).toBe("compromised");
     expect(reuseResult.session?.status).toBe("compromised");
+  });
+
+  it("exercises DriverDeviceSessionService runtime auth path using IdentityRepository", async () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const repository = new IdentityRepository();
+    const jwtAuthService = new JwtAuthService();
+    const driverProfileService = new DriverProfileService(
+      new AuditNotificationService(),
+    );
+    const service = new DriverDeviceSessionService(
+      jwtAuthService,
+      driverProfileService,
+      undefined,
+      undefined,
+      repository,
+    );
+
+    // 1. Register device
+    const registered = await service.register({
+      registrationCode: "demo-driver",
+      deviceId: "device-runtime-001",
+      deviceLabel: "Driver Phone",
+    });
+
+    expect(registered.driverId).toBe("drv-demo-001");
+    expect(registered.deviceId).toBe("device-runtime-001");
+    expect(registered.refreshToken).toMatch(/^drvrefresh_/);
+
+    // Verify session persisted in repository with hashed refresh secret
+    const persistedSession = await repository.getSession(registered.bindingId);
+    expect(persistedSession).not.toBeNull();
+    expect(persistedSession?.status).toBe("active");
+
+    const persistedFamily = await repository.getRefreshFamilyByTokenHash(
+      hashIdentitySecret(registered.refreshToken),
+    );
+    expect(persistedFamily).not.toBeNull();
+    expect(persistedFamily?.sessionId).toBe(registered.bindingId);
+
+    // 2. Validate active session access
+    await expect(
+      service.assertSessionAccessAllowed(
+        registered.bindingId,
+        "device-runtime-001",
+        "drv-demo-001",
+        "/api/driver/trips",
+      ),
+    ).resolves.toBeUndefined();
+
+    // 3. Refresh session
+    const refreshed = await service.refresh({
+      deviceId: "device-runtime-001",
+      refreshToken: registered.refreshToken,
+    });
+
+    expect(refreshed.bindingId).toBe(registered.bindingId);
+    expect(refreshed.refreshToken).not.toBe(registered.refreshToken);
+
+    // 4. Test token reuse via service refresh (presenting original refreshToken)
+    await expect(
+      service.refresh({
+        deviceId: "device-runtime-001",
+        refreshToken: registered.refreshToken,
+      }),
+    ).rejects.toThrowError(ApiRequestError);
+
+    // Family and session should now be compromised
+    const compromisedSession = await repository.getSession(registered.bindingId);
+    expect(compromisedSession?.status).toBe("compromised");
+
+    delete process.env.JWT_SECRET;
   });
 });

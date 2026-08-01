@@ -328,7 +328,7 @@ describe("bootstrap auth extraction", () => {
 });
 
 describe("bootstrap auth guard", () => {
-  it("honors OpenRoute metadata for public endpoints", () => {
+  it("honors OpenRoute metadata for public endpoints", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {},
@@ -354,10 +354,10 @@ describe("bootstrap auth guard", () => {
       PublicHandler,
     );
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
-  it("still resolves bearer identity on OpenRoute endpoints when a token is present", () => {
+  it("still resolves bearer identity on OpenRoute endpoints when a token is present", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -404,7 +404,7 @@ describe("bootstrap auth guard", () => {
       PublicHandler,
     );
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity).toMatchObject({
       authMode: "jwt_bearer",
       actorId: "tenant-admin-001",
@@ -417,7 +417,7 @@ describe("bootstrap auth guard", () => {
     delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
-  it("rejects tenant bootstrap identities on call-center order creation", () => {
+  it("rejects tenant bootstrap identities on call-center order creation", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -432,12 +432,12 @@ describe("bootstrap auth guard", () => {
       originalUrl: "/api/call-center/orders",
     };
 
-    expect(() =>
+    await expect(
       guard.canActivate(createExecutionContext(request)),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      guard.canActivate(createExecutionContext(request));
+      await guard.canActivate(createExecutionContext(request));
     } catch (error) {
       const apiError = error as ApiRequestError;
       expect(apiError.getStatus()).toBe(403);
@@ -449,7 +449,7 @@ describe("bootstrap auth guard", () => {
     }
   });
 
-  it("prefers x-drts-authorization for app JWTs when outer authorization is used elsewhere", () => {
+  it("prefers x-drts-authorization for app JWTs when outer authorization is used elsewhere", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -497,7 +497,7 @@ describe("bootstrap auth guard", () => {
       PublicHandler,
     );
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity).toMatchObject({
       authMode: "jwt_bearer",
       actorId: "platform-admin-001",
@@ -510,7 +510,7 @@ describe("bootstrap auth guard", () => {
     delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
-  it("rejects decorator-scoped endpoints when scopes are missing", () => {
+  it("rejects decorator-scoped endpoints when scopes are missing", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -546,10 +546,10 @@ describe("bootstrap auth guard", () => {
       ScopedHandler,
     );
 
-    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    await expect(guard.canActivate(context)).rejects.toThrowError(ApiRequestError);
   });
 
-  it("allows protected endpoints when the bootstrap identity has matching scopes", () => {
+  it("allows protected endpoints when the bootstrap identity has matching scopes", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -584,12 +584,12 @@ describe("bootstrap auth guard", () => {
       ScopedHandler,
     );
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity?.actorType).toBe("tenant_admin");
     expect(request.identity?.scopes).toContain("tenant:webhooks:write");
   });
 
-  it("returns 403 when rating moderation capability is missing", () => {
+  it("returns 403 when rating moderation capability is missing", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -607,9 +607,9 @@ describe("bootstrap auth guard", () => {
       MultiTaxiController as never,
     );
 
-    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    await expect(guard.canActivate(context)).rejects.toThrowError(ApiRequestError);
     try {
-      guard.canActivate(context);
+      await guard.canActivate(context);
     } catch (error) {
       const apiError = error as ApiRequestError;
       expect(apiError.getStatus()).toBe(403);
@@ -626,7 +626,7 @@ describe("bootstrap auth guard", () => {
     }
   });
 
-  it("allows platform rating moderation with the required capability", () => {
+  it("allows platform rating moderation with the required capability", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -645,7 +645,7 @@ describe("bootstrap auth guard", () => {
       MultiTaxiController as never,
     );
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity).toMatchObject({
       actorId: "platform-admin-001",
       realm: "platform",
@@ -653,7 +653,7 @@ describe("bootstrap auth guard", () => {
     });
   });
 
-  it("returns 403 when rating read capability is missing", () => {
+  it("returns 403 when rating read capability is missing", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -671,9 +671,9 @@ describe("bootstrap auth guard", () => {
       MultiTaxiController as never,
     );
 
-    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    await expect(guard.canActivate(context)).rejects.toThrowError(ApiRequestError);
     try {
-      guard.canActivate(context);
+      await guard.canActivate(context);
     } catch (error) {
       const apiError = error as ApiRequestError;
       expect(apiError.getStatus()).toBe(403);
@@ -691,7 +691,7 @@ describe("bootstrap auth guard", () => {
     }
   });
 
-  it("allows platform rating reads with the required capability", () => {
+  it("allows platform rating reads with the required capability", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -710,7 +710,7 @@ describe("bootstrap auth guard", () => {
       MultiTaxiController as never,
     );
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity).toMatchObject({
       actorId: "platform-admin-001",
       realm: "platform",
@@ -718,7 +718,7 @@ describe("bootstrap auth guard", () => {
     });
   });
 
-  it("denies ops identities from requesting sandbox legal-hold release", () => {
+  it("denies ops identities from requesting sandbox legal-hold release", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -754,10 +754,10 @@ describe("bootstrap auth guard", () => {
       ScopedHandler,
     );
 
-    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    await expect(guard.canActivate(context)).rejects.toThrowError(ApiRequestError);
 
     try {
-      guard.canActivate(context);
+      await guard.canActivate(context);
     } catch (error) {
       const apiError = error as ApiRequestError;
       expect(apiError.getStatus()).toBe(403);
@@ -769,7 +769,7 @@ describe("bootstrap auth guard", () => {
     }
   });
 
-  it("keeps route-policy scopes active when class-level realms are present", () => {
+  it("keeps route-policy scopes active when class-level realms are present", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {
@@ -790,10 +790,10 @@ describe("bootstrap auth guard", () => {
       RegulatoryControllerLike,
     );
 
-    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    await expect(guard.canActivate(context)).rejects.toThrowError(ApiRequestError);
   });
 
-  it("accepts SSE bootstrap identity from query params on ops dispatch streams", () => {
+  it("accepts SSE bootstrap identity from query params on ops dispatch streams", async () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
       headers: {},
@@ -809,7 +809,7 @@ describe("bootstrap auth guard", () => {
 
     const context = createExecutionContext(request);
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity).toMatchObject({
       actorType: "ops_user",
       actorId: "ops-007",
@@ -818,7 +818,7 @@ describe("bootstrap auth guard", () => {
     expect(request.identity?.scopes).toContain("dispatch:read");
   });
 
-  it("accepts verified bearer tokens and marks authMode as jwt_bearer", () => {
+  it("accepts verified bearer tokens and marks authMode as jwt_bearer", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -849,7 +849,7 @@ describe("bootstrap auth guard", () => {
 
     const context = createExecutionContext(request);
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity).toMatchObject({
       authMode: "jwt_bearer",
       actorType: "platform_admin",
@@ -862,7 +862,7 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_AUDIENCE;
   });
 
-  it("applies queue read realm and scope policy to verified bearer tokens", () => {
+  it("applies queue read realm and scope policy to verified bearer tokens", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -889,32 +889,32 @@ describe("bootstrap auth guard", () => {
       originalUrl: "/api/dispatch/queue",
     });
 
-    expect(() =>
+    await expect(
       guard.canActivate(
         createExecutionContext(
           createQueueRequest(createToken("tenant", ["dispatch:read"])),
         ),
       ),
-    ).toThrowError(ApiRequestError);
-    expect(() =>
+    ).rejects.toThrowError(ApiRequestError);
+    await expect(
       guard.canActivate(
         createExecutionContext(createQueueRequest(createToken("ops", []))),
       ),
-    ).toThrowError(ApiRequestError);
-    expect(
+    ).rejects.toThrowError(ApiRequestError);
+    await expect(
       guard.canActivate(
         createExecutionContext(
           createQueueRequest(createToken("ops", ["dispatch:read"])),
         ),
       ),
-    ).toBe(true);
+    ).resolves.toBe(true);
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
   });
 
-  it("accepts bearer tokens even when issuer and audience are not configured", () => {
+  it("accepts bearer tokens even when issuer and audience are not configured", async () => {
     process.env.JWT_SECRET = "test-secret";
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
@@ -945,7 +945,7 @@ describe("bootstrap auth guard", () => {
 
     const context = createExecutionContext(request);
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.identity).toMatchObject({
       authMode: "jwt_bearer",
       actorId: "tenant-admin-001",
@@ -956,7 +956,7 @@ describe("bootstrap auth guard", () => {
     delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
-  it("rejects bearer tokens with the wrong audience", () => {
+  it("rejects bearer tokens with the wrong audience", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -991,7 +991,7 @@ describe("bootstrap auth guard", () => {
 
     const context = createExecutionContext(request);
 
-    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    await expect(guard.canActivate(context)).rejects.toThrowError(ApiRequestError);
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
@@ -1725,7 +1725,7 @@ describe("partner bootstrap-session auth controller", () => {
 });
 
 describe("driver device-session auth controller", () => {
-  it("registers a device and issues a driver-bound bearer session", () => {
+  it("registers a device and issues a driver-bound bearer session", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -1733,7 +1733,7 @@ describe("driver device-session auth controller", () => {
     const jwtAuthService = new JwtAuthService();
     const { controller } = createAuthFixture(jwtAuthService);
 
-    const response = controller.issueDriverDeviceSession(
+    const response = await controller.issueDriverDeviceSession(
       {
         registrationCode: "demo-driver",
         deviceId: "device-test-001",
@@ -1767,7 +1767,7 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_AUDIENCE;
   });
 
-  it("rejects revoked driver device bearer sessions on protected driver routes", () => {
+  it("rejects revoked driver device bearer sessions on protected driver routes", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -1776,24 +1776,28 @@ describe("driver device-session auth controller", () => {
     const { controller, driverDeviceSessionService } =
       createAuthFixture(jwtAuthService);
 
-    const firstSession = controller.issueDriverDeviceSession(
-      {
-        registrationCode: "demo-driver",
-        deviceId: "device-test-002",
-      },
-      "req-driver-device-002",
+    const firstSession = (
+      await controller.issueDriverDeviceSession(
+        {
+          registrationCode: "demo-driver",
+          deviceId: "device-test-002",
+        },
+        "req-driver-device-002",
+      )
     ).data;
 
-    const refreshedSession = controller.refreshDriverDeviceSession(
-      {
-        refreshToken: firstSession.refreshToken,
-        deviceId: "device-test-002",
-      },
-      "req-driver-device-003",
+    const refreshedSession = (
+      await controller.refreshDriverDeviceSession(
+        {
+          refreshToken: firstSession.refreshToken,
+          deviceId: "device-test-002",
+        },
+        "req-driver-device-003",
+      )
     ).data;
 
     expect(refreshedSession.refreshToken).not.toBe(firstSession.refreshToken);
-    controller.revokeDriverDeviceSession(
+    await controller.revokeDriverDeviceSession(
       {
         actorType: "driver_user",
         actorId: "drv-demo-001",
@@ -1828,32 +1832,34 @@ describe("driver device-session auth controller", () => {
       originalUrl: "/api/driver/profile",
     };
 
-    expect(() =>
+    await expect(
       guard.canActivate(createExecutionContext(request)),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
   });
 
-  it("allows platform admins to revoke a driver device binding for operational recovery", () => {
+  it("allows platform admins to revoke a driver device binding for operational recovery", async () => {
     process.env.JWT_SECRET = "test-secret";
 
     const { controller, driverProfileService } = createAuthFixture(
       new JwtAuthService(),
     );
 
-    const session = controller.issueDriverDeviceSession(
-      {
-        registrationCode: "demo-driver",
-        deviceId: "device-test-admin-revoke-001",
-        deviceLabel: "QA iPhone",
-      },
-      "req-driver-device-admin-001",
+    const session = (
+      await controller.issueDriverDeviceSession(
+        {
+          registrationCode: "demo-driver",
+          deviceId: "device-test-admin-revoke-001",
+          deviceLabel: "QA iPhone",
+        },
+        "req-driver-device-admin-001",
+      )
     ).data;
 
-    const response = controller.revokeDriverDeviceSession(
+    const response = await controller.revokeDriverDeviceSession(
       {
         actorType: "platform_admin",
         actorId: "platform-admin-001",
@@ -1895,20 +1901,22 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
   });
 
-  it("rejects unauthenticated driver device binding revoke attempts", () => {
+  it("rejects unauthenticated driver device binding revoke attempts", async () => {
     process.env.JWT_SECRET = "test-secret";
 
     const { controller } = createAuthFixture(new JwtAuthService());
 
-    const session = controller.issueDriverDeviceSession(
-      {
-        registrationCode: "demo-driver",
-        deviceId: "device-test-anon-revoke-001",
-      },
-      "req-driver-device-anon-revoke-001",
+    const session = (
+      await controller.issueDriverDeviceSession(
+        {
+          registrationCode: "demo-driver",
+          deviceId: "device-test-anon-revoke-001",
+        },
+        "req-driver-device-anon-revoke-001",
+      )
     ).data;
 
-    expect(() =>
+    await expect(
       controller.revokeDriverDeviceSession(
         null,
         {
@@ -1917,10 +1925,10 @@ describe("driver device-session auth controller", () => {
         },
         "req-driver-device-anon-revoke-002",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      controller.revokeDriverDeviceSession(
+      await controller.revokeDriverDeviceSession(
         null,
         {
           bindingId: session.bindingId,
@@ -1941,28 +1949,32 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
   });
 
-  it("rebinds a device by revoking the prior binding before issuing the replacement session", () => {
+  it("rebinds a device by revoking the prior binding before issuing the replacement session", async () => {
     process.env.JWT_SECRET = "test-secret";
 
     const { controller, driverProfileService, auditNotificationService } =
       createAuthFixture(new JwtAuthService());
 
-    const firstSession = controller.issueDriverDeviceSession(
-      {
-        registrationCode: "demo-driver",
-        deviceId: "device-test-rebind-001",
-        deviceLabel: "Shared Tablet",
-      },
-      "req-driver-device-rebind-001",
+    const firstSession = (
+      await controller.issueDriverDeviceSession(
+        {
+          registrationCode: "demo-driver",
+          deviceId: "device-test-rebind-001",
+          deviceLabel: "Shared Tablet",
+        },
+        "req-driver-device-rebind-001",
+      )
     ).data;
 
-    const secondSession = controller.issueDriverDeviceSession(
-      {
-        registrationCode: "drv-demo-002",
-        deviceId: "device-test-rebind-001",
-        deviceLabel: "Shared Tablet",
-      },
-      "req-driver-device-rebind-002",
+    const secondSession = (
+      await controller.issueDriverDeviceSession(
+        {
+          registrationCode: "drv-demo-002",
+          deviceId: "device-test-rebind-001",
+          deviceLabel: "Shared Tablet",
+        },
+        "req-driver-device-rebind-002",
+      )
     ).data;
 
     expect(secondSession.bindingId).not.toBe(firstSession.bindingId);
@@ -1995,12 +2007,12 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
   });
 
-  it("rejects device registration when the driver certifications are invalid", () => {
+  it("rejects device registration when the driver certifications are invalid", async () => {
     process.env.JWT_SECRET = "test-secret";
 
     const { controller } = createAuthFixture(new JwtAuthService());
 
-    expect(() =>
+    await expect(
       controller.issueDriverDeviceSession(
         {
           registrationCode: "drv-demo-003",
@@ -2008,10 +2020,10 @@ describe("driver device-session auth controller", () => {
         },
         "req-driver-device-005",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      controller.issueDriverDeviceSession(
+      await controller.issueDriverDeviceSession(
         {
           registrationCode: "drv-demo-003",
           deviceId: "device-test-invalid-cert-001",
@@ -2031,7 +2043,7 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
   });
 
-  it("rejects driver bearer access after the driver is suspended", () => {
+  it("rejects driver bearer access after the driver is suspended", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -2043,12 +2055,14 @@ describe("driver device-session auth controller", () => {
       regulatoryRegistryService,
     } = createAuthFixture(jwtAuthService);
 
-    const session = controller.issueDriverDeviceSession(
-      {
-        registrationCode: "demo-driver",
-        deviceId: "device-test-003",
-      },
-      "req-driver-device-006",
+    const session = (
+      await controller.issueDriverDeviceSession(
+        {
+          registrationCode: "demo-driver",
+          deviceId: "device-test-003",
+        },
+        "req-driver-device-006",
+      )
     ).data;
     regulatoryRegistryService.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "suspended",
@@ -2068,12 +2082,12 @@ describe("driver device-session auth controller", () => {
       originalUrl: "/api/driver/profile",
     };
 
-    expect(() =>
+    await expect(
       guard.canActivate(createExecutionContext(request)),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      guard.canActivate(createExecutionContext(request));
+      await guard.canActivate(createExecutionContext(request));
     } catch (error) {
       const apiError = error as ApiRequestError;
       expect(apiError.getStatus()).toBe(403);
@@ -2089,19 +2103,21 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_AUDIENCE;
   });
 
-  it("rejects refresh immediately after the driver is suspended", () => {
+  it("rejects refresh immediately after the driver is suspended", async () => {
     process.env.JWT_SECRET = "test-secret";
 
     const { controller, regulatoryRegistryService } = createAuthFixture(
       new JwtAuthService(),
     );
 
-    const session = controller.issueDriverDeviceSession(
-      {
-        registrationCode: "demo-driver",
-        deviceId: "device-test-suspended-refresh-001",
-      },
-      "req-driver-device-suspended-refresh-001",
+    const session = (
+      await controller.issueDriverDeviceSession(
+        {
+          registrationCode: "demo-driver",
+          deviceId: "device-test-suspended-refresh-001",
+        },
+        "req-driver-device-suspended-refresh-001",
+      )
     ).data;
 
     regulatoryRegistryService.updateDriverLifecycle("drv-demo-001", {
@@ -2109,24 +2125,15 @@ describe("driver device-session auth controller", () => {
       reason: "manual compliance hold",
     });
 
-    expect(() =>
-      controller.refreshDriverDeviceSession(
-        {
-          refreshToken: session.refreshToken,
-          deviceId: session.deviceId,
-        },
-        "req-driver-device-suspended-refresh-002",
-      ),
-    ).toThrowError(ApiRequestError);
-
     try {
-      controller.refreshDriverDeviceSession(
+      await controller.refreshDriverDeviceSession(
         {
           refreshToken: session.refreshToken,
           deviceId: session.deviceId,
         },
         "req-driver-device-suspended-refresh-002",
       );
+      expect.unreachable("expected refresh to throw");
     } catch (error) {
       const apiError = error as ApiRequestError;
       expect(apiError.getStatus()).toBe(403);
