@@ -474,6 +474,200 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         oidcService.verifyAndDecodeIdToken(noneAlgIdToken),
       ).rejects.toThrow(ApiRequestError);
     });
+
+    it("rejects token exchange response missing id_token", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        return new Response(
+          JSON.stringify({
+            access_token: "acc_token_no_id",
+            token_type: "Bearer",
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as typeof fetch;
+
+      try {
+        await expect(
+          oidcService.exchangeRealOidcTokenEndpoint(
+            {
+              provider: "oidc",
+              callbackUrl: "http://localhost:3000/api/auth/callback",
+              code: "real_code_no_id_token",
+              state: "test_state",
+              pkceVerifier: "a".repeat(50),
+            },
+            {
+              state: "test_state",
+              nonce: "test_nonce_12345",
+              codeVerifier: "a".repeat(50),
+              codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
+              codeChallengeMethod: "S256",
+              realm: "tenant",
+              redirectUri: "http://localhost:3000/api/auth/callback",
+              tenantId: null,
+              partnerId: null,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 600000,
+            },
+            "https://auth.staging.drts.internal/oauth2/v1/token",
+          ),
+        ).rejects.toThrow(ApiRequestError);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects real OIDC response when userinfo sub does not match id_token sub", async () => {
+      const originalFetch = globalThis.fetch;
+      const secret = "test_jwt_secret_key_32_characters_long_min!";
+      process.env.JWT_SECRET = secret;
+      process.env.OIDC_CLIENT_SECRET = secret;
+
+      const validIdToken = jwt.sign(
+        {
+          sub: "legitimate_user_sub",
+          iss: "https://auth.staging.drts.internal",
+          aud: "drts-bff-client",
+          email: "admin@acme.example",
+          nonce: "test_nonce_12345",
+        },
+        secret,
+        { algorithm: "HS256" },
+      );
+
+      globalThis.fetch = (async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("/oauth2/v1/token")) {
+          return new Response(
+            JSON.stringify({
+              access_token: "acc_token_999",
+              id_token: validIdToken,
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (urlStr.includes("/oauth2/v1/userinfo")) {
+          return new Response(
+            JSON.stringify({
+              sub: "mismatched_attacker_sub",
+              email: "admin@acme.example",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      }) as typeof fetch;
+
+      try {
+        process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
+        process.env.OIDC_CLIENT_ID = "drts-bff-client";
+        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
+        process.env.OIDC_USERINFO_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/userinfo";
+
+        await expect(
+          oidcService.exchangeRealOidcTokenEndpoint(
+            {
+              provider: "oidc",
+              callbackUrl: "http://localhost:3000/api/auth/callback",
+              code: "real_code_sub_mismatch",
+              state: "test_state",
+              pkceVerifier: "a".repeat(50),
+            },
+            {
+              state: "test_state",
+              nonce: "test_nonce_12345",
+              codeVerifier: "a".repeat(50),
+              codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
+              codeChallengeMethod: "S256",
+              realm: "tenant",
+              redirectUri: "http://localhost:3000/api/auth/callback",
+              tenantId: null,
+              partnerId: null,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 600000,
+            },
+            "https://auth.staging.drts.internal/oauth2/v1/token",
+          ),
+        ).rejects.toThrow(ApiRequestError);
+      } finally {
+        globalThis.fetch = originalFetch;
+        delete process.env.OIDC_TOKEN_ENDPOINT;
+        delete process.env.OIDC_USERINFO_ENDPOINT;
+      }
+    });
+
+    it("rejects real OIDC response when id_token nonce is missing or mismatched", async () => {
+      const originalFetch = globalThis.fetch;
+      const secret = "test_jwt_secret_key_32_characters_long_min!";
+      process.env.JWT_SECRET = secret;
+      process.env.OIDC_CLIENT_SECRET = secret;
+
+      const idTokenWithoutNonce = jwt.sign(
+        {
+          sub: "sub_real_oidc_123",
+          iss: "https://auth.staging.drts.internal",
+          aud: "drts-bff-client",
+          email: "admin@acme.example",
+        },
+        secret,
+        { algorithm: "HS256" },
+      );
+
+      globalThis.fetch = (async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("/oauth2/v1/token")) {
+          return new Response(
+            JSON.stringify({
+              access_token: "acc_token_999",
+              id_token: idTokenWithoutNonce,
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      }) as typeof fetch;
+
+      try {
+        process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
+        process.env.OIDC_CLIENT_ID = "drts-bff-client";
+        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
+
+        await expect(
+          oidcService.exchangeRealOidcTokenEndpoint(
+            {
+              provider: "oidc",
+              callbackUrl: "http://localhost:3000/api/auth/callback",
+              code: "real_code_no_nonce",
+              state: "test_state",
+              pkceVerifier: "a".repeat(50),
+            },
+            {
+              state: "test_state",
+              nonce: "test_nonce_12345",
+              codeVerifier: "a".repeat(50),
+              codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
+              codeChallengeMethod: "S256",
+              realm: "tenant",
+              redirectUri: "http://localhost:3000/api/auth/callback",
+              tenantId: null,
+              partnerId: null,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 600000,
+            },
+            "https://auth.staging.drts.internal/oauth2/v1/token",
+          ),
+        ).rejects.toThrow(ApiRequestError);
+      } finally {
+        globalThis.fetch = originalFetch;
+        delete process.env.OIDC_TOKEN_ENDPOINT;
+      }
+    });
   });
 
   describe("5. Partner OIDC PKCE Flow & Durable Identity Link Binding", () => {

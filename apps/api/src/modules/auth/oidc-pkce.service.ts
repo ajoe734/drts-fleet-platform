@@ -1086,10 +1086,22 @@ export class OidcPkceService {
         expires_in?: number;
       };
 
-      let claimsFromToken: Partial<OidcClaims> = {};
+      if (!tokenData.id_token || typeof tokenData.id_token !== "string" || !tokenData.id_token.trim()) {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "OIDC provider response missing required id_token.",
+        );
+      }
 
-      if (tokenData.id_token) {
-        claimsFromToken = await this.verifyAndDecodeIdToken(tokenData.id_token, stateRecord);
+      const claimsFromToken = await this.verifyAndDecodeIdToken(tokenData.id_token, stateRecord);
+
+      if (!claimsFromToken.sub) {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          "OIDC ID token missing required principal subject claim ('sub').",
+        );
       }
 
       const userinfoEndpoint =
@@ -1110,8 +1122,16 @@ export class OidcPkceService {
         }
       }
 
+      if (userinfoClaims.sub && userinfoClaims.sub !== claimsFromToken.sub) {
+        throw new ApiRequestError(
+          400,
+          "AUTH_SESSION_EXCHANGE_DENIED",
+          `OIDC userinfo subject '${userinfoClaims.sub}' does not match ID token subject '${claimsFromToken.sub}'.`,
+        );
+      }
+
       const mergedClaims: OidcClaims = {
-        sub: userinfoClaims.sub || claimsFromToken.sub || "",
+        sub: claimsFromToken.sub,
         iss: claimsFromToken.iss || process.env.OIDC_ISSUER || "https://auth.staging.drts.internal",
         aud: claimsFromToken.aud || clientId,
         email: userinfoClaims.email || claimsFromToken.email || "",
@@ -1119,7 +1139,7 @@ export class OidcPkceService {
         amr: claimsFromToken.amr || userinfoClaims.amr || ["pwd", "mfa"],
         acr: claimsFromToken.acr || userinfoClaims.acr || "urn:mace:incommon:iap:silver",
         auth_time: claimsFromToken.auth_time || Math.floor(Date.now() / 1000),
-        nonce: claimsFromToken.nonce || stateRecord?.nonce,
+        nonce: claimsFromToken.nonce,
         tenant_id: claimsFromToken.tenant_id || userinfoClaims.tenant_id,
         partner_id: claimsFromToken.partner_id || userinfoClaims.partner_id,
       };
@@ -1218,6 +1238,16 @@ export class OidcPkceService {
         issuer: expectedIssuer,
         audience: expectedAudience,
       }) as jwt.JwtPayload;
+
+      if (stateRecord && stateRecord.nonce) {
+        if (!verifiedPayload.nonce || verifiedPayload.nonce !== stateRecord.nonce) {
+          throw new ApiRequestError(
+            400,
+            "AUTH_SESSION_EXCHANGE_DENIED",
+            "OIDC ID token nonce missing or mismatch.",
+          );
+        }
+      }
 
       return verifiedPayload as Partial<OidcClaims>;
     } catch (error) {
