@@ -430,8 +430,8 @@ export class AuthController {
 
     throw new ApiRequestError(
       403,
-      "TENANT_AUTHENTICATION_REQUIRED",
-      "Tenant authentication requires a verified identity proof.",
+      "AUTH_SESSION_EXCHANGE_DENIED",
+      "The authentication proof could not be matched to an active session exchange.",
       {},
     );
   }
@@ -451,8 +451,8 @@ export class AuthController {
   private buildTenantBootstrapDeniedError() {
     return new ApiRequestError(
       403,
-      "TENANT_AUTHENTICATION_REQUIRED",
-      "Tenant authentication requires a verified identity proof.",
+      "AUTH_SESSION_EXCHANGE_DENIED",
+      "The authentication proof could not be matched to an active session exchange.",
       {},
     );
   }
