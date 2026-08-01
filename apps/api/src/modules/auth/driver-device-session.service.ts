@@ -78,11 +78,18 @@ export class DriverDeviceSessionService {
     this.assertDriverAuthEligible(driverId);
 
     const now = new Date().toISOString();
-    await this.repository.revokeDriverSession(
+    const revokedSession = await this.repository.revokeDriverSession(
       { deviceId },
       now,
       "device_rebound",
     );
+    if (revokedSession) {
+      this.driverProfileService.recordDeviceBindingRevocation(
+        revokedSession.actorId,
+        revokedSession.sessionId,
+        now,
+      );
+    }
 
     const refreshToken = createOpaqueToken("drvrefresh");
     const persisted = await this.repository.issueDriverDeviceSession({
