@@ -6,11 +6,12 @@ import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-regi
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { AuthController } from "./auth.controller";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
+import { OidcPkceService } from "./oidc-pkce.service";
 
 @Module({
   imports: [TenantPartnerModule, DriverProfileModule, RegulatoryRegistryModule],
   controllers: [AuthController],
-  providers: [JwtAuthService, DriverDeviceSessionService],
-  exports: [JwtAuthService, DriverDeviceSessionService],
+  providers: [JwtAuthService, DriverDeviceSessionService, OidcPkceService],
+  exports: [JwtAuthService, DriverDeviceSessionService, OidcPkceService],
 })
 export class AuthModule {}

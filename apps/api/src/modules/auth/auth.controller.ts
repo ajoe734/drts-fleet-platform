@@ -1,10 +1,11 @@
-import { Body, Controller, Headers, Optional, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Optional, Param, Post, Query, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
   CreatePartnerBootstrapSessionCommand,
   DriverDeviceProvisioningSession,
   CreateTenantBootstrapSessionCommand,
+  IamCallbackSessionExchangeCommand,
   IdentityContext,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
@@ -32,12 +33,13 @@ import {
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
-import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
+import type { AuthBootstrapHeaders, AuthRealm } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
+import { OidcPkceService } from "./oidc-pkce.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
@@ -66,9 +68,165 @@ export class AuthController {
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly driverDeviceSessionService: DriverDeviceSessionService,
+    private readonly oidcPkceService: OidcPkceService,
     @Optional()
     private readonly securityEventsService?: SecurityEventsService,
   ) {}
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Get(":realm/login")
+  getOidcLoginUrl(
+    @Param("realm") realm: AuthRealm,
+    @Query("redirect_uri") redirectUri?: string,
+    @Query("tenant_id") tenantId?: string,
+    @Query("partner_id") partnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (realm !== "tenant" && realm !== "partner") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_REALM_INVALID",
+        `Unsupported OIDC realm '${realm}'. Only 'tenant' and 'partner' are supported.`,
+      );
+    }
+    const result = this.oidcPkceService.generateLoginParameters(realm, {
+      redirectUri,
+      tenantId,
+      partnerId,
+    });
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Get(":realm/callback")
+  processOidcCallback(
+    @Param("realm") realm: AuthRealm,
+    @Query("code") code?: string,
+    @Query("state") state?: string,
+    @Query("code_verifier") pkceVerifier?: string,
+    @Query("redirect_uri") redirectUri?: string,
+    @Query("state_token") stateToken?: string,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (realm !== "tenant" && realm !== "partner") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_REALM_INVALID",
+        `Unsupported OIDC realm '${realm}'.`,
+      );
+    }
+
+    const command: IamCallbackSessionExchangeCommand = {
+      provider: "oidc",
+      callbackUrl: redirectUri ?? "",
+      code: code ?? "",
+      state: state ?? "",
+      pkceVerifier: pkceVerifier ?? "",
+    };
+
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    const meta = { sourceIp, userAgent, requestId, stateToken };
+
+    try {
+      if (realm === "tenant") {
+        const session = this.oidcPkceService.exchangeTenantCallbackSession(
+          command,
+          meta,
+        );
+        return toApiSuccessEnvelope(session, requestId);
+      } else {
+        const session = this.oidcPkceService.exchangePartnerCallbackSession(
+          command,
+          meta,
+        );
+        return toApiSuccessEnvelope(session, requestId);
+      }
+    } catch (error) {
+      throw toPublicTenantAuthError(error);
+    }
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/callback-session")
+  exchangeTenantCallbackSession(
+    @Body() command: IamCallbackSessionExchangeCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    try {
+      const session = this.oidcPkceService.exchangeTenantCallbackSession(
+        command,
+        { sourceIp, userAgent, requestId },
+      );
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      throw toPublicTenantAuthError(error);
+    }
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/callback-session")
+  exchangePartnerCallbackSession(
+    @Body() command: IamCallbackSessionExchangeCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    try {
+      const session = this.oidcPkceService.exchangePartnerCallbackSession(
+        command,
+        { sourceIp, userAgent, requestId },
+      );
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      throw toPublicPartnerAuthError(error);
+    }
+  }
+
+  @Get("session")
+  getAuthSession(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
+    }
+    return toApiSuccessEnvelope(
+      {
+        active: true,
+        identity,
+      },
+      requestId,
+    );
+  }
+
+  @OpenRoute()
+  @Post("logout")
+  revokeAuthSession(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      {
+        loggedOut: true,
+        message: "Session successfully revoked.",
+      },
+      requestId,
+    );
+  }
 
   @Post("token")
   issueToken(@Req() request: TokenRequest): {
