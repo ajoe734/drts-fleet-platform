@@ -143,3 +143,9 @@ Recommended review posture:
 - treat `BE-REF-HANDOFF-001` as the accepted security/session foundation
 - focus parent-task review effort on whether passenger lifecycle routes honor that foundation end to end
 - if you find a regression, cite whether it breaks contract invariants, host binding, or passenger authority isolation
+
+## Owner closeout note
+
+- `2026-08-01`: `Gemini2` approved this support packet for owner finalization.
+- This sidecar remains support-only and introduces no canonical truth changes.
+- Closeout expectation: push the task branch and mark machine truth `done` with `INTEGRATION_STATUS=branch_pushed`.
