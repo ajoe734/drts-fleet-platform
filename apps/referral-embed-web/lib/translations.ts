@@ -789,6 +789,64 @@ const en = {
     "This booking request was not approved. Confirm that the trip remains within the supported service area.",
   "embed.negative.degraded":
     "Service is responding slowly right now. Recovery will continue after the system stabilizes.",
+  "embed.chrome.title": "Community Ride",
+  "embed.handoff.title.line1": "Signed in as {name}",
+  "embed.handoff.title.line2": "Preparing your ride",
+  "embed.handoff.status": "handoff · linked",
+  "embed.handoff.cardTitle": "Identity carried from the community app",
+  "embed.handoff.banner":
+    "No sign-in needed · {appName} securely carried your resident identity into this ride flow. The embedded page will not ask for an account or password.",
+  "embed.reauth.title": "Session expired",
+  "embed.reauth.connectionTitle": "Connection status",
+  "embed.reauth.bannerPrefix":
+    "To protect your resident account, please return to",
+  "embed.reauth.bannerSuffix":
+    "to reopen ride hailing. This page will not ask for your account or password.",
+  "embed.unsupported.title": "This surface cannot open here",
+  "embed.unsupported.reasonTitle": "Reason",
+  "embed.unsupported.reasonBody":
+    "Ride hailing can only open inside an authorized community app. The current source host is not on the entryHost allowlist, so loading was blocked and no personal data was sent.",
+  "embed.unsupported.detectionTitle": "Detection result",
+  "embed.consent.title": "Authorize ride-hailing access",
+  "embed.consent.subtitle":
+    "First-time use · please review the consent scope below · consent_required",
+  "embed.consent.banner":
+    "Transportation is provided by DRTS. Personal data is only used to complete this trip and consent can be withdrawn in the community app settings.",
+  "embed.fallback.title": "Embedded service is temporarily unavailable",
+  "embed.fallback.nextTitle": "Next step",
+  "embed.fallback.bodyPrefix":
+    "Ride hailing cannot be completed inside the community app right now. You can continue in the",
+  "embed.fallback.siteName": "standalone ride site",
+  "embed.fallback.bodySuffix":
+    "after SMS verification, and your trip and receipt will stay linked to your identity.",
+  "embed.book.verified": "Verified",
+  "embed.book.tripTitle": "Trip",
+  "embed.book.vehicleTitle": "Vehicle type",
+  "embed.negative.supportLabel": "Community ride support {phone}",
+  "embed.trip.etaEstimateShort": "min · est.",
+  "embed.trip.pickupEta": "Estimated pickup",
+  "embed.trip.footerNote":
+    "Arrival time is estimated, not guaranteed · Transportation provided by DRTS",
+  "embed.trips.title": "My trips",
+  "embed.trips.boundName": "Linked to {name}",
+  "embed.trips.recoverNote":
+    "Trips and receipts can still be recovered after reopening the app",
+  "embed.receipt.completedTitle": "Trip completed",
+  "embed.receipt.tripTitle": "Trip",
+  "embed.receipt.passengerVehicleTitle": "Passenger and vehicle",
+  "embed.receipt.fareTitle": "Fare breakdown",
+  "embed.receipt.paymentChannel": "{payment} · via {channel}",
+  "embed.outcome.completedTitle": "Trip completed",
+  "embed.outcome.cancelledTitle": "Trip cancelled",
+  "embed.outcome.rateTripTitle": "Rate this trip",
+  "embed.outcome.cancelledBody":
+    "This trip was cancelled and no fare was charged. If cancellation happened after the driver arrived, a fee may still apply under the community ride terms.",
+  "embed.messageSlot.hint":
+    "Copy is rendered from the backend messageCode · preview only",
+  "embed.field.sameBookingCombined":
+    "Same trip continues · no second booking and no extra charge.",
+  "embed.fallbackTrip.footerNote":
+    "Transportation provided by DRTS · service status is for reference only",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -1518,6 +1576,58 @@ const zh: Record<keyof typeof en, string> = {
   "embed.negative.denied":
     "此次叫車請求未通過，請確認行程仍在支援的服務範圍內。",
   "embed.negative.degraded": "服務目前回應較慢，系統恢復後會再繼續。",
+  "embed.chrome.title": "社區叫車",
+  "embed.handoff.title.line1": "以 {name} 身分",
+  "embed.handoff.title.line2": "為您準備叫車",
+  "embed.handoff.status": "handoff · 已交接",
+  "embed.handoff.cardTitle": "身分由社區 App 帶入",
+  "embed.handoff.banner":
+    "免再登入 · 由 {appName} 安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。",
+  "embed.reauth.title": "登入狀態已逾時",
+  "embed.reauth.connectionTitle": "連線狀態",
+  "embed.reauth.bannerPrefix": "為保護您的住戶帳號，請回到",
+  "embed.reauth.bannerSuffix":
+    "重新進入「叫車」。此頁不會要求輸入帳號或密碼。",
+  "embed.unsupported.title": "無法在此環境開啟",
+  "embed.unsupported.reasonTitle": "原因",
+  "embed.unsupported.reasonBody":
+    "叫車服務僅能於授權的社區 App 內開啟。目前來源不在白名單宿主（entryHost），基於安全考量已封鎖載入，未傳送任何個資。",
+  "embed.unsupported.detectionTitle": "偵測結果",
+  "embed.consent.title": "授權使用叫車服務",
+  "embed.consent.subtitle": "首次使用 · 請確認以下同意範圍 · consent_required",
+  "embed.consent.banner":
+    "由智慧運輸科技 DRTS 提供接送 · 個資僅用於完成本次行程，可於社區 App 設定撤回授權。",
+  "embed.fallback.title": "內嵌服務暫時無法使用",
+  "embed.fallback.nextTitle": "接下來",
+  "embed.fallback.bodyPrefix": "目前無法在社區 App 內完成叫車。您可改用",
+  "embed.fallback.siteName": "獨立叫車網站",
+  "embed.fallback.bodySuffix":
+    "，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。",
+  "embed.book.verified": "已驗證",
+  "embed.book.tripTitle": "行程",
+  "embed.book.vehicleTitle": "車種",
+  "embed.negative.supportLabel": "社區叫車客服 {phone}",
+  "embed.trip.etaEstimateShort": "分鐘 · 估計",
+  "embed.trip.pickupEta": "預計上車",
+  "embed.trip.footerNote": "抵達時間為估計值，非保證 · 接送由智慧運輸科技 DRTS 提供",
+  "embed.trips.title": "我的行程",
+  "embed.trips.boundName": "綁定 {name}",
+  "embed.trips.recoverNote": "重開 App 後行程與收據仍可找回",
+  "embed.receipt.completedTitle": "行程已完成",
+  "embed.receipt.tripTitle": "行程",
+  "embed.receipt.passengerVehicleTitle": "乘客與車輛",
+  "embed.receipt.fareTitle": "費用明細",
+  "embed.receipt.paymentChannel": "{payment} · 經 {channel}",
+  "embed.outcome.completedTitle": "行程已完成",
+  "embed.outcome.cancelledTitle": "行程已取消",
+  "embed.outcome.rateTripTitle": "為這趟行程評分",
+  "embed.outcome.cancelledBody":
+    "此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。",
+  "embed.messageSlot.hint": "文案由後端 messageCode 渲染 · 此為示意",
+  "embed.field.sameBookingCombined":
+    "同一筆行程繼續 · 不會重新下單，也不會加收費用。",
+  "embed.fallbackTrip.footerNote":
+    "接送由智慧運輸科技 DRTS 提供 · 服務狀態僅供參考",
 };
 
 export const translations = { en, zh } as const;
