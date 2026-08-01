@@ -46,10 +46,13 @@ const GLYPHS: Record<string, string> = {
   arrow: "M5 12h14 M13 6l6 6-6 6",
   ban: "M6 6l12 12 M12 21a9 9 0 100-18 9 9 0 000 18z",
   bolt: "M13 3L5 13h6l-1 8 8-10h-6z",
+  building:
+    "M4 21V5a1 1 0 011-1h9a1 1 0 011 1v16 M15 21V9h4a1 1 0 011 1v11 M7 8h2 M7 12h2 M7 16h2 M18 13h1 M18 17h1",
   car: "M5 16l1.5-5a2 2 0 011.93-1.43h7.14A2 2 0 0117.5 11L19 16 M6 16h12 M7 18.5h.01 M17 18.5h.01 M8 16v2 M16 16v2",
   check: "M5 12l4 4 10-10",
   chevL: "M15 6l-6 6 6 6",
   clock: "M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z",
+  download: "M12 3v12 M7 11l5 5 5-5 M5 21h14",
   ext: "M14 4h6v6 M20 4l-8 8 M18 13v6H5V6h6",
   info: "M12 8h.02 M11 12h1v5h1 M12 21a9 9 0 100-18 9 9 0 000 18z",
   lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
@@ -57,7 +60,9 @@ const GLYPHS: Record<string, string> = {
   pin: "M12 21s6-5.33 6-11a6 6 0 10-12 0c0 5.67 6 11 6 11z M12 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z",
   refresh:
     "M3 12a9 9 0 0115.3-6.36L21 8 M21 3v5h-5 M21 12a9 9 0 01-15.3 6.36L3 16 M3 21v-5h5",
+  receipt: "M5 3h14v18l-3-2-3 2-3-2-3 2z M8 8h8 M8 12h8 M8 16h5",
   shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z",
+  spark: "M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z",
   star: "M12 17.2l-5.3 2.8 1-5.9-4.3-4.2 6-.9L12 3.5l2.6 5.5 6 .9-4.3 4.2 1 5.9z",
   user: "M12 12a4 4 0 100-8 4 4 0 000 8z M5.5 20a6.5 6.5 0 0113 0",
   x: "M6 6l12 12 M18 6L6 18",
@@ -492,6 +497,37 @@ function BrandMark({
   );
 }
 
+function Avatar({
+  theme,
+  name,
+  size = 34,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  name: string;
+  size?: number;
+}) {
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2.6,
+        background: theme.primaryBg,
+        color: theme.primary,
+        border: `1px solid ${theme.primaryBd}`,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: size * 0.4,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+    >
+      {name.slice(0, 1)}
+    </span>
+  );
+}
+
 function StateHero({
   theme,
   tone,
@@ -644,7 +680,7 @@ function AppShell({
           <div style={{ flex: 1, lineHeight: 1.2 }}>
             <div style={{ fontSize: 14.5, fontWeight: 700 }}>社區叫車</div>
             <div style={{ fontSize: 10, opacity: 0.78 }}>
-              社區 App · {context.strings.displayName}
+              {context.strings.appName} · {context.strings.displayName}
             </div>
           </div>
           <span
@@ -766,7 +802,7 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
       </Card>
 
       <Banner theme={theme} tone="primary" icon="bolt">
-        免再登入 · 由社區 App 安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+        免再登入 · 由 {context.strings.appName} 安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
       </Banner>
     </AppShell>
   );
@@ -782,7 +818,7 @@ function ReauthScreen({ context }: { context: EmbedContext }) {
         <>
           <ActionButton
             href={buildHref(context, { state: "handoff" })}
-            label="回社區 App 重新進入"
+            label={`回 ${context.strings.appName} 重新進入`}
             theme={theme}
           />
           <ActionButton
@@ -806,7 +842,7 @@ function ReauthScreen({ context }: { context: EmbedContext }) {
         <TokenRow theme={theme} ok={false} label="交付權杖逾時" code="handoff_token" value="stale" />
       </Card>
       <Banner theme={theme} tone="warn" icon="shield">
-        為保護您的住戶帳號，請回到 <b>{context.strings.displayName}</b> 重新進入「叫車」。此頁不會要求輸入帳號或密碼。
+        為保護您的住戶帳號，請回到 <b>{context.strings.appName}</b> 重新進入「叫車」。此頁不會要求輸入帳號或密碼。
       </Banner>
     </AppShell>
   );
@@ -1244,7 +1280,14 @@ function TripScreen({ context }: { context: EmbedContext }) {
       </div>
 
       <Card theme={theme} accent={theme.primary}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 14,
+          }}
+        >
           <Pill theme={theme} tone={state.tone} dot>
             {state.zh}
           </Pill>
@@ -1252,75 +1295,107 @@ function TripScreen({ context }: { context: EmbedContext }) {
             {embedTrip.id}
           </span>
         </div>
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "grid", gap: 4 }}>
-            <div style={{ fontSize: 12, color: theme.muted }}>上車 / 下車</div>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{embedTrip.from}</div>
-            <div style={{ fontSize: 12.5, color: theme.muted }}>{embedTrip.to}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+          <Avatar theme={theme} name={embedTrip.driver} size={50} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>
+              {embedTrip.driver} · {embedTrip.rating} ★
+            </div>
+            <div style={{ fontSize: 12, color: theme.muted, fontFamily: theme.mono }}>
+              {embedTrip.vehicle} · {embedTrip.plate}
+            </div>
           </div>
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 10,
-              paddingTop: 4,
+              textAlign: "center",
+              background: theme.primaryBg,
+              border: `1px solid ${theme.primaryBd}`,
+              borderRadius: 12,
+              padding: "8px 16px",
             }}
           >
-            <div>
-              <div style={{ fontSize: 11, color: theme.muted }}>ETA</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: theme.primary, fontFamily: theme.mono }}>
-                {embedTrip.etaMin}
-              </div>
+            <div
+              style={{
+                fontSize: 28,
+                fontWeight: 800,
+                color: theme.primary,
+                fontFamily: theme.mono,
+                lineHeight: 1,
+              }}
+            >
+              {embedTrip.etaMin}
             </div>
-            <div>
-              <div style={{ fontSize: 11, color: theme.muted }}>車種</div>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>{embedTrip.vehicle}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: theme.muted }}>時間</div>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>{embedTrip.win}</div>
+            <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>
+              分鐘 · 估計
             </div>
           </div>
         </div>
       </Card>
 
-      <Card theme={theme} title="車輛與司機">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <Card theme={theme}>
+        <div style={{ display: "flex", gap: 11 }}>
           <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
-              background: theme.primaryBg,
-              color: theme.primary,
-              display: "inline-flex",
+              display: "flex",
+              flexDirection: "column",
               alignItems: "center",
-              justifyContent: "center",
+              paddingTop: 4,
             }}
           >
-            <Icon name="car" size={22} />
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: 5,
+                border: `2px solid ${theme.primary}`,
+              }}
+            />
+            <span
+              style={{
+                flex: 1,
+                width: 2,
+                background: theme.line,
+                margin: "3px 0",
+                minHeight: 22,
+              }}
+            />
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: 2,
+                background: theme.primary,
+              }}
+            />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{embedTrip.driver}</div>
-            <div style={{ fontSize: 11.5, color: theme.muted }}>
-              {embedTrip.plate} · {embedTrip.vehicle}
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 18 }}>
+              {embedTrip.from}
             </div>
-          </div>
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 12,
-              fontWeight: 700,
-              color: theme.warnFg,
-            }}
-          >
-            <Icon name="star" size={12} />
-            {embedTrip.rating}
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{embedTrip.to}</div>
           </div>
         </div>
+        <div
+          style={{
+            marginTop: 12,
+            paddingTop: 12,
+            borderTop: `1px solid ${theme.lineSoft}`,
+          }}
+        >
+          <DetailRow theme={theme} label="預計上車" value={embedTrip.win} mono last />
+        </div>
       </Card>
+
+      <div
+        style={{
+          fontSize: 11,
+          color: theme.faint,
+          textAlign: "center",
+          lineHeight: 1.5,
+        }}
+      >
+        抵達時間為估計值，非保證 · 接送由智慧運輸科技 DRTS 提供
+      </div>
     </AppShell>
   );
 }
@@ -1329,8 +1404,24 @@ function TripsScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
   return (
     <AppShell context={context} badgeTone="live">
-      <Card theme={theme} title="行程歷史" subtitle="最近叫車紀錄">
-        {embedTripHistory.map((trip, index) => {
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 17, fontWeight: 800 }}>我的行程</div>
+        <Pill theme={theme} tone="neutral">綁定 {embedResident.name}</Pill>
+      </div>
+      <div
+        style={{
+          fontSize: 11.5,
+          color: theme.muted,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginTop: -4,
+        }}
+      >
+        <Icon name="shield" size={13} style={{ color: theme.primary }} />
+        重開 App 後行程與收據仍可找回
+      </div>
+      {embedTripHistory.map((trip) => {
           const tripState =
             tripStateLabel[trip.state] || {
               zh: trip.state,
@@ -1343,30 +1434,75 @@ function TripsScreen({ context }: { context: EmbedContext }) {
                 ? "neutral"
                 : "info";
           return (
-            <div
-              key={trip.id}
-              style={{
-                display: "grid",
-                gap: 6,
-                padding: "10px 0",
-                borderBottom: index < embedTripHistory.length - 1 ? `1px solid ${theme.lineSoft}` : "none",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                <span style={{ fontSize: 13.5, fontWeight: 700 }}>{trip.id}</span>
-                <Pill theme={theme} tone={tone}>
-                  {tripState.zh}
-                </Pill>
+            <Card theme={theme} key={trip.id}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: theme.surfaceLo,
+                    color: theme.muted,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Icon
+                    name={
+                      trip.state === "cancelled"
+                        ? "x"
+                        : trip.state === "completed"
+                          ? "check"
+                          : "car"
+                    }
+                    size={18}
+                  />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {trip.from} → {trip.to}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: theme.muted,
+                      fontFamily: theme.mono,
+                      marginTop: 2,
+                    }}
+                  >
+                    {trip.date} · {trip.id}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <Pill theme={theme} tone={tone} dot>
+                    {tripState.zh}
+                  </Pill>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontFamily: theme.mono,
+                      color: theme.ink,
+                      marginTop: 5,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {trip.fare}
+                  </div>
+                </div>
               </div>
-              <div style={{ fontSize: 11.5, color: theme.muted }}>{trip.date}</div>
-              <div style={{ fontSize: 12.5, color: theme.ink2 }}>
-                {trip.from} → {trip.to}
-              </div>
-              <div style={{ fontSize: 12, color: theme.ink, fontFamily: theme.mono }}>{trip.fare}</div>
-            </div>
+            </Card>
           );
         })}
-      </Card>
     </AppShell>
   );
 }
@@ -1379,26 +1515,85 @@ function ReceiptScreen({ context }: { context: EmbedContext }) {
       badgeTone="live"
       footer={
         <ActionButton
-          href={buildHref(context, { screen: "trips", state: "handoff" })}
-          label="查看歷史行程"
+          href={buildHref(context, { screen: "receipt", state: "handoff" })}
+          label="下載收據"
           theme={theme}
+          icon="download"
         />
       }
     >
-      <Card theme={theme} title="收據（PII 遮罩）" subtitle={embedReceipt.id}>
-        <DetailRow theme={theme} label="訂單編號" value={embedReceipt.orderId} mono />
-        <DetailRow theme={theme} label="完成日期" value={`${embedReceipt.date} · ${embedReceipt.completedAt}`} />
-        <DetailRow theme={theme} label="乘客" value={`${embedReceipt.passenger} · ${embedReceipt.maskedPhone}`} />
-        <DetailRow theme={theme} label="路線" value={`${embedReceipt.from} → ${embedReceipt.to}`} />
-        <DetailRow theme={theme} label="車輛" value={`${embedReceipt.vehicle} · ${embedReceipt.plate}`} />
-        <DetailRow theme={theme} label="付款方式" value={embedReceipt.payment} />
-        <DetailRow theme={theme} label="通路" value={embedReceipt.channel} last />
+      <StateHero theme={theme} tone="success" icon="check" title="行程已完成" />
+      <div
+        style={{
+          textAlign: "center",
+          fontSize: 12,
+          color: theme.muted,
+          fontFamily: theme.mono,
+          marginTop: -6,
+        }}
+      >
+        {embedReceipt.id} · {embedReceipt.orderId}
+      </div>
+      <Card theme={theme} title="行程" subtitle={embedReceipt.date}>
+        <div style={{ display: "flex", gap: 11 }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              paddingTop: 4,
+            }}
+          >
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: 5,
+                border: `2px solid ${theme.primary}`,
+              }}
+            />
+            <span
+              style={{
+                flex: 1,
+                width: 2,
+                background: theme.line,
+                margin: "3px 0",
+                minHeight: 16,
+              }}
+            />
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: 2,
+                background: theme.primary,
+              }}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 14 }}>
+              {embedReceipt.from}
+            </div>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{embedReceipt.to}</div>
+          </div>
+        </div>
       </Card>
-      <Card theme={theme} title="費用明細">
-        <DetailRow theme={theme} label="起跳" value={embedReceipt.fareBase} />
-        <DetailRow theme={theme} label="里程" value={embedReceipt.fareDistance} />
-        <DetailRow theme={theme} label="時間" value={embedReceipt.fareTime} />
-        <DetailRow theme={theme} label="總計" value={embedReceipt.total} strong mono last />
+      <Card theme={theme} title="乘客與車輛" subtitle="PII 已遮罩">
+        <DetailRow theme={theme} label="乘客" value={embedReceipt.passenger} />
+        <DetailRow theme={theme} label="聯絡電話" value={embedReceipt.maskedPhone} mono />
+        <DetailRow theme={theme} label="司機 / 車牌" value={`${embedReceipt.driver} · ${embedReceipt.plate}`} />
+        <DetailRow theme={theme} label="車種" value={embedReceipt.vehicle} last />
+      </Card>
+      <Card theme={theme} title="費用明細" subtitle="fare breakdown">
+        <DetailRow theme={theme} label="起步價" value={embedReceipt.fareBase} mono />
+        <DetailRow theme={theme} label="里程" value={embedReceipt.fareDistance} mono />
+        <DetailRow theme={theme} label="時間" value={embedReceipt.fareTime} mono />
+        <DetailRow theme={theme} label="合計" value={embedReceipt.total} strong mono last />
+        <div style={{ marginTop: 12 }}>
+          <Banner theme={theme} tone="neutral" icon="building">
+            {embedReceipt.payment} · 經 {embedReceipt.channel}
+          </Banner>
+        </div>
       </Card>
     </AppShell>
   );
@@ -1419,16 +1614,26 @@ function OutcomeScreen({
       badgeTone={completed ? "live" : "neutral"}
       footer={
         completed ? (
-          <ActionButton
-            href={buildHref(context, { screen: "receipt", state: "handoff" })}
-            label="查看收據"
-            theme={theme}
-          />
+          <>
+            <ActionButton
+              href={buildHref(context, { screen: "receipt", state: "handoff" })}
+              label="查看收據"
+              theme={theme}
+              icon="receipt"
+            />
+            <ActionButton
+              href={buildHref(context, { screen: "book", state: "handoff" })}
+              label="再叫一次"
+              theme={theme}
+              variant="ghost"
+            />
+          </>
         ) : (
           <ActionButton
             href={buildHref(context, { screen: "book", state: "handoff" })}
-            label="再次叫車"
+            label="重新叫車"
             theme={theme}
+            iconRight="arrow"
           />
         )
       }
@@ -1440,18 +1645,37 @@ function OutcomeScreen({
         title={completed ? "行程已完成" : "行程已取消"}
         posture={completed ? "completed" : "cancelled"}
       />
-      <Banner theme={theme} tone={completed ? "success" : "neutral"} icon={completed ? "check" : "x"}>
-        {completed
-          ? "已完成本次接送。您可查看收據與費用明細，必要時於歷史紀錄中再次查找。"
-          : "此行程已取消。若仍需用車，您可重新建立叫車請求。"}
-      </Banner>
       {completed ? (
-        <Card theme={theme} title="本次行程">
-          <DetailRow theme={theme} label="行程編號" value={embedReceipt.id} mono />
-          <DetailRow theme={theme} label="司機" value={embedReceipt.driver} />
-          <DetailRow theme={theme} label="總計" value={embedReceipt.total} strong mono last />
+        <>
+          <Card theme={theme}>
+            <DetailRow theme={theme} label="行程" value="台北車站 → 社區大廳" />
+            <DetailRow theme={theme} label="車資" value="NT$ 285" strong />
+            <DetailRow theme={theme} label="付款" value="社區月結" last />
+          </Card>
+          <Card theme={theme} title="為這趟行程評分">
+            <div style={{ display: "flex", justifyContent: "center", gap: 9, padding: "4px 0" }}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <Icon key={n} name="spark" size={30} style={{ color: theme.warnFg }} />
+              ))}
+            </div>
+          </Card>
+        </>
+      ) : (
+        <Card theme={theme}>
+          <div
+            style={{
+              fontSize: 13,
+              color: theme.ink2,
+              lineHeight: 1.65,
+              marginBottom: 10,
+            }}
+          >
+            此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。
+          </div>
+          <DetailRow theme={theme} label="取消時間" value="06-05 19:42" mono />
+          <DetailRow theme={theme} label="費用" value="NT$ 0" strong last />
         </Card>
-      ) : null}
+      )}
     </AppShell>
   );
 }

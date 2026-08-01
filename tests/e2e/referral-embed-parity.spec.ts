@@ -103,13 +103,13 @@ const routeSpecs: RouteSpec[] = [
     screenshot: "12-trips.png",
     label: "trips",
     path: embedPath("handoff", "trips"),
-    markers: [/行程歷史/, /PT-9E11A3/],
+    markers: [/我的行程/, /PT-9E11A3/],
   },
   {
     screenshot: "13-receipt.png",
     label: "receipt",
     path: embedPath("handoff", "receipt"),
-    markers: [/收據（PII 遮罩）/, /費用明細/],
+    markers: [/行程已完成/, /費用明細/],
   },
   {
     screenshot: "14-completed.png",
@@ -121,7 +121,34 @@ const routeSpecs: RouteSpec[] = [
     screenshot: "15-cancelled.png",
     label: "cancelled",
     path: embedPath("handoff", "cancelled"),
-    markers: [/行程已取消/, /再次叫車/],
+    markers: [/行程已取消/, /重新叫車/],
+  },
+];
+
+const fallbackSpecs: RouteSpec[] = [
+  {
+    screenshot: "16-fb-vehicle-change.png",
+    label: "vehicle_change_in_progress",
+    path: embedPath("handoff", "vehicle_change_in_progress"),
+    markers: [/正在為您重新安排車輛/, /messageCode · pax\.fallback\.vehicle_change\.body/],
+  },
+  {
+    screenshot: "17-fb-human-assigned.png",
+    label: "human_fallback_assigned",
+    path: embedPath("handoff", "human_fallback_assigned"),
+    markers: [/新車已為您指派/, /messageCode · pax\.fallback\.human_assigned\.body/],
+  },
+  {
+    screenshot: "18-fb-service-continuing.png",
+    label: "service_continuing",
+    path: embedPath("handoff", "service_continuing"),
+    markers: [/行程繼續進行/, /messageCode · pax\.fallback\.service_continuing\.body/],
+  },
+  {
+    screenshot: "19-fb-eta-updated.png",
+    label: "eta_updated",
+    path: embedPath("handoff", "eta_updated"),
+    markers: [/預計時間已更新/, /messageCode · pax\.fallback\.eta_updated\.body/],
   },
 ];
 
@@ -139,6 +166,29 @@ test.describe("referral embed 15-screen parity", () => {
         for (const marker of route.markers) {
           await expect(page.locator("body")).toContainText(marker);
         }
+        await page.screenshot({
+          path: path.join(screenshotDir, route.screenshot),
+          fullPage: true,
+        });
+      });
+    }
+  });
+
+  test("retains the 4 Phase 2 fallback states with message-code slots", async ({
+    page,
+  }) => {
+    for (const route of fallbackSpecs) {
+      await test.step(route.label, async () => {
+        const response = await page.goto(route.path, {
+          waitUntil: "domcontentloaded",
+        });
+        expect(response?.ok()).toBeTruthy();
+        for (const marker of route.markers) {
+          await expect(page.locator("body")).toContainText(marker);
+        }
+        await expect(page.locator("body")).toContainText(
+          "同一筆行程繼續 · 不會重新下單，也不會加收費用。",
+        );
         await page.screenshot({
           path: path.join(screenshotDir, route.screenshot),
           fullPage: true,
