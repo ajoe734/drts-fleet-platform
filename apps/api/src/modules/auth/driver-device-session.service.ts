@@ -15,11 +15,13 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { SecurityEventsService } from "../security-events/security-events.service";
 import { DriverDeviceSessionRepository } from "./driver-device-session.repository";
 
 const DRIVER_ACCESS_TOKEN_EXPIRES_IN = "15m";
 const DRIVER_REFRESH_TOKEN_EXPIRES_IN = "30d";
-const DRIVER_REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const DRIVER_REFRESH_TOKEN_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const DRIVER_REFRESH_TOKEN_ABSOLUTE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function createOpaqueToken(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
@@ -37,6 +39,8 @@ export class DriverDeviceSessionService {
     private readonly repository: DriverDeviceSessionRepository,
     @Optional()
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
+    @Optional()
+    private readonly securityEventsService?: SecurityEventsService,
   ) {}
 
   async register(
@@ -89,6 +93,16 @@ export class DriverDeviceSessionService {
         revokedSession.sessionId,
         now,
       );
+      this.recordRevocationEvent(revokedSession, {
+        actorId: revokedSession.actorId,
+        actorType: "system",
+        realm: "driver",
+        tenantId: null,
+        partnerId: null,
+        requestId: requestId ?? null,
+        reasonCode: "DEVICE_REBOUND",
+        authMethods: ["driver_device_registration"],
+      });
     }
 
     const refreshToken = createOpaqueToken("drvrefresh");
@@ -101,7 +115,11 @@ export class DriverDeviceSessionService {
         signals: ["device_registration"],
       },
       issuedAt: now,
-      expiresAt: addDuration(now, DRIVER_REFRESH_TOKEN_TTL_MS),
+      idleExpiresAt: addDuration(now, DRIVER_REFRESH_TOKEN_IDLE_TTL_MS),
+      absoluteExpiresAt: addDuration(
+        now,
+        DRIVER_REFRESH_TOKEN_ABSOLUTE_TTL_MS,
+      ),
       refreshToken,
     });
 
@@ -111,7 +129,42 @@ export class DriverDeviceSessionService {
       requestId,
     );
 
-    return this.issueSession(persisted.session, refreshToken);
+    const session = this.issueSession(persisted.session, refreshToken);
+    this.securityEventsService?.recordEvent({
+      actorId: persisted.session.actorId,
+      actorType: "driver_user",
+      subjectId: persisted.session.actorId,
+      realm: "driver",
+      tenantId: null,
+      partnerId: null,
+      eventType: "driver_device_session.registered",
+      eventFamily: "session",
+      outcome: "success",
+      severity: "low",
+      targetType: "driver_device_binding",
+      targetId: persisted.session.sessionId,
+      sessionId: persisted.session.sessionId,
+      tokenId: session.accessToken,
+      authMethods: ["driver_device_registration"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: {
+        bindingId: persisted.session.sessionId,
+        driverId: persisted.session.actorId,
+        status: "active",
+      },
+      maskedContext: {
+        deviceId: persisted.session.deviceId,
+        deviceLabel: persisted.session.deviceLabel,
+      },
+    });
+
+    return session;
   }
 
   async refresh(
@@ -145,7 +198,7 @@ export class DriverDeviceSessionService {
       refreshToken,
       nextRefreshToken,
       rotatedAt,
-      expiresAt: addDuration(rotatedAt, DRIVER_REFRESH_TOKEN_TTL_MS),
+      idleExpiresAt: addDuration(rotatedAt, DRIVER_REFRESH_TOKEN_IDLE_TTL_MS),
       riskSummary: {
         riskLevel: "low",
         signals: ["refresh_rotation"],
@@ -168,7 +221,41 @@ export class DriverDeviceSessionService {
       rotated.session.lastRefreshedAt,
     );
 
-    return this.issueSession(rotated.session, nextRefreshToken);
+    const session = this.issueSession(rotated.session, nextRefreshToken);
+    this.securityEventsService?.recordEvent({
+      actorId: rotated.session.actorId,
+      actorType: "driver_user",
+      subjectId: rotated.session.actorId,
+      realm: "driver",
+      tenantId: null,
+      partnerId: null,
+      eventType: "driver_device_session.refreshed",
+      eventFamily: "session",
+      outcome: "success",
+      severity: "low",
+      targetType: "driver_device_binding",
+      targetId: rotated.session.sessionId,
+      sessionId: rotated.session.sessionId,
+      tokenId: session.accessToken,
+      authMethods: ["driver_refresh_token"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: {
+        bindingId: rotated.session.sessionId,
+        refreshedAt: rotated.session.lastRefreshedAt,
+        status: "active",
+      },
+      maskedContext: {
+        deviceId: rotated.session.deviceId,
+      },
+    });
+
+    return session;
   }
 
   async revoke(
@@ -215,6 +302,19 @@ export class DriverDeviceSessionService {
       this.resolveRevocationAuditActor(revokedSession, identity),
       requestId,
     );
+    this.recordRevocationEvent(revokedSession, {
+      actorId: identity?.actorId ?? revokedSession.actorId,
+      actorType:
+        identity?.actorType === "driver_user"
+          ? "system"
+          : (identity?.actorType ?? "system"),
+      realm: identity?.realm ?? "driver",
+      tenantId: identity?.tenantId ?? null,
+      partnerId: identity?.partnerId ?? null,
+      requestId: requestId ?? null,
+      reasonCode: null,
+      authMethods: ["driver_device_revoke"],
+    });
 
     return {
       bindingId: revokedSession.sessionId,
@@ -304,6 +404,59 @@ export class DriverDeviceSessionService {
       refreshedAt: session.lastRefreshedAt,
       revokedAt: session.revokedAt,
     };
+  }
+
+  private recordRevocationEvent(
+    session: {
+      sessionId: string;
+      actorId: string;
+      deviceId: string | null;
+    },
+    actor: {
+      actorId: string;
+      actorType: BootstrapRequestIdentity["actorType"];
+      realm: BootstrapRequestIdentity["realm"];
+      tenantId: string | null;
+      partnerId: string | null;
+      requestId: string | null;
+      reasonCode: string | null;
+      authMethods: string[];
+    },
+  ) {
+    this.securityEventsService?.recordEvent({
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      subjectId: session.actorId,
+      realm: actor.realm,
+      tenantId: actor.tenantId,
+      partnerId: actor.partnerId,
+      eventType: "driver_device_session.revoked",
+      eventFamily: "device",
+      outcome: "revoked",
+      severity: "medium",
+      targetType: "driver_device_binding",
+      targetId: session.sessionId,
+      sessionId: session.sessionId,
+      tokenId: null,
+      authMethods: actor.authMethods,
+      sourceIp: null,
+      userAgent: null,
+      requestId: actor.requestId,
+      traceId: null,
+      reasonCode: actor.reasonCode,
+      approvalId: null,
+      beforeSummary: {
+        bindingId: session.sessionId,
+        status: "active",
+      },
+      afterSummary: {
+        bindingId: session.sessionId,
+        status: "revoked",
+      },
+      maskedContext: {
+        deviceId: session.deviceId,
+      },
+    });
   }
 
   private issueSession(

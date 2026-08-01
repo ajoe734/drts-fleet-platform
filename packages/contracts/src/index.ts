@@ -1225,6 +1225,88 @@ export interface AuditLogRecord {
   createdAt: string;
 }
 
+export const SECURITY_EVENT_FAMILIES = [
+  "auth",
+  "session",
+  "account",
+  "role",
+  "invitation",
+  "device",
+  "credential",
+  "policy",
+  "break_glass",
+] as const;
+export type SecurityEventFamily =
+  (typeof SECURITY_EVENT_FAMILIES)[number];
+
+export const SECURITY_EVENT_OUTCOMES = [
+  "success",
+  "failure",
+  "denied",
+  "revoked",
+  "expired",
+] as const;
+export type SecurityEventOutcome =
+  (typeof SECURITY_EVENT_OUTCOMES)[number];
+
+export const SECURITY_EVENT_SEVERITIES = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+] as const;
+export type SecurityEventSeverity =
+  (typeof SECURITY_EVENT_SEVERITIES)[number];
+
+export interface SecurityEventRecord {
+  eventId: string;
+  occurredAt: string;
+  eventType: string;
+  eventFamily: SecurityEventFamily;
+  outcome: SecurityEventOutcome;
+  severity: SecurityEventSeverity;
+  actorId: string | null;
+  actorType: IdentityContext["actorType"];
+  subjectIdHash: string | null;
+  realm: IdentityContext["realm"];
+  tenantId: string | null;
+  partnerId: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  sessionId: string | null;
+  tokenIdHash: string | null;
+  authMethods: string[];
+  sourceIpPrefix: string | null;
+  userAgentHash: string | null;
+  requestId: string | null;
+  traceId: string | null;
+  reasonCode: string | null;
+  approvalId: string | null;
+  policyVersion: string | null;
+  beforeSummary: Record<string, unknown> | null;
+  afterSummary: Record<string, unknown> | null;
+  maskedContext: Record<string, unknown>;
+}
+
+export interface SecurityEventQuery {
+  tenantId?: string | null;
+  partnerId?: string | null;
+  actorId?: string | null;
+  eventFamily?: SecurityEventFamily | null;
+  eventType?: string | null;
+  outcome?: SecurityEventOutcome | null;
+  limit?: number | null;
+}
+
+export interface SecurityEventMatrixEntry {
+  eventType: string;
+  eventFamily: SecurityEventFamily;
+  description: string;
+  privileged: boolean;
+  tenantScoped: boolean;
+  requiredOutcomes: SecurityEventOutcome[];
+}
+
 export const EVIDENCE_RETENTION_FAMILIES = [
   "call_recording",
   "report_artifact",
