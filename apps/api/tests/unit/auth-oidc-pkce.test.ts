@@ -347,6 +347,38 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         ),
       ).rejects.toThrow(ApiRequestError);
     });
+
+    it("persists immutable subject binding durably so subsequent logins resolve via subject lookup", async () => {
+      const defaultTenantId = tenantPartnerService.getDefaultTenantId();
+      const login1 = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
+        tenantId: defaultTenantId,
+      });
+
+      const session1 = await oidcService.exchangeTenantCallbackSession(
+        {
+          provider: "oidc",
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+          code: "valid_authorization_code_12345",
+          state: login1.state,
+          tenantId: defaultTenantId,
+        },
+        { stateToken: login1.stateToken },
+      );
+      expect(session1.profile.email).toBe("admin@acme.example");
+
+      // Verify subject is durably bound in TenantPartnerService
+      const expectedSub = `sub_oidc_${createHash("sha256").update("valid_authorization_code_12345").digest("hex").slice(0, 12)}`;
+      const boundUser = tenantPartnerService.findTenantUserBySubject(expectedSub);
+      expect(boundUser).not.toBeNull();
+      expect(boundUser?.email).toBe("admin@acme.example");
+    });
+
+    it("does not conflate internal userId with external OIDC sub when subject is unbound", () => {
+      // tenant-user-demo-001 is an internal userId, NOT a bound OIDC subject
+      const user = tenantPartnerService.findTenantUserBySubject("tenant-user-demo-001");
+      expect(user).toBeNull();
+    });
   });
 
   describe("6. Real OIDC HTTP Provider Exchange & JWT Token Verification", () => {

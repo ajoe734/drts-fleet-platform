@@ -288,7 +288,11 @@ export class OidcPkceService {
     let existingUser = requestedTenantId
       ? (this.tenantPartnerService
           .listTenantUsers(requestedTenantId)
-          .find((user) => user.userId === subjectId || (user as any).subjectId === subjectId) ?? null)
+          .find(
+            (user) =>
+              (user as any).subjectId === subjectId ||
+              (user as any).subject === subjectId,
+          ) ?? null)
       : null;
 
     if (!existingUser) {
@@ -308,7 +312,7 @@ export class OidcPkceService {
       }
 
       if (existingUser) {
-        const boundSubject = (existingUser as any).subjectId;
+        const boundSubject = (existingUser as any).subjectId || (existingUser as any).subject;
         if (boundSubject && boundSubject !== subjectId) {
           const targetTenantId =
             existingUser.tenantId ||
@@ -331,13 +335,16 @@ export class OidcPkceService {
           );
         }
 
-        (existingUser as any).subjectId = subjectId;
-        const internalUser = this.tenantPartnerService.findTenantUser(
+        const boundUser = this.tenantPartnerService.bindTenantUserSubject(
           existingUser.tenantId,
           existingUser.userId,
+          subjectId,
         );
-        if (internalUser) {
-          (internalUser as any).subjectId = subjectId;
+        if (boundUser) {
+          existingUser = boundUser;
+        } else {
+          (existingUser as any).subjectId = subjectId;
+          (existingUser as any).subject = subjectId;
         }
       }
     }

@@ -2414,6 +2414,8 @@ export interface TenantUserRoleRecord {
   approvalNotificationOptOut: boolean;
   invitedAt: string;
   updatedAt: string;
+  subjectId?: string;
+  subject?: string;
 }
 
 export interface CreateTenantUserCommand {

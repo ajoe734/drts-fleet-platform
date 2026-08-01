@@ -19,9 +19,9 @@ function createSignedRsaIdToken(payload: Record<string, unknown>, privateKeyPem:
 }
 
 describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
-  const jwtAuthService = new JwtAuthService();
-  const tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
-  const oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
+  let jwtAuthService: JwtAuthService;
+  let tenantPartnerService: TenantPartnerService;
+  let oidcService: OidcPkceService;
 
   const originalEnv = { ...process.env };
 
@@ -30,6 +30,10 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
     process.env.OIDC_CLIENT_ID = "drts-bff-client";
     process.env.OIDC_MOCK_MODE = "true";
+
+    jwtAuthService = new JwtAuthService();
+    tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
+    oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
   });
 
   afterEach(() => {

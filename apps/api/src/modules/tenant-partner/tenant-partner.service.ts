@@ -4275,11 +4275,58 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const userRole = this.userRoles.find(
       (candidate) =>
-        candidate.userId === trimmed ||
         (candidate as any).subjectId === trimmed ||
         (candidate as any).subject === trimmed,
     );
     return userRole ? this.cloneUserRole(userRole) : null;
+  }
+
+  bindTenantUserSubject(
+    tenantId: string | null | undefined,
+    userId: string,
+    subjectId: string,
+  ) {
+    const targetUser = userId?.trim();
+    const trimmedSubject = subjectId?.trim();
+    if (!targetUser || !trimmedSubject) {
+      return null;
+    }
+
+    const targetTenant = tenantId?.trim();
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        (!targetTenant || candidate.tenantId === targetTenant) &&
+        candidate.userId === targetUser,
+    );
+    if (!userRole) {
+      return null;
+    }
+
+    const previousUserRoles = this.userRoles.map((entry) =>
+      this.cloneUserRole(entry),
+    );
+
+    (userRole as any).subjectId = trimmedSubject;
+    (userRole as any).subject = trimmedSubject;
+
+    try {
+      this.persistChanges(
+        {
+          userRoles: this.userRoles.map((entry) => this.cloneUserRole(entry)),
+        },
+        `bind subject ${trimmedSubject} to user ${targetUser}`,
+      );
+    } catch {
+      this.userRoles = previousUserRoles;
+      throw new ApiRequestError(
+        500,
+        "PERSISTENCE_FAILED",
+        "Failed to persist subject binding.",
+      );
+    }
+
+    this.syncIdentityTenantUserRoles(`bind subject ${trimmedSubject}`);
+    return this.cloneUserRole(userRole);
   }
 
   findTenantUser(tenantId: string, userId: string) {
