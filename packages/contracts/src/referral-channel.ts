@@ -170,3 +170,60 @@ export interface PartnerIngressHandoffSession {
     drtsPassengerId: string;
   };
 }
+
+export type ReferralPassengerBookingCreateCommand =
+  import("./index").CreateTenantBookingCommand;
+
+export interface ReferralPassengerBookingCreateResult {
+  replayed: boolean;
+  booking: import("./index").BookingRecord;
+  order: import("./index").OwnedOrderRecord;
+}
+
+export interface ReferralPassengerBookingAuthorityView {
+  booking: import("./index").BookingRecord;
+  order: import("./index").OwnedOrderRecord;
+  assignment: import("./index").PassengerDispatchDisclosureSnapshot | null;
+  rating: import("./index").PassengerTripRatingRecord | null;
+  receiptReady: boolean;
+  actions: {
+    canCancel: boolean;
+    canRate: boolean;
+    canReadReceipt: boolean;
+  };
+}
+
+export interface ReferralPassengerBookingHistoryItem {
+  booking: import("./index").BookingRecord;
+  order: {
+    orderId: string;
+    orderNo: string;
+    status: import("./index").OwnedOrderRecord["status"];
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  receiptReady: boolean;
+  rated: boolean;
+}
+
+export interface ReferralPassengerBookingHistoryView {
+  items: ReferralPassengerBookingHistoryItem[];
+}
+
+export interface ReferralPassengerReceiptView {
+  bookingId: string;
+  orderId: string;
+  settlement: {
+    channelKey: import("./index").SettlementMatrixRecord["channelKey"];
+    receiptOwner: string;
+  };
+  passenger: {
+    passengerId: string | null;
+    name: string | null;
+    phone: string | null;
+  };
+  receipt: import("./index").MultiTaxiElectronicReceipt;
+  availableFormats: Array<"html" | "pdf">;
+}

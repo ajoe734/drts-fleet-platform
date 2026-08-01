@@ -189,18 +189,18 @@ describe("bootstrap auth extraction", () => {
     expect(
       resolveRouteAuthPolicy("GET", "/api/partner/bookings/booking-001"),
     ).toEqual({
-      routeKey: "partner:bookings:get",
+      routeKey: "partner:bookings:GET",
       requiredScopes: ["partner:book"],
       allowedRealms: ["system", "partner"],
-      description: "Partner-scoped booking confirmation and receipt access",
+      description: "Partner-scoped booking lifecycle access",
     });
     expect(
       resolveRouteAuthPolicy("GET", "/api/partner/orders/order-001"),
     ).toEqual({
-      routeKey: "partner:orders:get",
+      routeKey: "partner:orders:GET",
       requiredScopes: ["partner:book"],
       allowedRealms: ["system", "partner"],
-      description: "Partner-scoped booking confirmation and receipt access",
+      description: "Partner-scoped booking lifecycle access",
     });
   });
 

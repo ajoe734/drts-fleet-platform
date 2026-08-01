@@ -191,7 +191,7 @@ const en = {
   "book.summary.service.note":
     "Partner, tenant, and concierge surfaces have their own request entry; this lane is direct passenger.",
   "book.summary.footnote":
-    "Submission is intentionally not wired to a live backend in this slice. The slice materializes route topology and authority framing; the actual POST /bookings integration belongs to a downstream wave.",
+    "Submission stays bound to the referral passenger authority session so retries can recover without duplicating a booking.",
   "book.callout.authority.title": "Authority-safe entry",
   "book.callout.authority.body":
     "This surface only owns direct passenger requests. Bookings owned by tenant, partner, or concierge channels stay in their own surfaces and are not duplicated here.",
