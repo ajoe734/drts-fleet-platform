@@ -267,7 +267,7 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     const idToken = createSignedRsaIdToken(idTokenPayload, privateKeyPem, "test-rsa-kid-001");
 
     // Mock OIDC token endpoint fetch response
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       if (url.toString().includes("/oauth2/v1/token")) {
         return new Response(
           JSON.stringify({
