@@ -1,5 +1,6 @@
 import { Injectable, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import jwt from "jsonwebtoken";
 
 import type {
   CanonicalAccountStatus,
@@ -36,10 +37,13 @@ export const DEFAULT_ROLE_SCOPES: Record<string, readonly string[]> = {
 
 export interface ResolveIapSubjectOptions {
   expectedAudience?: string;
+  expectedIssuer?: string;
   jwtSecretOrPublicKey?: string;
   strictIapMode?: boolean;
   autoProvision?: boolean;
   roleGroupMapping?: Record<string, string>;
+  allowUnverifiedTokenInDev?: boolean;
+  requestedRealm?: "platform" | "ops";
 }
 
 export interface ResolvedIapWorkforceSubject {
@@ -105,7 +109,9 @@ export class IAPSubjectAdapter {
     try {
       payload = verifyIapJwtAssertion(rawAssertion, {
         expectedAudience: options.expectedAudience,
+        expectedIssuer: options.expectedIssuer,
         jwtSecretOrPublicKey: options.jwtSecretOrPublicKey,
+        allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
       });
     } catch (err: any) {
       if (err?.code === "IAP_AUDIENCE_MISMATCH" || err?.message?.includes("audience mismatch")) {
@@ -251,20 +257,63 @@ export class IAPSubjectAdapter {
         (m.realm === "platform" || m.realm === "ops"),
     );
 
+    // Surface choice resolution: determine requested realm from options or request headers
+    let requestedRealm: "platform" | "ops" | undefined = options.requestedRealm;
+    if (!requestedRealm && headers) {
+      const headerRealm = this.readHeader(headers, "x-realm")?.toLowerCase();
+      if (headerRealm === "ops" || headerRealm === "platform") {
+        requestedRealm = headerRealm as "platform" | "ops";
+      } else {
+        const headerActorType = this.readHeader(headers, "x-actor-type")?.toLowerCase();
+        if (headerActorType === "ops_user") {
+          requestedRealm = "ops";
+        } else if (headerActorType === "platform_admin") {
+          requestedRealm = "platform";
+        } else {
+          const authHeader =
+            this.readHeader(headers, "x-drts-authorization") ||
+            this.readHeader(headers, "authorization");
+          if (authHeader && authHeader.startsWith("Bearer ")) {
+            try {
+              const token = authHeader.slice(7).trim();
+              const decoded = jwt.decode(token) as {
+                realm?: string;
+                actorType?: string;
+              } | null;
+              if (decoded?.realm === "ops" || decoded?.actorType === "ops_user") {
+                requestedRealm = "ops";
+              } else if (decoded?.realm === "platform" || decoded?.actorType === "platform_admin") {
+                requestedRealm = "platform";
+              }
+            } catch {
+              // Ignore invalid Bearer header decoding during surface detection
+            }
+          }
+        }
+      }
+    }
+
     const isPlatformGroup = assertionGroups.includes("platform-admins@platform.drts");
     const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
 
     let activeMembership =
-      (isPlatformGroup
+      (requestedRealm === "ops"
+        ? activeControlPlaneMemberships.find((m) => m.realm === "ops") ||
+          (isPlatformGroup || isOpsGroup
+            ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
+            : null)
+        : requestedRealm === "platform"
         ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
-        : null) ||
-      (isOpsGroup
-        ? activeControlPlaneMemberships.find((m) => m.realm === "ops")
-        : null) ||
+        : (isPlatformGroup
+            ? activeControlPlaneMemberships.find((m) => m.realm === "platform")
+            : null) ||
+          (isOpsGroup
+            ? activeControlPlaneMemberships.find((m) => m.realm === "ops")
+            : null)) ||
       activeControlPlaneMemberships[0];
 
     if (!activeMembership) {
-      const { actorType, realm } = this.getActorContext(undefined, undefined, assertionGroups);
+      const { actorType, realm } = this.getActorContext(requestedRealm, undefined, assertionGroups);
       this.emitDeniedEvent(
         "user_inactive",
         principal.email || normalizedEmail,
@@ -368,12 +417,18 @@ export class IAPSubjectAdapter {
       );
     }
 
-    // Align membership realm with verified groups and effective roles
+    // Align membership realm with verified groups, requested surface, and effective roles
     const hasPlatformRole = effectiveRoles.some(
       (r) => r === "superadmin" || r === "platform_admin",
     );
     const expectedRealm: "platform" | "ops" =
-      isPlatformGroup && hasPlatformRole ? "platform" : "ops";
+      requestedRealm === "ops"
+        ? "ops"
+        : requestedRealm === "platform"
+        ? "platform"
+        : isPlatformGroup && hasPlatformRole
+        ? "platform"
+        : "ops";
 
     if (activeMembership.realm !== expectedRealm) {
       const matchingMembership = activeControlPlaneMemberships.find(
@@ -381,6 +436,22 @@ export class IAPSubjectAdapter {
       );
       if (matchingMembership) {
         activeMembership = matchingMembership;
+      } else if (expectedRealm === "ops") {
+        activeMembership = {
+          ...activeMembership,
+          realm: "ops",
+        };
+      }
+    }
+
+    if (expectedRealm === "ops") {
+      const opsRoles = effectiveRoles.filter(
+        (r) => r === "operator" || r === "ops_user",
+      );
+      if (opsRoles.length > 0) {
+        effectiveRoles = opsRoles;
+      } else {
+        effectiveRoles = ["operator"];
       }
     }
 

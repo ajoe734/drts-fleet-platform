@@ -759,6 +759,109 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     expect(opsEvent?.actorType).toBe("ops_user");
     expect(opsEvent?.realm).toBe("ops");
   });
+
+  it("verifies BootstrapAuthGuard respects ops surface choice for platform-admin assertions without 403 AUTH_REALM_DENIED", async () => {
+    process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+    process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_ops_surface_downgrade",
+        sourceRef: "iap_subject:ops_surface_sub",
+        issuer: "google_iap",
+        subject: "ops_surface_sub",
+        principalType: "human",
+        email: "platform-admin-on-ops@platform.drts",
+        emailVerified: true,
+        displayName: "Platform Admin Ops User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_ops_surface_platform",
+        sourceRef: "iap_membership:ops_surface_sub_platform",
+        principalId: "principal_ops_surface_downgrade",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_ops_surface_superadmin",
+          sourceRef: "rb_ops_surface_superadmin",
+          membershipId: "membership_ops_surface_platform",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const reflector = {
+      getAllAndOverride: (key: string) => {
+        if (key === "auth:allowed_realms") return ["ops"];
+        if (key === "auth:required_scopes") return ["dispatch:read"];
+        return undefined;
+      },
+    } as any;
+
+    const guard = new BootstrapAuthGuard(
+      reflector,
+      new JwtAuthService(),
+      undefined,
+      undefined,
+      adapter,
+    );
+
+    const token = signAssertion({
+      sub: "ops_surface_sub",
+      email: "platform-admin-on-ops@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    // Ops console proxy mints assertions with x-realm: ops / x-actor-type: ops_user header
+    const mockRequest: any = {
+      headers: {
+        "x-goog-iap-jwt-assertion": token,
+        "x-realm": "ops",
+        "x-actor-type": "ops_user",
+      },
+      method: "GET",
+      url: "/api/ops/dispatch-queue",
+    };
+
+    const context: any = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => () => {},
+      getClass: () => class {},
+    };
+
+    const allowed = await guard.canActivate(context);
+    expect(allowed).toBe(true);
+    expect(mockRequest.identity).toBeDefined();
+    expect(mockRequest.identity.realm).toBe("ops");
+    expect(mockRequest.identity.actorType).toBe("ops_user");
+    expect(mockRequest.identity.roles).toContain("operator");
+
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
+  });
 });
 
 

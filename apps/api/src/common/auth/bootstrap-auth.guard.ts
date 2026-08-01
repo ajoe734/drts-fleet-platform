@@ -195,6 +195,10 @@ export class BootstrapAuthGuard implements CanActivate {
       process.env.IAP_EXPECTED_AUDIENCE ||
       process.env.IAP_AUDIENCE ||
       process.env.JWT_AUDIENCE;
+    const expectedIssuer = process.env.IAP_EXPECTED_ISSUER;
+    const allowUnverifiedTokenInDev =
+      process.env.NODE_ENV !== "production" &&
+      process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
     const jwtSecretOrPublicKey =
       process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
       process.env.IAP_JWT_SECRET ||
@@ -205,6 +209,8 @@ export class BootstrapAuthGuard implements CanActivate {
       {
         strictIapMode: isStrictIap,
         ...(expectedAudience ? { expectedAudience } : {}),
+        ...(expectedIssuer ? { expectedIssuer } : {}),
+        ...(allowUnverifiedTokenInDev ? { allowUnverifiedTokenInDev } : {}),
         ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
         autoProvision: process.env.NODE_ENV !== "production",
       },
