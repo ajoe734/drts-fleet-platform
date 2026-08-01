@@ -93,7 +93,7 @@ Below is the complete classification inventory of all API route groups across al
 | `/service-area/*` | Any | `platform, ops` | `foundation:read / write` | Service area & stop policy administration |
 | `/product-rules/*`, `/fare-anomaly/*` | Any | `platform, ops` | `foundation:read / write` | Product rules & fare anomaly monitoring |
 | `/sandbox/*` | Any | `platform, ops` | `foundation:read / write` | Sandbox dispatch gate & compliance |
-| `/assistant/*` | Any | `platform, ops` | `foundation:read / write` | AI Assistant tools & conversation flows |
+| `/assistant/*` | Any | `platform, ops` | `assistant:read / write` | AI Assistant tools & conversation flows |
 | `/certificate-support/*` | Any | `platform, ops` | `regulatory:read / write` | Certificate support & compliance |
 | `/feature-flags/*` | Any | `platform, ops` | `foundation:read / write` | Feature flag administration |
 | `/geo/*` | Any | `platform, ops, tenant, driver, partner` | `foundation:read / write` | Geocoding & map service management |

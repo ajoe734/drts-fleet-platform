@@ -41,6 +41,8 @@ import {
   RequireScopes,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { Throttle } from "@nestjs/throttler";
+import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import { MultiTaxiService } from "./multi-taxi.service";
 
@@ -54,6 +56,7 @@ export class MultiTaxiController {
 
   @Post("multi-taxi/rides")
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   async createRide(
     @Body() command: CreateMultiTaxiRideCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -79,6 +82,7 @@ export class MultiTaxiController {
 
   @Get("passenger-rides/:accessToken")
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   async getPassengerRide(
     @Param("accessToken") accessToken: string,
     @Headers("x-request-id") requestId?: string,
@@ -91,6 +95,7 @@ export class MultiTaxiController {
 
   @Sse("passenger-rides/:accessToken/events")
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   streamPassengerRide(
     @Param("accessToken") accessToken: string,
   ): Observable<MessageEvent> {
@@ -99,6 +104,7 @@ export class MultiTaxiController {
 
   @Post("passenger-rides/:accessToken/cancel")
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   async cancelPassengerRide(
     @Param("accessToken") accessToken: string,
     @Body() command: { reason?: string },
@@ -116,6 +122,7 @@ export class MultiTaxiController {
 
   @Post("passenger-rides/:accessToken/ratings")
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   async submitPassengerRating(
     @Param("accessToken") accessToken: string,
     @Body() command: SubmitPassengerTripRatingCommand,
@@ -129,6 +136,7 @@ export class MultiTaxiController {
 
   @Post("passenger-rides/:accessToken/contact")
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   async getPassengerContact(
     @Param("accessToken") accessToken: string,
     @Headers("x-request-id") requestId?: string,
@@ -141,6 +149,7 @@ export class MultiTaxiController {
 
   @Get("passenger-rides/:accessToken/receipt")
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   async getPassengerReceipt(
     @Param("accessToken") accessToken: string,
     @Headers("x-request-id") requestId?: string,

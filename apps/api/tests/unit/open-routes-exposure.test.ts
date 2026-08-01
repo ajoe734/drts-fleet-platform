@@ -1,5 +1,9 @@
 import "reflect-metadata";
 import { Reflector } from "@nestjs/core";
+import {
+  THROTTLER_LIMIT,
+  THROTTLER_SKIP,
+} from "@nestjs/throttler/dist/throttler.constants";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -43,6 +47,7 @@ describe("IAM-P0-003 Open Routes Rate & Data Exposure Tests (Requirement 4)", ()
     { name: "IdentityController.getContext", class: IdentityController, method: "getContext" },
     { name: "MultiTaxiController.createRide", class: MultiTaxiController, method: "createRide" },
     { name: "MultiTaxiController.getPassengerRide", class: MultiTaxiController, method: "getPassengerRide" },
+    { name: "MultiTaxiController.streamPassengerRide", class: MultiTaxiController, method: "streamPassengerRide" },
     { name: "MultiTaxiController.cancelPassengerRide", class: MultiTaxiController, method: "cancelPassengerRide" },
     { name: "MultiTaxiController.submitPassengerRating", class: MultiTaxiController, method: "submitPassengerRating" },
     { name: "MultiTaxiController.getPassengerContact", class: MultiTaxiController, method: "getPassengerContact" },
@@ -68,6 +73,24 @@ describe("IAM-P0-003 Open Routes Rate & Data Exposure Tests (Requirement 4)", ()
     }
   });
 
+  it("verifies all open routes carry explicit rate-limiting throttle controls (@Throttle or @SkipThrottle)", () => {
+    for (const item of openRouteTargets) {
+      const handler = item.class.prototype[item.method];
+      const handlerLimit = Reflect.getMetadata(THROTTLER_LIMIT + "default", handler);
+      const classLimit = Reflect.getMetadata(THROTTLER_LIMIT + "default", item.class);
+      const handlerSkip = Reflect.getMetadata(THROTTLER_SKIP + "default", handler);
+      const classSkip = Reflect.getMetadata(THROTTLER_SKIP + "default", item.class);
+
+      const hasThrottleLimit = typeof handlerLimit === "number" || typeof classLimit === "number";
+      const hasSkipThrottle = handlerSkip === true || classSkip === true;
+
+      expect(
+        hasThrottleLimit || hasSkipThrottle,
+        `Open route ${item.name} must be explicitly decorated with @Throttle(...) or @SkipThrottle(...)`,
+      ).toBe(true);
+    }
+  });
+
   it("verifies Health payload does not expose sensitive credentials or secrets", () => {
     const payload = buildHealthPayload();
     expect(payload).toHaveProperty("service", "api");
@@ -89,3 +112,4 @@ describe("IAM-P0-003 Open Routes Rate & Data Exposure Tests (Requirement 4)", ()
     }
   });
 });
+
