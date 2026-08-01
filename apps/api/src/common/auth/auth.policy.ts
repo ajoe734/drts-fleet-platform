@@ -284,6 +284,19 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("call-center/orders")) {
+    return {
+      routeKey: `callcenter:orders:${upperMethod}`,
+      requiredScopes: methodScope(
+        "callcenter:read",
+        "callcenter:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Callcenter phone-order management",
+    };
+  }
+
   if (
     routePath.startsWith("call-center") ||
     routePath.startsWith("callcenter")
@@ -624,8 +637,8 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: `assistant:${upperMethod}`,
       requiredScopes: methodScope(
-        "foundation:read",
-        "foundation:write",
+        "assistant:read",
+        "assistant:write",
         upperMethod,
       ),
       allowedRealms: baseAllowedRealms("platform", "ops"),
