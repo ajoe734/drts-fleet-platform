@@ -6,9 +6,9 @@
 **Parent Reviewer:** `Gemini2`  
 **Sidecar Owner:** `Gemini2`  
 **Sidecar Reviewer:** `Codex2`  
-**Generated:** `2026-08-01` (UTC, packet rev2)  
-**Snapshot Anchor (parent `last_update`):** `2026-08-01T10:07:52Z`  
-**Snapshot Anchor (sidecar `last_update`):** `2026-08-01T10:10:21Z`  
+**Generated:** `2026-08-01` (UTC, packet rev3)  
+**Snapshot Anchor (parent `last_update`):** `2026-08-01T10:22:55Z`  
+**Snapshot Anchor (sidecar `last_update`):** `2026-08-01T10:22:24Z`  
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT` — support-only; does not modify canonical truth, runtime behavior, contract surface, or parent task implementation files.
 
 ---
@@ -20,7 +20,7 @@
 - Pin upstream machine-truth dependency on `REF-DOC-001` (status: `done`, commit: `1391b6c1f11e7fee0fd5313ff70ea22eaded236b`).
 - Map component boundaries across contract schemas, backend partner services, DB migrations, Referral Embed Web API/middleware, and security test suites.
 - Explicitly differentiate existing workspace baseline paths from new target artifacts designated for creation under `BE-REF-HANDOFF-001`.
-- Provide a structured handoff document for reviewer (`Codex2`) evaluation and verification reachable on remote branch `gemini2/be-ref-handoff-001-sidecar-acceptance`.
+- Provide a structured handoff document for reviewer (`Codex2`) evaluation and verification, including reachable local worktree instructions and the original owner branch reference `gemini2/be-ref-handoff-001-sidecar-acceptance`.
 
 ### Out of Scope
 - Modifying L1 product specs or canonical design documents (`phase1_prd_detailed_v1.md`, `phase1_service_contracts_v1.md`, etc.).
@@ -117,13 +117,26 @@ When reviewing parent task `BE-REF-HANDOFF-001`, the reviewer (`Gemini2` / `Code
 
 ## 5. Reviewer Handoff & Verification Instructions
 
-1. **Remote Ref Availability**:
-   This sidecar packet is anchored on branch `gemini2/be-ref-handoff-001-sidecar-acceptance` and pushed to remote `origin/gemini2/be-ref-handoff-001-sidecar-acceptance`. Reviewers can inspect the artifact directly via:
+1. **Local Task Branch / Worktree Availability**:
+   Supervisor dispatch assigned reviewer worktree `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex2-be-ref-handoff-001-sidecar-acceptance` on branch `codex2/be-ref-handoff-001-sidecar-acceptance`. If the reviewer is not already in that worktree, reuse the existing branch/worktree first:
+   ```bash
+   existing=$(git worktree list --porcelain | awk 'BEGIN{p=""} /^worktree /{p=substr($0,10)} /^branch refs\\/heads\\/codex2\\/be-ref-handoff-001-sidecar-acceptance$/{print p; exit}')
+   if [ -n "$existing" ]; then
+     cd "$existing"
+   elif git show-ref --verify --quiet refs/heads/codex2/be-ref-handoff-001-sidecar-acceptance; then
+     git switch codex2/be-ref-handoff-001-sidecar-acceptance
+   else
+     git switch -c codex2/be-ref-handoff-001-sidecar-acceptance origin/dev
+   fi
+   ```
+
+2. **Owner Branch Ref Availability**:
+   The original sidecar handoff branch remains `gemini2/be-ref-handoff-001-sidecar-acceptance` on remote `origin`. Reviewers who need to inspect the owner snapshot directly can fetch the packet via:
    ```bash
    git fetch origin gemini2/be-ref-handoff-001-sidecar-acceptance
    git checkout origin/gemini2/be-ref-handoff-001-sidecar-acceptance -- support/sidecars/BE-REF-HANDOFF-001/BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE.md
    ```
 
-2. **Handoff Protocol**:
+3. **Handoff Protocol**:
    - Owner (`Gemini2`) executes `AI_NAME=Gemini2 scripts/ai-status.sh handoff BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE Codex2 "Updated acceptance packet with repository path audit and pushed ref to origin"`.
    - Reviewer (`Codex2`) verifies the artifact on `origin/gemini2/be-ref-handoff-001-sidecar-acceptance` and approves via `AI_NAME=Codex2 scripts/ai-status.sh approve BE-REF-HANDOFF-001-SIDECAR-ACCEPTANCE "Approved sidecar acceptance packet"`.
