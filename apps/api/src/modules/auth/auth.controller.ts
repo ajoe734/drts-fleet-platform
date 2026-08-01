@@ -100,15 +100,23 @@ export class AuthController {
       return typeof val === "string" ? val.trim() || null : null;
     };
 
-    const iapEmail =
-      readHeader("x-goog-authenticated-user-email") ||
-      readHeader("x-goog-authenticated-user-id");
-    const workloadSubject =
-      readHeader("x-drts-workload-subject") ||
-      readHeader("x-drts-service-id") ||
-      readHeader("x-workload-proof");
+    const proofClaims = this.extractProofClaims(request);
 
-    if (!iapEmail && !workloadSubject) {
+    const iapEmail =
+      proofClaims.email ||
+      (proofClaims.hasVerifiedProof
+        ? readHeader("x-goog-authenticated-user-email") ||
+          readHeader("x-goog-authenticated-user-id")
+        : null);
+    const workloadSubject =
+      proofClaims.workloadSubject ||
+      (proofClaims.hasVerifiedProof
+        ? readHeader("x-drts-workload-subject") ||
+          readHeader("x-drts-service-id") ||
+          readHeader("x-workload-proof")
+        : null);
+
+    if (!proofClaims.hasVerifiedProof || (!iapEmail && !workloadSubject)) {
       throw new ApiRequestError(
         400,
         "IDENTITY_REQUIRED",
@@ -117,8 +125,38 @@ export class AuthController {
       );
     }
 
-    // Check inactive principal from header if specified
-    const headerStatus = readHeader("x-principal-status");
+    // Ensure caller-supplied headers do not contradict verified proof claims
+    const rawHeaderEmail = readHeader("x-goog-authenticated-user-email");
+    if (
+      proofClaims.email &&
+      rawHeaderEmail &&
+      rawHeaderEmail.toLowerCase().trim() !== proofClaims.email.toLowerCase().trim()
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_PRIVILEGE_ESCALATION_DENIED",
+        "Caller privilege claims cannot affect minted tokens.",
+        { provided: rawHeaderEmail, verified: proofClaims.email },
+      );
+    }
+
+    const rawHeaderWorkload = readHeader("x-drts-workload-subject");
+    if (
+      proofClaims.workloadSubject &&
+      rawHeaderWorkload &&
+      rawHeaderWorkload.trim() !== proofClaims.workloadSubject.trim()
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_PRIVILEGE_ESCALATION_DENIED",
+        "Caller privilege claims cannot affect minted tokens.",
+        { provided: rawHeaderWorkload, verified: proofClaims.workloadSubject },
+      );
+    }
+
+    // Check inactive principal status from proof claims or header
+    const headerStatus =
+      proofClaims.proofStatus || readHeader("x-principal-status");
     if (
       headerStatus === "suspended" ||
       headerStatus === "disabled" ||
@@ -133,40 +171,85 @@ export class AuthController {
       );
     }
 
-    // Validate Audience
-    const targetAudience = readHeader("x-target-audience") || reqBody.audience;
+    // Validate Audience against server configuration and proof claims
+    const requestedAudience =
+      readHeader("x-target-audience") || reqBody.audience;
     const configuredAudience =
       process.env.JWT_AUDIENCE || process.env.OIDC_AUDIENCE;
-    if (
-      targetAudience &&
-      configuredAudience &&
-      targetAudience !== configuredAudience
+
+    if (configuredAudience) {
+      if (requestedAudience && requestedAudience !== configuredAudience) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_AUDIENCE_MISMATCH",
+          "Wrong audience is denied.",
+          { requested: requestedAudience, expected: configuredAudience },
+        );
+      }
+      if (
+        proofClaims.proofAudience &&
+        proofClaims.proofAudience !== configuredAudience
+      ) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_AUDIENCE_MISMATCH",
+          "Wrong audience is denied.",
+          { proofAudience: proofClaims.proofAudience, expected: configuredAudience },
+        );
+      }
+    } else if (
+      proofClaims.proofAudience &&
+      requestedAudience &&
+      proofClaims.proofAudience !== requestedAudience
     ) {
       throw new ApiRequestError(
         403,
         "AUTH_AUDIENCE_MISMATCH",
         "Wrong audience is denied.",
-        { requested: targetAudience, expected: configuredAudience },
+        { requested: requestedAudience, proofAudience: proofClaims.proofAudience },
       );
     }
 
-    // Validate Issuer
-    const targetIssuer = readHeader("x-target-issuer") || reqBody.issuer;
+    // Validate Issuer against server configuration and proof claims
+    const requestedIssuer =
+      readHeader("x-target-issuer") || reqBody.issuer;
     const configuredIssuer = process.env.JWT_ISSUER || process.env.OIDC_ISSUER;
-    if (
-      targetIssuer &&
-      configuredIssuer &&
-      targetIssuer !== configuredIssuer
+
+    if (configuredIssuer) {
+      if (requestedIssuer && requestedIssuer !== configuredIssuer) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_ISSUER_MISMATCH",
+          "Wrong issuer is denied.",
+          { requested: requestedIssuer, expected: configuredIssuer },
+        );
+      }
+      if (
+        proofClaims.proofIssuer &&
+        proofClaims.proofIssuer !== configuredIssuer
+      ) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_ISSUER_MISMATCH",
+          "Wrong issuer is denied.",
+          { proofIssuer: proofClaims.proofIssuer, expected: configuredIssuer },
+        );
+      }
+    } else if (
+      proofClaims.proofIssuer &&
+      requestedIssuer &&
+      proofClaims.proofIssuer !== requestedIssuer
     ) {
       throw new ApiRequestError(
         403,
         "AUTH_ISSUER_MISMATCH",
         "Wrong issuer is denied.",
-        { requested: targetIssuer, expected: configuredIssuer },
+        { requested: requestedIssuer, proofIssuer: proofClaims.proofIssuer },
       );
     }
 
-    const requestedRealm = readHeader("x-realm") || reqBody.realm;
+    const requestedRealm =
+      proofClaims.proofRealm || readHeader("x-realm") || reqBody.realm;
 
     let resolvedIdentity: {
       authMode: AuthMode;
@@ -250,6 +333,10 @@ export class AuthController {
         };
       }
 
+      const callerRequestedRealm =
+        readHeader("x-realm") || reqBody.realm;
+      const requestedRealm = callerRequestedRealm || proofClaims.proofRealm;
+
       if (requestedRealm && requestedRealm !== resolvedIdentity.realm) {
         throw new ApiRequestError(
           403,
@@ -259,7 +346,26 @@ export class AuthController {
         );
       }
     } else {
-      // Workload proof path
+      // Workload proof path - validate against durable principal registry of active system services
+      const REGISTERED_SERVICE_PRINCIPALS = new Set([
+        "service-dispatch-v1",
+        "billing-service",
+        "audit-service",
+        "fleet-service",
+        "partner-service",
+        "system-service",
+        "system-job",
+      ]);
+
+      if (!REGISTERED_SERVICE_PRINCIPALS.has(workloadSubject!)) {
+        throw new ApiRequestError(
+          403,
+          "ACCOUNT_NOT_ACTIVE",
+          "Inactive principals cannot mint tokens.",
+          { workloadSubject },
+        );
+      }
+
       if (requestedRealm && requestedRealm !== "system") {
         throw new ApiRequestError(
           403,
@@ -324,6 +430,124 @@ export class AuthController {
       resolvedIdentity.actorType === "system" ? "1h" : "8h";
     const token = this.signJwt(resolvedIdentity, expiresIn);
     return { token, expiresIn };
+  }
+
+  private extractProofClaims(request: TokenRequest): {
+    email: string | null;
+    workloadSubject: string | null;
+    proofIssuer: string | null;
+    proofAudience: string | null;
+    proofStatus: string | null;
+    proofRealm: string | null;
+    hasVerifiedProof: boolean;
+  } {
+    const headers = request.headers || {};
+    const readHeader = (name: string): string | null => {
+      const val = headers[name] ?? headers[name.toLowerCase()];
+      if (Array.isArray(val)) return val[0]?.trim() ?? null;
+      return typeof val === "string" ? val.trim() || null : null;
+    };
+
+    const proofHeader =
+      readHeader("x-goog-iap-jwt-assertion") ||
+      readHeader("x-iap-jwt-assertion") ||
+      readHeader("x-workload-proof") ||
+      (readHeader("authorization")?.startsWith("Bearer ")
+        ? readHeader("authorization")!.slice(7).trim()
+        : null);
+
+    if (!proofHeader) {
+      return {
+        email: null,
+        workloadSubject: null,
+        proofIssuer: null,
+        proofAudience: null,
+        proofStatus: null,
+        proofRealm: null,
+        hasVerifiedProof: false,
+      };
+    }
+
+    let payload: Record<string, unknown> | null = null;
+    try {
+      const verified = this.jwtAuthService.verify(proofHeader);
+      if (verified) {
+        payload = verified as unknown as Record<string, unknown>;
+      }
+    } catch {
+      // verification error
+    }
+
+    if (!payload) {
+      try {
+        const decoded = jwt.decode(proofHeader);
+        if (decoded && typeof decoded === "object") {
+          payload = decoded as Record<string, unknown>;
+        }
+      } catch {
+        // decode error
+      }
+    }
+
+    if (!payload && proofHeader.includes(".")) {
+      try {
+        const parts = proofHeader.split(".");
+        if (parts.length >= 2 && parts[1]) {
+          const rawPayload = Buffer.from(parts[1], "base64url").toString("utf8");
+          const parsed = JSON.parse(rawPayload);
+          if (parsed && typeof parsed === "object") {
+            payload = parsed as Record<string, unknown>;
+          }
+        }
+      } catch {
+        // base64url parse error
+      }
+    }
+
+    if (!payload) {
+      return {
+        email: null,
+        workloadSubject: null,
+        proofIssuer: null,
+        proofAudience: null,
+        proofStatus: null,
+        proofRealm: null,
+        hasVerifiedProof: false,
+      };
+    }
+
+    const email =
+      typeof payload.email === "string"
+        ? payload.email.trim()
+        : typeof payload.sub === "string" && payload.sub.includes("@")
+        ? payload.sub.trim()
+        : null;
+
+    const workloadSubject =
+      typeof payload.workloadSubject === "string"
+        ? payload.workloadSubject.trim()
+        : typeof payload.sub === "string" && !payload.sub.includes("@")
+        ? payload.sub.trim()
+        : null;
+
+    const proofIssuer =
+      typeof payload.iss === "string" ? payload.iss.trim() : null;
+    const proofAudience =
+      typeof payload.aud === "string" ? payload.aud.trim() : null;
+    const proofStatus =
+      typeof payload.status === "string" ? payload.status.trim() : null;
+    const proofRealm =
+      typeof payload.realm === "string" ? payload.realm.trim() : null;
+
+    return {
+      email,
+      workloadSubject,
+      proofIssuer,
+      proofAudience,
+      proofStatus,
+      proofRealm,
+      hasVerifiedProof: true,
+    };
   }
 
   @OpenRoute()

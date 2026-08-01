@@ -79,7 +79,12 @@ export class JwtKeyMaterialNotConfiguredError extends Error {
 export function isJwtKeyMaterialNotConfiguredError(
   error: unknown,
 ): error is JwtKeyMaterialNotConfiguredError {
-  return error instanceof JwtKeyMaterialNotConfiguredError;
+  return (
+    error instanceof JwtKeyMaterialNotConfiguredError ||
+    (error instanceof Error &&
+      (error.name === "JwtKeyMaterialNotConfiguredError" ||
+        (error as { code?: string }).code === "JWT_KEY_MATERIAL_NOT_CONFIGURED"))
+  );
 }
 
 @Injectable()

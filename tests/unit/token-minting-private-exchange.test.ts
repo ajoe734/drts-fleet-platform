@@ -28,6 +28,10 @@ function getHttpStatus(error: unknown): number | null {
 describe("IAM-P0-002: Token minting private verified exchange", () => {
   let controller: AuthController;
   let jwtAuthService: JwtAuthService;
+  let adminProof: string;
+  let opsProof: string;
+  let workloadProof: string;
+  let contractorProof: string;
 
   beforeEach(() => {
     process.env = {
@@ -44,6 +48,50 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       {} as never,
       {} as never,
     );
+
+    adminProof = jwtAuthService.sign({
+      actorId: "pa-admin-001",
+      actorType: "platform_admin",
+      realm: "platform",
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["superadmin"],
+      scopes: [],
+      drtsPassengerId: null,
+    } as any);
+
+    opsProof = jwtAuthService.sign({
+      actorId: "pa-operator-001",
+      actorType: "ops_user",
+      realm: "ops",
+      tenantId: null,
+      roleFamilies: ["ops"],
+      roles: ["ops_user"],
+      scopes: [],
+      drtsPassengerId: null,
+    } as any);
+
+    workloadProof = jwtAuthService.sign({
+      actorId: "service-dispatch-v1",
+      actorType: "system",
+      realm: "system",
+      tenantId: null,
+      roleFamilies: [],
+      roles: ["system_service"],
+      scopes: [],
+      drtsPassengerId: null,
+    } as any);
+
+    contractorProof = jwtAuthService.sign({
+      actorId: "devops-contractor",
+      actorType: "ops_user",
+      realm: "ops",
+      tenantId: null,
+      roleFamilies: ["ops"],
+      roles: ["ops_user"],
+      scopes: [],
+      drtsPassengerId: null,
+    } as any);
   });
 
   afterEach(() => {
@@ -57,6 +105,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       controller.issueToken({
         headers: {
           "x-drts-internal-key": "internal-secret",
+          "x-goog-iap-jwt-assertion": opsProof,
           "x-goog-authenticated-user-email": "ops@platform.drts",
           "x-roles": "platform_superadmin",
         },
@@ -77,6 +126,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       controller.issueToken({
         headers: {
           "x-drts-internal-key": "internal-secret",
+          "x-goog-iap-jwt-assertion": adminProof,
           "x-goog-authenticated-user-email": "admin@platform.drts",
           "x-target-audience": "wrong-audience",
         },
@@ -94,6 +144,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       controller.issueToken({
         headers: {
           "x-drts-internal-key": "internal-secret",
+          "x-goog-iap-jwt-assertion": adminProof,
           "x-goog-authenticated-user-email": "admin@platform.drts",
           "x-target-issuer": "wrong-issuer",
         },
@@ -111,6 +162,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       controller.issueToken({
         headers: {
           "x-drts-internal-key": "internal-secret",
+          "x-goog-iap-jwt-assertion": adminProof,
           "x-goog-authenticated-user-email": "admin@platform.drts",
           "x-realm": "tenant",
         },
@@ -129,6 +181,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       controller.issueToken({
         headers: {
           "x-drts-internal-key": "internal-secret",
+          "x-goog-iap-jwt-assertion": adminProof,
           "x-goog-authenticated-user-email": "admin@platform.drts",
           "x-principal-status": "suspended",
         },
@@ -147,6 +200,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
     const platformRes = controller.issueToken({
       headers: {
         "x-drts-internal-key": "internal-secret",
+        "x-goog-iap-jwt-assertion": adminProof,
         "x-goog-authenticated-user-email": "admin@platform.drts",
       },
     });
@@ -161,6 +215,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
     const opsRes = controller.issueToken({
       headers: {
         "x-drts-internal-key": "internal-secret",
+        "x-goog-iap-jwt-assertion": opsProof,
         "x-goog-authenticated-user-email": "ops@platform.drts",
       },
     });
@@ -175,6 +230,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
     const workloadRes = controller.issueToken({
       headers: {
         "x-drts-internal-key": "internal-secret",
+        "x-workload-proof": workloadProof,
         "x-drts-workload-subject": "service-dispatch-v1",
       },
     });
@@ -203,9 +259,21 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
     expect(respNoProof?.code).toBe("IDENTITY_REQUIRED");
 
     // Valid direct path with workload proof passes
+    const billingProof = jwtAuthService.sign({
+      actorId: "billing-service",
+      actorType: "system",
+      realm: "system",
+      tenantId: null,
+      roleFamilies: [],
+      roles: ["system_service"],
+      scopes: [],
+      drtsPassengerId: null,
+    } as any);
+
     const validRes = controller.issueToken({
       headers: {
         "x-drts-internal-key": "internal-secret",
+        "x-workload-proof": billingProof,
         "x-drts-workload-subject": "billing-service",
       },
     });
@@ -233,6 +301,28 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
   });
 
   it("7. Tenant user durable membership resolution and status check", () => {
+    const activeUserProof = jwtAuthService.sign({
+      actorId: "user-active-001",
+      actorType: "tenant_admin",
+      realm: "tenant",
+      tenantId: "tenant-beta",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: [],
+      drtsPassengerId: null,
+    } as any);
+
+    const suspendedUserProof = jwtAuthService.sign({
+      actorId: "user-suspended-001",
+      actorType: "tenant_admin",
+      realm: "tenant",
+      tenantId: "tenant-beta",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: [],
+      drtsPassengerId: null,
+    } as any);
+
     const mockTenantPartnerService = {
       findTenantUserByEmail: vi.fn((email: string) => {
         if (email === "active@tenant.com") {
@@ -267,6 +357,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
     const activeRes = tenantController.issueToken({
       headers: {
         "x-drts-internal-key": "internal-secret",
+        "x-goog-iap-jwt-assertion": activeUserProof,
         "x-goog-authenticated-user-email": "active@tenant.com",
       },
     });
@@ -282,6 +373,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       tenantController.issueToken({
         headers: {
           "x-drts-internal-key": "internal-secret",
+          "x-goog-iap-jwt-assertion": suspendedUserProof,
           "x-goog-authenticated-user-email": "suspended@tenant.com",
         },
       });
@@ -299,6 +391,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       controller.issueToken({
         headers: {
           "x-goog-authenticated-user-email": "admin@platform.drts",
+          "x-goog-iap-jwt-assertion": adminProof,
         },
       });
     } catch (error) {
@@ -316,6 +409,7 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
       controller.issueToken({
         headers: {
           "x-drts-internal-key": "internal-secret",
+          "x-goog-iap-jwt-assertion": contractorProof,
           "x-goog-authenticated-user-email": "devops.contractor@example.com",
         },
       });

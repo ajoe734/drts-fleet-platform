@@ -38,6 +38,7 @@ describe("JWT controller error mapping", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_PRIVATE_KEY;
     delete process.env.JWT_PUBLIC_KEY;
+    delete process.env.DRTS_INTERNAL_KEY;
 
     const controller = new AuthController(
       new JwtAuthService(),
@@ -45,11 +46,24 @@ describe("JWT controller error mapping", () => {
       {} as never,
     );
 
+    const toB64Url = (str: string) =>
+      Buffer.from(str)
+        .toString("base64")
+        .replace(/=/g, "")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_");
+    const header = toB64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+    const payload = toB64Url(
+      JSON.stringify({ email: "admin@platform.drts", sub: "pa-admin-001" }),
+    );
+    const mockAssertion = `${header}.${payload}.${toB64Url("signature")}`;
+
     let thrown: unknown;
     try {
       controller.issueToken({
         headers: {
           "x-goog-authenticated-user-email": "admin@platform.drts",
+          "x-goog-iap-jwt-assertion": mockAssertion,
         },
         method: "POST",
         originalUrl: "/api/auth/token",
