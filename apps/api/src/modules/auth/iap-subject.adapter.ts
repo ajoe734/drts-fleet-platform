@@ -194,11 +194,16 @@ export class IAPSubjectAdapter {
       const isPlatformAdminGroup = assertionGroups.includes("platform-admins@platform.drts");
       const isOpsUserGroup = assertionGroups.includes("ops-users@platform.drts");
 
-      const defaultRole = isPlatformAdminGroup
-        ? "superadmin"
-        : isOpsUserGroup
-        ? "operator"
-        : "ops_user";
+      if (!isPlatformAdminGroup && !isOpsUserGroup) {
+        this.emitDeniedEvent("unmapped_group_membership", normalizedEmail);
+        throw new ApiRequestError(
+          403,
+          "IAP_WORKFORCE_USER_INACTIVE",
+          "Unmapped workforce user subject has no valid group membership.",
+        );
+      }
+
+      const defaultRole = isPlatformAdminGroup ? "superadmin" : "operator";
       const defaultRealm = isPlatformAdminGroup ? "platform" : "ops";
 
       const newPrincipal: CanonicalIdentityPrincipalRecord = {

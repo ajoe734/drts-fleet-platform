@@ -256,7 +256,11 @@ function buildIdentity(
   requestId?: string | null,
   authMode: ControlPlaneIdentity["authMode"] = "jwt_bearer",
   subject?: string | null,
+  overrideRoles?: string[],
 ): ControlPlaneIdentity {
+  const known =
+    PLATFORM_ADMIN_DIRECTORY[authenticatedUserEmail as keyof typeof PLATFORM_ADMIN_DIRECTORY];
+
   if (actorType === "platform_admin") {
     const platformIdentity = resolvePlatformAdminIdentity(
       authenticatedUserEmail,
@@ -265,12 +269,16 @@ function buildIdentity(
     return {
       authMode,
       actorType,
-      actorId: platformIdentity.actorId,
+      actorId: known
+        ? known.actorId
+        : subject
+        ? `iap-subject-${toActorSlug(subject)}`
+        : platformIdentity.actorId,
       ...(subject ? { subject } : {}),
       realm: CONTROL_PLANE_REALMS[actorType],
       tenantId: null,
       roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
-      roles: platformIdentity.roles,
+      roles: overrideRoles ?? platformIdentity.roles,
       scopes: [...CONTROL_PLANE_SCOPE_PRESETS[actorType]],
       requestId: requestId ?? null,
     };
@@ -279,12 +287,16 @@ function buildIdentity(
   return {
     authMode,
     actorType,
-    actorId: `ops-user-${toActorSlug(authenticatedUserEmail)}`,
+    actorId: known
+      ? known.actorId
+      : subject
+      ? `iap-subject-${toActorSlug(subject)}`
+      : `ops-user-${toActorSlug(authenticatedUserEmail)}`,
     ...(subject ? { subject } : {}),
     realm: CONTROL_PLANE_REALMS[actorType],
     tenantId: null,
     roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
-    roles: ["ops_user"],
+    roles: overrideRoles ?? ["ops_user"],
     scopes: [...CONTROL_PLANE_SCOPE_PRESETS[actorType]],
     requestId: requestId ?? null,
   };
@@ -455,6 +467,7 @@ export function issueControlPlaneRequestAuth(options: {
 }): ControlPlaneRequestAuth {
   let verifiedSubject: string | null = null;
   let verifiedEmail: string | null = null;
+  let verifiedGroups: string[] | null = null;
 
   if (options.headers) {
     const assertion = extractIapJwtAssertion(options.headers);
@@ -470,8 +483,13 @@ export function issueControlPlaneRequestAuth(options: {
         if (payload.email) {
           verifiedEmail = normalizeAuthenticatedUserEmail(payload.email);
         }
-      } catch (err) {
-        if (options.strictIapMode) {
+        if (Array.isArray(payload.gcp_ia_groups)) {
+          verifiedGroups = payload.gcp_ia_groups;
+        } else if (Array.isArray(payload.groups)) {
+          verifiedGroups = payload.groups;
+        }
+      } catch (err: any) {
+        if (options.strictIapMode || extractIapJwtAssertion(options.headers)) {
           throw new Error(
             `Control-plane IAP assertion verification failed: ${
               err instanceof Error ? err.message : String(err)
@@ -483,6 +501,30 @@ export function issueControlPlaneRequestAuth(options: {
       throw new Error(
         "Control-plane strict IAP mode requires a valid x-goog-iap-jwt-assertion header.",
       );
+    }
+  }
+
+  // Derive authority strictly from verified subject group membership when assertion/groups present
+  let overrideRoles: string[] | undefined = undefined;
+
+  if (verifiedGroups !== null) {
+    const isPlatformAdmin = verifiedGroups.includes("platform-admins@platform.drts");
+    const isOpsUser = verifiedGroups.includes("ops-users@platform.drts");
+
+    if (!isPlatformAdmin && !isOpsUser) {
+      throw new Error("Verified IAP subject has no valid workforce group membership.");
+    }
+
+    if (options.actorType === "platform_admin") {
+      if (!isPlatformAdmin) {
+        throw new Error("Verified IAP subject does not possess required platform-admins group membership.");
+      }
+      overrideRoles = ["superadmin"];
+    } else if (options.actorType === "ops_user") {
+      if (!isOpsUser && !isPlatformAdmin) {
+        throw new Error("Verified IAP subject does not possess required ops-users group membership.");
+      }
+      overrideRoles = isPlatformAdmin ? ["operator"] : ["ops_user"];
     }
   }
 
@@ -509,6 +551,7 @@ export function issueControlPlaneRequestAuth(options: {
     options.requestId,
     hasJwtSecret ? "jwt_bearer" : "bootstrap_headers",
     verifiedSubject,
+    overrideRoles,
   );
 
   if (!hasJwtSecret) {

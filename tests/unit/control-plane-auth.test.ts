@@ -155,4 +155,50 @@ describe("control-plane auth helper", () => {
       }),
     ).toThrowError("IAP JWT assertion issuer mismatch");
   });
+
+  it("rejects request when verified IAP subject group membership does not match requested actorType", () => {
+    const testSecret = "iap_test_secret_32bytes_minimum!";
+    const opsOnlyToken = signTestIapJwtAssertion(
+      {
+        sub: "user-ops-99",
+        email: "operator@platform.drts",
+        gcp_ia_groups: ["ops-users@platform.drts"],
+      },
+      testSecret,
+    );
+
+    expect(() =>
+      issueControlPlaneRequestAuth({
+        actorType: "platform_admin",
+        headers: {
+          "x-goog-iap-jwt-assertion": opsOnlyToken,
+        },
+        strictIapMode: true,
+        iapJwtSecretOrPublicKey: testSecret,
+      }),
+    ).toThrowError("Verified IAP subject does not possess required platform-admins group membership.");
+  });
+
+  it("rejects unmapped subjects lacking both platform and ops group membership", () => {
+    const testSecret = "iap_test_secret_32bytes_minimum!";
+    const unmappedToken = signTestIapJwtAssertion(
+      {
+        sub: "user-unmapped-01",
+        email: "unmapped@external.com",
+        gcp_ia_groups: ["external-guests@external.com"],
+      },
+      testSecret,
+    );
+
+    expect(() =>
+      issueControlPlaneRequestAuth({
+        actorType: "ops_user",
+        headers: {
+          "x-goog-iap-jwt-assertion": unmappedToken,
+        },
+        strictIapMode: true,
+        iapJwtSecretOrPublicKey: testSecret,
+      }),
+    ).toThrowError("Verified IAP subject has no valid workforce group membership.");
+  });
 });

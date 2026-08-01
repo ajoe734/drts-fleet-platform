@@ -145,6 +145,40 @@ describe("IAPSubjectAdapter", () => {
     expect(caught?.code).toBe("IAP_AUDIENCE_MISMATCH");
   });
 
+  it("fails closed when unmapped subject attempts autoProvision without valid workforce group", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const token = signTestIapToken({
+      sub: "unmapped_sub_99",
+      email: "guest@external.com",
+      gcp_ia_groups: ["unmapped-group@external.com"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+          autoProvision: true,
+        },
+      );
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+    const resp = caught?.getResponse() as any;
+    expect(resp?.error?.message).toContain("Unmapped workforce user subject has no valid group membership.");
+  });
+
   it("fails closed when workforce user or membership is inactive/suspended", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
