@@ -331,7 +331,17 @@ export class IAPSubjectAdapter {
         return true;
       });
 
-      const assignedRoles = Array.from(new Set(activeBindings.map((b) => b.roleCode)));
+      const allAssignedRoles = Array.from(new Set(activeBindings.map((b) => b.roleCode)));
+      const assignedRoles = allAssignedRoles.filter((r) => {
+        if (m.realm === "platform") {
+          return r === "superadmin" || r === "platform_admin";
+        }
+        if (m.realm === "ops") {
+          return r === "operator" || r === "ops_user";
+        }
+        return false;
+      });
+
       const missingGroupsForM: string[] = [];
       const effectiveRolesForM: string[] = [];
       let driftForM = false;
@@ -352,22 +362,10 @@ export class IAPSubjectAdapter {
         }
       }
 
-      // Filter effective roles to match the membership's realm
-      let realmMatchingRoles = effectiveRolesForM;
-      if (m.realm === "platform") {
-        realmMatchingRoles = effectiveRolesForM.filter(
-          (r) => r === "superadmin" || r === "platform_admin",
-        );
-      } else if (m.realm === "ops") {
-        realmMatchingRoles = effectiveRolesForM.filter(
-          (r) => r === "operator" || r === "ops_user",
-        );
-      }
-
       membershipAnalyses.push({
         membership: m,
         originalRoles: assignedRoles,
-        effectiveRoles: realmMatchingRoles,
+        effectiveRoles: effectiveRolesForM,
         missingGroups: missingGroupsForM,
         driftDetected: driftForM,
       });
@@ -525,7 +523,7 @@ export class IAPSubjectAdapter {
     let driftDetails: ResolvedIapWorkforceSubject["driftDetails"];
     const missingGroupsList = requestedRealm
       ? selectedAnalysis.missingGroups
-      : Array.from(allMissingGroups);
+      : (allMissingGroups.size > 0 ? Array.from(allMissingGroups) : selectedAnalysis.missingGroups);
     const hasDrift = requestedRealm
       ? selectedAnalysis.driftDetected || missingGroupsList.length > 0
       : overallDriftDetected || selectedAnalysis.driftDetected || missingGroupsList.length > 0;
@@ -534,7 +532,7 @@ export class IAPSubjectAdapter {
       driftDetails = {
         originalRoles,
         effectiveRoles,
-        missingGroups: missingGroupsList.length > 0 ? missingGroupsList : selectedAnalysis.missingGroups,
+        missingGroups: missingGroupsList,
       };
       this.emitGroupDriftEvent(
         principal.principalId,

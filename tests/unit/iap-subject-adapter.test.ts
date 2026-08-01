@@ -1272,6 +1272,166 @@ describe("IAPSubjectAdapter", () => {
     expect(result.effectiveRoles).toEqual(["superadmin"]);
     expect(result.driftDetected).toBe(false);
   });
+
+  it("fails closed when platform realm is requested but platform membership only possesses ops-only durable role bindings", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_cross_platform_001",
+        sourceRef: "iap_subject:cross_platform_sub",
+        issuer: "google_iap",
+        subject: "cross_platform_sub",
+        principalType: "human",
+        email: "cross-platform@platform.drts",
+        emailVerified: true,
+        displayName: "Cross Platform User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_cross_platform_001",
+        sourceRef: "iap_membership:cross_platform",
+        principalId: "principal_cross_platform_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_ops_on_platform_001",
+          sourceRef: "rb_ops_on_platform_001",
+          membershipId: "membership_cross_platform_001",
+          roleCode: "operator", // Ops-only role assigned to platform membership
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const token = signTestIapToken({
+      sub: "cross_platform_sub",
+      email: "cross-platform@platform.drts",
+      gcp_ia_groups: ["ops-users@platform.drts", "platform-admins@platform.drts"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+          requestedRealm: "platform",
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+    const resp = caught?.getResponse() as any;
+    expect(resp?.error?.message).toBe("Workforce user has no active durable role bindings.");
+  });
+
+  it("fails closed when ops realm is requested but ops membership only possesses platform-only durable role bindings", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_cross_ops_001",
+        sourceRef: "iap_subject:cross_ops_sub",
+        issuer: "google_iap",
+        subject: "cross_ops_sub",
+        principalType: "human",
+        email: "cross-ops@platform.drts",
+        emailVerified: true,
+        displayName: "Cross Ops User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_cross_ops_001",
+        sourceRef: "iap_membership:cross_ops",
+        principalId: "principal_cross_ops_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_platform_on_ops_001",
+          sourceRef: "rb_platform_on_ops_001",
+          membershipId: "membership_cross_ops_001",
+          roleCode: "superadmin", // Platform-only role assigned to ops membership
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    const token = signTestIapToken({
+      sub: "cross_ops_sub",
+      email: "cross-ops@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    });
+
+    let caught: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: EXPECTED_AUDIENCE,
+          jwtSecretOrPublicKey: TEST_SECRET,
+          requestedRealm: "ops",
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        caught = err;
+      }
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught?.status).toBe(403);
+    expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
+    const resp = caught?.getResponse() as any;
+    expect(resp?.error?.message).toBe("Workforce user has no active durable role bindings.");
+  });
 });
 
 
