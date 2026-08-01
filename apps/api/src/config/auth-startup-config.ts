@@ -118,26 +118,23 @@ const ALLOWED_JWT_ALGORITHMS = new Set([
 export function detectAuthEnvironment(
   env: EnvLike = process.env,
 ): AuthEnvironment {
+  const raw = (env.APP_ENV ?? env.NODE_ENV)?.trim().toLowerCase();
+
+  if (raw === "prod" || raw === "production") {
+    return "production";
+  }
+  if (raw === "stage" || raw === "staging") {
+    return "staging";
+  }
+  if (raw === "test" || raw === "testing" || raw === "ci") {
+    return "test";
+  }
+
   if ((env.CI ?? "").trim().toLowerCase() === "true") {
     return "test";
   }
 
-  const raw = (env.APP_ENV ?? env.NODE_ENV ?? "local").trim().toLowerCase();
-
-  switch (raw) {
-    case "prod":
-    case "production":
-      return "production";
-    case "stage":
-    case "staging":
-      return "staging";
-    case "test":
-    case "testing":
-    case "ci":
-      return "test";
-    default:
-      return "local";
-  }
+  return "local";
 }
 
 function normalizeString(value: string | undefined): string | undefined {
@@ -193,13 +190,7 @@ export function buildAuthStartupConfigReport(
   // Check explicit local/test mode requirement
   const authMode = normalizeString(env.AUTH_MODE)?.toLowerCase();
   if (!isStrictEnvironment) {
-    if (!authMode) {
-      issues.push({
-        control: "AUTH_MODE",
-        issue: `Missing required control: AUTH_MODE must be explicitly specified in local/test environment (e.g. AUTH_MODE=local or AUTH_MODE=test)`,
-        code: "MISSING_CONTROL",
-      });
-    } else if (!["local", "test", "dev", "explicit"].includes(authMode)) {
+    if (authMode && !["local", "test", "dev", "explicit"].includes(authMode)) {
       issues.push({
         control: "AUTH_MODE",
         issue: `Invalid AUTH_MODE "${authMode}" specified for ${environment} environment`,
