@@ -309,4 +309,23 @@ describe("IAM-P0-002: Token minting private verified exchange", () => {
     expect(getHttpStatus(thrown)).toBe(401);
     expect(resp?.code).toBe("INTERNAL_KEY_REQUIRED");
   });
+
+  it("9. Email heuristics are rejected (devops.contractor@example.com cannot mint ops_user)", () => {
+    let thrown: unknown;
+    try {
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-goog-authenticated-user-email": "devops.contractor@example.com",
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const resp = getErrorResponse(thrown);
+    expect(getHttpStatus(thrown)).toBe(403);
+    expect(resp?.code).toBe("ACCOUNT_NOT_ACTIVE");
+  });
 });
+

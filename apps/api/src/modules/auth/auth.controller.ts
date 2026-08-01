@@ -30,10 +30,9 @@ import {
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
-import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
 import type {
   AuthActorType,
-  AuthBootstrapHeaders,
+  AuthMode,
   AuthRealm,
   AuthRoleFamily,
 } from "../../common/auth/auth.types";
@@ -170,6 +169,7 @@ export class AuthController {
     const requestedRealm = readHeader("x-realm") || reqBody.realm;
 
     let resolvedIdentity: {
+      authMode: AuthMode;
       actorType: AuthActorType;
       actorId: string;
       realm: AuthRealm;
@@ -182,15 +182,12 @@ export class AuthController {
 
     if (iapEmail) {
       const normalizedEmail = iapEmail.toLowerCase().trim();
-      const isSuperadmin =
-        normalizedEmail === "admin@platform.drts" ||
-        normalizedEmail.includes("superadmin");
-      const isOps =
-        normalizedEmail === "ops@platform.drts" ||
-        normalizedEmail.includes("ops");
+      const isSuperadmin = normalizedEmail === "admin@platform.drts";
+      const isOps = normalizedEmail === "ops@platform.drts";
 
       if (isSuperadmin) {
         resolvedIdentity = {
+          authMode: "jwt_bearer",
           actorType: "platform_admin",
           actorId: "pa-admin-001",
           realm: "platform",
@@ -202,6 +199,7 @@ export class AuthController {
         };
       } else if (isOps) {
         resolvedIdentity = {
+          authMode: "jwt_bearer",
           actorType: "ops_user",
           actorId: "pa-operator-001",
           realm: "ops",
@@ -236,9 +234,11 @@ export class AuthController {
         }
 
         const roles = [tenantUser.roleCode];
-        const scopes = getTenantRoleScopes(tenantUser.roleCode);
+        const tenantScopes = getTenantRoleScopes(tenantUser.roleCode);
+        const scopes = tenantScopes ? [...tenantScopes] : [];
 
         resolvedIdentity = {
+          authMode: "jwt_bearer",
           actorType: "tenant_admin",
           actorId: tenantUser.userId,
           realm: "tenant",
@@ -270,6 +270,7 @@ export class AuthController {
       }
 
       resolvedIdentity = {
+        authMode: "jwt_bearer",
         actorType: "system",
         actorId: workloadSubject!,
         realm: "system",
