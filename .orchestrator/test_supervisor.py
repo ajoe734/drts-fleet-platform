@@ -550,6 +550,36 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(base_branch, "dev")
             self.assertEqual(source, "existing_worktree")
 
+    def test_reuses_existing_worktree_for_execution_branch_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            existing = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "codex/iam-ses-002-post-p0", str(existing), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                metadata={
+                    "mode": "execution",
+                    "task": {"execution_branch": "codex/iam-ses-002-post-p0"},
+                },
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("IAM-SES-002"),
+            )
+
+            self.assertEqual(workspace, existing.resolve())
+            self.assertEqual(branch, "codex/iam-ses-002-post-p0")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_worktree")
+
     def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"
@@ -981,6 +1011,102 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         record = state["queue"]["events"]["evt-stale"]
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["skip_reason"], "stale_dispatch_event")
+
+    def test_skips_queued_dispatch_when_external_integration_is_pending(self) -> None:
+        task = {
+            "id": "BUS-VAL-CI-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+            "pr_url": "https://github.com/example/repo/pull/1",
+            "last_update": "2026-04-05T11:45:16Z",
+        }
+        queued_event = supervisor.build_dispatch_event(
+            task,
+            "Codex",
+            "owned_in_progress_dispatch",
+            {"BUS-VAL-CI-001": task},
+        )
+        queue_payload = {
+            "event_id": "evt-ci-pending",
+            "event_key": queued_event["key"],
+            "task_id": "BUS-VAL-CI-001",
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+            "message": "wake",
+        }
+        state = {"queue": {"events": {}}, "workers": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_event_queue", return_value=[queue_payload]),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
+            mock.patch.object(
+                supervisor,
+                "start_worker_for_request",
+                side_effect=AssertionError("CI-pending task should not start a worker"),
+            ),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.process_queue(self.config, state, self.provider_report)
+
+        self.assertTrue(changed)
+        record = state["queue"]["events"]["evt-ci-pending"]
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["skip_reason"], "stale_dispatch_event")
+
+    def test_chair_does_not_directly_dispatch_task_with_pending_integration(self) -> None:
+        task = {
+            "id": "BUS-VAL-CI-002",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+        }
+
+        self.assertIsNone(
+            supervisor.chair_dispatch_action_reason(
+                self.config,
+                task,
+                {"BUS-VAL-CI-002": task},
+            )
+        )
+
+    def test_proactive_claim_does_not_reassign_task_with_pending_integration(self) -> None:
+        task = {
+            "id": "BUS-VAL-CI-003",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+        }
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            self.config,
+            task=task,
+            task_map={"BUS-VAL-CI-003": task},
+            idle_agent_name="Gemini",
+            idle_agent_names=["Gemini"],
+            agent_loads={"Codex": [1], "Gemini": []},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["in_progress"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+        )
+
+        self.assertIsNone(plan)
 
     def test_build_request_uses_task_brief_context_for_execution_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

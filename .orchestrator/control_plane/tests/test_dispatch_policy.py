@@ -25,6 +25,7 @@ class DispatchPolicyTests(unittest.TestCase):
                     "reviewer": "Claude",
                     "depends_on": ["DEP-1", "ARCHIVED-1"],
                     "artifacts": ["apps/api"],
+                    "execution_branch": "codex/task-1-existing-pr",
                     "next": "implement",
                     "last_update": "2026-07-18T00:00:00Z",
                 },
@@ -71,6 +72,53 @@ class DispatchPolicyTests(unittest.TestCase):
             self.assertEqual(decision.target_agent, expected_agent)
             self.assertEqual(decision.reason, expected_reason)
 
+    def test_holds_in_progress_task_while_external_ci_is_pending(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+            "integration_status": "ci_pending",
+            "pr_url": "https://github.com/example/repo/pull/1",
+            "ci_status": "pending",
+        }
+
+        self.assertIsNone(resolve_dispatch_target(task, {"TASK-1": task}, self.policy))
+
+    def test_allows_in_progress_task_back_to_owner_after_ci_failure(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+            "integration_status": "ci_failed",
+            "pr_url": "https://github.com/example/repo/pull/1",
+            "ci_status": "failure",
+        }
+
+        decision = resolve_dispatch_target(task, {"TASK-1": task}, self.policy)
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+
+    def test_ci_failure_overrides_a_stale_in_flight_integration_status(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "in_progress",
+            "owner": "Codex",
+            "depends_on": [],
+            "integration_status": "ci_pending",
+            "pr_url": "https://github.com/example/repo/pull/1",
+            "ci_status": "failure",
+        }
+
+        decision = resolve_dispatch_target(task, {"TASK-1": task}, self.policy)
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+
     def test_event_is_deterministic_and_contains_canonical_metadata(self) -> None:
         decision = resolve_dispatch_target(self.tasks["TASK-1"], self.tasks, self.policy)
 
@@ -80,6 +128,7 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["target_agent"], "Codex")
         self.assertEqual(first["metadata"], {"source": "test", "mode": "execution"})
+        self.assertEqual(first["task"]["execution_branch"], "codex/task-1-existing-pr")
 
 
     def test_runtime_event_omits_external_envelope_fields(self) -> None:

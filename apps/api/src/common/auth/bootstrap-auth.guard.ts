@@ -111,6 +111,14 @@ function extractBearerToken(
   return value.slice(7).trim() || null;
 }
 
+function hasControlPlaneInnerBearer(
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  const value = headers["x-drts-authorization"];
+  const header = Array.isArray(value) ? value[0] : value;
+  return Boolean(header?.startsWith("Bearer "));
+}
+
 function hasBootstrapAuthSignal(
   headers: Record<string, string | string[] | undefined>,
 ): boolean {
@@ -300,33 +308,42 @@ export class BootstrapAuthGuard implements CanActivate {
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
-        return this.jwtAuthService.verifyAccessToken(token).then((payload) => {
-          if (!payload) {
-            throw new ApiRequestError(
-              401,
-              "JWT_INVALID",
-              "Bearer token is invalid or expired.",
-              { route: requestUrl },
-            );
-          }
-
-          const identity = this.jwtAuthService!.toRequestIdentity(payload);
-          request.identity = identity;
-          if (policy) {
-            try {
-              this.assertRealmAllowed(identity, policy.allowedRealms, request);
-              this.assertScopesAllowed(
-                identity,
-                policy.requiredScopes,
-                request,
+        return this.jwtAuthService
+          .verifyAccessToken(token, {
+            allowControlPlaneProxyToken:
+              hasControlPlaneInnerBearer(baseHeaders),
+          })
+          .then((payload) => {
+            if (!payload) {
+              throw new ApiRequestError(
+                401,
+                "JWT_INVALID",
+                "Bearer token is invalid or expired.",
+                { route: requestUrl },
               );
-            } catch (error) {
-              this.recordAuthorizationDenialAudit(identity, request, error);
-              throw error;
             }
-          }
-          return true;
-        });
+
+            const identity = this.jwtAuthService!.toRequestIdentity(payload);
+            request.identity = identity;
+            if (policy) {
+              try {
+                this.assertRealmAllowed(
+                  identity,
+                  policy.allowedRealms,
+                  request,
+                );
+                this.assertScopesAllowed(
+                  identity,
+                  policy.requiredScopes,
+                  request,
+                );
+              } catch (error) {
+                this.recordAuthorizationDenialAudit(identity, request, error);
+                throw error;
+              }
+            }
+            return true;
+          });
       }
     }
     const headers = isSseBootstrapQueryRoute(
@@ -405,17 +422,22 @@ export class BootstrapAuthGuard implements CanActivate {
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
-        return this.jwtAuthService.verifyAccessToken(token).then((payload) => {
-          if (!payload) {
-            throw new ApiRequestError(
-              401,
-              "JWT_INVALID",
-              "Bearer token is invalid or expired.",
-              { route: requestUrl },
-            );
-          }
-          request.identity = this.jwtAuthService!.toRequestIdentity(payload);
-        });
+        return this.jwtAuthService
+          .verifyAccessToken(token, {
+            allowControlPlaneProxyToken:
+              hasControlPlaneInnerBearer(baseHeaders),
+          })
+          .then((payload) => {
+            if (!payload) {
+              throw new ApiRequestError(
+                401,
+                "JWT_INVALID",
+                "Bearer token is invalid or expired.",
+                { route: requestUrl },
+              );
+            }
+            request.identity = this.jwtAuthService!.toRequestIdentity(payload);
+          });
       }
     }
 

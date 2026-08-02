@@ -19,11 +19,30 @@ try:
 except ImportError:  # pragma: no cover - non-POSIX fallback
     fcntl = None
 
+STATUS_AUTHORITY_VERSION = "2026-08-02.v1"
+STATUS_AUTHORITY_HANDSHAKE = "ORCH-STATUS-AUTHORITY-003"
+
 ROOT = Path(
     os.environ.get("AI_STATUS_ROOT")
     or os.environ.get("ORCH_STATUS_ROOT")
     or Path(__file__).resolve().parents[1]
 ).resolve()
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_LOCAL_ROOT = _SCRIPT_DIR.parent.resolve()
+
+
+def ensure_canonical_delegation(argv: list[str] | None = None) -> None:
+    if ROOT != _LOCAL_ROOT and not os.environ.get("_AI_STATUS_DELEGATED"):
+        canonical_script = (ROOT / "scripts" / "ai_status.py").resolve()
+        if canonical_script.exists() and canonical_script != Path(__file__).resolve():
+            os.environ["_AI_STATUS_DELEGATED"] = "1"
+            os.environ["AI_STATUS_ROOT"] = str(ROOT)
+            os.environ["ORCH_STATUS_ROOT"] = str(ROOT)
+            cmd_args = (argv if argv is not None else sys.argv)[1:]
+            os.execv(sys.executable, [sys.executable, str(canonical_script)] + cmd_args)
+
+
 STATUS_FILE = ROOT / "ai-status.json"
 LOG_FILE = ROOT / "ai-activity-log.jsonl"
 TASK_ARCHIVE_FILE = ROOT / "ai-task-archive.jsonl"
@@ -617,6 +636,18 @@ def enforce_required_integration_closeout(
     task: dict[str, Any],
     completion_metadata: dict[str, Any],
 ) -> None:
+    required_fields = task.get("required_evidence_fields") or []
+    if isinstance(required_fields, list) and required_fields:
+        missing_fields: list[str] = []
+        for field in required_fields:
+            val = str(completion_metadata.get(field) or task.get(field) or "").strip()
+            if not val:
+                missing_fields.append(str(field))
+        if missing_fields:
+            raise SystemExit(
+                f"{task.get('id') or 'task'} requires evidence fields: {', '.join(missing_fields)}"
+            )
+
     required_status = required_integration_status(task)
     if not required_status:
         return
@@ -763,13 +794,18 @@ def default_state() -> dict[str, Any]:
         "handoffs": [],
         "blockers": [],
         "workload": {name: meta["target_workload"] for name, meta in KNOWN_AGENTS.items()},
+        "status_authority_version": STATUS_AUTHORITY_VERSION,
+        "status_authority_handshake": STATUS_AUTHORITY_HANDSHAKE,
     }
 
 
 def load_state() -> dict[str, Any]:
     if not STATUS_FILE.exists() or STATUS_FILE.read_text(encoding="utf-8").strip() == "":
-        return default_state()
-    state = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+        state = default_state()
+    else:
+        state = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+    state["status_authority_version"] = STATUS_AUTHORITY_VERSION
+    state["status_authority_handshake"] = STATUS_AUTHORITY_HANDSHAKE
     sync_canonical_document_metadata(state)
     normalize_state_agents(state)
     return state
@@ -2389,6 +2425,7 @@ def command_audit(state: dict[str, Any], args: list[str]) -> None:
 
 
 def main(argv: list[str]) -> int:
+    ensure_canonical_delegation(argv)
     state = load_state()
     command = argv[1] if len(argv) > 1 else "sync"
     args = argv[2:]

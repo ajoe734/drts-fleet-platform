@@ -38,6 +38,7 @@ from control_plane.domain.dispatch_policy import (
     build_dispatch_event as build_domain_dispatch_event,
     dependencies_satisfied as domain_dependencies_satisfied,
     dependency_signature as domain_dependency_signature,
+    has_external_integration_in_flight,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -1273,6 +1274,24 @@ def _task_branch(agent_id: str, task_id: str) -> str:
     return f"{normalize_agent_id(agent_id)}/{task_id.lower()}"
 
 
+def _execution_branch(repo_root: Path, request: DeliveryRequest) -> str:
+    """Prefer a task-scoped branch override only when Git accepts it."""
+    default_branch = _task_branch(request.agent_id, request.task_id or "")
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
+    configured_branch = task.get("execution_branch")
+    if not isinstance(configured_branch, str) or not configured_branch.strip():
+        return default_branch
+
+    result = _git_capture(
+        repo_root,
+        ["check-ref-format", "--branch", configured_branch.strip()],
+    )
+    if result.returncode != 0:
+        return default_branch
+    return (result.stdout or "").strip() or default_branch
+
+
 def _worktree_entries(repo_root: Path) -> list[dict[str, str]]:
     result = _git_capture(repo_root, ["worktree", "list", "--porcelain"])
     if result.returncode != 0:
@@ -1350,16 +1369,16 @@ def _worker_worktrees_enabled(config: dict[str, Any]) -> bool:
     return settings.get("enabled", True) is not False
 
 
-def _candidate_worktree_path(base: Path, agent_id: str, task_id: str) -> Path:
+def _candidate_worktree_path(base: Path, agent_id: str, task_id: str, branch: str) -> Path:
     slug = re.sub(r"[^a-z0-9._-]+", "-", f"{normalize_agent_id(agent_id)}-{task_id.lower()}").strip("-")
     candidate = base / slug
     if not candidate.exists():
         return candidate
-    if _current_branch(candidate) == _task_branch(agent_id, task_id):
+    if _current_branch(candidate) == branch:
         return candidate
     for index in range(2, 20):
         suffixed = base / f"{slug}-{index}"
-        if not suffixed.exists() or _current_branch(suffixed) == _task_branch(agent_id, task_id):
+        if not suffixed.exists() or _current_branch(suffixed) == branch:
             return suffixed
     return base / f"{slug}-{new_runtime_id('wt')}"
 
@@ -1492,7 +1511,7 @@ def ensure_execution_workspace(
     if not request.task_id or mode == "planning":
         return repo_root, None, None, None
 
-    branch = _task_branch(request.agent_id, request.task_id)
+    branch = _execution_branch(repo_root, request)
     base_branch = routing.base_branch if routing else "dev"
     base = _worker_worktree_base(config, repo_root)
     existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
@@ -1500,7 +1519,7 @@ def ensure_execution_workspace(
         return existing, branch, base_branch, "existing_worktree"
 
     base.mkdir(parents=True, exist_ok=True)
-    destination = _candidate_worktree_path(base, request.agent_id, request.task_id)
+    destination = _candidate_worktree_path(base, request.agent_id, request.task_id, branch)
     if destination.exists() and _current_branch(destination) == branch:
         return destination.resolve(), branch, base_branch, "existing_path"
 
@@ -3761,6 +3780,8 @@ def proactive_claim_plan_for_idle_agent(
     allowed_statuses = {str(value).lower() for value in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
     task_status = str(task.get("status") or "").lower()
     if task_status not in allowed_statuses:
+        return None
+    if task_status == "in_progress" and has_external_integration_in_flight(task):
         return None
 
     owner = str(task.get("owner") or "")
@@ -6309,7 +6330,12 @@ def current_dispatch_event_key(config: dict[str, Any], event: dict[str, Any], ta
     elif reason == "owned_finalize_dispatch":
         eligible = task_status in finalize_statuses and task.get(owner_field) == target_agent
     elif reason == "owned_in_progress_dispatch":
-        eligible = task_status == "in_progress" and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
+        eligible = (
+            task_status == "in_progress"
+            and task.get(owner_field) == target_agent
+            and not has_external_integration_in_flight(task)
+            and dependencies_satisfied(task, task_map, dependency_done_statuses)
+        )
     elif reason == "owned_ready_dispatch":
         eligible = task_status in {"todo", "backlog"} and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
 
@@ -7560,7 +7586,12 @@ def chair_dispatch_action_reason(
         return reviewer, "review_ready_dispatch"
     if status_value in finalize_statuses and owner:
         return owner, "owned_finalize_dispatch"
-    if status_value == "in_progress" and owner and dependencies_satisfied(task, task_map, dependency_done_statuses):
+    if (
+        status_value == "in_progress"
+        and owner
+        and not has_external_integration_in_flight(task)
+        and dependencies_satisfied(task, task_map, dependency_done_statuses)
+    ):
         return owner, "owned_in_progress_dispatch"
     if status_value in {"todo", "backlog"} and owner and dependencies_satisfied(task, task_map, dependency_done_statuses):
         return owner, "owned_ready_dispatch"

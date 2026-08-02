@@ -491,6 +491,17 @@ class IntegrationGateUnitTest(unittest.TestCase):
                 status,
             )
 
+    def test_required_integration_status_blocks_unmatched_statuses(self) -> None:
+        task = {"id": "REL-REF-EMBED-001", "required_integration_status": "dev_deployed"}
+        for status in ("merged_to_dev", "not_applicable", "branch_pushed", "ci_failed"):
+            reason = integration_gate.check_integration_gate(task, status, self._cfg())
+            self.assertIsNotNone(reason, f"Expected block for status {status}")
+            self.assertIn("REL-REF-EMBED-001", reason)
+            self.assertIn("required_integration_status=dev_deployed", reason)
+        self.assertIsNone(
+            integration_gate.check_integration_gate(task, "dev_deployed", self._cfg())
+        )
+
     def test_exempt_pattern_allows(self) -> None:
         cfg = self._cfg(exempt_task_patterns=[r"-SIDECAR-ACCEPTANCE$"])
         self.assertIsNone(
@@ -688,6 +699,62 @@ class IntegrationGateCommandDoneTest(unittest.TestCase):
             ai_status.command_done(state, ["I18N-OPS-03", "support-only packet finalized"])
         self.assertEqual(task["status"], "done")
         self.assertEqual(task["integration_status"], "not_applicable")
+
+    def test_status_authority_version_stamped_on_load(self) -> None:
+        state = ai_status.default_state()
+        self.assertEqual(state.get("status_authority_version"), "2026-08-02.v1")
+        self.assertEqual(state.get("status_authority_handshake"), "ORCH-STATUS-AUTHORITY-003")
+
+    def test_required_evidence_fields_enforcement(self) -> None:
+        task = {
+            "id": "REL-REF-EMBED-002",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "review_approved",
+            "required_integration_status": "dev_deployed",
+            "required_evidence_fields": [
+                "pr_url",
+                "ci_run_url",
+                "merge_commit",
+                "dev_deploy_run_url",
+                "dev_deploy_sha",
+                "live_verification_urls",
+            ],
+        }
+        completion_metadata = {
+            "integration_status": "dev_deployed",
+            "pr_url": "https://github.com/test/pr/1",
+            "ci_run_url": "https://github.com/test/ci/1",
+            "merge_commit": "abc123",
+            "dev_deploy_run_url": "https://github.com/test/deploy/1",
+            "dev_deploy_sha": "abc123",
+        }
+        with self.assertRaisesRegex(SystemExit, "requires evidence fields: live_verification_urls"):
+            ai_status.enforce_required_integration_closeout(task, completion_metadata)
+
+    def test_delegation_to_canonical_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            canonical_root = Path(tmpdir) / "canonical"
+            worktree_root = Path(tmpdir) / "worktree"
+            (canonical_root / "scripts").mkdir(parents=True)
+            (worktree_root / "scripts").mkdir(parents=True)
+
+            canonical_script = canonical_root / "scripts" / "ai_status.py"
+            canonical_script.write_text("# canonical\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(ai_status, "ROOT", canonical_root),
+                mock.patch.object(ai_status, "_LOCAL_ROOT", worktree_root),
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch.object(os, "execv") as mock_execv,
+            ):
+                ai_status.ensure_canonical_delegation(["ai_status.py", "show", "T1"])
+
+            mock_execv.assert_called_once_with(
+                sys.executable,
+                [sys.executable, str(canonical_script), "show", "T1"],
+            )
+            self.assertTrue(canonical_script.exists())
 
 
 if __name__ == "__main__":
