@@ -108,4 +108,31 @@ describe("validateInternalKey strict environment behavior", () => {
     ).not.toThrow();
     expect(next).toHaveBeenCalledOnce();
   });
+
+  it("middleware bypasses local enforcement when DRTS_ENV=development sets flag false even with mounted key", () => {
+    process.env.NODE_ENV = "production";
+    process.env.DRTS_ENV = "development";
+    process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";
+    process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
+
+    const middleware = new InternalKeyMiddleware();
+    const next = vi.fn();
+
+    expect(() =>
+      middleware.use(
+        {
+          method: "GET",
+          originalUrl: "/api/platform-admin/tenants",
+          headers: {
+            "x-actor-type": "platform_admin",
+            "x-actor-id": "local-admin",
+            "x-realm": "platform",
+          },
+        },
+        {},
+        next,
+      ),
+    ).not.toThrow();
+    expect(next).toHaveBeenCalledOnce();
+  });
 });
