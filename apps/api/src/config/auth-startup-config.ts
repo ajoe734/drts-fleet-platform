@@ -226,7 +226,9 @@ export function buildAuthStartupConfigReport(
   } else {
     if (
       authMode &&
-      ["local", "test", "dev", "explicit", "mock", "insecure"].includes(authMode)
+      ["local", "test", "dev", "explicit", "mock", "insecure"].includes(
+        authMode,
+      )
     ) {
       issues.push({
         control: "AUTH_MODE",
@@ -302,7 +304,62 @@ export function buildAuthStartupConfigReport(
   const jwtSecret = normalizeString(env.JWT_SECRET);
   const privateKey = normalizeString(env.JWT_PRIVATE_KEY);
   const publicKey = normalizeString(env.JWT_PUBLIC_KEY);
-  const runtimeUsesAsymmetricKey = Boolean(privateKey || publicKey);
+
+  let keyRingJsonValid = true;
+  let keyRingUsesAsymmetric = false;
+  let hasKeyRingActiveKey = false;
+
+  if (env.JWT_KEY_RING_JSON && env.JWT_KEY_RING_JSON.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(env.JWT_KEY_RING_JSON);
+      if (Array.isArray(parsed)) {
+        const activeItem = parsed.find(
+          (k: { status?: string }) => k && k.status === "active",
+        );
+        if (activeItem) {
+          hasKeyRingActiveKey = true;
+          const alg = String(activeItem.algorithm || "").toUpperCase();
+          if (
+            [
+              "RS256",
+              "RS384",
+              "RS512",
+              "PS256",
+              "PS384",
+              "PS512",
+              "ES256",
+              "ES384",
+              "ES512",
+            ].includes(alg)
+          ) {
+            keyRingUsesAsymmetric = true;
+          }
+        }
+      } else {
+        keyRingJsonValid = false;
+      }
+    } catch {
+      keyRingJsonValid = false;
+    }
+  }
+
+  if (env.JWT_KEY_RING_JSON && !keyRingJsonValid) {
+    issues.push({
+      control: "JWT_KEY_RING_JSON",
+      issue: "Unsafe control value: JWT_KEY_RING_JSON is set to invalid JSON",
+      code: "INVALID_FORMAT",
+    });
+  } else if (env.JWT_KEY_RING_JSON && !hasKeyRingActiveKey) {
+    issues.push({
+      control: "JWT_KEY_RING_JSON",
+      issue:
+        "Missing required control: JWT_KEY_RING_JSON must specify at least one active signing key",
+      code: "MISSING_CONTROL",
+    });
+  }
+
+  const runtimeUsesAsymmetricKey =
+    keyRingUsesAsymmetric || Boolean(privateKey || publicKey);
   let algorithms: string[] = [];
 
   if (parsedAlgos.length > 0) {
@@ -334,8 +391,9 @@ export function buildAuthStartupConfigReport(
   // 4. Signing Key Validation
   const isAsymmetric = runtimeUsesAsymmetricKey;
   const requestsSymmetricAlgorithms = algorithms.some(isSymmetricJwtAlgorithm);
-  const requestsAsymmetricAlgorithms =
-    algorithms.some(isAsymmetricJwtAlgorithm);
+  const requestsAsymmetricAlgorithms = algorithms.some(
+    isAsymmetricJwtAlgorithm,
+  );
 
   if (requestsAsymmetricAlgorithms && !isAsymmetric) {
     issues.push({
@@ -356,14 +414,14 @@ export function buildAuthStartupConfigReport(
   }
 
   if (isStrictEnvironment) {
-    if (!jwtSecret && !isAsymmetric) {
+    if (!jwtSecret && !isAsymmetric && !hasKeyRingActiveKey) {
       issues.push({
         control: "JWT_SECRET / JWT_PRIVATE_KEY",
         issue:
           "Missing required control: JWT_SECRET or JWT_PRIVATE_KEY/JWT_PUBLIC_KEY must be configured in staging/production",
         code: "MISSING_CONTROL",
       });
-    } else if (isAsymmetric) {
+    } else if (isAsymmetric && !hasKeyRingActiveKey) {
       if (!privateKey || !publicKey) {
         issues.push({
           control: "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY",
@@ -381,7 +439,7 @@ export function buildAuthStartupConfigReport(
           });
         }
       }
-    } else if (jwtSecret) {
+    } else if (jwtSecret && !hasKeyRingActiveKey) {
       if (isWeakSecret(jwtSecret)) {
         issues.push({
           control: "JWT_SECRET",
