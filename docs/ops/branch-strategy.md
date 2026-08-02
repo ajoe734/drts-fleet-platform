@@ -411,6 +411,11 @@ stays at `review_approved` until its commit reaches `origin/dev`, at which point
 This closes the recurring "done at branch, never merged to dev → work stranded"
 failure mode.
 
+Task-level release gates may be stricter than §11.6's default integrated floor.
+If a task carries `required_integration_status=dev_deployed`, owner closeout
+must record explicit PR/CI/merge/dev-deploy evidence and may not finalize with
+`not_applicable`, `merged_to_dev`, or git merge reconciliation alone.
+
 ### 11.7 Trigger checklist (before each significant save)
 
 Worker prompts (wakeup + closeout skill) carry this checklist; it is reproduced here for human reference:

@@ -4,6 +4,8 @@ Use this checklist whenever a worker is closing a canonical implementation task 
 
 This is the layer above `task-closeout-finalization.md`. A task branch can be committed and pushed without the development loop being closed.
 
+If a task object sets `required_integration_status`, that task-level requirement overrides the looser default closeout floor. Example: a task with `required_integration_status=dev_deployed` cannot finalize with `not_applicable`, `merged_to_dev`, or git merge reconciliation alone.
+
 ## Completion Levels
 
 Record one of these values as `INTEGRATION_STATUS` when finalizing a task:
@@ -46,6 +48,17 @@ Use these environment variables with `scripts/ai-status.sh done` or `python3 scr
 - `DEV_DEPLOY_RUN_URL`: successful `Deploy - Dev` run URL.
 - `DEV_DEPLOY_SHA`: SHA deployed by that run.
 - `DEV_DEPLOY_SOURCE_REF`: `publish/v*`, release tag, branch, or SHA used by the deploy run.
+
+For tasks with `required_integration_status=dev_deployed`, all of the following are mandatory at `done` time and must be recorded explicitly in machine truth:
+
+- `PR_URL`
+- `CI_STATUS`
+- `CI_RUN_URL`
+- `MERGED_REF`
+- `MERGE_COMMIT`
+- `DEV_DEPLOY_RUN_URL`
+- `DEV_DEPLOY_SHA`
+- `DEV_DEPLOY_SOURCE_REF`
 
 Example for a branch-only closeout that still needs integration:
 
