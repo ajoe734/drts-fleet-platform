@@ -77,7 +77,9 @@ EXTERNAL_INTEGRATION_IN_FLIGHT_STATUSES = frozenset(
 )
 
 
-def has_external_integration_in_flight(record: TaskRecord) -> bool:
+def has_external_integration_in_flight(
+    record: TaskRecord | Mapping[str, Any],
+) -> bool:
     """True when an owner should supervise external integration, not start coding again.
 
     A pushed branch or pending CI is already an active implementation attempt.
@@ -85,12 +87,18 @@ def has_external_integration_in_flight(record: TaskRecord) -> bool:
     overwrite the task's current PR evidence. CI failures deliberately remain
     dispatchable so the owner can fix them.
     """
+    record = _task(record)
+    ci_status = str(record.raw.get("ci_status") or "").strip().lower()
+    # CI is the freshest execution signal. A delayed integration_status must not
+    # trap a failed task in a permanent no-dispatch state.
+    if ci_status in {"failure", "failed", "cancelled", "timed_out"}:
+        return False
+
     integration_status = str(record.raw.get("integration_status") or "").strip().lower()
     if integration_status in EXTERNAL_INTEGRATION_IN_FLIGHT_STATUSES:
         return True
 
     pr_url = str(record.raw.get("pr_url") or "").strip()
-    ci_status = str(record.raw.get("ci_status") or "").strip().lower()
     return bool(pr_url) and ci_status in {"pending", "queued", "in_progress", "running"}
 
 
@@ -174,7 +182,9 @@ def ready_dispatch_signature(
     payload = {
         "dependency_signature": dependency_signature(record, tasks_by_id),
         "depends_on": list(record.depends_on),
+        "ci_status": record.raw.get("ci_status"),
         "execution_branch": record.raw.get("execution_branch"),
+        "integration_status": record.raw.get("integration_status"),
         "last_update": record.last_update,
         "owner": record.owner or None,
         "reason": str(reason.value if isinstance(reason, DispatchReason) else reason),
