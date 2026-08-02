@@ -110,9 +110,19 @@ and preserves an independent reviewer.
 | `IAM-IDP-001` | P0 | Implement tenant and partner-human OIDC authorization-code plus PKCE through a BFF. Validate state, nonce, code verifier, issuer, audience, redirect allowlist and IdP MFA claims; bind subject to durable membership. |
 | `IAM-IDP-002` | P0 | Resolve verified IAP workforce subject to durable platform/ops memberships. Reject spoofed email headers, wrong audience, unmapped/inactive users and client-provided roles. Detect group/membership drift. |
 | `IAM-SES-001` | P0 | Add durable session, refresh family and token records with hash-only secrets, expiry, rotation, revoke reason, device/risk context and indexes. Prove restart and concurrent consume behavior. |
-| `IAM-SES-002` | P0 | Issue and enforce `sid`, `jti`, `tokenVersion`, `auth_time`, `amr`, `acr`, issuer, audience and policy version. Check durable revocation and invalidate all affected sessions within 60 seconds of status/membership/role change. |
-| `IAM-SES-003` | P1 | Deliver self session inventory, logout, logout-all and boundary-safe admin revoke APIs with audit and CSRF. Expose only masked device/IP summaries. |
+| `IAM-SES-002` | P0 | Issue and enforce `sid`, `jti`, `tokenVersion`, `auth_time`, `amr`, `acr`, issuer, audience and policy version. Extend the canonical authority projection across issued bearer/session payloads, middleware request identity, `IdentityContext`, and `GET /api/identity/context`. Check durable revocation and invalidate all affected sessions within 60 seconds of status/membership/role change. |
+| `IAM-SES-003` | P1 | Deliver self session inventory, logout, logout-all and boundary-safe admin revoke APIs with audit and CSRF. Consume the `IAM-SES-001` / `IAM-SES-002` session identifiers, revoke state, and masking rules rather than redefining claim semantics. Expose only masked device/IP summaries. |
 | `IAM-KEY-001` | P1 | Move signing to an asymmetric or managed key ring with `kid`, current/previous overlap, activation and retirement times. Add rotation and rollback drill evidence; never relax issuer/audience on rollback. |
+
+Scope boundary for the session wave:
+
+- `IAM-SES-002` owns the canonical claim envelope and request-time revocation
+  enforcement.
+- `IAM-SES-003` owns the session-management APIs and inventory/revoke read
+  models.
+- `IAM-CTR-001` remains the baseline contract publication task, but it does not
+  block `IAM-SES-002` from extending the identity/session contracts to match
+  the accepted minimum authority envelope from the architecture packet.
 
 ### 5.3 Accounts, authorization and privileged governance
 
