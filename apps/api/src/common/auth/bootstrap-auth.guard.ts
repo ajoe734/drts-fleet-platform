@@ -23,6 +23,7 @@ import type {
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { JwtAuthService, type JwtIdentityPayload } from "./jwt-auth.service";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 function asHeaderRecord(
   headers: unknown,
@@ -184,16 +185,18 @@ export class BootstrapAuthGuard implements CanActivate {
     baseHeaders: Record<string, string | string[] | undefined>,
     policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
   ): Promise<boolean> {
+    const authEnvironment = detectAuthEnvironment(process.env);
     const isStrictIap =
       process.env.STRICT_IAP_MODE === "true" ||
-      process.env.NODE_ENV === "production";
+      authEnvironment === "production" ||
+      authEnvironment === "staging";
     const expectedAudience =
       process.env.IAP_EXPECTED_AUDIENCE ||
       process.env.IAP_AUDIENCE ||
       process.env.JWT_AUDIENCE;
     const expectedIssuer = process.env.IAP_EXPECTED_ISSUER;
     const allowUnverifiedTokenInDev =
-      process.env.NODE_ENV !== "production" &&
+      authEnvironment === "local" &&
       process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
     const jwtSecretOrPublicKey =
       process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY || process.env.IAP_JWT_SECRET;
@@ -204,7 +207,7 @@ export class BootstrapAuthGuard implements CanActivate {
       ...(expectedIssuer ? { expectedIssuer } : {}),
       ...(allowUnverifiedTokenInDev ? { allowUnverifiedTokenInDev } : {}),
       ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
-      autoProvision: process.env.NODE_ENV !== "production",
+      autoProvision: !isStrictIap,
     });
 
     const identity: BootstrapRequestIdentity = {

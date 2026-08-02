@@ -472,6 +472,50 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.IAP_JWT_SECRET;
   });
 
+  it("fails closed in staging even when the local unverified-IAP flag is set", async () => {
+    process.env.APP_ENV = "staging";
+    process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+    process.env.ALLOW_UNVERIFIED_IAP_DEV = "true";
+    delete process.env.IAP_JWT_SECRET;
+    delete process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY;
+
+    const identityRepo = new IdentityRepository();
+    const adapter = new IAPSubjectAdapter(identityRepo);
+    const reflector = { getAllAndOverride: () => undefined } as any;
+    const guard = new BootstrapAuthGuard(
+      reflector,
+      new JwtAuthService(),
+      undefined,
+      undefined,
+      adapter,
+    );
+    const mockRequest: any = {
+      headers: {
+        "x-goog-iap-jwt-assertion": signAssertion({
+          sub: "staging_unverified_subject",
+          email: "staging-user@platform.drts",
+          gcp_ia_groups: ["platform-admins@platform.drts"],
+        }),
+      },
+      method: "GET",
+      url: "/api/platform-admin/health",
+    };
+    const context: any = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => () => {},
+      getClass: () => class {},
+    };
+
+    await expect(guard.canActivate(context)).rejects.toMatchObject({
+      code: "IAP_ASSERTION_INVALID",
+    });
+    expect(mockRequest.identity).toBeUndefined();
+
+    delete process.env.APP_ENV;
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.ALLOW_UNVERIFIED_IAP_DEV;
+  });
+
   it("verifies AuthController /auth/token allows system realm calls in strict IAP mode without IAP assertion", async () => {
     process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
     process.env.JWT_SECRET = INTEGRATION_TEST_SECRET;
