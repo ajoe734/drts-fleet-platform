@@ -4,6 +4,7 @@ import {
   CONTROL_PLANE_REQUEST_AUTH_HEADER,
   extractAuthenticatedUserEmail,
   issueControlPlaneRequestAuth,
+  resolveControlPlaneStrictIapMode,
   signTestIapJwtAssertion,
   verifyIapJwtAssertion,
 } from "../../packages/control-plane-auth/src/index";
@@ -98,6 +99,25 @@ describe("control-plane auth helper", () => {
     ).toThrowError(
       "Control-plane strict IAP mode requires a valid x-goog-iap-jwt-assertion header.",
     );
+  });
+
+  it("only enables strict IAP when STRICT_IAP_MODE is explicitly true", () => {
+    expect(
+      resolveControlPlaneStrictIapMode({
+        NODE_ENV: "production",
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+    expect(
+      resolveControlPlaneStrictIapMode({
+        STRICT_IAP_MODE: "false",
+        NODE_ENV: "production",
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+    expect(
+      resolveControlPlaneStrictIapMode({
+        STRICT_IAP_MODE: "true",
+      } as NodeJS.ProcessEnv),
+    ).toBe(true);
   });
 
   it("extracts verified subject and email from signed IAP JWT assertion", () => {

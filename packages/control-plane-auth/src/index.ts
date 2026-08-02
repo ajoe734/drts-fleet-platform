@@ -75,6 +75,12 @@ export interface ControlPlaneRequestAuth {
   headers: Record<string, string>;
 }
 
+export function resolveControlPlaneStrictIapMode(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.STRICT_IAP_MODE === "true";
+}
+
 const CONTROL_PLANE_ROLE_FAMILIES: Record<
   ControlPlaneActorType,
   AuthRoleFamily[]
