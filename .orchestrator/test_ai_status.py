@@ -748,12 +748,12 @@ class IntegrationGateCommandDoneTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {}, clear=True),
                 mock.patch.object(os, "execv") as mock_execv,
             ):
-                # Import check logic simulation
-                if ai_status.ROOT != ai_status._LOCAL_ROOT and not os.environ.get("_AI_STATUS_DELEGATED"):
-                    target = (ai_status.ROOT / "scripts" / "ai_status.py").resolve()
-                    if target.exists() and target != canonical_script:
-                        os.execv(sys.executable, [sys.executable, str(target)] + sys.argv[1:])
+                ai_status.ensure_canonical_delegation(["ai_status.py", "show", "T1"])
 
+            mock_execv.assert_called_once_with(
+                sys.executable,
+                [sys.executable, str(canonical_script), "show", "T1"],
+            )
             self.assertTrue(canonical_script.exists())
 
 

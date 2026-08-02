@@ -31,13 +31,17 @@ ROOT = Path(
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _LOCAL_ROOT = _SCRIPT_DIR.parent.resolve()
 
-if ROOT != _LOCAL_ROOT and not os.environ.get("_AI_STATUS_DELEGATED"):
-    canonical_script = (ROOT / "scripts" / "ai_status.py").resolve()
-    if canonical_script.exists() and canonical_script != Path(__file__).resolve():
-        os.environ["_AI_STATUS_DELEGATED"] = "1"
-        os.environ["AI_STATUS_ROOT"] = str(ROOT)
-        os.environ["ORCH_STATUS_ROOT"] = str(ROOT)
-        os.execv(sys.executable, [sys.executable, str(canonical_script)] + sys.argv[1:])
+
+def ensure_canonical_delegation(argv: list[str] | None = None) -> None:
+    if ROOT != _LOCAL_ROOT and not os.environ.get("_AI_STATUS_DELEGATED"):
+        canonical_script = (ROOT / "scripts" / "ai_status.py").resolve()
+        if canonical_script.exists() and canonical_script != Path(__file__).resolve():
+            os.environ["_AI_STATUS_DELEGATED"] = "1"
+            os.environ["AI_STATUS_ROOT"] = str(ROOT)
+            os.environ["ORCH_STATUS_ROOT"] = str(ROOT)
+            cmd_args = (argv if argv is not None else sys.argv)[1:]
+            os.execv(sys.executable, [sys.executable, str(canonical_script)] + cmd_args)
+
 
 STATUS_FILE = ROOT / "ai-status.json"
 LOG_FILE = ROOT / "ai-activity-log.jsonl"
@@ -2421,6 +2425,7 @@ def command_audit(state: dict[str, Any], args: list[str]) -> None:
 
 
 def main(argv: list[str]) -> int:
+    ensure_canonical_delegation(argv)
     state = load_state()
     command = argv[1] if len(argv) > 1 else "sync"
     args = argv[2:]
