@@ -143,6 +143,7 @@ def ready_dispatch_signature(
     payload = {
         "dependency_signature": dependency_signature(record, tasks_by_id),
         "depends_on": list(record.depends_on),
+        "execution_branch": record.raw.get("execution_branch"),
         "last_update": record.last_update,
         "owner": record.owner or None,
         "reason": str(reason.value if isinstance(reason, DispatchReason) else reason),
@@ -175,6 +176,7 @@ def build_dispatch_event(
         "helper_kind",
         "mutates_canonical",
         "auto_created_by",
+        "execution_branch",
     ):
         if key in record.raw:
             task_payload[key] = record.raw.get(key)
