@@ -51,6 +51,7 @@ export interface ResolvedIapWorkforceSubject {
   membership: CanonicalIdentityMembershipRecord;
   effectiveRoles: string[];
   effectiveScopes: string[];
+  tokenVersion: number;
   driftDetected: boolean;
   driftDetails?: {
     originalRoles: string[];
@@ -368,6 +369,7 @@ export class IAPSubjectAdapter {
       originalRoles: string[];
       effectiveRoles: string[];
       missingGroups: string[];
+      tokenVersionTimestamps: string[];
       driftDetected: boolean;
     }
 
@@ -434,6 +436,10 @@ export class IAPSubjectAdapter {
         originalRoles: assignedRoles,
         effectiveRoles: effectiveRolesForM,
         missingGroups: missingGroupsForM,
+        tokenVersionTimestamps: [
+          m.updatedAt,
+          ...bindings.map((b) => b.updatedAt),
+        ],
         driftDetected: driftForM,
       });
     }
@@ -587,6 +593,12 @@ export class IAPSubjectAdapter {
     const activeMembership = selectedAnalysis.membership;
     const effectiveRoles = selectedAnalysis.effectiveRoles;
     const originalRoles = selectedAnalysis.originalRoles;
+    const tokenVersion = Math.max(
+      Date.parse(principal.updatedAt),
+      ...selectedAnalysis.tokenVersionTimestamps.map((timestamp) =>
+        Date.parse(timestamp),
+      ),
+    );
 
     const finalActorContext = this.getActorContext(
       activeMembership.realm,
@@ -639,6 +651,7 @@ export class IAPSubjectAdapter {
       membership: activeMembership,
       effectiveRoles,
       effectiveScopes: Array.from(effectiveScopesSet),
+      tokenVersion,
       driftDetected: hasDrift,
       ...(driftDetails ? { driftDetails } : {}),
     };

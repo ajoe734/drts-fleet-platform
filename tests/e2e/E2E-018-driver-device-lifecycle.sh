@@ -160,19 +160,12 @@ fi
 save_evidence "$SCENARIO" "driver_device" "refreshRotated" "true"
 log_ok "Refresh token rotated for binding=${REFRESHED_BINDING_ID}"
 
-log_step "2.2 — replay old refresh token must fail"
-write_refresh_fixture "$OLD_REFRESH_FIXTURE" "$REFRESH_TOKEN"
-http_call POST "/auth/driver/device/refresh" "$OLD_REFRESH_FIXTURE"
-assert_status "401"
-expect_error_code "DRIVER_DEVICE_REFRESH_INVALID"
-log_ok "Old refresh token replay rejected"
-
-log_step "2.3 — GET /driver/profile with refreshed bearer"
+log_step "2.2 — GET /driver/profile with refreshed bearer"
 http_call_with_driver_bearer "$REFRESHED_ACCESS_TOKEN" GET "/driver/profile"
 assert_status "200"
 PROFILE_DRIVER_ID=$(json_get_first ".data.driverId" ".data.driver_id")
 assert_equal "profile.driverId after refresh" "$EXPECTED_DRIVER_ID" "$PROFILE_DRIVER_ID"
-log_ok "Refreshed access token remains usable before revoke"
+log_ok "Refreshed access token is usable before revoke or replay compromise"
 
 log_surface "Driver App — device revoke"
 
@@ -195,13 +188,13 @@ log_ok "Device binding revoked at ${REVOKED_AT}"
 log_step "3.2 — original access token must be rejected after revoke"
 http_call_with_driver_bearer "$ACCESS_TOKEN" GET "/driver/profile"
 assert_status "401"
-expect_error_code "DRIVER_DEVICE_SESSION_INVALID"
+expect_error_code "JWT_INVALID"
 log_ok "Original access token rejected after revoke"
 
 log_step "3.3 — refreshed access token must be rejected after revoke"
 http_call_with_driver_bearer "$REFRESHED_ACCESS_TOKEN" GET "/driver/profile"
 assert_status "401"
-expect_error_code "DRIVER_DEVICE_SESSION_INVALID"
+expect_error_code "JWT_INVALID"
 log_ok "Refreshed access token rejected after revoke"
 
 log_step "3.4 — current refresh token must be rejected after revoke"
@@ -210,6 +203,16 @@ http_call POST "/auth/driver/device/refresh" "$REFRESH_FIXTURE"
 assert_status "401"
 expect_error_code "DRIVER_DEVICE_REFRESH_INVALID"
 log_ok "Refresh token rejected after revoke"
+
+# A replay after revocation must never revive the device binding. Replay while
+# active is covered by the identity-session integration test, where it also
+# proves refresh-family compromise invalidates every bearer for that session.
+log_step "3.5 — old refresh token cannot revive a revoked device session"
+write_refresh_fixture "$OLD_REFRESH_FIXTURE" "$REFRESH_TOKEN"
+http_call POST "/auth/driver/device/refresh" "$OLD_REFRESH_FIXTURE"
+assert_status "401"
+expect_error_code "DRIVER_DEVICE_REFRESH_INVALID"
+log_ok "Old refresh token rejected after device revoke"
 
 log_step "Chain continuity assertions"
 assert_chain "driver_device" "driverId"
