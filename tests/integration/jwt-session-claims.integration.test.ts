@@ -76,6 +76,124 @@ function createBearerContext(token: string, url = "/api/ops/orders") {
 }
 
 describe("JWT session claims integration", () => {
+  it("derives IAP session assurance claims from trusted upstream proof without synthetic MFA upgrade", async () => {
+    process.env.DRTS_INTERNAL_KEY = INTERNAL_KEY;
+    process.env.JWT_SECRET = JWT_SECRET;
+    process.env.IAP_EXPECTED_AUDIENCE = IAP_AUDIENCE;
+    process.env.IAP_JWT_SECRET = IAP_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    const tenantPartnerService = new TenantPartnerService(
+      createAuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService,
+      identityRepo,
+    );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
+    const controller = new AuthController(
+      new JwtAuthService(),
+      tenantPartnerService,
+      {} as never,
+      jwtSessionClaimsService,
+      securityEventsService,
+      adapter,
+    );
+
+    const assertion = signAssertion({
+      sub: "iap_claims_subject_001",
+      email: "iap-claims-admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+      iat: 1_785_686_400,
+    });
+
+    const tokenResponse = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": INTERNAL_KEY,
+        "x-goog-iap-jwt-assertion": assertion,
+      },
+    });
+
+    const payload = new JwtAuthService().verify(tokenResponse.token);
+    expect(payload?.auth_time).toBe(1_785_686_400);
+    expect(payload?.amr).toEqual(["iap_assertion"]);
+    expect(payload?.acr).toBe("aal0");
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.JWT_SECRET;
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
+  });
+
+  it("preserves trusted upstream IAP amr acr and auth_time claims when present", async () => {
+    process.env.DRTS_INTERNAL_KEY = INTERNAL_KEY;
+    process.env.JWT_SECRET = JWT_SECRET;
+    process.env.IAP_EXPECTED_AUDIENCE = IAP_AUDIENCE;
+    process.env.IAP_JWT_SECRET = IAP_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    const tenantPartnerService = new TenantPartnerService(
+      createAuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService,
+      identityRepo,
+    );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
+    const controller = new AuthController(
+      new JwtAuthService(),
+      tenantPartnerService,
+      {} as never,
+      jwtSessionClaimsService,
+      securityEventsService,
+      adapter,
+    );
+
+    const tokenResponse = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": INTERNAL_KEY,
+        "x-goog-iap-jwt-assertion": signAssertion({
+          sub: "iap_claims_subject_002",
+          email: "iap-claims-ops@platform.drts",
+          gcp_ia_groups: ["ops-users@platform.drts"],
+          auth_time: 1_785_686_100,
+          amr: ["pwd", "otp"],
+          acr: "aal2",
+        }),
+      },
+    });
+
+    const payload = new JwtAuthService().verify(tokenResponse.token);
+    expect(payload?.auth_time).toBe(1_785_686_100);
+    expect(payload?.amr).toEqual(["pwd", "otp"]);
+    expect(payload?.acr).toBe("aal2");
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.JWT_SECRET;
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
+  });
+
   it("invalidates tenant bearer tokens after role or status changes", async () => {
     process.env.JWT_SECRET = JWT_SECRET;
     process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
@@ -611,6 +729,8 @@ describe("JWT session claims integration", () => {
     expect(payload?.membershipId).toBe("membership_fallback_platform_001");
     expect(payload?.roles).toEqual(["superadmin"]);
     expect(payload?.scopes).toContain("foundation:write");
+    expect(payload?.amr).toEqual(["bootstrap_headers"]);
+    expect(payload?.acr).toBe("aal0");
 
     const guard = createGuard(jwtSessionClaimsService);
     const ctx = createBearerContext(

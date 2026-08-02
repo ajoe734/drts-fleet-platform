@@ -156,6 +156,8 @@ export class AuthController {
       const token = await this.signControlPlaneJwt(identity, expiresIn, {
         principal: resolved.principal,
         membership: resolved.membership,
+        sessionSource: "trusted_iap_assertion",
+        ...resolved.trustedSessionClaims,
       });
       return { token, expiresIn };
     }
@@ -814,6 +816,7 @@ export class AuthController {
       claimContext: {
         principal,
         membership,
+        sessionSource: "bootstrap_headers",
       },
     };
   }

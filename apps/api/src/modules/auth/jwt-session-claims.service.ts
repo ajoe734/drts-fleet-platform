@@ -26,6 +26,13 @@ type JwtSessionContext = {
   authTime?: number;
   amr?: string[];
   acr?: string;
+  sessionSource?:
+    | "trusted_iap_assertion"
+    | "bootstrap_headers"
+    | "tenant_bootstrap"
+    | "partner_api_key"
+    | "driver_device_binding"
+    | "workload_identity";
 };
 
 function sha256(parts: Array<string | number | boolean | null | undefined>) {
@@ -56,8 +63,10 @@ export class JwtSessionClaimsService {
     "sid" | "jti" | "tokenVersion" | "auth_time" | "amr" | "acr" | "policyVersion" | "membershipId"
   > {
     const nowSeconds = Math.floor(Date.now() / 1000);
-    const amr = context.amr?.length ? [...context.amr] : this.resolveAmr(identity);
-    const acr = context.acr?.trim() || this.resolveAcr(identity);
+    const amr = context.amr?.length
+      ? [...context.amr]
+      : this.resolveAmr(identity, context);
+    const acr = context.acr?.trim() || this.resolveAcr(identity, context);
 
     return {
       sid: context.sid?.trim() || randomUUID(),
@@ -288,7 +297,10 @@ export class JwtSessionClaimsService {
     }
   }
 
-  private resolveAmr(identity: JwtSessionClaimInput) {
+  private resolveAmr(
+    identity: JwtSessionClaimInput,
+    context: JwtSessionContext,
+  ) {
     switch (identity.realm) {
       case "tenant":
         return ["tenant_bootstrap"];
@@ -296,7 +308,13 @@ export class JwtSessionClaimsService {
         return ["partner_api_key"];
       case "platform":
       case "ops":
-        return ["federated_iap"];
+        if (context.sessionSource === "trusted_iap_assertion") {
+          return ["iap_assertion"];
+        }
+        if (context.sessionSource === "bootstrap_headers") {
+          return ["bootstrap_headers"];
+        }
+        return ["control_plane_exchange"];
       case "driver":
         return ["driver_device_binding"];
       case "system":
@@ -305,10 +323,17 @@ export class JwtSessionClaimsService {
     }
   }
 
-  private resolveAcr(identity: JwtSessionClaimInput) {
+  private resolveAcr(
+    identity: JwtSessionClaimInput,
+    context: JwtSessionContext,
+  ) {
     switch (identity.realm) {
       case "platform":
       case "ops":
+        if (context.sessionSource === "trusted_iap_assertion") {
+          return "aal0";
+        }
+        return "aal0";
       case "tenant":
       case "driver":
         return "aal1";

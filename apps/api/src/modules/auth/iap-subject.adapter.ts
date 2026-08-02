@@ -51,6 +51,11 @@ export interface ResolvedIapWorkforceSubject {
   membership: CanonicalIdentityMembershipRecord;
   effectiveRoles: string[];
   effectiveScopes: string[];
+  trustedSessionClaims: {
+    authTime?: number;
+    amr?: string[];
+    acr?: string;
+  };
   driftDetected: boolean;
   driftDetails?: {
     originalRoles: string[];
@@ -142,6 +147,7 @@ export class IAPSubjectAdapter {
         `IAP assertion verification failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    const trustedSessionClaims = this.extractTrustedSessionClaims(payload);
 
     const subject = payload.sub;
     const assertionGroups = payload.gcp_ia_groups || payload.groups || [];
@@ -639,8 +645,41 @@ export class IAPSubjectAdapter {
       membership: activeMembership,
       effectiveRoles,
       effectiveScopes: Array.from(effectiveScopesSet),
+      trustedSessionClaims,
       driftDetected: hasDrift,
       ...(driftDetails ? { driftDetails } : {}),
+    };
+  }
+
+  private extractTrustedSessionClaims(payload: IapJwtPayload): {
+    authTime?: number;
+    amr?: string[];
+    acr?: string;
+  } {
+    const authTime =
+      typeof payload.auth_time === "number" && Number.isFinite(payload.auth_time)
+        ? payload.auth_time
+        : typeof payload.iat === "number" && Number.isFinite(payload.iat)
+          ? payload.iat
+          : undefined;
+    const rawAmr: unknown[] | undefined = Array.isArray(payload.amr)
+      ? payload.amr
+      : undefined;
+    const amr = rawAmr
+      ? rawAmr
+          .filter((value: unknown): value is string => typeof value === "string")
+          .map((value: string) => value.trim())
+          .filter((value: string) => value.length > 0)
+      : undefined;
+    const acr =
+      typeof payload.acr === "string" && payload.acr.trim().length > 0
+        ? payload.acr.trim()
+        : undefined;
+
+    return {
+      ...(authTime !== undefined ? { authTime } : {}),
+      ...(amr && amr.length > 0 ? { amr } : {}),
+      ...(acr ? { acr } : {}),
     };
   }
 

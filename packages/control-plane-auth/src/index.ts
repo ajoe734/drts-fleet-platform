@@ -13,6 +13,9 @@ export interface IapJwtPayload {
   iss?: string;
   exp?: number;
   iat?: number;
+  auth_time?: number;
+  amr?: string[];
+  acr?: string;
   hd?: string;
   gcp_ia_groups?: string[];
   groups?: string[];
