@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { ApiRequestError } from "../api-envelope";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -97,22 +98,43 @@ function hasBearerAuthorization(request: RequestLike): boolean {
   return headerValues.some((value) => /^Bearer\s+\S+/i.test(value));
 }
 
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
 export function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
 ): void {
   const requestPath = request.originalUrl ?? request.url ?? "";
   const requestMethod = request.method ?? "GET";
+  const strictEnvironment = isStrictAuthEnvironment();
 
   if (
-    !expectedKey ||
     isHealthRequest(requestPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, requestPath) ||
-    hasPublicBootstrapRealm(request) ||
     hasBearerAuthorization(request)
   ) {
     return;
+  }
+
+  if (!strictEnvironment && (!expectedKey || hasPublicBootstrapRealm(request))) {
+    return;
+  }
+
+  if (!expectedKey) {
+    throw new ApiRequestError(
+      503,
+      "INTERNAL_KEY_NOT_CONFIGURED",
+      "x-drts-internal-key validation is not configured for this environment.",
+      {
+        route: requestPath,
+        method: requestMethod,
+        requiredEnv: "DRTS_INTERNAL_KEY",
+      },
+    );
   }
 
   const providedKey = normalizeHeaderValue(

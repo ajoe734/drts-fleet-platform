@@ -262,9 +262,15 @@ import type {
   PartnerReferralUsagePeriodRecord,
 } from "./partner-referral-portal.types";
 import type { ReferralStatementRecord } from "../billing-settlement/referral-statement.types";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
 
 type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
@@ -4248,6 +4254,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   getDefaultTenantId() {
+    if (isStrictAuthEnvironment()) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "DEFAULT_TENANT_FORBIDDEN",
+        "Default tenant authority is disabled in strict auth environments.",
+      );
+    }
     return DEMO_TENANT_ID;
   }
 
