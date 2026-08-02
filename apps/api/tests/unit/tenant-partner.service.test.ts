@@ -703,6 +703,48 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(repository.getState().userRoles).toEqual([]);
   });
 
+  it("rehydrates partial persisted state in strict auth environments without falling back to demo defaults", async () => {
+    process.env.DRTS_ENV = "staging";
+    const persistChanges = vi.fn(async () => undefined);
+    const reportPersistenceFailure = vi.fn();
+    const repository = {
+      loadState: vi.fn(async () => ({
+        slaProfiles: [
+          {
+            tenantId: "tenant-acme",
+            waitThresholdMin: 12,
+            arrivalThresholdMin: 18,
+            completionThresholdMin: 95,
+            updatedAt: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+        notificationPreferences: [
+          {
+            tenantId: "tenant-acme",
+            subscriptions: [],
+            updatedAt: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+      })),
+      persistChanges,
+      reportPersistenceFailure,
+    };
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.getSlaProfile("tenant-acme").waitThresholdMin).toBe(12);
+    expect(service.getNotificationPreferences("tenant-acme")).toMatchObject({
+      tenantId: "tenant-acme",
+    });
+    expect(service.listPartnerEntries()).toEqual([]);
+    expect(persistChanges).not.toHaveBeenCalled();
+    expect(reportPersistenceFailure).not.toHaveBeenCalled();
+  });
+
   it("does not resurrect revoked credentials or replace rotated credentials from seeds", async () => {
     const persistedState = createEmptyRepositoryState();
     persistedState.partnerIngressCredentials = [

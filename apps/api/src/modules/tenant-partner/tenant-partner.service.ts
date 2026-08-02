@@ -1279,50 +1279,34 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const persistedState = await this.tenantPartnerRepository.loadState();
-      const notificationPreferences =
-        persistedState.notificationPreferences ?? [];
-      const slaProfiles = persistedState.slaProfiles ?? [];
-      const webhookEndpoints = persistedState.webhookEndpoints ?? [];
-      const webhookDeliveries = persistedState.webhookDeliveries ?? [];
-      const partnerEntries = persistedState.partnerEntries ?? [];
-      const partnerIngressCredentials =
-        persistedState.partnerIngressCredentials ?? [];
-      const partnerEligibilityVerifications =
-        persistedState.partnerEligibilityVerifications ?? [];
-      const approvalRules = persistedState.approvalRules ?? [];
-      const approvalRequests = persistedState.approvalRequests ?? [];
-      const approvalDecisions = persistedState.approvalDecisions ?? [];
-      const passengers = persistedState.passengers ?? [];
-      const addresses = persistedState.addresses ?? [];
-      const costCenters = persistedState.costCenters ?? [];
-      const quotaPolicies = persistedState.quotaPolicies ?? [];
-      const quotaLedger = persistedState.quotaLedger ?? [];
-      const quotaMonthlySnapshots = persistedState.quotaMonthlySnapshots ?? [];
-      const userRoles = persistedState.userRoles ?? [];
-      const apiKeys = persistedState.apiKeys ?? [];
-      const sanitizedState = this.sanitizePersistedState({
-        notificationPreferences,
-        webhookEndpoints,
-        webhookDeliveries,
-        slaProfiles,
-        partnerEntries,
-        partnerIngressCredentials,
-        partnerEligibilityVerifications,
-        approvalRules,
-        approvalRequests,
-        approvalDecisions,
-        passengers,
-        addresses,
-        costCenters,
-        quotaPolicies,
-        quotaLedger,
-        quotaMonthlySnapshots,
-        userRoles,
-        apiKeys,
-      });
-      const hasPersistedState = this.hasPersistedState(persistedState);
+      const normalizedPersistedState: TenantPartnerState = {
+        notificationPreferences: persistedState.notificationPreferences ?? [],
+        webhookEndpoints: persistedState.webhookEndpoints ?? [],
+        webhookDeliveries: persistedState.webhookDeliveries ?? [],
+        slaProfiles: persistedState.slaProfiles ?? [],
+        partnerEntries: persistedState.partnerEntries ?? [],
+        partnerIngressCredentials:
+          persistedState.partnerIngressCredentials ?? [],
+        partnerEligibilityVerifications:
+          persistedState.partnerEligibilityVerifications ?? [],
+        approvalRules: persistedState.approvalRules ?? [],
+        approvalRequests: persistedState.approvalRequests ?? [],
+        approvalDecisions: persistedState.approvalDecisions ?? [],
+        passengers: persistedState.passengers ?? [],
+        addresses: persistedState.addresses ?? [],
+        costCenters: persistedState.costCenters ?? [],
+        quotaPolicies: persistedState.quotaPolicies ?? [],
+        quotaLedger: persistedState.quotaLedger ?? [],
+        quotaMonthlySnapshots: persistedState.quotaMonthlySnapshots ?? [],
+        userRoles: persistedState.userRoles ?? [],
+        apiKeys: persistedState.apiKeys ?? [],
+      };
+      const sanitizedState = this.sanitizePersistedState(
+        normalizedPersistedState,
+      );
+      const hasPersistedState = this.hasPersistedState(normalizedPersistedState);
       const strictSanitizeChanges = this.buildStrictSanitizeChanges(
-        persistedState,
+        normalizedPersistedState,
         sanitizedState,
       );
 
@@ -1400,7 +1384,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       this.normalizePartnerEntryAuthModes();
       if (
         isStrictAuthEnvironment() &&
-        this.didSanitizePersistedState(persistedState, sanitizedState)
+        this.didSanitizePersistedState(normalizedPersistedState, sanitizedState)
       ) {
         this.persistChanges(
           strictSanitizeChanges,
