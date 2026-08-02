@@ -203,10 +203,10 @@ AI_NAME=Gemini scripts/ai-status.sh reopen IAM-SES-002-SIDECAR-ACCEPTANCE "packe
 1. Stage only `support/sidecars/IAM-SES-002/IAM-SES-002-SIDECAR-ACCEPTANCE.md`.
 2. Create a task-scoped closeout commit whose subject contains `IAM-SES-002-SIDECAR-ACCEPTANCE`, and whose body includes `LLM-Agent:`, `Task-ID:`, `Reviewer:`, and `Verification:`.
 3. Run a normal non-force push to `origin codex2/iam-ses-002-sidecar-acceptance`.
-4. Only after commit + push succeed, record machine-truth closeout with `COMMIT_HASH`, `COMMIT_SUBJECT`, `PUSH_REMOTE`, `PUSH_BRANCH`, and `INTEGRATION_STATUS=branch_pushed`.
+4. Only after commit + push succeed, record machine-truth closeout with `COMMIT_HASH`, `COMMIT_SUBJECT`, `PUSH_REMOTE`, `PUSH_BRANCH`, and the sidecar/support-only integration marker `INTEGRATION_STATUS=not_applicable`.
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh done IAM-SES-002-SIDECAR-ACCEPTANCE "Owner finalized approved support-only acceptance packet for IAM-SES-002 at support/sidecars/IAM-SES-002/IAM-SES-002-SIDECAR-ACCEPTANCE.md. The packet preserves the parent in_progress baseline, the merged prerequisite chain, the remaining IAM-IDP-002 integration gate, and the reviewer handoff guidance for revocable JWT/session-claim enforcement without changing canonical truth. COMMIT_HASH=<hash> COMMIT_SUBJECT=\"IAM-SES-002-SIDECAR-ACCEPTANCE: finalize approved acceptance packet\" PUSH_REMOTE=origin PUSH_BRANCH=codex2/iam-ses-002-sidecar-acceptance INTEGRATION_STATUS=branch_pushed"
+AI_NAME=Codex2 scripts/ai-status.sh done IAM-SES-002-SIDECAR-ACCEPTANCE "Owner finalized approved support-only acceptance packet for IAM-SES-002 at support/sidecars/IAM-SES-002/IAM-SES-002-SIDECAR-ACCEPTANCE.md. The packet preserves the parent in_progress baseline, the merged prerequisite chain, the remaining IAM-IDP-002 integration gate, and the reviewer handoff guidance for revocable JWT/session-claim enforcement without changing canonical truth. COMMIT_HASH=<hash> COMMIT_SUBJECT=\"IAM-SES-002-SIDECAR-ACCEPTANCE: finalize approved acceptance packet\" PUSH_REMOTE=origin PUSH_BRANCH=codex2/iam-ses-002-sidecar-acceptance INTEGRATION_STATUS=not_applicable"
 ```
 
 Parent absorption / 主線採納仍由 parent owner `Gemini` 決定，不由此 sidecar 自動推進；此 closeout 只代表 support branch packet 已提交並推送。
@@ -216,4 +216,4 @@ Parent absorption / 主線採納仍由 parent owner `Gemini` 決定，不由此 
 ## 10) Change Log
 
 - `2026-08-02T01:15Z` — 初版建立：依 shared machine truth task slices、Stage 1.5 architecture / execution docs、與 repo auth/session baseline 掃描，整理 `IAM-SES-002` 的 acceptance checklist、dependency map、current-gap evidence anchors、以及 reviewer / owner handoff 指引。內容明確保留 parent `in_progress` 狀態與 `IAM-IDP-002` PR #1253 integration gate，避免 support packet overclaim canonical implementation progress。
-- `2026-08-02T01:25Z` — closeout 對齊：將 packet 狀態更新為 `review_approved`，並把 owner closeout 指引對齊實際流程，要求 task-scoped closeout commit、normal push、以及以 `INTEGRATION_STATUS=branch_pushed` 記錄 machine-truth `done`。
+- `2026-08-02T01:25Z` — closeout 對齊：將 packet 狀態更新為 `review_approved`，並把 owner closeout 指引對齊實際流程，要求 task-scoped closeout commit、normal push、以及以 sidecar/support-only 規則的 `INTEGRATION_STATUS=not_applicable` 記錄 machine-truth `done`。
