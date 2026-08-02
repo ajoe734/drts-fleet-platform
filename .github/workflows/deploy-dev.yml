@@ -630,6 +630,7 @@ jobs:
           internal_key_secret="${secret_prefix}-jwt-secret"
           secret_args="${secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
           web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+          referral_embed_secret_args="${referral_embed_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
 
           referral_handoff_secret="${secret_prefix}-referral-embed-handoff-key"
           if ! gcloud secrets describe "$referral_handoff_secret" --project "$project_id" >/dev/null 2>&1; then
@@ -1124,6 +1125,71 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
+
+      - name: Verify referral handoff session lifecycle
+        run: |
+          set -euo pipefail
+
+          api_url="${{ steps.urls.outputs.api }}"
+          referral_embed_url="${{ steps.urls.outputs.referral_embed }}"
+          entry_slug="${{ needs.prepare.outputs.referral_embed_entry_slug }}"
+          entry_host="$(curl --fail --silent --show-error \
+            "${api_url}/api/partner/entries/${entry_slug}" \
+            | jq -er '.data.entry_host // .data.entryHost')"
+          handoff_secret="${{ needs.prepare.outputs.secret_prefix }}-referral-embed-handoff-key"
+          handoff_key="$(gcloud secrets versions access latest \
+            --secret="$handoff_secret" \
+            --project="${{ needs.prepare.outputs.project_id }}")"
+          echo "::add-mask::${handoff_key}"
+
+          body_file="$(mktemp)"
+          headers_file="$(mktemp)"
+          trap 'rm -f "$body_file" "$headers_file"' EXIT
+
+          issue_artifact() {
+            local partner_user_ref="$1"
+            local response artifact
+            response="$(jq -nc \
+              --arg entrySlug "$entry_slug" \
+              --arg entryHost "$entry_host" \
+              --arg partnerUserRef "$partner_user_ref" \
+              '{entrySlug: $entrySlug, entryHost: $entryHost, partnerUserRef: $partnerUserRef}' \
+              | curl --fail --silent --show-error \
+                --request POST \
+                --header "Content-Type: application/json" \
+                --header "x-drts-referral-handoff-key: ${handoff_key}" \
+                --data @- \
+                "${api_url}/api/partner/ingress/referral-embed-handoff")"
+            artifact="$(jq -er '.data.artifact' <<<"$response")"
+            printf '%s' "$artifact"
+          }
+
+          exchange_artifact() {
+            local artifact="$1"
+            local target_host="$2"
+            jq -nc \
+              --arg artifact "$artifact" \
+              --arg entrySlug "$entry_slug" \
+              --arg entryHost "$target_host" \
+              '{artifact: $artifact, entrySlug: $entrySlug, entryHost: $entryHost}' \
+              | curl --silent --show-error \
+                --request POST \
+                --header "Content-Type: application/json" \
+                --dump-header "$headers_file" \
+                --output "$body_file" \
+                --write-out '%{http_code}' \
+                --data @- \
+                "${referral_embed_url}/api/referral/session"
+          }
+
+          artifact="$(issue_artifact "deploy-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+          [[ "$(exchange_artifact "$artifact" "$entry_host")" == "200" ]]
+          jq -e '.ok == true' "$body_file" >/dev/null
+          grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file"
+
+          [[ "$(exchange_artifact "$artifact" "$entry_host")" == "400" ]]
+          artifact_for_wrong_host="$(issue_artifact "deploy-smoke-cross-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+          [[ "$(exchange_artifact "$artifact_for_wrong_host" "evil.example")" == "400" ]]
 
       - name: Print dev URLs
         run: |

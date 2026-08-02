@@ -89,6 +89,12 @@ describe("dev active surface contract", () => {
     expect(source).not.toContain(
       '"${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "referral-demo-community"',
     );
+    expect(source).toContain(
+      'referral_embed_secret_args="${referral_embed_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"',
+    );
+    expect(source).toContain("Verify referral handoff session lifecycle");
+    expect(source).toContain("x-drts-referral-handoff-key");
+    expect(source).toContain("drts_referral_embed_session");
   });
 
   it("keeps domain mapping defaults and fail-closed wording aligned", () => {
