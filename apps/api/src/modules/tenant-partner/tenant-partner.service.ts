@@ -280,7 +280,6 @@ function cloneReferralRevenueShareRuleSeed(): ReferralRevenueShareRule[] {
 function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
   return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
 }
-
 type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
 type WebhookRuntimeMetadata = TenantWebhookRuntimeMetadata & {

@@ -109,7 +109,6 @@ function isInternalKeyEnforcementDisabled(): boolean {
     process.env.DRTS_INTERNAL_KEY_ENFORCED?.trim().toLowerCase() === "false"
   );
 }
-
 export function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
