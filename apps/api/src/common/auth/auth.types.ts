@@ -46,6 +46,8 @@ export interface BootstrapRequestIdentity {
   authMode: AuthMode;
   actorType: AuthActorType;
   actorId: string | null;
+  principalId?: string | null;
+  membershipId?: string | null;
   subject?: string | null;
   realm: AuthRealm;
   tenantId: string | null;
@@ -53,6 +55,17 @@ export interface BootstrapRequestIdentity {
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
   drtsPassengerId?: string | null;
+  sessionId?: string | null;
+  tokenId?: string | null;
+  tokenVersion?: number | null;
+  authTime?: string | null;
+  amr?: string[];
+  acr?: string | null;
+  policyVersion?: string | null;
+  issuer?: string | null;
+  audience?: string[] | null;
+  issuedAt?: string | null;
+  expiresAt?: string | null;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
