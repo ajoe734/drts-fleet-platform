@@ -69,9 +69,14 @@ export class DriverDeviceSessionService {
       );
     }
     if (!deviceId) {
-      throw new ApiRequestError(400, "FIELD_REQUIRED", "deviceId is required.", {
-        field: "deviceId",
-      });
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "deviceId is required.",
+        {
+          field: "deviceId",
+        },
+      );
     }
 
     const driverId =
@@ -207,9 +212,14 @@ export class DriverDeviceSessionService {
     const deviceId = command.deviceId?.trim();
     const refreshToken = command.refreshToken?.trim();
     if (!deviceId) {
-      throw new ApiRequestError(400, "FIELD_REQUIRED", "deviceId is required.", {
-        field: "deviceId",
-      });
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "deviceId is required.",
+        {
+          field: "deviceId",
+        },
+      );
     }
     if (!refreshToken) {
       throw new ApiRequestError(
@@ -222,9 +232,13 @@ export class DriverDeviceSessionService {
 
     const now = new Date().toISOString();
     const nextRefreshToken = createOpaqueToken("drvrefresh");
+    const tokenId = createOpaqueToken("jti");
+    const tokenVersion = Date.parse(now);
     const rotated = await this.identityRepo.consumeAndRotateRefreshToken({
       oldTokenRaw: refreshToken,
       newTokenRaw: nextRefreshToken,
+      newSessionTokenId: tokenId,
+      newSessionTokenVersion: tokenVersion,
       newExpiresAt: addDuration(now, DRIVER_REFRESH_ABSOLUTE_TTL_MS),
       updatedAt: now,
     });
@@ -240,11 +254,8 @@ export class DriverDeviceSessionService {
 
     const sessionRecord = rotated.session;
     const sessionDeviceId =
-      (
-        sessionRecord.deviceSummary as
-          | { deviceId?: string | null }
-          | undefined
-      )?.deviceId ?? null;
+      (sessionRecord.deviceSummary as { deviceId?: string | null } | undefined)
+        ?.deviceId ?? null;
     if (sessionDeviceId !== deviceId || sessionRecord.status !== "active") {
       throw new ApiRequestError(
         401,
@@ -258,7 +269,6 @@ export class DriverDeviceSessionService {
       sessionRecord.actorId?.trim() || sessionRecord.principalId.trim();
     this.assertDriverAuthEligible(driverId);
 
-    const tokenVersion = Date.parse(now);
     const reissued = await this.jwtAuthService.issueSessionToken(
       {
         authMode: "jwt_bearer",
@@ -271,6 +281,7 @@ export class DriverDeviceSessionService {
         roles: ["driver_user"],
         scopes: ["driver:read", "driver:write", "dispatch:read"],
         requestId: null,
+        tokenId,
         driverBindingId: sessionRecord.sessionId,
         driverDeviceId: deviceId,
       },
@@ -380,12 +391,8 @@ export class DriverDeviceSessionService {
     }
 
     const deviceId =
-      (
-        revoked.deviceSummary as
-          | { deviceId?: string | null }
-          | undefined
-      )?.deviceId ??
-      command.deviceId;
+      (revoked.deviceSummary as { deviceId?: string | null } | undefined)
+        ?.deviceId ?? command.deviceId;
     const driverId = revoked.actorId?.trim() || revoked.principalId.trim();
     const revokedAt = revoked.revokedAt ?? new Date().toISOString();
 
@@ -459,15 +466,14 @@ export class DriverDeviceSessionService {
     }
 
     const sessionDeviceId =
-      (
-        session.deviceSummary as
-          | { deviceId?: string | null }
-          | undefined
-      )?.deviceId ?? null;
-    const sessionDriverId = session.actorId?.trim() || session.principalId.trim();
+      (session.deviceSummary as { deviceId?: string | null } | undefined)
+        ?.deviceId ?? null;
+    const sessionDriverId =
+      session.actorId?.trim() || session.principalId.trim();
 
     return (
-      sessionDeviceId === resolvedDeviceId && sessionDriverId === resolvedDriverId
+      sessionDeviceId === resolvedDeviceId &&
+      sessionDriverId === resolvedDriverId
     );
   }
 
@@ -546,14 +552,17 @@ export class DriverDeviceSessionService {
       return this.identityRepo.getSession(bindingId);
     }
 
-    return this.identityRepo.findActiveSessionByDevice(command.deviceId?.trim() || "");
+    return this.identityRepo.findActiveSessionByDevice(
+      command.deviceId?.trim() || "",
+    );
   }
 
   private async revokeActiveBindingForDevice(
     deviceId: string,
     requestId?: string,
   ): Promise<void> {
-    const existing = await this.identityRepo.findActiveSessionByDevice(deviceId);
+    const existing =
+      await this.identityRepo.findActiveSessionByDevice(deviceId);
     if (!existing) {
       return;
     }
@@ -628,11 +637,8 @@ export class DriverDeviceSessionService {
   ) {
     const driverId = session.actorId?.trim() || session.principalId.trim();
     const deviceId =
-      (
-        session.deviceSummary as
-          | { deviceId?: string | null }
-          | undefined
-      )?.deviceId ?? null;
+      (session.deviceSummary as { deviceId?: string | null } | undefined)
+        ?.deviceId ?? null;
 
     if (!identity) {
       throw new ApiRequestError(
@@ -740,8 +746,10 @@ export class DriverDeviceSessionService {
     session: CanonicalIdentitySessionRecord,
   ): DriverDeviceBindingSummary {
     const deviceSummary =
-      (session.deviceSummary as { deviceId?: string; deviceLabel?: string | null }) ??
-      {};
+      (session.deviceSummary as {
+        deviceId?: string;
+        deviceLabel?: string | null;
+      }) ?? {};
     return {
       bindingId: session.sessionId,
       deviceId: deviceSummary.deviceId ?? "",

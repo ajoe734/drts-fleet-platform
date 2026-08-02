@@ -15,7 +15,11 @@ import {
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
-async function deleteSessionTestData(database: DatabaseService, sessionIds: string[], principalIds: string[]) {
+async function deleteSessionTestData(
+  database: DatabaseService,
+  sessionIds: string[],
+  principalIds: string[],
+) {
   if (sessionIds.length > 0) {
     await database.query(
       `DELETE FROM iam.identity_refresh_families WHERE session_id = ANY($1::text[])`,
@@ -40,7 +44,10 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
   const createdPrincipalIds = new Set<string>();
 
   afterEach(async () => {
-    if (DATABASE_URL && (createdSessionIds.size > 0 || createdPrincipalIds.size > 0)) {
+    if (
+      DATABASE_URL &&
+      (createdSessionIds.size > 0 || createdPrincipalIds.size > 0)
+    ) {
       const cleanupDb = new DatabaseService();
       try {
         await deleteSessionTestData(
@@ -69,7 +76,10 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     const db = new DatabaseService();
     databases.push(db);
 
-    const result = await db.query<{ sessions_table: string | null; families_table: string | null }>(
+    const result = await db.query<{
+      sessions_table: string | null;
+      families_table: string | null;
+    }>(
       `
         SELECT
           to_regclass('iam.identity_sessions')::text AS sessions_table,
@@ -78,7 +88,9 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     );
 
     expect(result.rows[0]?.sessions_table).toBe("iam.identity_sessions");
-    expect(result.rows[0]?.families_table).toBe("iam.identity_refresh_families");
+    expect(result.rows[0]?.families_table).toBe(
+      "iam.identity_refresh_families",
+    );
   });
 
   it("stores iam.identity_sessions.token_version as bigint for millisecond session versions", async () => {
@@ -168,13 +180,18 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     await repo.createRefreshFamily(family);
 
     // Verify raw secret is NOT stored in DB projection or record
-    const dbRow = await db.query<{ current_token_hash: string; record: unknown }>(
+    const dbRow = await db.query<{
+      current_token_hash: string;
+      record: unknown;
+    }>(
       `SELECT current_token_hash, record FROM iam.identity_refresh_families WHERE family_id = $1`,
       [familyId],
     );
 
     expect(dbRow.rows[0]?.current_token_hash).toBe(tokenHash);
-    expect(JSON.stringify(dbRow.rows[0]?.record)).not.toContain(rawRefreshSecret);
+    expect(JSON.stringify(dbRow.rows[0]?.record)).not.toContain(
+      rawRefreshSecret,
+    );
 
     // Revoke session
     await repo.revokeSession(sessionId, "SECURITY_AUDIT_REVOKE", principalId);
@@ -259,6 +276,8 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
       familyId,
       oldTokenRaw: refreshToken,
       newTokenRaw: `rotated_refresh_token_${randomUUID()}`,
+      newSessionTokenId: `jti_expired_${randomUUID()}`,
+      newSessionTokenVersion: Date.now(),
       newExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
     });
 
@@ -348,12 +367,16 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
         familyId,
         oldTokenRaw: initialTokenRaw,
         newTokenRaw: newTokenRawA,
+        newSessionTokenId: `jti_conc_a_${randomUUID()}`,
+        newSessionTokenVersion: Date.now() + 1,
         newExpiresAt: new Date(Date.now() + 86400000 * 30).toISOString(),
       }),
       repoB.consumeAndRotateRefreshToken({
         familyId,
         oldTokenRaw: initialTokenRaw,
         newTokenRaw: newTokenRawB,
+        newSessionTokenId: `jti_conc_b_${randomUUID()}`,
+        newSessionTokenVersion: Date.now() + 2,
         newExpiresAt: new Date(Date.now() + 86400000 * 30).toISOString(),
       }),
     ]);
@@ -374,6 +397,8 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     const reuseAttempt = await repoA.consumeAndRotateRefreshToken({
       oldTokenRaw: initialTokenRaw,
       newTokenRaw: `new_token_reuse_${randomUUID()}`,
+      newSessionTokenId: `jti_reuse_${randomUUID()}`,
+      newSessionTokenVersion: Date.now() + 3,
       newExpiresAt: new Date(Date.now() + 86400000 * 30).toISOString(),
     });
 

@@ -271,6 +271,12 @@ describe("JWT Session Claims Integration", () => {
       guard.canActivate(createExecutionContext(request)),
     ).resolves.toBe(true);
 
+    // Refresh rotation advances the durable session claims, so a captured bearer
+    // from before the rotation cannot survive beside the newly issued bearer.
+    expect(
+      await jwtAuthService.verifyAccessToken(registered.accessToken),
+    ).toBeNull();
+
     expect(request.identity).toMatchObject({
       actorId: refreshed.driverId,
       realm: "driver",
