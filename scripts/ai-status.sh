@@ -8,4 +8,14 @@ elif [[ -n "${ORCH_STATUS_ROOT:-}" ]]; then
 else
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
-exec python3 "$ROOT_DIR/scripts/ai_status.py" "$@"
+
+CANONICAL_SCRIPT="$ROOT_DIR/scripts/ai_status.py"
+if [[ ! -f "$CANONICAL_SCRIPT" ]]; then
+  echo "Error: Canonical status script not found at $CANONICAL_SCRIPT" >&2
+  exit 1
+fi
+
+export ORCH_STATUS_ROOT="$ROOT_DIR"
+export AI_STATUS_ROOT="$ROOT_DIR"
+
+exec python3 "$CANONICAL_SCRIPT" "$@"

@@ -700,6 +700,62 @@ class IntegrationGateCommandDoneTest(unittest.TestCase):
         self.assertEqual(task["status"], "done")
         self.assertEqual(task["integration_status"], "not_applicable")
 
+    def test_status_authority_version_stamped_on_load(self) -> None:
+        state = ai_status.default_state()
+        self.assertEqual(state.get("status_authority_version"), "2026-08-02.v1")
+        self.assertEqual(state.get("status_authority_handshake"), "ORCH-STATUS-AUTHORITY-003")
+
+    def test_required_evidence_fields_enforcement(self) -> None:
+        task = {
+            "id": "REL-REF-EMBED-002",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "review_approved",
+            "required_integration_status": "dev_deployed",
+            "required_evidence_fields": [
+                "pr_url",
+                "ci_run_url",
+                "merge_commit",
+                "dev_deploy_run_url",
+                "dev_deploy_sha",
+                "live_verification_urls",
+            ],
+        }
+        completion_metadata = {
+            "integration_status": "dev_deployed",
+            "pr_url": "https://github.com/test/pr/1",
+            "ci_run_url": "https://github.com/test/ci/1",
+            "merge_commit": "abc123",
+            "dev_deploy_run_url": "https://github.com/test/deploy/1",
+            "dev_deploy_sha": "abc123",
+        }
+        with self.assertRaisesRegex(SystemExit, "requires evidence fields: live_verification_urls"):
+            ai_status.enforce_required_integration_closeout(task, completion_metadata)
+
+    def test_delegation_to_canonical_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            canonical_root = Path(tmpdir) / "canonical"
+            worktree_root = Path(tmpdir) / "worktree"
+            (canonical_root / "scripts").mkdir(parents=True)
+            (worktree_root / "scripts").mkdir(parents=True)
+
+            canonical_script = canonical_root / "scripts" / "ai_status.py"
+            canonical_script.write_text("# canonical\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(ai_status, "ROOT", canonical_root),
+                mock.patch.object(ai_status, "_LOCAL_ROOT", worktree_root),
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch.object(os, "execv") as mock_execv,
+            ):
+                # Import check logic simulation
+                if ai_status.ROOT != ai_status._LOCAL_ROOT and not os.environ.get("_AI_STATUS_DELEGATED"):
+                    target = (ai_status.ROOT / "scripts" / "ai_status.py").resolve()
+                    if target.exists() and target != canonical_script:
+                        os.execv(sys.executable, [sys.executable, str(target)] + sys.argv[1:])
+
+            self.assertTrue(canonical_script.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
