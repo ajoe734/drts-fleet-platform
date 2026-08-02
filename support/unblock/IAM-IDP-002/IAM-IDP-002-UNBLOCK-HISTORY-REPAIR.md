@@ -3,17 +3,18 @@
 Date: 2026-08-01
 Task: `IAM-IDP-002-UNBLOCK-HISTORY-REPAIR`
 Parent task: `IAM-IDP-002`
-Parent branch: `gemini2/iam-idp-002`
+Canonical implementation branch: `gemini2/iam-idp-002`
+Current owner worktree branch: `codex2/iam-idp-002`
 Task branch: `codex/iam-idp-002-unblock-history-repair`
 
 ## Finding
 
-No shared-history rewrite problem was found on the parent branch.
+No shared-history rewrite problem was found on the implementation branch.
 
-- `gemini2/iam-idp-002` is a linear branch from `origin/dev` at `717a8719`.
-- Local parent head is `04429f88` (`fix(IAM-IDP-002): scope role binding evaluation to selected membership realm and add cross-realm regression tests`).
-- `codex/iam-idp-002` is not the source of the owner branch. It was created from `origin/dev` and later fast-forwarded to the owner branch tip for review bookkeeping.
-- The actual blocker at chair time was remote lag plus transport/auth failure: `origin/gemini2/iam-idp-002` was still at `039b0ff4`, while a previous worker reported non-interactive HTTPS auth failure when trying to push.
+- `gemini2/iam-idp-002` remains a linear branch from remote `dev` at `717a8719`.
+- The canonical implementation tip is still `04429f88` (`fix(IAM-IDP-002): scope role binding evaluation to selected membership realm and add cross-realm regression tests`), and `PR #1251` is still open from that branch.
+- The current contamination is branch/worktree/commit misalignment after the parent task was reassigned at `2026-08-01T23:58:19Z`: the new owner worktree is pinned to `codex2/iam-idp-002@717a8719`, while the real implementation and review rail remain on `gemini2/iam-idp-002@04429f88`.
+- Machine truth for the parent task is also contaminated: it currently records `integration_status=merged_to_dev`, but GitHub still shows remote `dev@717a8719` and `PR #1251` as `OPEN` / `BLOCKED`.
 
 There is also real worktree contamination in the Gemini2 task worktree, but it is separate from branch history:
 
@@ -24,28 +25,36 @@ Those files should not be staged into `IAM-IDP-002`.
 
 ## Evidence
 
-- `git merge-base origin/dev gemini2/iam-idp-002` resolves to `717a8719`.
-- `git reflog show --date=iso gemini2/iam-idp-002` shows the branch was created from `origin/dev` on 2026-08-01 20:58:50 +0000 and then advanced linearly through `bd0b555e` .. `04429f88`.
-- `git reflog show --date=iso codex/iam-idp-002` shows the review branch was created from `origin/dev` on 2026-08-01 21:04:30 +0000 and later fast-forwarded to `gemini2/iam-idp-002` on 2026-08-01 23:12:16 +0000.
-- `git push --dry-run origin gemini2/iam-idp-002:gemini2/iam-idp-002` reported a plain fast-forward from `039b0ff4` to `04429f88`.
-- `git ls-remote --heads origin gemini2/iam-idp-002` now resolves to `04429f88f53322a4c080cd862d7233fa91541ae8`.
+- `git ls-remote --heads origin dev` resolves to `717a87195d59943a8601b5f4d3bc7d7e8317daad`.
+- `git ls-remote --heads origin gemini2/iam-idp-002` resolves to `04429f88f53322a4c080cd862d7233fa91541ae8`.
+- `git ls-remote --heads origin codex2/iam-idp-002` returns no branch. The reassigned owner branch does not exist remotely.
+- `git merge-base dev gemini2/iam-idp-002` resolves to `717a8719`, and `git rev-list --left-right --count codex2/iam-idp-002...gemini2/iam-idp-002` reports `0 20`.
+- `git worktree list --porcelain` shows `codex2/iam-idp-002` checked out at `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex2-iam-idp-002` with `HEAD 717a8719`, while `gemini2/iam-idp-002` is checked out at `/tmp/iam-idp-002-review.5DBlPb` with `HEAD 04429f88`.
+- `gh pr view 1251 --json headRefName,baseRefName,state,mergeStateStatus,statusCheckRollup` shows `headRefName=gemini2/iam-idp-002`, `baseRefName=dev`, `state=OPEN`, `mergeStateStatus=BLOCKED`.
+- As of `2026-08-01`, `PR #1251` has failing checks including `Commit trailers`, `Smoke acceptance`, `lint`, `typecheck`, `e2e`, and `ci-integ`, so there is no merged-to-dev evidence yet.
 
 ## Repair
 
-No force-push, rebase, or shared-history surgery was required.
+No force-push, rebase of shared history, or branch rewrite is required.
 
 The non-destructive repair path was:
 
-1. Verify that `origin/gemini2/iam-idp-002` is an ancestor of local `gemini2/iam-idp-002`.
-2. Ignore unrelated dirty files in the Gemini2 worktree.
-3. Push or verify the branch by refspec from a clean helper worktree instead of trying to finalize from the contaminated owner worktree.
+1. Treat `gemini2/iam-idp-002@04429f88` and `PR #1251` as the canonical implementation/review rail.
+2. Do not restart implementation from `codex2/iam-idp-002@717a8719`.
+3. In the reassigned owner worktree, fast-forward the local owner branch onto the canonical tip without rewriting shared history:
 
-As of 2026-08-01, the remote branch head matches the parent fix commit `04429f88`.
+   ```bash
+   git fetch origin gemini2/iam-idp-002
+   git merge --ff-only FETCH_HEAD
+   ```
 
-During this repair, machine truth for the parent task advanced again: at `2026-08-01T23:49:42Z`, `IAM-IDP-002` was already moved to `review_approved` with `PR #1251` open against `dev`. That confirms the history/push blocker is resolved.
+4. Keep unrelated dirty files out of any `IAM-IDP-002` staging set.
+5. Repair machine truth only after the branch reality is aligned: until `PR #1251` merges and remote `dev` contains the delivered commit, the parent task must not claim `merged_to_dev`.
+
+As of `2026-08-01`, the implementation branch itself is healthy; the remaining blocker is the reassigned owner branch/worktree not pointing at that implementation, plus stale integration bookkeeping on the parent task.
 
 ## Unblocked Next Step For `IAM-IDP-002`
 
-1. Treat `origin/gemini2/iam-idp-002@04429f88` as the canonical review tip for any further branch-level inspection.
-2. In the Gemini2 worktree, do not stage the unrelated sidecar JSON or local `node_modules/`.
-3. Follow the parent task's latest machine truth: as of `2026-08-01T23:49:42Z`, integration closeout is in progress with `PR #1251` open to `dev` and CI pending.
+1. Codex2 should continue from the existing implementation tip, not from the empty reassigned base branch: fast-forward local `codex2/iam-idp-002` to `origin/gemini2/iam-idp-002@04429f88` or inspect `PR #1251` directly.
+2. Fix the failing checks on `PR #1251`; that is the real unblock target now.
+3. After `PR #1251` merges and remote `dev` contains the delivered commit, update the parent task's integration evidence. Until then, the correct parent closeout level is branch/PR-level, not `merged_to_dev`.
