@@ -6,7 +6,7 @@
 - Parent: `IAM-P0-006`
 - Owner: `Codex2`
 - Reviewer: `Codex`
-- Audit timestamp: `2026-08-02T05:43:00+00:00`
+- Audit timestamp: `2026-08-02T06:07:00+00:00`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex2-iam-p0-006-unblock-history-repair`
 - Assigned helper branch:
@@ -16,7 +16,7 @@
 
 `IAM-P0-006` is no longer blocked. As of `2026-08-02`, the parent task is
 already `done`, and machine truth records it as reconciled from
-`origin/dev @ da8f9f79a93c9acc0a131fbb0e7993adb5d048c6`.
+`origin/dev @ da8f9f79a93c9acc0a131fbb0e7993adb5d048c6` at closeout time.
 
 This helper task exists to repair the stale unblock narrative that was written
 against outdated branch and PR observations.
@@ -62,7 +62,7 @@ is what this task repairs.
 
 ### Parent integration state
 
-- `origin/dev @ da8f9f79a93c9acc0a131fbb0e7993adb5d048c6`
+- current `origin/dev @ b27233f3c3210b3bacc636e7e5603daa3552f655`
 - `origin/codex2/iam-p0-006 @ ab68a8be8104b3bfaeedb70c1e5d3602d3317292`
 - local `codex2/iam-p0-006 @ ab68a8be8104b3bfaeedb70c1e5d3602d3317292`
 - `git merge-base --is-ancestor ab68a8be8104b3bfaeedb70c1e5d3602d3317292 origin/dev`
@@ -95,32 +95,34 @@ fast-forward of the owner branch tip.
   `9a3c91577e06f26d7b761848f2d5374f6d67513f`
 - prior refreshed helper head from the fourth repair follow-up:
   `0dc8ebffe0004fe88164fae0ce02909e11d86cbf`
+- prior refreshed helper head from the fifth repair follow-up:
+  `68289e7dd41ece05f837222b7859f4a81d0f5c45`
 - current local helper `HEAD`:
-  `codex2/iam-p0-006-unblock-history-repair @ 68289e7dd41ece05f837222b7859f4a81d0f5c45`
+  `codex2/iam-p0-006-unblock-history-repair @ 636f4e312922d103d5379efae5560c291decefd0`
 - stale local remote-tracking ref observed in this worktree:
   `origin/codex2/iam-p0-006-unblock-history-repair @ 98e4e3ba2634743ff1a9396c3222df56cba2acd9`
 - current actual remote helper head from `git ls-remote`:
-  `origin refs/heads/codex2/iam-p0-006-unblock-history-repair @ 68289e7dd41ece05f837222b7859f4a81d0f5c45`
+  `origin refs/heads/codex2/iam-p0-006-unblock-history-repair @ 636f4e312922d103d5379efae5560c291decefd0`
 - helper PR:
   `#1264 https://github.com/ajoe734/drts-fleet-platform/pull/1264`
 - current helper PR head OID from GitHub:
-  `68289e7dd41ece05f837222b7859f4a81d0f5c45`
+  `636f4e312922d103d5379efae5560c291decefd0`
 
 This is the contamination that kept the helper task blocked during review: the
 artifact originally published the stale local remote-tracking ref
 (`6363b9c1...`) as if it were the current shared branch head. The first repair
 corrected that claim to `667b097d...`, but the helper branch then advanced to
 `dc1493a...`, then to `98e4e3ba...`, then to `9a3c9157...`, then to
-`0dc8ebff...`, and then again to `68289e7d...`, while the markdown lagged
-behind the live branch and PR head. The exact chronology must therefore treat
-`667b097d...`, `dc1493a...`, `98e4e3ba...`, `9a3c9157...`, and `0dc8ebff...`
-as prior repaired heads and `68289e7d...` as the current canonical helper
-branch and PR head.
+`0dc8ebff...`, then to `68289e7d...`, and then again to `636f4e31...`, while
+the markdown lagged behind the live branch and PR head. The exact chronology
+must therefore treat `667b097d...`, `dc1493a...`, `98e4e3ba...`,
+`9a3c9157...`, `0dc8ebff...`, and `68289e7d...` as prior repaired heads and
+`636f4e31...` as the current canonical helper branch and PR head.
 
 This worktree also demonstrates the more precise contamination shape: even
 after `git fetch origin`, the local `origin/codex2/iam-p0-006-unblock-history-repair`
 tracking ref still reported `98e4e3ba...`, while both `git ls-remote` and
-`gh pr view 1264 --json headRefOid` reported `68289e7d...`. For this helper
+`gh pr view 1264 --json headRefOid` reported `636f4e31...`. For this helper
 task, the authoritative current head evidence is therefore the live remote ref
 and PR head, not the stale remote-tracking ref cached in the worktree.
 
@@ -169,11 +171,11 @@ reusing the superseded stale-history diagnosis.
   - `git fetch origin`
   - `git rev-parse origin/dev origin/codex2/iam-p0-006 codex2/iam-p0-006 HEAD origin/codex2/iam-p0-006-unblock-history-repair`
   - `git ls-remote --heads origin codex2/iam-p0-006-unblock-history-repair`
+  - `git merge-base --is-ancestor da8f9f79a93c9acc0a131fbb0e7993adb5d048c6 origin/dev`
   - `git rev-list --left-right --count origin/dev...codex2/iam-p0-006`
   - `git merge-base --is-ancestor ab68a8be8104b3bfaeedb70c1e5d3602d3317292 origin/dev`
   - `git log --oneline --decorate --max-count=12 --graph origin/dev origin/codex2/iam-p0-006 codex2/iam-p0-006-unblock-history-repair`
-  - `git show -s --format=fuller da8f9f79a93c9acc0a131fbb0e7993adb5d048c6`
-  - `git show -s --format=fuller 6363b9c125d291101d05a8c48f0924800d4f5ac9 667b097dc1ef30ce5c5f45ecb703d28ca097e8ac dc1493a43c82c712cd8c0e419ccca37b8d540ac1 98e4e3ba2634743ff1a9396c3222df56cba2acd9 9a3c91577e06f26d7b761848f2d5374f6d67513f 0dc8ebffe0004fe88164fae0ce02909e11d86cbf 68289e7dd41ece05f837222b7859f4a81d0f5c45`
+  - `git show -s --format=fuller b27233f3c3210b3bacc636e7e5603daa3552f655 da8f9f79a93c9acc0a131fbb0e7993adb5d048c6 68289e7dd41ece05f837222b7859f4a81d0f5c45 636f4e312922d103d5379efae5560c291decefd0`
 - Inspected PR presence:
   - `gh pr list --head codex2/iam-p0-006 --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
   - `gh pr list --head codex2/iam-p0-006-unblock-history-repair --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
