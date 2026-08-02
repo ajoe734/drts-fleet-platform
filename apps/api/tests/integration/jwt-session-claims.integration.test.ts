@@ -520,6 +520,139 @@ describe("JWT Session Claims Integration", () => {
     expect(await service.verifyAccessToken(issued.token)).toBeNull();
   });
 
+  it("invalidates a platform session within 60 seconds when its durable membership role binding changes", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    configureHs256Env();
+
+    const db = new DatabaseService();
+    databases.push(db);
+    const repo = new IdentityRepository(db);
+    const service = new JwtAuthService(repo);
+    const principalId = `principal_platform_membership_${randomUUID()}`;
+    const membershipId = `membership_platform_membership_${randomUUID()}`;
+    const roleBindingId = `role_binding_platform_membership_${randomUUID()}`;
+    const issuedAt = "2026-08-02T00:00:00.000Z";
+    const changedAt = "2026-08-02T00:00:30.000Z";
+    createdPrincipalIds.add(principalId);
+
+    await repo.upsertWorkforceIdentity(
+      {
+        principalId,
+        sourceRef: `test:${principalId}`,
+        issuer: "test_issuer",
+        subject: `test_subject_${principalId}`,
+        principalType: "human",
+        email: `${principalId}@example.test`,
+        emailVerified: true,
+        displayName: "Platform Membership Session Test",
+        status: "active",
+        createdAt: issuedAt,
+        updatedAt: issuedAt,
+      },
+      {
+        membershipId,
+        sourceRef: `test:${membershipId}`,
+        principalId,
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: issuedAt,
+        updatedAt: issuedAt,
+      },
+      [
+        {
+          roleBindingId,
+          sourceRef: `test:${roleBindingId}`,
+          membershipId,
+          roleCode: "platform_admin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: issuedAt,
+          validTo: null,
+          createdAt: issuedAt,
+          updatedAt: issuedAt,
+        },
+      ],
+    );
+
+    const issued = await service.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "platform_admin",
+        actorId: principalId,
+        principalId,
+        membershipId,
+        realm: "platform",
+        tenantId: null,
+        roleFamilies: ["platform"],
+        roles: ["platform_admin"],
+        scopes: ["platform:read"],
+        requestId: null,
+      },
+      {
+        principalId,
+        membershipId,
+        subject: `test_subject_${principalId}`,
+        ensurePrincipal: false,
+        authTime: issuedAt,
+        tokenVersion: Date.parse(issuedAt),
+      },
+    );
+    createdSessionIds.add(issued.sessionId);
+
+    expect(await service.verifyAccessToken(issued.token)).not.toBeNull();
+
+    await repo.upsertWorkforceIdentity(
+      {
+        principalId,
+        sourceRef: `test:${principalId}`,
+        issuer: "test_issuer",
+        subject: `test_subject_${principalId}`,
+        principalType: "human",
+        email: `${principalId}@example.test`,
+        emailVerified: true,
+        displayName: "Platform Membership Session Test",
+        status: "active",
+        createdAt: issuedAt,
+        updatedAt: issuedAt,
+      },
+      {
+        membershipId,
+        sourceRef: `test:${membershipId}`,
+        principalId,
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: issuedAt,
+        updatedAt: changedAt,
+      },
+      [
+        {
+          roleBindingId,
+          sourceRef: `test:${roleBindingId}`,
+          membershipId,
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: issuedAt,
+          validTo: null,
+          createdAt: issuedAt,
+          updatedAt: changedAt,
+        },
+      ],
+    );
+
+    expect(await service.verifyAccessToken(issued.token)).toBeNull();
+  });
+
   it("rejects algorithm-confusion tokens when asymmetric keys are configured", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
