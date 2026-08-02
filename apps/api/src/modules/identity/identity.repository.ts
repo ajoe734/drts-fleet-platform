@@ -9,7 +9,11 @@ import type {
   CanonicalIdentityMembershipRecord,
   CanonicalIdentityPrincipalRecord,
   CanonicalIdentityRoleBindingRecord,
+  CanonicalIdentitySessionRecord,
+  CanonicalRefreshFamilyRecord,
   CanonicalTenantUserIdentitySnapshot,
+  ConsumeAndRotateRefreshTokenCommand,
+  ConsumeAndRotateRefreshTokenResult,
   TenantUserRoleRecord,
 } from "@drts/contracts";
 
@@ -20,6 +24,10 @@ type JsonRecordRow = {
 };
 
 const LEGACY_TENANT_USER_ISSUER = "legacy_tenant_email";
+
+export function hashIdentitySecret(secret: string): string {
+  return createHash("sha256").update(secret).digest("hex");
+}
 
 @Injectable()
 export class IdentityRepository {
@@ -44,6 +52,18 @@ export class IdentityRepository {
     string,
     CanonicalIdentityInvitationRecord
   >();
+
+  private readonly fallbackSessions = new Map<
+    string,
+    CanonicalIdentitySessionRecord
+  >();
+
+  private readonly fallbackRefreshFamilies = new Map<
+    string,
+    CanonicalRefreshFamilyRecord
+  >();
+
+  private readonly fallbackPreviousTokenHashes = new Map<string, string>();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -224,6 +244,21 @@ export class IdentityRepository {
     }));
   }
 
+  async ensurePrincipalRecord(
+    principal: CanonicalIdentityPrincipalRecord,
+  ): Promise<CanonicalIdentityPrincipalRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackPrincipal(principal);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertPrincipal(client, principal);
+    } finally {
+      client.release();
+    }
+  }
+
   async findPrincipalBySubject(
     issuer: string,
     subject: string,
@@ -402,6 +437,810 @@ export class IdentityRepository {
       }
       await client.query("COMMIT");
       return { principal: p, membership: m, roleBindings: rbs };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createSession(
+    session: CanonicalIdentitySessionRecord,
+  ): Promise<CanonicalIdentitySessionRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackSessions.set(session.sessionId, { ...session });
+      return { ...session };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          INSERT INTO iam.identity_sessions (
+            session_id,
+            source_ref,
+            principal_id,
+            membership_id,
+            realm,
+            status,
+            auth_time,
+            auth_methods,
+            token_version,
+            idle_expires_at,
+            absolute_expires_at,
+            revoked_at,
+            revoked_by_principal_id,
+            revoke_reason,
+            device_summary,
+            risk_summary,
+            created_at,
+            updated_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17, $18, $19::jsonb
+          )
+          ON CONFLICT (session_id) DO UPDATE SET
+            status = EXCLUDED.status,
+            auth_methods = EXCLUDED.auth_methods,
+            token_version = EXCLUDED.token_version,
+            idle_expires_at = EXCLUDED.idle_expires_at,
+            absolute_expires_at = EXCLUDED.absolute_expires_at,
+            revoked_at = EXCLUDED.revoked_at,
+            revoked_by_principal_id = EXCLUDED.revoked_by_principal_id,
+            revoke_reason = EXCLUDED.revoke_reason,
+            device_summary = EXCLUDED.device_summary,
+            risk_summary = EXCLUDED.risk_summary,
+            updated_at = EXCLUDED.updated_at,
+            record = EXCLUDED.record
+          RETURNING record
+        `,
+        [
+          session.sessionId,
+          session.sourceRef,
+          session.principalId,
+          session.membershipId,
+          session.realm,
+          session.status,
+          session.authTime,
+          session.authMethods,
+          session.tokenVersion,
+          session.idleExpiresAt,
+          session.absoluteExpiresAt,
+          session.revokedAt,
+          session.revokedByPrincipalId,
+          session.revokeReason,
+          JSON.stringify(session.deviceSummary || {}),
+          JSON.stringify(session.riskSummary || {}),
+          session.createdAt,
+          session.updatedAt,
+          JSON.stringify(session),
+        ],
+      );
+
+      return this.parseRecord<CanonicalIdentitySessionRecord>(
+        result.rows[0]?.record,
+        "iam.identity_sessions",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async getSession(
+    sessionId: string,
+  ): Promise<CanonicalIdentitySessionRecord | null> {
+    if (!this.isEnabled()) {
+      const found = this.fallbackSessions.get(sessionId);
+      return found ? { ...found } : null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_sessions WHERE session_id = $1`,
+      [sessionId],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return this.parseRecord<CanonicalIdentitySessionRecord>(
+      row.record,
+      "iam.identity_sessions",
+    );
+  }
+
+  async revokeSession(
+    sessionId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ): Promise<CanonicalIdentitySessionRecord | null> {
+    const revokedAt = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      const session = this.fallbackSessions.get(sessionId);
+      if (!session) {
+        return null;
+      }
+      const updated: CanonicalIdentitySessionRecord = {
+        ...session,
+        status: "revoked",
+        revokedAt,
+        revokedByPrincipalId: revokedByPrincipalId || null,
+        revokeReason: reason,
+        updatedAt: revokedAt,
+      };
+      this.fallbackSessions.set(sessionId, updated);
+
+      for (const [familyId, family] of this.fallbackRefreshFamilies.entries()) {
+        if (family.sessionId === sessionId && family.status === "active") {
+          this.fallbackRefreshFamilies.set(familyId, {
+            ...family,
+            status: "revoked",
+            updatedAt: revokedAt,
+          });
+        }
+      }
+      return updated;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const sessionResult = await client.query<JsonRecordRow>(
+        `
+          UPDATE iam.identity_sessions
+          SET status = 'revoked',
+              revoked_at = $2::timestamptz,
+              revoked_by_principal_id = $3::text,
+              revoke_reason = $4::text,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(
+                    jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                    '{revokedAt}', to_jsonb($2::text)
+                  ),
+                  '{revokedByPrincipalId}', to_jsonb($3::text)
+                ),
+                '{revokeReason}', to_jsonb($4::text)
+              )
+          WHERE session_id = $1::text
+          RETURNING record
+        `,
+        [sessionId, revokedAt, revokedByPrincipalId || null, reason],
+      );
+
+      if (sessionResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+
+      await client.query(
+        `
+          UPDATE iam.identity_refresh_families
+          SET status = 'revoked',
+              updated_at = $2::timestamptz,
+              record = jsonb_set(record, '{status}', '"revoked"'::jsonb)
+          WHERE session_id = $1::text AND status = 'active'
+        `,
+        [sessionId, revokedAt],
+      );
+
+      await client.query("COMMIT");
+      const row = sessionResult.rows[0];
+      if (!row) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentitySessionRecord>(
+        row.record,
+        "iam.identity_sessions",
+      );
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listSessionsByPrincipal(
+    principalId: string,
+  ): Promise<CanonicalIdentitySessionRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackSessions.values())
+        .filter((session) => session.principalId === principalId)
+        .map((session) => ({ ...session }));
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_sessions WHERE principal_id = $1 ORDER BY updated_at DESC`,
+      [principalId],
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<CanonicalIdentitySessionRecord>(
+        row.record,
+        "iam.identity_sessions",
+      ),
+    );
+  }
+
+  async findActiveSessionByDevice(
+    deviceId: string,
+  ): Promise<CanonicalIdentitySessionRecord | null> {
+    if (!deviceId.trim()) {
+      return null;
+    }
+
+    if (!this.isEnabled()) {
+      for (const session of this.fallbackSessions.values()) {
+        const sessionDeviceId =
+          (
+            session.deviceSummary as
+              | { deviceId?: string | null }
+              | undefined
+          )?.deviceId ?? null;
+        if (session.status === "active" && sessionDeviceId === deviceId) {
+          return { ...session };
+        }
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM iam.identity_sessions
+        WHERE status = 'active'
+          AND device_summary->>'deviceId' = $1
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+      [deviceId],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return this.parseRecord<CanonicalIdentitySessionRecord>(
+      row.record,
+      "iam.identity_sessions",
+    );
+  }
+
+  async createRefreshFamily(
+    family: CanonicalRefreshFamilyRecord,
+  ): Promise<CanonicalRefreshFamilyRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackRefreshFamilies.set(family.familyId, { ...family });
+      return { ...family };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          INSERT INTO iam.identity_refresh_families (
+            family_id,
+            source_ref,
+            session_id,
+            current_token_hash,
+            counter,
+            status,
+            expires_at,
+            compromised_at,
+            created_at,
+            updated_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb
+          )
+          ON CONFLICT (family_id) DO UPDATE SET
+            current_token_hash = EXCLUDED.current_token_hash,
+            counter = EXCLUDED.counter,
+            status = EXCLUDED.status,
+            expires_at = EXCLUDED.expires_at,
+            compromised_at = EXCLUDED.compromised_at,
+            updated_at = EXCLUDED.updated_at,
+            record = EXCLUDED.record
+          RETURNING record
+        `,
+        [
+          family.familyId,
+          family.sourceRef,
+          family.sessionId,
+          family.currentTokenHash,
+          family.counter,
+          family.status,
+          family.expiresAt,
+          family.compromisedAt,
+          family.createdAt,
+          family.updatedAt,
+          JSON.stringify(family),
+        ],
+      );
+
+      return this.parseRecord<CanonicalRefreshFamilyRecord>(
+        result.rows[0]?.record,
+        "iam.identity_refresh_families",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async getRefreshFamily(
+    familyId: string,
+  ): Promise<CanonicalRefreshFamilyRecord | null> {
+    if (!this.isEnabled()) {
+      const found = this.fallbackRefreshFamilies.get(familyId);
+      return found ? { ...found } : null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_refresh_families WHERE family_id = $1`,
+      [familyId],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return this.parseRecord<CanonicalRefreshFamilyRecord>(
+      row.record,
+      "iam.identity_refresh_families",
+    );
+  }
+
+  async getRefreshFamilyByTokenHash(
+    tokenHash: string,
+  ): Promise<CanonicalRefreshFamilyRecord | null> {
+    if (!this.isEnabled()) {
+      for (const family of this.fallbackRefreshFamilies.values()) {
+        if (family.currentTokenHash === tokenHash) {
+          return { ...family };
+        }
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_refresh_families WHERE current_token_hash = $1`,
+      [tokenHash],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return this.parseRecord<CanonicalRefreshFamilyRecord>(
+      row.record,
+      "iam.identity_refresh_families",
+    );
+  }
+
+  async consumeAndRotateRefreshToken(
+    command: ConsumeAndRotateRefreshTokenCommand,
+  ): Promise<ConsumeAndRotateRefreshTokenResult> {
+    const oldHash =
+      command.oldTokenHash ||
+      (command.oldTokenRaw ? hashIdentitySecret(command.oldTokenRaw) : "");
+    const newHash =
+      command.newTokenHash ||
+      (command.newTokenRaw ? hashIdentitySecret(command.newTokenRaw) : "");
+
+    if (!oldHash || !newHash) {
+      return {
+        success: false,
+        session: null,
+        family: null,
+        reason: "INVALID_TOKEN",
+      };
+    }
+
+    if (!this.isEnabled()) {
+      let targetFamily: CanonicalRefreshFamilyRecord | null = null;
+      for (const family of this.fallbackRefreshFamilies.values()) {
+        if (
+          family.currentTokenHash === oldHash ||
+          (command.familyId &&
+            family.familyId === command.familyId &&
+            family.currentTokenHash === oldHash)
+        ) {
+          targetFamily = family;
+          break;
+        }
+      }
+
+      if (!targetFamily) {
+        const compromisedFamilyId = this.fallbackPreviousTokenHashes.get(oldHash);
+        if (compromisedFamilyId) {
+          const family =
+            this.fallbackRefreshFamilies.get(compromisedFamilyId) || null;
+          const session = family
+            ? this.fallbackSessions.get(family.sessionId) || null
+            : null;
+          const now = new Date().toISOString();
+
+          if (family) {
+            family.status = "compromised";
+            family.compromisedAt = now;
+            family.updatedAt = now;
+          }
+          if (session) {
+            session.status = "compromised";
+            session.revokedAt = now;
+            session.revokeReason = "REFRESH_TOKEN_REUSE_DETECTED";
+            session.updatedAt = now;
+          }
+
+          return {
+            success: false,
+            session,
+            family,
+            reason: "REUSE_DETECTED",
+          };
+        }
+
+        return {
+          success: false,
+          session: null,
+          family: null,
+          reason: "INVALID_TOKEN",
+        };
+      }
+
+      const session = this.fallbackSessions.get(targetFamily.sessionId) || null;
+
+      if (
+        targetFamily.status === "compromised" ||
+        session?.status === "compromised"
+      ) {
+        return {
+          success: false,
+          session,
+          family: targetFamily,
+          reason: "COMPROMISED",
+        };
+      }
+      if (
+        targetFamily.status === "revoked" ||
+        session?.status === "revoked"
+      ) {
+        return {
+          success: false,
+          session,
+          family: targetFamily,
+          reason: "REVOKED",
+        };
+      }
+
+      const nowTime = Date.now();
+      if (
+        new Date(targetFamily.expiresAt).getTime() <= nowTime ||
+        (session &&
+          new Date(session.absoluteExpiresAt).getTime() <= nowTime)
+      ) {
+        const now = new Date().toISOString();
+        targetFamily.status = "expired";
+        targetFamily.updatedAt = now;
+        if (session) {
+          session.status = "expired";
+          session.updatedAt = now;
+        }
+
+        return {
+          success: false,
+          session,
+          family: targetFamily,
+          reason: "EXPIRED",
+        };
+      }
+
+      this.fallbackPreviousTokenHashes.set(oldHash, targetFamily.familyId);
+      const now = command.updatedAt || new Date().toISOString();
+      targetFamily.currentTokenHash = newHash;
+      targetFamily.counter += 1;
+      targetFamily.expiresAt = command.newExpiresAt;
+      targetFamily.updatedAt = now;
+      if (session) {
+        session.updatedAt = now;
+      }
+
+      return {
+        success: true,
+        session,
+        family: { ...targetFamily },
+      };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+
+      const familyResult = await client.query<{
+        family_id: string;
+        session_id: string;
+        current_token_hash: string;
+        counter: number;
+        family_status: string;
+        expires_at: string;
+        compromised_at: string | null;
+        family_record: unknown;
+        session_status: string;
+        absolute_expires_at: string;
+        session_record: unknown;
+      }>(
+        `
+          SELECT
+            f.family_id,
+            f.session_id,
+            f.current_token_hash,
+            f.counter,
+            f.status AS family_status,
+            f.expires_at,
+            f.compromised_at,
+            f.record AS family_record,
+            s.status AS session_status,
+            s.absolute_expires_at,
+            s.record AS session_record
+          FROM iam.identity_refresh_families f
+          JOIN iam.identity_sessions s ON s.session_id = f.session_id
+          WHERE f.current_token_hash = $1
+          FOR UPDATE OF f, s
+        `,
+        [oldHash],
+      );
+
+      if (familyResult.rows.length === 0) {
+        const historicalResult = await client.query<{
+          family_id: string;
+          session_id: string;
+          family_record: unknown;
+          session_record: unknown;
+        }>(
+          `
+            SELECT f.family_id, f.session_id, f.record AS family_record, s.record AS session_record
+            FROM iam.identity_refresh_families f
+            JOIN iam.identity_sessions s ON s.session_id = f.session_id
+            WHERE f.record->'previousHashes' ? $1::text
+            FOR UPDATE OF f, s
+          `,
+          [oldHash],
+        );
+
+        if (historicalResult.rows.length > 0) {
+          const row = historicalResult.rows[0];
+          if (!row) {
+            await client.query("ROLLBACK");
+            return {
+              success: false,
+              session: null,
+              family: null,
+              reason: "INVALID_TOKEN",
+            };
+          }
+          const now = new Date().toISOString();
+
+          await client.query(
+            `
+              UPDATE iam.identity_refresh_families
+              SET status = 'compromised',
+                  compromised_at = $1::timestamptz,
+                  updated_at = $1::timestamptz,
+                  record = jsonb_set(
+                    jsonb_set(record, '{status}', '"compromised"'::jsonb),
+                    '{compromisedAt}', to_jsonb($1::timestamptz)
+                  )
+              WHERE family_id = $2::text
+            `,
+            [now, row.family_id],
+          );
+
+          await client.query(
+            `
+              UPDATE iam.identity_sessions
+              SET status = 'compromised',
+                  revoked_at = $1::timestamptz,
+                  revoke_reason = 'REFRESH_TOKEN_REUSE_DETECTED',
+                  updated_at = $1::timestamptz,
+                  record = jsonb_set(
+                    jsonb_set(
+                      jsonb_set(record, '{status}', '"compromised"'::jsonb),
+                      '{revokedAt}', to_jsonb($1::timestamptz)
+                    ),
+                    '{revokeReason}', '"REFRESH_TOKEN_REUSE_DETECTED"'::jsonb
+                  )
+              WHERE session_id = $2::text
+            `,
+            [now, row.session_id],
+          );
+
+          await client.query("COMMIT");
+          const updatedFamily = this.parseRecord<CanonicalRefreshFamilyRecord>(
+            row.family_record,
+            "iam.identity_refresh_families",
+          );
+          const updatedSession = this.parseRecord<CanonicalIdentitySessionRecord>(
+            row.session_record,
+            "iam.identity_sessions",
+          );
+
+          return {
+            success: false,
+            session: {
+              ...updatedSession,
+              status: "compromised",
+              revokedAt: now,
+              revokeReason: "REFRESH_TOKEN_REUSE_DETECTED",
+            },
+            family: {
+              ...updatedFamily,
+              status: "compromised",
+              compromisedAt: now,
+            },
+            reason: "REUSE_DETECTED",
+          };
+        }
+
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          session: null,
+          family: null,
+          reason: "INVALID_TOKEN",
+        };
+      }
+
+      const row = familyResult.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          session: null,
+          family: null,
+          reason: "INVALID_TOKEN",
+        };
+      }
+      const family = this.parseRecord<CanonicalRefreshFamilyRecord>(
+        row.family_record,
+        "iam.identity_refresh_families",
+      );
+      const session = this.parseRecord<CanonicalIdentitySessionRecord>(
+        row.session_record,
+        "iam.identity_sessions",
+      );
+
+      if (
+        row.family_status === "compromised" ||
+        row.session_status === "compromised"
+      ) {
+        await client.query("ROLLBACK");
+        return { success: false, session, family, reason: "COMPROMISED" };
+      }
+
+      if (
+        row.family_status === "revoked" ||
+        row.session_status === "revoked"
+      ) {
+        await client.query("ROLLBACK");
+        return { success: false, session, family, reason: "REVOKED" };
+      }
+
+      const nowTime = Date.now();
+      if (
+        new Date(row.expires_at).getTime() <= nowTime ||
+        new Date(row.absolute_expires_at).getTime() <= nowTime
+      ) {
+        const now = new Date().toISOString();
+        await client.query(
+          `UPDATE iam.identity_refresh_families SET status = 'expired', updated_at = $1 WHERE family_id = $2`,
+          [now, row.family_id],
+        );
+        await client.query(
+          `UPDATE iam.identity_sessions SET status = 'expired', updated_at = $1 WHERE session_id = $2`,
+          [now, row.session_id],
+        );
+        await client.query("COMMIT");
+
+        return {
+          success: false,
+          session: { ...session, status: "expired" },
+          family: { ...family, status: "expired" },
+          reason: "EXPIRED",
+        };
+      }
+
+      const now = command.updatedAt || new Date().toISOString();
+      const updateFamilyResult = await client.query<JsonRecordRow>(
+        `
+          UPDATE iam.identity_refresh_families
+          SET current_token_hash = $1::text,
+              counter = counter + 1,
+              expires_at = $2::timestamptz,
+              updated_at = $3::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(record, '{currentTokenHash}', to_jsonb($1::text)),
+                  '{counter}', to_jsonb(counter + 1)
+                ),
+                '{previousHashes}',
+                coalesce(record->'previousHashes', '[]'::jsonb) || to_jsonb($4::text)
+              )
+          WHERE family_id = $5::text AND current_token_hash = $4::text AND status = 'active'
+          RETURNING record
+        `,
+        [newHash, command.newExpiresAt, now, oldHash, row.family_id],
+      );
+
+      if (updateFamilyResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          session: null,
+          family: null,
+          reason: "CONCURRENCY_CONFLICT",
+        };
+      }
+
+      const updateSessionResult = await client.query<JsonRecordRow>(
+        `
+          UPDATE iam.identity_sessions
+          SET updated_at = $1::timestamptz,
+              record = jsonb_set(record, '{updatedAt}', to_jsonb($1::text))
+          WHERE session_id = $2::text
+          RETURNING record
+        `,
+        [now, row.session_id],
+      );
+
+      await client.query("COMMIT");
+      const updatedFamilyRow = updateFamilyResult.rows[0];
+      const updatedSessionRow = updateSessionResult.rows[0];
+      if (!updatedFamilyRow || !updatedSessionRow) {
+        return {
+          success: false,
+          session: null,
+          family: null,
+          reason: "CONCURRENCY_CONFLICT",
+        };
+      }
+      const updatedFamily = this.parseRecord<CanonicalRefreshFamilyRecord>(
+        updatedFamilyRow.record,
+        "iam.identity_refresh_families",
+      );
+      const updatedSession = this.parseRecord<CanonicalIdentitySessionRecord>(
+        updatedSessionRow.record,
+        "iam.identity_sessions",
+      );
+
+      return {
+        success: true,
+        session: updatedSession,
+        family: updatedFamily,
+      };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
