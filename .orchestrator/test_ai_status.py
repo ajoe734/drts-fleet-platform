@@ -97,6 +97,34 @@ class CompletionMetadataTest(unittest.TestCase):
         self.assertEqual(metadata["commit_hash"], "-")
         self.assertEqual(metadata["commit_subject"], "no-commit closeout")
 
+    def test_release_gate_noncanonical_done_still_requires_commit_metadata(self) -> None:
+        task = {
+            "id": "TASK-001-RELEASE",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "review_approved",
+            "mutates_canonical": False,
+            "release_gate": True,
+        }
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(SystemExit, "done requires COMMIT_HASH"):
+                ai_status.completion_metadata_from_env(task, "Codex")
+
+    def test_required_integration_noncanonical_done_still_requires_commit_metadata(self) -> None:
+        task = {
+            "id": "TASK-001-DEPLOY",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "review_approved",
+            "mutates_canonical": False,
+            "required_integration_status": "dev_deployed",
+        }
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(SystemExit, "done requires COMMIT_HASH"):
+                ai_status.completion_metadata_from_env(task, "Codex")
+
 
 class UnblockParentResolutionTest(unittest.TestCase):
     def test_unblock_done_resumes_parent_to_todo(self) -> None:
@@ -316,6 +344,31 @@ class GitMergeReconciliationTest(unittest.TestCase):
 
         self.assertEqual(reconciled, [])
         task = next(t for t in state["tasks"] if t["id"] == "REL-REF-EMBED-001")
+        self.assertEqual(task["status"], "review_approved")
+
+    def test_reconcile_skips_any_required_integration_task(self) -> None:
+        state = self._state()
+        state["tasks"].append(
+            {
+                "id": "REL-MERGE-ONLY-001",
+                "owner": "Codex2",
+                "reviewer": "Codex",
+                "status": "review_approved",
+                "required_integration_status": "merged_to_dev",
+            }
+        )
+        closeouts = {
+            "REL-MERGE-ONLY-001": {
+                "sha": "feedfacefeedfacefeedfacefeedfacefeedface",
+                "subject": "REL-MERGE-ONLY-001: requires explicit integration evidence",
+                "commit_date": "2026-08-02T03:48:47+00:00",
+            }
+        }
+        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
+            reconciled = ai_status.apply_git_merge_reconciliation(state)
+
+        self.assertEqual(reconciled, [])
+        task = next(t for t in state["tasks"] if t["id"] == "REL-MERGE-ONLY-001")
         self.assertEqual(task["status"], "review_approved")
 
     def test_closeout_regex_excludes_anchor_commits(self) -> None:

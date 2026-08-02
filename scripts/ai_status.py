@@ -436,6 +436,10 @@ def build_doc_sync_audit_report(state: dict[str, Any]) -> tuple[bool, list[str]]
 
 
 def task_requires_commit(task: dict[str, Any]) -> bool:
+    if task.get("release_gate"):
+        return True
+    if required_integration_status(task):
+        return True
     if task.get("task_class") == "sidecar":
         return False
     if task.get("mutates_canonical") is False:
@@ -1270,7 +1274,7 @@ def apply_git_merge_reconciliation(
         if not closeout:
             continue
         required_status = required_integration_status(task)
-        if required_status == "dev_deployed":
+        if required_status:
             continue
         prior_status = str(task.get("status") or "")
         actor = canonical_agent_name(task.get("owner")) or current_actor()
