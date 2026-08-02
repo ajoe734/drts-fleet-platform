@@ -66,9 +66,10 @@ type PendingAction =
       kind: "role";
       user: PlatformAdminUserRecord;
       roleCode: PlatformAdminUserRole;
+      reason: string;
     }
   | { kind: "suspend"; user: PlatformAdminUserRecord; reason: string }
-  | { kind: "activate"; user: PlatformAdminUserRecord };
+  | { kind: "activate"; user: PlatformAdminUserRecord; reason: string };
 
 const bodyStyle = {
   display: "grid",
@@ -252,6 +253,7 @@ export default function UsersPage() {
   const [formDisplayName, setFormDisplayName] = useState("");
   const [formRoleCode, setFormRoleCode] =
     useState<PlatformAdminUserRole>("operator");
+  const [formReason, setFormReason] = useState("");
   const [creating, setCreating] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(
     null,
@@ -288,6 +290,10 @@ export default function UsersPage() {
             "High-risk change. A confirmation reason is required before the user loses platform access. Access is revoked immediately on confirm.",
           reasonField: "Reason",
           reasonHint: "Required to confirm this high-risk suspension.",
+          inviteReasonHint:
+            "Required before creating or changing a durable workforce account.",
+          mutationReasonHint:
+            "Required before applying the durable role or status change.",
           reasonPlaceholder: "e.g. Offboarding / suspected credential leak",
           activateTitle: "Reactivate platform staff",
           activateSubtitle:
@@ -325,6 +331,8 @@ export default function UsersPage() {
             "高風險變更，需填寫原因確認後才停用；確認後使用者隨即失去平台存取權限。",
           reasonField: "原因",
           reasonHint: "高風險停用確認必填。",
+          inviteReasonHint: "建立或變更 durable workforce 帳號前必填。",
+          mutationReasonHint: "套用 durable 角色或狀態變更前必填。",
           reasonPlaceholder: "例如：離職 / 疑似憑證外洩",
           activateTitle: "重新啟用平台人員",
           activateSubtitle: "恢復此使用者的平台存取權限；確認後立即生效。",
@@ -362,6 +370,7 @@ export default function UsersPage() {
     setFormEmail("");
     setFormDisplayName("");
     setFormRoleCode("operator");
+    setFormReason("");
   }, []);
 
   const handleCreate = async (event: FormEvent) => {
@@ -373,6 +382,7 @@ export default function UsersPage() {
         email: formEmail.trim(),
         displayName: formDisplayName.trim(),
         roleCode: formRoleCode,
+        reason: formReason.trim(),
       });
       resetInvite();
       await loadUsers();
@@ -388,11 +398,16 @@ export default function UsersPage() {
       userId: string,
       roleCode: PlatformAdminUserRole,
       status: PlatformAdminUserStatus,
+      reason: string,
     ) => {
       setUpdatingUserId(userId);
       setError(null);
       try {
-        await client.updatePlatformAdminUserRole(userId, { roleCode, status });
+        await client.updatePlatformAdminUserRole(userId, {
+          roleCode,
+          status,
+          reason,
+        });
         setPendingAction(null);
         await loadUsers();
       } catch (e: unknown) {
@@ -410,21 +425,26 @@ export default function UsersPage() {
     }
     const { kind, user } = pendingAction;
     if (kind === "role") {
-      await applyUpdate(user.userId, pendingAction.roleCode, user.status);
+      await applyUpdate(
+        user.userId,
+        pendingAction.roleCode,
+        user.status,
+        pendingAction.reason,
+      );
     } else if (kind === "suspend") {
-      // The canvas descriptor marks `suspend` as requiresReason: true, so the
-      // operator must type a reason as a confirmation gate before this
-      // high-risk status transition. The reason is intentionally NOT sent to
-      // the backend: UpdatePlatformAdminUserRoleCommand only carries
-      // { roleCode, status } (packages/contracts/src/index.ts) and widening
-      // that contract is outside this page-scoped task. The backend audit
-      // record for this action captures only roleCode, not the status value
-      // (platform-admin.service.ts update_platform_admin_user_role), so the
-      // copy above frames suspend/activate as a confirmation gate that changes
-      // access on confirm — it does NOT claim the status change is audited.
-      await applyUpdate(user.userId, user.roleCode, "suspended");
+      await applyUpdate(
+        user.userId,
+        user.roleCode,
+        "suspended",
+        pendingAction.reason,
+      );
     } else {
-      await applyUpdate(user.userId, user.roleCode, "active");
+      await applyUpdate(
+        user.userId,
+        user.roleCode,
+        "active",
+        pendingAction.reason,
+      );
     }
   };
 
@@ -482,6 +502,7 @@ export default function UsersPage() {
                   kind: "role",
                   user: row,
                   roleCode: row.roleCode,
+                  reason: "",
                 })
               }
             >
@@ -512,7 +533,11 @@ export default function UsersPage() {
                   variant="secondary"
                   disabled={busy}
                   onClick={() =>
-                    setPendingAction({ kind: "activate", user: row })
+                    setPendingAction({
+                      kind: "activate",
+                      user: row,
+                      reason: "",
+                    })
                   }
                 >
                   {copy.actionActivate}
@@ -525,7 +550,7 @@ export default function UsersPage() {
                 variant="secondary"
                 disabled={busy}
                 onClick={() =>
-                  setPendingAction({ kind: "activate", user: row })
+                  setPendingAction({ kind: "activate", user: row, reason: "" })
                 }
               >
                 {copy.actionActivate}
@@ -546,6 +571,7 @@ export default function UsersPage() {
       const canSubmit =
         Boolean(formEmail.trim()) &&
         Boolean(formDisplayName.trim()) &&
+        Boolean(formReason.trim()) &&
         !creating;
       return (
         <div style={overlayStyle} role="dialog" aria-modal="true">
@@ -600,6 +626,20 @@ export default function UsersPage() {
                     ))}
                   </select>
                 </CanvasField>
+                <CanvasField
+                  theme={theme}
+                  label={copy.reasonField}
+                  hint={copy.inviteReasonHint}
+                  required
+                >
+                  <textarea
+                    value={formReason}
+                    onChange={(event) => setFormReason(event.target.value)}
+                    rows={3}
+                    placeholder={copy.reasonPlaceholder}
+                    style={{ ...controlStyle(theme), resize: "vertical" }}
+                  />
+                </CanvasField>
               </div>
               <div style={modalFooterStyle}>
                 <CanvasBtn
@@ -647,9 +687,7 @@ export default function UsersPage() {
         : kind === "suspend"
           ? copy.confirmSuspend
           : copy.confirmActivate;
-    const canConfirm =
-      !pendingBusy &&
-      (kind !== "suspend" || pendingAction.reason.trim().length > 0);
+    const canConfirm = !pendingBusy && pendingAction.reason.trim().length > 0;
 
     return (
       <div style={overlayStyle} role="dialog" aria-modal="true">
@@ -693,6 +731,7 @@ export default function UsersPage() {
                       kind: "role",
                       user,
                       roleCode: event.target.value as PlatformAdminUserRole,
+                      reason: pendingAction.reason,
                     })
                   }
                   style={controlStyle(theme)}
@@ -706,28 +745,43 @@ export default function UsersPage() {
               </CanvasField>
             ) : null}
 
-            {kind === "suspend" ? (
-              <CanvasField
-                theme={theme}
-                label={copy.reasonField}
-                hint={copy.reasonHint}
-                required
-              >
-                <textarea
-                  value={pendingAction.reason}
-                  onChange={(event) =>
-                    setPendingAction({
-                      kind: "suspend",
-                      user,
-                      reason: event.target.value,
-                    })
-                  }
-                  rows={3}
-                  placeholder={copy.reasonPlaceholder}
-                  style={{ ...controlStyle(theme), resize: "vertical" }}
-                />
-              </CanvasField>
-            ) : null}
+            <CanvasField
+              theme={theme}
+              label={copy.reasonField}
+              hint={
+                kind === "suspend" ? copy.reasonHint : copy.mutationReasonHint
+              }
+              required
+            >
+              <textarea
+                value={pendingAction.reason}
+                onChange={(event) =>
+                  setPendingAction(
+                    kind === "role"
+                      ? {
+                          kind: "role",
+                          user,
+                          roleCode: pendingAction.roleCode,
+                          reason: event.target.value,
+                        }
+                      : kind === "suspend"
+                        ? {
+                            kind: "suspend",
+                            user,
+                            reason: event.target.value,
+                          }
+                        : {
+                            kind: "activate",
+                            user,
+                            reason: event.target.value,
+                          },
+                  )
+                }
+                rows={3}
+                placeholder={copy.reasonPlaceholder}
+                style={{ ...controlStyle(theme), resize: "vertical" }}
+              />
+            </CanvasField>
           </div>
           <div style={modalFooterStyle}>
             <CanvasBtn

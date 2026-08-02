@@ -73,21 +73,25 @@ export class IdentityRepository {
     string,
     CanonicalIdentityPrincipalRecord
   >();
+  private readonly fallbackPrincipalSourceRefs = new Map<string, string>();
 
   private readonly fallbackMemberships = new Map<
     string,
     CanonicalIdentityMembershipRecord
   >();
+  private readonly fallbackMembershipSourceRefs = new Map<string, string>();
 
   private readonly fallbackRoleBindings = new Map<
     string,
     CanonicalIdentityRoleBindingRecord
   >();
+  private readonly fallbackRoleBindingSourceRefs = new Map<string, string>();
 
   private readonly fallbackInvitations = new Map<
     string,
     CanonicalIdentityInvitationRecord
   >();
+  private readonly fallbackInvitationSourceRefs = new Map<string, string>();
 
   private readonly fallbackSessions = new Map<
     string,
@@ -280,6 +284,38 @@ export class IdentityRepository {
     }));
   }
 
+  async findPrincipalsByEmail(
+    email: string,
+  ): Promise<CanonicalIdentityPrincipalRecord[]> {
+    const normalized = email.trim().toLowerCase();
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackPrincipals.values())
+        .filter((principal) => principal.email?.toLowerCase() === normalized)
+        .map((principal) => ({ ...principal }));
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM iam.identity_principals
+          WHERE email_normalized = $1
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+        [normalized],
+      );
+      return result.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityPrincipalRecord>(
+          row.record,
+          "iam.identity_principals",
+        ),
+      );
+    } finally {
+      client.release();
+    }
+  }
+
   async ensurePrincipalRecord(
     principal: CanonicalIdentityPrincipalRecord,
   ): Promise<CanonicalIdentityPrincipalRecord> {
@@ -363,36 +399,8 @@ export class IdentityRepository {
   async findPrincipalByEmail(
     email: string,
   ): Promise<CanonicalIdentityPrincipalRecord | null> {
-    const normalized = email.trim().toLowerCase();
-    if (!this.isEnabled()) {
-      for (const principal of this.fallbackPrincipals.values()) {
-        if (principal.email?.toLowerCase() === normalized) {
-          return { ...principal };
-        }
-      }
-      return null;
-    }
-
-    const client = await this.databaseService!.connect();
-    try {
-      const result = await client.query<JsonRecordRow>(
-        `
-          SELECT record FROM iam.identity_principals
-          WHERE email_normalized = $1
-          LIMIT 1
-        `,
-        [normalized],
-      );
-      if (!result.rows[0]?.record) {
-        return null;
-      }
-      return this.parseRecord<CanonicalIdentityPrincipalRecord>(
-        result.rows[0].record,
-        "iam.identity_principals",
-      );
-    } finally {
-      client.release();
-    }
+    const [principal] = await this.findPrincipalsByEmail(email);
+    return principal ?? null;
   }
 
   async findMembershipsByPrincipalId(
@@ -417,6 +425,85 @@ export class IdentityRepository {
         `,
         [principalId],
       );
+      return result.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityMembershipRecord>(
+          row.record,
+          "iam.identity_memberships",
+        ),
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async findMembershipById(
+    membershipId: string,
+  ): Promise<CanonicalIdentityMembershipRecord | null> {
+    if (!this.isEnabled()) {
+      const membership = this.fallbackMemberships.get(membershipId);
+      return membership ? { ...membership } : null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_memberships
+          WHERE membership_id = $1
+          LIMIT 1
+        `,
+        [membershipId],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityMembershipRecord>(
+        result.rows[0].record,
+        "iam.identity_memberships",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async listMembershipsByScope(
+    scopeRef: string,
+    realms?: readonly string[],
+  ): Promise<CanonicalIdentityMembershipRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackMemberships.values())
+        .filter(
+          (membership) =>
+            membership.scopeRef === scopeRef &&
+            (realms === undefined || realms.includes(membership.realm)),
+        )
+        .map((membership) => ({ ...membership }));
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result =
+        realms && realms.length > 0
+          ? await client.query<JsonRecordRow>(
+              `
+                SELECT record
+                FROM iam.identity_memberships
+                WHERE scope_ref = $1
+                  AND realm = ANY($2::text[])
+                ORDER BY updated_at DESC, created_at DESC
+              `,
+              [scopeRef, realms],
+            )
+          : await client.query<JsonRecordRow>(
+              `
+                SELECT record
+                FROM iam.identity_memberships
+                WHERE scope_ref = $1
+                ORDER BY updated_at DESC, created_at DESC
+              `,
+              [scopeRef],
+            );
+
       return result.rows.map((row) =>
         this.parseRecord<CanonicalIdentityMembershipRecord>(
           row.record,
@@ -1577,12 +1664,15 @@ export class IdentityRepository {
   }
 
   private upsertFallbackPrincipal(record: CanonicalIdentityPrincipalRecord) {
-    const existing = record.sourceRef
-      ? this.fallbackPrincipals.get(record.sourceRef)
-      : null;
+    const existingPrincipalId = record.sourceRef
+      ? (this.fallbackPrincipalSourceRefs.get(record.sourceRef) ??
+        record.principalId)
+      : record.principalId;
+    const existing = this.fallbackPrincipals.get(existingPrincipalId) ?? null;
     const persisted = existing
       ? {
           ...existing,
+          sourceRef: record.sourceRef,
           issuer: record.issuer,
           subject: record.subject,
           principalType: record.principalType,
@@ -1593,19 +1683,26 @@ export class IdentityRepository {
           updatedAt: record.updatedAt,
         }
       : { ...record };
+    this.fallbackPrincipals.set(persisted.principalId, persisted);
     if (record.sourceRef) {
-      this.fallbackPrincipals.set(record.sourceRef, persisted);
+      this.fallbackPrincipalSourceRefs.set(
+        record.sourceRef,
+        persisted.principalId,
+      );
     }
     return { ...persisted };
   }
 
   private upsertFallbackMembership(record: CanonicalIdentityMembershipRecord) {
-    const existing = record.sourceRef
-      ? this.fallbackMemberships.get(record.sourceRef)
-      : null;
+    const existingMembershipId = record.sourceRef
+      ? (this.fallbackMembershipSourceRefs.get(record.sourceRef) ??
+        record.membershipId)
+      : record.membershipId;
+    const existing = this.fallbackMemberships.get(existingMembershipId) ?? null;
     const persisted = existing
       ? {
           ...existing,
+          sourceRef: record.sourceRef,
           principalId: record.principalId,
           realm: record.realm,
           scopeRef: record.scopeRef,
@@ -1617,8 +1714,12 @@ export class IdentityRepository {
           updatedAt: record.updatedAt,
         }
       : { ...record };
+    this.fallbackMemberships.set(persisted.membershipId, persisted);
     if (record.sourceRef) {
-      this.fallbackMemberships.set(record.sourceRef, persisted);
+      this.fallbackMembershipSourceRefs.set(
+        record.sourceRef,
+        persisted.membershipId,
+      );
     }
     return { ...persisted };
   }
@@ -1626,12 +1727,16 @@ export class IdentityRepository {
   private upsertFallbackRoleBinding(
     record: CanonicalIdentityRoleBindingRecord,
   ) {
-    const existing = record.sourceRef
-      ? this.fallbackRoleBindings.get(record.sourceRef)
-      : null;
+    const existingRoleBindingId = record.sourceRef
+      ? (this.fallbackRoleBindingSourceRefs.get(record.sourceRef) ??
+        record.roleBindingId)
+      : record.roleBindingId;
+    const existing =
+      this.fallbackRoleBindings.get(existingRoleBindingId) ?? null;
     const persisted = existing
       ? {
           ...existing,
+          sourceRef: record.sourceRef,
           membershipId: record.membershipId,
           roleCode: record.roleCode,
           grantedByPrincipalId: record.grantedByPrincipalId,
@@ -1641,19 +1746,26 @@ export class IdentityRepository {
           updatedAt: record.updatedAt,
         }
       : { ...record };
+    this.fallbackRoleBindings.set(persisted.roleBindingId, persisted);
     if (record.sourceRef) {
-      this.fallbackRoleBindings.set(record.sourceRef, persisted);
+      this.fallbackRoleBindingSourceRefs.set(
+        record.sourceRef,
+        persisted.roleBindingId,
+      );
     }
     return { ...persisted };
   }
 
   private upsertFallbackInvitation(record: CanonicalIdentityInvitationRecord) {
-    const existing = record.sourceRef
-      ? this.fallbackInvitations.get(record.sourceRef)
-      : null;
+    const existingInvitationId = record.sourceRef
+      ? (this.fallbackInvitationSourceRefs.get(record.sourceRef) ??
+        record.invitationId)
+      : record.invitationId;
+    const existing = this.fallbackInvitations.get(existingInvitationId) ?? null;
     const persisted = existing
       ? {
           ...existing,
+          sourceRef: record.sourceRef,
           membershipId: record.membershipId,
           issuerPrincipalId: record.issuerPrincipalId,
           realm: record.realm,
@@ -1670,8 +1782,12 @@ export class IdentityRepository {
           updatedAt: record.updatedAt,
         }
       : { ...record };
+    this.fallbackInvitations.set(persisted.invitationId, persisted);
     if (record.sourceRef) {
-      this.fallbackInvitations.set(record.sourceRef, persisted);
+      this.fallbackInvitationSourceRefs.set(
+        record.sourceRef,
+        persisted.invitationId,
+      );
     }
     return { ...persisted };
   }
