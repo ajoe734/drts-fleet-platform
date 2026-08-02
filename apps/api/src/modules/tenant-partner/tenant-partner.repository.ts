@@ -147,6 +147,11 @@ export type PersistTenantPartnerChanges = {
   quotaMonthlySnapshots?: readonly TenantQuotaMonthlySnapshotRecord[];
   userRoles?: readonly TenantUserRoleRecord[];
   apiKeys?: readonly StoredTenantApiKeyRecord[];
+  deletedTenantIds?: readonly string[];
+  deletedPartnerEntrySlugs?: readonly string[];
+  deletedPartnerIngressCredentialIds?: readonly string[];
+  deletedApprovalRequestIds?: readonly string[];
+  deletedApprovalDecisionIds?: readonly string[];
 };
 
 @Injectable()
@@ -558,6 +563,141 @@ export class TenantPartnerRepository {
     }
 
     const writes: Promise<unknown>[] = [];
+
+    for (const tenantId of changes.deletedTenantIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_notification_preferences WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_sla_profiles WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_channel_entries WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_eligibility_verifications WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_rules WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_webhook_deliveries WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_passengers WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_addresses WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_cost_centers WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_quota_policies WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_quota_ledger WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_quota_monthly_snapshots WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_user_roles WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_api_keys WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+    }
+
+    for (const entrySlug of changes.deletedPartnerEntrySlugs ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_ingress_credentials WHERE entry_slug = $1`,
+          [entrySlug],
+        ),
+      );
+    }
+
+    for (const keyId of changes.deletedPartnerIngressCredentialIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_ingress_credentials WHERE key_id = $1`,
+          [keyId],
+        ),
+      );
+    }
+
+    for (const approvalRequestId of changes.deletedApprovalRequestIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_decisions WHERE approval_request_id = $1`,
+          [approvalRequestId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_requests WHERE approval_request_id = $1`,
+          [approvalRequestId],
+        ),
+      );
+    }
+
+    for (const decisionId of changes.deletedApprovalDecisionIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_decisions WHERE decision_id = $1`,
+          [decisionId],
+        ),
+      );
+    }
 
     for (const preferences of changes.notificationPreferences ?? []) {
       writes.push(

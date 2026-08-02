@@ -22,6 +22,7 @@ export type PersistPlatformAdminChanges = {
   platformTenants?: readonly PlatformAdminTenantRecord[];
   publicInfoVersions?: readonly PublicInfoVersionRecord[];
   placardVersions?: readonly PlacardVersionRecord[];
+  deletedPlatformTenantIds?: readonly string[];
   deletedPublicInfoVersionIds?: readonly string[];
 };
 
@@ -96,6 +97,15 @@ export class PlatformAdminRepository {
     }
 
     const writes: Promise<unknown>[] = [];
+
+    for (const tenantId of changes.deletedPlatformTenantIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_platform_tenants WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+    }
 
     for (const tenant of changes.platformTenants ?? []) {
       writes.push(

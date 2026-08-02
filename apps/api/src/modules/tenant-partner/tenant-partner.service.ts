@@ -1321,25 +1321,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         userRoles,
         apiKeys,
       });
-      const hasPersistedState =
-        sanitizedState.notificationPreferences.length > 0 ||
-        sanitizedState.slaProfiles.length > 0 ||
-        sanitizedState.webhookEndpoints.length > 0 ||
-        sanitizedState.webhookDeliveries.length > 0 ||
-        sanitizedState.partnerEntries.length > 0 ||
-        sanitizedState.partnerIngressCredentials.length > 0 ||
-        sanitizedState.partnerEligibilityVerifications.length > 0 ||
-        sanitizedState.approvalRules.length > 0 ||
-        sanitizedState.approvalRequests.length > 0 ||
-        sanitizedState.approvalDecisions.length > 0 ||
-        sanitizedState.passengers.length > 0 ||
-        sanitizedState.addresses.length > 0 ||
-        sanitizedState.costCenters.length > 0 ||
-        sanitizedState.quotaPolicies.length > 0 ||
-        sanitizedState.quotaLedger.length > 0 ||
-        sanitizedState.quotaMonthlySnapshots.length > 0 ||
-        sanitizedState.userRoles.length > 0 ||
-        sanitizedState.apiKeys.length > 0;
+      const hasPersistedState = this.hasPersistedState(persistedState);
+      const strictSanitizeChanges = this.buildStrictSanitizeChanges(
+        persistedState,
+        sanitizedState,
+      );
 
       if (!hasPersistedState) {
         this.persistChanges(
@@ -1417,7 +1403,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         isStrictAuthEnvironment() &&
         this.didSanitizePersistedState(persistedState, sanitizedState)
       ) {
-        this.persistChanges(sanitizedState, "module init strict auth sanitize");
+        this.persistChanges(
+          strictSanitizeChanges,
+          "module init strict auth sanitize",
+        );
       }
       this.partnerEligibilityVerifications = new Map(
         sanitizedState.partnerEligibilityVerifications.map((verification) => [
@@ -9181,6 +9170,102 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     sanitized: TenantPartnerState,
   ): boolean {
     return JSON.stringify(original) !== JSON.stringify(sanitized);
+  }
+
+  private hasPersistedState(state: TenantPartnerState) {
+    return (
+      state.notificationPreferences.length > 0 ||
+      state.slaProfiles.length > 0 ||
+      state.webhookEndpoints.length > 0 ||
+      state.webhookDeliveries.length > 0 ||
+      state.partnerEntries.length > 0 ||
+      state.partnerIngressCredentials.length > 0 ||
+      state.partnerEligibilityVerifications.length > 0 ||
+      state.approvalRules.length > 0 ||
+      state.approvalRequests.length > 0 ||
+      state.approvalDecisions.length > 0 ||
+      state.passengers.length > 0 ||
+      state.addresses.length > 0 ||
+      state.costCenters.length > 0 ||
+      state.quotaPolicies.length > 0 ||
+      state.quotaLedger.length > 0 ||
+      state.quotaMonthlySnapshots.length > 0 ||
+      state.userRoles.length > 0 ||
+      state.apiKeys.length > 0
+    );
+  }
+
+  private buildStrictSanitizeChanges(
+    original: TenantPartnerState,
+    sanitized: TenantPartnerState,
+  ): PersistTenantPartnerChanges {
+    return {
+      ...sanitized,
+      deletedTenantIds: this.hasDemoTenantState(original)
+        ? [DEMO_TENANT_ID]
+        : [],
+      deletedPartnerEntrySlugs: this.collectRemovedKeys(
+        original.partnerEntries,
+        sanitized.partnerEntries,
+        (value) => value.entrySlug,
+      ),
+      deletedPartnerIngressCredentialIds: this.collectRemovedKeys(
+        original.partnerIngressCredentials,
+        sanitized.partnerIngressCredentials,
+        (value) => value.keyId,
+      ),
+      deletedApprovalRequestIds: this.collectRemovedKeys(
+        original.approvalRequests,
+        sanitized.approvalRequests,
+        (value) => value.approvalRequestId,
+      ),
+      deletedApprovalDecisionIds: this.collectRemovedKeys(
+        original.approvalDecisions,
+        sanitized.approvalDecisions,
+        (value) => value.decisionId,
+      ),
+    };
+  }
+
+  private hasDemoTenantState(state: TenantPartnerState) {
+    const addTenantIds = <T extends { tenantId: string }>(
+      values: readonly T[],
+      target: Set<string>,
+    ) => {
+      for (const value of values) {
+        target.add(value.tenantId);
+      }
+    };
+
+    const tenantIds = new Set<string>();
+    addTenantIds(state.notificationPreferences, tenantIds);
+    addTenantIds(state.webhookEndpoints, tenantIds);
+    addTenantIds(state.webhookDeliveries, tenantIds);
+    addTenantIds(state.slaProfiles, tenantIds);
+    addTenantIds(state.partnerEntries, tenantIds);
+    addTenantIds(state.partnerEligibilityVerifications, tenantIds);
+    addTenantIds(state.approvalRules, tenantIds);
+    addTenantIds(state.approvalRequests, tenantIds);
+    addTenantIds(state.passengers, tenantIds);
+    addTenantIds(state.addresses, tenantIds);
+    addTenantIds(state.costCenters, tenantIds);
+    addTenantIds(state.quotaPolicies, tenantIds);
+    addTenantIds(state.quotaLedger, tenantIds);
+    addTenantIds(state.quotaMonthlySnapshots, tenantIds);
+    addTenantIds(state.userRoles, tenantIds);
+    addTenantIds(state.apiKeys, tenantIds);
+    return tenantIds.has(DEMO_TENANT_ID);
+  }
+
+  private collectRemovedKeys<T>(
+    original: readonly T[],
+    sanitized: readonly T[],
+    keyOf: (value: T) => string,
+  ) {
+    const sanitizedKeys = new Set(sanitized.map(keyOf));
+    return original
+      .map(keyOf)
+      .filter((key) => !sanitizedKeys.has(key));
   }
 
   private requirePartnerIngressCredential(entrySlug: string, keyId: string) {

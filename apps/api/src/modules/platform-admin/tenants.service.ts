@@ -139,8 +139,13 @@ export class TenantsService implements OnModuleInit {
       const platformTenants = this.sanitizePersistedTenants(
         persistedState.platformTenants,
       );
+      const deletedPlatformTenantIds = this.collectRemovedKeys(
+        persistedState.platformTenants,
+        platformTenants,
+        (tenant) => tenant.id,
+      );
 
-      if (platformTenants.length === 0) {
+      if (persistedState.platformTenants.length === 0) {
         this.persistChanges(
           {
             platformTenants: this.list(),
@@ -153,6 +158,15 @@ export class TenantsService implements OnModuleInit {
       this.tenants.clear();
       for (const tenant of platformTenants) {
         this.tenants.set(tenant.id, this.cloneTenant(tenant));
+      }
+      if (isStrictAuthEnvironment() && deletedPlatformTenantIds.length > 0) {
+        this.persistChanges(
+          {
+            platformTenants: this.list(),
+            deletedPlatformTenantIds,
+          },
+          "module init strict auth sanitize",
+        );
       }
     } catch (error) {
       this.platformAdminRepository.reportPersistenceFailure(
@@ -805,6 +819,17 @@ export class TenantsService implements OnModuleInit {
     return tenants
       .filter((tenant) => tenant.id !== DEMO_TENANT_ID)
       .map((tenant) => this.cloneTenant(tenant));
+  }
+
+  private collectRemovedKeys<T>(
+    original: readonly T[],
+    sanitized: readonly T[],
+    keyOf: (value: T) => string,
+  ) {
+    const sanitizedKeys = new Set(sanitized.map(keyOf));
+    return original
+      .map(keyOf)
+      .filter((key) => !sanitizedKeys.has(key));
   }
 
   private buildTenantId(code: string) {
