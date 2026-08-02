@@ -1,29 +1,16 @@
-import { EventEmitter2 } from "@nestjs/event-emitter";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
-import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
-import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
-import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
-import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 const ORIGINAL_ENV = { ...process.env };
 
 function createAuthFixture() {
   const auditNotificationService = new AuditNotificationService();
-  const driverProfileService = new DriverProfileService(
-    auditNotificationService,
-  );
-  const regulatoryRegistryService = new RegulatoryRegistryService(
-    new OpsDispatchEventsService(new EventEmitter2()),
-    auditNotificationService,
-    driverProfileService,
-  );
   const tenantPartnerService = new TenantPartnerService(
     auditNotificationService,
   );
@@ -31,19 +18,11 @@ function createAuthFixture() {
   const jwtAuthService = new JwtAuthService(
     identityRepository,
     tenantPartnerService,
-    regulatoryRegistryService,
-  );
-  const driverDeviceSessionService = new DriverDeviceSessionService(
-    jwtAuthService,
-    driverProfileService,
-    regulatoryRegistryService,
-    undefined,
-    identityRepository,
   );
   const controller = new AuthController(
     jwtAuthService,
     tenantPartnerService,
-    driverDeviceSessionService,
+    {} as never,
   );
 
   return { controller, tenantPartnerService };
