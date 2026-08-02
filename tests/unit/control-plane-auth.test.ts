@@ -19,7 +19,7 @@ describe("control-plane auth helper", () => {
     ).toBe("edna@cctech-support.com");
   });
 
-  it("issues a JWT-backed control-plane auth header when JWT_SECRET is present", () => {
+  it("issues a JWT-backed control-plane auth header when JWT_SECRET is present", async () => {
     process.env.JWT_SECRET = "control-plane-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -60,6 +60,15 @@ describe("control-plane auth helper", () => {
     expect(payload?.scopes).toContain("forwarder:read");
     expect(payload?.scopes).toContain("multi_taxi_ratings:read");
     expect(payload?.scopes).toContain("multi_taxi_ratings:moderate");
+    expect(await new JwtAuthService().verifyAccessToken(token!)).toBeNull();
+    await expect(
+      new JwtAuthService().verifyAccessToken(token!, {
+        allowControlPlaneProxyToken: true,
+      }),
+    ).resolves.toMatchObject({
+      controlPlaneProxy: true,
+      actorType: "platform_admin",
+    });
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;

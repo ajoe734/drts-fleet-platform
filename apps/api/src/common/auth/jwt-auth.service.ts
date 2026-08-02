@@ -42,6 +42,7 @@ export interface JwtIdentityPayload {
   aud?: string | string[] | undefined;
   iat?: number | undefined;
   exp?: number | undefined;
+  controlPlaneProxy?: boolean | undefined;
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
@@ -739,13 +740,28 @@ export class JwtAuthService {
     }
   }
 
-  async verifyAccessToken(token: string): Promise<JwtIdentityPayload | null> {
+  async verifyAccessToken(
+    token: string,
+    options?: { allowControlPlaneProxyToken?: boolean },
+  ): Promise<JwtIdentityPayload | null> {
     const payload = this.verify(token);
-    if (!payload || !this.hasRequiredSessionClaims(payload)) {
+    if (!payload) {
       return null;
     }
 
-    if (!this.identityRepository || !payload.sid) {
+    const isControlPlaneProxyToken =
+      options?.allowControlPlaneProxyToken === true &&
+      payload.controlPlaneProxy === true &&
+      (payload.actorType === "ops_user" ||
+        payload.actorType === "platform_admin") &&
+      (payload.realm === "ops" || payload.realm === "platform");
+    if (!this.hasRequiredSessionClaims(payload)) {
+      // The proxy token is purpose-bound, signed, and short-lived. It is not a
+      // user session and therefore has no durable session record to resolve.
+      return isControlPlaneProxyToken ? payload : null;
+    }
+
+    if (isControlPlaneProxyToken || !this.identityRepository || !payload.sid) {
       return payload;
     }
 

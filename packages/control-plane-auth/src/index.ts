@@ -628,6 +628,7 @@ export function issueControlPlaneRequestAuth(options: {
 
   const token = jwt.sign(
     {
+      controlPlaneProxy: true,
       sub: identity.actorId,
       actorType: identity.actorType,
       realm: identity.realm,
