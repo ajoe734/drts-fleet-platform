@@ -237,9 +237,21 @@ export class IdentityRepository {
         ...roleBindingDraft,
         membershipId: membership.membershipId,
       });
-      const existingInvitation = await this.findInvitationByMembershipId(
-        membership.membershipId,
+      const existingInvitationResult = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_invitations
+          WHERE membership_id = $1
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `,
+        [membership.membershipId],
       );
+      const existingInvitation = existingInvitationResult.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+            existingInvitationResult.rows[0].record,
+            "iam.identity_invitations",
+          )
+        : null;
       const persistedInvitation =
         existingInvitation &&
         existingInvitation.deliveryStatus !== "legacy_backfill"
