@@ -120,11 +120,32 @@ async function applyUpstreamAuth(
   request: NextRequest,
   targetUrl: URL,
 ) {
+  const strictIapMode =
+    process.env.STRICT_IAP_MODE === "true" ||
+    process.env.NODE_ENV === "production";
+  const iapJwtSecretOrPublicKey =
+    process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
+    process.env.IAP_JWT_SECRET ||
+    process.env.JWT_SECRET;
+  const expectedIapAudience =
+    process.env.IAP_EXPECTED_AUDIENCE ||
+    process.env.IAP_AUDIENCE ||
+    process.env.JWT_AUDIENCE;
+  const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
+  const allowUnverifiedTokenInDev =
+    process.env.NODE_ENV !== "production" &&
+    process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
+
   const controlPlaneAuth = issueControlPlaneRequestAuth({
     actorType: "ops_user",
     headers: request.headers,
     defaultEmail: ROC_DUTY_OPERATOR_EMAIL,
     requestId: request.headers.get("x-request-id"),
+    strictIapMode,
+    ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
+    ...(expectedIapAudience ? { expectedIapAudience } : {}),
+    ...(expectedIapIssuer ? { expectedIapIssuer } : {}),
+    ...(allowUnverifiedTokenInDev ? { allowUnverifiedTokenInDev } : {}),
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
     ...(process.env.JWT_AUDIENCE
@@ -166,7 +187,32 @@ async function forward(
   const method = request.method.toUpperCase();
   const targetUrl = buildTargetUrl(request, path);
   const headers = copyRequestHeaders(request);
-  await applyUpstreamAuth(headers, request, targetUrl);
+
+  try {
+    await applyUpstreamAuth(headers, request, targetUrl);
+  } catch (error: any) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isForbidden =
+      message.includes("audience mismatch") ||
+      message.includes("does not possess") ||
+      message.includes("unmapped") ||
+      message.includes("no valid workforce group membership");
+    const status = isForbidden ? 403 : 401;
+    const code = isForbidden
+      ? message.includes("audience mismatch")
+        ? "IAP_AUDIENCE_MISMATCH"
+        : "IAP_SUBJECT_FORBIDDEN"
+      : "IAP_ASSERTION_INVALID";
+    return NextResponse.json(
+      {
+        error: {
+          code,
+          message,
+        },
+      },
+      { status },
+    );
+  }
 
   const init: RequestInit = {
     method,

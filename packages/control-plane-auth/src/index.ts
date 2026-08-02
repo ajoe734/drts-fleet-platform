@@ -3,6 +3,27 @@ import jwt from "jsonwebtoken";
 export const CONTROL_PLANE_REQUEST_AUTH_HEADER = "x-drts-authorization";
 export const CONTROL_PLANE_IAP_EMAIL_HEADER = "x-goog-authenticated-user-email";
 export const CONTROL_PLANE_IAP_USER_ID_HEADER = "x-goog-authenticated-user-id";
+export const CONTROL_PLANE_IAP_JWT_HEADER = "x-goog-iap-jwt-assertion";
+export const CONTROL_PLANE_IAP_JWT_HEADER_ALT = "x-goog-authenticated-user-jwt";
+
+export interface IapJwtPayload {
+  sub: string;
+  email?: string;
+  aud?: string;
+  iss?: string;
+  exp?: number;
+  iat?: number;
+  hd?: string;
+  gcp_ia_groups?: string[];
+  groups?: string[];
+  [key: string]: unknown;
+}
+export interface VerifyIapAssertionOptions {
+  expectedAudience?: string | undefined;
+  expectedIssuer?: string | undefined;
+  jwtSecretOrPublicKey?: string | undefined;
+  allowUnverifiedTokenInDev?: boolean | undefined;
+}
 
 export const CONTROL_PLANE_DEFAULT_EMAILS = {
   platform_admin: "admin@platform.drts",
@@ -24,7 +45,7 @@ export const CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST = new Set([
 
 export type ControlPlaneActorType = "platform_admin" | "ops_user";
 
-type HeaderRecord =
+export type HeaderRecord =
   | Headers
   | Record<string, string | string[] | undefined>
   | undefined
@@ -39,6 +60,7 @@ export interface ControlPlaneIdentity {
   authMode: "bootstrap_headers" | "jwt_bearer";
   actorType: ControlPlaneActorType;
   actorId: string;
+  subject?: string | null;
   realm: AuthRealm;
   tenantId: null;
   roleFamilies: AuthRoleFamily[];
@@ -104,28 +126,6 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "reports:read",
     "reports:write",
     "forwarder:read",
-    // S3-FIX-PLATFORM-ADMIN-SANDBOX-SCOPE-001: mirrors
-    // `SANDBOX_COMPLIANCE_SCOPES` from the API preset, in the same order.
-    //
-    // These are minted into `x-scopes` (or the JWT `scopes` claim) by
-    // `apps/platform-admin-web/app/control-plane-proxy`, and the API's
-    // `deriveScopes()` honours explicit scopes verbatim — so for a browser
-    // request this list REPLACES, rather than supplements,
-    // `AUTH_SCOPE_PRESETS.platform_admin`. Omitting them 403'd every
-    // platform-admin sandbox compliance / investigation / evidence /
-    // legal-hold / regulatory-report surface with `AUTH_SCOPE_DENIED`.
-    //
-    // The two dual-control approve rights are included deliberately; the full
-    // boundary decision is recorded in
-    // `docs/01-decisions/SD-DP-20260725-008-control-plane-proxy-scope-parity.md`.
-    // Separation of duties for those flows is NOT enforced by withholding the
-    // scope: `platform-admin-compliance.service.ts` compares the requesting
-    // and approving `actorId` and raises `SANDBOX_EXPORT_SELF_APPROVAL_-
-    // FORBIDDEN` / `SANDBOX_LEGAL_HOLD_SELF_APPROVAL_FORBIDDEN`. The proxy
-    // derives `actorId` from the IAP-authenticated email, so two humans still
-    // mint two actor ids and the maker-checker rule holds end to end; without
-    // IAP every caller collapses onto the same default actor id and the same
-    // guard blocks the approval, so the failure mode is closed either way.
     "sandbox.compliance.read",
     "sandbox.compliance.manage",
     "sandbox.investigation.read",
@@ -254,7 +254,14 @@ function buildIdentity(
   authenticatedUserEmail: string,
   requestId?: string | null,
   authMode: ControlPlaneIdentity["authMode"] = "jwt_bearer",
+  subject?: string | null,
+  overrideRoles?: string[],
 ): ControlPlaneIdentity {
+  const known =
+    PLATFORM_ADMIN_DIRECTORY[
+      authenticatedUserEmail as keyof typeof PLATFORM_ADMIN_DIRECTORY
+    ];
+
   if (actorType === "platform_admin") {
     const platformIdentity = resolvePlatformAdminIdentity(
       authenticatedUserEmail,
@@ -263,11 +270,16 @@ function buildIdentity(
     return {
       authMode,
       actorType,
-      actorId: platformIdentity.actorId,
+      actorId: known
+        ? known.actorId
+        : subject
+          ? `iap-subject-${toActorSlug(subject)}`
+          : platformIdentity.actorId,
+      ...(subject ? { subject } : {}),
       realm: CONTROL_PLANE_REALMS[actorType],
       tenantId: null,
       roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
-      roles: platformIdentity.roles,
+      roles: overrideRoles ?? platformIdentity.roles,
       scopes: [...CONTROL_PLANE_SCOPE_PRESETS[actorType]],
       requestId: requestId ?? null,
     };
@@ -276,19 +288,145 @@ function buildIdentity(
   return {
     authMode,
     actorType,
-    actorId: `ops-user-${toActorSlug(authenticatedUserEmail)}`,
+    actorId: known
+      ? known.actorId
+      : subject
+        ? `iap-subject-${toActorSlug(subject)}`
+        : `ops-user-${toActorSlug(authenticatedUserEmail)}`,
+    ...(subject ? { subject } : {}),
     realm: CONTROL_PLANE_REALMS[actorType],
     tenantId: null,
     roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
-    roles: ["ops_user"],
+    roles: overrideRoles ?? ["ops_user"],
     scopes: [...CONTROL_PLANE_SCOPE_PRESETS[actorType]],
     requestId: requestId ?? null,
   };
 }
 
+export function extractIapJwtAssertion(headers: HeaderRecord): string | null {
+  const jwtHeader = readHeader(headers, CONTROL_PLANE_IAP_JWT_HEADER);
+  if (jwtHeader?.trim()) {
+    return jwtHeader.trim();
+  }
+  const altJwtHeader = readHeader(headers, CONTROL_PLANE_IAP_JWT_HEADER_ALT);
+  if (altJwtHeader?.trim()) {
+    return altJwtHeader.trim();
+  }
+  return null;
+}
+
+export function verifyIapJwtAssertion(
+  token: string,
+  options: VerifyIapAssertionOptions = {},
+): IapJwtPayload {
+  const trimmed = token.replace(/^Bearer\s+/i, "").trim();
+  if (!trimmed) {
+    throw new Error("IAP JWT assertion token is empty.");
+  }
+
+  let payload: IapJwtPayload;
+  if (options.jwtSecretOrPublicKey) {
+    try {
+      payload = jwt.verify(
+        trimmed,
+        options.jwtSecretOrPublicKey,
+      ) as IapJwtPayload;
+    } catch (err) {
+      throw new Error(
+        `IAP JWT assertion signature verification failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  } else if (options.allowUnverifiedTokenInDev) {
+    const decoded = jwt.decode(trimmed);
+    if (!decoded || typeof decoded !== "object") {
+      throw new Error("Failed to decode IAP JWT assertion.");
+    }
+    payload = decoded as IapJwtPayload;
+  } else {
+    throw new Error(
+      "IAP JWT assertion signature verification failed: verification key is required.",
+    );
+  }
+
+  const expectedIssuer =
+    options.expectedIssuer ?? "https://cloud.google.com/iap";
+  if (!payload.iss || payload.iss !== expectedIssuer) {
+    throw new Error(
+      `IAP JWT assertion issuer mismatch: expected ${expectedIssuer}, got ${payload.iss ?? "none"}`,
+    );
+  }
+
+  if (options.expectedAudience) {
+    if (!payload.aud || payload.aud !== options.expectedAudience) {
+      const err = new Error(
+        `IAP JWT assertion audience mismatch: expected ${options.expectedAudience}, got ${payload.aud ?? "none"}`,
+      );
+      (err as any).code = "IAP_AUDIENCE_MISMATCH";
+      throw err;
+    }
+  }
+
+  if (payload.exp && typeof payload.exp === "number") {
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp < now) {
+      throw new Error("IAP JWT assertion is expired.");
+    }
+  }
+
+  if (!payload.sub) {
+    throw new Error("IAP JWT assertion missing subject claim.");
+  }
+
+  return payload;
+}
+
+export function signTestIapJwtAssertion(
+  payload: Record<string, unknown>,
+  secret: string,
+  options?: jwt.SignOptions,
+): string {
+  const fullPayload = {
+    iss: "https://cloud.google.com/iap",
+    ...payload,
+  };
+  return jwt.sign(fullPayload, secret, options);
+}
+
 export function extractAuthenticatedUserEmail(
   headers: HeaderRecord,
+  options?: {
+    strictIapMode?: boolean | undefined;
+    expectedAudience?: string | undefined;
+    expectedIssuer?: string | undefined;
+    jwtSecretOrPublicKey?: string | undefined;
+    allowUnverifiedTokenInDev?: boolean | undefined;
+  },
 ): string | null {
+  const assertion = extractIapJwtAssertion(headers);
+  if (assertion) {
+    try {
+      const payload = verifyIapJwtAssertion(assertion, {
+        expectedAudience: options?.expectedAudience,
+        expectedIssuer: options?.expectedIssuer,
+        jwtSecretOrPublicKey: options?.jwtSecretOrPublicKey,
+        allowUnverifiedTokenInDev: options?.allowUnverifiedTokenInDev,
+      });
+      if (payload.email) {
+        return normalizeAuthenticatedUserEmail(payload.email);
+      }
+    } catch {
+      if (options?.strictIapMode) {
+        return null;
+      }
+    }
+  }
+
+  if (options?.strictIapMode) {
+    return null;
+  }
+
   const emailHeader = readHeader(headers, CONTROL_PLANE_IAP_EMAIL_HEADER);
   const userIdHeader = readHeader(headers, CONTROL_PLANE_IAP_USER_ID_HEADER);
 
@@ -323,11 +461,122 @@ export function issueControlPlaneRequestAuth(options: {
   jwtAudience?: string | undefined;
   expiresIn?: JwtExpiresIn | undefined;
   requestId?: string | null;
+  strictIapMode?: boolean | undefined;
+  iapJwtSecretOrPublicKey?: string | undefined;
+  expectedIapAudience?: string | undefined;
+  expectedIapIssuer?: string | undefined;
+  allowUnverifiedTokenInDev?: boolean | undefined;
 }): ControlPlaneRequestAuth {
-  const authenticatedUserEmail =
-    extractAuthenticatedUserEmail(options.headers) ||
-    normalizeAuthenticatedUserEmail(options.defaultEmail ?? null) ||
-    CONTROL_PLANE_DEFAULT_EMAILS[options.actorType];
+  let verifiedSubject: string | null = null;
+  let verifiedEmail: string | null = null;
+  let verifiedGroups: string[] | null = null;
+
+  if (options.headers) {
+    const assertion = extractIapJwtAssertion(options.headers);
+    if (assertion) {
+      try {
+        const payload = verifyIapJwtAssertion(assertion, {
+          expectedAudience: options.expectedIapAudience,
+          expectedIssuer: options.expectedIapIssuer,
+          jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
+          allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
+        });
+        verifiedSubject = payload.sub;
+        if (payload.email) {
+          verifiedEmail = normalizeAuthenticatedUserEmail(payload.email);
+        }
+        if (Array.isArray(payload.gcp_ia_groups)) {
+          verifiedGroups = payload.gcp_ia_groups;
+        } else if (Array.isArray(payload.groups)) {
+          verifiedGroups = payload.groups;
+        }
+      } catch (err: any) {
+        if (options.strictIapMode || extractIapJwtAssertion(options.headers)) {
+          throw new Error(
+            `Control-plane IAP assertion verification failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+    } else if (options.strictIapMode) {
+      throw new Error(
+        "Control-plane strict IAP mode requires a valid x-goog-iap-jwt-assertion header.",
+      );
+    }
+  }
+
+  // Derive authority strictly from verified subject group membership when assertion/groups present or in strict IAP mode
+  let overrideRoles: string[] | undefined = undefined;
+
+  if (options.strictIapMode || verifiedGroups !== null) {
+    if (verifiedGroups === null) {
+      throw new Error(
+        "Verified IAP subject has no valid workforce group membership.",
+      );
+    }
+
+    const isPlatformAdmin = verifiedGroups.includes(
+      "platform-admins@platform.drts",
+    );
+    const isOpsUser = verifiedGroups.includes("ops-users@platform.drts");
+
+    if (!isPlatformAdmin && !isOpsUser) {
+      throw new Error(
+        "Verified IAP subject has no valid workforce group membership.",
+      );
+    }
+
+    if (options.actorType === "platform_admin") {
+      if (!isPlatformAdmin) {
+        throw new Error(
+          "Verified IAP subject does not possess required platform-admins group membership.",
+        );
+      }
+      overrideRoles = ["superadmin"];
+    } else if (options.actorType === "ops_user") {
+      if (!isOpsUser && !isPlatformAdmin) {
+        throw new Error(
+          "Verified IAP subject does not possess required ops-users group membership.",
+        );
+      }
+      overrideRoles = isPlatformAdmin ? ["operator"] : ["ops_user"];
+    }
+  }
+
+  const assertionPresent = Boolean(
+    options.headers && extractIapJwtAssertion(options.headers),
+  );
+  let authenticatedUserEmail: string | null =
+    verifiedEmail ||
+    extractAuthenticatedUserEmail(options.headers, {
+      ...(options.strictIapMode !== undefined && {
+        strictIapMode: options.strictIapMode,
+      }),
+      ...(options.expectedIapAudience !== undefined && {
+        expectedAudience: options.expectedIapAudience,
+      }),
+      ...(options.expectedIapIssuer !== undefined && {
+        expectedIssuer: options.expectedIapIssuer,
+      }),
+      ...(options.iapJwtSecretOrPublicKey !== undefined && {
+        jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
+      }),
+      ...(options.allowUnverifiedTokenInDev !== undefined && {
+        allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
+      }),
+    });
+
+  if (!authenticatedUserEmail) {
+    if (options.strictIapMode || assertionPresent) {
+      throw new Error(
+        "Control-plane strict IAP mode requires a verified user email in assertion.",
+      );
+    }
+    authenticatedUserEmail =
+      normalizeAuthenticatedUserEmail(options.defaultEmail ?? null) ||
+      CONTROL_PLANE_DEFAULT_EMAILS[options.actorType];
+  }
 
   if (!authenticatedUserEmail) {
     throw new Error("Control-plane authenticated user email is unavailable.");
@@ -339,20 +588,30 @@ export function issueControlPlaneRequestAuth(options: {
     authenticatedUserEmail,
     options.requestId,
     hasJwtSecret ? "jwt_bearer" : "bootstrap_headers",
+    verifiedSubject,
+    overrideRoles,
   );
 
+  const rawAssertion = options.headers
+    ? extractIapJwtAssertion(options.headers)
+    : null;
+
   if (!hasJwtSecret) {
+    const headers: Record<string, string> = {
+      "x-actor-type": identity.actorType,
+      "x-actor-id": identity.actorId,
+      "x-realm": identity.realm,
+      "x-roles": identity.roles.join(","),
+      "x-role-families": identity.roleFamilies.join(","),
+      "x-scopes": identity.scopes.join(","),
+    };
+    if (rawAssertion) {
+      headers[CONTROL_PLANE_IAP_JWT_HEADER] = rawAssertion;
+    }
     return {
       authenticatedUserEmail,
       identity,
-      headers: {
-        "x-actor-type": identity.actorType,
-        "x-actor-id": identity.actorId,
-        "x-realm": identity.realm,
-        "x-roles": identity.roles.join(","),
-        "x-role-families": identity.roleFamilies.join(","),
-        "x-scopes": identity.scopes.join(","),
-      },
+      headers,
     };
   }
 
@@ -381,11 +640,16 @@ export function issueControlPlaneRequestAuth(options: {
     signOptions,
   );
 
+  const headers: Record<string, string> = {
+    [CONTROL_PLANE_REQUEST_AUTH_HEADER]: `Bearer ${token}`,
+  };
+  if (rawAssertion) {
+    headers[CONTROL_PLANE_IAP_JWT_HEADER] = rawAssertion;
+  }
+
   return {
     authenticatedUserEmail,
     identity,
-    headers: {
-      [CONTROL_PLANE_REQUEST_AUTH_HEADER]: `Bearer ${token}`,
-    },
+    headers,
   };
 }

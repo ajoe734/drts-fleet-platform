@@ -208,6 +208,8 @@ jobs:
       API_PORT: "3001"
       API_HOST: 0.0.0.0
       E2E_API_URL: http://localhost:3001
+      # The API rejects implicit local/test auth configuration at startup.
+      AUTH_MODE: test
       JWT_SECRET: ci-e2e-secret
       JWT_ISSUER: drts-local
       JWT_AUDIENCE: drts-api
