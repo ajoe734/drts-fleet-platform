@@ -1,11 +1,22 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import * as jwt from "jsonwebtoken";
+import { Reflector } from "@nestjs/core";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DatabaseService } from "../../src/common/db";
+import {
+  type AuthenticatedRequestLike,
+  BootstrapAuthGuard,
+} from "../../src/common/auth";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
+import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
+import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
+import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_ENV_KEYS = [
@@ -99,6 +110,16 @@ function normalizeAudience(aud: string | string[] | undefined) {
   return Array.isArray(aud) ? aud : [aud];
 }
 
+function createExecutionContext(request: AuthenticatedRequestLike) {
+  return {
+    switchToHttp: () => ({
+      getRequest: () => request,
+    }),
+    getHandler: () => function handler() {},
+    getClass: () => class GuardTarget {},
+  } as never;
+}
+
 describe("JWT Session Claims Integration", () => {
   const databases: DatabaseService[] = [];
   const createdSessionIds = new Set<string>();
@@ -188,6 +209,87 @@ describe("JWT Session Claims Integration", () => {
     expect(session?.currentTokenId).toBe(issued.tokenId);
     expect(session?.tokenVersion).toBe(issued.tokenVersion);
     expect(session?.policyVersion).toBe("auth.jwt-session.integration.v1");
+  });
+
+  it("accepts a refreshed driver bearer on protected routes with durable session claims", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    configureHs256Env();
+
+    const db = new DatabaseService();
+    databases.push(db);
+    const repo = new IdentityRepository(db);
+    const auditNotificationService = new AuditNotificationService();
+    const driverProfileService = new DriverProfileService(
+      auditNotificationService,
+    );
+    const regulatoryRegistryService = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter2()),
+      auditNotificationService,
+      driverProfileService,
+    );
+    const jwtAuthService = new JwtAuthService(
+      repo,
+      undefined,
+      regulatoryRegistryService,
+    );
+    const driverDeviceSessionService = new DriverDeviceSessionService(
+      jwtAuthService,
+      driverProfileService,
+      regulatoryRegistryService,
+      undefined,
+      repo,
+    );
+
+    const registered = await driverDeviceSessionService.register({
+      registrationCode: "driver-demo-001",
+      deviceId: `driver-device-${randomUUID()}`,
+      deviceLabel: "JWT Session Claims Integration",
+    });
+
+    createdSessionIds.add(registered.bindingId);
+    createdPrincipalIds.add(registered.driverId);
+
+    const refreshed = await driverDeviceSessionService.refresh({
+      refreshToken: registered.refreshToken,
+      deviceId: registered.deviceId,
+    });
+
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtAuthService,
+      driverDeviceSessionService,
+    );
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: `Bearer ${refreshed.accessToken}`,
+      },
+      method: "GET",
+      originalUrl: "/api/driver/profile",
+    };
+
+    await expect(
+      guard.canActivate(createExecutionContext(request)),
+    ).resolves.toBe(true);
+
+    expect(request.identity).toMatchObject({
+      actorId: refreshed.driverId,
+      realm: "driver",
+      sessionId: refreshed.bindingId,
+    });
+
+    const payload = await jwtAuthService.verifyAccessToken(
+      refreshed.accessToken,
+    );
+    expect(payload).not.toBeNull();
+    expect(payload?.driverBindingId).toBe(refreshed.bindingId);
+    expect(payload?.driverDeviceId).toBe(refreshed.deviceId);
+
+    const session = await repo.getSession(refreshed.bindingId);
+    expect(session?.currentTokenId).toBe(payload?.jti);
+    expect(session?.tokenVersion).toBe(payload?.tokenVersion);
+    expect(session?.deviceSummary).toMatchObject({
+      deviceId: refreshed.deviceId,
+    });
   });
 
   it("rejects alg=none tokens and signed tokens missing required session claims", async () => {
