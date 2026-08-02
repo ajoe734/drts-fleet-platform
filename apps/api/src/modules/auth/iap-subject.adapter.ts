@@ -23,13 +23,38 @@ import { AUTH_SCOPE_PRESETS } from "../../common/auth/auth.constants";
 
 export const DEFAULT_IAP_ROLE_GROUP_MAPPING: Record<string, string> = {
   superadmin: "platform-admins@platform.drts",
+  admin: "platform-admins@platform.drts",
+  viewer: "platform-admins@platform.drts",
   operator: "ops-users@platform.drts",
   platform_admin: "platform-admins@platform.drts",
   ops_user: "ops-users@platform.drts",
 };
 
+const PLATFORM_VIEWER_SCOPES = [
+  "identity:read",
+  "foundation:read",
+  "audit:read",
+  "notifications:read",
+  "tenant:read",
+  "tenant:webhooks:read",
+  "tenant:sla:read",
+  "tenant:billing:read",
+  "billing:read",
+  "regulatory:read",
+  "incident:read",
+  "maintenance:read",
+  "reports:read",
+  "forwarder:read",
+  "sandbox.compliance.read",
+  "sandbox.investigation.read",
+  "sandbox.evidence.preview",
+  "multi_taxi_ratings:read",
+] as const;
+
 export const DEFAULT_ROLE_SCOPES: Record<string, readonly string[]> = {
   superadmin: AUTH_SCOPE_PRESETS.platform_admin,
+  admin: AUTH_SCOPE_PRESETS.platform_admin,
+  viewer: PLATFORM_VIEWER_SCOPES,
   platform_admin: AUTH_SCOPE_PRESETS.platform_admin,
   operator: AUTH_SCOPE_PRESETS.ops_user,
   ops_user: AUTH_SCOPE_PRESETS.ops_user,
@@ -176,6 +201,25 @@ export class IAPSubjectAdapter {
     );
 
     const now = new Date().toISOString();
+
+    if (!principal) {
+      const provisionedPrincipal =
+        await this.findProvisionedControlPlanePrincipalByEmail(normalizedEmail);
+      if (provisionedPrincipal) {
+        principal = await this.identityRepository.ensurePrincipalRecord({
+          ...provisionedPrincipal,
+          issuer: "google_iap",
+          subject,
+          email: normalizedEmail,
+          emailVerified: true,
+          displayName:
+            provisionedPrincipal.displayName ||
+            normalizedEmail.split("@")[0] ||
+            "IAP User",
+          updatedAt: now,
+        });
+      }
+    }
 
     if (principal) {
       if (this.isInactiveStatus(principal.status)) {
@@ -403,7 +447,12 @@ export class IAPSubjectAdapter {
       );
       const assignedRoles = allAssignedRoles.filter((r) => {
         if (m.realm === "platform") {
-          return r === "superadmin" || r === "platform_admin";
+          return (
+            r === "superadmin" ||
+            r === "platform_admin" ||
+            r === "admin" ||
+            r === "viewer"
+          );
         }
         if (m.realm === "ops") {
           return r === "operator" || r === "ops_user";
@@ -657,6 +706,30 @@ export class IAPSubjectAdapter {
     };
   }
 
+  private async findProvisionedControlPlanePrincipalByEmail(email: string) {
+    const principals =
+      await this.identityRepository.findPrincipalsByEmail(email);
+    for (const principal of principals) {
+      if (principal.issuer === "google_iap") {
+        continue;
+      }
+      const memberships =
+        await this.identityRepository.findMembershipsByPrincipalId(
+          principal.principalId,
+        );
+      if (
+        memberships.some(
+          (membership) =>
+            membership.scopeRef === "platform:control_plane" &&
+            (membership.realm === "platform" || membership.realm === "ops"),
+        )
+      ) {
+        return principal;
+      }
+    }
+    return null;
+  }
+
   private isInactiveStatus(status: CanonicalAccountStatus): boolean {
     return status !== "active";
   }
@@ -686,7 +759,11 @@ export class IAPSubjectAdapter {
     }
     if (roles && roles.length > 0) {
       const hasPlatformRole = roles.some(
-        (r) => r === "superadmin" || r === "platform_admin",
+        (r) =>
+          r === "superadmin" ||
+          r === "platform_admin" ||
+          r === "admin" ||
+          r === "viewer",
       );
       const hasOpsRole = roles.some(
         (r) => r === "operator" || r === "ops_user",

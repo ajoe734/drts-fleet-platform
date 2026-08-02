@@ -6452,11 +6452,13 @@ export interface CreatePlatformAdminUserCommand {
   email: string;
   displayName: string;
   roleCode: PlatformAdminUserRole;
+  reason: string;
 }
 
 export interface UpdatePlatformAdminUserRoleCommand {
   roleCode: PlatformAdminUserRole;
   status?: PlatformAdminUserStatus;
+  reason: string;
 }
 
 export type PlatformNoticeSeverity = "info" | "warning" | "critical";

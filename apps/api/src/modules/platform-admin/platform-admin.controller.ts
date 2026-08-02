@@ -141,35 +141,42 @@ export class PlatformAdminController {
   // ── Platform Admin Users ──────────────────────────────────────────────────
 
   @Get("users")
-  listPlatformAdminUsers(@Headers("x-request-id") requestId?: string) {
+  async listPlatformAdminUsers(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      { items: this.platformAdminService.listPlatformAdminUsers() },
+      { items: await this.platformAdminService.listPlatformAdminUsers() },
       requestId,
     );
   }
 
   @Post("users")
-  createPlatformAdminUser(
+  async createPlatformAdminUser(
     @Body() command: CreatePlatformAdminUserCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.createPlatformAdminUser(command, requestId),
+      await this.platformAdminService.createPlatformAdminUser(
+        command,
+        requestId,
+        this.requireActorId(identity),
+      ),
       requestId,
     );
   }
 
   @Post("users/:userId/role")
-  updatePlatformAdminUserRole(
+  async updatePlatformAdminUserRole(
     @Param("userId") userId: string,
     @Body() command: UpdatePlatformAdminUserRoleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.updatePlatformAdminUserRole(
+      await this.platformAdminService.updatePlatformAdminUserRole(
         userId,
         command,
         requestId,
+        this.requireActorId(identity),
       ),
       requestId,
     );
