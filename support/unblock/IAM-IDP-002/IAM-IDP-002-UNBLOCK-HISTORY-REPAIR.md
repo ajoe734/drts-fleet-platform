@@ -14,7 +14,8 @@ No shared-history rewrite problem was found on the implementation branch.
 - `gemini2/iam-idp-002` remains a linear branch from remote `dev` at `717a8719`.
 - The canonical implementation tip is still `04429f88` (`fix(IAM-IDP-002): scope role binding evaluation to selected membership realm and add cross-realm regression tests`), and `PR #1251` is still open from that branch.
 - The current contamination is branch/worktree/commit misalignment after the parent task was reassigned at `2026-08-01T23:58:19Z`: the new owner worktree is pinned to `codex2/iam-idp-002@717a8719`, while the real implementation and review rail remain on `gemini2/iam-idp-002@04429f88`.
-- Machine truth for the parent task is also contaminated: it currently records `integration_status=merged_to_dev`, but GitHub still shows remote `dev@717a8719` and `PR #1251` as `OPEN` / `BLOCKED`.
+- Parent machine truth was also contaminated at dispatch time: `IAM-IDP-002` still recorded `integration_status=merged_to_dev`, even though GitHub showed remote `dev@717a8719` and `PR #1251` as `OPEN` / `BLOCKED`.
+- This task repairs that parent machine truth to branch/PR-level evidence: `integration_status=pr_open`, `pr_url=https://github.com/ajoe734/drts-fleet-platform/pull/1251`, and a concrete ff-only next step for `codex2/iam-idp-002`.
 
 There is also real worktree contamination in the Gemini2 task worktree, but it is separate from branch history:
 
@@ -32,6 +33,7 @@ Those files should not be staged into `IAM-IDP-002`.
 - `git worktree list --porcelain` shows `codex2/iam-idp-002` checked out at `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex2-iam-idp-002` with `HEAD 717a8719`, while `gemini2/iam-idp-002` is checked out at `/tmp/iam-idp-002-review.5DBlPb` with `HEAD 04429f88`.
 - `gh pr view 1251 --json headRefName,baseRefName,state,mergeStateStatus,statusCheckRollup` shows `headRefName=gemini2/iam-idp-002`, `baseRefName=dev`, `state=OPEN`, `mergeStateStatus=BLOCKED`.
 - As of `2026-08-01`, `PR #1251` has failing checks including `Commit trailers`, `Smoke acceptance`, `lint`, `typecheck`, `e2e`, and `ci-integ`, so there is no merged-to-dev evidence yet.
+- `python3 scripts/ai_status.py show IAM-IDP-002` now returns `integration_status=pr_open`, no `merged_ref` / `merge_commit`, and `next="History repair verified on 2026-08-01: fast-forward local codex2/iam-idp-002 onto origin/gemini2/iam-idp-002@04429f88, then continue CI repair on PR #1251..."`.
 
 ## Repair
 
@@ -49,7 +51,16 @@ The non-destructive repair path was:
    ```
 
 4. Keep unrelated dirty files out of any `IAM-IDP-002` staging set.
-5. Repair machine truth only after the branch reality is aligned: until `PR #1251` merges and remote `dev` contains the delivered commit, the parent task must not claim `merged_to_dev`.
+5. Repair the parent task's machine truth to branch/PR-level evidence, not merged-to-dev evidence, until `PR #1251` actually merges and remote `dev` contains the delivered commit.
+
+The parent machine-truth repair was applied with:
+
+```bash
+AI_NAME=Codex INTEGRATION_STATUS=pr_open \
+PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/1251 \
+python3 scripts/ai_status.py note IAM-IDP-002 \
+  "History repair verified on 2026-08-01: fast-forward local codex2/iam-idp-002 onto origin/gemini2/iam-idp-002@04429f88, then continue CI repair on PR #1251 from that branch instead of restarting from 717a8719. Remote dev remains 717a8719, so integration stays at branch/PR level until PR #1251 merges."
+```
 
 As of `2026-08-01`, the implementation branch itself is healthy; the remaining blocker is the reassigned owner branch/worktree not pointing at that implementation, plus stale integration bookkeeping on the parent task.
 

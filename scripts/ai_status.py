@@ -466,51 +466,90 @@ INTEGRATION_STATUS_VALUES = {
     "dev_deployed",
 }
 
+INTEGRATION_OPTIONAL_ENV_FIELDS = {
+    "pr_url": "PR_URL",
+    "ci_status": "CI_STATUS",
+    "ci_run_url": "CI_RUN_URL",
+    "merged_ref": "MERGED_REF",
+    "merge_commit": "MERGE_COMMIT",
+    "dev_deploy_run_url": "DEV_DEPLOY_RUN_URL",
+    "dev_deploy_sha": "DEV_DEPLOY_SHA",
+    "dev_deploy_source_ref": "DEV_DEPLOY_SOURCE_REF",
+}
 
-def integration_metadata_from_env(commit_required: bool, timestamp: str) -> dict[str, Any]:
-    integration_status = os.environ.get("INTEGRATION_STATUS", "").strip().lower()
+INTEGRATION_METADATA_FIELDS = {
+    "integration_status",
+    "integration_recorded_at",
+    *INTEGRATION_OPTIONAL_ENV_FIELDS.keys(),
+}
+
+
+def clear_integration_metadata(task: dict[str, Any]) -> None:
+    for key in INTEGRATION_METADATA_FIELDS:
+        task.pop(key, None)
+
+
+def apply_integration_metadata(task: dict[str, Any], metadata: dict[str, Any]) -> None:
+    clear_integration_metadata(task)
+    task.update({key: value for key, value in metadata.items() if key in INTEGRATION_METADATA_FIELDS})
+
+
+def integration_metadata_from_env(
+    commit_required: bool,
+    timestamp: str,
+    *,
+    prefix: str = "",
+    allow_missing: bool = False,
+) -> dict[str, Any] | None:
+    integration_status_key = f"{prefix}INTEGRATION_STATUS"
+    integration_status = os.environ.get(integration_status_key, "").strip().lower()
+    optional_values = {
+        field: os.environ.get(f"{prefix}{env_name}", "").strip()
+        for field, env_name in INTEGRATION_OPTIONAL_ENV_FIELDS.items()
+    }
+    has_inputs = bool(integration_status) or any(optional_values.values())
+
+    if allow_missing and not has_inputs:
+        return None
+    if allow_missing and not integration_status:
+        raise SystemExit(f"{integration_status_key} is required when supplying {prefix}* integration metadata")
     if not integration_status:
         integration_status = "branch_pushed" if commit_required else "not_applicable"
     if integration_status not in INTEGRATION_STATUS_VALUES:
         allowed = ", ".join(sorted(INTEGRATION_STATUS_VALUES))
-        raise SystemExit(f"INTEGRATION_STATUS must be one of: {allowed}")
+        raise SystemExit(f"{integration_status_key} must be one of: {allowed}")
 
-    pr_url = os.environ.get("PR_URL", "").strip()
-    ci_status = os.environ.get("CI_STATUS", "").strip()
-    ci_run_url = os.environ.get("CI_RUN_URL", "").strip()
-    merged_ref = os.environ.get("MERGED_REF", "").strip()
-    merge_commit = os.environ.get("MERGE_COMMIT", "").strip()
-    dev_deploy_run_url = os.environ.get("DEV_DEPLOY_RUN_URL", "").strip()
-    dev_deploy_sha = os.environ.get("DEV_DEPLOY_SHA", "").strip()
-    dev_deploy_source_ref = os.environ.get("DEV_DEPLOY_SOURCE_REF", "").strip()
+    pr_url = optional_values["pr_url"]
+    ci_status = optional_values["ci_status"]
+    ci_run_url = optional_values["ci_run_url"]
+    merged_ref = optional_values["merged_ref"]
+    merge_commit = optional_values["merge_commit"]
+    dev_deploy_run_url = optional_values["dev_deploy_run_url"]
+    dev_deploy_sha = optional_values["dev_deploy_sha"]
+    dev_deploy_source_ref = optional_values["dev_deploy_source_ref"]
 
     if integration_status == "merged_to_dev" and not (merged_ref or merge_commit):
-        raise SystemExit("INTEGRATION_STATUS=merged_to_dev requires MERGED_REF or MERGE_COMMIT")
+        raise SystemExit(f"{integration_status_key}=merged_to_dev requires {prefix}MERGED_REF or {prefix}MERGE_COMMIT")
     if integration_status == "dev_deployed":
         if not (merged_ref or merge_commit):
-            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires MERGED_REF or MERGE_COMMIT")
+            raise SystemExit(f"{integration_status_key}=dev_deployed requires {prefix}MERGED_REF or {prefix}MERGE_COMMIT")
         if not dev_deploy_run_url or not dev_deploy_sha:
-            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires DEV_DEPLOY_RUN_URL and DEV_DEPLOY_SHA")
+            raise SystemExit(
+                f"{integration_status_key}=dev_deployed requires {prefix}DEV_DEPLOY_RUN_URL and {prefix}DEV_DEPLOY_SHA"
+            )
     if integration_status == "ci_failed" and not (ci_status or ci_run_url):
-        raise SystemExit("INTEGRATION_STATUS=ci_failed requires CI_STATUS or CI_RUN_URL")
+        raise SystemExit(f"{integration_status_key}=ci_failed requires {prefix}CI_STATUS or {prefix}CI_RUN_URL")
     if integration_status == "deploy_blocked" and not (dev_deploy_run_url or dev_deploy_source_ref or merged_ref):
-        raise SystemExit("INTEGRATION_STATUS=deploy_blocked requires deploy or merge evidence")
+        raise SystemExit(
+            f"{integration_status_key}=deploy_blocked requires {prefix}DEV_DEPLOY_RUN_URL, "
+            f"{prefix}DEV_DEPLOY_SOURCE_REF, or {prefix}MERGED_REF"
+        )
 
     metadata: dict[str, Any] = {
         "integration_status": integration_status,
         "integration_recorded_at": timestamp,
     }
-    optional_fields = {
-        "pr_url": pr_url,
-        "ci_status": ci_status,
-        "ci_run_url": ci_run_url,
-        "merged_ref": merged_ref,
-        "merge_commit": merge_commit,
-        "dev_deploy_run_url": dev_deploy_run_url,
-        "dev_deploy_sha": dev_deploy_sha,
-        "dev_deploy_source_ref": dev_deploy_source_ref,
-    }
-    metadata.update({key: value for key, value in optional_fields.items() if value})
+    metadata.update({key: value for key, value in optional_values.items() if value})
     return metadata
 
 
@@ -1051,6 +1090,16 @@ def apply_unblock_parent_resolution(
         task["resolved_parent_waiting_for"] = parent_waiting_for
     else:
         task.pop("resolved_parent_waiting_for", None)
+    parent_integration_metadata = integration_metadata_from_env(
+        task_requires_commit(parent),
+        timestamp,
+        prefix="PARENT_",
+        allow_missing=True,
+    )
+    if parent_integration_metadata:
+        task["resolved_parent_integration_status"] = parent_integration_metadata["integration_status"]
+    else:
+        task.pop("resolved_parent_integration_status", None)
 
     parent["status"] = resume_status
     parent["last_update"] = timestamp
@@ -1059,6 +1108,8 @@ def apply_unblock_parent_resolution(
         parent["waiting_for"] = parent_waiting_for
     else:
         parent.pop("waiting_for", None)
+    if parent_integration_metadata:
+        apply_integration_metadata(parent, parent_integration_metadata)
 
     if resume_status == "blocked":
         state.setdefault("blockers", []).append(
@@ -1954,6 +2005,13 @@ def command_note(state: dict[str, Any], args: list[str]) -> None:
     timestamp = iso_now()
     task["last_update"] = timestamp
     task["next"] = message
+    integration_metadata = integration_metadata_from_env(
+        task_requires_commit(task),
+        timestamp,
+        allow_missing=True,
+    )
+    if integration_metadata:
+        apply_integration_metadata(task, integration_metadata)
     append_log({"ts": timestamp, "agent": actor, "type": "note", "task_id": task_id, "message": message})
 
 
@@ -2126,7 +2184,8 @@ def command_done(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "done"
     task["last_update"] = timestamp
     task["next"] = message
-    task.update(completion_metadata)
+    apply_integration_metadata(task, completion_metadata)
+    task.update({key: value for key, value in completion_metadata.items() if key not in INTEGRATION_METADATA_FIELDS})
     task.pop("waiting_for", None)
     mark_blockers_resolved(state, task_id)
     mark_handoffs_done(state, task_id)

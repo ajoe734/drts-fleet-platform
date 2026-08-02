@@ -199,6 +199,122 @@ class UnblockParentResolutionTest(unittest.TestCase):
         self.assertEqual(len(state["blockers"]), 1)
         self.assertEqual(state["blockers"][0]["status"], "open")
 
+    def test_unblock_done_can_replace_parent_stale_merge_evidence(self) -> None:
+        state = {
+            "tasks": [
+                {
+                    "id": "IAM-IDP-002",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "status": "in_progress",
+                    "next": "Stale merge evidence still recorded.",
+                    "integration_status": "merged_to_dev",
+                    "integration_recorded_at": "2026-08-01T23:50:57Z",
+                    "merged_ref": "origin/dev",
+                    "merge_commit": "04429f88f53322a4c080cd862d7233fa91541ae8",
+                },
+                {
+                    "id": "IAM-IDP-002-UNBLOCK-HISTORY-REPAIR",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "status": "review_approved",
+                    "task_class": "unblock",
+                    "helper_parent": "IAM-IDP-002",
+                    "helper_kind": "history_repair",
+                    "mutates_canonical": True,
+                },
+            ],
+            "blockers": [],
+            "handoffs": [],
+        }
+
+        env = {
+            "AI_NAME": "Codex",
+            "COMMIT_HASH": "abc123",
+            "COMMIT_SUBJECT": "IAM-IDP-002-UNBLOCK-HISTORY-REPAIR: repair parent integration evidence",
+            "PUSH_REMOTE": "origin",
+            "PUSH_BRANCH": "codex/iam-idp-002-unblock-history-repair",
+            "PARENT_STATUS": "todo",
+            "PARENT_NEXT": (
+                "Fast-forward local codex2/iam-idp-002 onto origin/gemini2/iam-idp-002@04429f88, "
+                "then continue PR #1251 CI repair; remote dev is still 717a8719 so this task remains branch/PR-level only."
+            ),
+            "PARENT_INTEGRATION_STATUS": "pr_open",
+            "PARENT_PR_URL": "https://github.com/example/drts-fleet-platform/pull/1251",
+        }
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(
+                ai_status,
+                "_load_orchestrator_config",
+                return_value={"branch_strategy": {"integration_gate": {"enabled": False}}},
+            ),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            ai_status.command_done(
+                state,
+                [
+                    "IAM-IDP-002-UNBLOCK-HISTORY-REPAIR",
+                    "Recorded non-destructive repair route and corrected parent branch/PR evidence.",
+                ],
+            )
+
+        parent = next(task for task in state["tasks"] if task["id"] == "IAM-IDP-002")
+        child = next(task for task in state["tasks"] if task["id"] == "IAM-IDP-002-UNBLOCK-HISTORY-REPAIR")
+        self.assertEqual(parent["status"], "todo")
+        self.assertEqual(parent["integration_status"], "pr_open")
+        self.assertEqual(parent["pr_url"], "https://github.com/example/drts-fleet-platform/pull/1251")
+        self.assertNotIn("merged_ref", parent)
+        self.assertNotIn("merge_commit", parent)
+        self.assertEqual(child["resolved_parent_integration_status"], "pr_open")
+        self.assertEqual(len(state["handoffs"]), 1)
+        self.assertEqual(state["handoffs"][0]["to"], "Codex2")
+
+
+class NoteIntegrationMetadataTest(unittest.TestCase):
+    def test_note_can_replace_stale_merge_evidence(self) -> None:
+        state = {
+            "tasks": [
+                {
+                    "id": "IAM-IDP-002",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "status": "in_progress",
+                    "next": "Stale merge evidence still recorded.",
+                    "integration_status": "merged_to_dev",
+                    "integration_recorded_at": "2026-08-01T23:50:57Z",
+                    "merged_ref": "origin/dev",
+                    "merge_commit": "04429f88f53322a4c080cd862d7233fa91541ae8",
+                }
+            ],
+            "blockers": [],
+            "handoffs": [],
+        }
+
+        env = {
+            "AI_NAME": "Codex",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/drts-fleet-platform/pull/1251",
+        }
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_note(
+                state,
+                [
+                    "IAM-IDP-002",
+                    (
+                        "Fast-forward local codex2/iam-idp-002 onto origin/gemini2/iam-idp-002@04429f88, "
+                        "then continue PR #1251 CI repair; remote dev is still 717a8719 so this task remains branch/PR-level only."
+                    ),
+                ],
+            )
+
+        task = state["tasks"][0]
+        self.assertEqual(task["integration_status"], "pr_open")
+        self.assertEqual(task["pr_url"], "https://github.com/example/drts-fleet-platform/pull/1251")
+        self.assertNotIn("merged_ref", task)
+        self.assertNotIn("merge_commit", task)
+
 
 class GitMergeReconciliationTest(unittest.TestCase):
     def _state(self) -> dict[str, object]:
