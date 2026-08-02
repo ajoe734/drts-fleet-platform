@@ -330,6 +330,36 @@ export class IdentityRepository {
     }
   }
 
+  async findPrincipalById(
+    principalId: string,
+  ): Promise<CanonicalIdentityPrincipalRecord | null> {
+    if (!this.isEnabled()) {
+      const principal = this.fallbackPrincipals.get(principalId);
+      return principal ? { ...principal } : null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_principals
+          WHERE principal_id = $1
+          LIMIT 1
+        `,
+        [principalId],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityPrincipalRecord>(
+        result.rows[0].record,
+        "iam.identity_principals",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
   async findPrincipalByEmail(
     email: string,
   ): Promise<CanonicalIdentityPrincipalRecord | null> {
@@ -554,10 +584,7 @@ export class IdentityRepository {
         ],
       );
 
-      return this.hydrateSessionRecord(
-        result.rows[0],
-        "iam.identity_sessions",
-      );
+      return this.hydrateSessionRecord(result.rows[0], "iam.identity_sessions");
     } finally {
       client.release();
     }
@@ -717,11 +744,8 @@ export class IdentityRepository {
     if (!this.isEnabled()) {
       for (const session of this.fallbackSessions.values()) {
         const sessionDeviceId =
-          (
-            session.deviceSummary as
-              | { deviceId?: string | null }
-              | undefined
-          )?.deviceId ?? null;
+          (session.deviceSummary as { deviceId?: string | null } | undefined)
+            ?.deviceId ?? null;
         if (session.status === "active" && sessionDeviceId === deviceId) {
           return { ...session };
         }
@@ -908,7 +932,8 @@ export class IdentityRepository {
       }
 
       if (!targetFamily) {
-        const compromisedFamilyId = this.fallbackPreviousTokenHashes.get(oldHash);
+        const compromisedFamilyId =
+          this.fallbackPreviousTokenHashes.get(oldHash);
         if (compromisedFamilyId) {
           const family =
             this.fallbackRefreshFamilies.get(compromisedFamilyId) || null;
@@ -958,10 +983,7 @@ export class IdentityRepository {
           reason: "COMPROMISED",
         };
       }
-      if (
-        targetFamily.status === "revoked" ||
-        session?.status === "revoked"
-      ) {
+      if (targetFamily.status === "revoked" || session?.status === "revoked") {
         return {
           success: false,
           session,
@@ -973,8 +995,7 @@ export class IdentityRepository {
       const nowTime = Date.now();
       if (
         new Date(targetFamily.expiresAt).getTime() <= nowTime ||
-        (session &&
-          new Date(session.absoluteExpiresAt).getTime() <= nowTime)
+        (session && new Date(session.absoluteExpiresAt).getTime() <= nowTime)
       ) {
         const now = new Date().toISOString();
         targetFamily.status = "expired";
@@ -1165,10 +1186,7 @@ export class IdentityRepository {
         return { success: false, session, family, reason: "COMPROMISED" };
       }
 
-      if (
-        row.family_status === "revoked" ||
-        row.session_status === "revoked"
-      ) {
+      if (row.family_status === "revoked" || row.session_status === "revoked") {
         await client.query("ROLLBACK");
         return { success: false, session, family, reason: "REVOKED" };
       }

@@ -436,7 +436,10 @@ export class IAPSubjectAdapter {
         originalRoles: assignedRoles,
         effectiveRoles: effectiveRolesForM,
         missingGroups: missingGroupsForM,
-        tokenVersionTimestamps: [m.updatedAt, ...bindings.map((b) => b.updatedAt)],
+        tokenVersionTimestamps: [
+          m.updatedAt,
+          ...bindings.map((b) => b.updatedAt),
+        ],
         driftDetected: driftForM,
       });
     }
@@ -591,6 +594,7 @@ export class IAPSubjectAdapter {
     const effectiveRoles = selectedAnalysis.effectiveRoles;
     const originalRoles = selectedAnalysis.originalRoles;
     const tokenVersion = Math.max(
+      Date.parse(principal.updatedAt),
       ...selectedAnalysis.tokenVersionTimestamps.map((timestamp) =>
         Date.parse(timestamp),
       ),

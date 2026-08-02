@@ -177,7 +177,10 @@ export function isJwtKeyMaterialNotConfiguredError(
   return error instanceof JwtKeyMaterialNotConfiguredError;
 }
 
-function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+function arraysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
   if (left.length !== right.length) {
     return false;
   }
@@ -233,7 +236,9 @@ function parseJwtDurationMillis(expiresIn: JwtExpiresIn): number {
 }
 
 function unique(values: readonly string[] | null | undefined): string[] {
-  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
+  return [
+    ...new Set((values ?? []).map((value) => value.trim()).filter(Boolean)),
+  ];
 }
 
 @Injectable()
@@ -285,8 +290,8 @@ export class JwtAuthService {
     return Boolean(
       (process.env.JWT_PRIVATE_KEY &&
         process.env.JWT_PRIVATE_KEY.trim().length > 0) ||
-        (process.env.JWT_PUBLIC_KEY &&
-          process.env.JWT_PUBLIC_KEY.trim().length > 0),
+      (process.env.JWT_PUBLIC_KEY &&
+        process.env.JWT_PUBLIC_KEY.trim().length > 0),
     );
   }
 
@@ -401,9 +406,9 @@ export class JwtAuthService {
     }
     if (audience) {
       options.audience = Array.isArray(audience)
-        ? (audience.length === 1
-            ? audience[0]
-            : ([...audience] as [string, ...string[]]))
+        ? audience.length === 1
+          ? audience[0]
+          : ([...audience] as [string, ...string[]])
         : audience;
     }
 
@@ -418,9 +423,7 @@ export class JwtAuthService {
     return `${prefix}_${value.replace(/-/g, "")}`;
   }
 
-  private resolvePolicyVersion(
-    explicitPolicyVersion?: string | null,
-  ): string {
+  private resolvePolicyVersion(explicitPolicyVersion?: string | null): string {
     return (
       explicitPolicyVersion?.trim() ||
       process.env.JWT_POLICY_VERSION?.trim() ||
@@ -515,16 +518,16 @@ export class JwtAuthService {
   private hasRequiredSessionClaims(payload: JwtIdentityPayload): boolean {
     return Boolean(
       payload.sid &&
-        payload.jti &&
-        Number.isFinite(payload.tokenVersion) &&
-        typeof payload.auth_time === "number" &&
-        payload.auth_time > 0 &&
-        payload.amr &&
-        payload.amr.length > 0 &&
-        payload.acr &&
-        payload.policyVersion &&
-        payload.iss &&
-        payload.aud,
+      payload.jti &&
+      Number.isFinite(payload.tokenVersion) &&
+      typeof payload.auth_time === "number" &&
+      payload.auth_time > 0 &&
+      payload.amr &&
+      payload.amr.length > 0 &&
+      payload.acr &&
+      payload.policyVersion &&
+      payload.iss &&
+      payload.aud,
     );
   }
 
@@ -545,21 +548,20 @@ export class JwtAuthService {
     const authTime = options?.authTime ?? identity.authTime ?? issuedAt;
     const sessionId =
       options?.sessionId ?? identity.sessionId ?? this.createOpaqueId("sid");
-    const tokenId =
-      identity.tokenId ?? this.createOpaqueId("jti");
+    const tokenId = identity.tokenId ?? this.createOpaqueId("jti");
     const tokenVersion =
-      options?.tokenVersion ??
-      identity.tokenVersion ??
-      Date.parse(issuedAt);
+      options?.tokenVersion ?? identity.tokenVersion ?? Date.parse(issuedAt);
     const policyVersion = this.resolvePolicyVersion(
       options?.policyVersion ?? identity.policyVersion,
     );
-    const amr = unique(options?.amr ?? identity.amr ?? this.resolveDefaultAmr(identity));
-    const acr = options?.acr ?? identity.acr ?? this.resolveDefaultAcr(identity);
+    const amr = unique(
+      options?.amr ?? identity.amr ?? this.resolveDefaultAmr(identity),
+    );
+    const acr =
+      options?.acr ?? identity.acr ?? this.resolveDefaultAcr(identity);
     const principalId =
       options?.principalId ?? identity.principalId ?? identity.actorId;
-    const membershipId =
-      options?.membershipId ?? identity.membershipId ?? null;
+    const membershipId = options?.membershipId ?? identity.membershipId ?? null;
     const audience = this.getAudienceList();
     const issuer = this.getIssuer() ?? null;
     const subject =
@@ -579,7 +581,12 @@ export class JwtAuthService {
       (options?.ensurePrincipal ?? !membershipId)
     ) {
       await this.identityRepository.ensurePrincipalRecord(
-        this.buildPrincipalRecord(identity, principalId, subject ?? principalId, issuedAt),
+        this.buildPrincipalRecord(
+          identity,
+          principalId,
+          subject ?? principalId,
+          issuedAt,
+        ),
       );
     }
 
@@ -617,7 +624,9 @@ export class JwtAuthService {
           ...(identity.driverBindingId
             ? { bindingId: identity.driverBindingId }
             : {}),
-          ...(identity.driverDeviceId ? { deviceId: identity.driverDeviceId } : {}),
+          ...(identity.driverDeviceId
+            ? { deviceId: identity.driverDeviceId }
+            : {}),
         },
         riskSummary: {},
         createdAt: issuedAt,
@@ -697,15 +706,18 @@ export class JwtAuthService {
     return jwt.sign(
       payload,
       this.getSignKey(),
-      this.buildJwtOptions(expiresIn, opts?.jwtId ?? identity.tokenId ?? undefined),
+      this.buildJwtOptions(
+        expiresIn,
+        opts?.jwtId ?? identity.tokenId ?? undefined,
+      ),
     );
   }
 
   verify(token: string): JwtIdentityPayload | null {
     try {
-      const decoded = jwt.decode(token, { complete: true }) as
-        | { header?: { alg?: string } }
-        | null;
+      const decoded = jwt.decode(token, { complete: true }) as {
+        header?: { alg?: string };
+      } | null;
       const algorithm = decoded?.header?.alg?.toUpperCase();
       if (!algorithm || algorithm === "NONE") {
         return null;
@@ -772,17 +784,13 @@ export class JwtAuthService {
         return false;
       }
       const sessionDeviceId =
-        (session.deviceSummary as { deviceId?: string } | undefined)?.deviceId ??
-        null;
+        (session.deviceSummary as { deviceId?: string } | undefined)
+          ?.deviceId ?? null;
       return payload.driverDeviceId === sessionDeviceId;
     }
 
     if (payload.realm === "tenant") {
-      if (
-        !this.tenantPartnerService ||
-        !payload.tenantId ||
-        !payload.sub
-      ) {
+      if (!this.tenantPartnerService || !payload.tenantId || !payload.sub) {
         return true;
       }
 
@@ -831,9 +839,14 @@ export class JwtAuthService {
         return false;
       }
 
-      const memberships = await this.identityRepository.findMembershipsByPrincipalId(
-        principalId,
-      );
+      const principal =
+        await this.identityRepository.findPrincipalById(principalId);
+      if (!principal || principal.status !== "active") {
+        return false;
+      }
+
+      const memberships =
+        await this.identityRepository.findMembershipsByPrincipalId(principalId);
       const membership = memberships.find(
         (candidate) =>
           candidate.membershipId === payload.membershipId &&
@@ -843,15 +856,19 @@ export class JwtAuthService {
         return false;
       }
 
-      const roleBindings = await this.identityRepository.findRoleBindingsByMembershipId(
-        membership.membershipId,
-      );
+      const roleBindings =
+        await this.identityRepository.findRoleBindingsByMembershipId(
+          membership.membershipId,
+        );
       const timestamps = [
+        principal.updatedAt,
         membership.updatedAt,
         ...roleBindings.map((binding) => binding.updatedAt),
       ];
 
-      return this.computeWorkforceTokenVersion(timestamps) === payload.tokenVersion;
+      return (
+        this.computeWorkforceTokenVersion(timestamps) === payload.tokenVersion
+      );
     }
 
     return true;
