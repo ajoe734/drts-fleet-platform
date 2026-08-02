@@ -175,6 +175,19 @@ describe("validateAuthStartupConfig in local & test mode", () => {
       AuthConfigurationError,
     );
   });
+
+  it("accepts the dev Cloud Run rail when DRTS_ENV=development overrides NODE_ENV=production", () => {
+    const report = validateAuthStartupConfig({
+      DRTS_ENV: "development",
+      NODE_ENV: "production",
+      CI: "false",
+      AUTH_MODE: "dev",
+    });
+
+    expect(report.environment).toBe("local");
+    expect(report.isStrictEnvironment).toBe(false);
+    expect(report.valid).toBe(true);
+  });
 });
 
 describe("validateAuthStartupConfig in staging & production (Strict Mode)", () => {
