@@ -16,18 +16,28 @@ import {
 } from "@nestjs/common";
 
 import type {
+  AcceptTenantInvitationCommand,
+  AcceptTenantInvitationResult,
   AcknowledgeOpsApprovalRequestBreachCommand,
   ActionReceipt,
   AuditLogRecord,
   ApproveTenantBookingApprovalRequestCommand,
+  CanonicalIdentityInvitationRecord,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateReferralEmbedHandoffArtifactCommand,
   CreatePartnerIngressHandoffCommand,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
+  CreateTenantUserResult,
   EscalateTenantBookingApprovalRequestCommand,
   IdentityContext,
+  OffboardTenantUserCommand,
+  ReactivateTenantUserCommand,
+  ResendTenantInvitationResult,
+  RevokeTenantInvitationResult,
+  SuspendTenantUserCommand,
+  VerifyTenantInvitationResult,
   CreateTenantWebhookEndpointCommand,
   DeleteTenantWebhookEndpointCommand,
   EmptyStateEnvelope,
@@ -1195,6 +1205,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private userRoles = USER_ROLE_SEED.map((userRole) =>
     this.cloneUserRole(userRole),
   );
+
+  private invitations: CanonicalIdentityInvitationRecord[] = [];
 
   private apiKeys = API_KEY_SEED.map((apiKey) =>
     this.cloneStoredApiKey(apiKey),
@@ -6298,7 +6310,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: CreateTenantUserCommand,
     requestId?: string,
     identity?: IdentityContext | null,
-  ) {
+  ): Promise<CreateTenantUserResult> {
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
     this.assertNonBlank(command.roleCode, "roleCode");
@@ -6338,7 +6350,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       updatedAt: now,
     };
 
+    const rawInvitationToken = `inv_tok_${randomUUID()}_${randomBytes(16).toString("hex")}`;
+    const tokenHash = createHash("sha256")
+      .update(rawInvitationToken)
+      .digest("hex");
+    const expiresAtDate = new Date();
+    expiresAtDate.setHours(expiresAtDate.getHours() + 24);
+    const expiresAt = expiresAtDate.toISOString();
+
+    const invitationRecord: CanonicalIdentityInvitationRecord = {
+      invitationId: `invitation_${randomUUID()}`,
+      sourceRef: `tenant_user_role:${userRole.userId}:invitation`,
+      membershipId: `membership_${randomUUID()}`,
+      issuerPrincipalId: securityActor?.actorId ?? null,
+      realm: "tenant",
+      scopeRef: `tenant:${tenantId}`,
+      tenantId,
+      partnerId: null,
+      email: normalizedEmail,
+      roleCode: command.roleCode.trim(),
+      tokenHash,
+      deliveryStatus: "pending_delivery",
+      expiresAt,
+      acceptedAt: null,
+      revokedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
     this.userRoles = [this.cloneUserRole(userRole), ...this.userRoles];
+    this.invitations = [invitationRecord, ...this.invitations];
+
     const persisted = this.persistIdentityGovernanceMutation({
       changes: {
         userRoles: [this.cloneUserRole(userRole)],
@@ -6347,6 +6389,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       rollback: () => {
         this.userRoles = previousUserRoles.map((entry) =>
           this.cloneUserRole(entry),
+        );
+        this.invitations = this.invitations.filter(
+          (i) => i.invitationId !== invitationRecord.invitationId,
         );
       },
       event: securityActor
@@ -6383,6 +6428,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     return this.afterPersistence(persisted, () => {
       this.syncIdentityTenantUserRole(userRole, "create_tenant_user");
+      if (
+        this.identityRepository &&
+        typeof (this.identityRepository as any).upsertInvitationRecord ===
+          "function"
+      ) {
+        void (this.identityRepository as any).upsertInvitationRecord(
+          invitationRecord,
+        );
+      }
       this.recordTenantAudit(
         {
           actorId: null,
@@ -6397,8 +6451,558 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         requestId,
       );
 
-      return this.cloneUserRole(userRole);
+      const result = Object.assign(this.cloneUserRole(userRole), {
+        user: this.cloneUserRole(userRole),
+        invitation: invitationRecord,
+        rawInvitationToken,
+      });
+      return result;
     });
+  }
+
+  async resendTenantInvitation(
+    tenantId: string,
+    userId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<ResendTenantInvitationResult> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+    if (userRole.status !== "invited") {
+      throw new ApiRequestError(
+        400,
+        "IAM_INVITATION_INVALID",
+        "Invitation can only be resent for users in invited status.",
+        { userId, status: userRole.status },
+      );
+    }
+
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const now = new Date().toISOString();
+
+    for (const inv of this.invitations) {
+      if (
+        inv.email === userRole.email &&
+        inv.tenantId === tenantId &&
+        !inv.revokedAt &&
+        !inv.acceptedAt
+      ) {
+        inv.revokedAt = now;
+        inv.updatedAt = now;
+      }
+    }
+
+    const rawInvitationToken = `inv_tok_${randomUUID()}_${randomBytes(16).toString("hex")}`;
+    const tokenHash = createHash("sha256")
+      .update(rawInvitationToken)
+      .digest("hex");
+    const expiresAtDate = new Date();
+    expiresAtDate.setHours(expiresAtDate.getHours() + 24);
+    const expiresAt = expiresAtDate.toISOString();
+
+    const newInvitation: CanonicalIdentityInvitationRecord = {
+      invitationId: `invitation_${randomUUID()}`,
+      sourceRef: `tenant_user_role:${userRole.userId}:invitation:${randomUUID()}`,
+      membershipId: `membership_${randomUUID()}`,
+      issuerPrincipalId: securityActor?.actorId ?? null,
+      realm: "tenant",
+      scopeRef: `tenant:${tenantId}`,
+      tenantId,
+      partnerId: null,
+      email: userRole.email,
+      roleCode: userRole.roleCode,
+      tokenHash,
+      deliveryStatus: "pending_delivery",
+      expiresAt,
+      acceptedAt: null,
+      revokedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.invitations = [newInvitation, ...this.invitations];
+    if (
+      this.identityRepository &&
+      typeof (this.identityRepository as any).upsertInvitationRecord ===
+        "function"
+    ) {
+      void (this.identityRepository as any).upsertInvitationRecord(
+        newInvitation,
+      );
+    }
+
+    this.securityEventsService?.recordEvent({
+      actorId: securityActor?.actorId ?? null,
+      actorType: securityActor?.actorType ?? "tenant_admin",
+      subjectId: userRole.email,
+      realm: "tenant",
+      tenantId,
+      partnerId: null,
+      eventType: "tenant_user.invitation_resent",
+      eventFamily: "invitation",
+      outcome: "success",
+      severity: "medium",
+      targetType: "tenant_user_role",
+      targetId: userRole.userId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: securityActor
+        ? [securityActor.authMode]
+        : ["bootstrap_headers"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: this.buildTenantUserAuditSummary(userRole),
+      maskedContext: { email: userRole.email },
+    });
+
+    return {
+      user: this.cloneUserRole(userRole),
+      invitation: newInvitation,
+      rawInvitationToken,
+    };
+  }
+
+  async revokeTenantInvitation(
+    tenantId: string,
+    userId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<RevokeTenantInvitationResult> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const now = new Date().toISOString();
+
+    let targetInvitation = this.invitations.find(
+      (inv) =>
+        inv.email === userRole.email &&
+        inv.tenantId === tenantId &&
+        !inv.revokedAt &&
+        !inv.acceptedAt,
+    );
+
+    if (!targetInvitation) {
+      targetInvitation = {
+        invitationId: `invitation_${randomUUID()}`,
+        sourceRef: `tenant_user_role:${userRole.userId}:revoked_invitation`,
+        membershipId: `membership_${randomUUID()}`,
+        issuerPrincipalId: securityActor?.actorId ?? null,
+        realm: "tenant",
+        scopeRef: `tenant:${tenantId}`,
+        tenantId,
+        partnerId: null,
+        email: userRole.email,
+        roleCode: userRole.roleCode,
+        tokenHash: "revoked_dummy_hash",
+        deliveryStatus: "delivery_failed",
+        expiresAt: now,
+        acceptedAt: null,
+        revokedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.invitations.push(targetInvitation);
+    } else {
+      targetInvitation.revokedAt = now;
+      targetInvitation.updatedAt = now;
+    }
+
+    if (
+      this.identityRepository &&
+      typeof (this.identityRepository as any).upsertInvitationRecord ===
+        "function"
+    ) {
+      void (this.identityRepository as any).upsertInvitationRecord(
+        targetInvitation,
+      );
+    }
+
+    this.securityEventsService?.recordEvent({
+      actorId: securityActor?.actorId ?? null,
+      actorType: securityActor?.actorType ?? "tenant_admin",
+      subjectId: userRole.email,
+      realm: "tenant",
+      tenantId,
+      partnerId: null,
+      eventType: "tenant_user.invitation_revoked",
+      eventFamily: "invitation",
+      outcome: "success",
+      severity: "medium",
+      targetType: "tenant_user_role",
+      targetId: userRole.userId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: securityActor
+        ? [securityActor.authMode]
+        : ["bootstrap_headers"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: this.buildTenantUserAuditSummary(userRole),
+      maskedContext: { email: userRole.email },
+    });
+
+    return {
+      user: this.cloneUserRole(userRole),
+      invitation: targetInvitation,
+    };
+  }
+
+  async verifyTenantInvitation(
+    invitationToken: string,
+  ): Promise<VerifyTenantInvitationResult> {
+    const trimmed = invitationToken?.trim();
+    if (!trimmed) {
+      return { valid: false };
+    }
+
+    const tokenHash = createHash("sha256").update(trimmed).digest("hex");
+    let invitation =
+      this.invitations.find((inv) => inv.tokenHash === tokenHash) ?? null;
+
+    if (
+      !invitation &&
+      this.identityRepository &&
+      typeof (this.identityRepository as any).findInvitationByTokenHash ===
+        "function"
+    ) {
+      invitation = await (this.identityRepository as any).findInvitationByTokenHash(
+        tokenHash,
+      );
+    }
+
+    if (!invitation) {
+      return { valid: false };
+    }
+
+    if (invitation.revokedAt || invitation.acceptedAt) {
+      return { valid: false };
+    }
+
+    if (new Date(invitation.expiresAt).getTime() <= Date.now()) {
+      return { valid: false };
+    }
+
+    const targetUser = this.userRoles.find(
+      (u) =>
+        u.email === invitation!.email &&
+        (!invitation!.tenantId || u.tenantId === invitation!.tenantId),
+    );
+    if (!targetUser || targetUser.status !== "invited") {
+      return { valid: false };
+    }
+
+    return {
+      valid: true,
+      email: invitation.email,
+      tenantId: invitation.tenantId ?? undefined,
+      roleCode: invitation.roleCode,
+      expiresAt: invitation.expiresAt,
+    };
+  }
+
+  async acceptTenantInvitation(
+    command: AcceptTenantInvitationCommand,
+    requestId?: string,
+  ): Promise<AcceptTenantInvitationResult> {
+    const verification = await this.verifyTenantInvitation(
+      command.invitationToken,
+    );
+    if (!verification.valid || !verification.email) {
+      throw new ApiRequestError(
+        400,
+        "IAM_INVITATION_INVALID",
+        "Invitation token is invalid, expired, or already accepted.",
+      );
+    }
+
+    const tokenHash = createHash("sha256")
+      .update(command.invitationToken.trim())
+      .digest("hex");
+    let invitation =
+      this.invitations.find((inv) => inv.tokenHash === tokenHash) ?? null;
+    if (
+      !invitation &&
+      this.identityRepository &&
+      typeof (this.identityRepository as any).findInvitationByTokenHash ===
+        "function"
+    ) {
+      invitation = await (this.identityRepository as any).findInvitationByTokenHash(
+        tokenHash,
+      );
+    }
+
+    if (!invitation) {
+      throw new ApiRequestError(
+        400,
+        "IAM_INVITATION_INVALID",
+        "Invitation record could not be resolved.",
+      );
+    }
+
+    const userRole = this.userRoles.find(
+      (u) =>
+        u.email === invitation!.email &&
+        (!invitation!.tenantId || u.tenantId === invitation!.tenantId),
+    );
+    if (!userRole || userRole.status !== "invited") {
+      throw new ApiRequestError(
+        400,
+        "IAM_INVITATION_INVALID",
+        "Target user is not in invited state.",
+      );
+    }
+
+    const now = new Date().toISOString();
+    invitation.acceptedAt = now;
+    invitation.deliveryStatus = "delivered";
+    invitation.updatedAt = now;
+
+    userRole.status = "active";
+    userRole.updatedAt = now;
+
+    if (
+      this.identityRepository &&
+      typeof (this.identityRepository as any).upsertInvitationRecord ===
+        "function"
+    ) {
+      void (this.identityRepository as any).upsertInvitationRecord(invitation);
+    }
+    this.syncIdentityTenantUserRole(userRole, "accept_invitation");
+
+    this.securityEventsService?.recordEvent({
+      actorId: userRole.userId,
+      actorType: "tenant_admin",
+      subjectId: userRole.email,
+      realm: "tenant",
+      tenantId: userRole.tenantId,
+      partnerId: null,
+      eventType: "tenant_user.invitation_accepted",
+      eventFamily: "invitation",
+      outcome: "success",
+      severity: "medium",
+      targetType: "tenant_user_role",
+      targetId: userRole.userId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: ["invitation_proof"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: this.buildTenantUserAuditSummary(userRole),
+      maskedContext: { email: userRole.email },
+    });
+
+    return {
+      user: this.cloneUserRole(userRole),
+      invitation,
+      accepted: true,
+    };
+  }
+
+  async suspendTenantUser(
+    tenantId: string,
+    userId: string,
+    command?: SuspendTenantUserCommand,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<TenantUserRoleRecord> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+
+    if (userRole.roleCode === "tenant_admin") {
+      const activeAdminCount = this.userRoles.filter(
+        (u) =>
+          u.tenantId === tenantId &&
+          u.userId !== userId &&
+          u.roleCode === "tenant_admin" &&
+          (u.status === "active" || u.status === "invited"),
+      ).length;
+      if (activeAdminCount === 0) {
+        throw new ApiRequestError(
+          400,
+          "LAST_ADMIN_PROTECTION_FAILED",
+          "Cannot demote or remove the last tenant admin in the tenant.",
+          { tenantId, userId },
+        );
+      }
+    }
+
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    userRole.status = "suspended";
+    userRole.updatedAt = new Date().toISOString();
+
+    if (
+      this.identityRepository &&
+      typeof (this.identityRepository as any).revokePrincipalSessions ===
+        "function"
+    ) {
+      void (this.identityRepository as any).revokePrincipalSessions(
+        userRole.userId,
+      );
+    }
+    this.syncIdentityTenantUserRole(userRole, "suspend_tenant_user");
+
+    this.securityEventsService?.recordEvent({
+      actorId: securityActor?.actorId ?? null,
+      actorType: securityActor?.actorType ?? "tenant_admin",
+      subjectId: userRole.email,
+      realm: "tenant",
+      tenantId,
+      partnerId: null,
+      eventType: "tenant_user.suspended",
+      eventFamily: "account",
+      outcome: "success",
+      severity: "high",
+      targetType: "tenant_user_role",
+      targetId: userRole.userId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: securityActor
+        ? [securityActor.authMode]
+        : ["bootstrap_headers"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: command?.reason ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: this.buildTenantUserAuditSummary(userRole),
+      maskedContext: { email: userRole.email },
+    });
+
+    return this.cloneUserRole(userRole);
+  }
+
+  async reactivateTenantUser(
+    tenantId: string,
+    userId: string,
+    command?: ReactivateTenantUserCommand,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<TenantUserRoleRecord> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    userRole.status = "active";
+    userRole.updatedAt = new Date().toISOString();
+
+    this.syncIdentityTenantUserRole(userRole, "reactivate_tenant_user");
+
+    this.securityEventsService?.recordEvent({
+      actorId: securityActor?.actorId ?? null,
+      actorType: securityActor?.actorType ?? "tenant_admin",
+      subjectId: userRole.email,
+      realm: "tenant",
+      tenantId,
+      partnerId: null,
+      eventType: "tenant_user.reactivated",
+      eventFamily: "account",
+      outcome: "success",
+      severity: "medium",
+      targetType: "tenant_user_role",
+      targetId: userRole.userId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: securityActor
+        ? [securityActor.authMode]
+        : ["bootstrap_headers"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: command?.reason ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: this.buildTenantUserAuditSummary(userRole),
+      maskedContext: { email: userRole.email },
+    });
+
+    return this.cloneUserRole(userRole);
+  }
+
+  async offboardTenantUser(
+    tenantId: string,
+    userId: string,
+    command?: OffboardTenantUserCommand,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<TenantUserRoleRecord> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+
+    if (userRole.roleCode === "tenant_admin") {
+      const activeAdminCount = this.userRoles.filter(
+        (u) =>
+          u.tenantId === tenantId &&
+          u.userId !== userId &&
+          u.roleCode === "tenant_admin" &&
+          (u.status === "active" || u.status === "invited"),
+      ).length;
+      if (activeAdminCount === 0) {
+        throw new ApiRequestError(
+          400,
+          "LAST_ADMIN_PROTECTION_FAILED",
+          "Cannot demote or remove the last tenant admin in the tenant.",
+          { tenantId, userId },
+        );
+      }
+    }
+
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    userRole.status = "offboarded";
+    userRole.updatedAt = new Date().toISOString();
+
+    if (
+      this.identityRepository &&
+      typeof (this.identityRepository as any).revokePrincipalSessions ===
+        "function"
+    ) {
+      void (this.identityRepository as any).revokePrincipalSessions(
+        userRole.userId,
+      );
+    }
+    this.syncIdentityTenantUserRole(userRole, "offboard_tenant_user");
+
+    this.securityEventsService?.recordEvent({
+      actorId: securityActor?.actorId ?? null,
+      actorType: securityActor?.actorType ?? "tenant_admin",
+      subjectId: userRole.email,
+      realm: "tenant",
+      tenantId,
+      partnerId: null,
+      eventType: "tenant_user.offboarded",
+      eventFamily: "account",
+      outcome: "success",
+      severity: "high",
+      targetType: "tenant_user_role",
+      targetId: userRole.userId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: securityActor
+        ? [securityActor.authMode]
+        : ["bootstrap_headers"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: command?.reason ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: this.buildTenantUserAuditSummary(userRole),
+      maskedContext: { email: userRole.email },
+    });
+
+    return this.cloneUserRole(userRole);
   }
 
   updateTenantUserRole(
@@ -6413,6 +7017,57 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const userRole = this.requireTenantUser(tenantId, userId);
     const before = this.cloneUserRole(userRole);
+
+    // Self-escalation denial check
+    if (identity) {
+      const isSelf =
+        (identity.actorId && identity.actorId === userRole.userId) ||
+        (identity.subject &&
+          identity.subject.toLowerCase() === userRole.email.toLowerCase());
+      if (isSelf) {
+        const newRole = command.roleCode?.trim();
+        const newStatus = command.status;
+        if (
+          (newRole && newRole !== userRole.roleCode) ||
+          (newStatus && newStatus !== userRole.status)
+        ) {
+          throw new ApiRequestError(
+            403,
+            "SELF_ESCALATION_DENIED",
+            "Self-escalation and self-role changes are denied.",
+            { userId: userRole.userId, actorId: identity.actorId },
+          );
+        }
+      }
+    }
+
+    // Last-admin protection check
+    const isCurrentAdmin = userRole.roleCode === "tenant_admin";
+    const newRole = command.roleCode?.trim() ?? userRole.roleCode;
+    const newStatus = command.status ?? userRole.status;
+    const isDemotingAdmin = isCurrentAdmin && newRole !== "tenant_admin";
+    const isDisablingAdmin =
+      isCurrentAdmin && newStatus !== "active" && newStatus !== "invited";
+
+    if (isDemotingAdmin || isDisablingAdmin) {
+      const activeAdminCount = this.userRoles.filter(
+        (u) =>
+          u.tenantId === tenantId &&
+          u.userId !== userId &&
+          u.roleCode === "tenant_admin" &&
+          (u.status === "active" || u.status === "invited"),
+      ).length;
+
+      if (activeAdminCount === 0) {
+        throw new ApiRequestError(
+          400,
+          "LAST_ADMIN_PROTECTION_FAILED",
+          "Cannot demote or remove the last tenant admin in the tenant.",
+          { tenantId, userId },
+        );
+      }
+    }
+
     const securityActor = this.requireSecurityEventActor(identity, tenantId);
     const previousUserRoles = this.userRoles.map((entry) =>
       this.cloneUserRole(entry),

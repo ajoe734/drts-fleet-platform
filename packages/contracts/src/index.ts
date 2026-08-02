@@ -2400,7 +2400,12 @@ export function isCanonicalAccountActive(status: CanonicalAccountStatus) {
 }
 
 // --- Tenant User & Roles ---
-export type TenantUserRoleStatus = "invited" | "active" | "suspended";
+export type TenantUserRoleStatus =
+  | "invited"
+  | "active"
+  | "suspended"
+  | "disabled"
+  | "offboarded";
 
 export interface TenantUserRoleRecord {
   userId: string;
@@ -2420,6 +2425,53 @@ export interface CreateTenantUserCommand {
   roleCode: string;
 }
 
+export interface CreateTenantUserResult {
+  user: TenantUserRoleRecord;
+  invitation: CanonicalIdentityInvitationRecord | null;
+  rawInvitationToken?: string | null;
+}
+
+export interface ResendTenantInvitationResult {
+  user: TenantUserRoleRecord;
+  invitation: CanonicalIdentityInvitationRecord;
+  rawInvitationToken: string;
+}
+
+export interface RevokeTenantInvitationResult {
+  user: TenantUserRoleRecord;
+  invitation: CanonicalIdentityInvitationRecord;
+}
+
+export interface AcceptTenantInvitationCommand {
+  invitationToken: string;
+}
+
+export interface AcceptTenantInvitationResult {
+  user: TenantUserRoleRecord;
+  invitation: CanonicalIdentityInvitationRecord;
+  accepted: true;
+}
+
+export interface VerifyTenantInvitationResult {
+  valid: boolean;
+  email?: string;
+  tenantId?: string;
+  roleCode?: string;
+  expiresAt?: string;
+}
+
+export interface SuspendTenantUserCommand {
+  reason?: string;
+}
+
+export interface ReactivateTenantUserCommand {
+  reason?: string;
+}
+
+export interface OffboardTenantUserCommand {
+  reason?: string;
+}
+
 export interface UpdateTenantRoleCommand {
   roleCode: string;
   status?: TenantUserRoleStatus;
@@ -2432,6 +2484,7 @@ export interface TenantRoleCatalogRecord {
   description: string;
   assignable: boolean;
 }
+
 
 // --- Tenant API Keys ---
 export interface TenantApiKeyRecord {

@@ -14,6 +14,8 @@ export const IAM_STAGE15_ERROR_CODES = [
   "IAM_CREDENTIAL_NOT_FOUND",
   "IAM_ACCESS_REVIEW_NOT_FOUND",
   "IAM_BREAK_GLASS_NOT_FOUND",
+  "LAST_ADMIN_PROTECTION_FAILED",
+  "SELF_ESCALATION_DENIED",
 ] as const;
 
 export type IamStage15ErrorCode = (typeof IAM_STAGE15_ERROR_CODES)[number];
@@ -145,6 +147,48 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     domain: "account",
   },
   {
+    operationId: "resendTenantUserInvitation",
+    method: "post",
+    path: "/api/tenant/users/{userId}/invitation/resend",
+    domain: "invitation",
+  },
+  {
+    operationId: "revokeTenantUserInvitation",
+    method: "post",
+    path: "/api/tenant/users/{userId}/invitation/revoke",
+    domain: "invitation",
+  },
+  {
+    operationId: "acceptTenantInvitation",
+    method: "post",
+    path: "/api/tenant/invitations/accept",
+    domain: "invitation",
+  },
+  {
+    operationId: "verifyTenantInvitation",
+    method: "get",
+    path: "/api/tenant/invitations/verify",
+    domain: "invitation",
+  },
+  {
+    operationId: "suspendTenantUser",
+    method: "post",
+    path: "/api/tenant/users/{userId}/suspend",
+    domain: "account",
+  },
+  {
+    operationId: "reactivateTenantUser",
+    method: "post",
+    path: "/api/tenant/users/{userId}/reactivate",
+    domain: "account",
+  },
+  {
+    operationId: "offboardTenantUser",
+    method: "post",
+    path: "/api/tenant/users/{userId}/offboard",
+    domain: "account",
+  },
+  {
     operationId: "updateTenantUserRole",
     method: "post",
     path: "/api/tenant/users/{userId}/role",
@@ -262,3 +306,4 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
 
 export type IamStage15Operation =
   (typeof IAM_STAGE15_OPERATION_CATALOG)[number];
+

@@ -13,6 +13,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  AcceptTenantInvitationCommand,
   AcknowledgeOpsApprovalRequestBreachCommand,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
@@ -22,6 +23,9 @@ import type {
   EscalateTenantBookingApprovalRequestCommand,
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
+  OffboardTenantUserCommand,
+  ReactivateTenantUserCommand,
+  SuspendTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   DeleteTenantWebhookEndpointCommand,
   DisableTenantCostCenterCommand,
@@ -1416,6 +1420,148 @@ export class TenantPartnerController {
           requestId,
           identity,
         ),
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/invitation/resend")
+  async resendTenantInvitation(
+    @Param("userId") userId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.resendTenantInvitation(
+        this.requireTenantId(tenantId),
+        userId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/invitation/revoke")
+  async revokeTenantInvitation(
+    @Param("userId") userId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.revokeTenantInvitation(
+        this.requireTenantId(tenantId),
+        userId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Get("tenant/invitations/verify")
+  async verifyTenantInvitation(
+    @Query("token") token?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.tenantPartnerService.verifyTenantInvitation(
+      token ?? "",
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/invitations/accept")
+  async acceptTenantInvitation(
+    @Body() command: AcceptTenantInvitationCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.tenantPartnerService.acceptTenantInvitation(
+      command,
+      requestId,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("tenant/users/:userId/suspend")
+  async suspendTenantUser(
+    @Param("userId") userId: string,
+    @Body() command: SuspendTenantUserCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.suspendTenantUser(
+        this.requireTenantId(tenantId),
+        userId,
+        command,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/reactivate")
+  async reactivateTenantUser(
+    @Param("userId") userId: string,
+    @Body() command: ReactivateTenantUserCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.reactivateTenantUser(
+        this.requireTenantId(tenantId),
+        userId,
+        command,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/offboard")
+  async offboardTenantUser(
+    @Param("userId") userId: string,
+    @Body() command: OffboardTenantUserCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.offboardTenantUser(
+        this.requireTenantId(tenantId),
+        userId,
+        command,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Delete("tenant/users/:userId")
+  async deleteTenantUser(
+    @Param("userId") userId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.offboardTenantUser(
+        this.requireTenantId(tenantId),
+        userId,
+        undefined,
+        requestId,
+        identity,
       ),
       requestId,
     );

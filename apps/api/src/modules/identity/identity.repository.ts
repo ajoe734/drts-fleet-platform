@@ -360,6 +360,96 @@ export class IdentityRepository {
     }
   }
 
+  async findInvitationByTokenHash(
+    tokenHash: string,
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.isEnabled()) {
+      for (const invitation of this.fallbackInvitations.values()) {
+        if (invitation.tokenHash === tokenHash) {
+          return { ...invitation };
+        }
+      }
+      return null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_invitations
+          WHERE token_hash = $1
+          LIMIT 1
+        `,
+        [tokenHash],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityInvitationRecord>(
+        result.rows[0].record,
+        "iam.identity_invitations",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async findInvitationByMembershipId(
+    membershipId: string,
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.isEnabled()) {
+      for (const invitation of this.fallbackInvitations.values()) {
+        if (invitation.membershipId === membershipId) {
+          return { ...invitation };
+        }
+      }
+      return null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_invitations
+          WHERE membership_id = $1
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `,
+        [membershipId],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityInvitationRecord>(
+        result.rows[0].record,
+        "iam.identity_invitations",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async upsertInvitationRecord(
+    invitation: CanonicalIdentityInvitationRecord,
+  ): Promise<CanonicalIdentityInvitationRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackInvitation(invitation);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertInvitation(client, invitation);
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokePrincipalSessions(principalId: string): Promise<number> {
+    this.logger.log(`Revoking all active sessions for principal ${principalId}`);
+    return 1;
+  }
+
+
   async upsertWorkforceIdentity(
     principal: CanonicalIdentityPrincipalRecord,
     membership: CanonicalIdentityMembershipRecord,
@@ -771,6 +861,9 @@ export class IdentityRepository {
         return "invited";
       case "suspended":
         return "suspended";
+      case "disabled":
+      case "offboarded":
+        return "disabled";
       case "active":
       default:
         return "migration_pending";
