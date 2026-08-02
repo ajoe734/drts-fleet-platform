@@ -54,9 +54,20 @@ def integration_gate_settings(config: dict[str, Any] | None) -> dict[str, Any]:
     return raw
 
 
-def is_integrated(integration_status: str | None) -> bool:
-    """True when the status means the work is on dev (or no commit was owed)."""
-    return str(integration_status or "").strip().lower() in INTEGRATED_STATUSES
+def is_integrated(
+    integration_status: str | None,
+    task: dict[str, Any] | None = None,
+) -> bool:
+    """True when the status means the work is integrated according to gate / task requirements."""
+    status = str(integration_status or "").strip().lower()
+    required = str((task or {}).get("required_integration_status") or "").strip().lower()
+    if required == "dev_deployed":
+        return status == "dev_deployed"
+    if required == "merged_to_dev":
+        return status in {"merged_to_dev", "deploy_blocked", "dev_deployed"}
+    if required == "not_applicable":
+        return status == "not_applicable"
+    return status in INTEGRATED_STATUSES
 
 
 def _task_exempt(task_id: str, patterns: list[str]) -> bool:
@@ -86,12 +97,21 @@ def check_integration_gate(
     settings = integration_gate_settings(config)
     if not settings.get("enabled"):
         return None
-    if is_integrated(integration_status):
+    if is_integrated(integration_status, task):
         return None
     task_id = str((task or {}).get("id") or "")
     if _task_exempt(task_id, settings.get("exempt_task_patterns", [])):
         return None
     status = str(integration_status or "").strip().lower() or "branch_pushed"
+    required = str((task or {}).get("required_integration_status") or "").strip().lower()
+    if required:
+        return (
+            f"{task_id or 'task'} cannot close as done with "
+            f"INTEGRATION_STATUS={status}: task carries required_integration_status={required} "
+            f"which cannot be satisfied by status {status}. "
+            f"Provide full integration/deployment evidence. "
+            f"See docs/ops/branch-strategy.md §11.6."
+        )
     return (
         f"{task_id or 'task'} cannot close as done with "
         f"INTEGRATION_STATUS={status}: branch-only work is not integrated to dev "

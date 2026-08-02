@@ -491,6 +491,17 @@ class IntegrationGateUnitTest(unittest.TestCase):
                 status,
             )
 
+    def test_required_integration_status_blocks_unmatched_statuses(self) -> None:
+        task = {"id": "REL-REF-EMBED-001", "required_integration_status": "dev_deployed"}
+        for status in ("merged_to_dev", "not_applicable", "branch_pushed", "ci_failed"):
+            reason = integration_gate.check_integration_gate(task, status, self._cfg())
+            self.assertIsNotNone(reason, f"Expected block for status {status}")
+            self.assertIn("REL-REF-EMBED-001", reason)
+            self.assertIn("required_integration_status=dev_deployed", reason)
+        self.assertIsNone(
+            integration_gate.check_integration_gate(task, "dev_deployed", self._cfg())
+        )
+
     def test_exempt_pattern_allows(self) -> None:
         cfg = self._cfg(exempt_task_patterns=[r"-SIDECAR-ACCEPTANCE$"])
         self.assertIsNone(
