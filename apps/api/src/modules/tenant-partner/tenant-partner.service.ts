@@ -6381,8 +6381,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         : null,
     });
 
-    return this.afterPersistence(persisted, () => {
-      this.syncIdentityTenantUserRole(userRole, "create_tenant_user");
+    return this.afterPersistence(persisted, async () => {
+      await this.syncIdentityTenantUserRole(userRole, "create_tenant_user");
       this.recordTenantAudit(
         {
           actorId: null,
@@ -6414,11 +6414,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const userRole = this.requireTenantUser(tenantId, userId);
     const before = this.cloneUserRole(userRole);
     const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const nextRoleCode = command.roleCode.trim();
+    const nextStatus = command.status ?? userRole.status;
+    this.assertTenantUserRoleChangeIsSafe({
+      tenantId,
+      userRole,
+      nextRoleCode,
+      nextStatus,
+      identity,
+    });
     const previousUserRoles = this.userRoles.map((entry) =>
       this.cloneUserRole(entry),
     );
-    userRole.roleCode = command.roleCode.trim();
-    userRole.status = command.status ?? userRole.status;
+    userRole.roleCode = nextRoleCode;
+    userRole.status = nextStatus;
     userRole.approvalNotificationOptOut =
       command.approvalNotificationOptOut ?? userRole.approvalNotificationOptOut;
     userRole.updatedAt = new Date().toISOString();
@@ -6465,8 +6474,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         : null,
     });
 
-    return this.afterPersistence(persisted, () => {
-      this.syncIdentityTenantUserRole(userRole, "update_tenant_role");
+    return this.afterPersistence(persisted, async () => {
+      const identitySnapshot = await this.syncIdentityTenantUserRole(
+        userRole,
+        "update_tenant_role",
+      );
+      if (
+        before.roleCode !== userRole.roleCode ||
+        before.status !== userRole.status
+      ) {
+        await this.revokeTenantUserSessions(
+          userRole,
+          identitySnapshot?.principal.principalId ?? null,
+          before.status !== "active" || userRole.status !== "active"
+            ? "TENANT_ACCOUNT_STATUS_CHANGED"
+            : "TENANT_ROLE_CHANGED",
+          securityActor?.actorId,
+        );
+      }
       this.recordTenantAudit(
         {
           actorId: null,
@@ -10312,7 +10337,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private afterPersistence<T>(
     persisted: MaybePromise<void>,
-    onSuccess: () => T,
+    onSuccess: () => MaybePromise<T>,
   ): MaybePromise<T> {
     if (persisted instanceof Promise) {
       return persisted.then(() => onSuccess());
@@ -12406,11 +12431,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private syncIdentityTenantUserRoles(context: string) {
     for (const userRole of this.userRoles) {
-      this.syncIdentityTenantUserRole(userRole, context);
+      void this.syncIdentityTenantUserRole(userRole, context).catch(() => {
+        // Startup backfill is best-effort; request mutations await this path.
+      });
     }
   }
 
-  private syncIdentityTenantUserRole(
+  private async syncIdentityTenantUserRole(
     userRole: TenantUserRoleRecord,
     context: string,
   ) {
@@ -12419,16 +12446,101 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       !identityRepository ||
       typeof identityRepository.syncLegacyTenantUserRole !== "function"
     ) {
+      return null;
+    }
+
+    try {
+      return await identityRepository.syncLegacyTenantUserRole(
+        this.cloneUserRole(userRole),
+      );
+    } catch (error) {
+      if (typeof identityRepository.reportPersistenceFailure === "function") {
+        identityRepository.reportPersistenceFailure(error, context);
+      }
+      throw error;
+    }
+  }
+
+  private assertTenantUserRoleChangeIsSafe(params: {
+    tenantId: string;
+    userRole: TenantUserRoleRecord;
+    nextRoleCode: string;
+    nextStatus: TenantUserRoleRecord["status"];
+    identity: IdentityContext | null | undefined;
+  }) {
+    const { tenantId, userRole, nextRoleCode, nextStatus, identity } = params;
+    if (
+      identity?.actorId === userRole.userId &&
+      (nextRoleCode !== userRole.roleCode || nextStatus !== userRole.status)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SELF_ROLE_CHANGE_DENIED",
+        "Tenant users cannot change their own role or account status.",
+        { tenantId },
+      );
+    }
+
+    const removesActiveTenantAdmin =
+      userRole.roleCode === "tenant_admin" &&
+      userRole.status === "active" &&
+      (nextRoleCode !== "tenant_admin" || nextStatus !== "active");
+    if (!removesActiveTenantAdmin) {
       return;
     }
 
-    void identityRepository
-      .syncLegacyTenantUserRole(this.cloneUserRole(userRole))
-      .catch((error: unknown) => {
-        if (typeof identityRepository.reportPersistenceFailure === "function") {
-          identityRepository.reportPersistenceFailure(error, context);
-        }
-      });
+    const activeReplacementCount = this.userRoles.filter(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.userId !== userRole.userId &&
+        candidate.roleCode === "tenant_admin" &&
+        candidate.status === "active",
+    ).length;
+    if (activeReplacementCount > 0) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "TENANT_LAST_ADMIN_REQUIRED",
+      "At least one other active tenant administrator is required.",
+      { tenantId },
+    );
+  }
+
+  private async revokeTenantUserSessions(
+    userRole: TenantUserRoleRecord,
+    canonicalPrincipalId: string | null,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ) {
+    const identityRepository = this.identityRepository;
+    if (!identityRepository) {
+      return;
+    }
+
+    const principalIds = Array.from(
+      new Set(
+        [userRole.userId, canonicalPrincipalId].filter(
+          (principalId): principalId is string => Boolean(principalId?.trim()),
+        ),
+      ),
+    );
+    for (const principalId of principalIds) {
+      const sessions =
+        await identityRepository.listSessionsByPrincipal(principalId);
+      await Promise.all(
+        sessions
+          .filter((session) => session.status === "active")
+          .map((session) =>
+            identityRepository.revokeSession(
+              session.sessionId,
+              reason,
+              revokedByPrincipalId,
+            ),
+          ),
+      );
+    }
   }
 
   private async persistChangesRequired(
