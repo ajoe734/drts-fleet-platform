@@ -1928,6 +1928,82 @@ describe("workforce control-plane token exchange", () => {
       ]),
     );
   });
+
+  it("rejects ops token exchange when group drift removes the ops grant but leaves platform access", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller, identityRepository } = createWorkforceFixture();
+    const subject = "workforce-cross-realm-001";
+    const sharedHeaders = {
+      "x-drts-internal-key": "internal-secret",
+      "x-goog-authenticated-user-email": "accounts.google.com:ops@platform.drts",
+    };
+
+    await controller.issueToken({
+      headers: {
+        ...sharedHeaders,
+        "x-drts-control-plane-actor-type": "platform_admin",
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: subject,
+          email: "ops@platform.drts",
+          groups: ["drts-platform-superadmin", "drts-ops-user"],
+        }),
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
+    await expect(
+      controller.issueToken({
+        headers: {
+          ...sharedHeaders,
+          "x-drts-control-plane-actor-type": "ops_user",
+          "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+            sub: subject,
+            email: "ops@platform.drts",
+            groups: ["drts-platform-superadmin"],
+          }),
+          "x-roles": "operator",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          details: {
+            reasonCode: "realm_membership_missing",
+          },
+        },
+      },
+    });
+
+    expect(identityRepository.listMemberships()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          realm: "ops",
+          status: "suspended",
+        }),
+        expect.objectContaining({
+          realm: "platform",
+          status: "active",
+        }),
+      ]),
+    );
+    expect(identityRepository.listRoleBindings()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          membershipId: expect.stringMatching(/^membership_/),
+          roleCode: "operator",
+        }),
+      ]),
+    );
+  });
 });
 
 describe("partner bootstrap-session auth controller", () => {

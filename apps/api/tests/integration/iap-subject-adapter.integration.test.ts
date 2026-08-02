@@ -302,4 +302,54 @@ describe("IAP subject adapter integration", () => {
       ]),
     );
   });
+
+  it("rejects ops exchange when group drift removes the ops grant but leaves platform access", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const subject = "workforce-cross-realm-001";
+    const sharedHeaders = {
+      "x-drts-internal-key": "internal-secret",
+      "x-goog-authenticated-user-email": "accounts.google.com:ops@platform.drts",
+    };
+
+    const initialResponse = await fetch(`${baseUrl}/auth/token`, {
+      method: "POST",
+      headers: {
+        ...sharedHeaders,
+        "x-drts-control-plane-actor-type": "platform_admin",
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: subject,
+          email: "ops@platform.drts",
+          groups: ["drts-platform-superadmin", "drts-ops-user"],
+        }),
+      },
+    });
+    expect(initialResponse.status).toBe(201);
+
+    const downgradedResponse = await fetch(`${baseUrl}/auth/token`, {
+      method: "POST",
+      headers: {
+        ...sharedHeaders,
+        "x-drts-control-plane-actor-type": "ops_user",
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: subject,
+          email: "ops@platform.drts",
+          groups: ["drts-platform-superadmin"],
+        }),
+        "x-roles": "operator",
+      },
+    });
+
+    expect(downgradedResponse.status).toBe(403);
+    await expect(downgradedResponse.json()).resolves.toMatchObject({
+      error: {
+        details: {
+          reason_code: "realm_membership_missing",
+        },
+      },
+    });
+  });
 });
