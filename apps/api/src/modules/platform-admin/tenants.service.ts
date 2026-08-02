@@ -33,6 +33,7 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   PlatformAdminRepository,
@@ -106,6 +107,11 @@ const DEFAULT_API_KEY_SCOPES = [
 
 const DEMO_CREATED_AT = "2026-04-01T00:00:00.000Z";
 
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
 @Injectable()
 export class TenantsService implements OnModuleInit {
   private readonly logger = new Logger(TenantsService.name);
@@ -116,8 +122,10 @@ export class TenantsService implements OnModuleInit {
     @Optional()
     private readonly platformAdminRepository?: PlatformAdminRepository,
   ) {
-    const seed = this.createSeedTenant();
-    this.tenants.set(seed.id, seed);
+    if (!isStrictAuthEnvironment()) {
+      const seed = this.createSeedTenant();
+      this.tenants.set(seed.id, seed);
+    }
   }
 
   async onModuleInit() {

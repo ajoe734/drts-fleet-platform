@@ -107,6 +107,11 @@ function extractBearerToken(
   return value.slice(7).trim() || null;
 }
 
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
 @Injectable()
 export class BootstrapAuthGuard implements CanActivate {
   constructor(
@@ -245,6 +250,8 @@ export class BootstrapAuthGuard implements CanActivate {
     requestUrl: string,
     policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
   ): boolean {
+    const strictEnvironment = isStrictAuthEnvironment();
+
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
@@ -287,6 +294,24 @@ export class BootstrapAuthGuard implements CanActivate {
         )
       : baseHeaders;
 
+    const bootstrapIdentity = extractBootstrapRequestIdentity(headers, {
+      allowAnonymous: false,
+      method: request.method ?? undefined,
+      requestUrl: requestUrl || undefined,
+    });
+
+    if (strictEnvironment && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
+    }
+
     if (!policy) {
       const anonymousIdentity = extractBootstrapRequestIdentity(headers, {
         allowAnonymous: true,
@@ -298,12 +323,7 @@ export class BootstrapAuthGuard implements CanActivate {
       }
       return true;
     }
-
-    const identity = extractBootstrapRequestIdentity(headers, {
-      allowAnonymous: false,
-      method: request.method ?? undefined,
-      requestUrl: requestUrl || undefined,
-    });
+    const identity = bootstrapIdentity;
 
     if (!identity) {
       throw new ApiRequestError(
@@ -336,6 +356,8 @@ export class BootstrapAuthGuard implements CanActivate {
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
   ) {
+    const strictEnvironment = isStrictAuthEnvironment();
+
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
@@ -352,6 +374,23 @@ export class BootstrapAuthGuard implements CanActivate {
           { route: requestUrl },
         );
       }
+    }
+
+    const bootstrapIdentity = extractBootstrapRequestIdentity(baseHeaders, {
+      allowAnonymous: false,
+      method: request.method ?? undefined,
+      requestUrl: requestUrl || undefined,
+    });
+    if (strictEnvironment && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
     }
 
     const anonymousIdentity = extractBootstrapRequestIdentity(baseHeaders, {
