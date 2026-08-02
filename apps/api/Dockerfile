@@ -33,6 +33,7 @@ COPY apps/api/ apps/api/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
+    pnpm --filter @drts/control-plane-auth build && \
     pnpm --filter @drts/api build
 
 # pnpm deploy creates a self-contained flat node_modules (no workspace symlinks)
