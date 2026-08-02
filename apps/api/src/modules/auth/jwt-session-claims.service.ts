@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type {
+  CanonicalAuthSessionRecord,
   CanonicalIdentityMembershipRecord,
   CanonicalIdentityPrincipalRecord,
   PartnerChannelEntryRecord,
@@ -129,7 +130,24 @@ export class JwtSessionClaimsService {
 
   private async assertControlPlaneTokenActive(payload: JwtIdentityPayload) {
     if (!this.identityRepository || !payload.sub || !payload.membershipId) {
-      return;
+      throw this.buildRevokedError(payload, "control_plane_session_unbound");
+    }
+
+    const session = await this.identityRepository.findAuthSessionByTokenId(
+      payload.jti,
+    );
+    if (!session) {
+      throw this.buildRevokedError(payload, "session_not_found");
+    }
+    if (
+      session.status !== "active" ||
+      session.sessionId !== payload.sid ||
+      session.principalId !== payload.sub ||
+      session.membershipId !== payload.membershipId ||
+      session.realm !== payload.realm ||
+      session.tokenVersion !== payload.tokenVersion
+    ) {
+      throw this.buildRevokedError(payload, "session_revoked");
     }
 
     const memberships = await this.identityRepository.findMembershipsByPrincipalId(
@@ -170,6 +188,49 @@ export class JwtSessionClaimsService {
     if (currentVersion !== payload.tokenVersion) {
       throw this.buildRevokedError(payload, "membership_changed");
     }
+  }
+
+  async registerAuthSession(
+    identity: JwtSessionClaimInput,
+    sessionClaims: Pick<
+      JwtIdentityPayload,
+      | "sid"
+      | "jti"
+      | "tokenVersion"
+      | "auth_time"
+      | "amr"
+      | "acr"
+      | "policyVersion"
+      | "membershipId"
+    >,
+    context: JwtSessionContext = {},
+  ): Promise<CanonicalAuthSessionRecord | null> {
+    if (!this.identityRepository) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const record: CanonicalAuthSessionRecord = {
+      sessionId: sessionClaims.sid,
+      tokenId: sessionClaims.jti,
+      principalId: identity.actorId ?? null,
+      membershipId: sessionClaims.membershipId ?? context.membership?.membershipId ?? null,
+      realm: identity.realm,
+      actorType: identity.actorType,
+      tokenVersion: sessionClaims.tokenVersion,
+      policyVersion: sessionClaims.policyVersion,
+      authTime: sessionClaims.auth_time,
+      authMethods: [...sessionClaims.amr],
+      assuranceLevel: sessionClaims.acr,
+      status: "active",
+      issuedAt: now,
+      expiresAt: null,
+      revokedAt: null,
+      revokedReason: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return this.identityRepository.upsertAuthSession(record);
   }
 
   private buildTokenVersion(

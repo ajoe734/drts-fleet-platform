@@ -2359,6 +2359,35 @@ export interface CanonicalIdentityRoleBindingRecord {
   updatedAt: string;
 }
 
+export const CANONICAL_AUTH_SESSION_STATUSES = [
+  "active",
+  "revoked",
+  "compromised",
+] as const;
+export type CanonicalAuthSessionStatus =
+  (typeof CANONICAL_AUTH_SESSION_STATUSES)[number];
+
+export interface CanonicalAuthSessionRecord {
+  sessionId: string;
+  tokenId: string;
+  principalId: string | null;
+  membershipId: string | null;
+  realm: IdentityContext["realm"];
+  actorType: IdentityContext["actorType"];
+  tokenVersion: string;
+  policyVersion: string;
+  authTime: number;
+  authMethods: string[];
+  assuranceLevel: string;
+  status: CanonicalAuthSessionStatus;
+  issuedAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const CANONICAL_INVITATION_DELIVERY_STATUSES = [
   "pending_delivery",
   "delivered",

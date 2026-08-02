@@ -4,6 +4,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient } from "pg";
 
 import type {
+  CanonicalAuthSessionRecord,
   CanonicalAccountStatus,
   CanonicalIdentityInvitationRecord,
   CanonicalIdentityMembershipRecord,
@@ -30,6 +31,11 @@ export class IdentityRepository {
     CanonicalIdentityPrincipalRecord
   >();
 
+  private readonly fallbackPrincipalsById = new Map<
+    string,
+    CanonicalIdentityPrincipalRecord
+  >();
+
   private readonly fallbackMemberships = new Map<
     string,
     CanonicalIdentityMembershipRecord
@@ -44,6 +50,8 @@ export class IdentityRepository {
     string,
     CanonicalIdentityInvitationRecord
   >();
+
+  private readonly fallbackAuthSessions = new Map<string, CanonicalAuthSessionRecord>();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -201,7 +209,7 @@ export class IdentityRepository {
   }
 
   listPrincipals() {
-    return Array.from(this.fallbackPrincipals.values(), (principal) => ({
+    return Array.from(this.fallbackPrincipalsById.values(), (principal) => ({
       ...principal,
     }));
   }
@@ -221,6 +229,13 @@ export class IdentityRepository {
   listInvitations() {
     return Array.from(this.fallbackInvitations.values(), (invitation) => ({
       ...invitation,
+    }));
+  }
+
+  listAuthSessions() {
+    return Array.from(this.fallbackAuthSessions.values(), (session) => ({
+      ...session,
+      authMethods: [...session.authMethods],
     }));
   }
 
@@ -298,7 +313,7 @@ export class IdentityRepository {
     principalId: string,
   ): Promise<CanonicalIdentityPrincipalRecord | null> {
     if (!this.isEnabled()) {
-      const record = this.fallbackPrincipals.get(principalId);
+      const record = this.fallbackPrincipalsById.get(principalId);
       return record ? { ...record } : null;
     }
 
@@ -445,6 +460,146 @@ export class IdentityRepository {
     this.logger.warn(
       `Identity persistence skipped during ${context}: ${detail}`,
     );
+  }
+
+  async findAuthSessionByTokenId(
+    tokenId: string,
+  ): Promise<CanonicalAuthSessionRecord | null> {
+    if (!this.isEnabled()) {
+      const record = this.fallbackAuthSessions.get(tokenId);
+      return record
+        ? {
+            ...record,
+            authMethods: [...record.authMethods],
+          }
+        : null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.auth_sessions
+          WHERE token_id = $1
+          LIMIT 1
+        `,
+        [tokenId],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalAuthSessionRecord>(
+        result.rows[0].record,
+        "iam.auth_sessions",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async upsertAuthSession(
+    record: CanonicalAuthSessionRecord,
+  ): Promise<CanonicalAuthSessionRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackAuthSession(record);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          INSERT INTO iam.auth_sessions (
+            token_id,
+            session_id,
+            principal_id,
+            membership_id,
+            realm,
+            actor_type,
+            token_version,
+            policy_version,
+            auth_time,
+            auth_methods,
+            assurance_level,
+            session_status,
+            issued_at,
+            expires_at,
+            revoked_at,
+            revoked_reason,
+            created_at,
+            updated_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb
+          )
+          ON CONFLICT (token_id) DO UPDATE SET
+            session_id = EXCLUDED.session_id,
+            principal_id = EXCLUDED.principal_id,
+            membership_id = EXCLUDED.membership_id,
+            realm = EXCLUDED.realm,
+            actor_type = EXCLUDED.actor_type,
+            token_version = EXCLUDED.token_version,
+            policy_version = EXCLUDED.policy_version,
+            auth_time = EXCLUDED.auth_time,
+            auth_methods = EXCLUDED.auth_methods,
+            assurance_level = EXCLUDED.assurance_level,
+            session_status = EXCLUDED.session_status,
+            issued_at = EXCLUDED.issued_at,
+            expires_at = EXCLUDED.expires_at,
+            revoked_at = EXCLUDED.revoked_at,
+            revoked_reason = EXCLUDED.revoked_reason,
+            updated_at = EXCLUDED.updated_at,
+            record = EXCLUDED.record
+          RETURNING record
+        `,
+        [
+          record.tokenId,
+          record.sessionId,
+          record.principalId,
+          record.membershipId,
+          record.realm,
+          record.actorType,
+          record.tokenVersion,
+          record.policyVersion,
+          record.authTime,
+          JSON.stringify(record.authMethods),
+          record.assuranceLevel,
+          record.status,
+          record.issuedAt,
+          record.expiresAt,
+          record.revokedAt,
+          record.revokedReason,
+          record.createdAt,
+          record.updatedAt,
+          JSON.stringify(record),
+        ],
+      );
+      return this.parseRecord<CanonicalAuthSessionRecord>(
+        result.rows[0]?.record,
+        "iam.auth_sessions",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeAuthSessionByTokenId(
+    tokenId: string,
+    revokedReason: string,
+    revokedAt = new Date().toISOString(),
+    status: CanonicalAuthSessionRecord["status"] = "revoked",
+  ): Promise<CanonicalAuthSessionRecord | null> {
+    const existing = await this.findAuthSessionByTokenId(tokenId);
+    if (!existing) {
+      return null;
+    }
+
+    return this.upsertAuthSession({
+      ...existing,
+      status,
+      revokedAt,
+      revokedReason,
+      updatedAt: revokedAt,
+    });
   }
 
   private async upsertPrincipal(
@@ -685,6 +840,18 @@ export class IdentityRepository {
     );
   }
 
+  private upsertFallbackAuthSession(record: CanonicalAuthSessionRecord) {
+    const persisted = {
+      ...record,
+      authMethods: [...record.authMethods],
+    };
+    this.fallbackAuthSessions.set(record.tokenId, persisted);
+    return {
+      ...persisted,
+      authMethods: [...persisted.authMethods],
+    };
+  }
+
   private upsertFallbackPrincipal(record: CanonicalIdentityPrincipalRecord) {
     const existing = record.sourceRef
       ? this.fallbackPrincipals.get(record.sourceRef)
@@ -705,6 +872,7 @@ export class IdentityRepository {
     if (record.sourceRef) {
       this.fallbackPrincipals.set(record.sourceRef, persisted);
     }
+    this.fallbackPrincipalsById.set(record.principalId, persisted);
     return { ...persisted };
   }
 

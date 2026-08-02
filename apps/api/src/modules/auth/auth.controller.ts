@@ -39,8 +39,9 @@ import { CurrentIdentity } from "../../common/auth";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
-import { IAPSubjectAdapter } from "./iap-subject.adapter";
+import { DEFAULT_ROLE_SCOPES, IAPSubjectAdapter } from "./iap-subject.adapter";
 import { JwtSessionClaimsService } from "./jwt-session-claims.service";
+import { IdentityRepository } from "../identity/identity.repository";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
@@ -78,6 +79,8 @@ export class AuthController {
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
   ) {}
 
   @Post("token")
@@ -150,7 +153,7 @@ export class AuthController {
       };
 
       const expiresIn: JwtExpiresIn = "8h";
-      const token = this.signJwt(identity, expiresIn, {
+      const token = await this.signControlPlaneJwt(identity, expiresIn, {
         principal: resolved.principal,
         membership: resolved.membership,
       });
@@ -178,6 +181,16 @@ export class AuthController {
 
     const expiresIn: JwtExpiresIn =
       identity.actorType === "system" ? "1h" : "8h";
+    if (identity.realm === "platform" || identity.realm === "ops") {
+      const resolved = await this.resolveDurableControlPlaneIdentity(identity);
+      const token = await this.signControlPlaneJwt(
+        resolved.identity,
+        expiresIn,
+        resolved.claimContext,
+      );
+      return { token, expiresIn };
+    }
+
     const token = this.signJwt(identity, expiresIn);
     return { token, expiresIn };
   }
@@ -681,5 +694,127 @@ export class AuthController {
 
       throw error;
     }
+  }
+
+  private async signControlPlaneJwt(
+    identity: Parameters<JwtAuthService["sign"]>[0],
+    expiresIn: JwtExpiresIn,
+    claimContext: NonNullable<Parameters<JwtSessionClaimsService["buildClaims"]>[1]>,
+  ) {
+    const sessionClaims = this.jwtSessionClaimsService.buildClaims(
+      identity,
+      claimContext,
+    );
+    await this.jwtSessionClaimsService.registerAuthSession(
+      identity,
+      sessionClaims,
+      claimContext,
+    );
+
+    try {
+      return this.jwtAuthService.sign(identity, {
+        expiresIn,
+        sessionClaims,
+      });
+    } catch (error) {
+      if (isJwtKeyMaterialNotConfiguredError(error)) {
+        throw new ApiRequestError(
+          503,
+          "JWT_NOT_CONFIGURED",
+          "JWT session issuance is not configured for this environment.",
+          {
+            requiredEnv: error.requiredEnv.join(" or "),
+          },
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  private async resolveDurableControlPlaneIdentity(
+    identity: BootstrapRequestIdentity,
+  ): Promise<{
+    identity: BootstrapRequestIdentity;
+    claimContext: NonNullable<Parameters<JwtSessionClaimsService["buildClaims"]>[1]>;
+  }> {
+    if (!this.identityRepository || !identity.actorId) {
+      throw new ApiRequestError(
+        403,
+        "CONTROL_PLANE_MEMBERSHIP_REQUIRED",
+        "Durable control-plane membership is required to mint platform or ops JWTs.",
+      );
+    }
+
+    const principal = await this.identityRepository.findPrincipalById(identity.actorId);
+    if (!principal || principal.status !== "active") {
+      throw new ApiRequestError(
+        403,
+        "CONTROL_PLANE_MEMBERSHIP_REQUIRED",
+        "Durable control-plane principal is inactive or missing.",
+      );
+    }
+
+    const memberships = await this.identityRepository.findMembershipsByPrincipalId(
+      identity.actorId,
+    );
+    const membership =
+      memberships.find(
+        (candidate) =>
+          candidate.realm === identity.realm && candidate.status === "active",
+      ) ?? null;
+    if (!membership) {
+      throw new ApiRequestError(
+        403,
+        "CONTROL_PLANE_MEMBERSHIP_REQUIRED",
+        "Durable control-plane membership is inactive or missing.",
+      );
+    }
+
+    const now = new Date().toISOString();
+    const roleBindings = await this.identityRepository.findRoleBindingsByMembershipId(
+      membership.membershipId,
+    );
+    const roles = Array.from(
+      new Set(
+        roleBindings
+          .filter(
+            (binding) =>
+              (!binding.validFrom || binding.validFrom <= now) &&
+              (!binding.validTo || binding.validTo > now),
+          )
+          .map((binding) => binding.roleCode)
+          .sort((left, right) => left.localeCompare(right)),
+      ),
+    );
+    if (roles.length === 0) {
+      throw new ApiRequestError(
+        403,
+        "CONTROL_PLANE_MEMBERSHIP_REQUIRED",
+        "Durable control-plane membership has no active role bindings.",
+      );
+    }
+
+    const scopes = Array.from(
+      new Set(
+        roles.flatMap(
+          (role) => [...(DEFAULT_ROLE_SCOPES[role] ?? DEFAULT_ROLE_SCOPES.ops_user)],
+        ),
+      ),
+    );
+
+    return {
+      identity: {
+        ...identity,
+        actorType: identity.realm === "platform" ? "platform_admin" : "ops_user",
+        roleFamilies: [identity.realm],
+        roles,
+        scopes,
+      },
+      claimContext: {
+        principal,
+        membership,
+      },
+    };
   }
 }

@@ -325,6 +325,182 @@ describe("JWT session claims integration", () => {
     delete process.env.IAP_JWT_SECRET;
   });
 
+  it("invalidates control-plane bearer tokens after durable token revocation", async () => {
+    process.env.DRTS_INTERNAL_KEY = INTERNAL_KEY;
+    process.env.JWT_SECRET = JWT_SECRET;
+    process.env.IAP_EXPECTED_AUDIENCE = IAP_AUDIENCE;
+    process.env.IAP_JWT_SECRET = IAP_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    const tenantPartnerService = new TenantPartnerService(
+      createAuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService,
+      identityRepo,
+    );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
+    const controller = new AuthController(
+      new JwtAuthService(),
+      tenantPartnerService,
+      {} as never,
+      jwtSessionClaimsService,
+      securityEventsService,
+      adapter,
+      identityRepo,
+    );
+
+    const tokenResponse = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": INTERNAL_KEY,
+        "x-goog-iap-jwt-assertion": signAssertion({
+          sub: "revoked_subject_001",
+          email: "revoked-admin@platform.drts",
+          gcp_ia_groups: ["platform-admins@platform.drts"],
+        }),
+      },
+    });
+
+    const payload = new JwtAuthService().verify(tokenResponse.token);
+    expect(payload?.jti).toBeTruthy();
+    expect(payload?.membershipId).toBeTruthy();
+
+    await identityRepo.revokeAuthSessionByTokenId(
+      payload!.jti,
+      "manual_logout",
+    );
+
+    const guard = createGuard(jwtSessionClaimsService);
+    const ctx = createBearerContext(
+      tokenResponse.token,
+      "/api/platform-admin/dispatch-recovery",
+    );
+    await expect(guard.canActivate(ctx.context)).rejects.toMatchObject({
+      code: "JWT_SESSION_INVALIDATED",
+    });
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.JWT_SECRET;
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
+  });
+
+  it("binds non-IAP control-plane fallback tokens to durable membership state", async () => {
+    process.env.DRTS_INTERNAL_KEY = INTERNAL_KEY;
+    process.env.JWT_SECRET = JWT_SECRET;
+    process.env.NODE_ENV = "test";
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const tenantPartnerService = new TenantPartnerService(
+      createAuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService,
+      identityRepo,
+    );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_fallback_platform_001",
+        sourceRef: "iap_subject:fallback_platform_001",
+        issuer: "google_iap",
+        subject: "fallback_platform_001",
+        principalType: "human",
+        email: "fallback-admin@platform.drts",
+        emailVerified: true,
+        displayName: "Fallback Admin",
+        status: "active",
+        createdAt: "2026-08-02T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+      },
+      {
+        membershipId: "membership_fallback_platform_001",
+        sourceRef: "iap_membership:fallback_platform_001",
+        principalId: "principal_fallback_platform_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: "2026-08-02T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+      },
+      [
+        {
+          roleBindingId: "role_binding_fallback_platform_001",
+          sourceRef: "role_binding_fallback_platform_001",
+          membershipId: "membership_fallback_platform_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: "2026-08-02T00:00:00.000Z",
+          validTo: null,
+          createdAt: "2026-08-02T00:00:00.000Z",
+          updatedAt: "2026-08-02T00:00:00.000Z",
+        },
+      ],
+    );
+
+    const controller = new AuthController(
+      new JwtAuthService(),
+      tenantPartnerService,
+      {} as never,
+      jwtSessionClaimsService,
+      securityEventsService,
+      undefined,
+      identityRepo,
+    );
+
+    const tokenResponse = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": INTERNAL_KEY,
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "principal_fallback_platform_001",
+        "x-realm": "platform",
+        "x-roles": "ops_user",
+        "x-scopes": "dispatch:read",
+      },
+    });
+
+    const payload = new JwtAuthService().verify(tokenResponse.token);
+    expect(payload?.membershipId).toBe("membership_fallback_platform_001");
+    expect(payload?.roles).toEqual(["superadmin"]);
+    expect(payload?.scopes).toContain("foundation:write");
+
+    const guard = createGuard(jwtSessionClaimsService);
+    const ctx = createBearerContext(
+      tokenResponse.token,
+      "/api/platform-admin/dispatch-recovery",
+    );
+    await expect(guard.canActivate(ctx.context)).resolves.toBe(true);
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.JWT_SECRET;
+    delete process.env.NODE_ENV;
+  });
+
   it("preserves realm isolation for bearer tokens after JWT issuance", async () => {
     process.env.JWT_SECRET = JWT_SECRET;
     process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
