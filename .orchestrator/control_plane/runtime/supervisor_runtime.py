@@ -38,6 +38,7 @@ from control_plane.domain.dispatch_policy import (
     build_dispatch_event as build_domain_dispatch_event,
     dependencies_satisfied as domain_dependencies_satisfied,
     dependency_signature as domain_dependency_signature,
+    has_external_integration_in_flight,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -3780,6 +3781,8 @@ def proactive_claim_plan_for_idle_agent(
     task_status = str(task.get("status") or "").lower()
     if task_status not in allowed_statuses:
         return None
+    if task_status == "in_progress" and has_external_integration_in_flight(task):
+        return None
 
     owner = str(task.get("owner") or "")
     reviewer = str(task.get("reviewer") or "")
@@ -6327,7 +6330,12 @@ def current_dispatch_event_key(config: dict[str, Any], event: dict[str, Any], ta
     elif reason == "owned_finalize_dispatch":
         eligible = task_status in finalize_statuses and task.get(owner_field) == target_agent
     elif reason == "owned_in_progress_dispatch":
-        eligible = task_status == "in_progress" and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
+        eligible = (
+            task_status == "in_progress"
+            and task.get(owner_field) == target_agent
+            and not has_external_integration_in_flight(task)
+            and dependencies_satisfied(task, task_map, dependency_done_statuses)
+        )
     elif reason == "owned_ready_dispatch":
         eligible = task_status in {"todo", "backlog"} and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
 
@@ -7578,7 +7586,12 @@ def chair_dispatch_action_reason(
         return reviewer, "review_ready_dispatch"
     if status_value in finalize_statuses and owner:
         return owner, "owned_finalize_dispatch"
-    if status_value == "in_progress" and owner and dependencies_satisfied(task, task_map, dependency_done_statuses):
+    if (
+        status_value == "in_progress"
+        and owner
+        and not has_external_integration_in_flight(task)
+        and dependencies_satisfied(task, task_map, dependency_done_statuses)
+    ):
         return owner, "owned_in_progress_dispatch"
     if status_value in {"todo", "backlog"} and owner and dependencies_satisfied(task, task_map, dependency_done_statuses):
         return owner, "owned_ready_dispatch"
