@@ -1273,6 +1273,24 @@ def _task_branch(agent_id: str, task_id: str) -> str:
     return f"{normalize_agent_id(agent_id)}/{task_id.lower()}"
 
 
+def _execution_branch(repo_root: Path, request: DeliveryRequest) -> str:
+    """Prefer a task-scoped branch override only when Git accepts it."""
+    default_branch = _task_branch(request.agent_id, request.task_id or "")
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
+    configured_branch = task.get("execution_branch")
+    if not isinstance(configured_branch, str) or not configured_branch.strip():
+        return default_branch
+
+    result = _git_capture(
+        repo_root,
+        ["check-ref-format", "--branch", configured_branch.strip()],
+    )
+    if result.returncode != 0:
+        return default_branch
+    return (result.stdout or "").strip() or default_branch
+
+
 def _worktree_entries(repo_root: Path) -> list[dict[str, str]]:
     result = _git_capture(repo_root, ["worktree", "list", "--porcelain"])
     if result.returncode != 0:
@@ -1350,16 +1368,16 @@ def _worker_worktrees_enabled(config: dict[str, Any]) -> bool:
     return settings.get("enabled", True) is not False
 
 
-def _candidate_worktree_path(base: Path, agent_id: str, task_id: str) -> Path:
+def _candidate_worktree_path(base: Path, agent_id: str, task_id: str, branch: str) -> Path:
     slug = re.sub(r"[^a-z0-9._-]+", "-", f"{normalize_agent_id(agent_id)}-{task_id.lower()}").strip("-")
     candidate = base / slug
     if not candidate.exists():
         return candidate
-    if _current_branch(candidate) == _task_branch(agent_id, task_id):
+    if _current_branch(candidate) == branch:
         return candidate
     for index in range(2, 20):
         suffixed = base / f"{slug}-{index}"
-        if not suffixed.exists() or _current_branch(suffixed) == _task_branch(agent_id, task_id):
+        if not suffixed.exists() or _current_branch(suffixed) == branch:
             return suffixed
     return base / f"{slug}-{new_runtime_id('wt')}"
 
@@ -1492,7 +1510,7 @@ def ensure_execution_workspace(
     if not request.task_id or mode == "planning":
         return repo_root, None, None, None
 
-    branch = _task_branch(request.agent_id, request.task_id)
+    branch = _execution_branch(repo_root, request)
     base_branch = routing.base_branch if routing else "dev"
     base = _worker_worktree_base(config, repo_root)
     existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
@@ -1500,7 +1518,7 @@ def ensure_execution_workspace(
         return existing, branch, base_branch, "existing_worktree"
 
     base.mkdir(parents=True, exist_ok=True)
-    destination = _candidate_worktree_path(base, request.agent_id, request.task_id)
+    destination = _candidate_worktree_path(base, request.agent_id, request.task_id, branch)
     if destination.exists() and _current_branch(destination) == branch:
         return destination.resolve(), branch, base_branch, "existing_path"
 

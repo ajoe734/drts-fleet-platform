@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -262,6 +263,37 @@ def repo_scoped_target_files(values: list[Any] | tuple[Any, ...] | None) -> tupl
     return result, skipped
 
 
+_SHELL_SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+
+def _is_safe_execution_branch(branch: str) -> bool:
+    """Allow only Git-valid branch names that are safe in the wake-up shell block."""
+    if not _SHELL_SAFE_BRANCH_RE.fullmatch(branch):
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "check-ref-format", "--branch", branch],
+            cwd=str(ROOT),
+            text=True,
+            capture_output=True,
+            timeout=5.0,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def execution_branch_for_task(task_payload: dict[str, Any], lane: str, task_id_kebab: str) -> str:
+    """Return a task override when it is safe for the generated shell commands."""
+    fallback = f"{lane}/{task_id_kebab}"
+    configured_branch = task_payload.get("execution_branch")
+    if not isinstance(configured_branch, str):
+        return fallback
+    branch = configured_branch.strip()
+    return branch if branch and _is_safe_execution_branch(branch) else fallback
+
+
 def render_wakeup_message(
     config: dict[str, Any],
     event: dict[str, Any],
@@ -352,7 +384,7 @@ def render_wakeup_message(
     branch_protocol = build_branch_protocol_block(
         task_id=raw_task_id,
         lane=lane,
-        task_id_kebab=task_id_kebab,
+        branch=execution_branch_for_task(task_payload, lane, task_id_kebab),
         base_branch=base_branch,
     )
     task_commit_guardrails = ""
@@ -387,31 +419,31 @@ def build_branch_protocol_block(
     *,
     task_id: str,
     lane: str,
-    task_id_kebab: str,
+    branch: str,
     base_branch: str,
 ) -> str:
     """Render the anchor-commit / branch-hygiene block injected into wakeup.txt.
 
-    Returns "" when any of the three positional facts (task id, lane, base
+    Returns "" when any of the four positional facts (task id, lane, branch, base
     branch) is missing — without all three we can't print concrete commands,
     and the abstract protocol already lives in
     `.orchestrator/skills/worker-anchor-commit.md`, so a blank block is the
     correct degradation (e.g. for planning baton dispatches that have no
     task-scoped branch).
     """
-    if not (task_id and lane and task_id_kebab and base_branch):
+    if not (task_id and lane and branch and base_branch):
         return ""
     return (
         "\n分支與 anchor commit（依 `docs/ops/branch-strategy.md` §11，工作期間遵守）：\n"
-        f"- 預期 branch：`{lane}/{task_id_kebab}`，base 為 `{base_branch}`。\n"
+        f"- 預期 branch：`{branch}`，base 為 `{base_branch}`。\n"
         "- 若 supervisor 已指定 isolated worker cwd，留在該 cwd；不要切換 canonical root。\n"
         "- 若當前 branch 不是預期 branch，先復用既有 branch/worktree；只有 branch 不存在才建立：\n"
         "  ```bash\n"
         "  git fetch origin\n"
-        f"  existing=$(git worktree list --porcelain | awk 'BEGIN{{p=\"\"}} /^worktree /{{p=substr($0,10)}} /^branch refs\\/heads\\/{lane}\\/{task_id_kebab}$/{{print p; exit}}')\n"
+        f"  existing=$(git worktree list --porcelain | awk 'BEGIN{{p=\"\"}} /^worktree /{{p=substr($0,10)}} /^branch refs\\/heads\\/{branch}$/{{print p; exit}}')\n"
         "  if [ -n \"$existing\" ]; then cd \"$existing\"; "
-        f"elif git show-ref --verify --quiet refs/heads/{lane}/{task_id_kebab}; then git switch {lane}/{task_id_kebab}; "
-        f"else git switch -c {lane}/{task_id_kebab} origin/{base_branch}; fi\n"
+        f"elif git show-ref --verify --quiet refs/heads/{branch}; then git switch {branch}; "
+        f"else git switch -c {branch} origin/{base_branch}; fi\n"
         "  ```\n"
         "- working tree 不是暫存區。改動觸及 fragile surface（`.orchestrator/supervisor.py`、"
         "`.orchestrator/control_plane/**`、"
