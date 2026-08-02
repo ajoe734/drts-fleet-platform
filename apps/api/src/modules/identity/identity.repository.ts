@@ -195,13 +195,21 @@ export class IdentityRepository {
         ...roleBindingDraft,
         membershipId: membership.membershipId,
       });
+      const existingInvitation = Array.from(
+        this.fallbackInvitations.values(),
+      ).find(
+        (invitation) => invitation.membershipId === membership.membershipId,
+      );
       const invitation =
-        userRole.invitedAt.trim().length > 0
-          ? this.upsertFallbackInvitation({
-              ...invitationDraft,
-              membershipId: membership.membershipId,
-            })
-          : null;
+        existingInvitation &&
+        existingInvitation.deliveryStatus !== "legacy_backfill"
+          ? { ...existingInvitation }
+          : userRole.invitedAt.trim().length > 0
+            ? this.upsertFallbackInvitation({
+                ...invitationDraft,
+                membershipId: membership.membershipId,
+              })
+            : null;
       const persistedMembership = invitation
         ? this.upsertFallbackMembership({
             ...membership,
@@ -229,12 +237,19 @@ export class IdentityRepository {
         ...roleBindingDraft,
         membershipId: membership.membershipId,
       });
-      const persistedInvitation = userRole.invitedAt.trim().length
-        ? await this.upsertInvitation(client, {
-            ...invitationDraft,
-            membershipId: membership.membershipId,
-          })
-        : null;
+      const existingInvitation = await this.findInvitationByMembershipId(
+        membership.membershipId,
+      );
+      const persistedInvitation =
+        existingInvitation &&
+        existingInvitation.deliveryStatus !== "legacy_backfill"
+          ? existingInvitation
+          : userRole.invitedAt.trim().length
+            ? await this.upsertInvitation(client, {
+                ...invitationDraft,
+                membershipId: membership.membershipId,
+              })
+            : null;
       const persistedMembership = persistedInvitation
         ? await this.upsertMembership(client, {
             ...membership,
@@ -278,6 +293,260 @@ export class IdentityRepository {
     return Array.from(this.fallbackInvitations.values(), (invitation) => ({
       ...invitation,
     }));
+  }
+
+  async findInvitationByTokenHash(
+    tokenHash: string,
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.isEnabled()) {
+      for (const invitation of this.fallbackInvitations.values()) {
+        if (invitation.tokenHash === tokenHash) {
+          return { ...invitation };
+        }
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_invitations WHERE token_hash = $1 LIMIT 1`,
+      [tokenHash],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+          result.rows[0].record,
+          "iam.identity_invitations",
+        )
+      : null;
+  }
+
+  async findInvitationByMembershipId(
+    membershipId: string,
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.isEnabled()) {
+      const invitations = Array.from(this.fallbackInvitations.values())
+        .filter((invitation) => invitation.membershipId === membershipId)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      return invitations[0] ? { ...invitations[0] } : null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record FROM iam.identity_invitations
+        WHERE membership_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+      [membershipId],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+          result.rows[0].record,
+          "iam.identity_invitations",
+        )
+      : null;
+  }
+
+  async upsertInvitationRecord(
+    invitation: CanonicalIdentityInvitationRecord,
+  ): Promise<CanonicalIdentityInvitationRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackInvitation(invitation);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertInvitation(client, invitation);
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Atomically consumes a valid proof so concurrent acceptance cannot activate twice. */
+  async consumeInvitationToken(
+    tokenHash: string,
+    acceptedAt = new Date().toISOString(),
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.isEnabled()) {
+      for (const [
+        sourceRef,
+        invitation,
+      ] of this.fallbackInvitations.entries()) {
+        if (invitation.tokenHash !== tokenHash) {
+          continue;
+        }
+        if (
+          invitation.acceptedAt ||
+          invitation.revokedAt ||
+          Date.parse(invitation.expiresAt) <= Date.parse(acceptedAt)
+        ) {
+          return null;
+        }
+        const consumed = {
+          ...invitation,
+          acceptedAt,
+          updatedAt: acceptedAt,
+        };
+        this.fallbackInvitations.set(sourceRef, consumed);
+        return { ...consumed };
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        UPDATE iam.identity_invitations
+        SET accepted_at = $2::timestamptz,
+            updated_at = $2::timestamptz,
+            record = jsonb_set(
+              jsonb_set(record, '{acceptedAt}', to_jsonb($2::text)),
+              '{updatedAt}', to_jsonb($2::text)
+            )
+        WHERE token_hash = $1
+          AND accepted_at IS NULL
+          AND revoked_at IS NULL
+          AND expires_at > $2::timestamptz
+        RETURNING record
+      `,
+      [tokenHash, acceptedAt],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+          result.rows[0].record,
+          "iam.identity_invitations",
+        )
+      : null;
+  }
+
+  /** Promotes the canonical principal and membership only after proof consumption. */
+  async activateTenantInvitation(
+    invitationId: string,
+    activatedAt = new Date().toISOString(),
+  ): Promise<CanonicalTenantUserIdentitySnapshot | null> {
+    if (!this.isEnabled()) {
+      const invitation = Array.from(this.fallbackInvitations.values()).find(
+        (candidate) => candidate.invitationId === invitationId,
+      );
+      if (!invitation?.acceptedAt) {
+        return null;
+      }
+      const membershipEntry = Array.from(
+        this.fallbackMemberships.entries(),
+      ).find(
+        ([, candidate]) => candidate.membershipId === invitation.membershipId,
+      );
+      if (!membershipEntry) {
+        return null;
+      }
+      const membership = this.upsertFallbackMembership({
+        ...membershipEntry[1],
+        status: "active",
+        updatedAt: activatedAt,
+      });
+      const principalEntry = Array.from(this.fallbackPrincipals.entries()).find(
+        ([, candidate]) => candidate.principalId === membership.principalId,
+      );
+      if (!principalEntry) {
+        return null;
+      }
+      const principal = this.upsertFallbackPrincipal({
+        ...principalEntry[1],
+        status: "active",
+        emailVerified: true,
+        updatedAt: activatedAt,
+      });
+      const roleBinding = Array.from(this.fallbackRoleBindings.values()).find(
+        (candidate) => candidate.membershipId === membership.membershipId,
+      );
+      return roleBinding
+        ? {
+            principal,
+            membership,
+            roleBinding: { ...roleBinding },
+            invitation: { ...invitation },
+          }
+        : null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationResult = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations WHERE invitation_id = $1 FOR UPDATE`,
+        [invitationId],
+      );
+      const invitationRecord = invitationResult.rows[0]?.record;
+      if (!invitationRecord) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const invitation = this.parseRecord<CanonicalIdentityInvitationRecord>(
+        invitationRecord,
+        "iam.identity_invitations",
+      );
+      if (!invitation.acceptedAt) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipResult = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membershipRecord = membershipResult.rows[0]?.record;
+      if (!membershipRecord) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membership = this.parseRecord<CanonicalIdentityMembershipRecord>(
+        membershipRecord,
+        "iam.identity_memberships",
+      );
+      const principalResult = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principalRecord = principalResult.rows[0]?.record;
+      if (!principalRecord) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principal = this.parseRecord<CanonicalIdentityPrincipalRecord>(
+        principalRecord,
+        "iam.identity_principals",
+      );
+      const activatedPrincipal = await this.upsertPrincipal(client, {
+        ...principal,
+        status: "active",
+        emailVerified: true,
+        updatedAt: activatedAt,
+      });
+      const activatedMembership = await this.upsertMembership(client, {
+        ...membership,
+        status: "active",
+        updatedAt: activatedAt,
+      });
+      const roleBindingResult = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE membership_id = $1 LIMIT 1`,
+        [membership.membershipId],
+      );
+      await client.query("COMMIT");
+      if (!roleBindingResult.rows[0]?.record) {
+        return null;
+      }
+      return {
+        principal: activatedPrincipal,
+        membership: activatedMembership,
+        roleBinding: this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+          roleBindingResult.rows[0].record,
+          "iam.identity_role_bindings",
+        ),
+        invitation,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async ensurePrincipalRecord(

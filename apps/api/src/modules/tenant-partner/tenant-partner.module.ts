@@ -14,6 +14,7 @@ import { ReferralEmbedHandoffRepository } from "./referral-embed-handoff.reposit
 import { ReferralChannelScaffoldService } from "./referral-channel.scaffold.service";
 import { TenantPartnerController } from "./tenant-partner.controller";
 import { TenantPartnerRepository } from "./tenant-partner.repository";
+import { TenantInvitationDeliveryService } from "./tenant-invitation-delivery.service";
 import {
   PARTNER_INGRESS_CREDENTIAL_SEEDS,
   resolvePartnerIngressCredentialsFromEnv,
@@ -34,6 +35,7 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
     TenantPartnerService,
     JwtAuthService,
     TenantPartnerRepository,
+    TenantInvitationDeliveryService,
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
     ReferralChannelScaffoldService,

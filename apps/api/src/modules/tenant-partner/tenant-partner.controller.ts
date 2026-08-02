@@ -13,6 +13,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  AcceptTenantInvitationCommand,
   AcknowledgeOpsApprovalRequestBreachCommand,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
@@ -341,9 +342,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
-    const session = await this.tenantPartnerService.recordReferralEmbedConsent(
-      command,
-    );
+    const session =
+      await this.tenantPartnerService.recordReferralEmbedConsent(command);
     return toApiSuccessEnvelope(session, requestId);
   }
 
@@ -1428,6 +1428,58 @@ export class TenantPartnerController {
           requestId,
           identity,
         ),
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/invitation/resend")
+  async resendTenantInvitation(
+    @Param("userId") userId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.resendTenantInvitation(
+        this.requireTenantId(tenantId),
+        userId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/invitation/revoke")
+  async revokeTenantInvitation(
+    @Param("userId") userId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.revokeTenantInvitation(
+        this.requireTenantId(tenantId),
+        userId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/invitations/accept")
+  async acceptTenantInvitation(
+    @Body() command: AcceptTenantInvitationCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.acceptTenantInvitation(
+        command,
+        requestId,
       ),
       requestId,
     );

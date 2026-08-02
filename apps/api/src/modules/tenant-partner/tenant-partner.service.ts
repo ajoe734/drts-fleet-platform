@@ -17,6 +17,8 @@ import {
 
 import type {
   AcknowledgeOpsApprovalRequestBreachCommand,
+  AcceptTenantInvitationCommand,
+  AcceptTenantInvitationResult,
   ActionReceipt,
   AuditLogRecord,
   ApproveTenantBookingApprovalRequestCommand,
@@ -26,6 +28,7 @@ import type {
   CreatePartnerIngressHandoffCommand,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
+  CanonicalIdentityInvitationRecord,
   EscalateTenantBookingApprovalRequestCommand,
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
@@ -99,6 +102,7 @@ import type {
   TenantPassengerQualityIssue,
   TenantPassengerRecord,
   TenantIntegrationGovernancePackage,
+  TenantInvitationView,
   TenantOrderListQuery,
   TenantProgramUsageRecord,
   TenantQuotaLedgerEntry,
@@ -257,6 +261,7 @@ import {
   type WebhookRetryPolicy,
 } from "./webhook-dispatch.service";
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
+import { TenantInvitationDeliveryService } from "./tenant-invitation-delivery.service";
 import type {
   PartnerReferralDashboardRecord,
   PartnerReferralRevenuePeriodRecord,
@@ -1251,6 +1256,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(IdentityRepository)
     identityRepository?: IdentityRepository,
+    @Optional()
+    private readonly tenantInvitationDelivery: TenantInvitationDeliveryService = new TenantInvitationDeliveryService(),
   ) {
     this.securityEventsService =
       securityEventsService instanceof SecurityEventsService
@@ -6382,7 +6389,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     });
 
     return this.afterPersistence(persisted, async () => {
-      await this.syncIdentityTenantUserRole(userRole, "create_tenant_user");
+      const identitySnapshot = await this.syncIdentityTenantUserRole(
+        userRole,
+        "create_tenant_user",
+      );
+      await this.issueTenantInvitation(
+        userRole,
+        identitySnapshot?.membership.membershipId ?? null,
+        securityActor?.actorId ?? null,
+        "initial",
+      );
       this.recordTenantAudit(
         {
           actorId: null,
@@ -6399,6 +6415,183 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       return this.cloneUserRole(userRole);
     });
+  }
+
+  async resendTenantInvitation(
+    tenantId: string,
+    userId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<TenantInvitationView> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+    if (userRole.status !== "invited") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_INVITATION_NOT_PENDING",
+        "Only an invited tenant user can receive a replacement invitation.",
+        { tenantId, userId },
+      );
+    }
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const identitySnapshot = await this.syncIdentityTenantUserRole(
+      userRole,
+      "resend_tenant_invitation",
+    );
+    const current = identitySnapshot
+      ? await this.identityRepository?.findInvitationByMembershipId(
+          identitySnapshot.membership.membershipId,
+        )
+      : null;
+    if (current && !current.acceptedAt && !current.revokedAt) {
+      await this.identityRepository?.upsertInvitationRecord({
+        ...current,
+        revokedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    const invitation = await this.issueTenantInvitation(
+      userRole,
+      identitySnapshot?.membership.membershipId ?? null,
+      securityActor?.actorId ?? null,
+      "resend",
+    );
+    if (!invitation) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "IDENTITY_AUTHORITY_UNAVAILABLE",
+        "Tenant invitation delivery requires the identity authority.",
+        { tenantId, userId },
+      );
+    }
+    this.recordTenantAudit(
+      {
+        actorId: securityActor?.actorId ?? null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "resend_tenant_invitation",
+        resourceType: "tenant_user_role",
+        resourceId: userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      },
+      requestId,
+    );
+    return this.toTenantInvitationView(invitation);
+  }
+
+  async revokeTenantInvitation(
+    tenantId: string,
+    userId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<TenantInvitationView> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const identitySnapshot = await this.syncIdentityTenantUserRole(
+      userRole,
+      "revoke_tenant_invitation",
+    );
+    const invitation = identitySnapshot
+      ? await this.identityRepository?.findInvitationByMembershipId(
+          identitySnapshot.membership.membershipId,
+        )
+      : null;
+    if (!invitation || invitation.acceptedAt || invitation.revokedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_INVITATION_NOT_PENDING",
+        "There is no pending invitation to revoke.",
+        { tenantId, userId },
+      );
+    }
+    const revokedAt = new Date().toISOString();
+    const revoked = await this.identityRepository!.upsertInvitationRecord({
+      ...invitation,
+      revokedAt,
+      updatedAt: revokedAt,
+    });
+    this.recordTenantAudit(
+      {
+        actorId: securityActor?.actorId ?? null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "revoke_tenant_invitation",
+        resourceType: "tenant_user_role",
+        resourceId: userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      },
+      requestId,
+    );
+    return this.toTenantInvitationView(revoked);
+  }
+
+  async acceptTenantInvitation(
+    command: AcceptTenantInvitationCommand,
+    requestId?: string,
+  ): Promise<AcceptTenantInvitationResult> {
+    this.assertNonBlank(command.invitationToken, "invitationToken");
+    const invitation = await this.identityRepository?.consumeInvitationToken(
+      createHash("sha256").update(command.invitationToken).digest("hex"),
+    );
+    if (!invitation) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+        {},
+      );
+    }
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        candidate.tenantId === invitation.tenantId &&
+        candidate.email === invitation.email,
+    );
+    if (!userRole || userRole.status !== "invited") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+        {},
+      );
+    }
+    const before = this.cloneUserRole(userRole);
+    userRole.status = "active";
+    userRole.updatedAt = new Date().toISOString();
+    try {
+      await this.persistChangesRequired(
+        { userRoles: [this.cloneUserRole(userRole)] },
+        "accept_tenant_invitation",
+      );
+      await this.syncIdentityTenantUserRole(
+        userRole,
+        "accept_tenant_invitation",
+      );
+      await this.identityRepository?.activateTenantInvitation(
+        invitation.invitationId,
+      );
+    } catch (error) {
+      Object.assign(userRole, before);
+      throw error;
+    }
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: userRole.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "accept_tenant_invitation",
+        resourceType: "tenant_user_role",
+        resourceId: userRole.userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      },
+      requestId,
+    );
+    return {
+      user: this.cloneUserRole(userRole),
+      invitation: this.toTenantInvitationView(invitation),
+      accepted: true,
+    };
   }
 
   updateTenantUserRole(
@@ -6479,6 +6672,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         userRole,
         "update_tenant_role",
       );
+      if (
+        userRole.status !== "invited" &&
+        identitySnapshot?.invitation &&
+        !identitySnapshot.invitation.acceptedAt &&
+        !identitySnapshot.invitation.revokedAt
+      ) {
+        const revokedAt = new Date().toISOString();
+        await this.identityRepository?.upsertInvitationRecord({
+          ...identitySnapshot.invitation,
+          revokedAt,
+          updatedAt: revokedAt,
+        });
+      }
       if (
         before.roleCode !== userRole.roleCode ||
         before.status !== userRole.status
@@ -12437,6 +12643,81 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async issueTenantInvitation(
+    userRole: TenantUserRoleRecord,
+    membershipId: string | null,
+    issuerPrincipalId: string | null,
+    kind: "initial" | "resend",
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.identityRepository || !membershipId) {
+      // Legacy fixture-only service construction has no canonical identity authority.
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const rawToken = `ti_${randomBytes(32).toString("base64url")}`;
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const invitation: CanonicalIdentityInvitationRecord = {
+      invitationId: `invitation_${randomUUID()}`,
+      sourceRef:
+        kind === "initial"
+          ? `tenant_user_role:${userRole.userId}:invitation`
+          : `tenant_user_role:${userRole.userId}:invitation:resend:${randomUUID()}`,
+      membershipId,
+      issuerPrincipalId,
+      realm: "tenant",
+      scopeRef: `tenant:${userRole.tenantId}`,
+      tenantId: userRole.tenantId,
+      partnerId: null,
+      email: userRole.email,
+      roleCode: userRole.roleCode,
+      tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+      deliveryStatus: "pending_delivery",
+      expiresAt,
+      acceptedAt: null,
+      revokedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const stored =
+      await this.identityRepository.upsertInvitationRecord(invitation);
+
+    try {
+      await this.tenantInvitationDelivery.send({
+        invitationId: stored.invitationId,
+        tenantId: userRole.tenantId,
+        recipientEmail: userRole.email,
+        displayName: userRole.displayName,
+        expiresAt: stored.expiresAt,
+        rawToken,
+      });
+      return await this.identityRepository.upsertInvitationRecord({
+        ...stored,
+        deliveryStatus: "delivered",
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      await this.identityRepository.upsertInvitationRecord({
+        ...stored,
+        deliveryStatus: "delivery_failed",
+        updatedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+  }
+
+  private toTenantInvitationView(
+    invitation: CanonicalIdentityInvitationRecord,
+  ): TenantInvitationView {
+    return {
+      invitationId: invitation.invitationId,
+      deliveryStatus: invitation.deliveryStatus,
+      expiresAt: invitation.expiresAt,
+      acceptedAt: invitation.acceptedAt,
+      revokedAt: invitation.revokedAt,
+    };
+  }
+
   private async syncIdentityTenantUserRole(
     userRole: TenantUserRoleRecord,
     context: string,
@@ -12482,6 +12763,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const removesActiveTenantAdmin =
+      Boolean(this.identityRepository) &&
       userRole.roleCode === "tenant_admin" &&
       userRole.status === "active" &&
       (nextRoleCode !== "tenant_admin" || nextStatus !== "active");
