@@ -39,6 +39,21 @@ async function deleteSessionTestData(
   }
   if (principalIds.length > 0) {
     await database.query(
+      `
+        DELETE FROM iam.identity_role_bindings
+        WHERE membership_id IN (
+          SELECT membership_id
+          FROM iam.identity_memberships
+          WHERE principal_id = ANY($1::text[])
+        )
+      `,
+      [principalIds],
+    );
+    await database.query(
+      `DELETE FROM iam.identity_memberships WHERE principal_id = ANY($1::text[])`,
+      [principalIds],
+    );
+    await database.query(
       `DELETE FROM iam.identity_principals WHERE principal_id = ANY($1::text[])`,
       [principalIds],
     );
@@ -92,7 +107,10 @@ describe("JWT Session Claims Integration", () => {
   afterEach(async () => {
     restoreJwtEnv();
 
-    if (DATABASE_URL && (createdSessionIds.size > 0 || createdPrincipalIds.size > 0)) {
+    if (
+      DATABASE_URL &&
+      (createdSessionIds.size > 0 || createdPrincipalIds.size > 0)
+    ) {
       const cleanupDb = new DatabaseService();
       try {
         await deleteSessionTestData(
@@ -154,7 +172,9 @@ describe("JWT Session Claims Integration", () => {
     expect(payload?.sid).toBe(issued.sessionId);
     expect(payload?.jti).toBe(issued.tokenId);
     expect(payload?.tokenVersion).toBe(issued.tokenVersion);
-    expect(payload?.auth_time).toBe(Date.parse("2026-08-02T00:00:00.000Z") / 1000);
+    expect(payload?.auth_time).toBe(
+      Date.parse("2026-08-02T00:00:00.000Z") / 1000,
+    );
     expect(payload?.amr).toEqual(["tenant_bootstrap_fixture"]);
     expect(payload?.acr).toBe("aal1");
     expect(payload?.policyVersion).toBe("auth.jwt-session.integration.v1");
@@ -262,6 +282,138 @@ describe("JWT Session Claims Integration", () => {
       tokenVersion: session!.tokenVersion + 1,
       updatedAt: new Date().toISOString(),
     });
+
+    expect(await service.verifyAccessToken(issued.token)).toBeNull();
+  });
+
+  it("invalidates a platform session when its principal is suspended", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    configureHs256Env();
+
+    const db = new DatabaseService();
+    databases.push(db);
+    const repo = new IdentityRepository(db);
+    const service = new JwtAuthService(repo);
+    const principalId = `principal_platform_${randomUUID()}`;
+    const membershipId = `membership_platform_${randomUUID()}`;
+    const roleBindingId = `role_binding_platform_${randomUUID()}`;
+    const issuedAt = "2026-08-02T00:00:00.000Z";
+    createdPrincipalIds.add(principalId);
+
+    await repo.upsertWorkforceIdentity(
+      {
+        principalId,
+        sourceRef: `test:${principalId}`,
+        issuer: "test_issuer",
+        subject: `test_subject_${principalId}`,
+        principalType: "human",
+        email: `${principalId}@example.test`,
+        emailVerified: true,
+        displayName: "Platform Session Test",
+        status: "active",
+        createdAt: issuedAt,
+        updatedAt: issuedAt,
+      },
+      {
+        membershipId,
+        sourceRef: `test:${membershipId}`,
+        principalId,
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: issuedAt,
+        updatedAt: issuedAt,
+      },
+      [
+        {
+          roleBindingId,
+          sourceRef: `test:${roleBindingId}`,
+          membershipId,
+          roleCode: "platform_admin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: issuedAt,
+          validTo: null,
+          createdAt: issuedAt,
+          updatedAt: issuedAt,
+        },
+      ],
+    );
+
+    const issued = await service.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "platform_admin",
+        actorId: principalId,
+        principalId,
+        membershipId,
+        realm: "platform",
+        tenantId: null,
+        roleFamilies: ["platform"],
+        roles: ["platform_admin"],
+        scopes: ["platform:read"],
+        requestId: null,
+      },
+      {
+        principalId,
+        membershipId,
+        subject: `test_subject_${principalId}`,
+        ensurePrincipal: false,
+        authTime: issuedAt,
+        tokenVersion: Date.parse(issuedAt),
+      },
+    );
+    createdSessionIds.add(issued.sessionId);
+
+    expect(await service.verifyAccessToken(issued.token)).not.toBeNull();
+
+    await repo.upsertWorkforceIdentity(
+      {
+        principalId,
+        sourceRef: `test:${principalId}`,
+        issuer: "test_issuer",
+        subject: `test_subject_${principalId}`,
+        principalType: "human",
+        email: `${principalId}@example.test`,
+        emailVerified: true,
+        displayName: "Platform Session Test",
+        status: "suspended",
+        createdAt: issuedAt,
+        updatedAt: "2026-08-02T00:01:00.000Z",
+      },
+      {
+        membershipId,
+        sourceRef: `test:${membershipId}`,
+        principalId,
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: issuedAt,
+        updatedAt: issuedAt,
+      },
+      [
+        {
+          roleBindingId,
+          sourceRef: `test:${roleBindingId}`,
+          membershipId,
+          roleCode: "platform_admin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: issuedAt,
+          validTo: null,
+          createdAt: issuedAt,
+          updatedAt: issuedAt,
+        },
+      ],
+    );
 
     expect(await service.verifyAccessToken(issued.token)).toBeNull();
   });
