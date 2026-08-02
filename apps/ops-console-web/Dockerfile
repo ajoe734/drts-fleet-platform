@@ -33,6 +33,7 @@ COPY scripts/control-plane-web-proxy.mjs scripts/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
+    pnpm --filter @drts/control-plane-auth build && \
     pnpm --filter @drts/ui-tokens build && \
     pnpm --filter @drts/ops-console-web build
 
