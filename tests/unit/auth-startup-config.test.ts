@@ -58,6 +58,16 @@ describe("detectAuthEnvironment", () => {
     );
   });
 
+  it("prefers DRTS_ENV over NODE_ENV for the dev Cloud Run rail", () => {
+    expect(
+      detectAuthEnvironment({
+        DRTS_ENV: "development",
+        NODE_ENV: "production",
+        CI: "false",
+      }),
+    ).toBe("local");
+  });
+
   it("detects test environment when CI=true or NODE_ENV=test", () => {
     expect(detectAuthEnvironment({ CI: "true" })).toBe("test");
     expect(detectAuthEnvironment({ NODE_ENV: "test", CI: "false" })).toBe(
@@ -156,6 +166,19 @@ describe("validateAuthStartupConfig in local & test mode", () => {
     expect(() => validateAuthStartupConfig(env)).toThrowError(
       AuthConfigurationError,
     );
+  });
+
+  it("accepts the dev Cloud Run rail when DRTS_ENV=development overrides NODE_ENV=production", () => {
+    const report = validateAuthStartupConfig({
+      DRTS_ENV: "development",
+      NODE_ENV: "production",
+      CI: "false",
+      AUTH_MODE: "dev",
+    });
+
+    expect(report.environment).toBe("local");
+    expect(report.isStrictEnvironment).toBe(false);
+    expect(report.valid).toBe(true);
   });
 });
 

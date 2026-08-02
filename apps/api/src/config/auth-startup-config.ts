@@ -118,7 +118,12 @@ const ALLOWED_JWT_ALGORITHMS = new Set([
 export function detectAuthEnvironment(
   env: EnvLike = process.env,
 ): AuthEnvironment {
-  const raw = (env.APP_ENV ?? env.NODE_ENV)?.trim().toLowerCase();
+  // Cloud Run dev rails run with NODE_ENV=production but still advertise the
+  // lane via DRTS_ENV=development. Respect the application rail first so auth
+  // startup validation does not misclassify dev as strict production.
+  const raw = (env.APP_ENV ?? env.DRTS_ENV ?? env.NODE_ENV)
+    ?.trim()
+    .toLowerCase();
 
   if (raw === "prod" || raw === "production") {
     return "production";
