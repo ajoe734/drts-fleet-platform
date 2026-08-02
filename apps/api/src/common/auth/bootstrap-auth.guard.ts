@@ -107,6 +107,29 @@ function extractBearerToken(
   return value.slice(7).trim() || null;
 }
 
+function hasBootstrapAuthSignal(
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  return [
+    "x-actor-type",
+    "x-actor-id",
+    "x-realm",
+    "x-roles",
+    "x-role-families",
+    "x-scopes",
+    "x-auth-mode",
+    "x-tenant-id",
+    "x-partner-id",
+    "x-partner-program-id",
+    "x-partner-entry-slug",
+  ].some((key) => {
+    const value = headers[key];
+    return Array.isArray(value)
+      ? value.some((entry) => Boolean(entry?.trim()))
+      : typeof value === "string" && value.trim().length > 0;
+  });
+}
+
 function isStrictAuthEnvironment(): boolean {
   const environment = detectAuthEnvironment(process.env);
   return environment === "production" || environment === "staging";
@@ -131,6 +154,20 @@ export class BootstrapAuthGuard implements CanActivate {
       .getRequest<AuthenticatedRequestLike>();
     const requestUrl = request.originalUrl ?? request.url ?? "";
     const baseHeaders = asHeaderRecord(request.headers);
+    const strictEnvironment = isStrictAuthEnvironment();
+
+    if (strictEnvironment && hasBootstrapAuthSignal(baseHeaders)) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
+    }
+
     const isOpenRoute =
       this.reflector.getAllAndOverride<boolean>(AUTH_OPEN_ROUTE_KEY, [
         context.getHandler(),

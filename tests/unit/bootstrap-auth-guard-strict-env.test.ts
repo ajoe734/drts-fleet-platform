@@ -69,4 +69,55 @@ describe("BootstrapAuthGuard strict environment behavior", () => {
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity?.actorId).toBe("dev-admin");
   });
+
+  it("rejects bootstrap headers even when a verified bearer token is present in staging", async () => {
+    process.env.APP_ENV = "staging";
+    process.env.JWT_SECRET = "unit-test-jwt-secret";
+    process.env.JWT_ISSUER = "drts";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const jwtAuthService = new JwtAuthService();
+    const token = jwtAuthService.sign(
+      {
+        authMode: "jwt_bearer",
+        actorType: "platform_admin",
+        actorId: "platform-admin-001",
+        realm: "platform",
+        tenantId: null,
+        roles: ["superadmin"],
+        scopes: ["foundation:read"],
+        roleFamilies: ["platform"],
+        requestId: null,
+      },
+      { issuer: "drts", audience: "drts-api" },
+    );
+    const guard = new BootstrapAuthGuard(
+      { getAllAndOverride: () => undefined } as never,
+      jwtAuthService,
+    );
+    const request: any = {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "spoofed-admin",
+        "x-realm": "platform",
+      },
+      method: "GET",
+      url: "/api/platform-admin/tenants",
+    };
+    const context: any = {
+      switchToHttp: () => ({ getRequest: () => request }),
+      getHandler: () => () => undefined,
+      getClass: () => class {},
+    };
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    try {
+      guard.canActivate(context);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+      });
+    }
+  });
 });

@@ -533,7 +533,72 @@ describe("TenantPartnerService sensitive-data governance", () => {
       localSeedService.listApiKeys("tenant-demo-001")[0] as never,
     ];
     process.env.DRTS_ENV = "staging";
-    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    let repositoryState = cloneState(persistedState);
+    const repository = {
+      isEnabled: vi.fn(() => false),
+      loadState: vi.fn(async () => cloneState(repositoryState)),
+      persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
+        repositoryState = {
+          ...repositoryState,
+          ...(changes.notificationPreferences
+            ? { notificationPreferences: cloneState({ ...createEmptyRepositoryState(), notificationPreferences: [...changes.notificationPreferences] }).notificationPreferences }
+            : {}),
+          ...(changes.webhookEndpoints
+            ? { webhookEndpoints: cloneState({ ...createEmptyRepositoryState(), webhookEndpoints: [...changes.webhookEndpoints] }).webhookEndpoints }
+            : {}),
+          ...(changes.webhookDeliveries
+            ? { webhookDeliveries: cloneState({ ...createEmptyRepositoryState(), webhookDeliveries: [...changes.webhookDeliveries] }).webhookDeliveries }
+            : {}),
+          ...(changes.slaProfiles
+            ? { slaProfiles: cloneState({ ...createEmptyRepositoryState(), slaProfiles: [...changes.slaProfiles] }).slaProfiles }
+            : {}),
+          ...(changes.partnerEntries
+            ? { partnerEntries: cloneState({ ...createEmptyRepositoryState(), partnerEntries: [...changes.partnerEntries] }).partnerEntries }
+            : {}),
+          ...(changes.partnerIngressCredentials
+            ? { partnerIngressCredentials: cloneState({ ...createEmptyRepositoryState(), partnerIngressCredentials: [...changes.partnerIngressCredentials] }).partnerIngressCredentials }
+            : {}),
+          ...(changes.partnerEligibilityVerifications
+            ? { partnerEligibilityVerifications: cloneState({ ...createEmptyRepositoryState(), partnerEligibilityVerifications: [...changes.partnerEligibilityVerifications] }).partnerEligibilityVerifications }
+            : {}),
+          ...(changes.approvalRules
+            ? { approvalRules: cloneState({ ...createEmptyRepositoryState(), approvalRules: [...changes.approvalRules] }).approvalRules }
+            : {}),
+          ...(changes.approvalRequests
+            ? { approvalRequests: cloneState({ ...createEmptyRepositoryState(), approvalRequests: [...changes.approvalRequests] }).approvalRequests }
+            : {}),
+          ...(changes.approvalDecisions
+            ? { approvalDecisions: cloneState({ ...createEmptyRepositoryState(), approvalDecisions: [...changes.approvalDecisions] }).approvalDecisions }
+            : {}),
+          ...(changes.passengers
+            ? { passengers: cloneState({ ...createEmptyRepositoryState(), passengers: [...changes.passengers] }).passengers }
+            : {}),
+          ...(changes.addresses
+            ? { addresses: cloneState({ ...createEmptyRepositoryState(), addresses: [...changes.addresses] }).addresses }
+            : {}),
+          ...(changes.costCenters
+            ? { costCenters: cloneState({ ...createEmptyRepositoryState(), costCenters: [...changes.costCenters] }).costCenters }
+            : {}),
+          ...(changes.quotaPolicies
+            ? { quotaPolicies: cloneState({ ...createEmptyRepositoryState(), quotaPolicies: [...changes.quotaPolicies] }).quotaPolicies }
+            : {}),
+          ...(changes.quotaLedger
+            ? { quotaLedger: cloneState({ ...createEmptyRepositoryState(), quotaLedger: [...changes.quotaLedger] }).quotaLedger }
+            : {}),
+          ...(changes.quotaMonthlySnapshots
+            ? { quotaMonthlySnapshots: cloneState({ ...createEmptyRepositoryState(), quotaMonthlySnapshots: [...changes.quotaMonthlySnapshots] }).quotaMonthlySnapshots }
+            : {}),
+          ...(changes.userRoles
+            ? { userRoles: cloneState({ ...createEmptyRepositoryState(), userRoles: [...changes.userRoles] }).userRoles }
+            : {}),
+          ...(changes.apiKeys
+            ? { apiKeys: cloneState({ ...createEmptyRepositoryState(), apiKeys: [...changes.apiKeys] }).apiKeys }
+            : {}),
+        };
+      }),
+      reportPersistenceFailure: vi.fn(),
+      getState: () => cloneState(repositoryState),
+    };
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       repository as never,
@@ -553,6 +618,21 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(service.getSlaProfile("tenant-acme")).toMatchObject({
       tenantId: "tenant-acme",
     });
+    expect(repository.getState().notificationPreferences).toEqual([
+      expect.objectContaining({ tenantId: "tenant-acme" }),
+    ]);
+    expect(repository.getState().partnerEntries).toEqual([]);
+    expect(repository.getState().userRoles).toEqual([]);
+    expect(repository.persistChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationPreferences: [
+          expect.objectContaining({ tenantId: "tenant-acme" }),
+        ],
+        partnerEntries: [],
+        userRoles: [],
+      }),
+      "module init strict auth sanitize",
+    );
   });
 
   it("does not resurrect revoked credentials or replace rotated credentials from seeds", async () => {

@@ -311,7 +311,7 @@ export class IAPSubjectAdapter {
 
     // Surface choice resolution: determine requested realm from options or request headers
     let requestedRealm: "platform" | "ops" | undefined = options.requestedRealm;
-    if (!requestedRealm && headers) {
+    if (!requestedRealm && headers && !options.strictIapMode) {
       const headerRealm = this.readHeader(headers, "x-realm")?.toLowerCase();
       if (headerRealm === "ops" || headerRealm === "platform") {
         requestedRealm = headerRealm as "platform" | "ops";
