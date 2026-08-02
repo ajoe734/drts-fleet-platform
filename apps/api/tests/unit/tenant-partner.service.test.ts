@@ -317,6 +317,8 @@ function createDatabaseQuotaRepository(options?: {
 }
 
 describe("TenantPartnerService sensitive-data governance", () => {
+  const originalDrtsEnv = process.env.DRTS_ENV;
+
   afterEach(() => {
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT;
@@ -324,6 +326,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
     delete process.env.PARTNER_INGRESS_KEY_CATHAY;
     delete process.env.PARTNER_INGRESS_KEY_TAISHIN;
     delete process.env.PARTNER_INGRESS_KEY_DBS;
+    if (originalDrtsEnv === undefined) {
+      delete process.env.DRTS_ENV;
+    } else {
+      process.env.DRTS_ENV = originalDrtsEnv;
+    }
   });
 
   it("reconciles canonical partner-booking route seeds without duplicating persisted entries", async () => {
@@ -462,6 +469,89 @@ describe("TenantPartnerService sensitive-data governance", () => {
         actorType: "referral_passenger",
         partnerEntrySlug: "ctbc",
       },
+    });
+  });
+
+  it("strips demo tenant graph from persisted state in strict auth environments", async () => {
+    const localSeedService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const persistedState = createEmptyRepositoryState();
+    persistedState.notificationPreferences = [
+      localSeedService.getNotificationPreferences("tenant-demo-001"),
+      {
+        tenantId: "tenant-acme",
+        bookingDigestEnabled: true,
+        bookingDigestChannel: "email",
+        bookingDigestRecipients: ["ops@acme.example"],
+        approvalDigestEnabled: true,
+        approvalDigestChannel: "email",
+        approvalDigestRecipients: ["approvals@acme.example"],
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+    persistedState.slaProfiles = [
+      localSeedService.getSlaProfile("tenant-demo-001"),
+      {
+        tenantId: "tenant-acme",
+        bookingResponseMinutes: 10,
+        dispatchAssignmentMinutes: 15,
+        driverArrivalMinutes: 20,
+        completionGraceMinutes: 30,
+        activeFlag: true,
+        escalationRouting: ["ops"],
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+    persistedState.partnerEntries = [localSeedService.getPartnerEntry("ctbc")];
+    persistedState.partnerIngressCredentials = [
+      {
+        keyId: "partner-key-ctbc-dev",
+        entrySlug: "ctbc",
+        keyPrefix: "env_bootstrap",
+        maskedSuffix: "configured",
+        source: "env_bootstrap",
+        createdAt: "2026-04-10T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: null,
+        issuedBy: "system:env_bootstrap",
+        revokedBy: null,
+        rotationReason: null,
+        revokeReason: null,
+        keyHash: "c".repeat(64),
+      },
+    ];
+    persistedState.passengers = [
+      localSeedService.listPassengers("tenant-demo-001")[0]!,
+    ];
+    persistedState.addresses = [localSeedService.listAddresses("tenant-demo-001")[0]!];
+    persistedState.costCenters = localSeedService.listCostCenters("tenant-demo-001");
+    persistedState.userRoles = localSeedService.listTenantUsers("tenant-demo-001");
+    persistedState.apiKeys = [
+      localSeedService.listApiKeys("tenant-demo-001")[0] as never,
+    ];
+    process.env.DRTS_ENV = "staging";
+    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.listPassengers("tenant-demo-001")).toEqual([]);
+    expect(service.listAddresses("tenant-demo-001")).toEqual([]);
+    expect(service.listCostCenters("tenant-demo-001")).toEqual([]);
+    expect(service.listTenantUsers("tenant-demo-001")).toEqual([]);
+    expect(service.listApiKeys("tenant-demo-001")).toEqual([]);
+    expect(() => service.getPartnerEntry("ctbc")).toThrow(ApiRequestError);
+    expect(service.getNotificationPreferences("tenant-acme")).toMatchObject({
+      tenantId: "tenant-acme",
+    });
+    expect(service.getSlaProfile("tenant-acme")).toMatchObject({
+      tenantId: "tenant-acme",
     });
   });
 
