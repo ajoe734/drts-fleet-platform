@@ -58,3 +58,11 @@ Dependency summary: `IAM-P0-004`, `IAM-ACC-001`, and `IAM-CTR-001` are directly 
 - Parent task state changed during this session: earlier samples showed `review` and then `in_progress`; the latest machine-truth sample at `2026-08-02T02:31:56Z` is `done`. This packet uses the latest sample.
 - Stale path references and trailing whitespace from the prior packet have been removed.
 - Ready for reviewer: `Codex2`
+
+---
+
+## 6. Owner Closeout Notes
+
+- `review_approved` is recorded for this sidecar task with reviewer `Codex2` on `2026-08-02`.
+- Owner reran `pnpm exec vitest run tests/integration/iap-subject-adapter.integration.test.ts tests/unit/iap-subject-adapter.test.ts tests/unit/control-plane-auth.test.ts` at `HEAD` on `2026-08-02`; result: `3` files passed, `45` tests passed.
+- This remains a support-only packet with no deploy target. Branch closeout and machine-truth finalization are the only remaining owner actions.
