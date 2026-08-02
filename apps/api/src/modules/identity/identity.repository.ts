@@ -1020,6 +1020,8 @@ export class IdentityRepository {
       targetFamily.expiresAt = command.newExpiresAt;
       targetFamily.updatedAt = now;
       if (session) {
+        session.currentTokenId = command.newSessionTokenId;
+        session.tokenVersion = command.newSessionTokenVersion;
         session.updatedAt = now;
       }
 
@@ -1276,12 +1278,24 @@ export class IdentityRepository {
       const updateSessionResult = await client.query<PersistedSessionRow>(
         `
           UPDATE iam.identity_sessions
-          SET updated_at = $1::timestamptz,
-              record = jsonb_set(record, '{updatedAt}', to_jsonb($1::text))
-          WHERE session_id = $2::text
+          SET token_version = $1::bigint,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(record, '{currentTokenId}', to_jsonb($3::text)),
+                  '{tokenVersion}', to_jsonb($1::bigint)
+                ),
+                '{updatedAt}', to_jsonb($2::text)
+              )
+          WHERE session_id = $4::text
           RETURNING *
         `,
-        [now, row.session_id],
+        [
+          command.newSessionTokenVersion,
+          now,
+          command.newSessionTokenId,
+          row.session_id,
+        ],
       );
 
       await client.query("COMMIT");

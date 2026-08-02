@@ -108,17 +108,25 @@ describe("Identity session and refresh family repository (in-memory mode)", () =
       familyId: "family_002",
       oldTokenRaw: initialToken,
       newTokenRaw: newToken,
+      newSessionTokenId: "jti_session_002_v2",
+      newSessionTokenVersion: 2,
       newExpiresAt: "2099-01-02T00:00:00.000Z",
     });
 
     expect(rotateResult.success).toBe(true);
     expect(rotateResult.family?.counter).toBe(1);
-    expect(rotateResult.family?.currentTokenHash).toBe(hashIdentitySecret(newToken));
+    expect(rotateResult.family?.currentTokenHash).toBe(
+      hashIdentitySecret(newToken),
+    );
+    expect(rotateResult.session?.currentTokenId).toBe("jti_session_002_v2");
+    expect(rotateResult.session?.tokenVersion).toBe(2);
 
     // Verify token reuse attempt (re-presenting initialToken)
     const reuseResult = await repository.consumeAndRotateRefreshToken({
       oldTokenRaw: initialToken,
       newTokenRaw: "raw_refresh_token_v3",
+      newSessionTokenId: "jti_session_002_v3",
+      newSessionTokenVersion: 3,
       newExpiresAt: "2099-01-03T00:00:00.000Z",
     });
 

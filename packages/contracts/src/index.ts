@@ -2483,6 +2483,8 @@ export interface ConsumeAndRotateRefreshTokenCommand {
   oldTokenHash?: string;
   newTokenRaw?: string;
   newTokenHash?: string;
+  newSessionTokenId: string;
+  newSessionTokenVersion: number;
   newExpiresAt: string;
   updatedAt?: string;
 }
@@ -2499,8 +2501,6 @@ export interface ConsumeAndRotateRefreshTokenResult {
     | "REUSE_DETECTED"
     | "CONCURRENCY_CONFLICT";
 }
-
-
 
 // --- Tenant User & Roles ---
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
