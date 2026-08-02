@@ -9,3 +9,5 @@ export * from "./feature-gate.guard";
 export * from "./internal-key.middleware";
 export * from "./jwt-auth.service";
 export * from "./signing-key-ring";
+export * from "./step-up.policy";
+export * from "./step-up-proof.service";
