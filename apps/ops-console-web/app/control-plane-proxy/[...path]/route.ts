@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
   CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
+  exchangeControlPlaneRequestAuth,
   issueControlPlaneRequestAuth,
   stripControlPlaneAuthQueryParams,
 } from "@drts/control-plane-auth";
@@ -113,39 +114,56 @@ async function applyUpstreamAuth(
   request: NextRequest,
   targetUrl: URL,
 ) {
-  const controlPlaneAuth = issueControlPlaneRequestAuth({
-    actorType: "ops_user",
-    headers: request.headers,
-    defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
-    requestId: request.headers.get("x-request-id"),
-    ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
-    ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
-    ...(process.env.JWT_AUDIENCE
-      ? { jwtAudience: process.env.JWT_AUDIENCE }
-      : {}),
-  });
-
-  Object.entries(controlPlaneAuth.headers).forEach(([key, value]) => {
-    headers.set(key, value);
-  });
+  const upstreamAuthHeaders: Record<string, string | undefined> = {};
 
   if (process.env.DRTS_API_AUTH_AUDIENCE) {
     const metadataToken = await mintMetadataIdentityToken(
       resolveTargetAudience(targetUrl),
     );
     if (metadataToken) {
-      headers.set("authorization", `Bearer ${metadataToken}`);
+      upstreamAuthHeaders.authorization = `Bearer ${metadataToken}`;
     }
-    return;
+  } else if (isRunAppTarget(targetUrl)) {
+    const metadataToken = await mintMetadataIdentityToken(targetUrl.origin);
+    if (metadataToken) {
+      upstreamAuthHeaders["x-serverless-authorization"] =
+        `Bearer ${metadataToken}`;
+    }
   }
 
-  if (!isRunAppTarget(targetUrl)) {
-    return;
-  }
+  const exchangeUrl = new URL("api/auth/token", `${resolveTargetOrigin()}/`);
+  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
+  const controlPlaneAuth =
+    internalKey && request.headers.get("x-goog-iap-jwt-assertion")
+      ? await exchangeControlPlaneRequestAuth({
+          actorType: "ops_user",
+          headers: request.headers,
+          defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
+          exchangeUrl: exchangeUrl.toString(),
+          internalKey,
+          requestId: request.headers.get("x-request-id"),
+          upstreamAuthHeaders,
+        })
+      : issueControlPlaneRequestAuth({
+          actorType: "ops_user",
+          headers: request.headers,
+          defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
+          requestId: request.headers.get("x-request-id"),
+          ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
+          ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
+          ...(process.env.JWT_AUDIENCE
+            ? { jwtAudience: process.env.JWT_AUDIENCE }
+            : {}),
+        });
 
-  const metadataToken = await mintMetadataIdentityToken(targetUrl.origin);
-  if (metadataToken) {
-    headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
+  Object.entries(controlPlaneAuth.headers).forEach(([key, value]) => {
+    headers.set(key, value);
+  });
+
+  for (const [key, value] of Object.entries(upstreamAuthHeaders)) {
+    if (value) {
+      headers.set(key, value);
+    }
   }
 }
 

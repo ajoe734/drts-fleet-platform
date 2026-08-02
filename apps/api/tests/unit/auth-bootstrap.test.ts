@@ -1,5 +1,6 @@
 import { Reflector } from "@nestjs/core";
 import { EventEmitter2 } from "@nestjs/event-emitter";
+import jwt from "jsonwebtoken";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
@@ -7,9 +8,12 @@ import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.s
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../src/modules/auth/auth.controller";
 import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
+import { WorkforceIdentityService } from "../../src/modules/auth/workforce-identity.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
+import { SecurityEventsService } from "../../src/modules/security-events/security-events.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
   AUTH_REALM_PATH_MATRIX,
@@ -72,6 +76,71 @@ function createAuthFixture(jwtAuthService = new JwtAuthService()) {
     regulatoryRegistryService,
     tenantPartnerService,
   };
+}
+
+function createWorkforceFixture() {
+  const jwtAuthService = new JwtAuthService();
+  const auditNotificationService = new AuditNotificationService();
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
+  );
+  const regulatoryRegistryService = new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter2()),
+    auditNotificationService,
+    driverProfileService,
+  );
+  const tenantPartnerService = new TenantPartnerService(
+    auditNotificationService,
+  );
+  const driverDeviceSessionService = new DriverDeviceSessionService(
+    jwtAuthService,
+    driverProfileService,
+    regulatoryRegistryService,
+  );
+  const identityRepository = new IdentityRepository();
+  const securityEventsService = new SecurityEventsService();
+  const workforceIdentityService = new WorkforceIdentityService(
+    identityRepository,
+    securityEventsService,
+  );
+  const controller = new AuthController(
+    jwtAuthService,
+    tenantPartnerService,
+    driverDeviceSessionService,
+    workforceIdentityService,
+    securityEventsService,
+  );
+
+  return {
+    controller,
+    identityRepository,
+    securityEventsService,
+    jwtAuthService,
+  };
+}
+
+function signWorkforceAssertion(input: {
+  sub?: string;
+  email?: string;
+  active?: boolean;
+  groups?: string[];
+  audience?: string;
+}) {
+  return jwt.sign(
+    {
+      sub: input.sub ?? "workforce-subject-001",
+      email: input.email ?? "admin@platform.drts",
+      email_verified: true,
+      active: input.active ?? true,
+      groups: input.groups ?? ["drts-platform-superadmin"],
+    },
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET!,
+    {
+      algorithm: "HS256",
+      issuer: "https://cloud.google.com/iap",
+      audience: input.audience ?? "drts-control-plane",
+    },
+  );
 }
 
 describe("bootstrap auth extraction", () => {
@@ -1600,6 +1669,213 @@ describe("tenant bootstrap-session auth controller", () => {
     delete process.env.APP_ENV;
     delete process.env.JWT_SECRET;
     delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
+  });
+});
+
+describe("workforce control-plane token exchange", () => {
+  it("issues a server-resolved platform token from a verified workforce assertion", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller, jwtAuthService } = createWorkforceFixture();
+    const response = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": "internal-secret",
+        "x-drts-control-plane-actor-type": "platform_admin",
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          groups: ["drts-platform-superadmin"],
+        }),
+        "x-goog-authenticated-user-email":
+          "accounts.google.com:admin@platform.drts",
+        "x-roles": "viewer",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
+    const payload = jwtAuthService.verify(response.token);
+    expect(payload).toMatchObject({
+      actorType: "platform_admin",
+      sub: "pa-admin-001",
+      roles: ["superadmin"],
+    });
+    expect(payload?.roles).not.toContain("viewer");
+  });
+
+  it("rejects a spoofed workforce email header that disagrees with the assertion", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller } = createWorkforceFixture();
+
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-drts-control-plane-actor-type": "platform_admin",
+          "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+            email: "admin@platform.drts",
+          }),
+          "x-goog-authenticated-user-email":
+            "accounts.google.com:spoofed@platform.drts",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "AUTH_SESSION_EXCHANGE_DENIED",
+          details: {
+            reasonCode: "spoofed_email_header",
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects workforce assertions with the wrong audience", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller } = createWorkforceFixture();
+
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-drts-control-plane-actor-type": "platform_admin",
+          "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+            audience: "wrong-audience",
+          }),
+          "x-goog-authenticated-user-email":
+            "accounts.google.com:admin@platform.drts",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          details: {
+            reasonCode: "wrong_workforce_audience",
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects inactive workforce users", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller } = createWorkforceFixture();
+
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-drts-control-plane-actor-type": "ops_user",
+          "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+            active: false,
+            email: "ops@platform.drts",
+            groups: ["drts-ops-user"],
+          }),
+          "x-goog-authenticated-user-email":
+            "accounts.google.com:ops@platform.drts",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          details: {
+            reasonCode: "inactive_workforce_user",
+          },
+        },
+      },
+    });
+  });
+
+  it("applies least privilege on group drift and records a drift event", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller, identityRepository, jwtAuthService, securityEventsService } =
+      createWorkforceFixture();
+    const baseHeaders = {
+      "x-drts-internal-key": "internal-secret",
+      "x-drts-control-plane-actor-type": "platform_admin",
+      "x-goog-authenticated-user-email":
+        "accounts.google.com:admin@platform.drts",
+    };
+
+    await controller.issueToken({
+      headers: {
+        ...baseHeaders,
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: "workforce-drift-001",
+          groups: ["drts-platform-superadmin"],
+        }),
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
+    const downgraded = await controller.issueToken({
+      headers: {
+        ...baseHeaders,
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: "workforce-drift-001",
+          groups: ["drts-platform-operator"],
+        }),
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
+    const payload = jwtAuthService.verify(downgraded.token);
+    expect(payload?.roles).toEqual(["operator"]);
+    expect(identityRepository.listRoleBindings()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          roleCode: "operator",
+        }),
+      ]),
+    );
+
+    const events = await securityEventsService.listEvents(null, {
+      eventType: "workforce_membership.drift_detected",
+    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          afterSummary: expect.objectContaining({
+            grants: expect.arrayContaining([
+              expect.objectContaining({
+                actorType: "platform_admin",
+                roleCode: "operator",
+              }),
+            ]),
+          }),
+        }),
+      ]),
+    );
   });
 });
 

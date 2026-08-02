@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("JWT controller error mapping", () => {
-  it("maps AuthController signing key gaps to JWT_NOT_CONFIGURED", () => {
+  it("maps AuthController signing key gaps to JWT_NOT_CONFIGURED", async () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_PRIVATE_KEY;
     delete process.env.JWT_PUBLIC_KEY;
@@ -47,7 +47,7 @@ describe("JWT controller error mapping", () => {
 
     let thrown: unknown;
     try {
-      controller.issueToken({
+      await controller.issueToken({
         headers: {
           "x-actor-type": "tenant_admin",
           "x-actor-id": "tenant-user-001",

@@ -1,6 +1,7 @@
 import { ApiClient } from "@drts/api-client";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
+  exchangeControlPlaneRequestAuth,
   issueControlPlaneRequestAuth,
 } from "@drts/control-plane-auth";
 import { headers as nextHeaders } from "next/headers";
@@ -41,18 +42,7 @@ async function mintMetadataIdentityToken(
 export async function getServerOpsClient(): Promise<ApiClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
-  const controlPlaneAuth = issueControlPlaneRequestAuth({
-    actorType: "ops_user",
-    headers: requestHeaders,
-    defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
-    requestId: requestHeaders.get("x-request-id"),
-    ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
-    ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
-    ...(process.env.JWT_AUDIENCE
-      ? { jwtAudience: process.env.JWT_AUDIENCE }
-      : {}),
-  });
-  const defaultHeaders = { ...controlPlaneAuth.headers };
+  const defaultHeaders: Record<string, string> = {};
   const protectedAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
 
   if (protectedAudience) {
@@ -68,6 +58,32 @@ export async function getServerOpsClient(): Promise<ApiClient> {
       defaultHeaders["x-serverless-authorization"] = `Bearer ${metadataToken}`;
     }
   }
+
+  const exchangeUrl = new URL("api/auth/token", `${apiUrl}/`).toString();
+  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
+  const controlPlaneAuth =
+    internalKey && requestHeaders.get("x-goog-iap-jwt-assertion")
+      ? await exchangeControlPlaneRequestAuth({
+          actorType: "ops_user",
+          headers: requestHeaders,
+          defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
+          exchangeUrl,
+          internalKey,
+          requestId: requestHeaders.get("x-request-id"),
+          upstreamAuthHeaders: defaultHeaders,
+        })
+      : issueControlPlaneRequestAuth({
+          actorType: "ops_user",
+          headers: requestHeaders,
+          defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
+          requestId: requestHeaders.get("x-request-id"),
+          ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
+          ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
+          ...(process.env.JWT_AUDIENCE
+            ? { jwtAudience: process.env.JWT_AUDIENCE }
+            : {}),
+        });
+  Object.assign(defaultHeaders, controlPlaneAuth.headers);
 
   if (!process.env.JWT_SECRET) {
     return new ApiClient({

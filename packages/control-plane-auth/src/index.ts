@@ -53,6 +53,16 @@ export interface ControlPlaneRequestAuth {
   headers: Record<string, string>;
 }
 
+export interface ControlPlaneTokenExchangeOptions {
+  actorType: ControlPlaneActorType;
+  headers?: HeaderRecord | undefined;
+  defaultEmail?: string | undefined;
+  exchangeUrl: string;
+  internalKey: string;
+  requestId?: string | null;
+  upstreamAuthHeaders?: Record<string, string | undefined> | undefined;
+}
+
 const CONTROL_PLANE_ROLE_FAMILIES: Record<
   ControlPlaneActorType,
   AuthRoleFamily[]
@@ -384,6 +394,109 @@ export function issueControlPlaneRequestAuth(options: {
   return {
     authenticatedUserEmail,
     identity,
+    headers: {
+      [CONTROL_PLANE_REQUEST_AUTH_HEADER]: `Bearer ${token}`,
+    },
+  };
+}
+
+export async function exchangeControlPlaneRequestAuth(
+  options: ControlPlaneTokenExchangeOptions,
+): Promise<ControlPlaneRequestAuth> {
+  const authenticatedUserEmail =
+    extractAuthenticatedUserEmail(options.headers) ||
+    normalizeAuthenticatedUserEmail(options.defaultEmail ?? null) ||
+    CONTROL_PLANE_DEFAULT_EMAILS[options.actorType];
+
+  if (!authenticatedUserEmail) {
+    throw new Error("Control-plane authenticated user email is unavailable.");
+  }
+
+  const requestHeaders = new Headers();
+  requestHeaders.set("content-type", "application/json");
+  requestHeaders.set("x-drts-internal-key", options.internalKey);
+  requestHeaders.set("x-drts-control-plane-actor-type", options.actorType);
+  if (options.requestId) {
+    requestHeaders.set("x-request-id", options.requestId);
+  }
+
+  const emailHeader = readHeader(options.headers, CONTROL_PLANE_IAP_EMAIL_HEADER);
+  const userIdHeader = readHeader(options.headers, CONTROL_PLANE_IAP_USER_ID_HEADER);
+  const assertionHeader = readHeader(options.headers, "x-goog-iap-jwt-assertion");
+  if (emailHeader) {
+    requestHeaders.set(CONTROL_PLANE_IAP_EMAIL_HEADER, emailHeader);
+  }
+  if (userIdHeader) {
+    requestHeaders.set(CONTROL_PLANE_IAP_USER_ID_HEADER, userIdHeader);
+  }
+  if (assertionHeader) {
+    requestHeaders.set("x-goog-iap-jwt-assertion", assertionHeader);
+  }
+
+  for (const [key, value] of Object.entries(options.upstreamAuthHeaders ?? {})) {
+    if (!value) {
+      continue;
+    }
+    requestHeaders.set(key, value);
+  }
+
+  const response = await fetch(options.exchangeUrl, {
+    method: "POST",
+    headers: requestHeaders,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Control-plane token exchange failed with status ${response.status}.`,
+    );
+  }
+
+  const payload = (await response.json()) as {
+    token?: string;
+    expiresIn?: string;
+  };
+  const token = payload.token?.trim();
+  if (!token) {
+    throw new Error("Control-plane token exchange returned an empty token.");
+  }
+
+  const decoded = jwt.decode(token) as
+    | ({
+        sub?: string | null;
+        actorType?: ControlPlaneActorType;
+        realm?: AuthRealm;
+        roleFamilies?: AuthRoleFamily[];
+        roles?: string[];
+        scopes?: string[];
+      } & jwt.JwtPayload)
+    | null;
+
+  if (
+    !decoded?.sub ||
+    (decoded.actorType !== "platform_admin" && decoded.actorType !== "ops_user") ||
+    (decoded.realm !== "platform" && decoded.realm !== "ops")
+  ) {
+    throw new Error("Control-plane token exchange returned an invalid identity.");
+  }
+
+  return {
+    authenticatedUserEmail,
+    identity: {
+      authMode: "jwt_bearer",
+      actorType: decoded.actorType,
+      actorId: decoded.sub,
+      realm: decoded.realm,
+      tenantId: null,
+      roleFamilies:
+        decoded.roleFamilies?.filter(
+          (family): family is AuthRoleFamily =>
+            family === "platform" || family === "ops",
+        ) ?? [...CONTROL_PLANE_ROLE_FAMILIES[decoded.actorType]],
+      roles: decoded.roles?.filter(Boolean) ?? [],
+      scopes: decoded.scopes?.filter(Boolean) ?? [],
+      requestId: options.requestId ?? null,
+    },
     headers: {
       [CONTROL_PLANE_REQUEST_AUTH_HEADER]: `Bearer ${token}`,
     },

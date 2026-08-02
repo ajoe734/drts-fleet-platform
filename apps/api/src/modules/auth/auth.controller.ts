@@ -40,6 +40,7 @@ import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { WorkforceIdentityService } from "./workforce-identity.service";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -67,16 +68,69 @@ export class AuthController {
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly driverDeviceSessionService: DriverDeviceSessionService,
     @Optional()
+    private readonly workforceIdentityService?: WorkforceIdentityService,
+    @Optional()
     private readonly securityEventsService?: SecurityEventsService,
   ) {}
 
   @Post("token")
-  issueToken(@Req() request: TokenRequest): {
+  async issueToken(@Req() request: TokenRequest): Promise<{
     token: string;
     expiresIn: string;
-  } {
+  }> {
     // Require internal key to issue tokens
     validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
+
+    const requestedActorType = request.headers["x-drts-control-plane-actor-type"];
+    if (
+      this.workforceIdentityService &&
+      (requestedActorType === "platform_admin" || requestedActorType === "ops_user")
+    ) {
+      const resolved =
+        await this.workforceIdentityService.resolveVerifiedWorkforceIdentity(
+          request.headers,
+          typeof request.headers["x-request-id"] === "string"
+            ? request.headers["x-request-id"]
+            : null,
+        );
+      const expiresIn: JwtExpiresIn = "8h";
+      const token = this.signJwt(resolved.identity, expiresIn);
+      this.securityEventsService?.recordEvent({
+        actorId: resolved.identity.actorId,
+        actorType: resolved.identity.actorType,
+        subjectId: resolved.principal.subject,
+        realm: resolved.identity.realm,
+        tenantId: null,
+        partnerId: null,
+        eventType: "workforce_session_exchange.issued",
+        eventFamily: "auth",
+        outcome: "success",
+        severity: "low",
+        targetType: "control_plane_session",
+        targetId: resolved.membership.membershipId,
+        sessionId: null,
+        tokenId: token,
+        authMethods: ["workforce_iap_assertion"],
+        sourceIp: null,
+        userAgent: null,
+        requestId: resolved.identity.requestId,
+        traceId: null,
+        reasonCode: resolved.driftDetected
+          ? "least_privilege_applied"
+          : "verified_workforce_subject",
+        approvalId: null,
+        beforeSummary: null,
+        afterSummary: {
+          actorId: resolved.identity.actorId,
+          membershipId: resolved.membership.membershipId,
+          roleCode: resolved.roleBinding.roleCode,
+        },
+        maskedContext: {
+          email: resolved.authenticatedUserEmail,
+        },
+      });
+      return { token, expiresIn };
+    }
 
     const identity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
