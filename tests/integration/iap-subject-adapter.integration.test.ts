@@ -428,6 +428,56 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.STRICT_IAP_MODE;
   });
 
+  it("verifies AuthController /auth/token rejects mixed IAP and bootstrap headers in strict environments", async () => {
+    process.env.APP_ENV = "staging";
+    process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+    process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+    process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    const jwtAuthService = new JwtAuthService();
+    const tenantPartnerService = new TenantPartnerService(
+      securityEventsService as any,
+    );
+    const driverDeviceSessionService = new DriverDeviceSessionService(
+      jwtAuthService,
+      null as any,
+      null as any,
+    );
+    const authController = new AuthController(
+      jwtAuthService,
+      tenantPartnerService,
+      driverDeviceSessionService,
+      securityEventsService,
+      adapter,
+    );
+
+    await expect(
+      authController.issueToken({
+        headers: {
+          "x-drts-internal-key": "test_internal_key_123",
+          "x-goog-iap-jwt-assertion": signAssertion({
+            sub: "strict_mixed_headers_subject",
+            email: "ops-lead@platform.drts",
+            gcp_ia_groups: ["ops-users@platform.drts"],
+          }),
+          "x-actor-type": "platform_admin",
+          "x-actor-id": "spoofed-admin",
+          "x-realm": "platform",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+    });
+
+    delete process.env.APP_ENV;
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
+  });
+
   it("verifies BootstrapAuthGuard enforces durable membership and group drift when receiving x-goog-iap-jwt-assertion", async () => {
     process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
     process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;

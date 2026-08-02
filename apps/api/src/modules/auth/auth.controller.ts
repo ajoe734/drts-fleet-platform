@@ -92,6 +92,19 @@ export class AuthController {
       process.env.STRICT_IAP_MODE === "true" ||
       strictEnvironment;
     const rawAssertion = extractIapJwtAssertion(request.headers);
+    const bootstrapIdentity = extractBootstrapRequestIdentity(request.headers, {
+      allowAnonymous: false,
+      method: request.method,
+      requestUrl: request.originalUrl ?? request.url,
+    });
+
+    if (strictEnvironment && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+      );
+    }
 
     if (rawAssertion && this.iapSubjectAdapter) {
       const expectedAudience =
@@ -139,11 +152,7 @@ export class AuthController {
       return { token, expiresIn };
     }
 
-    const identity = extractBootstrapRequestIdentity(request.headers, {
-      allowAnonymous: false,
-      method: request.method,
-      requestUrl: request.originalUrl ?? request.url,
-    });
+    const identity = bootstrapIdentity;
 
     if (!identity) {
       throw new ApiRequestError(

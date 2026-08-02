@@ -1413,6 +1413,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
               );
       this.reconcilePartnerIngressCredentialSeeds();
       this.normalizePartnerEntryAuthModes();
+      if (
+        isStrictAuthEnvironment() &&
+        this.didSanitizePersistedState(persistedState, sanitizedState)
+      ) {
+        this.persistChanges(sanitizedState, "module init strict auth sanitize");
+      }
       this.partnerEligibilityVerifications = new Map(
         sanitizedState.partnerEligibilityVerifications.map((verification) => [
           verification.eligibilityVerificationId,
@@ -9168,6 +9174,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.cloneStoredApiKey(value),
       ),
     };
+  }
+
+  private didSanitizePersistedState(
+    original: TenantPartnerState,
+    sanitized: TenantPartnerState,
+  ): boolean {
+    return JSON.stringify(original) !== JSON.stringify(sanitized);
   }
 
   private requirePartnerIngressCredential(entrySlug: string, keyId: string) {
