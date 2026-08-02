@@ -23,6 +23,42 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+type PersistedSessionRow = {
+  session_id: string;
+  source_ref: string | null;
+  principal_id: string;
+  membership_id: string | null;
+  realm: string;
+  status: string;
+  auth_time: string;
+  auth_methods: string[];
+  token_version: number | string;
+  idle_expires_at: string | null;
+  absolute_expires_at: string;
+  revoked_at: string | null;
+  revoked_by_principal_id: string | null;
+  revoke_reason: string | null;
+  device_summary: unknown;
+  risk_summary: unknown;
+  created_at: string;
+  updated_at: string;
+  record: unknown;
+};
+
+type PersistedRefreshFamilyRow = {
+  family_id: string;
+  source_ref: string | null;
+  session_id: string;
+  current_token_hash: string;
+  counter: number;
+  status: string;
+  expires_at: string;
+  compromised_at: string | null;
+  created_at: string;
+  updated_at: string;
+  record: unknown;
+};
+
 const LEGACY_TENANT_USER_ISSUER = "legacy_tenant_email";
 
 export function hashIdentitySecret(secret: string): string {
@@ -455,7 +491,7 @@ export class IdentityRepository {
 
     const client = await this.databaseService!.connect();
     try {
-      const result = await client.query<JsonRecordRow>(
+      const result = await client.query<PersistedSessionRow>(
         `
           INSERT INTO iam.identity_sessions (
             session_id,
@@ -493,7 +529,7 @@ export class IdentityRepository {
             risk_summary = EXCLUDED.risk_summary,
             updated_at = EXCLUDED.updated_at,
             record = EXCLUDED.record
-          RETURNING record
+          RETURNING *
         `,
         [
           session.sessionId,
@@ -518,8 +554,8 @@ export class IdentityRepository {
         ],
       );
 
-      return this.parseRecord<CanonicalIdentitySessionRecord>(
-        result.rows[0]?.record,
+      return this.hydrateSessionRecord(
+        result.rows[0],
         "iam.identity_sessions",
       );
     } finally {
@@ -535,8 +571,8 @@ export class IdentityRepository {
       return found ? { ...found } : null;
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT record FROM iam.identity_sessions WHERE session_id = $1`,
+    const result = await this.databaseService!.query<PersistedSessionRow>(
+      `SELECT * FROM iam.identity_sessions WHERE session_id = $1`,
       [sessionId],
     );
 
@@ -549,10 +585,7 @@ export class IdentityRepository {
       return null;
     }
 
-    return this.parseRecord<CanonicalIdentitySessionRecord>(
-      row.record,
-      "iam.identity_sessions",
-    );
+    return this.hydrateSessionRecord(row, "iam.identity_sessions");
   }
 
   async revokeSession(
@@ -592,7 +625,7 @@ export class IdentityRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const sessionResult = await client.query<JsonRecordRow>(
+      const sessionResult = await client.query<PersistedSessionRow>(
         `
           UPDATE iam.identity_sessions
           SET status = 'revoked',
@@ -603,15 +636,21 @@ export class IdentityRepository {
               record = jsonb_set(
                 jsonb_set(
                   jsonb_set(
-                    jsonb_set(record, '{status}', '"revoked"'::jsonb),
-                    '{revokedAt}', to_jsonb($2::text)
+                    jsonb_set(
+                      jsonb_set(
+                        jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                        '{revokedAt}', to_jsonb($2::text)
+                      ),
+                      '{revokedByPrincipalId}', to_jsonb($3::text)
+                    ),
+                    '{revokeReason}', to_jsonb($4::text)
                   ),
-                  '{revokedByPrincipalId}', to_jsonb($3::text)
+                  '{updatedAt}', to_jsonb($2::text)
                 ),
-                '{revokeReason}', to_jsonb($4::text)
+                '{status}', '"revoked"'::jsonb
               )
           WHERE session_id = $1::text
-          RETURNING record
+          RETURNING *
         `,
         [sessionId, revokedAt, revokedByPrincipalId || null, reason],
       );
@@ -626,7 +665,10 @@ export class IdentityRepository {
           UPDATE iam.identity_refresh_families
           SET status = 'revoked',
               updated_at = $2::timestamptz,
-              record = jsonb_set(record, '{status}', '"revoked"'::jsonb)
+              record = jsonb_set(
+                jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                '{updatedAt}', to_jsonb($2::text)
+              )
           WHERE session_id = $1::text AND status = 'active'
         `,
         [sessionId, revokedAt],
@@ -637,10 +679,7 @@ export class IdentityRepository {
       if (!row) {
         return null;
       }
-      return this.parseRecord<CanonicalIdentitySessionRecord>(
-        row.record,
-        "iam.identity_sessions",
-      );
+      return this.hydrateSessionRecord(row, "iam.identity_sessions");
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -658,16 +697,13 @@ export class IdentityRepository {
         .map((session) => ({ ...session }));
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT record FROM iam.identity_sessions WHERE principal_id = $1 ORDER BY updated_at DESC`,
+    const result = await this.databaseService!.query<PersistedSessionRow>(
+      `SELECT * FROM iam.identity_sessions WHERE principal_id = $1 ORDER BY updated_at DESC`,
       [principalId],
     );
 
     return result.rows.map((row) =>
-      this.parseRecord<CanonicalIdentitySessionRecord>(
-        row.record,
-        "iam.identity_sessions",
-      ),
+      this.hydrateSessionRecord(row, "iam.identity_sessions"),
     );
   }
 
@@ -693,9 +729,9 @@ export class IdentityRepository {
       return null;
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
+    const result = await this.databaseService!.query<PersistedSessionRow>(
       `
-        SELECT record
+        SELECT *
         FROM iam.identity_sessions
         WHERE status = 'active'
           AND device_summary->>'deviceId' = $1
@@ -714,10 +750,7 @@ export class IdentityRepository {
       return null;
     }
 
-    return this.parseRecord<CanonicalIdentitySessionRecord>(
-      row.record,
-      "iam.identity_sessions",
-    );
+    return this.hydrateSessionRecord(row, "iam.identity_sessions");
   }
 
   async createRefreshFamily(
@@ -730,7 +763,7 @@ export class IdentityRepository {
 
     const client = await this.databaseService!.connect();
     try {
-      const result = await client.query<JsonRecordRow>(
+      const result = await client.query<PersistedRefreshFamilyRow>(
         `
           INSERT INTO iam.identity_refresh_families (
             family_id,
@@ -755,7 +788,7 @@ export class IdentityRepository {
             compromised_at = EXCLUDED.compromised_at,
             updated_at = EXCLUDED.updated_at,
             record = EXCLUDED.record
-          RETURNING record
+          RETURNING *
         `,
         [
           family.familyId,
@@ -772,8 +805,8 @@ export class IdentityRepository {
         ],
       );
 
-      return this.parseRecord<CanonicalRefreshFamilyRecord>(
-        result.rows[0]?.record,
+      return this.hydrateRefreshFamilyRecord(
+        result.rows[0],
         "iam.identity_refresh_families",
       );
     } finally {
@@ -789,8 +822,8 @@ export class IdentityRepository {
       return found ? { ...found } : null;
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT record FROM iam.identity_refresh_families WHERE family_id = $1`,
+    const result = await this.databaseService!.query<PersistedRefreshFamilyRow>(
+      `SELECT * FROM iam.identity_refresh_families WHERE family_id = $1`,
       [familyId],
     );
 
@@ -803,8 +836,8 @@ export class IdentityRepository {
       return null;
     }
 
-    return this.parseRecord<CanonicalRefreshFamilyRecord>(
-      row.record,
+    return this.hydrateRefreshFamilyRecord(
+      row,
       "iam.identity_refresh_families",
     );
   }
@@ -821,8 +854,8 @@ export class IdentityRepository {
       return null;
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT record FROM iam.identity_refresh_families WHERE current_token_hash = $1`,
+    const result = await this.databaseService!.query<PersistedRefreshFamilyRow>(
+      `SELECT * FROM iam.identity_refresh_families WHERE current_token_hash = $1`,
       [tokenHash],
     );
 
@@ -835,8 +868,8 @@ export class IdentityRepository {
       return null;
     }
 
-    return this.parseRecord<CanonicalRefreshFamilyRecord>(
-      row.record,
+    return this.hydrateRefreshFamilyRecord(
+      row,
       "iam.identity_refresh_families",
     );
   }
@@ -1051,8 +1084,11 @@ export class IdentityRepository {
                   compromised_at = $1::timestamptz,
                   updated_at = $1::timestamptz,
                   record = jsonb_set(
-                    jsonb_set(record, '{status}', '"compromised"'::jsonb),
-                    '{compromisedAt}', to_jsonb($1::timestamptz)
+                    jsonb_set(
+                      jsonb_set(record, '{status}', '"compromised"'::jsonb),
+                      '{compromisedAt}', to_jsonb($1::text)
+                    ),
+                    '{updatedAt}', to_jsonb($1::text)
                   )
               WHERE family_id = $2::text
             `,
@@ -1068,10 +1104,13 @@ export class IdentityRepository {
                   updated_at = $1::timestamptz,
                   record = jsonb_set(
                     jsonb_set(
-                      jsonb_set(record, '{status}', '"compromised"'::jsonb),
-                      '{revokedAt}', to_jsonb($1::timestamptz)
+                      jsonb_set(
+                        jsonb_set(record, '{status}', '"compromised"'::jsonb),
+                        '{revokedAt}', to_jsonb($1::text)
+                      ),
+                      '{revokeReason}', '"REFRESH_TOKEN_REUSE_DETECTED"'::jsonb
                     ),
-                    '{revokeReason}', '"REFRESH_TOKEN_REUSE_DETECTED"'::jsonb
+                    '{updatedAt}', to_jsonb($1::text)
                   )
               WHERE session_id = $2::text
             `,
@@ -1079,28 +1118,13 @@ export class IdentityRepository {
           );
 
           await client.query("COMMIT");
-          const updatedFamily = this.parseRecord<CanonicalRefreshFamilyRecord>(
-            row.family_record,
-            "iam.identity_refresh_families",
-          );
-          const updatedSession = this.parseRecord<CanonicalIdentitySessionRecord>(
-            row.session_record,
-            "iam.identity_sessions",
-          );
+          const updatedFamily = await this.getRefreshFamily(row.family_id);
+          const updatedSession = await this.getSession(row.session_id);
 
           return {
             success: false,
-            session: {
-              ...updatedSession,
-              status: "compromised",
-              revokedAt: now,
-              revokeReason: "REFRESH_TOKEN_REUSE_DETECTED",
-            },
-            family: {
-              ...updatedFamily,
-              status: "compromised",
-              compromisedAt: now,
-            },
+            session: updatedSession,
+            family: updatedFamily,
             reason: "REUSE_DETECTED",
           };
         }
@@ -1156,25 +1180,45 @@ export class IdentityRepository {
       ) {
         const now = new Date().toISOString();
         await client.query(
-          `UPDATE iam.identity_refresh_families SET status = 'expired', updated_at = $1 WHERE family_id = $2`,
+          `
+            UPDATE iam.identity_refresh_families
+            SET status = 'expired',
+                updated_at = $1::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"expired"'::jsonb),
+                  '{updatedAt}', to_jsonb($1::text)
+                )
+            WHERE family_id = $2::text
+          `,
           [now, row.family_id],
         );
         await client.query(
-          `UPDATE iam.identity_sessions SET status = 'expired', updated_at = $1 WHERE session_id = $2`,
+          `
+            UPDATE iam.identity_sessions
+            SET status = 'expired',
+                updated_at = $1::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"expired"'::jsonb),
+                  '{updatedAt}', to_jsonb($1::text)
+                )
+            WHERE session_id = $2::text
+          `,
           [now, row.session_id],
         );
         await client.query("COMMIT");
+        const expiredFamily = await this.getRefreshFamily(row.family_id);
+        const expiredSession = await this.getSession(row.session_id);
 
         return {
           success: false,
-          session: { ...session, status: "expired" },
-          family: { ...family, status: "expired" },
+          session: expiredSession,
+          family: expiredFamily,
           reason: "EXPIRED",
         };
       }
 
       const now = command.updatedAt || new Date().toISOString();
-      const updateFamilyResult = await client.query<JsonRecordRow>(
+      const updateFamilyResult = await client.query<PersistedRefreshFamilyRow>(
         `
           UPDATE iam.identity_refresh_families
           SET current_token_hash = $1::text,
@@ -1183,14 +1227,20 @@ export class IdentityRepository {
               updated_at = $3::timestamptz,
               record = jsonb_set(
                 jsonb_set(
-                  jsonb_set(record, '{currentTokenHash}', to_jsonb($1::text)),
-                  '{counter}', to_jsonb(counter + 1)
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(record, '{currentTokenHash}', to_jsonb($1::text)),
+                      '{counter}', to_jsonb(counter + 1)
+                    ),
+                    '{previousHashes}',
+                    coalesce(record->'previousHashes', '[]'::jsonb) || to_jsonb($4::text)
+                  ),
+                  '{expiresAt}', to_jsonb($2::text)
                 ),
-                '{previousHashes}',
-                coalesce(record->'previousHashes', '[]'::jsonb) || to_jsonb($4::text)
+                '{updatedAt}', to_jsonb($3::text)
               )
           WHERE family_id = $5::text AND current_token_hash = $4::text AND status = 'active'
-          RETURNING record
+          RETURNING *
         `,
         [newHash, command.newExpiresAt, now, oldHash, row.family_id],
       );
@@ -1205,13 +1255,13 @@ export class IdentityRepository {
         };
       }
 
-      const updateSessionResult = await client.query<JsonRecordRow>(
+      const updateSessionResult = await client.query<PersistedSessionRow>(
         `
           UPDATE iam.identity_sessions
           SET updated_at = $1::timestamptz,
               record = jsonb_set(record, '{updatedAt}', to_jsonb($1::text))
           WHERE session_id = $2::text
-          RETURNING record
+          RETURNING *
         `,
         [now, row.session_id],
       );
@@ -1227,12 +1277,12 @@ export class IdentityRepository {
           reason: "CONCURRENCY_CONFLICT",
         };
       }
-      const updatedFamily = this.parseRecord<CanonicalRefreshFamilyRecord>(
-        updatedFamilyRow.record,
+      const updatedFamily = this.hydrateRefreshFamilyRecord(
+        updatedFamilyRow,
         "iam.identity_refresh_families",
       );
-      const updatedSession = this.parseRecord<CanonicalIdentitySessionRecord>(
-        updatedSessionRow.record,
+      const updatedSession = this.hydrateSessionRecord(
+        updatedSessionRow,
         "iam.identity_sessions",
       );
 
@@ -1634,5 +1684,93 @@ export class IdentityRepository {
     }
 
     return record as T;
+  }
+
+  private hydrateSessionRecord(
+    row: PersistedSessionRow | undefined,
+    source: string,
+  ): CanonicalIdentitySessionRecord {
+    if (!row) {
+      throw new Error(`Missing persisted session row from ${source}`);
+    }
+
+    const record = this.parseRecord<Partial<CanonicalIdentitySessionRecord>>(
+      row.record,
+      source,
+    );
+
+    return {
+      ...record,
+      sessionId: row.session_id,
+      sourceRef: row.source_ref,
+      principalId: row.principal_id,
+      membershipId: row.membership_id,
+      realm: row.realm,
+      status: row.status as CanonicalIdentitySessionRecord["status"],
+      authTime: row.auth_time,
+      authMethods: [...row.auth_methods],
+      tokenVersion: this.parseTokenVersion(row.token_version, source),
+      idleExpiresAt: row.idle_expires_at,
+      absoluteExpiresAt: row.absolute_expires_at,
+      revokedAt: row.revoked_at,
+      revokedByPrincipalId: row.revoked_by_principal_id,
+      revokeReason: row.revoke_reason,
+      deviceSummary: this.parseJsonObject(row.device_summary, source),
+      riskSummary: this.parseJsonObject(row.risk_summary, source),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private hydrateRefreshFamilyRecord(
+    row: PersistedRefreshFamilyRow | undefined,
+    source: string,
+  ): CanonicalRefreshFamilyRecord {
+    if (!row) {
+      throw new Error(`Missing persisted refresh family row from ${source}`);
+    }
+
+    const record = this.parseRecord<Partial<CanonicalRefreshFamilyRecord>>(
+      row.record,
+      source,
+    );
+
+    return {
+      ...record,
+      familyId: row.family_id,
+      sourceRef: row.source_ref,
+      sessionId: row.session_id,
+      currentTokenHash: row.current_token_hash,
+      counter: row.counter,
+      status: row.status as CanonicalRefreshFamilyRecord["status"],
+      expiresAt: row.expires_at,
+      compromisedAt: row.compromised_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private parseJsonObject(
+    value: unknown,
+    source: string,
+  ): Record<string, unknown> {
+    if (!value) {
+      return {};
+    }
+
+    if (typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`Invalid JSON object loaded from ${source}`);
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private parseTokenVersion(value: number | string, source: string): number {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Invalid token_version loaded from ${source}`);
+    }
+
+    return parsed;
   }
 }
