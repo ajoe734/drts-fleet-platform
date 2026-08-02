@@ -1301,7 +1301,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const quotaMonthlySnapshots = persistedState.quotaMonthlySnapshots ?? [];
       const userRoles = persistedState.userRoles ?? [];
       const apiKeys = persistedState.apiKeys ?? [];
-      const sanitizedState = this.sanitizePersistedState({
+      const persistedStateSnapshot: TenantPartnerState = {
         notificationPreferences,
         webhookEndpoints,
         webhookDeliveries,
@@ -1320,10 +1320,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         quotaMonthlySnapshots,
         userRoles,
         apiKeys,
-      });
-      const hasPersistedState = this.hasPersistedState(persistedState);
+      };
+      const sanitizedState = this.sanitizePersistedState(
+        persistedStateSnapshot,
+      );
+      const hasPersistedState = this.hasPersistedState(persistedStateSnapshot);
       const strictSanitizeChanges = this.buildStrictSanitizeChanges(
-        persistedState,
+        persistedStateSnapshot,
         sanitizedState,
       );
 
@@ -1401,7 +1404,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       this.normalizePartnerEntryAuthModes();
       if (
         isStrictAuthEnvironment() &&
-        this.didSanitizePersistedState(persistedState, sanitizedState)
+        this.didSanitizePersistedState(persistedStateSnapshot, sanitizedState)
       ) {
         this.persistChanges(
           strictSanitizeChanges,
@@ -1428,8 +1431,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         new Map<string, number>(),
       );
       this.approvalDecisions = sanitizedState.approvalDecisions.map(
-        (decision) =>
-        this.cloneApprovalDecision(decision),
+        (decision) => this.cloneApprovalDecision(decision),
       );
       this.approvalRequests = sanitizedState.approvalRequests.map((request) =>
         this.cloneApprovalRequest(
@@ -1446,8 +1448,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.cloneStoredWebhookEndpoint(endpoint),
       );
       this.webhookDeliveries = sanitizedState.webhookDeliveries.map(
-        (delivery) =>
-        this.cloneStoredWebhookDelivery(delivery),
+        (delivery) => this.cloneStoredWebhookDelivery(delivery),
       );
       this.passengers = sanitizedState.passengers.map((passenger) =>
         this.clonePassenger(passenger),
@@ -1463,7 +1464,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           : isStrictAuthEnvironment()
             ? []
             : COST_CENTER_SEED.map((costCenter) =>
-              this.cloneCostCenter(costCenter),
+                this.cloneCostCenter(costCenter),
               );
       this.quotaPolicies = new Map(
         sanitizedState.quotaPolicies.map((policy) => [
@@ -1501,7 +1502,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.cloneStoredApiKey(apiKey),
       );
       this.syncIdentityTenantUserRoles("module init rehydrate");
-      if (sanitizedState.partnerEntries.length === 0 && !isStrictAuthEnvironment()) {
+      if (
+        sanitizedState.partnerEntries.length === 0 &&
+        !isStrictAuthEnvironment()
+      ) {
         this.persistChanges(
           {
             partnerEntries: this.partnerEntries.map((entry) =>
@@ -1525,7 +1529,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init partner ingress credential bootstrap",
         );
       }
-      if (sanitizedState.costCenters.length === 0 && !isStrictAuthEnvironment()) {
+      if (
+        sanitizedState.costCenters.length === 0 &&
+        !isStrictAuthEnvironment()
+      ) {
         this.persistChanges(
           {
             costCenters: this.costCenters.map((costCenter) =>
@@ -9102,9 +9109,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         if (!value || typeof value !== "object" || !("tenantId" in value)) {
           return true;
         }
-        return (
-          (value as { tenantId?: string }).tenantId !== DEMO_TENANT_ID
-        );
+        return (value as { tenantId?: string }).tenantId !== DEMO_TENANT_ID;
       });
 
     return {
@@ -9131,12 +9136,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.cloneApprovalRule(value),
       ),
       approvalRequests: retainIfNotDemoTenant(state.approvalRequests).map(
-        (value) =>
-        this.cloneApprovalRequest(value),
+        (value) => this.cloneApprovalRequest(value),
       ),
       approvalDecisions: retainIfNotDemoTenant(state.approvalDecisions).map(
-        (value) =>
-        this.cloneApprovalDecision(value),
+        (value) => this.cloneApprovalDecision(value),
       ),
       passengers: retainIfNotDemoTenant(state.passengers).map((value) =>
         this.clonePassenger(value),
@@ -9263,9 +9266,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     keyOf: (value: T) => string,
   ) {
     const sanitizedKeys = new Set(sanitized.map(keyOf));
-    return original
-      .map(keyOf)
-      .filter((key) => !sanitizedKeys.has(key));
+    return original.map(keyOf).filter((key) => !sanitizedKeys.has(key));
   }
 
   private requirePartnerIngressCredential(entrySlug: string, keyId: string) {
