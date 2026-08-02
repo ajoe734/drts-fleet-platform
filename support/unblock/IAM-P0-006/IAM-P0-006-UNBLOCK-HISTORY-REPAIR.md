@@ -6,7 +6,7 @@
 - Parent: `IAM-P0-006`
 - Owner: `Codex2`
 - Reviewer: `Codex`
-- Audit timestamp: `2026-08-02T06:07:00+00:00`
+- Audit timestamp: `2026-08-02T06:16:00+00:00`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex2-iam-p0-006-unblock-history-repair`
 - Assigned helper branch:
@@ -97,32 +97,35 @@ fast-forward of the owner branch tip.
   `0dc8ebffe0004fe88164fae0ce02909e11d86cbf`
 - prior refreshed helper head from the fifth repair follow-up:
   `68289e7dd41ece05f837222b7859f4a81d0f5c45`
+- prior refreshed helper head from the sixth repair follow-up:
+  `636f4e312922d103d5379efae5560c291decefd0`
 - current local helper `HEAD`:
-  `codex2/iam-p0-006-unblock-history-repair @ 636f4e312922d103d5379efae5560c291decefd0`
+  `codex2/iam-p0-006-unblock-history-repair @ 12a780532b909e57881ee9e55c1cfbcb81ca1f38`
 - stale local remote-tracking ref observed in this worktree:
   `origin/codex2/iam-p0-006-unblock-history-repair @ 98e4e3ba2634743ff1a9396c3222df56cba2acd9`
 - current actual remote helper head from `git ls-remote`:
-  `origin refs/heads/codex2/iam-p0-006-unblock-history-repair @ 636f4e312922d103d5379efae5560c291decefd0`
+  `origin refs/heads/codex2/iam-p0-006-unblock-history-repair @ 12a780532b909e57881ee9e55c1cfbcb81ca1f38`
 - helper PR:
   `#1264 https://github.com/ajoe734/drts-fleet-platform/pull/1264`
 - current helper PR head OID from GitHub:
-  `636f4e312922d103d5379efae5560c291decefd0`
+  `12a780532b909e57881ee9e55c1cfbcb81ca1f38`
 
 This is the contamination that kept the helper task blocked during review: the
 artifact originally published the stale local remote-tracking ref
 (`6363b9c1...`) as if it were the current shared branch head. The first repair
 corrected that claim to `667b097d...`, but the helper branch then advanced to
 `dc1493a...`, then to `98e4e3ba...`, then to `9a3c9157...`, then to
-`0dc8ebff...`, then to `68289e7d...`, and then again to `636f4e31...`, while
-the markdown lagged behind the live branch and PR head. The exact chronology
-must therefore treat `667b097d...`, `dc1493a...`, `98e4e3ba...`,
-`9a3c9157...`, `0dc8ebff...`, and `68289e7d...` as prior repaired heads and
-`636f4e31...` as the current canonical helper branch and PR head.
+`0dc8ebff...`, then to `68289e7d...`, then to `636f4e31...`, and then again to
+`12a78053...`, while the markdown lagged behind the live branch and PR head.
+The exact chronology must therefore treat `667b097d...`, `dc1493a...`,
+`98e4e3ba...`, `9a3c9157...`, `0dc8ebff...`, `68289e7d...`, and
+`636f4e31...` as prior repaired heads and `12a78053...` as the current
+canonical helper branch and PR head.
 
 This worktree also demonstrates the more precise contamination shape: even
 after `git fetch origin`, the local `origin/codex2/iam-p0-006-unblock-history-repair`
 tracking ref still reported `98e4e3ba...`, while both `git ls-remote` and
-`gh pr view 1264 --json headRefOid` reported `636f4e31...`. For this helper
+`gh pr view 1264 --json headRefOid` reported `12a78053...`. For this helper
 task, the authoritative current head evidence is therefore the live remote ref
 and PR head, not the stale remote-tracking ref cached in the worktree.
 
@@ -175,7 +178,7 @@ reusing the superseded stale-history diagnosis.
   - `git rev-list --left-right --count origin/dev...codex2/iam-p0-006`
   - `git merge-base --is-ancestor ab68a8be8104b3bfaeedb70c1e5d3602d3317292 origin/dev`
   - `git log --oneline --decorate --max-count=12 --graph origin/dev origin/codex2/iam-p0-006 codex2/iam-p0-006-unblock-history-repair`
-  - `git show -s --format=fuller b27233f3c3210b3bacc636e7e5603daa3552f655 da8f9f79a93c9acc0a131fbb0e7993adb5d048c6 68289e7dd41ece05f837222b7859f4a81d0f5c45 636f4e312922d103d5379efae5560c291decefd0`
+  - `git show -s --format=fuller b27233f3c3210b3bacc636e7e5603daa3552f655 da8f9f79a93c9acc0a131fbb0e7993adb5d048c6 68289e7dd41ece05f837222b7859f4a81d0f5c45 636f4e312922d103d5379efae5560c291decefd0 12a780532b909e57881ee9e55c1cfbcb81ca1f38`
 - Inspected PR presence:
   - `gh pr list --head codex2/iam-p0-006 --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
   - `gh pr list --head codex2/iam-p0-006-unblock-history-repair --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
