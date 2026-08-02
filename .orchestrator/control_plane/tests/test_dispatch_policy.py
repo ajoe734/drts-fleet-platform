@@ -25,6 +25,7 @@ class DispatchPolicyTests(unittest.TestCase):
                     "reviewer": "Claude",
                     "depends_on": ["DEP-1", "ARCHIVED-1"],
                     "artifacts": ["apps/api"],
+                    "execution_branch": "codex/task-1-existing-pr",
                     "next": "implement",
                     "last_update": "2026-07-18T00:00:00Z",
                 },
@@ -80,6 +81,7 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["target_agent"], "Codex")
         self.assertEqual(first["metadata"], {"source": "test", "mode": "execution"})
+        self.assertEqual(first["task"]["execution_branch"], "codex/task-1-existing-pr")
 
 
     def test_runtime_event_omits_external_envelope_fields(self) -> None:
