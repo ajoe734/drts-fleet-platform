@@ -223,6 +223,13 @@ class GitMergeReconciliationTest(unittest.TestCase):
                     "reviewer": "Codex",
                     "status": "done",
                 },
+                {
+                    "id": "REL-REF-EMBED-001",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "status": "review_approved",
+                    "required_integration_status": "dev_deployed",
+                },
             ],
             "blockers": [
                 {
@@ -294,6 +301,22 @@ class GitMergeReconciliationTest(unittest.TestCase):
         self.assertEqual(reconciled, [])
         task = next(t for t in state["tasks"] if t["id"] == "PH1GC-E2E-010")
         self.assertEqual(task["status"], "backlog")
+
+    def test_reconcile_skips_dev_deploy_required_tasks(self) -> None:
+        state = self._state()
+        closeouts = {
+            "REL-REF-EMBED-001": {
+                "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                "subject": "REL-REF-EMBED-001: preserve release evidence gate",
+                "commit_date": "2026-08-02T03:48:47+00:00",
+            }
+        }
+        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
+            reconciled = ai_status.apply_git_merge_reconciliation(state)
+
+        self.assertEqual(reconciled, [])
+        task = next(t for t in state["tasks"] if t["id"] == "REL-REF-EMBED-001")
+        self.assertEqual(task["status"], "review_approved")
 
     def test_closeout_regex_excludes_anchor_commits(self) -> None:
         self.assertIsNotNone(
@@ -436,8 +459,10 @@ class IntegrationGateUnitTest(unittest.TestCase):
 
 
 class IntegrationGateCommandDoneTest(unittest.TestCase):
-    def _task(self) -> dict:
-        return {"id": "I18N-OPS-03", "owner": "Codex", "reviewer": "Claude", "status": "review_approved"}
+    def _task(self, **extra: object) -> dict:
+        task = {"id": "I18N-OPS-03", "owner": "Codex", "reviewer": "Claude", "status": "review_approved"}
+        task.update(extra)
+        return task
 
     def _state(self, task: dict) -> dict:
         return {"tasks": [task], "blockers": [], "handoffs": []}
@@ -511,6 +536,105 @@ class IntegrationGateCommandDoneTest(unittest.TestCase):
         ):
             ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
         self.assertEqual(task["status"], "done")
+
+    def test_dev_deploy_required_task_rejects_not_applicable(self) -> None:
+        task = self._task(required_integration_status="dev_deployed")
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
+        env = self._done_env(INTEGRATION_STATUS="not_applicable")
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            with self.assertRaisesRegex(SystemExit, "requires INTEGRATION_STATUS>=dev_deployed"):
+                ai_status.command_done(state, ["I18N-OPS-03", "attempted support-only closeout"])
+        self.assertEqual(task["status"], "review_approved")
+
+    def test_dev_deploy_required_task_rejects_merge_only_done(self) -> None:
+        task = self._task(required_integration_status="dev_deployed")
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
+        env = self._done_env(
+            INTEGRATION_STATUS="merged_to_dev",
+            PR_URL="https://example.test/pr/123",
+            CI_STATUS="passed",
+            CI_RUN_URL="https://example.test/ci/123",
+            MERGED_REF="origin/dev",
+            MERGE_COMMIT="abc123",
+        )
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            with self.assertRaisesRegex(SystemExit, "requires INTEGRATION_STATUS>=dev_deployed"):
+                ai_status.command_done(state, ["I18N-OPS-03", "merged but not deployed"])
+        self.assertEqual(task["status"], "review_approved")
+
+    def test_dev_deploy_required_task_requires_full_evidence(self) -> None:
+        task = self._task(required_integration_status="dev_deployed")
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
+        env = self._done_env(
+            INTEGRATION_STATUS="dev_deployed",
+            PR_URL="https://example.test/pr/123",
+            CI_STATUS="passed",
+            CI_RUN_URL="https://example.test/ci/123",
+            MERGED_REF="origin/dev",
+            MERGE_COMMIT="abc123",
+            DEV_DEPLOY_RUN_URL="https://example.test/deploy/123",
+            DEV_DEPLOY_SHA="abc123",
+        )
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            with self.assertRaisesRegex(SystemExit, "missing DEV_DEPLOY_SOURCE_REF"):
+                ai_status.command_done(state, ["I18N-OPS-03", "deployed but source ref missing"])
+        self.assertEqual(task["status"], "review_approved")
+
+    def test_dev_deploy_required_task_accepts_full_evidence(self) -> None:
+        task = self._task(required_integration_status="dev_deployed")
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
+        env = self._done_env(
+            INTEGRATION_STATUS="dev_deployed",
+            PR_URL="https://example.test/pr/123",
+            CI_STATUS="passed",
+            CI_RUN_URL="https://example.test/ci/123",
+            MERGED_REF="origin/dev",
+            MERGE_COMMIT="abc123",
+            DEV_DEPLOY_RUN_URL="https://example.test/deploy/123",
+            DEV_DEPLOY_SHA="abc123",
+            DEV_DEPLOY_SOURCE_REF="publish/v2026.08.02.0",
+        )
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            ai_status.command_done(state, ["I18N-OPS-03", "merged and deployed to dev"])
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["integration_status"], "dev_deployed")
+
+    def test_support_only_sidecar_still_allows_not_applicable(self) -> None:
+        task = self._task(task_class="sidecar", mutates_canonical=False)
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
+        with (
+            mock.patch.dict(os.environ, {"AI_NAME": "Codex", "NO_COMMIT_REQUIRED": "1"}, clear=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            ai_status.command_done(state, ["I18N-OPS-03", "support-only packet finalized"])
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["integration_status"], "not_applicable")
 
 
 if __name__ == "__main__":

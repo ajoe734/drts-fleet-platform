@@ -466,6 +466,21 @@ INTEGRATION_STATUS_VALUES = {
     "dev_deployed",
 }
 
+REQUIRED_INTEGRATION_STATUS_ALLOWED: dict[str, set[str]] = {
+    "branch_pushed": {
+        "branch_pushed",
+        "pr_open",
+        "ci_pending",
+        "ci_failed",
+        "merged_to_dev",
+        "deploy_blocked",
+        "dev_deployed",
+    },
+    "merged_to_dev": {"merged_to_dev", "deploy_blocked", "dev_deployed"},
+    "dev_deployed": {"dev_deployed"},
+    "not_applicable": {"not_applicable"},
+}
+
 
 def integration_metadata_from_env(commit_required: bool, timestamp: str) -> dict[str, Any]:
     integration_status = os.environ.get("INTEGRATION_STATUS", "").strip().lower()
@@ -557,7 +572,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             **integration_metadata,
         }
 
-    if no_commit_required:
+    if no_commit_required or not commit_hash:
         return {
             "commit_hash": "-",
             "commit_subject": "no-commit closeout",
@@ -566,7 +581,72 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "commit_recorded_at": timestamp,
             **integration_metadata,
         }
-    return integration_metadata
+
+    if not commit_subject:
+        raise SystemExit("done requires COMMIT_SUBJECT when COMMIT_HASH is provided")
+
+    return {
+        "commit_hash": commit_hash,
+        "commit_subject": commit_subject,
+        "commit_agent": canonical_agent_name(commit_agent),
+        "commit_reviewer": reviewer,
+        "commit_recorded_at": timestamp,
+        "push_remote": push_remote or "-",
+        "push_branch": push_branch or "-",
+        "push_ref": push_ref or (f"{push_remote}/{push_branch}" if push_remote and push_branch else "-"),
+        "push_commit": push_commit,
+        "push_recorded_at": timestamp,
+        **integration_metadata,
+    }
+
+
+def required_integration_status(task: dict[str, Any] | None) -> str | None:
+    required = str((task or {}).get("required_integration_status") or "").strip().lower()
+    if not required:
+        return None
+    if required not in INTEGRATION_STATUS_VALUES:
+        return None
+    return required
+
+
+def enforce_required_integration_closeout(
+    task: dict[str, Any],
+    completion_metadata: dict[str, Any],
+) -> None:
+    required_status = required_integration_status(task)
+    if not required_status:
+        return
+
+    actual_status = str(completion_metadata.get("integration_status") or "").strip().lower()
+    allowed_statuses = REQUIRED_INTEGRATION_STATUS_ALLOWED.get(required_status, {required_status})
+    if actual_status not in allowed_statuses:
+        raise SystemExit(
+            f"{task.get('id') or 'task'} requires INTEGRATION_STATUS>={required_status}; "
+            f"received {actual_status or 'unset'}. "
+            "Support-only/not_applicable closeout is reserved for explicit sidecar or non-canonical tasks."
+        )
+
+    if required_status != "dev_deployed":
+        return
+
+    missing: list[str] = []
+    for key in (
+        "pr_url",
+        "ci_status",
+        "ci_run_url",
+        "merged_ref",
+        "merge_commit",
+        "dev_deploy_run_url",
+        "dev_deploy_sha",
+        "dev_deploy_source_ref",
+    ):
+        if not str(completion_metadata.get(key) or "").strip():
+            missing.append(key.upper())
+    if missing:
+        raise SystemExit(
+            f"{task.get('id') or 'task'} requires dev-deploy closeout evidence; "
+            f"missing {', '.join(missing)}."
+        )
 
 
 def iso_now() -> str:
@@ -1189,6 +1269,9 @@ def apply_git_merge_reconciliation(
         closeout = closeouts.get(task_id)
         if not closeout:
             continue
+        required_status = required_integration_status(task)
+        if required_status == "dev_deployed":
+            continue
         prior_status = str(task.get("status") or "")
         actor = canonical_agent_name(task.get("owner")) or current_actor()
         task["status"] = "done"
@@ -1204,6 +1287,10 @@ def apply_git_merge_reconciliation(
         task["push_ref"] = target_ref
         task["push_commit"] = closeout["sha"]
         task["push_recorded_at"] = timestamp
+        task["integration_status"] = "merged_to_dev"
+        task["integration_recorded_at"] = timestamp
+        task["merged_ref"] = target_ref
+        task["merge_commit"] = closeout["sha"]
         task["reconciled_from_git_at"] = timestamp
         task["reconciled_from_git_ref"] = target_ref
         task["reconciled_from_git_prior_status"] = prior_status
@@ -2121,6 +2208,7 @@ def command_done(state: dict[str, Any], args: list[str]) -> None:
     if task.get("status") != "review_approved":
         raise SystemExit(f"{task_id} must be review_approved before it can move to done")
     completion_metadata = completion_metadata_from_env(task, actor)
+    enforce_required_integration_closeout(task, completion_metadata)
     _enforce_integration_gate(task, completion_metadata)
     timestamp = iso_now()
     task["status"] = "done"
