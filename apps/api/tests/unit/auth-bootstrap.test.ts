@@ -1773,6 +1773,53 @@ describe("workforce control-plane token exchange", () => {
     });
   });
 
+  it("rejects workforce assertions when verifier key material is not configured", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    delete process.env.DRTS_WORKFORCE_ASSERTION_SECRET;
+    delete process.env.DRTS_WORKFORCE_ASSERTION_PUBLIC_KEY;
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller } = createWorkforceFixture();
+    const forgedAssertion = jwt.sign(
+      {
+        sub: "workforce-forged-001",
+        email: "admin@platform.drts",
+        email_verified: true,
+        active: true,
+        groups: ["drts-platform-superadmin"],
+      },
+      process.env.JWT_SECRET!,
+      {
+        algorithm: "HS256",
+        issuer: "https://cloud.google.com/iap",
+        audience: "drts-control-plane",
+      },
+    );
+
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-drts-control-plane-actor-type": "platform_admin",
+          "x-goog-iap-jwt-assertion": forgedAssertion,
+          "x-goog-authenticated-user-email":
+            "accounts.google.com:admin@platform.drts",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          details: {
+            reasonCode: "iap_assertion_verifier_unconfigured",
+          },
+        },
+      },
+    });
+  });
+
   it("rejects inactive workforce users", async () => {
     process.env.JWT_SECRET = "inner-jwt-secret";
     process.env.DRTS_INTERNAL_KEY = "internal-secret";
@@ -1842,7 +1889,7 @@ describe("workforce control-plane token exchange", () => {
         ...baseHeaders,
         "x-goog-iap-jwt-assertion": signWorkforceAssertion({
           sub: "workforce-drift-001",
-          groups: ["drts-platform-operator"],
+          groups: ["drts-platform-viewer"],
         }),
       },
       method: "POST",
@@ -1850,11 +1897,15 @@ describe("workforce control-plane token exchange", () => {
     });
 
     const payload = jwtAuthService.verify(downgraded.token);
-    expect(payload?.roles).toEqual(["operator"]);
+    expect(payload?.roles).toEqual(["viewer"]);
+    expect(payload?.scopes).toContain("foundation:read");
+    expect(payload?.scopes).toContain("tenant:read");
+    expect(payload?.scopes).not.toContain("foundation:write");
+    expect(payload?.scopes).not.toContain("tenant:write");
     expect(identityRepository.listRoleBindings()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          roleCode: "operator",
+          roleCode: "viewer",
         }),
       ]),
     );
@@ -1869,7 +1920,7 @@ describe("workforce control-plane token exchange", () => {
             grants: expect.arrayContaining([
               expect.objectContaining({
                 actorType: "platform_admin",
-                roleCode: "operator",
+                roleCode: "viewer",
               }),
             ]),
           }),

@@ -12,6 +12,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import {
   AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE,
   AUTH_SCOPE_PRESETS,
+  getPlatformAdminRoleScopes,
 } from "../../common/auth/auth.constants";
 import type {
   AuthActorType,
@@ -30,8 +31,6 @@ const IAP_ASSERTION_HEADER = "x-goog-iap-jwt-assertion" as const;
 const IAP_EMAIL_HEADER = "x-goog-authenticated-user-email" as const;
 const IAP_USER_ID_HEADER = "x-goog-authenticated-user-id" as const;
 const DEFAULT_WORKFORCE_ASSERTION_ISSUER = "https://cloud.google.com/iap";
-const DEFAULT_WORKFORCE_ASSERTION_ALGORITHMS = ["HS256"] as const;
-
 type ControlPlaneActorType = Extract<AuthActorType, "platform_admin" | "ops_user">;
 type WorkforceRealm = "platform" | "ops";
 
@@ -286,6 +285,9 @@ export class WorkforceIdentityService {
         issuer: this.getAssertionIssuer(),
       }) as WorkforceAssertionPayload;
     } catch (error) {
+      if (error instanceof ApiRequestError) {
+        throw error;
+      }
       throw this.buildDeniedError(
         error instanceof Error && /audience/i.test(error.message)
           ? "wrong_workforce_audience"
@@ -312,9 +314,23 @@ export class WorkforceIdentityService {
       partnerEntrySlug: null,
       roleFamilies: [...AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE[actorType]],
       roles: [roleBinding.roleCode],
-      scopes: [...AUTH_SCOPE_PRESETS[actorType]],
+      scopes: this.resolveScopes(actorType, roleBinding.roleCode),
       requestId: requestId ?? null,
     };
+  }
+
+  private resolveScopes(
+    actorType: ControlPlaneActorType,
+    roleCode: string,
+  ): string[] {
+    if (actorType === "platform_admin") {
+      const roleScopes = getPlatformAdminRoleScopes(roleCode);
+      if (roleScopes) {
+        return [...roleScopes];
+      }
+    }
+
+    return [...AUTH_SCOPE_PRESETS[actorType]];
   }
 
   private resolveActorId(
@@ -447,13 +463,15 @@ export class WorkforceIdentityService {
       return secret;
     }
 
-    return process.env.JWT_SECRET?.trim() || "test-secret";
+    throw this.buildDeniedError("iap_assertion_verifier_unconfigured");
   }
 
   private getAssertionAlgorithms(): jwt.Algorithm[] {
     const raw = process.env.DRTS_WORKFORCE_ASSERTION_ALGORITHMS?.trim();
     if (!raw) {
-      return [...DEFAULT_WORKFORCE_ASSERTION_ALGORITHMS];
+      return process.env.DRTS_WORKFORCE_ASSERTION_PUBLIC_KEY?.trim()
+        ? ["RS256"]
+        : ["HS256"];
     }
 
     return raw

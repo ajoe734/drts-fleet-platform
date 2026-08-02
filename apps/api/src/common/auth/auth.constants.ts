@@ -188,6 +188,48 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   ],
 };
 
+const PLATFORM_ADMIN_VIEWER_SCOPES = [
+  "identity:read",
+  "foundation:read",
+  "audit:read",
+  "notifications:read",
+  "tenant:read",
+  "tenant:webhooks:read",
+  "tenant:sla:read",
+  "tenant:billing:read",
+  "billing:read",
+  "regulatory:read",
+  "incident:read",
+  "maintenance:read",
+  "reports:read",
+  "forwarder:read",
+  "sandbox.compliance.read",
+  "sandbox.investigation.read",
+  "sandbox.evidence.preview",
+  "multi_taxi_ratings:read",
+] as const;
+
+const PLATFORM_ADMIN_OPERATOR_SCOPES = [
+  ...PLATFORM_ADMIN_VIEWER_SCOPES,
+  "notifications:write",
+  "billing:write",
+  "regulatory:write",
+  "incident:write",
+  "maintenance:write",
+  "reports:write",
+  "multi_taxi_ratings:moderate",
+] as const;
+
+export const AUTH_PLATFORM_ADMIN_ROLE_SCOPE_PRESETS: Record<
+  "superadmin" | "admin" | "operator" | "viewer",
+  readonly string[]
+> = {
+  superadmin: AUTH_SCOPE_PRESETS.platform_admin,
+  admin: AUTH_SCOPE_PRESETS.platform_admin,
+  operator: PLATFORM_ADMIN_OPERATOR_SCOPES,
+  viewer: PLATFORM_ADMIN_VIEWER_SCOPES,
+};
+
 export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
   {
     tenant_admin: [
@@ -243,4 +285,14 @@ export function getTenantRoleScopes(
   roleCode: string,
 ): readonly string[] | null {
   return AUTH_TENANT_ROLE_SCOPE_PRESETS[roleCode] ?? null;
+}
+
+export function getPlatformAdminRoleScopes(
+  roleCode: string,
+): readonly string[] | null {
+  return (
+    AUTH_PLATFORM_ADMIN_ROLE_SCOPE_PRESETS[
+      roleCode as keyof typeof AUTH_PLATFORM_ADMIN_ROLE_SCOPE_PRESETS
+    ] ?? null
+  );
 }
