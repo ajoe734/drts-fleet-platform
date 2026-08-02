@@ -231,6 +231,7 @@ import {
   type PersistTenantPartnerChanges,
   type StoredPartnerIngressCredentialRecord,
   type StoredTenantApiKeyRecord,
+  type TenantPartnerState,
   type TenantPartnerQueryExecutor,
   type TenantQuotaMonthlySnapshotRecord,
   type StoredWebhookDeliveryRecord,
@@ -1252,9 +1253,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       (securityEventsService instanceof IdentityRepository
         ? securityEventsService
         : undefined);
+    if (isStrictAuthEnvironment()) {
+      this.clearDemoSeedState();
+    }
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
     );
+    if (isStrictAuthEnvironment()) {
+      this.partnerIngressCredentials = [];
+    }
     this.startApprovalNotificationPolling();
   }
 
@@ -1286,25 +1293,45 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const quotaMonthlySnapshots = persistedState.quotaMonthlySnapshots ?? [];
       const userRoles = persistedState.userRoles ?? [];
       const apiKeys = persistedState.apiKeys ?? [];
+      const sanitizedState = this.sanitizePersistedState({
+        notificationPreferences,
+        webhookEndpoints,
+        webhookDeliveries,
+        slaProfiles,
+        partnerEntries,
+        partnerIngressCredentials,
+        partnerEligibilityVerifications,
+        approvalRules,
+        approvalRequests,
+        approvalDecisions,
+        passengers,
+        addresses,
+        costCenters,
+        quotaPolicies,
+        quotaLedger,
+        quotaMonthlySnapshots,
+        userRoles,
+        apiKeys,
+      });
       const hasPersistedState =
-        notificationPreferences.length > 0 ||
-        slaProfiles.length > 0 ||
-        webhookEndpoints.length > 0 ||
-        webhookDeliveries.length > 0 ||
-        partnerEntries.length > 0 ||
-        partnerIngressCredentials.length > 0 ||
-        partnerEligibilityVerifications.length > 0 ||
-        approvalRules.length > 0 ||
-        approvalRequests.length > 0 ||
-        approvalDecisions.length > 0 ||
-        passengers.length > 0 ||
-        addresses.length > 0 ||
-        costCenters.length > 0 ||
-        quotaPolicies.length > 0 ||
-        quotaLedger.length > 0 ||
-        quotaMonthlySnapshots.length > 0 ||
-        userRoles.length > 0 ||
-        apiKeys.length > 0;
+        sanitizedState.notificationPreferences.length > 0 ||
+        sanitizedState.slaProfiles.length > 0 ||
+        sanitizedState.webhookEndpoints.length > 0 ||
+        sanitizedState.webhookDeliveries.length > 0 ||
+        sanitizedState.partnerEntries.length > 0 ||
+        sanitizedState.partnerIngressCredentials.length > 0 ||
+        sanitizedState.partnerEligibilityVerifications.length > 0 ||
+        sanitizedState.approvalRules.length > 0 ||
+        sanitizedState.approvalRequests.length > 0 ||
+        sanitizedState.approvalDecisions.length > 0 ||
+        sanitizedState.passengers.length > 0 ||
+        sanitizedState.addresses.length > 0 ||
+        sanitizedState.costCenters.length > 0 ||
+        sanitizedState.quotaPolicies.length > 0 ||
+        sanitizedState.quotaLedger.length > 0 ||
+        sanitizedState.quotaMonthlySnapshots.length > 0 ||
+        sanitizedState.userRoles.length > 0 ||
+        sanitizedState.apiKeys.length > 0;
 
       if (!hasPersistedState) {
         this.persistChanges(
@@ -1346,52 +1373,62 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.notificationPreferences = new Map(
-        notificationPreferences.map((preferences) => [
+        sanitizedState.notificationPreferences.map((preferences) => [
           preferences.tenantId,
           this.cloneNotificationPreferences(preferences),
         ]),
       );
       this.slaProfiles = new Map(
-        slaProfiles.map((profile) => [
+        sanitizedState.slaProfiles.map((profile) => [
           profile.tenantId,
           this.cloneSlaProfile(profile),
         ]),
       );
       this.partnerEntries =
-        partnerEntries.length > 0
-          ? partnerEntries.map((entry) => this.clonePartnerEntry(entry))
-          : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
+        sanitizedState.partnerEntries.length > 0
+          ? sanitizedState.partnerEntries.map((entry) =>
+              this.clonePartnerEntry(entry),
+            )
+          : isStrictAuthEnvironment()
+            ? []
+            : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
       this.reconcilePartnerEntrySeeds();
       this.partnerIngressCredentials =
-        partnerIngressCredentials.length > 0
-          ? partnerIngressCredentials.map((credential) =>
+        sanitizedState.partnerIngressCredentials.length > 0
+          ? sanitizedState.partnerIngressCredentials.map((credential) =>
               this.cloneStoredPartnerIngressCredential(credential),
             )
-          : this.partnerIngressCredentialSeeds.map((seed) =>
-              createBootstrapPartnerIngressCredential(seed),
-            );
+          : isStrictAuthEnvironment()
+            ? []
+            : this.partnerIngressCredentialSeeds.map((seed) =>
+                createBootstrapPartnerIngressCredential(seed),
+              );
       this.reconcilePartnerIngressCredentialSeeds();
       this.normalizePartnerEntryAuthModes();
       this.partnerEligibilityVerifications = new Map(
-        partnerEligibilityVerifications.map((verification) => [
+        sanitizedState.partnerEligibilityVerifications.map((verification) => [
           verification.eligibilityVerificationId,
           this.clonePartnerEligibilityVerification(verification),
         ]),
       );
-      this.approvalRules = approvalRules.map((rule) =>
+      this.approvalRules = sanitizedState.approvalRules.map((rule) =>
         this.cloneApprovalRule(rule),
       );
-      this.approvalRuleVersions = approvalRules.reduce((versions, rule) => {
-        versions.set(
-          rule.tenantId,
-          Math.max(versions.get(rule.tenantId) ?? 0, 1),
-        );
-        return versions;
-      }, new Map<string, number>());
-      this.approvalDecisions = approvalDecisions.map((decision) =>
+      this.approvalRuleVersions = sanitizedState.approvalRules.reduce(
+        (versions, rule) => {
+          versions.set(
+            rule.tenantId,
+            Math.max(versions.get(rule.tenantId) ?? 0, 1),
+          );
+          return versions;
+        },
+        new Map<string, number>(),
+      );
+      this.approvalDecisions = sanitizedState.approvalDecisions.map(
+        (decision) =>
         this.cloneApprovalDecision(decision),
       );
-      this.approvalRequests = approvalRequests.map((request) =>
+      this.approvalRequests = sanitizedState.approvalRequests.map((request) =>
         this.cloneApprovalRequest(
           this.mergeApprovalRequestDecisions(
             request,
@@ -1402,24 +1439,31 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ),
         ),
       );
-      this.webhookEndpoints = webhookEndpoints.map((endpoint) =>
+      this.webhookEndpoints = sanitizedState.webhookEndpoints.map((endpoint) =>
         this.cloneStoredWebhookEndpoint(endpoint),
       );
-      this.webhookDeliveries = webhookDeliveries.map((delivery) =>
+      this.webhookDeliveries = sanitizedState.webhookDeliveries.map(
+        (delivery) =>
         this.cloneStoredWebhookDelivery(delivery),
       );
-      this.passengers = passengers.map((passenger) =>
+      this.passengers = sanitizedState.passengers.map((passenger) =>
         this.clonePassenger(passenger),
       );
-      this.addresses = addresses.map((address) => this.cloneAddress(address));
+      this.addresses = sanitizedState.addresses.map((address) =>
+        this.cloneAddress(address),
+      );
       this.costCenters =
-        costCenters.length > 0
-          ? costCenters.map((costCenter) => this.cloneCostCenter(costCenter))
-          : COST_CENTER_SEED.map((costCenter) =>
+        sanitizedState.costCenters.length > 0
+          ? sanitizedState.costCenters.map((costCenter) =>
               this.cloneCostCenter(costCenter),
-            );
+            )
+          : isStrictAuthEnvironment()
+            ? []
+            : COST_CENTER_SEED.map((costCenter) =>
+              this.cloneCostCenter(costCenter),
+              );
       this.quotaPolicies = new Map(
-        quotaPolicies.map((policy) => [
+        sanitizedState.quotaPolicies.map((policy) => [
           this.buildQuotaPolicyKey(
             policy.tenantId,
             policy.costCenterCode,
@@ -1428,11 +1472,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           this.cloneQuotaPolicy(policy),
         ]),
       );
-      this.quotaLedger = quotaLedger.map((entry) =>
+      this.quotaLedger = sanitizedState.quotaLedger.map((entry) =>
         this.cloneQuotaLedgerEntry(entry),
       );
       this.quotaMonthlySnapshots = new Map(
-        quotaMonthlySnapshots.map((snapshot) => [
+        sanitizedState.quotaMonthlySnapshots.map((snapshot) => [
           this.buildQuotaSnapshotKey(
             snapshot.tenantId,
             snapshot.costCenterCode,
@@ -1443,12 +1487,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ]),
       );
       this.userRoles =
-        userRoles.length > 0
-          ? userRoles.map((userRole) => this.cloneUserRole(userRole))
-          : USER_ROLE_SEED.map((userRole) => this.cloneUserRole(userRole));
-      this.apiKeys = apiKeys.map((apiKey) => this.cloneStoredApiKey(apiKey));
+        sanitizedState.userRoles.length > 0
+          ? sanitizedState.userRoles.map((userRole) =>
+              this.cloneUserRole(userRole),
+            )
+          : isStrictAuthEnvironment()
+            ? []
+            : USER_ROLE_SEED.map((userRole) => this.cloneUserRole(userRole));
+      this.apiKeys = sanitizedState.apiKeys.map((apiKey) =>
+        this.cloneStoredApiKey(apiKey),
+      );
       this.syncIdentityTenantUserRoles("module init rehydrate");
-      if (partnerEntries.length === 0) {
+      if (sanitizedState.partnerEntries.length === 0 && !isStrictAuthEnvironment()) {
         this.persistChanges(
           {
             partnerEntries: this.partnerEntries.map((entry) =>
@@ -1458,7 +1508,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init partner entry bootstrap",
         );
       }
-      if (partnerIngressCredentials.length === 0) {
+      if (
+        sanitizedState.partnerIngressCredentials.length === 0 &&
+        !isStrictAuthEnvironment()
+      ) {
         this.persistChanges(
           {
             partnerIngressCredentials: this.partnerIngressCredentials.map(
@@ -1469,7 +1522,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init partner ingress credential bootstrap",
         );
       }
-      if (costCenters.length === 0) {
+      if (sanitizedState.costCenters.length === 0 && !isStrictAuthEnvironment()) {
         this.persistChanges(
           {
             costCenters: this.costCenters.map((costCenter) =>
@@ -1479,7 +1532,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init tenant cost-center bootstrap",
         );
       }
-      if (userRoles.length === 0) {
+      if (sanitizedState.userRoles.length === 0 && !isStrictAuthEnvironment()) {
         this.persistChanges(
           {
             userRoles: this.userRoles.map((userRole) =>
@@ -8882,6 +8935,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private reconcilePartnerEntrySeeds() {
+    if (isStrictAuthEnvironment()) {
+      return;
+    }
     const existingSlugs = new Set(
       this.partnerEntries.map((entry) => entry.entrySlug),
     );
@@ -8929,6 +8985,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private reconcilePartnerIngressCredentialSeeds() {
+    if (isStrictAuthEnvironment()) {
+      return;
+    }
     const configuredEntrySlugs = new Set(
       this.partnerIngressCredentials.map((credential) => credential.entrySlug),
     );
@@ -8959,6 +9018,147 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       (credential) =>
         credential.entrySlug === entrySlug && credential.revokedAt === null,
     );
+  }
+
+  private clearDemoSeedState() {
+    this.notificationPreferences = new Map();
+    this.slaProfiles = new Map();
+    this.passengers = [];
+    this.addresses = [];
+    this.costCenters = [];
+    this.userRoles = [];
+    this.apiKeys = [];
+    this.partnerEntries = [];
+  }
+
+  private sanitizePersistedState(
+    state: TenantPartnerState,
+  ): TenantPartnerState {
+    if (!isStrictAuthEnvironment()) {
+      return {
+        ...state,
+        notificationPreferences: state.notificationPreferences.map((value) => ({
+          ...value,
+        })),
+        webhookEndpoints: state.webhookEndpoints.map((value) =>
+          this.cloneStoredWebhookEndpoint(value),
+        ),
+        webhookDeliveries: state.webhookDeliveries.map((value) =>
+          this.cloneStoredWebhookDelivery(value),
+        ),
+        slaProfiles: state.slaProfiles.map((value) =>
+          this.cloneSlaProfile(value),
+        ),
+        partnerEntries: state.partnerEntries.map((value) =>
+          this.clonePartnerEntry(value),
+        ),
+        partnerIngressCredentials: state.partnerIngressCredentials.map(
+          (value) => this.cloneStoredPartnerIngressCredential(value),
+        ),
+        partnerEligibilityVerifications:
+          state.partnerEligibilityVerifications.map((value) =>
+            this.clonePartnerEligibilityVerification(value),
+          ),
+        approvalRules: state.approvalRules.map((value) =>
+          this.cloneApprovalRule(value),
+        ),
+        approvalRequests: state.approvalRequests.map((value) =>
+          this.cloneApprovalRequest(value),
+        ),
+        approvalDecisions: state.approvalDecisions.map((value) =>
+          this.cloneApprovalDecision(value),
+        ),
+        passengers: state.passengers.map((value) => this.clonePassenger(value)),
+        addresses: state.addresses.map((value) => this.cloneAddress(value)),
+        costCenters: state.costCenters.map((value) =>
+          this.cloneCostCenter(value),
+        ),
+        quotaPolicies: state.quotaPolicies.map((value) =>
+          this.cloneQuotaPolicy(value),
+        ),
+        quotaLedger: state.quotaLedger.map((value) =>
+          this.cloneQuotaLedgerEntry(value),
+        ),
+        quotaMonthlySnapshots: state.quotaMonthlySnapshots.map((value) =>
+          this.cloneQuotaMonthlySnapshot(value),
+        ),
+        userRoles: state.userRoles.map((value) => this.cloneUserRole(value)),
+        apiKeys: state.apiKeys.map((value) => this.cloneStoredApiKey(value)),
+      };
+    }
+
+    const retainedPartnerEntries = state.partnerEntries
+      .filter((entry) => entry.tenantId !== DEMO_TENANT_ID)
+      .map((entry) => this.clonePartnerEntry(entry));
+    const retainedPartnerEntrySlugs = new Set(
+      retainedPartnerEntries.map((entry) => entry.entrySlug),
+    );
+    const retainIfNotDemoTenant = <T>(values: readonly T[]) =>
+      values.filter((value) => {
+        if (!value || typeof value !== "object" || !("tenantId" in value)) {
+          return true;
+        }
+        return (
+          (value as { tenantId?: string }).tenantId !== DEMO_TENANT_ID
+        );
+      });
+
+    return {
+      notificationPreferences: retainIfNotDemoTenant(
+        state.notificationPreferences,
+      ).map((value) => ({ ...value })),
+      webhookEndpoints: retainIfNotDemoTenant(state.webhookEndpoints).map(
+        (value) => this.cloneStoredWebhookEndpoint(value),
+      ),
+      webhookDeliveries: retainIfNotDemoTenant(state.webhookDeliveries).map(
+        (value) => this.cloneStoredWebhookDelivery(value),
+      ),
+      slaProfiles: retainIfNotDemoTenant(state.slaProfiles).map((value) =>
+        this.cloneSlaProfile(value),
+      ),
+      partnerEntries: retainedPartnerEntries,
+      partnerIngressCredentials: state.partnerIngressCredentials
+        .filter((value) => retainedPartnerEntrySlugs.has(value.entrySlug))
+        .map((value) => this.cloneStoredPartnerIngressCredential(value)),
+      partnerEligibilityVerifications: retainIfNotDemoTenant(
+        state.partnerEligibilityVerifications,
+      ).map((value) => this.clonePartnerEligibilityVerification(value)),
+      approvalRules: retainIfNotDemoTenant(state.approvalRules).map((value) =>
+        this.cloneApprovalRule(value),
+      ),
+      approvalRequests: retainIfNotDemoTenant(state.approvalRequests).map(
+        (value) =>
+        this.cloneApprovalRequest(value),
+      ),
+      approvalDecisions: retainIfNotDemoTenant(state.approvalDecisions).map(
+        (value) =>
+        this.cloneApprovalDecision(value),
+      ),
+      passengers: retainIfNotDemoTenant(state.passengers).map((value) =>
+        this.clonePassenger(value),
+      ),
+      addresses: retainIfNotDemoTenant(state.addresses).map((value) =>
+        this.cloneAddress(value),
+      ),
+      costCenters: retainIfNotDemoTenant(state.costCenters).map((value) =>
+        this.cloneCostCenter(value),
+      ),
+      quotaPolicies: retainIfNotDemoTenant(state.quotaPolicies).map((value) =>
+        this.cloneQuotaPolicy(value),
+      ),
+      quotaLedger: retainIfNotDemoTenant(state.quotaLedger).map((value) =>
+        this.cloneQuotaLedgerEntry(value),
+      ),
+      quotaMonthlySnapshots: retainIfNotDemoTenant(
+        state.quotaMonthlySnapshots,
+      ).map((value) => this.cloneQuotaMonthlySnapshot(value)),
+      userRoles: retainIfNotDemoTenant(state.userRoles).map((value) =>
+        this.cloneUserRole(value),
+      ),
+      apiKeys: retainIfNotDemoTenant(state.apiKeys).map((value) =>
+        this.cloneStoredApiKey(value),
+      ),
+    };
   }
 
   private requirePartnerIngressCredential(entrySlug: string, keyId: string) {
