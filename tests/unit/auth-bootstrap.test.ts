@@ -84,7 +84,7 @@ afterEach(() => {
 });
 
 describe("tenant bootstrap session fixture gate", () => {
-  it("rejects email-only tenant bootstrap in production even for an active membership", () => {
+  it("rejects email-only tenant bootstrap in production even for an active membership", async () => {
     process.env.APP_ENV = "production";
     process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
@@ -92,7 +92,7 @@ describe("tenant bootstrap session fixture gate", () => {
 
     let thrown: unknown;
     try {
-      controller.issueTenantBootstrapSession({
+      await controller.issueTenantBootstrapSession({
         email: "ops@example.com",
         tenantId: "tenant-alpha",
       });
@@ -108,14 +108,14 @@ describe("tenant bootstrap session fixture gate", () => {
     );
   });
 
-  it("rejects email-only tenant bootstrap in local mode until fixture mode is explicitly enabled", () => {
+  it("rejects email-only tenant bootstrap in local mode until fixture mode is explicitly enabled", async () => {
     process.env.NODE_ENV = "test";
 
     const controller = createController([createTenantUser()]);
 
     let thrown: unknown;
     try {
-      controller.issueTenantBootstrapSession({
+      await controller.issueTenantBootstrapSession({
         email: "ops@example.com",
         tenantId: "tenant-alpha",
       });
@@ -131,13 +131,13 @@ describe("tenant bootstrap session fixture gate", () => {
     );
   });
 
-  it("allows deterministic local fixtures only when explicit fixture mode is enabled", () => {
+  it("allows deterministic local fixtures only when explicit fixture mode is enabled", async () => {
     process.env.NODE_ENV = "test";
     process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
     const controller = createController([createTenantUser()]);
 
-    const response = controller.issueTenantBootstrapSession({
+    const response = await controller.issueTenantBootstrapSession({
       email: "ops@example.com",
       tenantId: "tenant-alpha",
     });
@@ -151,7 +151,7 @@ describe("tenant bootstrap session fixture gate", () => {
     expect(response.data.accessToken).toEqual(expect.any(String));
   });
 
-  it("uses the same non-enumerating denial for invited, suspended, unknown, and cross-tenant users", () => {
+  it("uses the same non-enumerating denial for invited, suspended, unknown, and cross-tenant users", async () => {
     process.env.NODE_ENV = "test";
     process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
@@ -183,7 +183,7 @@ describe("tenant bootstrap session fixture gate", () => {
 
       let thrown: unknown;
       try {
-        controller.issueTenantBootstrapSession(testCase.command);
+        await controller.issueTenantBootstrapSession(testCase.command);
       } catch (error) {
         thrown = error;
       }

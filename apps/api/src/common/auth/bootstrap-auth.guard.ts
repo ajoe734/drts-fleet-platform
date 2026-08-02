@@ -97,6 +97,12 @@ function mergeUnique<T>(...values: readonly T[][]): T[] {
   return [...new Set(values.flat())];
 }
 
+function isPromiseLike<T>(
+  value: T | Promise<T>,
+): value is Promise<T> {
+  return typeof (value as Promise<T> | null)?.then === "function";
+}
+
 function extractBearerToken(
   headers: Record<string, string | string[] | undefined>,
 ): string | null {
@@ -133,8 +139,12 @@ export class BootstrapAuthGuard implements CanActivate {
       ]) ?? false;
 
     if (isOpenRoute) {
-      this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
-      return true;
+      const resolution = this.populateOpenRouteIdentity(
+        request,
+        baseHeaders,
+        requestUrl,
+      );
+      return isPromiseLike(resolution) ? resolution.then(() => true) : true;
     }
 
     const routePolicy = resolveRouteAuthPolicy(
@@ -244,15 +254,22 @@ export class BootstrapAuthGuard implements CanActivate {
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
     policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
-  ): boolean {
+  ): boolean | Promise<boolean> {
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
-        const payload = this.jwtAuthService.verify(token);
-        if (payload) {
-          this.assertDriverBindingActive(payload, requestUrl);
-          const identity = this.jwtAuthService.toRequestIdentity(payload);
+        return this.jwtAuthService.verifyAccessToken(token).then((payload) => {
+          if (!payload) {
+            throw new ApiRequestError(
+              401,
+              "JWT_INVALID",
+              "Bearer token is invalid or expired.",
+              { route: requestUrl },
+            );
+          }
+
+          const identity = this.jwtAuthService!.toRequestIdentity(payload);
           request.identity = identity;
           if (policy) {
             try {
@@ -268,13 +285,7 @@ export class BootstrapAuthGuard implements CanActivate {
             }
           }
           return true;
-        }
-        throw new ApiRequestError(
-          401,
-          "JWT_INVALID",
-          "Bearer token is invalid or expired.",
-          { route: requestUrl },
-        );
+        });
       }
     }
     const headers = isSseBootstrapQueryRoute(
@@ -335,22 +346,21 @@ export class BootstrapAuthGuard implements CanActivate {
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
-  ) {
+  ): void | Promise<void> {
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
-        const payload = this.jwtAuthService.verify(token);
-        if (payload) {
-          this.assertDriverBindingActive(payload, requestUrl);
-          request.identity = this.jwtAuthService.toRequestIdentity(payload);
-          return;
-        }
-        throw new ApiRequestError(
-          401,
-          "JWT_INVALID",
-          "Bearer token is invalid or expired.",
-          { route: requestUrl },
-        );
+        return this.jwtAuthService.verifyAccessToken(token).then((payload) => {
+          if (!payload) {
+            throw new ApiRequestError(
+              401,
+              "JWT_INVALID",
+              "Bearer token is invalid or expired.",
+              { route: requestUrl },
+            );
+          }
+          request.identity = this.jwtAuthService!.toRequestIdentity(payload);
+        });
       }
     }
 
@@ -476,22 +486,4 @@ export class BootstrapAuthGuard implements CanActivate {
     );
   }
 
-  private assertDriverBindingActive(
-    payload: JwtIdentityPayload,
-    route: string,
-  ) {
-    if (
-      payload.actorType !== "driver_user" ||
-      !this.driverDeviceSessionService
-    ) {
-      return;
-    }
-
-    this.driverDeviceSessionService.assertSessionAccessAllowed(
-      payload.driverBindingId,
-      payload.driverDeviceId,
-      payload.sub,
-      route,
-    );
-  }
 }
