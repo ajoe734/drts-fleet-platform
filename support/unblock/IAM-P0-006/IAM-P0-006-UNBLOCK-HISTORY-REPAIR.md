@@ -6,7 +6,7 @@
 - Parent: `IAM-P0-006`
 - Owner: `Codex2`
 - Reviewer: `Codex`
-- Audit timestamp: `2026-08-02T05:18:00+00:00`
+- Audit timestamp: `2026-08-02T05:31:00+00:00`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex2-iam-p0-006-unblock-history-repair`
 - Assigned helper branch:
@@ -87,24 +87,27 @@ fast-forward of the owner branch tip.
 
 - prior repaired helper head from the earlier review pass:
   `667b097dc1ef30ce5c5f45ecb703d28ca097e8ac`
+- prior refreshed helper head from the first repair follow-up:
+  `dc1493a43c82c712cd8c0e419ccca37b8d540ac1`
 - current local helper `HEAD`:
-  `codex2/iam-p0-006-unblock-history-repair @ dc1493a43c82c712cd8c0e419ccca37b8d540ac1`
+  `codex2/iam-p0-006-unblock-history-repair @ 98e4e3ba2634743ff1a9396c3222df56cba2acd9`
+- current local remote-tracking ref:
+  `origin/codex2/iam-p0-006-unblock-history-repair @ 98e4e3ba2634743ff1a9396c3222df56cba2acd9`
 - current actual remote helper head from `git ls-remote`:
-  `origin refs/heads/codex2/iam-p0-006-unblock-history-repair @ dc1493a43c82c712cd8c0e419ccca37b8d540ac1`
-- still-stale local remote-tracking ref in this worktree:
-  `origin/codex2/iam-p0-006-unblock-history-repair @ 6363b9c125d291101d05a8c48f0924800d4f5ac9`
+  `origin refs/heads/codex2/iam-p0-006-unblock-history-repair @ 98e4e3ba2634743ff1a9396c3222df56cba2acd9`
 - helper PR:
   `#1264 https://github.com/ajoe734/drts-fleet-platform/pull/1264`
 - current helper PR head OID from GitHub:
-  `dc1493a43c82c712cd8c0e419ccca37b8d540ac1`
+  `98e4e3ba2634743ff1a9396c3222df56cba2acd9`
 
 This is the contamination that kept the helper task blocked during review: the
-artifact published the stale local remote-tracking ref (`6363b9c1...`) as if it
-were the current shared branch head. The first repair corrected that claim to
-`667b097d...`, but the helper branch then advanced again to `dc1493a...` while
-the markdown still described `667b097d...` as the live local/remote/PR head.
-The exact chronology must therefore treat `667b097d...` as the prior repaired
-head and `dc1493a...` as the current canonical helper branch and PR head.
+artifact originally published the stale local remote-tracking ref
+(`6363b9c1...`) as if it were the current shared branch head. The first repair
+corrected that claim to `667b097d...`, but the helper branch then advanced to
+`dc1493a...`, and then again to `98e4e3ba...`, while the markdown lagged behind
+the live branch and PR head. The exact chronology must therefore treat
+`667b097d...` and `dc1493a...` as prior repaired heads and
+`98e4e3ba...` as the current canonical helper branch and PR head.
 
 ## Non-Destructive Repair Path
 
@@ -154,7 +157,7 @@ reusing the superseded stale-history diagnosis.
   - `git merge-base --is-ancestor ab68a8be8104b3bfaeedb70c1e5d3602d3317292 origin/dev`
   - `git log --oneline --decorate --max-count=12 --graph origin/dev origin/codex2/iam-p0-006 codex2/iam-p0-006-unblock-history-repair`
   - `git show -s --format=fuller da8f9f79a93c9acc0a131fbb0e7993adb5d048c6`
-  - `git show -s --format=fuller 6363b9c125d291101d05a8c48f0924800d4f5ac9 667b097dc1ef30ce5c5f45ecb703d28ca097e8ac dc1493a43c82c712cd8c0e419ccca37b8d540ac1`
+  - `git show -s --format=fuller 6363b9c125d291101d05a8c48f0924800d4f5ac9 667b097dc1ef30ce5c5f45ecb703d28ca097e8ac dc1493a43c82c712cd8c0e419ccca37b8d540ac1 98e4e3ba2634743ff1a9396c3222df56cba2acd9`
 - Inspected PR presence:
   - `gh pr list --head codex2/iam-p0-006 --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
   - `gh pr list --head codex2/iam-p0-006-unblock-history-repair --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
