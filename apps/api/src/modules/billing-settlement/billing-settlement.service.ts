@@ -96,6 +96,7 @@ import {
   type OwnedMobilityTripCompletedEvent,
 } from "../owned-mobility/owned-mobility-events";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
@@ -430,6 +431,19 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       updatedAt: "2026-06-01T00:00:00.000Z",
     }),
   ]);
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
+function cloneReferralRevenueShareRuleSeed(): ReferralRevenueShareRule[] {
+  return REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+}
+
+function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
+  return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
+}
 
 @Injectable()
 export class BillingSettlementService implements OnModuleInit {
@@ -2524,7 +2538,7 @@ export class BillingSettlementService implements OnModuleInit {
   // DRTS owes the channel a revenue share (percent of fare, or flat per-trip).
 
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
-    REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+    createInitialReferralRevenueShareRules();
 
   /** Active referral revenue-share rule for an entry at a given completion time. */
   resolveReferralRevenueShareRule(

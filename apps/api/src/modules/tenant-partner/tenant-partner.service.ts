@@ -273,6 +273,14 @@ function isStrictAuthEnvironment(): boolean {
   return environment === "production" || environment === "staging";
 }
 
+function cloneReferralRevenueShareRuleSeed(): ReferralRevenueShareRule[] {
+  return REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+}
+
+function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
+  return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
+}
+
 type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
 type WebhookRuntimeMetadata = TenantWebhookRuntimeMetadata & {
@@ -4353,7 +4361,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   // ── Referral revenue-share rate config (CRC-BE-006) ──────────────────────
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
-    REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+    createInitialReferralRevenueShareRules();
 
   listReferralRevenueShareRules(
     entrySlug?: string,
@@ -9029,6 +9037,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.userRoles = [];
     this.apiKeys = [];
     this.partnerEntries = [];
+    this.referralRevenueShareRules = [];
   }
 
   private sanitizePersistedState(
