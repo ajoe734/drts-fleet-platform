@@ -156,6 +156,19 @@ function mergeByKey<T>(
   return [...merged.values()];
 }
 
+function withoutKeys<T>(
+  current: readonly T[],
+  keys: readonly string[] | undefined,
+  keyOf: (value: T) => string,
+) {
+  if (!keys || keys.length === 0) {
+    return [...current];
+  }
+
+  const removed = new Set(keys);
+  return current.filter((value) => !removed.has(keyOf(value)));
+}
+
 function createInMemoryTenantPartnerRepository(
   initialState: TenantPartnerState = createEmptyRepositoryState(),
 ) {
@@ -165,86 +178,201 @@ function createInMemoryTenantPartnerRepository(
     isEnabled: vi.fn(() => false),
     loadState: vi.fn(async () => cloneState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
+      const nextState = {
+        notificationPreferences: withoutKeys(
+          state.notificationPreferences,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        webhookEndpoints: withoutKeys(
+          state.webhookEndpoints,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        webhookDeliveries: withoutKeys(
+          state.webhookDeliveries,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        slaProfiles: withoutKeys(
+          state.slaProfiles,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        partnerEntries: withoutKeys(
+          state.partnerEntries,
+          changes.deletedPartnerEntrySlugs ?? changes.deletedTenantIds,
+          (value) =>
+            changes.deletedPartnerEntrySlugs ? value.entrySlug : value.tenantId,
+        ),
+        partnerIngressCredentials: withoutKeys(
+          withoutKeys(
+            state.partnerIngressCredentials,
+            changes.deletedPartnerEntrySlugs,
+            (value) => value.entrySlug,
+          ),
+          changes.deletedPartnerIngressCredentialIds,
+          (value) => value.keyId,
+        ),
+        partnerEligibilityVerifications: withoutKeys(
+          state.partnerEligibilityVerifications,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        approvalRules: withoutKeys(
+          state.approvalRules,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        approvalRequests: withoutKeys(
+          state.approvalRequests,
+          changes.deletedApprovalRequestIds ?? changes.deletedTenantIds,
+          (value) =>
+            changes.deletedApprovalRequestIds
+              ? value.approvalRequestId
+              : value.tenantId,
+        ),
+        approvalDecisions: withoutKeys(
+          withoutKeys(
+            state.approvalDecisions,
+            changes.deletedApprovalRequestIds,
+            (value) => value.approvalRequestId,
+          ),
+          changes.deletedApprovalDecisionIds,
+          (value) => value.decisionId,
+        ),
+        passengers: withoutKeys(
+          state.passengers,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        addresses: withoutKeys(
+          state.addresses,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        costCenters: withoutKeys(
+          state.costCenters,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        quotaPolicies: withoutKeys(
+          state.quotaPolicies,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        quotaLedger: withoutKeys(
+          state.quotaLedger,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        quotaMonthlySnapshots: withoutKeys(
+          state.quotaMonthlySnapshots,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        userRoles: withoutKeys(
+          state.userRoles,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        apiKeys: withoutKeys(
+          state.apiKeys,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+      };
+
       state = {
         notificationPreferences: mergeByKey(
-          state.notificationPreferences,
+          nextState.notificationPreferences,
           changes.notificationPreferences,
           (value) => value.tenantId,
         ),
         webhookEndpoints: mergeByKey(
-          state.webhookEndpoints,
+          nextState.webhookEndpoints,
           changes.webhookEndpoints,
           (value) => value.webhookId,
         ),
         webhookDeliveries: mergeByKey(
-          state.webhookDeliveries,
+          nextState.webhookDeliveries,
           changes.webhookDeliveries,
           (value) => value.deliveryId,
         ),
         slaProfiles: mergeByKey(
-          state.slaProfiles,
+          nextState.slaProfiles,
           changes.slaProfiles,
           (value) => value.tenantId,
         ),
         partnerEntries: mergeByKey(
-          state.partnerEntries,
+          nextState.partnerEntries,
           changes.partnerEntries,
           (value) => value.entrySlug,
         ),
         partnerIngressCredentials: mergeByKey(
-          state.partnerIngressCredentials,
+          nextState.partnerIngressCredentials,
           changes.partnerIngressCredentials,
           (value) => value.keyId,
         ),
         partnerEligibilityVerifications: mergeByKey(
-          state.partnerEligibilityVerifications,
+          nextState.partnerEligibilityVerifications,
           changes.partnerEligibilityVerifications,
           (value) => value.eligibilityVerificationId,
         ),
         approvalRules: mergeByKey(
-          state.approvalRules,
+          nextState.approvalRules,
           changes.approvalRules,
           (value) => value.ruleId,
         ),
+        approvalRequests: mergeByKey(
+          nextState.approvalRequests,
+          changes.approvalRequests,
+          (value) => value.approvalRequestId,
+        ),
+        approvalDecisions: mergeByKey(
+          nextState.approvalDecisions,
+          changes.approvalDecisions,
+          (value) => value.decisionId,
+        ),
         passengers: mergeByKey(
-          state.passengers,
+          nextState.passengers,
           changes.passengers,
           (value) => value.passengerId,
         ),
         addresses: mergeByKey(
-          state.addresses,
+          nextState.addresses,
           changes.addresses,
           (value) => value.addressId,
         ),
         costCenters: mergeByKey(
-          state.costCenters,
+          nextState.costCenters,
           changes.costCenters,
           (value) => `${value.tenantId}:${value.code}`,
         ),
         quotaPolicies: mergeByKey(
-          state.quotaPolicies,
+          nextState.quotaPolicies,
           changes.quotaPolicies,
           (value) =>
             `${value.tenantId}:${serializeQuotaScopePart(value.costCenterCode)}:${value.period}`,
         ),
         quotaLedger: mergeByKey(
-          state.quotaLedger,
+          nextState.quotaLedger,
           changes.quotaLedger,
           (value) => value.ledgerEntryId,
         ),
         quotaMonthlySnapshots: mergeByKey(
-          state.quotaMonthlySnapshots,
+          nextState.quotaMonthlySnapshots,
           changes.quotaMonthlySnapshots,
           (value) =>
             `${value.tenantId}:${serializeQuotaScopePart(value.costCenterCode)}:${value.period}:${value.periodKey}`,
         ),
         userRoles: mergeByKey(
-          state.userRoles,
+          nextState.userRoles,
           changes.userRoles,
           (value) => value.userId,
         ),
         apiKeys: mergeByKey(
-          state.apiKeys,
+          nextState.apiKeys,
           changes.apiKeys,
           (value) => value.apiKeyId,
         ),
@@ -487,6 +615,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
         approvalDigestEnabled: true,
         approvalDigestChannel: "email",
         approvalDigestRecipients: ["approvals@acme.example"],
+        subscriptions: [],
         createdAt: "2026-08-01T00:00:00.000Z",
         updatedAt: "2026-08-01T00:00:00.000Z",
       },
@@ -533,72 +662,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
       localSeedService.listApiKeys("tenant-demo-001")[0] as never,
     ];
     process.env.DRTS_ENV = "staging";
-    let repositoryState = cloneState(persistedState);
-    const repository = {
-      isEnabled: vi.fn(() => false),
-      loadState: vi.fn(async () => cloneState(repositoryState)),
-      persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
-        repositoryState = {
-          ...repositoryState,
-          ...(changes.notificationPreferences
-            ? { notificationPreferences: cloneState({ ...createEmptyRepositoryState(), notificationPreferences: [...changes.notificationPreferences] }).notificationPreferences }
-            : {}),
-          ...(changes.webhookEndpoints
-            ? { webhookEndpoints: cloneState({ ...createEmptyRepositoryState(), webhookEndpoints: [...changes.webhookEndpoints] }).webhookEndpoints }
-            : {}),
-          ...(changes.webhookDeliveries
-            ? { webhookDeliveries: cloneState({ ...createEmptyRepositoryState(), webhookDeliveries: [...changes.webhookDeliveries] }).webhookDeliveries }
-            : {}),
-          ...(changes.slaProfiles
-            ? { slaProfiles: cloneState({ ...createEmptyRepositoryState(), slaProfiles: [...changes.slaProfiles] }).slaProfiles }
-            : {}),
-          ...(changes.partnerEntries
-            ? { partnerEntries: cloneState({ ...createEmptyRepositoryState(), partnerEntries: [...changes.partnerEntries] }).partnerEntries }
-            : {}),
-          ...(changes.partnerIngressCredentials
-            ? { partnerIngressCredentials: cloneState({ ...createEmptyRepositoryState(), partnerIngressCredentials: [...changes.partnerIngressCredentials] }).partnerIngressCredentials }
-            : {}),
-          ...(changes.partnerEligibilityVerifications
-            ? { partnerEligibilityVerifications: cloneState({ ...createEmptyRepositoryState(), partnerEligibilityVerifications: [...changes.partnerEligibilityVerifications] }).partnerEligibilityVerifications }
-            : {}),
-          ...(changes.approvalRules
-            ? { approvalRules: cloneState({ ...createEmptyRepositoryState(), approvalRules: [...changes.approvalRules] }).approvalRules }
-            : {}),
-          ...(changes.approvalRequests
-            ? { approvalRequests: cloneState({ ...createEmptyRepositoryState(), approvalRequests: [...changes.approvalRequests] }).approvalRequests }
-            : {}),
-          ...(changes.approvalDecisions
-            ? { approvalDecisions: cloneState({ ...createEmptyRepositoryState(), approvalDecisions: [...changes.approvalDecisions] }).approvalDecisions }
-            : {}),
-          ...(changes.passengers
-            ? { passengers: cloneState({ ...createEmptyRepositoryState(), passengers: [...changes.passengers] }).passengers }
-            : {}),
-          ...(changes.addresses
-            ? { addresses: cloneState({ ...createEmptyRepositoryState(), addresses: [...changes.addresses] }).addresses }
-            : {}),
-          ...(changes.costCenters
-            ? { costCenters: cloneState({ ...createEmptyRepositoryState(), costCenters: [...changes.costCenters] }).costCenters }
-            : {}),
-          ...(changes.quotaPolicies
-            ? { quotaPolicies: cloneState({ ...createEmptyRepositoryState(), quotaPolicies: [...changes.quotaPolicies] }).quotaPolicies }
-            : {}),
-          ...(changes.quotaLedger
-            ? { quotaLedger: cloneState({ ...createEmptyRepositoryState(), quotaLedger: [...changes.quotaLedger] }).quotaLedger }
-            : {}),
-          ...(changes.quotaMonthlySnapshots
-            ? { quotaMonthlySnapshots: cloneState({ ...createEmptyRepositoryState(), quotaMonthlySnapshots: [...changes.quotaMonthlySnapshots] }).quotaMonthlySnapshots }
-            : {}),
-          ...(changes.userRoles
-            ? { userRoles: cloneState({ ...createEmptyRepositoryState(), userRoles: [...changes.userRoles] }).userRoles }
-            : {}),
-          ...(changes.apiKeys
-            ? { apiKeys: cloneState({ ...createEmptyRepositoryState(), apiKeys: [...changes.apiKeys] }).apiKeys }
-            : {}),
-        };
-      }),
-      reportPersistenceFailure: vi.fn(),
-      getState: () => cloneState(repositoryState),
-    };
+    const repository = createInMemoryTenantPartnerRepository(
+      cloneState(persistedState),
+    );
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       repository as never,
@@ -618,21 +684,23 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(service.getSlaProfile("tenant-acme")).toMatchObject({
       tenantId: "tenant-acme",
     });
-    expect(repository.getState().notificationPreferences).toEqual([
-      expect.objectContaining({ tenantId: "tenant-acme" }),
-    ]);
-    expect(repository.getState().partnerEntries).toEqual([]);
-    expect(repository.getState().userRoles).toEqual([]);
     expect(repository.persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         notificationPreferences: [
           expect.objectContaining({ tenantId: "tenant-acme" }),
         ],
+        deletedTenantIds: ["tenant-demo-001"],
+        deletedPartnerEntrySlugs: ["ctbc"],
+        deletedPartnerIngressCredentialIds: ["partner-key-ctbc-dev"],
         partnerEntries: [],
         userRoles: [],
       }),
-      "module init strict auth sanitize",
     );
+    expect(repository.getState().notificationPreferences).toEqual([
+      expect.objectContaining({ tenantId: "tenant-acme" }),
+    ]);
+    expect(repository.getState().partnerEntries).toEqual([]);
+    expect(repository.getState().userRoles).toEqual([]);
   });
 
   it("does not resurrect revoked credentials or replace rotated credentials from seeds", async () => {

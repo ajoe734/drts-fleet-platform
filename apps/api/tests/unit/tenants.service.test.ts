@@ -373,6 +373,12 @@ describe("TenantsService", () => {
         id: "tenant-acme",
       }),
     ]);
+    expect(platformAdminRepository.persistChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformTenants: [expect.objectContaining({ id: "tenant-acme" })],
+        deletedPlatformTenantIds: ["tenant-demo-001"],
+      }),
+    );
   });
 
   it("invites a role and records invitedAt timestamp", () => {
