@@ -118,7 +118,9 @@ const ALLOWED_JWT_ALGORITHMS = new Set([
 export function detectAuthEnvironment(
   env: EnvLike = process.env,
 ): AuthEnvironment {
-  const raw = (env.APP_ENV ?? env.NODE_ENV)?.trim().toLowerCase();
+  const raw = (env.DRTS_ENV ?? env.APP_ENV ?? env.NODE_ENV)
+    ?.trim()
+    .toLowerCase();
 
   if (raw === "prod" || raw === "production") {
     return "production";
@@ -128,6 +130,14 @@ export function detectAuthEnvironment(
   }
   if (raw === "test" || raw === "testing" || raw === "ci") {
     return "test";
+  }
+  if (
+    raw === "dev" ||
+    raw === "development" ||
+    raw === "local" ||
+    raw === "sandbox"
+  ) {
+    return "local";
   }
 
   if ((env.CI ?? "").trim().toLowerCase() === "true") {

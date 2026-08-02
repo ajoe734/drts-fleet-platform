@@ -42,4 +42,31 @@ describe("BootstrapAuthGuard strict environment behavior", () => {
 
     expect(error?.code).toBe("AUTH_BOOTSTRAP_HEADERS_FORBIDDEN");
   });
+
+  it("keeps bootstrap headers available in development when NODE_ENV=production but DRTS_ENV=development", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.DRTS_ENV = "development";
+
+    const guard = new BootstrapAuthGuard(
+      { getAllAndOverride: () => undefined } as never,
+      new JwtAuthService(),
+    );
+    const request: any = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "dev-admin",
+        "x-realm": "platform",
+      },
+      method: "GET",
+      url: "/api/platform-admin/tenants",
+    };
+    const context: any = {
+      switchToHttp: () => ({ getRequest: () => request }),
+      getHandler: () => () => undefined,
+      getClass: () => class {},
+    };
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity?.actorId).toBe("dev-admin");
+  });
 });
