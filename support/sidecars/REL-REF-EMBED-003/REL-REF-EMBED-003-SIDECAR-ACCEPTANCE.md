@@ -75,3 +75,11 @@ Key achievements:
 - Verification Method: Unit tests (`pnpm exec vitest run tests/unit` - 83 files, 634 tests pass) & Live Endpoint Probes (9 Cloud Run services pass)
 - Final Integration Status: `dev_deployed`
 
+---
+
+## 7. Security Correction & Hardening
+
+- Removed `ALLOW_UNVERIFIED_IAP_DEV=true` from `.github/workflows/deploy-dev.yml` and web app control-plane proxies.
+- Enforced strict IAP evaluation (`strictIapMode = process.env.STRICT_IAP_MODE === "true" || process.env.NODE_ENV === "production"`) across `ops-console-web`, `platform-admin-web`, and `roc-console-web`.
+- Ensured public dev control-plane paths fail closed without valid IAP assertions or secret-bound authentication.
+- Verified unit tests in `control-plane-auth.test.ts` pass cleanly with strict IAP enforced in production builds.

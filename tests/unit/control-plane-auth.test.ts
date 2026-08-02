@@ -286,25 +286,17 @@ describe("control-plane auth helper", () => {
 
   it("correctly evaluates strictIapMode and allowUnverifiedTokenInDev across environments", () => {
     const resolveAuthConfig = (env: Record<string, string | undefined>) => {
-      const drtsEnv = (env.DRTS_ENV || env.APP_ENV || "").trim().toLowerCase();
-      const isDevEnv =
-        drtsEnv === "development" ||
-        drtsEnv === "dev" ||
-        drtsEnv === "local" ||
-        drtsEnv === "sandbox" ||
-        env.NODE_ENV !== "production";
-
       const strictIapMode =
-        env.STRICT_IAP_MODE === "true" ||
-        (!isDevEnv && env.NODE_ENV === "production");
+        env.STRICT_IAP_MODE === "true" || env.NODE_ENV === "production";
 
       const allowUnverifiedTokenInDev =
-        isDevEnv && env.ALLOW_UNVERIFIED_IAP_DEV === "true";
+        env.NODE_ENV !== "production" &&
+        env.ALLOW_UNVERIFIED_IAP_DEV === "true";
 
-      return { isDevEnv, strictIapMode, allowUnverifiedTokenInDev };
+      return { strictIapMode, allowUnverifiedTokenInDev };
     };
 
-    // In dev environment with production build (e.g. Cloud Run dev)
+    // In dev environment with production build (e.g. Cloud Run dev), strictIapMode is true and unverified dev IAP is disabled
     expect(
       resolveAuthConfig({
         NODE_ENV: "production",
@@ -312,22 +304,19 @@ describe("control-plane auth helper", () => {
         ALLOW_UNVERIFIED_IAP_DEV: "true",
       }),
     ).toEqual({
-      isDevEnv: true,
-      strictIapMode: false,
-      allowUnverifiedTokenInDev: true,
-    });
-
-    // In explicit strict mode, strictIapMode is true
-    expect(
-      resolveAuthConfig({
-        STRICT_IAP_MODE: "true",
-        NODE_ENV: "production",
-        DRTS_ENV: "development",
-      }),
-    ).toEqual({
-      isDevEnv: true,
       strictIapMode: true,
       allowUnverifiedTokenInDev: false,
+    });
+
+    // In local dev environment (NODE_ENV != production), allowUnverifiedTokenInDev can be enabled if requested
+    expect(
+      resolveAuthConfig({
+        NODE_ENV: "development",
+        ALLOW_UNVERIFIED_IAP_DEV: "true",
+      }),
+    ).toEqual({
+      strictIapMode: false,
+      allowUnverifiedTokenInDev: true,
     });
 
     // In staging environment, strictIapMode is true (fails closed without IAP)
@@ -337,7 +326,6 @@ describe("control-plane auth helper", () => {
         DRTS_ENV: "staging",
       }),
     ).toEqual({
-      isDevEnv: false,
       strictIapMode: true,
       allowUnverifiedTokenInDev: false,
     });
@@ -349,7 +337,6 @@ describe("control-plane auth helper", () => {
         DRTS_ENV: "production",
       }),
     ).toEqual({
-      isDevEnv: false,
       strictIapMode: true,
       allowUnverifiedTokenInDev: false,
     });

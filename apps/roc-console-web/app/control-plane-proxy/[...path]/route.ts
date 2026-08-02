@@ -120,23 +120,12 @@ async function applyUpstreamAuth(
   request: NextRequest,
   targetUrl: URL,
 ) {
-  const drtsEnv = (process.env.DRTS_ENV || process.env.APP_ENV || "")
-    .trim()
-    .toLowerCase();
-
-  const isDevEnv =
-    drtsEnv === "development" ||
-    drtsEnv === "dev" ||
-    drtsEnv === "local" ||
-    drtsEnv === "sandbox" ||
-    process.env.NODE_ENV !== "production";
-
   const strictIapMode =
     process.env.STRICT_IAP_MODE === "true" ||
-    (!isDevEnv && process.env.NODE_ENV === "production");
-
+    process.env.NODE_ENV === "production";
   const allowUnverifiedTokenInDev =
-    isDevEnv && process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
+    process.env.NODE_ENV !== "production" &&
+    process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
   const iapJwtSecretOrPublicKey =
     process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
     process.env.IAP_JWT_SECRET ||
