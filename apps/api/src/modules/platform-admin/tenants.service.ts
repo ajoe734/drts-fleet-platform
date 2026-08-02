@@ -106,6 +106,7 @@ const DEFAULT_API_KEY_SCOPES = [
 ];
 
 const DEMO_CREATED_AT = "2026-04-01T00:00:00.000Z";
+const DEMO_TENANT_ID = "tenant-demo-001";
 
 function isStrictAuthEnvironment(): boolean {
   const environment = detectAuthEnvironment(process.env);
@@ -135,7 +136,11 @@ export class TenantsService implements OnModuleInit {
 
     try {
       const persistedState = await this.platformAdminRepository.loadState();
-      if (persistedState.platformTenants.length === 0) {
+      const platformTenants = this.sanitizePersistedTenants(
+        persistedState.platformTenants,
+      );
+
+      if (platformTenants.length === 0) {
         this.persistChanges(
           {
             platformTenants: this.list(),
@@ -146,7 +151,7 @@ export class TenantsService implements OnModuleInit {
       }
 
       this.tenants.clear();
-      for (const tenant of persistedState.platformTenants) {
+      for (const tenant of platformTenants) {
         this.tenants.set(tenant.id, this.cloneTenant(tenant));
       }
     } catch (error) {
@@ -752,7 +757,7 @@ export class TenantsService implements OnModuleInit {
 
   private createSeedTenant() {
     return {
-      id: "tenant-demo-001",
+      id: DEMO_TENANT_ID,
       code: "demo",
       name: "Demo Tenant",
       status: "active",
@@ -788,6 +793,18 @@ export class TenantsService implements OnModuleInit {
       createdAt: DEMO_CREATED_AT,
       updatedAt: DEMO_CREATED_AT,
     } satisfies PlatformAdminTenantRecord;
+  }
+
+  private sanitizePersistedTenants(
+    tenants: readonly PlatformAdminTenantRecord[],
+  ): PlatformAdminTenantRecord[] {
+    if (!isStrictAuthEnvironment()) {
+      return tenants.map((tenant) => this.cloneTenant(tenant));
+    }
+
+    return tenants
+      .filter((tenant) => tenant.id !== DEMO_TENANT_ID)
+      .map((tenant) => this.cloneTenant(tenant));
   }
 
   private buildTenantId(code: string) {
