@@ -103,6 +103,13 @@ function isStrictAuthEnvironment(): boolean {
   return environment === "production" || environment === "staging";
 }
 
+function isInternalKeyEnforcementDisabled(): boolean {
+  return (
+    !isStrictAuthEnvironment() &&
+    process.env.DRTS_INTERNAL_KEY_ENFORCED?.trim().toLowerCase() === "false"
+  );
+}
+
 export function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
@@ -233,6 +240,10 @@ export function requireInternalKey(
 @Injectable()
 export class InternalKeyMiddleware implements NestMiddleware {
   use(request: RequestLike, _response: unknown, next: () => void) {
+    if (isInternalKeyEnforcementDisabled()) {
+      next();
+      return;
+    }
     validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
     next();
   }
