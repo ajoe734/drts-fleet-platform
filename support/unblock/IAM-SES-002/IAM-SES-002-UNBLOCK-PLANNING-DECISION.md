@@ -154,3 +154,29 @@ work is dependency coordination plus implementation.
 - `openapi/iam-stage15-contracts-v1.yaml`
 - `apps/api/src/common/auth/jwt-auth.service.ts`
 - `apps/api/src/modules/auth/auth.controller.ts`
+
+## Owner Closeout Refresh
+
+After reviewer approval, the owner rechecked this helper task for the formal
+`review_approved -> done` closeout path:
+
+- `AI_NAME=Codex scripts/ai-status.sh show IAM-SES-002-UNBLOCK-PLANNING-DECISION`
+  still reports this helper task as `review_approved` with owner `Codex`,
+  reviewer `Codex2`, and the approved `next` summary pointing at commit
+  `c353843b15324abafde2efdf31d21027ed06055e` on branch
+  `codex/iam-ses-002-unblock-planning-decision`.
+- `AI_NAME=Codex scripts/ai-status.sh show IAM-SES-002` now reports the parent
+  as `in_progress` on the clean implementation rail owned by `Codex2`, which
+  confirms the missing planning decision is no longer a machine-truth blocker
+  for the parent task.
+- `git ls-remote --heads origin
+  refs/heads/codex/iam-ses-002-unblock-planning-decision` confirms the helper
+  branch exists on `origin`; this task closes out as pushed branch evidence
+  only.
+- The review-approved artifact remains commit `c353843b15324abafde2efdf31d21027ed06055e`;
+  the final owner closeout commit exists only to satisfy the required
+  `Verification:` trailer and machine-truth finalize step without rewriting
+  shared history.
+
+Integration status for this helper task is `branch_pushed`. It does not claim
+merge to `dev` or deployment to a dev environment.
