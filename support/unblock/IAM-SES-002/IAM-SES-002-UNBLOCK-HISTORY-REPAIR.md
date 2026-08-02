@@ -228,3 +228,26 @@ As of `2026-08-02`, `IAM-SES-002` should stay blocked on dependency
 No application code or runtime tests were changed or rerun in this helper task.
 This repair is limited to branch / PR history evidence and machine-truth
 triage.
+
+## Owner Closeout Refresh
+
+After reviewer approval, the owner rechecked the helper task for the formal
+`review_approved -> done` closeout path:
+
+- `AI_NAME=Codex scripts/ai-status.sh show IAM-SES-002-UNBLOCK-HISTORY-REPAIR`
+  still reports this helper task as `review_approved` with owner `Codex`,
+  reviewer `Codex2`, and the approved `next` summary pointing at commit
+  `f6e4a5c0` on branch `codex/iam-ses-002-unblock-history-repair`.
+- `AI_NAME=Codex scripts/ai-status.sh show IAM-SES-002` still reports the
+  parent as `blocked` with the canonical resume path on
+  `codex/iam-ses-002-clean` / PR `#1255` after dependency PR `#1254` lands.
+- `git ls-remote --heads origin
+  refs/heads/codex/iam-ses-002-unblock-history-repair` confirms the helper
+  branch exists on `origin`; this task closes out as pushed branch evidence
+  only.
+- The review-approved artifact remains commit `f6e4a5c0`; the final owner
+  closeout commit exists only to satisfy the required `Verification:` trailer
+  and machine-truth finalize step without rewriting shared history.
+
+Integration status for this helper task is `branch_pushed`. It does not claim
+merge to `dev` or deployment to a dev environment.
