@@ -607,6 +607,7 @@ jobs:
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          referral_embed_secret_args="$web_secret_args"
           ops_secret_args="$web_secret_args"
           map_provider_mode="mock"
           assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
@@ -629,6 +630,21 @@ jobs:
           internal_key_secret="${secret_prefix}-jwt-secret"
           secret_args="${secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
           web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+
+          referral_handoff_secret="${secret_prefix}-referral-embed-handoff-key"
+          if ! gcloud secrets describe "$referral_handoff_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${referral_handoff_secret} not found in project ${project_id}."
+            exit 1
+          fi
+          secret_args="${secret_args},DRTS_REFERRAL_EMBED_HANDOFF_KEY=${referral_handoff_secret}:latest"
+          referral_embed_secret_args="${referral_embed_secret_args},DRTS_REFERRAL_EMBED_HANDOFF_KEY=${referral_handoff_secret}:latest"
+
+          referral_partner_ingress_secret="${secret_prefix}-referral-embed-partner-ingress-key"
+          if ! gcloud secrets describe "$referral_partner_ingress_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${referral_partner_ingress_secret} not found in project ${project_id}."
+            exit 1
+          fi
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_YUHE_RESIDENCE=${referral_partner_ingress_secret}:latest"
 
           # Dev embeds use server-to-server handoff. Map the managed secret to
           # issuer-scoped credential slots without exposing it to the
@@ -675,6 +691,7 @@ jobs:
 
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
           echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
           echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
           echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
@@ -887,7 +904,7 @@ jobs:
             --port 3014 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.referral_embed }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
             --allow-unauthenticated \
             --cpu 1 \

@@ -91,7 +91,11 @@ import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
-import { requireInternalKey } from "../../common/auth/internal-key.middleware";
+import {
+  REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+  requireInternalKey,
+  requireScopedInternalKey,
+} from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -275,9 +279,14 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
-    if (allowInternalBootstrap) {
-      requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
-    }
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
+    );
     const artifact: ReferralEmbedHandoffArtifact =
       await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
         command,
@@ -306,7 +315,14 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
+    );
     const session: ReferralEmbedSession =
       await this.tenantPartnerService.consumeReferralEmbedHandoffArtifact(
         command,
@@ -328,10 +344,16 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
-    const session = await this.tenantPartnerService.recordReferralEmbedConsent(
-      command,
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
     );
+    const session =
+      await this.tenantPartnerService.recordReferralEmbedConsent(command);
     return toApiSuccessEnvelope(session, requestId);
   }
 

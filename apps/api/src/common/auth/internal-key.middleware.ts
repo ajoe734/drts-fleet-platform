@@ -15,6 +15,7 @@ type RequestLike = {
 };
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
+export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
@@ -127,7 +128,10 @@ export function validateInternalKey(
     return;
   }
 
-  if (!strictEnvironment && (!expectedKey || hasPublicBootstrapRealm(request))) {
+  if (
+    !strictEnvironment &&
+    (!expectedKey || hasPublicBootstrapRealm(request))
+  ) {
     return;
   }
 
@@ -184,6 +188,22 @@ export function requireInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
 ): void {
+  requireScopedInternalKey(request, expectedKey, {
+    header: INTERNAL_KEY_HEADER,
+    requiredEnv: "DRTS_INTERNAL_KEY",
+  });
+}
+
+/**
+ * Enforce a purpose-bound server credential for a sensitive internal route.
+ * Keeping the header and secret separate prevents a general control-plane key
+ * from being replayed against a public referral handoff endpoint.
+ */
+export function requireScopedInternalKey(
+  request: RequestLike,
+  expectedKey: string | undefined,
+  options: { header: string; requiredEnv: string },
+): void {
   const requestPath = request.originalUrl ?? request.url ?? "";
   const requestMethod = request.method ?? "GET";
   const configuredKey = expectedKey?.trim();
@@ -196,19 +216,17 @@ export function requireInternalKey(
       {
         route: requestPath,
         method: requestMethod,
-        requiredEnv: "DRTS_INTERNAL_KEY",
+        requiredEnv: options.requiredEnv,
       },
     );
   }
 
-  const providedKey = normalizeHeaderValue(
-    request.headers?.[INTERNAL_KEY_HEADER],
-  );
+  const providedKey = normalizeHeaderValue(request.headers?.[options.header]);
   if (!providedKey) {
     throw new ApiRequestError(
       401,
       "INTERNAL_KEY_REQUIRED",
-      "x-drts-internal-key header is required for this environment.",
+      `${options.header} header is required for this environment.`,
       {
         route: requestPath,
         method: requestMethod,
@@ -229,7 +247,7 @@ export function requireInternalKey(
   throw new ApiRequestError(
     401,
     "INTERNAL_KEY_INVALID",
-    "x-drts-internal-key header is invalid for this environment.",
+    `${options.header} header is invalid for this environment.`,
     {
       route: requestPath,
       method: requestMethod,

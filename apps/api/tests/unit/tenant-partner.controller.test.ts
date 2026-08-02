@@ -31,7 +31,9 @@ describe("tenant partner ingress handoff controller", () => {
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
     delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
+    delete process.env.PARTNER_INGRESS_KEY_YUHE_RESIDENCE;
   });
 
   it("issues a short-lived passenger bearer session and reuses the binding on reopen", async () => {
@@ -253,5 +255,88 @@ describe("tenant partner ingress handoff controller", () => {
         },
       });
     }
+  });
+
+  it("requires a dedicated key for referral embed handoff issuance and consume", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_INTERNAL_KEY = "general-internal-key";
+    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "referral-handoff-key";
+    process.env.PARTNER_INGRESS_KEY_YUHE_RESIDENCE = "yuhe-partner-key";
+
+    const { controller } = createController();
+    const command = {
+      entrySlug: "yuhe-residence",
+      entryHost: "app.yuhe-living.com.tw",
+      partnerUserRef: "resident-001",
+    };
+
+    await expect(
+      controller.issueReferralEmbedHandoffArtifact(
+        command,
+        {
+          headers: { "x-drts-internal-key": "general-internal-key" },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/referral-embed-handoff",
+        },
+        "req-referral-handoff-wrong-key",
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_REQUIRED" });
+
+    await expect(
+      controller.issueReferralEmbedHandoffArtifact(
+        command,
+        {
+          headers: { "x-drts-referral-handoff-key": "forged-key" },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/referral-embed-handoff",
+        },
+        "req-referral-handoff-forged-key",
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
+
+    const issued = await controller.issueReferralEmbedHandoffArtifact(
+      command,
+      {
+        headers: {
+          "x-drts-referral-handoff-key": "referral-handoff-key",
+        },
+        method: "POST",
+        originalUrl: "/api/partner/ingress/referral-embed-handoff",
+      },
+      "req-referral-handoff-authorized",
+    );
+
+    const scopedRequest = {
+      headers: { "x-drts-referral-handoff-key": "referral-handoff-key" },
+      method: "POST",
+      originalUrl: "/api/partner/ingress/referral-embed-handoff/consume",
+    };
+    const consumed = await controller.consumeReferralEmbedHandoffArtifact(
+      {
+        artifact: issued.data.artifact,
+        entrySlug: command.entrySlug,
+        entryHost: command.entryHost,
+      },
+      scopedRequest,
+      "req-referral-handoff-consume",
+    );
+
+    expect(consumed.data).toMatchObject({
+      handoffId: issued.data.handoffId,
+      partnerEntrySlug: command.entrySlug,
+      entryHost: command.entryHost,
+    });
+
+    await expect(
+      controller.consumeReferralEmbedHandoffArtifact(
+        {
+          artifact: issued.data.artifact,
+          entrySlug: command.entrySlug,
+          entryHost: command.entryHost,
+        },
+        scopedRequest,
+        "req-referral-handoff-replay",
+      ),
+    ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REPLAYED" });
   });
 });
