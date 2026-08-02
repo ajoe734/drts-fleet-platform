@@ -284,33 +284,74 @@ describe("control-plane auth helper", () => {
     expect(auth.headers["x-goog-iap-jwt-assertion"]).toBe(iapToken);
   });
 
-  it("correctly evaluates strictIapMode based on STRICT_IAP_MODE, NODE_ENV, and DRTS_ENV", () => {
-    const isStrict = (env: Record<string, string | undefined>) =>
-      env.STRICT_IAP_MODE === "true" ||
-      (env.NODE_ENV === "production" && env.DRTS_ENV !== "development");
+  it("correctly evaluates strictIapMode and allowUnverifiedTokenInDev across environments", () => {
+    const resolveAuthConfig = (env: Record<string, string | undefined>) => {
+      const drtsEnv = (env.DRTS_ENV || env.APP_ENV || "").trim().toLowerCase();
+      const isDevEnv =
+        drtsEnv === "development" ||
+        drtsEnv === "dev" ||
+        drtsEnv === "local" ||
+        drtsEnv === "sandbox" ||
+        env.NODE_ENV !== "production";
 
-    // In dev environment with production build, strictIapMode is false (allows dev probes)
-    expect(isStrict({ NODE_ENV: "production", DRTS_ENV: "development" })).toBe(
-      false,
-    );
+      const strictIapMode =
+        env.STRICT_IAP_MODE === "true" ||
+        (!isDevEnv && env.NODE_ENV === "production");
+
+      const allowUnverifiedTokenInDev =
+        isDevEnv && env.ALLOW_UNVERIFIED_IAP_DEV === "true";
+
+      return { isDevEnv, strictIapMode, allowUnverifiedTokenInDev };
+    };
+
+    // In dev environment with production build (e.g. Cloud Run dev)
+    expect(
+      resolveAuthConfig({
+        NODE_ENV: "production",
+        DRTS_ENV: "development",
+        ALLOW_UNVERIFIED_IAP_DEV: "true",
+      }),
+    ).toEqual({
+      isDevEnv: true,
+      strictIapMode: false,
+      allowUnverifiedTokenInDev: true,
+    });
 
     // In explicit strict mode, strictIapMode is true
     expect(
-      isStrict({
+      resolveAuthConfig({
         STRICT_IAP_MODE: "true",
         NODE_ENV: "production",
         DRTS_ENV: "development",
       }),
-    ).toBe(true);
+    ).toEqual({
+      isDevEnv: true,
+      strictIapMode: true,
+      allowUnverifiedTokenInDev: false,
+    });
 
     // In staging environment, strictIapMode is true (fails closed without IAP)
-    expect(isStrict({ NODE_ENV: "production", DRTS_ENV: "staging" })).toBe(
-      true,
-    );
+    expect(
+      resolveAuthConfig({
+        NODE_ENV: "production",
+        DRTS_ENV: "staging",
+      }),
+    ).toEqual({
+      isDevEnv: false,
+      strictIapMode: true,
+      allowUnverifiedTokenInDev: false,
+    });
 
     // In production environment, strictIapMode is true (fails closed without IAP)
-    expect(isStrict({ NODE_ENV: "production", DRTS_ENV: "production" })).toBe(
-      true,
-    );
+    expect(
+      resolveAuthConfig({
+        NODE_ENV: "production",
+        DRTS_ENV: "production",
+      }),
+    ).toEqual({
+      isDevEnv: false,
+      strictIapMode: true,
+      allowUnverifiedTokenInDev: false,
+    });
   });
 });

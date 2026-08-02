@@ -41,10 +41,23 @@ async function mintMetadataIdentityToken(
 export async function getServerOpsClient(): Promise<ApiClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
+  const drtsEnv = (process.env.DRTS_ENV || process.env.APP_ENV || "")
+    .trim()
+    .toLowerCase();
+
+  const isDevEnv =
+    drtsEnv === "development" ||
+    drtsEnv === "dev" ||
+    drtsEnv === "local" ||
+    drtsEnv === "sandbox" ||
+    process.env.NODE_ENV !== "production";
+
   const strictIapMode =
     process.env.STRICT_IAP_MODE === "true" ||
-    (process.env.NODE_ENV === "production" &&
-      process.env.DRTS_ENV !== "development");
+    (!isDevEnv && process.env.NODE_ENV === "production");
+
+  const allowUnverifiedTokenInDev =
+    isDevEnv && process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
   const iapJwtSecretOrPublicKey =
     process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
     process.env.IAP_JWT_SECRET ||
@@ -54,9 +67,6 @@ export async function getServerOpsClient(): Promise<ApiClient> {
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const allowUnverifiedTokenInDev =
-    process.env.NODE_ENV !== "production" &&
-    process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
 
   const controlPlaneAuth = issueControlPlaneRequestAuth({
     actorType: "ops_user",
