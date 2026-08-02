@@ -249,6 +249,40 @@ class RenderWakeupMessageTests(unittest.TestCase):
         # Lane substitution uses the agent id, not the display name.
         self.assertIn("LLM-Agent: gemini2", rendered)
 
+    def test_execution_branch_override_is_rendered_for_gemini(self) -> None:
+        config = self._config(agent_id="gemini")
+        event = {
+            "task_id": "IAM-SES-002",
+            "target_agent": "gemini",
+            "reason": "owned_in_progress_dispatch",
+            "task": {
+                "id": "IAM-SES-002",
+                "execution_branch": "codex/iam-ses-002-post-p0",
+            },
+            "target_files": [],
+        }
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "gemini")
+
+        self.assertIn("`codex/iam-ses-002-post-p0`", rendered)
+        self.assertIn("refs/heads/codex/iam-ses-002-post-p0", rendered)
+        self.assertNotIn("gemini/iam-ses-002", rendered)
+
+    def test_invalid_execution_branch_falls_back_to_lane_task_branch(self) -> None:
+        config = self._config(agent_id="gemini")
+        event = {
+            "task_id": "IAM-SES-002",
+            "target_agent": "gemini",
+            "reason": "owned_in_progress_dispatch",
+            "task": {"id": "IAM-SES-002", "execution_branch": "bad; branch"},
+            "target_files": [],
+        }
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "gemini")
+
+        self.assertIn("`gemini/iam-ses-002`", rendered)
+        self.assertNotIn("bad; branch", rendered)
+
     def test_missing_task_id_degrades_to_blank_block(self) -> None:
         """Planning-baton or other task-less dispatches must NOT print a
         garbage `git switch -c lane/` line. The block should collapse."""
@@ -271,7 +305,7 @@ class RenderWakeupMessageTests(unittest.TestCase):
         block = watch_events.build_branch_protocol_block(
             task_id="OPS-GIT-WORKFLOW-005",
             lane="claude",
-            task_id_kebab="ops-git-workflow-005",
+            branch="claude/ops-git-workflow-005",
             base_branch="dev",
         )
         self.assertIn("claude/ops-git-workflow-005", block)
@@ -282,13 +316,13 @@ class RenderWakeupMessageTests(unittest.TestCase):
         for missing in [
             {"task_id": ""},
             {"lane": ""},
-            {"task_id_kebab": ""},
+            {"branch": ""},
             {"base_branch": ""},
         ]:
             kwargs = {
                 "task_id": "OPS-GIT-WORKFLOW-005",
                 "lane": "claude",
-                "task_id_kebab": "ops-git-workflow-005",
+                "branch": "claude/ops-git-workflow-005",
                 "base_branch": "backend-dev",
             }
             kwargs.update(missing)

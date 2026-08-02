@@ -550,6 +550,36 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(base_branch, "dev")
             self.assertEqual(source, "existing_worktree")
 
+    def test_reuses_existing_worktree_for_execution_branch_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            existing = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "codex/iam-ses-002-post-p0", str(existing), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                metadata={
+                    "mode": "execution",
+                    "task": {"execution_branch": "codex/iam-ses-002-post-p0"},
+                },
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("IAM-SES-002"),
+            )
+
+            self.assertEqual(workspace, existing.resolve())
+            self.assertEqual(branch, "codex/iam-ses-002-post-p0")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_worktree")
+
     def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"
