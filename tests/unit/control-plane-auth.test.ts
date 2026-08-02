@@ -283,4 +283,34 @@ describe("control-plane auth helper", () => {
 
     expect(auth.headers["x-goog-iap-jwt-assertion"]).toBe(iapToken);
   });
+
+  it("correctly evaluates strictIapMode based on STRICT_IAP_MODE, NODE_ENV, and DRTS_ENV", () => {
+    const isStrict = (env: Record<string, string | undefined>) =>
+      env.STRICT_IAP_MODE === "true" ||
+      (env.NODE_ENV === "production" && env.DRTS_ENV !== "development");
+
+    // In dev environment with production build, strictIapMode is false (allows dev probes)
+    expect(isStrict({ NODE_ENV: "production", DRTS_ENV: "development" })).toBe(
+      false,
+    );
+
+    // In explicit strict mode, strictIapMode is true
+    expect(
+      isStrict({
+        STRICT_IAP_MODE: "true",
+        NODE_ENV: "production",
+        DRTS_ENV: "development",
+      }),
+    ).toBe(true);
+
+    // In staging environment, strictIapMode is true (fails closed without IAP)
+    expect(isStrict({ NODE_ENV: "production", DRTS_ENV: "staging" })).toBe(
+      true,
+    );
+
+    // In production environment, strictIapMode is true (fails closed without IAP)
+    expect(isStrict({ NODE_ENV: "production", DRTS_ENV: "production" })).toBe(
+      true,
+    );
+  });
 });
