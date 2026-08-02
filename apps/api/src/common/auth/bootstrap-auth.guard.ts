@@ -22,7 +22,7 @@ import type {
 } from "./auth.types";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
-import { JwtAuthService, type JwtIdentityPayload } from "./jwt-auth.service";
+import { JwtAuthService } from "./jwt-auth.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 function asHeaderRecord(
@@ -97,9 +97,7 @@ function mergeUnique<T>(...values: readonly T[][]): T[] {
   return [...new Set(values.flat())];
 }
 
-function isPromiseLike<T>(
-  value: T | Promise<T>,
-): value is Promise<T> {
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof (value as Promise<T> | null)?.then === "function";
 }
 
@@ -559,5 +557,4 @@ export class BootstrapAuthGuard implements CanActivate {
       },
     );
   }
-
 }
