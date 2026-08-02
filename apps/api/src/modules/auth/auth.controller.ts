@@ -61,6 +61,11 @@ const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
 const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
 const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV = "DRTS_TENANT_BOOTSTRAP_MODE" as const;
 
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
 @Controller("auth")
 export class AuthController {
   constructor(
@@ -82,10 +87,10 @@ export class AuthController {
     validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
 
     const authEnvironment = detectAuthEnvironment(process.env);
+    const strictEnvironment = isStrictAuthEnvironment();
     const isStrictIap =
       process.env.STRICT_IAP_MODE === "true" ||
-      authEnvironment === "production" ||
-      authEnvironment === "staging";
+      strictEnvironment;
     const rawAssertion = extractIapJwtAssertion(request.headers);
 
     if (rawAssertion && this.iapSubjectAdapter) {
@@ -149,14 +154,11 @@ export class AuthController {
       );
     }
 
-    const isSystemRealm =
-      identity.actorType === "system" || identity.realm === "system";
-
-    if (isStrictIap && !isSystemRealm) {
+    if (isStrictIap) {
       throw new ApiRequestError(
         401,
-        "IAP_ASSERTION_MISSING",
-        "Verified IAP JWT assertion is required in strict IAP mode.",
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
       );
     }
 
@@ -330,8 +332,7 @@ export class AuthController {
         actorType: "system",
         subjectId: normalizedEmail,
         realm: "tenant",
-        tenantId:
-          requestedTenantId || this.tenantPartnerService.getDefaultTenantId(),
+        tenantId: requestedTenantId,
         partnerId: null,
         eventType: "tenant_bootstrap_session.denied",
         eventFamily: "auth",

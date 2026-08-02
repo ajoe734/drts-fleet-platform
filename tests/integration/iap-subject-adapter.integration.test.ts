@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { signTestIapJwtAssertion } from "@drts/control-plane-auth";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
@@ -14,6 +14,7 @@ import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/
 const INTEGRATION_TEST_SECRET = "iap_integration_test_secret_key_32chars!";
 const INTEGRATION_AUDIENCE =
   "/projects/1122334455/apps/drts-control-plane-prod";
+const ORIGINAL_ENV = { ...process.env };
 
 function signAssertion(payload: Record<string, unknown>): string {
   return signTestIapJwtAssertion(
@@ -26,6 +27,10 @@ function signAssertion(payload: Record<string, unknown>): string {
     INTEGRATION_TEST_SECRET,
   );
 }
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
 
 describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
   it("resolves IAP workforce subject and persists durable identity in repository", async () => {
@@ -375,7 +380,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.IAP_EXPECTED_AUDIENCE;
   });
 
-  it("verifies AuthController /auth/token fails closed in strict IAP mode without assertion", async () => {
+  it("verifies AuthController /auth/token rejects bootstrap headers in strict environments", async () => {
     process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
     process.env.STRICT_IAP_MODE = "true";
 
@@ -417,7 +422,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
 
     expect(error).not.toBeNull();
     expect(error?.getStatus()).toBe(401);
-    expect(error?.code).toBe("IAP_ASSERTION_MISSING");
+    expect(error?.code).toBe("AUTH_BOOTSTRAP_HEADERS_FORBIDDEN");
 
     delete process.env.DRTS_INTERNAL_KEY;
     delete process.env.STRICT_IAP_MODE;
@@ -516,7 +521,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.ALLOW_UNVERIFIED_IAP_DEV;
   });
 
-  it("verifies AuthController /auth/token allows system realm calls in strict IAP mode without IAP assertion", async () => {
+  it("verifies AuthController /auth/token rejects system bootstrap headers in strict environments", async () => {
     process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
     process.env.JWT_SECRET = INTEGRATION_TEST_SECRET;
     process.env.STRICT_IAP_MODE = "true";
@@ -542,20 +547,18 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       adapter,
     );
 
-    const result = await authController.issueToken({
-      headers: {
-        "x-drts-internal-key": "test_internal_key_123",
-        "x-actor-type": "system",
-        "x-actor-id": "system-service-01",
-        "x-realm": "system",
-      },
+    await expect(
+      authController.issueToken({
+        headers: {
+          "x-drts-internal-key": "test_internal_key_123",
+          "x-actor-type": "system",
+          "x-actor-id": "system-service-01",
+          "x-realm": "system",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
     });
-
-    expect(result.token).toBeTruthy();
-    const payload = jwtAuthService.verify(result.token);
-    expect(payload?.actorType).toBe("system");
-    expect(payload?.realm).toBe("system");
-    expect(payload?.sub).toBe("system-service-01");
 
     delete process.env.DRTS_INTERNAL_KEY;
     delete process.env.JWT_SECRET;
