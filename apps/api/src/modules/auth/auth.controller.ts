@@ -137,9 +137,12 @@ export class AuthController {
             ? "platform_admin"
             : "ops_user",
         actorId: resolved.principal.principalId,
+        principalId: resolved.principal.principalId,
+        membershipId: resolved.membership.membershipId,
         subject: resolved.principal.subject,
         realm: resolved.membership.realm as "platform" | "ops",
         tenantId: null,
+        tokenVersion: resolved.tokenVersion,
         roleFamilies: [resolved.membership.realm as "platform" | "ops"],
         roles: resolved.effectiveRoles,
         scopes: resolved.effectiveScopes,
@@ -148,8 +151,18 @@ export class AuthController {
       };
 
       const expiresIn: JwtExpiresIn = "8h";
-      const token = this.signJwt(identity, expiresIn);
-      return { token, expiresIn };
+      const issued = await this.issueJwtSession(identity, {
+        expiresIn,
+        principalId: resolved.principal.principalId,
+        membershipId: resolved.membership.membershipId,
+        subject: resolved.principal.subject,
+        ensurePrincipal: false,
+        authTime: new Date().toISOString(),
+        amr: ["verified_iap_workforce"],
+        acr: "aal2",
+        tokenVersion: resolved.tokenVersion,
+      });
+      return { token: issued.token, expiresIn };
     }
 
     const identity = bootstrapIdentity;
@@ -173,18 +186,27 @@ export class AuthController {
 
     const expiresIn: JwtExpiresIn =
       identity.actorType === "system" ? "1h" : "8h";
-    const token = this.signJwt(identity, expiresIn);
-    return { token, expiresIn };
+    const issuedAt = new Date().toISOString();
+    const issued = await this.issueJwtSession(identity, {
+      expiresIn,
+      principalId: identity.principalId ?? identity.actorId,
+      membershipId: identity.membershipId ?? null,
+      subject: identity.subject ?? identity.actorId,
+      ensurePrincipal: true,
+      authTime: issuedAt,
+      tokenVersion: Date.parse(issuedAt),
+    });
+    return { token: issued.token, expiresIn };
   }
 
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("driver/device/register")
-  issueDriverDeviceSession(
+  async issueDriverDeviceSession(
     @Body() command: RegisterDriverDeviceCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const session = this.driverDeviceSessionService.register(
+    const session = await this.driverDeviceSessionService.register(
       command,
       requestId,
     );
@@ -197,11 +219,11 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("driver/device/refresh")
-  refreshDriverDeviceSession(
+  async refreshDriverDeviceSession(
     @Body() command: RefreshDriverDeviceSessionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const session = this.driverDeviceSessionService.refresh(command);
+    const session = await this.driverDeviceSessionService.refresh(command);
     return toApiSuccessEnvelope<DriverDeviceProvisioningSession>(
       session,
       requestId,
@@ -209,12 +231,12 @@ export class AuthController {
   }
 
   @Post("driver/device/revoke")
-  revokeDriverDeviceSession(
+  async revokeDriverDeviceSession(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: RevokeDriverDeviceBindingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = this.driverDeviceSessionService.revoke(
+    const result = await this.driverDeviceSessionService.revoke(
       command,
       identity,
       requestId,
@@ -225,7 +247,7 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("tenant/bootstrap-session")
-  issueTenantBootstrapSession(
+  async issueTenantBootstrapSession(
     @Body() command: CreateTenantBootstrapSessionCommand,
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("x-real-ip") realIp?: string,
@@ -279,11 +301,14 @@ export class AuthController {
         resolvedRoleCode,
       );
       const identity = this.buildIdentityContext(profile);
-      const token = this.signJwt(
+      const issuedAt = new Date().toISOString();
+      const issued = await this.issueJwtSession(
         {
           authMode: "jwt_bearer",
           actorType: identity.actorType,
           actorId: identity.actorId,
+          principalId: identity.actorId,
+          subject: profile.id,
           realm: identity.realm,
           tenantId: identity.tenantId,
           roleFamilies: identity.roleFamilies,
@@ -291,10 +316,19 @@ export class AuthController {
           scopes: identity.scopes,
           requestId: requestId ?? null,
         },
-        TENANT_BOOTSTRAP_EXPIRES_IN,
+        {
+          expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
+          principalId: identity.actorId,
+          subject: profile.id,
+          ensurePrincipal: true,
+          authTime: issuedAt,
+          amr: ["tenant_bootstrap_fixture"],
+          acr: "aal1",
+          tokenVersion: Date.parse(existingUser.updatedAt),
+        },
       );
       const session: TenantBootstrapSession = {
-        accessToken: token,
+        accessToken: issued.token,
         tokenType: "Bearer",
         expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
         profile,
@@ -314,9 +348,9 @@ export class AuthController {
         severity: "low",
         targetType: "tenant_portal_session",
         targetId: profile.id,
-        sessionId: null,
-        tokenId: token,
-        authMethods: ["tenant_bootstrap_exchange"],
+        sessionId: issued.sessionId,
+        tokenId: issued.tokenId,
+        authMethods: issued.amr,
         sourceIp,
         userAgent: userAgent ?? null,
         requestId: requestId ?? null,
@@ -372,7 +406,7 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("partner/bootstrap-session")
-  issuePartnerBootstrapSession(
+  async issuePartnerBootstrapSession(
     @Body() command: CreatePartnerBootstrapSessionCommand,
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("x-real-ip") realIp?: string,
@@ -386,11 +420,14 @@ export class AuthController {
         command,
         requestId,
       );
-      const token = this.signJwt(
+      const issuedAt = new Date().toISOString();
+      const issued = await this.issueJwtSession(
         {
-          authMode: resolved.identity.authMode,
+          authMode: "jwt_bearer",
           actorType: resolved.identity.actorType,
           actorId: resolved.identity.actorId,
+          principalId: resolved.identity.actorId,
+          subject: resolved.identity.actorId,
           realm: resolved.identity.realm,
           tenantId: resolved.identity.tenantId,
           partnerId: resolved.identity.partnerId ?? null,
@@ -401,10 +438,19 @@ export class AuthController {
           scopes: resolved.identity.scopes,
           requestId: requestId ?? null,
         },
-        "1h",
+        {
+          expiresIn: "1h",
+          principalId: resolved.identity.actorId,
+          subject: resolved.identity.actorId,
+          ensurePrincipal: true,
+          authTime: issuedAt,
+          amr: ["partner_api_key"],
+          acr: "aal1",
+          tokenVersion: Date.parse(resolved.partnerEntry.updatedAt),
+        },
       );
       const session: PartnerBootstrapSession = {
-        accessToken: token,
+        accessToken: issued.token,
         tokenType: "Bearer",
         expiresIn: "1h",
         partnerEntry: resolved.partnerEntry,
@@ -427,9 +473,9 @@ export class AuthController {
         severity: "low",
         targetType: "partner_entry",
         targetId: resolved.partnerEntry.entrySlug,
-        sessionId: null,
-        tokenId: token,
-        authMethods: ["partner_api_key"],
+        sessionId: issued.sessionId,
+        tokenId: issued.tokenId,
+        authMethods: issued.amr,
         sourceIp,
         userAgent: userAgent ?? null,
         requestId: requestId ?? null,
@@ -643,12 +689,12 @@ export class AuthController {
     return `tenant-portal-${slug}`;
   }
 
-  private signJwt(
-    identity: Parameters<JwtAuthService["sign"]>[0],
-    expiresIn: JwtExpiresIn,
+  private async issueJwtSession(
+    identity: Parameters<JwtAuthService["issueSessionToken"]>[0],
+    options?: Parameters<JwtAuthService["issueSessionToken"]>[1],
   ) {
     try {
-      return this.jwtAuthService.sign(identity, { expiresIn });
+      return await this.jwtAuthService.issueSessionToken(identity, options);
     } catch (error) {
       if (isJwtKeyMaterialNotConfiguredError(error)) {
         throw new ApiRequestError(
