@@ -85,10 +85,21 @@ fast-forward of the owner branch tip.
 
 ### Helper branch state
 
-- helper branch:
-  `codex2/iam-p0-006-unblock-history-repair @ 6363b9c125d291101d05a8c48f0924800d4f5ac9`
+- local helper `HEAD`:
+  `codex2/iam-p0-006-unblock-history-repair @ 667b097dc1ef30ce5c5f45ecb703d28ca097e8ac`
+- actual remote helper head from `git ls-remote`:
+  `origin refs/heads/codex2/iam-p0-006-unblock-history-repair @ 667b097dc1ef30ce5c5f45ecb703d28ca097e8ac`
+- stale local remote-tracking ref:
+  `origin/codex2/iam-p0-006-unblock-history-repair @ 6363b9c125d291101d05a8c48f0924800d4f5ac9`
 - helper PR:
   `#1264 https://github.com/ajoe734/drts-fleet-platform/pull/1264`
+- helper PR head OID from GitHub:
+  `667b097dc1ef30ce5c5f45ecb703d28ca097e8ac`
+
+This is the contamination that kept the helper task blocked during review: the
+artifact published the stale local remote-tracking ref (`6363b9c1...`) as if it
+were the current shared branch head, even though both the actual remote branch
+and the PR head had already advanced to `667b097d...`.
 
 ## Non-Destructive Repair Path
 
@@ -132,12 +143,13 @@ reusing the superseded stale-history diagnosis.
 - Inspected refs and integration state:
   - `git branch --show-current`
   - `git status --short`
-  - `git rev-parse origin/dev origin/codex2/iam-p0-006 codex2/iam-p0-006 codex2/iam-p0-006-unblock-history-repair`
+  - `git rev-parse origin/dev origin/codex2/iam-p0-006 codex2/iam-p0-006 HEAD origin/codex2/iam-p0-006-unblock-history-repair`
+  - `git ls-remote --heads origin codex2/iam-p0-006-unblock-history-repair`
   - `git rev-list --left-right --count origin/dev...codex2/iam-p0-006`
   - `git merge-base --is-ancestor ab68a8be8104b3bfaeedb70c1e5d3602d3317292 origin/dev`
   - `git log --oneline --decorate --max-count=12 --graph origin/dev origin/codex2/iam-p0-006 codex2/iam-p0-006-unblock-history-repair`
   - `git show -s --format=fuller da8f9f79a93c9acc0a131fbb0e7993adb5d048c6`
-  - `git show -s --format=fuller 6363b9c125d291101d05a8c48f0924800d4f5ac9`
+  - `git show -s --format=fuller 6363b9c125d291101d05a8c48f0924800d4f5ac9 667b097dc1ef30ce5c5f45ecb703d28ca097e8ac`
 - Inspected PR presence:
   - `gh pr list --head codex2/iam-p0-006 --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
   - `gh pr list --head codex2/iam-p0-006-unblock-history-repair --state all --json number,title,headRefName,headRefOid,baseRefName,state,url`
