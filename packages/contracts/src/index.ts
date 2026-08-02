@@ -2593,6 +2593,25 @@ export interface CreateTenantUserCommand {
   roleCode: string;
 }
 
+/** Public invitation state. Secret material and token hashes never cross this boundary. */
+export interface TenantInvitationView {
+  invitationId: string;
+  deliveryStatus: CanonicalInvitationDeliveryStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface AcceptTenantInvitationCommand {
+  invitationToken: string;
+}
+
+export interface AcceptTenantInvitationResult {
+  user: TenantUserRoleRecord;
+  invitation: TenantInvitationView;
+  accepted: true;
+}
+
 export interface UpdateTenantRoleCommand {
   roleCode: string;
   status?: TenantUserRoleStatus;
