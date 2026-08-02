@@ -43,7 +43,8 @@ export async function getServerOpsClient(): Promise<ApiClient> {
   const requestHeaders = await nextHeaders();
   const strictIapMode =
     process.env.STRICT_IAP_MODE === "true" ||
-    process.env.NODE_ENV === "production";
+    (process.env.NODE_ENV === "production" &&
+      process.env.DRTS_ENV !== "development");
   const iapJwtSecretOrPublicKey =
     process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
     process.env.IAP_JWT_SECRET ||
