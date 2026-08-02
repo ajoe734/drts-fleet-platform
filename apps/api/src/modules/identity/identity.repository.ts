@@ -68,7 +68,10 @@ export class IdentityRepository {
       principalId: `principal_${randomUUID()}`,
       sourceRef: `${sourcePrefix}:principal`,
       issuer: LEGACY_TENANT_USER_ISSUER,
-      subject: this.buildLegacyTenantSubject(userRole.tenantId, normalizedEmail),
+      subject: this.buildLegacyTenantSubject(
+        userRole.tenantId,
+        normalizedEmail,
+      ),
       principalType: "human",
       email: normalizedEmail,
       emailVerified: false,
@@ -121,10 +124,7 @@ export class IdentityRepository {
       deliveryStatus: "legacy_backfill",
       expiresAt: invitationExpiresAt,
       acceptedAt: null,
-      revokedAt:
-        userRole.status === "invited"
-          ? null
-          : userRole.updatedAt,
+      revokedAt: userRole.status === "invited" ? null : userRole.updatedAt,
       createdAt: userRole.invitedAt,
       updatedAt: now,
     };
@@ -222,6 +222,192 @@ export class IdentityRepository {
     return Array.from(this.fallbackInvitations.values(), (invitation) => ({
       ...invitation,
     }));
+  }
+
+  async findPrincipalBySubject(
+    issuer: string,
+    subject: string,
+  ): Promise<CanonicalIdentityPrincipalRecord | null> {
+    if (!this.isEnabled()) {
+      for (const principal of this.fallbackPrincipals.values()) {
+        if (principal.issuer === issuer && principal.subject === subject) {
+          return { ...principal };
+        }
+      }
+      return null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_principals
+          WHERE issuer = $1 AND subject = $2
+          LIMIT 1
+        `,
+        [issuer, subject],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityPrincipalRecord>(
+        result.rows[0].record,
+        "iam.identity_principals",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async findPrincipalByEmail(
+    email: string,
+  ): Promise<CanonicalIdentityPrincipalRecord | null> {
+    const normalized = email.trim().toLowerCase();
+    if (!this.isEnabled()) {
+      for (const principal of this.fallbackPrincipals.values()) {
+        if (principal.email?.toLowerCase() === normalized) {
+          return { ...principal };
+        }
+      }
+      return null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_principals
+          WHERE email_normalized = $1
+          LIMIT 1
+        `,
+        [normalized],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityPrincipalRecord>(
+        result.rows[0].record,
+        "iam.identity_principals",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async findMembershipsByPrincipalId(
+    principalId: string,
+  ): Promise<CanonicalIdentityMembershipRecord[]> {
+    if (!this.isEnabled()) {
+      const results: CanonicalIdentityMembershipRecord[] = [];
+      for (const membership of this.fallbackMemberships.values()) {
+        if (membership.principalId === principalId) {
+          results.push({ ...membership });
+        }
+      }
+      return results;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_memberships
+          WHERE principal_id = $1
+        `,
+        [principalId],
+      );
+      return result.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityMembershipRecord>(
+          row.record,
+          "iam.identity_memberships",
+        ),
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async findRoleBindingsByMembershipId(
+    membershipId: string,
+  ): Promise<CanonicalIdentityRoleBindingRecord[]> {
+    if (!this.isEnabled()) {
+      const results: CanonicalIdentityRoleBindingRecord[] = [];
+      for (const binding of this.fallbackRoleBindings.values()) {
+        if (binding.membershipId === membershipId) {
+          results.push({ ...binding });
+        }
+      }
+      return results;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_role_bindings
+          WHERE membership_id = $1
+        `,
+        [membershipId],
+      );
+      return result.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+          row.record,
+          "iam.identity_role_bindings",
+        ),
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async upsertWorkforceIdentity(
+    principal: CanonicalIdentityPrincipalRecord,
+    membership: CanonicalIdentityMembershipRecord,
+    roleBindings: CanonicalIdentityRoleBindingRecord[],
+  ): Promise<{
+    principal: CanonicalIdentityPrincipalRecord;
+    membership: CanonicalIdentityMembershipRecord;
+    roleBindings: CanonicalIdentityRoleBindingRecord[];
+  }> {
+    if (!this.isEnabled()) {
+      const p = this.upsertFallbackPrincipal(principal);
+      const m = this.upsertFallbackMembership({
+        ...membership,
+        principalId: p.principalId,
+      });
+      const rbs = roleBindings.map((b) =>
+        this.upsertFallbackRoleBinding({
+          ...b,
+          membershipId: m.membershipId,
+        }),
+      );
+      return { principal: p, membership: m, roleBindings: rbs };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const p = await this.upsertPrincipal(client, principal);
+      const m = await this.upsertMembership(client, {
+        ...membership,
+        principalId: p.principalId,
+      });
+      const rbs: CanonicalIdentityRoleBindingRecord[] = [];
+      for (const binding of roleBindings) {
+        const rb = await this.upsertRoleBinding(client, {
+          ...binding,
+          membershipId: m.membershipId,
+        });
+        rbs.push(rb);
+      }
+      await client.query("COMMIT");
+      return { principal: p, membership: m, roleBindings: rbs };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   reportPersistenceFailure(error: unknown, context: string) {
@@ -516,7 +702,9 @@ export class IdentityRepository {
     return { ...persisted };
   }
 
-  private upsertFallbackRoleBinding(record: CanonicalIdentityRoleBindingRecord) {
+  private upsertFallbackRoleBinding(
+    record: CanonicalIdentityRoleBindingRecord,
+  ) {
     const existing = record.sourceRef
       ? this.fallbackRoleBindings.get(record.sourceRef)
       : null;

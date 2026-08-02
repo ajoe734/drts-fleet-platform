@@ -37,7 +37,9 @@ import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.consta
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
+import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
@@ -57,8 +59,7 @@ type JwtExpiresIn = NonNullable<
 
 const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
 const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
-const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV =
-  "DRTS_TENANT_BOOTSTRAP_MODE" as const;
+const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV = "DRTS_TENANT_BOOTSTRAP_MODE" as const;
 
 @Controller("auth")
 export class AuthController {
@@ -68,15 +69,70 @@ export class AuthController {
     private readonly driverDeviceSessionService: DriverDeviceSessionService,
     @Optional()
     private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly iapSubjectAdapter?: IAPSubjectAdapter,
   ) {}
 
   @Post("token")
-  issueToken(@Req() request: TokenRequest): {
+  async issueToken(@Req() request: TokenRequest): Promise<{
     token: string;
     expiresIn: string;
-  } {
+  }> {
     // Require internal key to issue tokens
     validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
+
+    const isStrictIap =
+      process.env.STRICT_IAP_MODE === "true" ||
+      process.env.NODE_ENV === "production";
+    const rawAssertion = extractIapJwtAssertion(request.headers);
+
+    if (rawAssertion && this.iapSubjectAdapter) {
+      const expectedAudience =
+        process.env.IAP_EXPECTED_AUDIENCE ||
+        process.env.IAP_AUDIENCE ||
+        process.env.JWT_AUDIENCE;
+      const expectedIssuer = process.env.IAP_EXPECTED_ISSUER;
+      const allowUnverifiedTokenInDev =
+        process.env.NODE_ENV !== "production" &&
+        process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
+      const jwtSecretOrPublicKey =
+        process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
+        process.env.IAP_JWT_SECRET ||
+        process.env.JWT_SECRET;
+
+      const resolved = await this.iapSubjectAdapter.resolveSubject(
+        request.headers,
+        {
+          strictIapMode: isStrictIap,
+          ...(expectedAudience ? { expectedAudience } : {}),
+          ...(expectedIssuer ? { expectedIssuer } : {}),
+          ...(allowUnverifiedTokenInDev ? { allowUnverifiedTokenInDev } : {}),
+          ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
+          autoProvision: process.env.NODE_ENV !== "production",
+        },
+      );
+
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType:
+          resolved.membership.realm === "platform"
+            ? "platform_admin"
+            : "ops_user",
+        actorId: resolved.principal.principalId,
+        subject: resolved.principal.subject,
+        realm: resolved.membership.realm as "platform" | "ops",
+        tenantId: null,
+        roleFamilies: [resolved.membership.realm as "platform" | "ops"],
+        roles: resolved.effectiveRoles,
+        scopes: resolved.effectiveScopes,
+        requestId:
+          (request.headers["x-request-id"] as string | undefined) ?? null,
+      };
+
+      const expiresIn: JwtExpiresIn = "8h";
+      const token = this.signJwt(identity, expiresIn);
+      return { token, expiresIn };
+    }
 
     const identity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
@@ -90,6 +146,17 @@ export class AuthController {
         "IDENTITY_REQUIRED",
         "Bootstrap identity headers (x-actor-type, x-actor-id, x-realm) are required.",
         {},
+      );
+    }
+
+    const isSystemRealm =
+      identity.actorType === "system" || identity.realm === "system";
+
+    if (isStrictIap && !isSystemRealm) {
+      throw new ApiRequestError(
+        401,
+        "IAP_ASSERTION_MISSING",
+        "Verified IAP JWT assertion is required in strict IAP mode.",
       );
     }
 
@@ -411,8 +478,8 @@ export class AuthController {
     }
 
     return (
-      ((error.getResponse() as { error?: { code?: string } })?.error?.code ??
-        null)
+      (error.getResponse() as { error?: { code?: string } })?.error?.code ??
+      null
     );
   }
 

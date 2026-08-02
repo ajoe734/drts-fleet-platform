@@ -20,6 +20,7 @@
     "@aws-sdk/client-s3": "^3.1094.0",
     "@aws-sdk/s3-request-presigner": "^3.1094.0",
     "@drts/contracts": "workspace:*",
+    "@drts/control-plane-auth": "workspace:*",
     "@nestjs/common": "^11.1.18",
     "@nestjs/core": "^11.1.18",
     "@nestjs/event-emitter": "^3.0.1",
@@ -36,6 +37,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/pg": "^8.20.0",
     "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
     "tsx": "^4.20.6"
   }
 }

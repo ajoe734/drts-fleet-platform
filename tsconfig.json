@@ -6,7 +6,8 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "paths": {
-      "@drts/contracts": ["packages/contracts/src/index.ts"]
+      "@drts/contracts": ["packages/contracts/src/index.ts"],
+      "@drts/control-plane-auth": ["packages/control-plane-auth/src/index.ts"]
     },
     "types": ["node"]
   },

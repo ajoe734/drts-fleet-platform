@@ -46,6 +46,7 @@ export interface BootstrapRequestIdentity {
   authMode: AuthMode;
   actorType: AuthActorType;
   actorId: string | null;
+  subject?: string | null;
   realm: AuthRealm;
   tenantId: string | null;
   partnerId?: string | null;
