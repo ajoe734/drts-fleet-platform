@@ -218,10 +218,9 @@ export class WorkforceIdentityService {
       throw this.buildDeniedError("realm_membership_missing");
     }
 
-    const membership = syncResult.memberships.find(
-      (candidate) =>
-        candidate.membership.realm === resolvedGrant.realm &&
-        candidate.membership.status === "active",
+    const membership = this.findActiveMembershipForGrant(
+      syncResult.memberships,
+      resolvedGrant,
     );
     if (!membership) {
       throw this.buildDeniedError("inactive_membership");
@@ -317,6 +316,20 @@ export class WorkforceIdentityService {
       scopes: this.resolveScopes(actorType, roleBinding.roleCode),
       requestId: requestId ?? null,
     };
+  }
+
+  private findActiveMembershipForGrant(
+    memberships: CanonicalMembershipSnapshot[],
+    grant: WorkforceGrant,
+  ) {
+    return memberships.find(
+      (candidate) =>
+        candidate.membership.realm === grant.realm &&
+        candidate.membership.status === "active" &&
+        candidate.roleBinding.membershipId === candidate.membership.membershipId &&
+        candidate.roleBinding.roleCode === grant.roleCode &&
+        candidate.roleBinding.validTo === null,
+    );
   }
 
   private resolveScopes(

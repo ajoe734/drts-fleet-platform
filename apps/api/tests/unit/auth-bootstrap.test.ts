@@ -2004,6 +2004,117 @@ describe("workforce control-plane token exchange", () => {
       ]),
     );
   });
+
+  it("rejects an active ops membership when the returned role binding belongs to a different realm membership", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const { controller, identityRepository } = createWorkforceFixture();
+
+    vi.spyOn(identityRepository, "syncWorkforceSubject").mockResolvedValue({
+      principal: {
+        principalId: "principal_cross_realm_001",
+        sourceRef: "workforce:test:principal",
+        issuer: "https://cloud.google.com/iap",
+        subject: "workforce-cross-realm-002",
+        principalType: "human",
+        email: "ops@platform.drts",
+        emailVerified: true,
+        displayName: "Ops User",
+        status: "active",
+        createdAt: "2026-08-02T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+      },
+      memberships: [
+        {
+          membership: {
+            membershipId: "membership_platform_001",
+            sourceRef: "workforce:test:membership:platform",
+            principalId: "principal_cross_realm_001",
+            realm: "platform",
+            scopeRef: "platform:global",
+            tenantId: null,
+            partnerId: null,
+            status: "active",
+            invitedByPrincipalId: null,
+            invitationId: null,
+            createdAt: "2026-08-02T00:00:00.000Z",
+            updatedAt: "2026-08-02T00:00:00.000Z",
+          },
+          roleBinding: {
+            roleBindingId: "role_binding_platform_001",
+            sourceRef: "workforce:test:role_binding:platform",
+            membershipId: "membership_platform_001",
+            roleCode: "superadmin",
+            grantedByPrincipalId: null,
+            approvalId: null,
+            validFrom: "2026-08-02T00:00:00.000Z",
+            validTo: null,
+            createdAt: "2026-08-02T00:00:00.000Z",
+            updatedAt: "2026-08-02T00:00:00.000Z",
+          },
+        },
+        {
+          membership: {
+            membershipId: "membership_ops_001",
+            sourceRef: "workforce:test:membership:ops",
+            principalId: "principal_cross_realm_001",
+            realm: "ops",
+            scopeRef: "ops:global",
+            tenantId: null,
+            partnerId: null,
+            status: "active",
+            invitedByPrincipalId: null,
+            invitationId: null,
+            createdAt: "2026-08-02T00:00:00.000Z",
+            updatedAt: "2026-08-02T00:00:00.000Z",
+          },
+          roleBinding: {
+            roleBindingId: "role_binding_cross_realm_001",
+            sourceRef: "workforce:test:role_binding:ops",
+            membershipId: "membership_platform_001",
+            roleCode: "superadmin",
+            grantedByPrincipalId: null,
+            approvalId: null,
+            validFrom: "2026-08-02T00:00:00.000Z",
+            validTo: null,
+            createdAt: "2026-08-02T00:00:00.000Z",
+            updatedAt: "2026-08-02T00:00:00.000Z",
+          },
+        },
+      ],
+      driftDetected: false,
+    });
+
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "internal-secret",
+          "x-drts-control-plane-actor-type": "ops_user",
+          "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+            sub: "workforce-cross-realm-002",
+            email: "ops@platform.drts",
+            groups: ["drts-ops-user"],
+          }),
+          "x-goog-authenticated-user-email": "accounts.google.com:ops@platform.drts",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          details: {
+            reasonCode: "inactive_membership",
+          },
+        },
+      },
+    });
+  });
 });
 
 describe("partner bootstrap-session auth controller", () => {
