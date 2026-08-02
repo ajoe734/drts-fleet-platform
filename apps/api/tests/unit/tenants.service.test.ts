@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TenantsService } from "../../src/modules/platform-admin/tenants.service";
 import { ApiRequestError } from "../../src/common/api-envelope";
@@ -41,6 +41,16 @@ function createService() {
     platformAdminRepository,
   };
 }
+
+const originalDrtsEnv = process.env.DRTS_ENV;
+
+afterEach(() => {
+  if (originalDrtsEnv === undefined) {
+    delete process.env.DRTS_ENV;
+  } else {
+    process.env.DRTS_ENV = originalDrtsEnv;
+  }
+});
 
 describe("TenantsService", () => {
   it("provisions bootstrap defaults and rollout state when creating a tenant", () => {
@@ -250,6 +260,124 @@ describe("TenantsService", () => {
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "pilot" }),
       "TENANT_IN_ROLLBACK_HOLD",
+    );
+  });
+
+  it("drops the demo tenant when strict auth rehydrates persisted state", async () => {
+    process.env.DRTS_ENV = "production";
+
+    const auditNotificationService = {
+      recordAuditLog: vi.fn(),
+    };
+    const platformAdminRepository = {
+      loadState: vi.fn().mockResolvedValue({
+        platformTenants: [
+          {
+            id: "tenant-demo-001",
+            code: "demo",
+            name: "Demo Tenant",
+            status: "active",
+            enabledModules: ["enterprise_dispatch"],
+            quotas: {
+              activeDrivers: 50,
+              monthlyBookings: 1200,
+              monthlyApiCalls: 80000,
+            },
+            bootstrapDefaults: {
+              roleDefaults: [],
+              billingBaseline: {
+                invoiceTitle: "Demo Tenant",
+                contactName: "Demo Billing",
+                email: "admin@demo.example",
+              },
+              notificationSubscriptions: [],
+              webhookEvents: [],
+            },
+            integrationPackage: {
+              mode: "none",
+              apiKeyScopes: [],
+              sandboxBaseUrl: null,
+              productionBaseUrl: null,
+            },
+            rollout: {
+              stage: "production",
+              sandboxStatus: "approved",
+              pilotStatus: "approved",
+              productionStatus: "approved",
+              cutoverOwner: "Ops",
+              rollbackOwner: "Ops",
+              rollbackPrepared: true,
+              lastPromotedAt: "2026-04-01T00:00:00.000Z",
+              notes: null,
+            },
+            createdAt: "2026-04-01T00:00:00.000Z",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+          },
+          {
+            id: "tenant-acme",
+            code: "acme",
+            name: "Acme",
+            status: "active",
+            enabledModules: ["enterprise_dispatch"],
+            quotas: {
+              activeDrivers: 25,
+              monthlyBookings: 500,
+              monthlyApiCalls: 10000,
+            },
+            bootstrapDefaults: {
+              roleDefaults: [],
+              billingBaseline: {
+                invoiceTitle: "Acme",
+                contactName: "Acme Billing",
+                email: "billing@acme.example",
+              },
+              notificationSubscriptions: [],
+              webhookEvents: [],
+            },
+            integrationPackage: {
+              mode: "none",
+              apiKeyScopes: [],
+              sandboxBaseUrl: null,
+              productionBaseUrl: null,
+            },
+            rollout: {
+              stage: "sandbox",
+              sandboxStatus: "ready",
+              pilotStatus: "pending",
+              productionStatus: "pending",
+              cutoverOwner: null,
+              rollbackOwner: null,
+              rollbackPrepared: false,
+              lastPromotedAt: null,
+              notes: null,
+            },
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+        publicInfoVersions: [],
+        placardVersions: [],
+      }),
+      persistChanges: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const service = new TenantsService(
+      auditNotificationService as never,
+      platformAdminRepository as never,
+    );
+    await service.onModuleInit();
+
+    expect(service.list()).toEqual([
+      expect.objectContaining({
+        id: "tenant-acme",
+      }),
+    ]);
+    expect(platformAdminRepository.persistChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformTenants: [expect.objectContaining({ id: "tenant-acme" })],
+        deletedPlatformTenantIds: ["tenant-demo-001"],
+      }),
     );
   });
 

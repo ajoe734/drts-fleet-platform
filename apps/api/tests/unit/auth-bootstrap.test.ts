@@ -417,6 +417,45 @@ describe("bootstrap auth guard", () => {
     delete process.env.DRTS_TENANT_BOOTSTRAP_MODE;
   });
 
+  it("rejects bootstrap identities on OpenRoute endpoints in strict auth environments", () => {
+    process.env.APP_ENV = "staging";
+
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "spoofed-admin",
+        "x-realm": "platform",
+      },
+      method: "GET",
+      originalUrl: "/api/identity/context",
+    };
+    class PublicHandler {
+      handler() {}
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      PublicHandler.prototype,
+      "handler",
+    );
+    expect(descriptor).toBeDefined();
+    if (!descriptor) {
+      throw new Error("expected descriptor");
+    }
+    OpenRoute()(PublicHandler.prototype, "handler", descriptor);
+
+    expect(() =>
+      guard.canActivate(
+        createExecutionContext(
+          request,
+          PublicHandler.prototype.handler,
+          PublicHandler,
+        ),
+      ),
+    ).toThrowError(ApiRequestError);
+
+    delete process.env.APP_ENV;
+  });
+
   it("rejects tenant bootstrap identities on call-center order creation", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {

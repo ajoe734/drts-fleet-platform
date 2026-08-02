@@ -156,6 +156,19 @@ function mergeByKey<T>(
   return [...merged.values()];
 }
 
+function withoutKeys<T>(
+  current: readonly T[],
+  keys: readonly string[] | undefined,
+  keyOf: (value: T) => string,
+) {
+  if (!keys || keys.length === 0) {
+    return [...current];
+  }
+
+  const removed = new Set(keys);
+  return current.filter((value) => !removed.has(keyOf(value)));
+}
+
 function createInMemoryTenantPartnerRepository(
   initialState: TenantPartnerState = createEmptyRepositoryState(),
 ) {
@@ -165,86 +178,201 @@ function createInMemoryTenantPartnerRepository(
     isEnabled: vi.fn(() => false),
     loadState: vi.fn(async () => cloneState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
+      const nextState = {
+        notificationPreferences: withoutKeys(
+          state.notificationPreferences,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        webhookEndpoints: withoutKeys(
+          state.webhookEndpoints,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        webhookDeliveries: withoutKeys(
+          state.webhookDeliveries,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        slaProfiles: withoutKeys(
+          state.slaProfiles,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        partnerEntries: withoutKeys(
+          state.partnerEntries,
+          changes.deletedPartnerEntrySlugs ?? changes.deletedTenantIds,
+          (value) =>
+            changes.deletedPartnerEntrySlugs ? value.entrySlug : value.tenantId,
+        ),
+        partnerIngressCredentials: withoutKeys(
+          withoutKeys(
+            state.partnerIngressCredentials,
+            changes.deletedPartnerEntrySlugs,
+            (value) => value.entrySlug,
+          ),
+          changes.deletedPartnerIngressCredentialIds,
+          (value) => value.keyId,
+        ),
+        partnerEligibilityVerifications: withoutKeys(
+          state.partnerEligibilityVerifications,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        approvalRules: withoutKeys(
+          state.approvalRules,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        approvalRequests: withoutKeys(
+          state.approvalRequests,
+          changes.deletedApprovalRequestIds ?? changes.deletedTenantIds,
+          (value) =>
+            changes.deletedApprovalRequestIds
+              ? value.approvalRequestId
+              : value.tenantId,
+        ),
+        approvalDecisions: withoutKeys(
+          withoutKeys(
+            state.approvalDecisions,
+            changes.deletedApprovalRequestIds,
+            (value) => value.approvalRequestId,
+          ),
+          changes.deletedApprovalDecisionIds,
+          (value) => value.decisionId,
+        ),
+        passengers: withoutKeys(
+          state.passengers,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        addresses: withoutKeys(
+          state.addresses,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        costCenters: withoutKeys(
+          state.costCenters,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        quotaPolicies: withoutKeys(
+          state.quotaPolicies,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        quotaLedger: withoutKeys(
+          state.quotaLedger,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        quotaMonthlySnapshots: withoutKeys(
+          state.quotaMonthlySnapshots,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        userRoles: withoutKeys(
+          state.userRoles,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+        apiKeys: withoutKeys(
+          state.apiKeys,
+          changes.deletedTenantIds,
+          (value) => value.tenantId,
+        ),
+      };
+
       state = {
         notificationPreferences: mergeByKey(
-          state.notificationPreferences,
+          nextState.notificationPreferences,
           changes.notificationPreferences,
           (value) => value.tenantId,
         ),
         webhookEndpoints: mergeByKey(
-          state.webhookEndpoints,
+          nextState.webhookEndpoints,
           changes.webhookEndpoints,
           (value) => value.webhookId,
         ),
         webhookDeliveries: mergeByKey(
-          state.webhookDeliveries,
+          nextState.webhookDeliveries,
           changes.webhookDeliveries,
           (value) => value.deliveryId,
         ),
         slaProfiles: mergeByKey(
-          state.slaProfiles,
+          nextState.slaProfiles,
           changes.slaProfiles,
           (value) => value.tenantId,
         ),
         partnerEntries: mergeByKey(
-          state.partnerEntries,
+          nextState.partnerEntries,
           changes.partnerEntries,
           (value) => value.entrySlug,
         ),
         partnerIngressCredentials: mergeByKey(
-          state.partnerIngressCredentials,
+          nextState.partnerIngressCredentials,
           changes.partnerIngressCredentials,
           (value) => value.keyId,
         ),
         partnerEligibilityVerifications: mergeByKey(
-          state.partnerEligibilityVerifications,
+          nextState.partnerEligibilityVerifications,
           changes.partnerEligibilityVerifications,
           (value) => value.eligibilityVerificationId,
         ),
         approvalRules: mergeByKey(
-          state.approvalRules,
+          nextState.approvalRules,
           changes.approvalRules,
           (value) => value.ruleId,
         ),
+        approvalRequests: mergeByKey(
+          nextState.approvalRequests,
+          changes.approvalRequests,
+          (value) => value.approvalRequestId,
+        ),
+        approvalDecisions: mergeByKey(
+          nextState.approvalDecisions,
+          changes.approvalDecisions,
+          (value) => value.decisionId,
+        ),
         passengers: mergeByKey(
-          state.passengers,
+          nextState.passengers,
           changes.passengers,
           (value) => value.passengerId,
         ),
         addresses: mergeByKey(
-          state.addresses,
+          nextState.addresses,
           changes.addresses,
           (value) => value.addressId,
         ),
         costCenters: mergeByKey(
-          state.costCenters,
+          nextState.costCenters,
           changes.costCenters,
           (value) => `${value.tenantId}:${value.code}`,
         ),
         quotaPolicies: mergeByKey(
-          state.quotaPolicies,
+          nextState.quotaPolicies,
           changes.quotaPolicies,
           (value) =>
             `${value.tenantId}:${serializeQuotaScopePart(value.costCenterCode)}:${value.period}`,
         ),
         quotaLedger: mergeByKey(
-          state.quotaLedger,
+          nextState.quotaLedger,
           changes.quotaLedger,
           (value) => value.ledgerEntryId,
         ),
         quotaMonthlySnapshots: mergeByKey(
-          state.quotaMonthlySnapshots,
+          nextState.quotaMonthlySnapshots,
           changes.quotaMonthlySnapshots,
           (value) =>
             `${value.tenantId}:${serializeQuotaScopePart(value.costCenterCode)}:${value.period}:${value.periodKey}`,
         ),
         userRoles: mergeByKey(
-          state.userRoles,
+          nextState.userRoles,
           changes.userRoles,
           (value) => value.userId,
         ),
         apiKeys: mergeByKey(
-          state.apiKeys,
+          nextState.apiKeys,
           changes.apiKeys,
           (value) => value.apiKeyId,
         ),
@@ -317,6 +445,8 @@ function createDatabaseQuotaRepository(options?: {
 }
 
 describe("TenantPartnerService sensitive-data governance", () => {
+  const originalDrtsEnv = process.env.DRTS_ENV;
+
   afterEach(() => {
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT;
@@ -324,6 +454,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
     delete process.env.PARTNER_INGRESS_KEY_CATHAY;
     delete process.env.PARTNER_INGRESS_KEY_TAISHIN;
     delete process.env.PARTNER_INGRESS_KEY_DBS;
+    if (originalDrtsEnv === undefined) {
+      delete process.env.DRTS_ENV;
+    } else {
+      process.env.DRTS_ENV = originalDrtsEnv;
+    }
   });
 
   it("reconciles canonical partner-booking route seeds without duplicating persisted entries", async () => {
@@ -463,6 +598,109 @@ describe("TenantPartnerService sensitive-data governance", () => {
         partnerEntrySlug: "ctbc",
       },
     });
+  });
+
+  it("strips demo tenant graph from persisted state in strict auth environments", async () => {
+    const localSeedService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const persistedState = createEmptyRepositoryState();
+    persistedState.notificationPreferences = [
+      localSeedService.getNotificationPreferences("tenant-demo-001"),
+      {
+        tenantId: "tenant-acme",
+        bookingDigestEnabled: true,
+        bookingDigestChannel: "email",
+        bookingDigestRecipients: ["ops@acme.example"],
+        approvalDigestEnabled: true,
+        approvalDigestChannel: "email",
+        approvalDigestRecipients: ["approvals@acme.example"],
+        subscriptions: [],
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+    persistedState.slaProfiles = [
+      localSeedService.getSlaProfile("tenant-demo-001"),
+      {
+        tenantId: "tenant-acme",
+        bookingResponseMinutes: 10,
+        dispatchAssignmentMinutes: 15,
+        driverArrivalMinutes: 20,
+        completionGraceMinutes: 30,
+        activeFlag: true,
+        escalationRouting: ["ops"],
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+    persistedState.partnerEntries = [localSeedService.getPartnerEntry("ctbc")];
+    persistedState.partnerIngressCredentials = [
+      {
+        keyId: "partner-key-ctbc-dev",
+        entrySlug: "ctbc",
+        keyPrefix: "env_bootstrap",
+        maskedSuffix: "configured",
+        source: "env_bootstrap",
+        createdAt: "2026-04-10T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: null,
+        issuedBy: "system:env_bootstrap",
+        revokedBy: null,
+        rotationReason: null,
+        revokeReason: null,
+        keyHash: "c".repeat(64),
+      },
+    ];
+    persistedState.passengers = [
+      localSeedService.listPassengers("tenant-demo-001")[0]!,
+    ];
+    persistedState.addresses = [localSeedService.listAddresses("tenant-demo-001")[0]!];
+    persistedState.costCenters = localSeedService.listCostCenters("tenant-demo-001");
+    persistedState.userRoles = localSeedService.listTenantUsers("tenant-demo-001");
+    persistedState.apiKeys = [
+      localSeedService.listApiKeys("tenant-demo-001")[0] as never,
+    ];
+    process.env.DRTS_ENV = "staging";
+    const repository = createInMemoryTenantPartnerRepository(
+      cloneState(persistedState),
+    );
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.listPassengers("tenant-demo-001")).toEqual([]);
+    expect(service.listAddresses("tenant-demo-001")).toEqual([]);
+    expect(service.listCostCenters("tenant-demo-001")).toEqual([]);
+    expect(service.listTenantUsers("tenant-demo-001")).toEqual([]);
+    expect(service.listApiKeys("tenant-demo-001")).toEqual([]);
+    expect(() => service.getPartnerEntry("ctbc")).toThrow(ApiRequestError);
+    expect(service.getNotificationPreferences("tenant-acme")).toMatchObject({
+      tenantId: "tenant-acme",
+    });
+    expect(service.getSlaProfile("tenant-acme")).toMatchObject({
+      tenantId: "tenant-acme",
+    });
+    expect(repository.persistChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationPreferences: [
+          expect.objectContaining({ tenantId: "tenant-acme" }),
+        ],
+        deletedTenantIds: ["tenant-demo-001"],
+        deletedPartnerEntrySlugs: ["ctbc"],
+        deletedPartnerIngressCredentialIds: ["partner-key-ctbc-dev"],
+        partnerEntries: [],
+        userRoles: [],
+      }),
+    );
+    expect(repository.getState().notificationPreferences).toEqual([
+      expect.objectContaining({ tenantId: "tenant-acme" }),
+    ]);
+    expect(repository.getState().partnerEntries).toEqual([]);
+    expect(repository.getState().userRoles).toEqual([]);
   });
 
   it("does not resurrect revoked credentials or replace rotated credentials from seeds", async () => {

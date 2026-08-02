@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { ApiRequestError } from "../api-envelope";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -97,22 +98,50 @@ function hasBearerAuthorization(request: RequestLike): boolean {
   return headerValues.some((value) => /^Bearer\s+\S+/i.test(value));
 }
 
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
+function isInternalKeyEnforcementDisabled(): boolean {
+  return (
+    !isStrictAuthEnvironment() &&
+    process.env.DRTS_INTERNAL_KEY_ENFORCED?.trim().toLowerCase() === "false"
+  );
+}
+
 export function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
 ): void {
   const requestPath = request.originalUrl ?? request.url ?? "";
   const requestMethod = request.method ?? "GET";
+  const strictEnvironment = isStrictAuthEnvironment();
 
   if (
-    !expectedKey ||
     isHealthRequest(requestPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, requestPath) ||
-    hasPublicBootstrapRealm(request) ||
     hasBearerAuthorization(request)
   ) {
     return;
+  }
+
+  if (!strictEnvironment && (!expectedKey || hasPublicBootstrapRealm(request))) {
+    return;
+  }
+
+  if (!expectedKey) {
+    throw new ApiRequestError(
+      503,
+      "INTERNAL_KEY_NOT_CONFIGURED",
+      "x-drts-internal-key validation is not configured for this environment.",
+      {
+        route: requestPath,
+        method: requestMethod,
+        requiredEnv: "DRTS_INTERNAL_KEY",
+      },
+    );
   }
 
   const providedKey = normalizeHeaderValue(
@@ -211,12 +240,7 @@ export function requireInternalKey(
 @Injectable()
 export class InternalKeyMiddleware implements NestMiddleware {
   use(request: RequestLike, _response: unknown, next: () => void) {
-    // Non-prod escape hatch: when enforcement is explicitly disabled (dev, so
-    // every server-to-server surface — e.g. the passenger embed resolving its
-    // partner entry — works without depending on per-service key mounts), the
-    // internal-key gate is a no-op. Defaults to enforced; prod never sets the
-    // flag, so production stays locked down.
-    if (process.env.DRTS_INTERNAL_KEY_ENFORCED === "false") {
+    if (isInternalKeyEnforcementDisabled()) {
       next();
       return;
     }

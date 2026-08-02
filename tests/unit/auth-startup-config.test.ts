@@ -34,6 +34,24 @@ function buildValidProductionEnv(): Record<string, string> {
 }
 
 describe("detectAuthEnvironment", () => {
+  it("prefers DRTS_ENV over NODE_ENV for runtime classification", () => {
+    expect(
+      detectAuthEnvironment({
+        DRTS_ENV: "development",
+        NODE_ENV: "production",
+        CI: "false",
+      }),
+    ).toBe("local");
+
+    expect(
+      detectAuthEnvironment({
+        DRTS_ENV: "staging",
+        NODE_ENV: "production",
+        CI: "false",
+      }),
+    ).toBe("staging");
+  });
+
   it("detects production environment", () => {
     expect(detectAuthEnvironment({ APP_ENV: "production", CI: "false" })).toBe(
       "production",

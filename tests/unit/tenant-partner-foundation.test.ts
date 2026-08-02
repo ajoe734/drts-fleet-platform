@@ -1457,6 +1457,26 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     ).toBe(true);
   });
 
+  it("does not expose seeded referral rates in production", () => {
+    const originalAppEnv = process.env.APP_ENV;
+
+    process.env.APP_ENV = "production";
+    try {
+      const service = new TenantPartnerService(new AuditNotificationService());
+
+      expect(service.listReferralRevenueShareRules()).toEqual([]);
+      expect(
+        service.listReferralRevenueShareRules("referral-demo-community"),
+      ).toEqual([]);
+    } finally {
+      if (originalAppEnv === undefined) {
+        delete process.env.APP_ENV;
+      } else {
+        process.env.APP_ENV = originalAppEnv;
+      }
+    }
+  });
+
   it("upserts a referral rate and writes an audit log", () => {
     const audit = new AuditNotificationService();
     const service = new TenantPartnerService(audit);
