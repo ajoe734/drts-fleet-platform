@@ -1,0 +1,38 @@
+{
+  "task_id": "AUDIT-REF-LIVE-003",
+  "audited_task_id": "REL-REF-EMBED-003",
+  "timestamp": "2026-08-02T09:00:00Z",
+  "audit_verdict": "BLOCKED_REOPEN_REQUIRED",
+  "github_api_audit": {
+    "claimed_deploy_run_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/30739640766",
+    "claimed_deploy_run_type": "CI (integration trunk)",
+    "claimed_deploy_run_conclusion": "success",
+    "actual_latest_deploy_dev_run_id": 30738815952,
+    "actual_latest_deploy_dev_run_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/30738815952",
+    "actual_latest_deploy_dev_conclusion": "failure",
+    "failed_job_name": "Dev health check",
+    "sha_ancestry_on_dev": "af144877e5696c3f8df3da83a0d704c5721c35c8",
+    "rel_ref_embed_commit_merged_to_dev": false
+  },
+  "gcp_cloud_run_audit": {
+    "referral_embed_web_url": "https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app",
+    "referral_embed_web_status": 200,
+    "referral_embed_custom_domain": "https://refer.smarttransport.tw/embed/yuhe-residence",
+    "referral_embed_custom_domain_status": 200,
+    "csp_frame_ancestors": "https://app.yuhe-living.com.tw https://app-stg.yuhe-living.com.tw",
+    "platform_admin_web_status": 500,
+    "ops_console_web_status": 500,
+    "partner_booking_web_status": 404,
+    "partner_booking_paused_confirmed": true
+  },
+  "security_and_handoff_reproduction": {
+    "authorized_s2s_handoff_passed": true,
+    "replay_denial_passed": true,
+    "cross_entry_origin_denial_passed": true,
+    "unit_security_tests_passed": "7/7",
+    "unit_routing_tests_passed": "7/7",
+    "unit_passenger_lifecycle_tests_passed": "8/8",
+    "hermetic_harness_tests_passed": "4/4",
+    "no_exposed_secrets": true
+  }
+}
