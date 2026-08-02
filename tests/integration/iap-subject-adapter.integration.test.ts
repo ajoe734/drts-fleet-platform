@@ -7,6 +7,7 @@ import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service"
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
 import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
 import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
+import { JwtSessionClaimsService } from "../../apps/api/src/modules/auth/jwt-session-claims.service";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
@@ -333,15 +334,21 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const tenantPartnerService = new TenantPartnerService(
       securityEventsService as any,
     );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
     const driverDeviceSessionService = new DriverDeviceSessionService(
       jwtAuthService,
       null as any,
+      jwtSessionClaimsService,
       null as any,
     );
     const authController = new AuthController(
       jwtAuthService,
       tenantPartnerService,
       driverDeviceSessionService,
+      jwtSessionClaimsService,
       securityEventsService,
       adapter,
     );
@@ -392,15 +399,21 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const tenantPartnerService = new TenantPartnerService(
       securityEventsService as any,
     );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
     const driverDeviceSessionService = new DriverDeviceSessionService(
       jwtAuthService,
       null as any,
+      jwtSessionClaimsService,
       null as any,
     );
     const authController = new AuthController(
       jwtAuthService,
       tenantPartnerService,
       driverDeviceSessionService,
+      jwtSessionClaimsService,
       securityEventsService,
       adapter,
     );
@@ -489,9 +502,14 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const reflector = {
       getAllAndOverride: () => undefined,
     } as any;
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      undefined,
+      identityRepo,
+    );
     const guard = new BootstrapAuthGuard(
       reflector,
       new JwtAuthService(),
+      jwtSessionClaimsService,
       undefined,
       undefined,
       adapter,
@@ -540,6 +558,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const guard = new BootstrapAuthGuard(
       reflector,
       new JwtAuthService(),
+      new JwtSessionClaimsService(undefined, identityRepo),
       undefined,
       undefined,
       adapter,
@@ -584,15 +603,21 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const tenantPartnerService = new TenantPartnerService(
       securityEventsService as any,
     );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
     const driverDeviceSessionService = new DriverDeviceSessionService(
       jwtAuthService,
       null as any,
+      jwtSessionClaimsService,
       null as any,
     );
     const authController = new AuthController(
       jwtAuthService,
       tenantPartnerService,
       driverDeviceSessionService,
+      jwtSessionClaimsService,
       securityEventsService,
       adapter,
     );
@@ -723,6 +748,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const guard = new BootstrapAuthGuard(
       reflector,
       new JwtAuthService(),
+      new JwtSessionClaimsService(undefined, identityRepo),
       undefined,
       undefined,
       adapter,
@@ -959,6 +985,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const guard = new BootstrapAuthGuard(
       reflector,
       new JwtAuthService(),
+      new JwtSessionClaimsService(undefined, identityRepo),
       undefined,
       undefined,
       adapter,

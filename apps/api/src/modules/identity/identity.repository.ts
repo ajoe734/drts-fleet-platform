@@ -294,6 +294,36 @@ export class IdentityRepository {
     }
   }
 
+  async findPrincipalById(
+    principalId: string,
+  ): Promise<CanonicalIdentityPrincipalRecord | null> {
+    if (!this.isEnabled()) {
+      const record = this.fallbackPrincipals.get(principalId);
+      return record ? { ...record } : null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_principals
+          WHERE principal_id = $1
+          LIMIT 1
+        `,
+        [principalId],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityPrincipalRecord>(
+        result.rows[0].record,
+        "iam.identity_principals",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
   async findMembershipsByPrincipalId(
     principalId: string,
   ): Promise<CanonicalIdentityMembershipRecord[]> {

@@ -40,6 +40,7 @@ import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
+import { JwtSessionClaimsService } from "./jwt-session-claims.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
@@ -72,6 +73,7 @@ export class AuthController {
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly driverDeviceSessionService: DriverDeviceSessionService,
+    private readonly jwtSessionClaimsService: JwtSessionClaimsService,
     @Optional()
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
@@ -148,7 +150,10 @@ export class AuthController {
       };
 
       const expiresIn: JwtExpiresIn = "8h";
-      const token = this.signJwt(identity, expiresIn);
+      const token = this.signJwt(identity, expiresIn, {
+        principal: resolved.principal,
+        membership: resolved.membership,
+      });
       return { token, expiresIn };
     }
 
@@ -292,6 +297,9 @@ export class AuthController {
           requestId: requestId ?? null,
         },
         TENANT_BOOTSTRAP_EXPIRES_IN,
+        {
+          tenantUser: existingUser,
+        },
       );
       const session: TenantBootstrapSession = {
         accessToken: token,
@@ -402,6 +410,9 @@ export class AuthController {
           requestId: requestId ?? null,
         },
         "1h",
+        {
+          partnerEntry: resolved.partnerEntry,
+        },
       );
       const session: PartnerBootstrapSession = {
         accessToken: token,
@@ -646,9 +657,16 @@ export class AuthController {
   private signJwt(
     identity: Parameters<JwtAuthService["sign"]>[0],
     expiresIn: JwtExpiresIn,
+    claimContext?: Parameters<JwtSessionClaimsService["buildClaims"]>[1],
   ) {
     try {
-      return this.jwtAuthService.sign(identity, { expiresIn });
+      return this.jwtAuthService.sign(identity, {
+        expiresIn,
+        sessionClaims: this.jwtSessionClaimsService.buildClaims(
+          identity,
+          claimContext,
+        ),
+      });
     } catch (error) {
       if (isJwtKeyMaterialNotConfiguredError(error)) {
         throw new ApiRequestError(

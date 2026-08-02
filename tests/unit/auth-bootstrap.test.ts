@@ -4,6 +4,7 @@ import type { TenantUserRoleRecord } from "@drts/contracts";
 
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
+import { JwtSessionClaimsService } from "../../apps/api/src/modules/auth/jwt-session-claims.service";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -50,8 +51,24 @@ function createController(users: TenantUserRoleRecord[] = []) {
           assignable: true,
         },
       ]),
+      findTenantUser: vi.fn((tenantId: string, userId: string) => {
+        const matched =
+          users.find(
+            (user) => user.tenantId === tenantId && user.userId === userId,
+          ) ?? null;
+        return matched ? { ...matched } : null;
+      }),
     } as never,
     {} as never,
+    new JwtSessionClaimsService({
+      findTenantUser: vi.fn((tenantId: string, userId: string) => {
+        const matched =
+          users.find(
+            (user) => user.tenantId === tenantId && user.userId === userId,
+          ) ?? null;
+        return matched ? { ...matched } : null;
+      }),
+    } as never),
   );
 }
 

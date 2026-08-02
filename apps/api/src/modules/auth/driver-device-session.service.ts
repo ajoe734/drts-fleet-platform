@@ -14,6 +14,7 @@ import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { JwtSessionClaimsService } from "./jwt-session-claims.service";
 
 type DriverDeviceBindingRecord = {
   bindingId: string;
@@ -48,6 +49,7 @@ export class DriverDeviceSessionService {
   constructor(
     private readonly jwtAuthService: JwtAuthService,
     private readonly driverProfileService: DriverProfileService,
+    private readonly jwtSessionClaimsService: JwtSessionClaimsService,
     @Optional()
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
     @Optional()
@@ -482,7 +484,27 @@ export class DriverDeviceSessionService {
         driverBindingId: binding.bindingId,
         driverDeviceId: binding.deviceId,
       },
-      { expiresIn: DRIVER_ACCESS_TOKEN_EXPIRES_IN },
+      {
+        expiresIn: DRIVER_ACCESS_TOKEN_EXPIRES_IN,
+        sessionClaims: this.jwtSessionClaimsService.buildClaims(
+          {
+            authMode: "jwt_bearer",
+            actorType: "driver_user",
+            actorId: binding.driverId,
+            realm: "driver",
+            tenantId: null,
+            roleFamilies: ["driver"],
+            roles: ["driver_user"],
+            scopes: ["driver:read", "driver:write", "dispatch:read"],
+            requestId: null,
+            driverBindingId: binding.bindingId,
+            driverDeviceId: binding.deviceId,
+          },
+          {
+            sid: binding.bindingId,
+          },
+        ),
+      },
     );
 
     return {

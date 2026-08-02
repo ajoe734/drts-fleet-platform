@@ -10,6 +10,7 @@ import { ApiRequestError } from "../api-envelope";
 import { DriverDeviceSessionService } from "../../modules/auth/driver-device-session.service";
 import { AuditNotificationService } from "../../modules/audit-notification/audit-notification.service";
 import { IAPSubjectAdapter } from "../../modules/auth/iap-subject.adapter";
+import { JwtSessionClaimsService } from "../../modules/auth/jwt-session-claims.service";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import {
   AUTH_ALLOWED_REALMS_KEY,
@@ -141,6 +142,8 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     @Optional() private readonly jwtAuthService?: JwtAuthService,
     @Optional()
+    private readonly jwtSessionClaimsService?: JwtSessionClaimsService,
+    @Optional()
     private readonly driverDeviceSessionService?: DriverDeviceSessionService,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
@@ -148,7 +151,7 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<AuthenticatedRequestLike>();
@@ -175,7 +178,7 @@ export class BootstrapAuthGuard implements CanActivate {
       ]) ?? false;
 
     if (isOpenRoute) {
-      this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
+      await this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
       return true;
     }
 
@@ -281,20 +284,20 @@ export class BootstrapAuthGuard implements CanActivate {
     return true;
   }
 
-  private activateNonIap(
+  private async activateNonIap(
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
     policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
-  ): boolean {
+  ): Promise<boolean> {
     const strictEnvironment = isStrictAuthEnvironment();
-
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
         const payload = this.jwtAuthService.verify(token);
         if (payload) {
+          await this.jwtSessionClaimsService?.assertTokenActive(payload);
           this.assertDriverBindingActive(payload, requestUrl);
           const identity = this.jwtAuthService.toRequestIdentity(payload);
           request.identity = identity;
@@ -388,7 +391,7 @@ export class BootstrapAuthGuard implements CanActivate {
     return true;
   }
 
-  private populateOpenRouteIdentity(
+  private async populateOpenRouteIdentity(
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
@@ -400,6 +403,7 @@ export class BootstrapAuthGuard implements CanActivate {
       if (token) {
         const payload = this.jwtAuthService.verify(token);
         if (payload) {
+          await this.jwtSessionClaimsService?.assertTokenActive(payload);
           this.assertDriverBindingActive(payload, requestUrl);
           request.identity = this.jwtAuthService.toRequestIdentity(payload);
           return;

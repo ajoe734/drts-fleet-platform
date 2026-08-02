@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
+import { JwtSessionClaimsService } from "../../apps/api/src/modules/auth/jwt-session-claims.service";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import type { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
@@ -41,6 +42,7 @@ describe("JWT controller error mapping", () => {
       new JwtAuthService(),
       {} as never,
       {} as never,
+      new JwtSessionClaimsService(),
     );
 
     let thrown: unknown;

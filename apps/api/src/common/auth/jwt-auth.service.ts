@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { IdentityContext } from "@drts/contracts";
 import { Injectable, Logger } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
@@ -20,6 +22,14 @@ export interface JwtIdentityPayload {
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
+  sid: string;
+  jti: string;
+  tokenVersion: string;
+  auth_time: number;
+  amr: string[];
+  acr: string;
+  policyVersion: string;
+  membershipId?: string | null;
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
@@ -62,6 +72,8 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   driverDeviceId?: string | null;
 };
 
+export type JwtSessionClaimInput = JwtSignIdentity;
+
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
 const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
 
@@ -85,6 +97,31 @@ export function isJwtKeyMaterialNotConfiguredError(
 @Injectable()
 export class JwtAuthService {
   private readonly logger = new Logger(JwtAuthService.name);
+
+  private hasRequiredClaims(payload: unknown): payload is JwtIdentityPayload {
+    if (!payload || typeof payload !== "object") {
+      return false;
+    }
+
+    const candidate = payload as Partial<JwtIdentityPayload>;
+    return (
+      typeof candidate.sid === "string" &&
+      candidate.sid.trim().length > 0 &&
+      typeof candidate.jti === "string" &&
+      candidate.jti.trim().length > 0 &&
+      typeof candidate.tokenVersion === "string" &&
+      candidate.tokenVersion.trim().length > 0 &&
+      typeof candidate.auth_time === "number" &&
+      Number.isFinite(candidate.auth_time) &&
+      Array.isArray(candidate.amr) &&
+      candidate.amr.length > 0 &&
+      candidate.amr.every((value) => typeof value === "string" && value.trim().length > 0) &&
+      typeof candidate.acr === "string" &&
+      candidate.acr.trim().length > 0 &&
+      typeof candidate.policyVersion === "string" &&
+      candidate.policyVersion.trim().length > 0
+    );
+  }
 
   private getSignKey(): string {
     const privateKey = process.env.JWT_PRIVATE_KEY;
@@ -186,7 +223,25 @@ export class JwtAuthService {
     return options;
   }
 
-  sign(identity: JwtSignIdentity, opts?: { expiresIn?: JwtExpiresIn }): string {
+  sign(
+    identity: JwtSignIdentity,
+    opts?: {
+      expiresIn?: JwtExpiresIn;
+      sessionClaims?: Pick<
+        JwtIdentityPayload,
+        | "sid"
+        | "jti"
+        | "tokenVersion"
+        | "auth_time"
+        | "amr"
+        | "acr"
+        | "policyVersion"
+        | "membershipId"
+      >;
+    },
+  ): string {
+    const sessionClaims =
+      opts?.sessionClaims ?? this.buildFallbackSessionClaims(identity);
     const payload: JwtIdentityPayload = {
       sub: identity.actorId,
       actorType: identity.actorType,
@@ -198,6 +253,14 @@ export class JwtAuthService {
       roleFamilies: identity.roleFamilies,
       roles: identity.roles,
       scopes: identity.scopes,
+      sid: sessionClaims.sid,
+      jti: sessionClaims.jti,
+      tokenVersion: sessionClaims.tokenVersion,
+      auth_time: sessionClaims.auth_time,
+      amr: sessionClaims.amr,
+      acr: sessionClaims.acr,
+      policyVersion: sessionClaims.policyVersion,
+      membershipId: sessionClaims.membershipId ?? null,
       drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
@@ -217,15 +280,45 @@ export class JwtAuthService {
 
   verify(token: string): JwtIdentityPayload | null {
     try {
-      return jwt.verify(
+      const payload = jwt.verify(
         token,
         this.getVerifyKey(),
         this.buildJwtVerifyOptions(),
-      ) as JwtIdentityPayload;
+      );
+      if (!this.hasRequiredClaims(payload)) {
+        this.logger.debug("JWT verification failed: required session claims missing");
+        return null;
+      }
+      return payload;
     } catch (err) {
       this.logger.debug(`JWT verification failed: ${(err as Error).message}`);
       return null;
     }
+  }
+
+  private buildFallbackSessionClaims(
+    identity: JwtSignIdentity,
+  ): Pick<
+    JwtIdentityPayload,
+    | "sid"
+    | "jti"
+    | "tokenVersion"
+    | "auth_time"
+    | "amr"
+    | "acr"
+    | "policyVersion"
+    | "membershipId"
+  > {
+    return {
+      sid: randomUUID(),
+      jti: randomUUID(),
+      tokenVersion: `${identity.realm}:${identity.actorId ?? "anonymous"}:${Date.now()}`,
+      auth_time: Math.floor(Date.now() / 1000),
+      amr: ["legacy_jwt"],
+      acr: "aal0",
+      policyVersion: `${identity.realm}:legacy-v1`,
+      membershipId: null,
+    };
   }
 
   toRequestIdentity(payload: JwtIdentityPayload): BootstrapRequestIdentity {
