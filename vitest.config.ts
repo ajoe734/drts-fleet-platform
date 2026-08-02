@@ -22,6 +22,7 @@ export default defineConfig({
       "tests/integ/**/*.test.ts",
       "tests/unit/**/*.test.ts",
       "tests/integration/**/*.test.ts",
+      "tests/security/**/*.test.ts",
       "tests/load/**/*.test.ts",
     ],
   },
