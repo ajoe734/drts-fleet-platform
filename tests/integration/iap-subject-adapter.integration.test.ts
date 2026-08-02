@@ -347,14 +347,21 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       gcp_ia_groups: ["platform-admins@platform.drts"],
     });
 
-    const result = await authController.issueToken({
+    const request = {
       headers: {
         "x-drts-internal-key": "test_internal_key_123",
         "x-goog-iap-jwt-assertion": token,
         "x-roles": "spoofed_role",
         "x-scopes": "spoofed:scope",
       },
+    };
+
+    await expect(authController.issueToken(request)).rejects.toMatchObject({
+      code: "IAP_ASSERTION_INVALID",
     });
+
+    process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+    const result = await authController.issueToken(request);
 
     expect(result.token).toBeTruthy();
     const payload = jwtAuthService.verify(result.token);
@@ -364,6 +371,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
 
     delete process.env.DRTS_INTERNAL_KEY;
     delete process.env.JWT_SECRET;
+    delete process.env.IAP_JWT_SECRET;
     delete process.env.IAP_EXPECTED_AUDIENCE;
   });
 

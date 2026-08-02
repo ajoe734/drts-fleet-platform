@@ -196,9 +196,7 @@ export class BootstrapAuthGuard implements CanActivate {
       process.env.NODE_ENV !== "production" &&
       process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
     const jwtSecretOrPublicKey =
-      process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
-      process.env.IAP_JWT_SECRET ||
-      process.env.JWT_SECRET;
+      process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY || process.env.IAP_JWT_SECRET;
 
     const resolved = await this.iapSubjectAdapter!.resolveSubject(baseHeaders, {
       strictIapMode: isStrictIap,
