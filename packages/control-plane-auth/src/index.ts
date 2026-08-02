@@ -22,7 +22,6 @@ export interface VerifyIapAssertionOptions {
   expectedAudience?: string | undefined;
   expectedIssuer?: string | undefined;
   jwtSecretOrPublicKey?: string | undefined;
-  allowUnverifiedTokenInDev?: boolean | undefined;
 }
 
 export const CONTROL_PLANE_DEFAULT_EMAILS = {
@@ -338,12 +337,6 @@ export function verifyIapJwtAssertion(
         }`,
       );
     }
-  } else if (options.allowUnverifiedTokenInDev) {
-    const decoded = jwt.decode(trimmed);
-    if (!decoded || typeof decoded !== "object") {
-      throw new Error("Failed to decode IAP JWT assertion.");
-    }
-    payload = decoded as IapJwtPayload;
   } else {
     throw new Error(
       "IAP JWT assertion signature verification failed: verification key is required.",
@@ -401,7 +394,6 @@ export function extractAuthenticatedUserEmail(
     expectedAudience?: string | undefined;
     expectedIssuer?: string | undefined;
     jwtSecretOrPublicKey?: string | undefined;
-    allowUnverifiedTokenInDev?: boolean | undefined;
   },
 ): string | null {
   const assertion = extractIapJwtAssertion(headers);
@@ -411,7 +403,6 @@ export function extractAuthenticatedUserEmail(
         expectedAudience: options?.expectedAudience,
         expectedIssuer: options?.expectedIssuer,
         jwtSecretOrPublicKey: options?.jwtSecretOrPublicKey,
-        allowUnverifiedTokenInDev: options?.allowUnverifiedTokenInDev,
       });
       if (payload.email) {
         return normalizeAuthenticatedUserEmail(payload.email);
@@ -465,7 +456,6 @@ export function issueControlPlaneRequestAuth(options: {
   iapJwtSecretOrPublicKey?: string | undefined;
   expectedIapAudience?: string | undefined;
   expectedIapIssuer?: string | undefined;
-  allowUnverifiedTokenInDev?: boolean | undefined;
 }): ControlPlaneRequestAuth {
   let verifiedSubject: string | null = null;
   let verifiedEmail: string | null = null;
@@ -479,7 +469,6 @@ export function issueControlPlaneRequestAuth(options: {
           expectedAudience: options.expectedIapAudience,
           expectedIssuer: options.expectedIapIssuer,
           jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
-          allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
         });
         verifiedSubject = payload.sub;
         if (payload.email) {
@@ -561,9 +550,6 @@ export function issueControlPlaneRequestAuth(options: {
       }),
       ...(options.iapJwtSecretOrPublicKey !== undefined && {
         jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
-      }),
-      ...(options.allowUnverifiedTokenInDev !== undefined && {
-        allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
       }),
     });
 

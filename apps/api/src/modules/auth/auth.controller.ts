@@ -86,11 +86,9 @@ export class AuthController {
     // Require internal key to issue tokens
     validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
 
-    const authEnvironment = detectAuthEnvironment(process.env);
     const strictEnvironment = isStrictAuthEnvironment();
     const isStrictIap =
-      process.env.STRICT_IAP_MODE === "true" ||
-      strictEnvironment;
+      process.env.STRICT_IAP_MODE === "true" || strictEnvironment;
     const rawAssertion = extractIapJwtAssertion(request.headers);
     const bootstrapIdentity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
@@ -112,9 +110,6 @@ export class AuthController {
         process.env.IAP_AUDIENCE ||
         process.env.JWT_AUDIENCE;
       const expectedIssuer = process.env.IAP_EXPECTED_ISSUER;
-      const allowUnverifiedTokenInDev =
-        authEnvironment === "local" &&
-        process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
       const jwtSecretOrPublicKey =
         process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY || process.env.IAP_JWT_SECRET;
 
@@ -124,7 +119,6 @@ export class AuthController {
           strictIapMode: isStrictIap,
           ...(expectedAudience ? { expectedAudience } : {}),
           ...(expectedIssuer ? { expectedIssuer } : {}),
-          ...(allowUnverifiedTokenInDev ? { allowUnverifiedTokenInDev } : {}),
           ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
           autoProvision: !isStrictIap,
         },
