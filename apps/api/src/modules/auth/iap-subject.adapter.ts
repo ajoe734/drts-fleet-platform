@@ -42,7 +42,6 @@ export interface ResolveIapSubjectOptions {
   strictIapMode?: boolean;
   autoProvision?: boolean;
   roleGroupMapping?: Record<string, string>;
-  allowUnverifiedTokenInDev?: boolean;
   requestedRealm?: "platform" | "ops";
 }
 
@@ -122,7 +121,6 @@ export class IAPSubjectAdapter {
         expectedAudience: options.expectedAudience,
         expectedIssuer: options.expectedIssuer,
         jwtSecretOrPublicKey: options.jwtSecretOrPublicKey,
-        allowUnverifiedTokenInDev: options.allowUnverifiedTokenInDev,
       });
     } catch (err: any) {
       if (

@@ -1087,6 +1087,11 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       keyId: "partner-key-dbs-dev",
       envVarName: "PARTNER_INGRESS_KEY_DBS",
     },
+    {
+      entrySlug: "yuhe-residence",
+      keyId: "partner-key-yuhe-residence",
+      envVarName: "PARTNER_INGRESS_KEY_YUHE_RESIDENCE",
+    },
   ];
 
 function hashPartnerApiKeyValue(apiKey: string) {

@@ -51,10 +51,6 @@ export async function getServerRocClient(): Promise<ApiClient> {
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const allowUnverifiedTokenInDev =
-    process.env.NODE_ENV !== "production" &&
-    process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
-
   const controlPlaneAuth = issueControlPlaneRequestAuth({
     actorType: "ops_user",
     headers: requestHeaders,
@@ -64,7 +60,6 @@ export async function getServerRocClient(): Promise<ApiClient> {
     ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
     ...(expectedIapAudience ? { expectedIapAudience } : {}),
     ...(expectedIapIssuer ? { expectedIapIssuer } : {}),
-    ...(allowUnverifiedTokenInDev ? { allowUnverifiedTokenInDev } : {}),
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
     ...(process.env.JWT_AUDIENCE

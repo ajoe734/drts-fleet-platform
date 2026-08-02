@@ -527,10 +527,9 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.IAP_JWT_SECRET;
   });
 
-  it("fails closed in staging even when the local unverified-IAP flag is set", async () => {
+  it("fails closed in staging when IAP verification key material is missing", async () => {
     process.env.APP_ENV = "staging";
     process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
-    process.env.ALLOW_UNVERIFIED_IAP_DEV = "true";
     delete process.env.IAP_JWT_SECRET;
     delete process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY;
 
@@ -568,7 +567,6 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
 
     delete process.env.APP_ENV;
     delete process.env.IAP_EXPECTED_AUDIENCE;
-    delete process.env.ALLOW_UNVERIFIED_IAP_DEV;
   });
 
   it("verifies AuthController /auth/token rejects system bootstrap headers in strict environments", async () => {

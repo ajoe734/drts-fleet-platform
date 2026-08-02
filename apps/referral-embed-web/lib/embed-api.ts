@@ -15,6 +15,7 @@ import type {
 import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
+const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 
 // The authority API serialises responses in snake_case, but the embed reads the
 // records as the camelCase contract types (entry.displayName / entryHost /
@@ -81,6 +82,12 @@ async function requestAuthority<T>(
         // ever runs server-side, so reading the secret here is safe.
         ...(process.env.DRTS_INTERNAL_KEY
           ? { "x-drts-internal-key": process.env.DRTS_INTERNAL_KEY }
+          : {}),
+        ...(process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY
+          ? {
+              [REFERRAL_EMBED_HANDOFF_KEY_HEADER]:
+                process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+            }
           : {}),
         ...(init?.headers ?? {}),
       },
