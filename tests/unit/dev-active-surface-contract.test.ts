@@ -95,6 +95,12 @@ describe("dev active surface contract", () => {
     expect(source).toContain("Verify referral handoff session lifecycle");
     expect(source).toContain("x-drts-referral-handoff-key");
     expect(source).toContain("drts_referral_embed_session");
+    expect(source).toContain(
+      "The referral handoff artifact has already been consumed.",
+    );
+    expect(source).toContain(
+      "The referral handoff artifact is not valid for this entry host.",
+    );
   });
 
   it("keeps domain mapping defaults and fail-closed wording aligned", () => {
