@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
@@ -6,6 +6,19 @@ import { execSync } from "node:child_process";
 describe("control-plane-auth production resolution regression", () => {
   const rootDir = resolve(__dirname, "../../");
   const pkgPath = join(rootDir, "packages/control-plane-auth/package.json");
+
+  beforeAll(() => {
+    const distJsPath = join(
+      rootDir,
+      "packages/control-plane-auth/dist/index.js",
+    );
+    if (!existsSync(distJsPath)) {
+      execSync("pnpm --filter @drts/control-plane-auth build", {
+        cwd: rootDir,
+        stdio: "ignore",
+      });
+    }
+  });
 
   it("package.json exports resolve to built JavaScript in production", () => {
     const pkgRaw = readFileSync(pkgPath, "utf-8");
@@ -109,5 +122,5 @@ describe("control-plane-auth production resolution regression", () => {
     ).trim();
 
     expect(loadAdapterOutput).toContain("ADAPTER_LOADED_OK");
-  });
+  }, 120000);
 });
