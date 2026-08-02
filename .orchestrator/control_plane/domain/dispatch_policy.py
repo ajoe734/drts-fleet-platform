@@ -30,6 +30,35 @@ class ReadyDispatchPolicy:
     owned_statuses: frozenset[str] = frozenset({"todo", "backlog"})
     dependency_done_statuses: frozenset[str] = frozenset({"done"})
 
+
+EXTERNAL_INTEGRATION_IN_FLIGHT_STATUSES = frozenset(
+    {
+        "branch_pushed",
+        "pr_open",
+        "ci_pending",
+        "merged_to_dev",
+        "deploy_blocked",
+        "dev_deployed",
+    }
+)
+
+
+def has_external_integration_in_flight(record: TaskRecord) -> bool:
+    """True when an owner should supervise external integration, not start coding again.
+
+    A pushed branch or pending CI is already an active implementation attempt.
+    Re-dispatching it to an isolated task branch creates duplicate patches and can
+    overwrite the task's current PR evidence. CI failures deliberately remain
+    dispatchable so the owner can fix them.
+    """
+    integration_status = str(record.raw.get("integration_status") or "").strip().lower()
+    if integration_status in EXTERNAL_INTEGRATION_IN_FLIGHT_STATUSES:
+        return True
+
+    pr_url = str(record.raw.get("pr_url") or "").strip()
+    ci_status = str(record.raw.get("ci_status") or "").strip().lower()
+    return bool(pr_url) and ci_status in {"pending", "queued", "in_progress", "running"}
+
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "ReadyDispatchPolicy":
         supervisor = config.get("supervisor") or {}
@@ -128,6 +157,8 @@ def resolve_dispatch_target(
     if not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses):
         return None
     if record.status in policy.in_progress_statuses and record.owner:
+        if has_external_integration_in_flight(record):
+            return None
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
     if record.status in policy.owned_statuses and record.owner:
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_READY)
