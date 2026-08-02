@@ -354,6 +354,9 @@ export class JwtSessionClaimsService {
     roles: readonly string[],
   ) {
     return sha256([
+      principal?.principalId,
+      principal?.status,
+      principal?.updatedAt,
       membership?.membershipId,
       membership?.realm,
       membership?.status,

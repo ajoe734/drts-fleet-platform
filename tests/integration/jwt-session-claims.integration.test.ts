@@ -325,6 +325,129 @@ describe("JWT session claims integration", () => {
     delete process.env.IAP_JWT_SECRET;
   });
 
+  it("invalidates control-plane bearer tokens after principal status drift", async () => {
+    process.env.DRTS_INTERNAL_KEY = INTERNAL_KEY;
+    process.env.JWT_SECRET = JWT_SECRET;
+    process.env.IAP_EXPECTED_AUDIENCE = IAP_AUDIENCE;
+    process.env.IAP_JWT_SECRET = IAP_SECRET;
+
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    const tenantPartnerService = new TenantPartnerService(
+      createAuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService,
+      identityRepo,
+    );
+    const jwtSessionClaimsService = new JwtSessionClaimsService(
+      tenantPartnerService,
+      identityRepo,
+    );
+    const controller = new AuthController(
+      new JwtAuthService(),
+      tenantPartnerService,
+      {} as never,
+      jwtSessionClaimsService,
+      securityEventsService,
+      adapter,
+    );
+
+    const tokenResponse = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": INTERNAL_KEY,
+        "x-goog-iap-jwt-assertion": signAssertion({
+          sub: "principal_drift_subject_001",
+          email: "principal-drift-admin@platform.drts",
+          gcp_ia_groups: ["platform-admins@platform.drts"],
+        }),
+      },
+    });
+
+    const payload = new JwtAuthService().verify(tokenResponse.token);
+    expect(payload?.membershipId).toBeTruthy();
+    expect(payload?.sub).toBeTruthy();
+
+    const guardBeforeDrift = createGuard(
+      new JwtSessionClaimsService(tenantPartnerService, identityRepo),
+    );
+    const firstPass = createBearerContext(
+      tokenResponse.token,
+      "/api/platform-admin/dispatch-recovery",
+    );
+    await expect(guardBeforeDrift.canActivate(firstPass.context)).resolves.toBe(
+      true,
+    );
+
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: payload!.sub!,
+        sourceRef: "iap_subject:principal_drift_subject_001",
+        issuer: "google_iap",
+        subject: "principal_drift_subject_001",
+        principalType: "human",
+        email: "principal-drift-admin@platform.drts",
+        emailVerified: true,
+        displayName: "Principal Drift Admin",
+        status: "suspended",
+        createdAt: "2026-08-02T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:03:00.000Z",
+      },
+      {
+        membershipId: payload!.membershipId!,
+        sourceRef: "iap_membership:principal_drift_subject_001",
+        principalId: payload!.sub!,
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: "2026-08-02T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+      },
+      [
+        {
+          roleBindingId: "role_binding_principal_drift_subject_001",
+          sourceRef: "role_binding_principal_drift_subject_001",
+          membershipId: payload!.membershipId!,
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: "2026-08-02T00:00:00.000Z",
+          validTo: null,
+          createdAt: "2026-08-02T00:00:00.000Z",
+          updatedAt: "2026-08-02T00:03:00.000Z",
+        },
+      ],
+    );
+
+    const guardAfterDrift = createGuard(
+      new JwtSessionClaimsService(tenantPartnerService, identityRepo),
+    );
+    const secondPass = createBearerContext(
+      tokenResponse.token,
+      "/api/platform-admin/dispatch-recovery",
+    );
+    await expect(guardAfterDrift.canActivate(secondPass.context)).rejects.toMatchObject(
+      {
+        code: "JWT_SESSION_INVALIDATED",
+      },
+    );
+
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.JWT_SECRET;
+    delete process.env.IAP_EXPECTED_AUDIENCE;
+    delete process.env.IAP_JWT_SECRET;
+  });
+
   it("invalidates control-plane bearer tokens after durable token revocation", async () => {
     process.env.DRTS_INTERNAL_KEY = INTERNAL_KEY;
     process.env.JWT_SECRET = JWT_SECRET;
