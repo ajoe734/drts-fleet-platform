@@ -32,6 +32,11 @@ export type CanonicalMembershipSnapshot = {
   roleBinding: CanonicalIdentityRoleBindingRecord;
 };
 
+type ExistingControlPlaneMembership = {
+  membership: CanonicalIdentityMembershipRecord;
+  roleBinding: CanonicalIdentityRoleBindingRecord | null;
+};
+
 type WorkforceSubjectSyncCommand = {
   issuer: string;
   subject: string;
@@ -284,19 +289,37 @@ export class IdentityRepository {
         principalId: existingPrincipal?.principalId ?? principalDraft.principalId,
         createdAt: existingPrincipal?.createdAt ?? principalDraft.createdAt,
       });
-      const existingMemberships = this.listFallbackMembershipSnapshotsForPrincipal(
+      const existingMemberships =
+        this.listFallbackControlPlaneMembershipsForPrincipal(
         principal.principalId,
       );
-      const persistedMemberships = command.grants.map((grant) =>
-        this.upsertFallbackWorkforceMembership(
-          principal,
-          grant,
-          now,
+      const persistedMemberships = command.grants.flatMap((grant) => {
+        const previous =
           existingMemberships.find(
             (candidate) => candidate.membership.realm === grant.realm,
-          ) ?? null,
-        ),
-      );
+          ) ?? null;
+        if (previous && previous.roleBinding === null) {
+          return [
+            {
+              membership: this.upsertFallbackMembership({
+                ...previous.membership,
+                status: "suspended",
+                updatedAt: now,
+              }),
+              roleBinding: null,
+            },
+          ];
+        }
+
+        return [
+          this.upsertFallbackWorkforceMembership(
+            principal,
+            grant,
+            now,
+            previous,
+          ),
+        ];
+      });
       const staleMemberships = existingMemberships
         .filter(
           (candidate) =>
@@ -310,12 +333,12 @@ export class IdentityRepository {
           }),
           roleBinding: candidate.roleBinding,
         }));
-      const memberships = [...persistedMemberships, ...staleMemberships].sort((a, b) =>
-        a.membership.realm.localeCompare(b.membership.realm),
+      const memberships = [...persistedMemberships, ...staleMemberships].sort(
+        (a, b) => a.membership.realm.localeCompare(b.membership.realm),
       );
       return {
         principal,
-        memberships,
+        memberships: memberships.filter(this.hasActiveRoleBindingSnapshot),
         driftDetected: this.detectWorkforceDrift(existingMemberships, memberships),
       };
     }
@@ -333,20 +356,38 @@ export class IdentityRepository {
         principalId: existingPrincipal?.principalId ?? principalDraft.principalId,
         createdAt: existingPrincipal?.createdAt ?? principalDraft.createdAt,
       });
-      const existingMemberships = await this.listMembershipSnapshotsForPrincipal(
+      const existingMemberships =
+        await this.listControlPlaneMembershipsForPrincipal(
         client,
         principal.principalId,
       );
-      const persistedMemberships: CanonicalMembershipSnapshot[] = [];
+      const persistedMemberships: ExistingControlPlaneMembership[] = [];
 
       for (const grant of command.grants) {
         const previous =
           existingMemberships.find(
             (candidate) => candidate.membership.realm === grant.realm,
           ) ?? null;
+        if (previous && previous.roleBinding === null) {
+          const membership = await this.upsertMembership(client, {
+            ...previous.membership,
+            status: "suspended",
+            updatedAt: now,
+          });
+          persistedMemberships.push({
+            membership,
+            roleBinding: null,
+          });
+          continue;
+        }
+
+        const previousWithBinding =
+          previous && previous.roleBinding !== null ? previous : null;
+
         const membership = await this.upsertMembership(client, {
           membershipId:
-            previous?.membership.membershipId ?? `membership_${randomUUID()}`,
+            previousWithBinding?.membership.membershipId ??
+            `membership_${randomUUID()}`,
           sourceRef: `${sourcePrefix}:membership:${grant.realm}`,
           principalId: principal.principalId,
           realm: grant.realm,
@@ -356,20 +397,21 @@ export class IdentityRepository {
           status: command.status === "active" ? "active" : "suspended",
           invitedByPrincipalId: null,
           invitationId: null,
-          createdAt: previous?.membership.createdAt ?? now,
+          createdAt: previousWithBinding?.membership.createdAt ?? now,
           updatedAt: now,
         });
         const roleBinding = await this.upsertRoleBinding(client, {
           roleBindingId:
-            previous?.roleBinding.roleBindingId ?? `role_binding_${randomUUID()}`,
+            previousWithBinding?.roleBinding.roleBindingId ??
+            `role_binding_${randomUUID()}`,
           sourceRef: `${sourcePrefix}:role_binding:${grant.realm}`,
           membershipId: membership.membershipId,
           roleCode: grant.roleCode,
           grantedByPrincipalId: null,
           approvalId: null,
-          validFrom: previous?.roleBinding.validFrom ?? now,
+          validFrom: previousWithBinding?.roleBinding.validFrom ?? now,
           validTo: null,
-          createdAt: previous?.roleBinding.createdAt ?? now,
+          createdAt: previousWithBinding?.roleBinding.createdAt ?? now,
           updatedAt: now,
         });
         persistedMemberships.push({ membership, roleBinding });
@@ -393,9 +435,9 @@ export class IdentityRepository {
       await client.query("COMMIT");
       return {
         principal,
-        memberships: persistedMemberships.sort((a, b) =>
-          a.membership.realm.localeCompare(b.membership.realm),
-        ),
+        memberships: persistedMemberships
+          .sort((a, b) => a.membership.realm.localeCompare(b.membership.realm))
+          .filter(this.hasActiveRoleBindingSnapshot),
         driftDetected: this.detectWorkforceDrift(
           existingMemberships,
           persistedMemberships,
@@ -826,10 +868,10 @@ export class IdentityRepository {
       : null;
   }
 
-  private async listMembershipSnapshotsForPrincipal(
+  private async listControlPlaneMembershipsForPrincipal(
     client: PoolClient,
     principalId: string,
-  ): Promise<CanonicalMembershipSnapshot[]> {
+  ): Promise<ExistingControlPlaneMembership[]> {
     const result = await client.query<
       JsonRecordRow & { role_record: unknown | null }
     >(
@@ -838,6 +880,7 @@ export class IdentityRepository {
         FROM iam.identity_memberships membership
         LEFT JOIN iam.identity_role_bindings role_binding
           ON role_binding.membership_id = membership.membership_id
+         AND role_binding.valid_to IS NULL
         WHERE membership.principal_id = $1
           AND membership.realm IN ('platform', 'ops')
       `,
@@ -845,25 +888,22 @@ export class IdentityRepository {
     );
 
     return result.rows
-      .map((row) => {
-        if (!row.role_record) {
-          return null;
-        }
-        return {
-          membership: this.parseRecord<CanonicalIdentityMembershipRecord>(
-            row.record,
-            "iam.identity_memberships",
-          ),
-          roleBinding: this.parseRecord<CanonicalIdentityRoleBindingRecord>(
-            row.role_record,
-            "iam.identity_role_bindings",
-          ),
-        };
-      })
-      .filter((row): row is CanonicalMembershipSnapshot => row !== null);
+      .map((row) => ({
+        membership: this.parseRecord<CanonicalIdentityMembershipRecord>(
+          row.record,
+          "iam.identity_memberships",
+        ),
+        roleBinding: row.role_record
+          ? this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+              row.role_record,
+              "iam.identity_role_bindings",
+            )
+          : null,
+      }))
+      .sort((a, b) => a.membership.realm.localeCompare(b.membership.realm));
   }
 
-  private listFallbackMembershipSnapshotsForPrincipal(principalId: string) {
+  private listFallbackControlPlaneMembershipsForPrincipal(principalId: string) {
     return Array.from(this.fallbackMemberships.values())
       .filter(
         (membership) =>
@@ -874,30 +914,30 @@ export class IdentityRepository {
         const roleBinding = Array.from(this.fallbackRoleBindings.values()).find(
           (candidate) => candidate.membershipId === membership.membershipId,
         );
-        if (!roleBinding) {
-          return null;
-        }
         return {
           membership: { ...membership },
-          roleBinding: { ...roleBinding },
+          roleBinding: roleBinding ? { ...roleBinding } : null,
         };
       })
-      .filter((row): row is CanonicalMembershipSnapshot => row !== null);
+      .sort((a, b) => a.membership.realm.localeCompare(b.membership.realm));
   }
 
   private upsertFallbackWorkforceMembership(
     principal: CanonicalIdentityPrincipalRecord,
     grant: WorkforceGrantRecord,
     now: string,
-    previous: CanonicalMembershipSnapshot | null,
+    previous: ExistingControlPlaneMembership | null,
   ) {
+    const previousWithBinding =
+      previous && previous.roleBinding !== null ? previous : null;
     const sourcePrefix = this.buildWorkforceSourcePrefix(
       principal.issuer,
       principal.subject,
     );
     const membership = this.upsertFallbackMembership({
       membershipId:
-        previous?.membership.membershipId ?? `membership_${randomUUID()}`,
+        previousWithBinding?.membership.membershipId ??
+        `membership_${randomUUID()}`,
       sourceRef: `${sourcePrefix}:membership:${grant.realm}`,
       principalId: principal.principalId,
       realm: grant.realm,
@@ -907,28 +947,29 @@ export class IdentityRepository {
       status: principal.status === "active" ? "active" : "suspended",
       invitedByPrincipalId: null,
       invitationId: null,
-      createdAt: previous?.membership.createdAt ?? now,
+      createdAt: previousWithBinding?.membership.createdAt ?? now,
       updatedAt: now,
     });
     const roleBinding = this.upsertFallbackRoleBinding({
       roleBindingId:
-        previous?.roleBinding.roleBindingId ?? `role_binding_${randomUUID()}`,
+        previousWithBinding?.roleBinding.roleBindingId ??
+        `role_binding_${randomUUID()}`,
       sourceRef: `${sourcePrefix}:role_binding:${grant.realm}`,
       membershipId: membership.membershipId,
       roleCode: grant.roleCode,
       grantedByPrincipalId: null,
       approvalId: null,
-      validFrom: previous?.roleBinding.validFrom ?? now,
+      validFrom: previousWithBinding?.roleBinding.validFrom ?? now,
       validTo: null,
-      createdAt: previous?.roleBinding.createdAt ?? now,
+      createdAt: previousWithBinding?.roleBinding.createdAt ?? now,
       updatedAt: now,
     });
     return { membership, roleBinding };
   }
 
   private detectWorkforceDrift(
-    previous: CanonicalMembershipSnapshot[],
-    current: CanonicalMembershipSnapshot[],
+    previous: ExistingControlPlaneMembership[],
+    current: ExistingControlPlaneMembership[],
   ) {
     if (previous.length !== current.length) {
       return true;
@@ -945,8 +986,16 @@ export class IdentityRepository {
       }
       return (
         prior.membership.status !== entry.membership.status ||
-        prior.roleBinding.roleCode !== entry.roleBinding.roleCode
+        (prior.roleBinding === null) !== (entry.roleBinding === null) ||
+        prior.roleBinding?.membershipId !== entry.roleBinding?.membershipId ||
+        prior.roleBinding?.roleCode !== entry.roleBinding?.roleCode
       );
     });
+  }
+
+  private hasActiveRoleBindingSnapshot(
+    snapshot: ExistingControlPlaneMembership,
+  ): snapshot is CanonicalMembershipSnapshot {
+    return snapshot.roleBinding !== null;
   }
 }

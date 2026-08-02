@@ -62,6 +62,7 @@ describe("IAP subject adapter integration", () => {
   let closeApplication: (() => Promise<void>) | undefined;
   let jwtAuthService: JwtAuthService;
   let securityEventsService: SecurityEventsService;
+  let identityRepository: IdentityRepository;
 
   beforeAll(async () => {
     const app = await NestFactory.create(
@@ -81,6 +82,7 @@ describe("IAP subject adapter integration", () => {
     baseUrl = `http://127.0.0.1:${address.port}`;
     jwtAuthService = app.get(JwtAuthService);
     securityEventsService = app.get(SecurityEventsService);
+    identityRepository = app.get(IdentityRepository);
     closeApplication = async () => {
       await app.close();
     };
@@ -93,6 +95,14 @@ describe("IAP subject adapter integration", () => {
       }
     }
     Object.assign(process.env, originalEnv);
+    const repositoryState = identityRepository as unknown as {
+      fallbackPrincipals: Map<string, Record<string, unknown>>;
+      fallbackMemberships: Map<string, Record<string, unknown>>;
+      fallbackRoleBindings: Map<string, Record<string, unknown>>;
+    };
+    repositoryState.fallbackPrincipals.clear();
+    repositoryState.fallbackMemberships.clear();
+    repositoryState.fallbackRoleBindings.clear();
   });
 
   afterAll(async () => {
@@ -351,5 +361,118 @@ describe("IAP subject adapter integration", () => {
         },
       },
     });
+  });
+
+  it("rejects ops exchange when a durable ops membership exists without any active role binding", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const repositoryState = identityRepository as unknown as {
+      fallbackPrincipals: Map<string, Record<string, unknown>>;
+      fallbackMemberships: Map<string, Record<string, unknown>>;
+      fallbackRoleBindings: Map<string, Record<string, unknown>>;
+    };
+    const principalId = "principal_cross_realm_orphan_001";
+    const sourcePrefix = "workforce_subject:40ef3c46be0461bb380b7d82";
+
+    repositoryState.fallbackPrincipals.set(`${sourcePrefix}:principal`, {
+      principalId,
+      sourceRef: `${sourcePrefix}:principal`,
+      issuer: "https://cloud.google.com/iap",
+      subject: "workforce-cross-realm-003",
+      principalType: "human",
+      email: "ops@platform.drts",
+      emailVerified: true,
+      displayName: "Ops User",
+      status: "active",
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+    repositoryState.fallbackMemberships.set(`${sourcePrefix}:membership:platform`, {
+      membershipId: "membership_platform_cross_realm_003",
+      sourceRef: `${sourcePrefix}:membership:platform`,
+      principalId,
+      realm: "platform",
+      scopeRef: "platform:global",
+      tenantId: null,
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+    repositoryState.fallbackMemberships.set(`${sourcePrefix}:membership:ops`, {
+      membershipId: "membership_ops_cross_realm_003",
+      sourceRef: `${sourcePrefix}:membership:ops`,
+      principalId,
+      realm: "ops",
+      scopeRef: "ops:global",
+      tenantId: null,
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+    repositoryState.fallbackRoleBindings.set(
+      `${sourcePrefix}:role_binding:platform`,
+      {
+        roleBindingId: "role_binding_platform_cross_realm_003",
+        sourceRef: `${sourcePrefix}:role_binding:platform`,
+        membershipId: "membership_platform_cross_realm_003",
+        roleCode: "superadmin",
+        grantedByPrincipalId: null,
+        approvalId: null,
+        validFrom: "2026-08-02T00:00:00.000Z",
+        validTo: null,
+        createdAt: "2026-08-02T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+      },
+    );
+
+    const response = await fetch(`${baseUrl}/auth/token`, {
+      method: "POST",
+      headers: {
+        "x-drts-internal-key": "internal-secret",
+        "x-drts-control-plane-actor-type": "ops_user",
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: "workforce-cross-realm-003",
+          email: "ops@platform.drts",
+          groups: ["drts-platform-superadmin", "drts-ops-user"],
+        }),
+        "x-goog-authenticated-user-email":
+          "accounts.google.com:ops@platform.drts",
+        "x-roles": "operator",
+      },
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        details: {
+          reason_code: "inactive_membership",
+        },
+      },
+    });
+    expect(identityRepository.listMemberships()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          membershipId: "membership_ops_cross_realm_003",
+          realm: "ops",
+          status: "suspended",
+        }),
+      ]),
+    );
+    expect(identityRepository.listRoleBindings()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          membershipId: "membership_ops_cross_realm_003",
+        }),
+      ]),
+    );
   });
 });
