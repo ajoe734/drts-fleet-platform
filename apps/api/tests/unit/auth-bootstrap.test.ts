@@ -1,5 +1,6 @@
 import { Reflector } from "@nestjs/core";
 import { EventEmitter2 } from "@nestjs/event-emitter";
+import jwt from "jsonwebtoken";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
@@ -362,6 +363,41 @@ describe("bootstrap auth extraction", () => {
 });
 
 describe("bootstrap auth guard", () => {
+  it("does not let a proxy-marked durable token bypass revoked sessions", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const fixture = createAuthFixture();
+    const issued = await fixture.jwtAuthService.issueSessionToken({
+      authMode: "jwt_bearer",
+      actorType: "platform_admin",
+      actorId: "platform-admin-001",
+      realm: "platform",
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["platform_admin"],
+      scopes: ["foundation:read"],
+      requestId: null,
+    });
+    const payload = jwt.decode(issued.token) as jwt.JwtPayload;
+    const proxyMarkedToken = jwt.sign(
+      { ...payload, controlPlaneProxy: true },
+      process.env.JWT_SECRET,
+    );
+
+    await fixture.identityRepository.revokeSession(
+      issued.sessionId,
+      "test revocation",
+    );
+
+    await expect(
+      fixture.jwtAuthService.verifyAccessToken(proxyMarkedToken, {
+        allowControlPlaneProxyToken: true,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("honors OpenRoute metadata for public endpoints", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {

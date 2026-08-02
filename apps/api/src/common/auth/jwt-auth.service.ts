@@ -532,6 +532,18 @@ export class JwtAuthService {
     );
   }
 
+  private hasAnySessionClaim(payload: JwtIdentityPayload): boolean {
+    return Boolean(
+      payload.sid ||
+      payload.jti ||
+      payload.tokenVersion !== undefined ||
+      payload.auth_time !== undefined ||
+      (payload.amr?.length ?? 0) > 0 ||
+      payload.acr ||
+      payload.policyVersion,
+    );
+  }
+
   private computeWorkforceTokenVersion(timestamps: readonly string[]): number {
     return Math.max(...timestamps.map((timestamp) => Date.parse(timestamp)));
   }
@@ -755,13 +767,15 @@ export class JwtAuthService {
       (payload.actorType === "ops_user" ||
         payload.actorType === "platform_admin") &&
       (payload.realm === "ops" || payload.realm === "platform");
+    const isSessionlessControlPlaneProxyToken =
+      isControlPlaneProxyToken && !this.hasAnySessionClaim(payload);
     if (!this.hasRequiredSessionClaims(payload)) {
       // The proxy token is purpose-bound, signed, and short-lived. It is not a
       // user session and therefore has no durable session record to resolve.
-      return isControlPlaneProxyToken ? payload : null;
+      return isSessionlessControlPlaneProxyToken ? payload : null;
     }
 
-    if (isControlPlaneProxyToken || !this.identityRepository || !payload.sid) {
+    if (!this.identityRepository || !payload.sid) {
       return payload;
     }
 
