@@ -89,7 +89,6 @@ describe("BootstrapAuthGuard strict environment behavior", () => {
         roleFamilies: ["platform"],
         requestId: null,
       },
-      { issuer: "drts", audience: "drts-api" },
     );
     const guard = new BootstrapAuthGuard(
       { getAllAndOverride: () => undefined } as never,
