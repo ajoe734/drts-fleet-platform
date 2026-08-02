@@ -252,6 +252,51 @@ describe("IAP subject adapter integration", () => {
     });
   });
 
+  it("rejects verified workforce assertions that omit the subject", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const assertion = jwt.sign(
+      {
+        email: "admin@platform.drts",
+        email_verified: true,
+        active: true,
+        groups: ["drts-platform-superadmin"],
+      },
+      process.env.DRTS_WORKFORCE_ASSERTION_SECRET,
+      {
+        algorithm: "HS256",
+        issuer: "https://cloud.google.com/iap",
+        audience: "drts-control-plane",
+      },
+    );
+
+    const response = await fetch(`${baseUrl}/auth/token`, {
+      method: "POST",
+      headers: {
+        "x-drts-internal-key": "internal-secret",
+        "x-drts-control-plane-actor-type": "platform_admin",
+        "x-goog-iap-jwt-assertion": assertion,
+        "x-goog-authenticated-user-email":
+          "accounts.google.com:admin@platform.drts",
+      },
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        details: {
+          reason_code: "workforce_subject_missing",
+        },
+      },
+    });
+    expect(identityRepository.listPrincipals()).toEqual([]);
+    expect(identityRepository.listMemberships()).toEqual([]);
+    expect(identityRepository.listRoleBindings()).toEqual([]);
+  });
+
   it("applies least privilege on group drift and records an alert event", async () => {
     process.env.JWT_SECRET = "inner-jwt-secret";
     process.env.JWT_ISSUER = "drts-tests";
@@ -361,6 +406,46 @@ describe("IAP subject adapter integration", () => {
         },
       },
     });
+  });
+
+  it("rejects unknown platform role bindings from the workforce group catalog", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+    process.env.DRTS_WORKFORCE_GROUP_ROLE_BINDINGS = JSON.stringify({
+      "drts-platform-auditor": {
+        realm: "platform",
+        actorType: "platform_admin",
+        roleCode: "auditor",
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/auth/token`, {
+      method: "POST",
+      headers: {
+        "x-drts-internal-key": "internal-secret",
+        "x-drts-control-plane-actor-type": "platform_admin",
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: "workforce-unknown-role-001",
+          groups: ["drts-platform-auditor"],
+        }),
+        "x-goog-authenticated-user-email":
+          "accounts.google.com:admin@platform.drts",
+      },
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        details: {
+          reason_code: "unmapped_workforce_subject",
+        },
+      },
+    });
+    expect(identityRepository.listPrincipals()).toEqual([]);
+    expect(identityRepository.listMemberships()).toEqual([]);
+    expect(identityRepository.listRoleBindings()).toEqual([]);
   });
 
   it("rejects ops exchange when a durable ops membership exists without any active role binding", async () => {

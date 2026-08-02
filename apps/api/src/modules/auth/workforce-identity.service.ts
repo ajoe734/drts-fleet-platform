@@ -108,6 +108,7 @@ export class WorkforceIdentityService {
   ): Promise<WorkforceResolutionResult> {
     const requestedActorType = this.readRequestedActorType(headers);
     const assertion = this.verifyAssertion(headers);
+    const subject = this.requireVerifiedSubject(assertion, requestedActorType, requestId);
     const groups = this.extractGroups(assertion);
     const grants = this.resolveDesiredGrants(groups);
     const principalStatus = this.resolvePrincipalStatus(assertion);
@@ -125,7 +126,7 @@ export class WorkforceIdentityService {
       this.recordSecurityEvent({
         actorId: null,
         actorType: "system",
-        subjectId: assertion.sub ?? null,
+        subjectId: subject,
         realm: requestedActorType === "platform_admin" ? "platform" : "ops",
         tenantId: null,
         partnerId: null,
@@ -146,7 +147,7 @@ export class WorkforceIdentityService {
       this.recordSecurityEvent({
         actorId: null,
         actorType: "system",
-        subjectId: assertion.sub ?? null,
+        subjectId: subject,
         realm: requestedActorType === "platform_admin" ? "platform" : "ops",
         tenantId: null,
         partnerId: null,
@@ -184,7 +185,7 @@ export class WorkforceIdentityService {
 
     const syncResult = await this.identityRepository.syncWorkforceSubject({
       issuer: this.getAssertionIssuer(),
-      subject: assertion.sub ?? "",
+      subject,
       email: normalizedAssertionEmail,
       emailVerified: assertion.email_verified === true,
       displayName:
@@ -341,6 +342,11 @@ export class WorkforceIdentityService {
       if (roleScopes) {
         return [...roleScopes];
       }
+      throw this.buildDeniedError("unsupported_workforce_role_binding");
+    }
+
+    if (actorType === "ops_user" && roleCode !== "ops_user") {
+      throw this.buildDeniedError("unsupported_workforce_role_binding");
     }
 
     return [...AUTH_SCOPE_PRESETS[actorType]];
@@ -400,6 +406,33 @@ export class WorkforceIdentityService {
     return PLATFORM_ROLE_PRIORITY[roleCode] ?? Number.MAX_SAFE_INTEGER;
   }
 
+  private requireVerifiedSubject(
+    assertion: WorkforceAssertionPayload,
+    requestedActorType: ControlPlaneActorType,
+    requestId?: string | null,
+  ) {
+    const subject = assertion.sub?.trim() ?? "";
+    if (subject) {
+      return subject;
+    }
+
+    this.recordSecurityEvent({
+      actorId: null,
+      actorType: "system",
+      subjectId: null,
+      realm: requestedActorType === "platform_admin" ? "platform" : "ops",
+      tenantId: null,
+      partnerId: null,
+      eventType: "workforce_session_exchange.denied",
+      outcome: "denied",
+      severity: "medium",
+      requestId: requestId ?? null,
+      reasonCode: "workforce_subject_missing",
+      maskedContext: null,
+    });
+    throw this.buildDeniedError("workforce_subject_missing");
+  }
+
   private getGroupGrantCatalog(): Record<string, WorkforceGrant> {
     const raw = process.env.DRTS_WORKFORCE_GROUP_ROLE_BINDINGS?.trim();
     if (!raw) {
@@ -415,8 +448,7 @@ export class WorkforceIdentityService {
             (grant.actorType === "platform_admin" ||
               grant.actorType === "ops_user") &&
             (grant.realm === "platform" || grant.realm === "ops") &&
-            typeof grant.roleCode === "string" &&
-            grant.roleCode.trim()
+            this.isSupportedWorkforceRoleBinding(grant)
           ) {
             catalog[group] = {
               realm: grant.realm,
@@ -431,6 +463,19 @@ export class WorkforceIdentityService {
     } catch {
       return { ...DEFAULT_GROUP_GRANTS };
     }
+  }
+
+  private isSupportedWorkforceRoleBinding(grant: WorkforceGrant) {
+    const roleCode = grant.roleCode.trim();
+    if (!roleCode) {
+      return false;
+    }
+
+    if (grant.actorType === "platform_admin") {
+      return grant.realm === "platform" && getPlatformAdminRoleScopes(roleCode) !== null;
+    }
+
+    return grant.realm === "ops" && roleCode === "ops_user";
   }
 
   private resolvePrincipalStatus(
