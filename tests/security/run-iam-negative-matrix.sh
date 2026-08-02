@@ -30,5 +30,11 @@ run pnpm --filter @drts/api exec vitest run \
   --no-file-parallelism --maxConcurrency=1
 
 if [[ "${IAM_UAT_SKIP_E2E:-0}" != "1" ]]; then
+  # Reserve a task-scoped loopback port so hermetic E2E does not collide with
+  # any long-lived local api process bound to the default dev port.
+  export API_PORT="${API_PORT:-3101}"
+  export API_HOST="${API_HOST:-127.0.0.1}"
+  export E2E_API_URL="${E2E_API_URL:-http://${API_HOST}:${API_PORT}}"
+  export API_LOG="${API_LOG:-/tmp/drts-e2e-api-iam-uat-001.log}"
   run ./tests/e2e/run-e2e-hermetic.sh 004 018
 fi
