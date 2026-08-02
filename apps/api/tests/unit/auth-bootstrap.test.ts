@@ -363,7 +363,7 @@ describe("bootstrap auth extraction", () => {
 });
 
 describe("bootstrap auth guard", () => {
-  it("does not let a proxy-marked durable token bypass revoked sessions", async () => {
+  it("does not let a proxy-marked durable token bypass durable session checks", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -385,6 +385,35 @@ describe("bootstrap auth guard", () => {
       { ...payload, controlPlaneProxy: true },
       process.env.JWT_SECRET,
     );
+    const session = await fixture.identityRepository.getSession(
+      issued.sessionId,
+    );
+    expect(session).not.toBeNull();
+    if (!session) {
+      throw new Error("expected issued session");
+    }
+
+    const getSession = vi.spyOn(fixture.identityRepository, "getSession");
+    getSession.mockResolvedValue({
+      ...session,
+      currentTokenId: "rotated-token-id",
+    });
+    await expect(
+      fixture.jwtAuthService.verifyAccessToken(proxyMarkedToken, {
+        allowControlPlaneProxyToken: true,
+      }),
+    ).resolves.toBeNull();
+
+    getSession.mockResolvedValue({
+      ...session,
+      tokenVersion: session.tokenVersion + 1,
+    });
+    await expect(
+      fixture.jwtAuthService.verifyAccessToken(proxyMarkedToken, {
+        allowControlPlaneProxyToken: true,
+      }),
+    ).resolves.toBeNull();
+    getSession.mockRestore();
 
     await fixture.identityRepository.revokeSession(
       issued.sessionId,
