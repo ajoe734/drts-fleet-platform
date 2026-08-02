@@ -560,4 +560,119 @@ describe("IAP subject adapter integration", () => {
       ]),
     );
   });
+
+  it("rejects platform exchange when a durable platform membership exists without any active role binding", async () => {
+    process.env.JWT_SECRET = "inner-jwt-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_SECRET = "workforce-secret";
+    process.env.DRTS_WORKFORCE_ASSERTION_AUDIENCE = "drts-control-plane";
+
+    const repositoryState = identityRepository as unknown as {
+      fallbackPrincipals: Map<string, Record<string, unknown>>;
+      fallbackMemberships: Map<string, Record<string, unknown>>;
+      fallbackRoleBindings: Map<string, Record<string, unknown>>;
+    };
+    const principalId = "principal_cross_realm_orphan_004";
+    const sourcePrefix = "workforce_subject:520bc1c84723476c73ff392a";
+
+    repositoryState.fallbackPrincipals.set(`${sourcePrefix}:principal`, {
+      principalId,
+      sourceRef: `${sourcePrefix}:principal`,
+      issuer: "https://cloud.google.com/iap",
+      subject: "workforce-cross-realm-004",
+      principalType: "human",
+      email: "ops@platform.drts",
+      emailVerified: true,
+      displayName: "Ops User",
+      status: "active",
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+    repositoryState.fallbackMemberships.set(`${sourcePrefix}:membership:platform`, {
+      membershipId: "membership_platform_cross_realm_004",
+      sourceRef: `${sourcePrefix}:membership:platform`,
+      principalId,
+      realm: "platform",
+      scopeRef: "platform:global",
+      tenantId: null,
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+    repositoryState.fallbackMemberships.set(`${sourcePrefix}:membership:ops`, {
+      membershipId: "membership_ops_cross_realm_004",
+      sourceRef: `${sourcePrefix}:membership:ops`,
+      principalId,
+      realm: "ops",
+      scopeRef: "ops:global",
+      tenantId: null,
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+    repositoryState.fallbackRoleBindings.set(`${sourcePrefix}:role_binding:ops`, {
+      roleBindingId: "role_binding_ops_cross_realm_004",
+      sourceRef: `${sourcePrefix}:role_binding:ops`,
+      membershipId: "membership_ops_cross_realm_004",
+      roleCode: "ops_user",
+      grantedByPrincipalId: null,
+      approvalId: null,
+      validFrom: "2026-08-02T00:00:00.000Z",
+      validTo: null,
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+
+    const response = await fetch(`${baseUrl}/auth/token`, {
+      method: "POST",
+      headers: {
+        "x-drts-internal-key": "internal-secret",
+        "x-drts-control-plane-actor-type": "platform_admin",
+        "x-goog-iap-jwt-assertion": signWorkforceAssertion({
+          sub: "workforce-cross-realm-004",
+          email: "ops@platform.drts",
+          groups: ["drts-platform-superadmin", "drts-ops-user"],
+        }),
+        "x-goog-authenticated-user-email":
+          "accounts.google.com:ops@platform.drts",
+        "x-roles": "ops_user",
+      },
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        details: {
+          reason_code: "inactive_membership",
+        },
+      },
+    });
+    expect(identityRepository.listMemberships()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          membershipId: "membership_platform_cross_realm_004",
+          realm: "platform",
+          status: "suspended",
+        }),
+        expect.objectContaining({
+          membershipId: "membership_ops_cross_realm_004",
+          realm: "ops",
+          status: "active",
+        }),
+      ]),
+    );
+    expect(identityRepository.listRoleBindings()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          membershipId: "membership_platform_cross_realm_004",
+        }),
+      ]),
+    );
+  });
 });

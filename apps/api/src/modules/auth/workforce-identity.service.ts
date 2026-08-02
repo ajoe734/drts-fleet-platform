@@ -107,6 +107,7 @@ export class WorkforceIdentityService {
     requestId?: string | null,
   ): Promise<WorkforceResolutionResult> {
     const requestedActorType = this.readRequestedActorType(headers);
+    const requestedRealm = this.resolveRealmForActorType(requestedActorType);
     const assertion = this.verifyAssertion(headers);
     const subject = this.requireVerifiedSubject(assertion, requestedActorType, requestId);
     const groups = this.extractGroups(assertion);
@@ -127,7 +128,7 @@ export class WorkforceIdentityService {
         actorId: null,
         actorType: "system",
         subjectId: subject,
-        realm: requestedActorType === "platform_admin" ? "platform" : "ops",
+        realm: requestedRealm,
         tenantId: null,
         partnerId: null,
         eventType: "workforce_session_exchange.denied",
@@ -148,7 +149,7 @@ export class WorkforceIdentityService {
         actorId: null,
         actorType: "system",
         subjectId: subject,
-        realm: requestedActorType === "platform_admin" ? "platform" : "ops",
+        realm: requestedRealm,
         tenantId: null,
         partnerId: null,
         eventType: "workforce_session_exchange.denied",
@@ -168,7 +169,7 @@ export class WorkforceIdentityService {
         actorId: null,
         actorType: "system",
         subjectId: assertion.sub ?? null,
-        realm: requestedActorType === "platform_admin" ? "platform" : "ops",
+        realm: requestedRealm,
         tenantId: null,
         partnerId: null,
         eventType: "workforce_session_exchange.denied",
@@ -196,14 +197,15 @@ export class WorkforceIdentityService {
     });
 
     const resolvedGrant = grants.find(
-      (grant) => grant.actorType === requestedActorType,
+      (grant) =>
+        grant.actorType === requestedActorType && grant.realm === requestedRealm,
     );
     if (!resolvedGrant) {
       this.recordSecurityEvent({
         actorId: syncResult.principal.principalId,
         actorType: "system",
         subjectId: syncResult.principal.subject,
-        realm: requestedActorType === "platform_admin" ? "platform" : "ops",
+        realm: requestedRealm,
         tenantId: null,
         partnerId: null,
         eventType: "workforce_session_exchange.denied",
@@ -268,6 +270,12 @@ export class WorkforceIdentityService {
       driftDetected: syncResult.driftDetected,
       authenticatedUserEmail: normalizedAssertionEmail,
     };
+  }
+
+  private resolveRealmForActorType(
+    actorType: ControlPlaneActorType,
+  ): WorkforceRealm {
+    return actorType === "platform_admin" ? "platform" : "ops";
   }
 
   private verifyAssertion(
