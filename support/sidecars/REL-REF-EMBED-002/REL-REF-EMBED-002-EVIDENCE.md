@@ -36,6 +36,12 @@ partner API key to mint a real handoff artifact, so the acceptance item
 "session-driven authorized flow works" cannot be honestly proven from live dev
 today.
 
+A resumed live recheck at `2026-08-02T04:26:09Z` reached the same conclusion:
+the formal URL still returned `HTTP/2 200` with
+`x-drts-embed-decision: allowed`, but its server-rendered payload again exposed
+`session: null`, `handoff.apiKey: null`, `handoff.partnerUserRef: null`, and
+`issues: ["fallback:missing_handoff_credentials"]`.
+
 This packet therefore supports `progress` / `blocker` state, not `done`.
 
 ## Evidence Chain
@@ -92,6 +98,23 @@ entry:
 
 This means the live URL is publicly reachable and visually aligned, but it is
 not yet a proved real handoff-backed session flow.
+
+## External Dependency Summary
+
+The remaining live-proof gap is operational, not semantic:
+
+- the public issue route `POST /partner/ingress/referral-embed-handoff` only
+  works with a real Yuhe partner ingress credential (`apiKey`) or an internal
+  bootstrap path
+- the actual session exchange path used by the web app,
+  `/api/referral/session`, calls consume/consent APIs that require
+  `x-drts-internal-key` on the server side
+- the live formal page currently has neither a pre-issued handoff artifact nor
+  a mounted credential path visible from this terminal environment
+
+Without one of those external inputs, this task can prove deploy/live reachability
+and fail-closed behavior, but it cannot honestly claim a real session-backed
+authorized flow, replay proof, or cross-entry proof on live dev.
 
 ## Referenced Canonical Artifacts
 
