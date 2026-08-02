@@ -194,6 +194,12 @@ Stage 1.5 必須達成：
 
 email、display name、IAP email header、tenant header 與 UI route 都不是 authority。`tenantId` 等 resource scope 必須由 membership / credential lookup 投影，若 client 另送 scope，只能做一致性比對，不得覆蓋 server identity。
 
+Task boundary note:
+
+- `IAM-SES-002` 擁有上述最小 authority claim envelope 的 canonical projection。該 task 必須把這組欄位落到 issued bearer/session payload、middleware request identity、`IdentityContext` 與 `GET /api/identity/context` 等共享 authority surface，而不是只停留在 JWT 內部。
+- `IAM-SES-003` 只擁有 session-management surface：`/api/auth/logout`、`/api/auth/logout-all`、`/api/auth/sessions`、`/api/auth/sessions/:sid/revoke` 與 admin-scoped `/api/identity/sessions`。它必須沿用 `IAM-SES-002` 定義的 session identifiers / claim semantics，不得重新定義 authority envelope。
+- 對於某些非 human 或非 step-up flow 不適用的欄位，可投影為 `null` 或空集合，但 canonical field names 不得因 realm 不同而漂移。
+
 ### 6.3 Token 與 BFF 原則
 
 - Browser 不得把 long-lived access / refresh token 存在 `localStorage`、`sessionStorage` 或可被 JavaScript 讀取的 cookie。
@@ -406,6 +412,8 @@ DB migration 必須包含 foreign keys、status check、unique constraints、exp
 
 既有 `/auth/tenant/bootstrap-session` 在 migration period 可保留名稱，但 request 必須改成 verified one-time exchange code，不接受 email 當 proof。既有 `/auth/token` 必須改為 private workload exchange 或 decommission，且 caller 不得提交任意 roles / scopes。
 
+以上 session-management endpoints 的 API owner 為 `IAM-SES-003`；它們消費 `IAM-SES-001` / `IAM-SES-002` 已定義的 `sid`、token version、revoke state 與 masking rules，而不重新定義 claim envelope。
+
 ### 12.2 Account / role administration
 
 | Endpoint family                | 必備能力                                                                           |
@@ -580,8 +588,8 @@ email 是否存在、正確 tenant、內部 role、IdP subject、credential hash
 | `IAM-IDP-001` | P0       | tenant / partner-human managed OIDC + PKCE BFF flow          | callback negative matrix、MFA claims、tenant context live evidence |
 | `IAM-IDP-002` | P0       | control-plane verified IAP subject -> membership resolution  | email header spoof、wrong audience、inactive workforce user 拒絕   |
 | `IAM-SES-001` | P0       | durable sessions + refresh families schema / repository      | restart 不遺失 revoke state；expiry / rotation 生效                |
-| `IAM-SES-002` | P0       | `sid / jti / tokenVersion / amr / auth_time` 與 revoke check | suspend / role change 60 秒內使舊 token 失效                       |
-| `IAM-SES-003` | P1       | self session inventory、logout、logout-all、admin revoke     | UI / API / audit / negative boundary 完成                          |
+| `IAM-SES-002` | P0       | `sid / jti / tokenVersion / amr / auth_time` 與 revoke check；將最小 authority claim envelope 投影到 canonical request identity / session contracts | suspend / role change 60 秒內使舊 token 失效                       |
+| `IAM-SES-003` | P1       | self session inventory、logout、logout-all、admin revoke；沿用 `IAM-SES-002` 的 session identifiers / masking rules | UI / API / audit / negative boundary 完成                          |
 | `IAM-KEY-001` | P1       | asymmetric signing or managed key + `kid` rotation           | current / previous overlap、old key retirement、rollback drill     |
 
 ### WP2：帳號、角色與治理
