@@ -6,7 +6,8 @@
 #   -> Tenant Booking Authority -> Billing / Settlement evidence
 #
 # Pass criteria (E2E-008):
-#   1. Inactive partner entry rejects bootstrap with PARTNER_ENTRY_INACTIVE.
+#   1. Inactive partner entry rejects bootstrap without exposing entry state to
+#      an unauthenticated caller.
 #   2. Reactivated entry accepts eligibility verification for the same entry.
 #   3. Partner-linked airport booking preserves partnerEntrySlug + eligibilityVerificationId.
 #   4. Finance evidence exposes partner-airport receipt ownership and invoice retrieval still works.
@@ -101,21 +102,21 @@ ENTRY_MUTATED=true
 save_evidence "$SCENARIO" "platform_admin" "entryStatusAfterDeactivate" "inactive"
 log_ok "Partner entry deactivated: ${ENTRY_SLUG}"
 
-log_step "1.3 — POST /auth/partner/bootstrap-session (expect inactive rejection)"
+log_step "1.3 — POST /auth/partner/bootstrap-session (expect opaque rejection)"
 http_call POST "/auth/partner/bootstrap-session" "$BOOTSTRAP_FIXTURE"
-if [[ "${RESP_STATUS}" != "403" ]]; then
-  log_fail "Expected inactive bootstrap rejection HTTP 403, got ${RESP_STATUS}"
+if [[ "${RESP_STATUS}" != "401" ]]; then
+  log_fail "Expected opaque bootstrap rejection HTTP 401, got ${RESP_STATUS}"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi
-INACTIVE_CODE=$(echo "$RESP_BODY" | jq -r '.error.code // empty' 2>/dev/null || true)
-if [[ "$INACTIVE_CODE" != "PARTNER_ENTRY_INACTIVE" ]]; then
-  log_fail "Expected PARTNER_ENTRY_INACTIVE, got '${INACTIVE_CODE:-<empty>}'"
+BOOTSTRAP_DENIAL_CODE=$(echo "$RESP_BODY" | jq -r '.error.code // empty' 2>/dev/null || true)
+if [[ "$BOOTSTRAP_DENIAL_CODE" != "AUTH_CREDENTIALS_INVALID" ]]; then
+  log_fail "Expected AUTH_CREDENTIALS_INVALID, got '${BOOTSTRAP_DENIAL_CODE:-<empty>}'"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi
-save_evidence "$SCENARIO" "partner" "inactiveBootstrapCode" "$INACTIVE_CODE"
-log_ok "Inactive entry blocks bootstrap with ${INACTIVE_CODE}"
+save_evidence "$SCENARIO" "partner" "inactiveBootstrapCode" "$BOOTSTRAP_DENIAL_CODE"
+log_ok "Inactive entry blocks bootstrap without exposing its lifecycle state."
 
 log_step "1.4 — POST /platform-admin/partner-entries/:entrySlug/activate (rollback restore)"
 switch_actor "platform_admin" "e2e-platform-admin-001"
