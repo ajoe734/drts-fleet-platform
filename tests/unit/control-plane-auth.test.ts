@@ -162,7 +162,7 @@ describe("control-plane auth helper", () => {
     );
   });
 
-  it("rejects assertion when JWT secret is missing and unverified dev mode is disabled", () => {
+  it("rejects assertion when JWT verification key is missing", () => {
     const iapToken = signTestIapJwtAssertion(
       {
         sub: "user-123",
@@ -171,9 +171,7 @@ describe("control-plane auth helper", () => {
       "some_secret",
     );
 
-    expect(() =>
-      verifyIapJwtAssertion(iapToken, { allowUnverifiedTokenInDev: false }),
-    ).toThrowError(
+    expect(() => verifyIapJwtAssertion(iapToken)).toThrowError(
       "IAP JWT assertion signature verification failed: verification key is required.",
     );
   });

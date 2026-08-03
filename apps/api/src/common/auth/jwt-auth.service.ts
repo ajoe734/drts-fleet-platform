@@ -11,6 +11,11 @@ import { IdentityRepository } from "../../modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../modules/tenant-partner/tenant-partner.service";
 import { getTenantRoleScopes } from "./auth.constants";
+import {
+  JwtKeyRetiredError,
+  JwtUnknownKeyError,
+  SigningKeyRing,
+} from "./signing-key-ring";
 import type {
   AuthActorType,
   AuthRealm,
@@ -253,47 +258,56 @@ export class JwtAuthService {
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
   ) {}
 
-  private getSignKey(): string {
-    const privateKey = process.env.JWT_PRIVATE_KEY;
-    if (privateKey && privateKey.trim().length > 0) {
-      return privateKey.trim();
+  private getSignKey(): {
+    signKey: string;
+    algorithm: jwt.Algorithm;
+    kid: string;
+  } {
+    try {
+      const active = new SigningKeyRing().getActiveSigningKey();
+      return {
+        signKey: active.signKey,
+        algorithm: active.algorithm,
+        kid: active.kid,
+      };
+    } catch (err) {
+      if (err instanceof JwtKeyMaterialNotConfiguredError) {
+        throw err;
+      }
+      throw new JwtKeyMaterialNotConfiguredError(
+        `${SIGN_KEY_MATERIAL_ERROR_MESSAGE}: ${(err as Error).message}`,
+        SIGN_KEY_REQUIRED_ENV,
+      );
     }
-    const secret = process.env.JWT_SECRET;
-    if (secret && secret.trim().length > 0) {
-      return secret.trim();
-    }
-    throw new JwtKeyMaterialNotConfiguredError(
-      SIGN_KEY_MATERIAL_ERROR_MESSAGE,
-      SIGN_KEY_REQUIRED_ENV,
-    );
   }
 
-  private getVerifyKey(): string {
-    const publicKey = process.env.JWT_PUBLIC_KEY;
-    if (publicKey && publicKey.trim().length > 0) {
-      return publicKey.trim();
+  private getVerifyKey(
+    kid?: string,
+    tokenAlg?: string,
+  ): { verifyKey: string; algorithm: jwt.Algorithm; kid: string } {
+    try {
+      const resolved = new SigningKeyRing().resolveVerifyKey(kid, tokenAlg);
+      return {
+        verifyKey: resolved.verifyKey,
+        algorithm: resolved.algorithm,
+        kid: resolved.kid,
+      };
+    } catch (err) {
+      if (
+        err instanceof JwtKeyRetiredError ||
+        err instanceof JwtUnknownKeyError
+      ) {
+        throw err;
+      }
+      throw new JwtKeyMaterialNotConfiguredError(
+        VERIFY_KEY_MATERIAL_ERROR_MESSAGE,
+        VERIFY_KEY_REQUIRED_ENV,
+      );
     }
-    const privateKey = process.env.JWT_PRIVATE_KEY;
-    if (privateKey && privateKey.trim().length > 0) {
-      return privateKey.trim();
-    }
-    const secret = process.env.JWT_SECRET;
-    if (secret && secret.trim().length > 0) {
-      return secret.trim();
-    }
-    throw new JwtKeyMaterialNotConfiguredError(
-      VERIFY_KEY_MATERIAL_ERROR_MESSAGE,
-      VERIFY_KEY_REQUIRED_ENV,
-    );
   }
 
   private isAsymmetricKeyConfigured(): boolean {
-    return Boolean(
-      (process.env.JWT_PRIVATE_KEY &&
-        process.env.JWT_PRIVATE_KEY.trim().length > 0) ||
-      (process.env.JWT_PUBLIC_KEY &&
-        process.env.JWT_PUBLIC_KEY.trim().length > 0),
-    );
+    return new SigningKeyRing().isAsymmetricConfigured();
   }
 
   private getIssuer(): string | undefined {
@@ -371,12 +385,14 @@ export class JwtAuthService {
   private buildJwtOptions(
     expiresIn: JwtExpiresIn | undefined,
     jwtId?: string,
+    keyInfo?: { algorithm: jwt.Algorithm; kid: string },
   ): jwt.SignOptions {
     const issuer = this.getIssuer();
     const audience = this.getAudienceOption();
     const algorithms = this.getAlgorithms();
     const options: jwt.SignOptions = {
-      algorithm: algorithms[0],
+      algorithm: keyInfo?.algorithm ?? algorithms[0],
+      ...(keyInfo?.kid ? { keyid: keyInfo.kid } : {}),
       ...(jwtId ? { jwtid: jwtId } : {}),
     };
 
@@ -395,11 +411,13 @@ export class JwtAuthService {
     return options;
   }
 
-  private buildJwtVerifyOptions(): jwt.VerifyOptions {
+  private buildJwtVerifyOptions(
+    allowedAlgos?: jwt.Algorithm[],
+  ): jwt.VerifyOptions {
     const issuer = this.getIssuer();
     const audience = this.getAudienceOption();
     const options: jwt.VerifyOptions = {
-      algorithms: this.getAlgorithms(),
+      algorithms: allowedAlgos ?? this.getAlgorithms(),
     };
 
     if (issuer) {
@@ -716,12 +734,15 @@ export class JwtAuthService {
         ? SERVICE_EXPIRES_IN
         : DEFAULT_EXPIRES_IN);
 
+    const activeKey = this.getSignKey();
+
     return jwt.sign(
       payload,
-      this.getSignKey(),
+      activeKey.signKey,
       this.buildJwtOptions(
         expiresIn,
         opts?.jwtId ?? identity.tokenId ?? undefined,
+        activeKey,
       ),
     );
   }
@@ -729,9 +750,10 @@ export class JwtAuthService {
   verify(token: string): JwtIdentityPayload | null {
     try {
       const decoded = jwt.decode(token, { complete: true }) as {
-        header?: { alg?: string };
+        header?: { alg?: string; kid?: string };
       } | null;
       const algorithm = decoded?.header?.alg?.toUpperCase();
+      const kid = decoded?.header?.kid;
       if (!algorithm || algorithm === "NONE") {
         return null;
       }
@@ -740,10 +762,12 @@ export class JwtAuthService {
         return null;
       }
 
+      const verifyKeyInfo = this.getVerifyKey(kid, algorithm);
+
       const verified = jwt.verify(
         token,
-        this.getVerifyKey(),
-        this.buildJwtVerifyOptions(),
+        verifyKeyInfo.verifyKey,
+        this.buildJwtVerifyOptions([verifyKeyInfo.algorithm]),
       ) as jwt.JwtPayload;
       return this.coerceJwtPayload(verified);
     } catch (err) {

@@ -20,10 +20,6 @@ export async function getServerPlatformAdminAuthority(): Promise<PlatformAdminAu
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const allowUnverifiedTokenInDev =
-    process.env.NODE_ENV !== "production" &&
-    process.env.ALLOW_UNVERIFIED_IAP_DEV === "true";
-
   const auth = issueControlPlaneRequestAuth({
     actorType: "platform_admin",
     headers: requestHeaders,
@@ -33,7 +29,6 @@ export async function getServerPlatformAdminAuthority(): Promise<PlatformAdminAu
     ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
     ...(expectedIapAudience ? { expectedIapAudience } : {}),
     ...(expectedIapIssuer ? { expectedIapIssuer } : {}),
-    ...(allowUnverifiedTokenInDev ? { allowUnverifiedTokenInDev } : {}),
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
     ...(process.env.JWT_AUDIENCE
