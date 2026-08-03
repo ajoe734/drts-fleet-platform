@@ -3455,10 +3455,19 @@ def chair_review_needs_immediate_attention(
     state: dict[str, Any],
     status: dict[str, Any] | None = None,
 ) -> bool:
-    if repeated_failure_records(state, status) or actionable_dispatch_pause_records(state, status, limit=1):
+    # Failure streaks carry an awaiting_chair flag that the chair clears, so a
+    # streak that is still awaiting review is always new information.
+    if repeated_failure_records(state, status):
         return True
+    # Dispatch and provider pauses persist until the underlying lane recovers.
+    # Only a pause recorded since the last review is new information; one the
+    # chair has already seen must fall back to the normal review cooldown
+    # instead of re-triggering a review on every tick.
     last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
-    for pause in active_provider_pause_records(state):
+    for pause in (
+        *actionable_dispatch_pause_records(state, status, limit=1),
+        *active_provider_pause_records(state),
+    ):
         paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
         if last_review_at is None or paused_at is None or paused_at > last_review_at:
             return True
@@ -7134,8 +7143,13 @@ def queue_chair_review(
     reason = chair_review_reason(state, approval_state, status=status, config=config)
     if reason is None:
         return False
-    immediate_attention = bool(chair_review_needs_immediate_attention(state, status) or ready_blocked_tasks)
-    bypass_cooldown = bool(pending_approval_items(approval_state) or immediate_attention)
+    needs_immediate_attention = chair_review_needs_immediate_attention(state, status)
+    immediate_attention = bool(needs_immediate_attention or ready_blocked_tasks)
+    # A dependency-ready blocked task stays listed until the parent is actually
+    # unblocked, which the chair's own repair action cannot do on its own. It
+    # therefore raises urgency for reviewer-lane selection but must not bypass
+    # the cooldown, or every tick re-queues the same blocked_task_triage.
+    bypass_cooldown = bool(pending_approval_items(approval_state) or needs_immediate_attention)
     cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:

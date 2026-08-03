@@ -5539,6 +5539,98 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertFalse(queued)
         choose_chair_reviewer.assert_not_called()
 
+    def test_dispatch_pause_review_respects_cooldown_after_recent_review(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"chair_review": {"enabled": True}}
+
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_dispatch_pause_recorded_after_last_review_bypasses_cooldown(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T13:10:00Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+
+        self.assertTrue(
+            supervisor.chair_review_needs_immediate_attention(state, {"tasks": []})
+        )
+
+    def test_dependency_ready_blocked_task_does_not_bypass_cooldown(self) -> None:
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-005",
+                    "status": "blocked",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "depends_on": ["DEP-001"],
+                    "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                },
+            ]
+        }
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"paths": {}, "chair_review": {"enabled": True}}
+
+        # The blocked task is still triage-worthy, so the reason stays set...
+        self.assertEqual(
+            supervisor.chair_review_reason(state, {"pending": []}, status=status, config=config),
+            "blocked_task_triage",
+        )
+
+        # ...but it must not re-queue a review on every tick while the cooldown
+        # is active, because the chair cannot clear the condition itself.
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, status, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
     def test_urgent_chair_review_can_use_lane_with_primary_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
