@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONTROL_PLANE_REQUEST_AUTH_HEADER,
+  detectControlPlaneAuthEnvironment,
   extractAuthenticatedUserEmail,
+  isStrictControlPlaneIapEnvironment,
   issueControlPlaneRequestAuth,
   signTestIapJwtAssertion,
   verifyIapJwtAssertion,
@@ -289,5 +291,64 @@ describe("control-plane auth helper", () => {
     });
 
     expect(auth.headers["x-goog-iap-jwt-assertion"]).toBe(iapToken);
+  });
+});
+
+describe("control-plane deployment environment detection", () => {
+  it("prefers DRTS_ENV over the NODE_ENV build mode", () => {
+    expect(
+      detectControlPlaneAuthEnvironment({
+        DRTS_ENV: "development",
+        NODE_ENV: "production",
+      }),
+    ).toBe("local");
+  });
+
+  it("falls back to APP_ENV and then NODE_ENV", () => {
+    expect(
+      detectControlPlaneAuthEnvironment({
+        APP_ENV: "staging",
+        NODE_ENV: "production",
+      }),
+    ).toBe("staging");
+    expect(detectControlPlaneAuthEnvironment({ NODE_ENV: "production" })).toBe(
+      "production",
+    );
+  });
+
+  it("keeps strict IAP mode on for production and staging deployments", () => {
+    expect(isStrictControlPlaneIapEnvironment({ DRTS_ENV: "production" })).toBe(
+      true,
+    );
+    expect(isStrictControlPlaneIapEnvironment({ DRTS_ENV: "staging" })).toBe(
+      true,
+    );
+  });
+
+  it("keeps strict IAP mode on when the deployment environment is unset", () => {
+    // A deployed Next.js bundle always reports NODE_ENV=production, so an
+    // unset DRTS_ENV must never downgrade a real production deployment.
+    expect(isStrictControlPlaneIapEnvironment({ NODE_ENV: "production" })).toBe(
+      true,
+    );
+  });
+
+  it("relaxes strict IAP mode for a dev deployment built in production mode", () => {
+    expect(
+      isStrictControlPlaneIapEnvironment({
+        DRTS_ENV: "development",
+        NODE_ENV: "production",
+      }),
+    ).toBe(false);
+  });
+
+  it("still allows strict IAP mode to be forced on explicitly", () => {
+    expect(
+      isStrictControlPlaneIapEnvironment({
+        DRTS_ENV: "development",
+        NODE_ENV: "production",
+        STRICT_IAP_MODE: "true",
+      }),
+    ).toBe(true);
   });
 });

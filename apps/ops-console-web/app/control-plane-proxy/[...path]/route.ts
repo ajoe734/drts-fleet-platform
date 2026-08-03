@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
   CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
+  isStrictControlPlaneIapEnvironment,
   issueControlPlaneRequestAuth,
   stripControlPlaneAuthQueryParams,
 } from "@drts/control-plane-auth";
@@ -113,9 +114,7 @@ async function applyUpstreamAuth(
   request: NextRequest,
   targetUrl: URL,
 ) {
-  const strictIapMode =
-    process.env.STRICT_IAP_MODE === "true" ||
-    process.env.NODE_ENV === "production";
+  const strictIapMode = isStrictControlPlaneIapEnvironment();
   const iapJwtSecretOrPublicKey =
     process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
     process.env.IAP_JWT_SECRET ||
