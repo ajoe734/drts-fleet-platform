@@ -26,6 +26,7 @@ function makeIdentity(
     roleFamilies: ["tenant"],
     roles: ["tenant_admin"],
     scopes: ["tenant:write", "identity:read"],
+    supportedExecutionModes: ["supervisor_managed_execution"],
     requestId: "req-identity-001",
     ...overrides,
   };
@@ -37,9 +38,7 @@ function makeRequest(
   body?: Record<string, unknown>,
 ) {
   return {
-    headers: reference
-      ? { "x-drts-step-up-reference": reference }
-      : {},
+    headers: reference ? { "x-drts-step-up-reference": reference } : {},
     method: "POST",
     url: path,
     body,
@@ -121,7 +120,10 @@ describe("step-up proof policy", () => {
 
     expect(() =>
       service.assertRequestSatisfied(
-        makeIdentity({ sessionId: "session-002", requestId: "req-other-session" }),
+        makeIdentity({
+          sessionId: "session-002",
+          requestId: "req-other-session",
+        }),
         makeRequest("/api/tenant/users", issued.stepUpReference),
       ),
     ).toThrowError(ApiRequestError);
