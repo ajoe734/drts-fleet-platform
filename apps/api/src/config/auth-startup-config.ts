@@ -45,6 +45,13 @@ export interface AuthStartupConfig {
     enforced: boolean;
     configured: boolean;
   };
+  workloadIdentity: {
+    configured: boolean;
+    issuerConfigured: boolean;
+    audienceConfigured: boolean;
+    keyConfigured: boolean;
+    registryConfigured: boolean;
+  };
   peppers: {
     passengerSubjectConfigured: boolean;
     passengerRideTokenConfigured: boolean;
@@ -170,6 +177,13 @@ function isSymmetricJwtAlgorithm(algorithm: string): boolean {
 
 function isAsymmetricJwtAlgorithm(algorithm: string): boolean {
   return /^(RS|ES|PS)/.test(algorithm.toUpperCase());
+}
+
+function looksLikePem(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return /BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(value);
 }
 
 export function isWeakSecret(value: string | undefined): boolean {
@@ -610,6 +624,29 @@ export function buildAuthStartupConfigReport(
   // 9. Internal Key & Pepper Secret References
   const internalKeyEnforced = normalizeString(env.DRTS_INTERNAL_KEY_ENFORCED);
   const internalKey = normalizeString(env.DRTS_INTERNAL_KEY);
+  const workloadIdentityIssuer = normalizeString(env.WORKLOAD_IDENTITY_ISSUER);
+  const workloadIdentityAudience = normalizeString(
+    env.WORKLOAD_IDENTITY_AUDIENCE ??
+      env.WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE,
+  );
+  const workloadIdentityKey = normalizeString(
+    env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY,
+  );
+  const workloadIdentityRegistry = normalizeString(
+    env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS,
+  );
+  const workloadIdentityConfigured = Boolean(
+    workloadIdentityIssuer &&
+      workloadIdentityAudience &&
+      workloadIdentityKey &&
+      workloadIdentityRegistry,
+  );
+  const workloadIdentityAnyConfigured = Boolean(
+    workloadIdentityIssuer ||
+      workloadIdentityAudience ||
+      workloadIdentityKey ||
+      workloadIdentityRegistry,
+  );
   const passengerSubjectPepper = normalizeString(env.PASSENGER_SUBJECT_PEPPER);
   const passengerRideTokenPepper = normalizeString(
     env.PASSENGER_RIDE_TOKEN_PEPPER,
@@ -625,14 +662,70 @@ export function buildAuthStartupConfigReport(
       });
     }
 
-    if (!internalKey) {
+    if (
+      workloadIdentityAnyConfigured &&
+      (!workloadIdentityIssuer ||
+        !workloadIdentityAudience ||
+        !workloadIdentityKey ||
+        !workloadIdentityRegistry)
+    ) {
+      if (!workloadIdentityIssuer) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_ISSUER",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_ISSUER must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityAudience) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_AUDIENCE / WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_AUDIENCE must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityKey) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityRegistry) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      !looksLikePem(workloadIdentityKey) &&
+      (isWeakSecret(workloadIdentityKey) || workloadIdentityKey.length < 32)
+    ) {
       issues.push({
-        control: "DRTS_INTERNAL_KEY",
+        control: "WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
         issue:
-          "Missing required control: DRTS_INTERNAL_KEY must be configured in staging/production",
+          "Unsafe control value: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be a valid public key/certificate or a strong shared secret when workload identity is enabled in staging/production",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (!internalKey && !workloadIdentityConfigured) {
+      issues.push({
+        control:
+          "DRTS_INTERNAL_KEY / WORKLOAD_IDENTITY_{ISSUER,AUDIENCE,JWT_SECRET_OR_PUBLIC_KEY,SERVICE_PRINCIPALS}",
+        issue:
+          "Missing required control: configure DRTS_INTERNAL_KEY or the complete workload identity validation set in staging/production",
         code: "MISSING_CONTROL",
       });
-    } else {
+    } else if (internalKey) {
       if (isWeakSecret(internalKey)) {
         issues.push({
           control: "DRTS_INTERNAL_KEY",
@@ -730,6 +823,13 @@ export function buildAuthStartupConfigReport(
       internalKey: {
         enforced: internalKeyEnforced?.toLowerCase() !== "false",
         configured: Boolean(internalKey),
+      },
+      workloadIdentity: {
+        configured: workloadIdentityConfigured,
+        issuerConfigured: Boolean(workloadIdentityIssuer),
+        audienceConfigured: Boolean(workloadIdentityAudience),
+        keyConfigured: Boolean(workloadIdentityKey),
+        registryConfigured: Boolean(workloadIdentityRegistry),
       },
       peppers: {
         passengerSubjectConfigured: Boolean(passengerSubjectPepper),

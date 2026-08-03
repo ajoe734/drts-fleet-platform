@@ -29,6 +29,25 @@ function getValidProdEnv(): Record<string, string> {
   };
 }
 
+function getValidProdWorkloadIdentityEnv(): Record<string, string> {
+  const env = getValidProdEnv();
+  delete env.DRTS_INTERNAL_KEY;
+  return {
+    ...env,
+    WORKLOAD_IDENTITY_ISSUER: "https://workload.prod.drts.internal",
+    WORKLOAD_IDENTITY_AUDIENCE: "https://auth.prod.drts.internal/token-exchange",
+    WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY: VALID_PROD_SECRET,
+    WORKLOAD_IDENTITY_SERVICE_PRINCIPALS: JSON.stringify([
+      {
+        principalId: "svc-api-runtime",
+        subject: "api-runtime",
+        scopes: ["foundation:read"],
+        allowedTokenAudiences: ["https://api.drts.internal"],
+      },
+    ]),
+  };
+}
+
 describe("Authentication Startup Configuration Integration Smoke", () => {
   it("passes startup preflight validation with complete production environment", () => {
     const env = getValidProdEnv();
@@ -50,6 +69,16 @@ describe("Authentication Startup Configuration Integration Smoke", () => {
     expect(() => validateAuthStartupConfig(unsafeEnv)).toThrowError(
       AuthConfigurationError,
     );
+  });
+
+  it("passes startup preflight validation with workload identity and no internal key secret", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    const report = validateAuthStartupConfig(env);
+
+    expect(report.valid).toBe(true);
+    expect(report.config.internalKey.configured).toBe(false);
+    expect(report.config.workloadIdentity.configured).toBe(true);
+    expect(report.config.workloadIdentity.registryConfigured).toBe(true);
   });
 
   it("ensures validation error message details missing controls without leaking secret values", () => {

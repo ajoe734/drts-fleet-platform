@@ -134,6 +134,7 @@ export interface IssueSessionTokenOptions {
   ensurePrincipal?: boolean;
   idleExpiresAt?: string | null;
   absoluteExpiresAt?: string;
+  audience?: string[] | null;
 }
 
 const SIGN_KEY_REQUIRED_ENV = ["JWT_PRIVATE_KEY", "JWT_SECRET"] as const;
@@ -148,7 +149,7 @@ const VERIFY_KEY_MATERIAL_ERROR_MESSAGE =
   "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)";
 
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
-const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
+const SERVICE_EXPIRES_IN: JwtExpiresIn = "15m";
 const DEFAULT_POLICY_VERSION = "auth.jwt-session.v1";
 const DEFAULT_JWT_ISSUER = "https://auth.local.drts.internal";
 const DEFAULT_JWT_AUDIENCE = "https://api.local.drts.internal";
@@ -386,9 +387,14 @@ export class JwtAuthService {
     expiresIn: JwtExpiresIn | undefined,
     jwtId?: string,
     keyInfo?: { algorithm: jwt.Algorithm; kid: string },
+    audienceOverride?: string[] | null,
   ): jwt.SignOptions {
     const issuer = this.getIssuer();
-    const audience = this.getAudienceOption();
+    const overrideAudience = normalizeAudience(audienceOverride);
+    const audience =
+      overrideAudience && overrideAudience.length > 0
+        ? overrideAudience
+        : normalizeAudience(this.getAudienceOption());
     const algorithms = this.getAlgorithms();
     const options: jwt.SignOptions = {
       algorithm: keyInfo?.algorithm ?? algorithms[0],
@@ -402,7 +408,7 @@ export class JwtAuthService {
     if (issuer) {
       options.issuer = issuer;
     }
-    if (audience) {
+    if (audience && audience.length > 0) {
       options.audience = Array.isArray(audience)
         ? ([...audience] as [string, ...string[]])
         : audience;
@@ -593,7 +599,14 @@ export class JwtAuthService {
     const principalId =
       options?.principalId ?? identity.principalId ?? identity.actorId;
     const membershipId = options?.membershipId ?? identity.membershipId ?? null;
-    const audience = this.getAudienceList();
+    const optionAudience = normalizeAudience(options?.audience);
+    const identityAudience = normalizeAudience(identity.audience);
+    const audience =
+      optionAudience && optionAudience.length > 0
+        ? optionAudience
+        : identityAudience && identityAudience.length > 0
+          ? identityAudience
+          : this.getAudienceList();
     const issuer = this.getIssuer() ?? null;
     const subject =
       options?.subject ??
@@ -743,6 +756,7 @@ export class JwtAuthService {
         expiresIn,
         opts?.jwtId ?? identity.tokenId ?? undefined,
         activeKey,
+        identity.audience,
       ),
     );
   }

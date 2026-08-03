@@ -59,6 +59,16 @@ type PersistedRefreshFamilyRow = {
   record: unknown;
 };
 
+export interface ConsumeWorkloadIdentityAssertionInput {
+  assertionHash: string;
+  issuer: string;
+  subject: string;
+  exchangeAudience: string;
+  tokenAudience: string;
+  principalId?: string | null;
+  expiresAt: string;
+}
+
 const LEGACY_TENANT_USER_ISSUER = "legacy_tenant_email";
 
 export function hashIdentitySecret(secret: string): string {
@@ -100,6 +110,10 @@ export class IdentityRepository {
   >();
 
   private readonly fallbackPreviousTokenHashes = new Map<string, string>();
+  private readonly fallbackConsumedWorkloadAssertions = new Map<
+    string,
+    ConsumeWorkloadIdentityAssertionInput & { consumedAt: string }
+  >();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -896,6 +910,73 @@ export class IdentityRepository {
       row,
       "iam.identity_refresh_families",
     );
+  }
+
+  async consumeWorkloadIdentityAssertion(
+    input: ConsumeWorkloadIdentityAssertionInput,
+  ): Promise<boolean> {
+    const consumedAt = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      const now = Date.now();
+      for (const [hash, record] of this.fallbackConsumedWorkloadAssertions) {
+        if (Date.parse(record.expiresAt) < now) {
+          this.fallbackConsumedWorkloadAssertions.delete(hash);
+        }
+      }
+
+      if (this.fallbackConsumedWorkloadAssertions.has(input.assertionHash)) {
+        return false;
+      }
+
+      this.fallbackConsumedWorkloadAssertions.set(input.assertionHash, {
+        ...input,
+        consumedAt,
+      });
+      return true;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<{ assertion_hash: string }>(
+        `
+          INSERT INTO iam.workload_identity_assertions (
+            assertion_hash,
+            issuer,
+            subject,
+            exchange_audience,
+            token_audience,
+            principal_id,
+            expires_at,
+            consumed_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb
+          )
+          ON CONFLICT (assertion_hash) DO NOTHING
+          RETURNING assertion_hash
+        `,
+        [
+          input.assertionHash,
+          input.issuer,
+          input.subject,
+          input.exchangeAudience,
+          input.tokenAudience,
+          input.principalId ?? null,
+          input.expiresAt,
+          consumedAt,
+          JSON.stringify({
+            ...input,
+            principalId: input.principalId ?? null,
+            consumedAt,
+          }),
+        ],
+      );
+
+      return result.rows.length > 0;
+    } finally {
+      client.release();
+    }
   }
 
   async consumeAndRotateRefreshToken(
