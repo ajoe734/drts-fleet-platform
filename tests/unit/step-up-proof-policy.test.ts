@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { IdentityContext } from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { StepUpProofService } from "../../apps/api/src/common/auth";
 import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
 
+type StepUpTestIdentity = BootstrapRequestIdentity & IdentityContext;
+
 function makeIdentity(
   overrides: Partial<BootstrapRequestIdentity> = {},
-): BootstrapRequestIdentity {
+): StepUpTestIdentity {
   return {
     authMode: "jwt_bearer",
     actorType: "tenant_admin",
@@ -29,7 +32,7 @@ function makeIdentity(
     supportedExecutionModes: ["supervisor_managed_execution"],
     requestId: "req-identity-001",
     ...overrides,
-  };
+  } as StepUpTestIdentity;
 }
 
 function makeRequest(
