@@ -8,13 +8,14 @@
 **Sidecar Reviewer:** `Gemini`
 **Generated:** `2026-08-03` (UTC)
 **Snapshot anchor (parent `last_update`):** `2026-08-03T06:38:15Z`
-**Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; no canonical truth, runtime, or contract files modified.
+**Status:** `REVIEW APPROVED SUPPORT ARTIFACT` - support-only; no canonical truth, runtime, or contract files modified.
 
 This packet is a reviewer-facing companion to `IAM-ACC-002`. It snapshots the
-parent task's current `review` state, maps the four declared dependencies, and
-turns the parent acceptance list into a concrete review checklist against the
-unmerged implementation commit `45abc7b295d7d58f9a1e67a7ed8576b2bd0efcfe` on
-branch `codex/iam-acc-002`.
+sidecar task in `review_approved`, records the parent task's approved review
+anchor, maps the four declared dependencies, and turns the parent acceptance
+list into a concrete review checklist against the unmerged implementation
+commit `45abc7b295d7d58f9a1e67a7ed8576b2bd0efcfe` on branch
+`codex/iam-acc-002`.
 
 Current lifecycle truth remains authoritative in `ai-status.json` and
 `ai-activity-log.jsonl`. This packet is a convenience snapshot only.
@@ -48,7 +49,7 @@ Out of scope:
 - id=`IAM-ACC-002-SIDECAR-ACCEPTANCE`
 - owner=`Codex`
 - reviewer=`Gemini`
-- status=`in_progress` at packet generation time
+- status=`review_approved`
 - helper_parent=`IAM-ACC-002`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
@@ -165,5 +166,7 @@ Reviewer focus from that surface:
 
 This sidecar created the requested support artifact only. No canonical truth or
 runtime files were edited in this task. The dependency chain for `IAM-ACC-002`
-is satisfied, the parent implementation is anchored at `45abc7b`, and the
-remaining work is reviewer judgment plus owner closeout once review is approved.
+is satisfied, the parent implementation is anchored at `45abc7b`, and this
+packet is ready for owner closeout on branch
+`codex/iam-acc-002-sidecar-acceptance` with integration status
+`branch_pushed`.
