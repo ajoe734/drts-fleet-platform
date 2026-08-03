@@ -115,6 +115,33 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     requiredOutcomes: ["denied"],
   },
   {
+    eventType: "step_up.proof_issued",
+    eventFamily: "policy",
+    description:
+      "Server-owned privileged-action proof issued after trusted MFA and freshness checks succeeded.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "step_up.denied",
+    eventFamily: "policy",
+    description:
+      "Step-up proof issuance or privileged-action verification failed because proof was missing, stale, or bound to the wrong action/session.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["denied"],
+  },
+  {
+    eventType: "step_up.satisfied",
+    eventFamily: "policy",
+    description:
+      "A privileged request supplied a fresh server-owned proof bound to the current session and action.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
     eventType: "break_glass.activated",
     eventFamily: "break_glass",
     description:

@@ -13,4 +13,5 @@ export * from "./internal-key-audit";
 export * from "./jwt-auth.service";
 export * from "./mfa-step-up.policy";
 export * from "./signing-key-ring";
-
+export * from "./step-up.policy";
+export * from "./step-up-proof.service";
