@@ -1083,6 +1083,11 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       envVarName: "PARTNER_INGRESS_KEY_CATHAY",
     },
     {
+      entrySlug: "yuhe-residence",
+      keyId: "partner-key-yuhe-residence-dev",
+      envVarName: "PARTNER_INGRESS_KEY_YUHE_RESIDENCE",
+    },
+    {
       entrySlug: "taishin",
       keyId: "partner-key-taishin-dev",
       envVarName: "PARTNER_INGRESS_KEY_TAISHIN",
