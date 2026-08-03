@@ -1073,6 +1073,11 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       envVarName: "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT",
     },
     {
+      entrySlug: "yuhe-residence",
+      keyId: "partner-key-yuhe-residence-dev",
+      envVarName: "PARTNER_INGRESS_KEY_YUHE_RESIDENCE",
+    },
+    {
       entrySlug: "ctbc",
       keyId: "partner-key-ctbc-dev",
       envVarName: "PARTNER_INGRESS_KEY_CTBC",
