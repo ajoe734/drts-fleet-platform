@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
-import type {
-  CreateStepUpProofCommand,
-  StepUpProof,
-} from "@drts/contracts";
+import type { CreateStepUpProofCommand, StepUpProof } from "@drts/contracts";
 
 import { ApiRequestError } from "../api-envelope";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
@@ -71,7 +68,9 @@ function extractStepUpReference(
   request: Pick<AuthenticatedRequestLike, "headers"> & { body?: unknown },
 ): string | null {
   const headerValue = request.headers[AUTH_STEP_UP_REFERENCE_HEADER];
-  const directHeader = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const directHeader = Array.isArray(headerValue)
+    ? headerValue[0]
+    : headerValue;
   const fromHeader = normalizeReference(directHeader);
   if (fromHeader) {
     return fromHeader;
@@ -114,7 +113,7 @@ export class StepUpProofService {
   createProof(
     identity: BootstrapRequestIdentity | null | undefined,
     command: CreateStepUpProofCommand,
-    requestId?: string,
+    requestId: string | null = null,
   ): StepUpProof {
     if (!identity?.actorId) {
       throw new ApiRequestError(
@@ -249,10 +248,15 @@ export class StepUpProofService {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
-        reasonCode: reference ? "missing_identity_session" : "missing_reference",
+        reasonCode: reference
+          ? "missing_identity_session"
+          : "missing_reference",
         requestId: identity?.requestId ?? null,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     const proof = this.storedProofs.get(reference);
@@ -263,7 +267,10 @@ export class StepUpProofService {
         reasonCode: "unknown_reference",
         requestId: identity.requestId ?? null,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     if (proof.actionId !== policy.actionId) {
@@ -274,7 +281,10 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     if (proof.sessionId !== identity.sessionId) {
@@ -285,7 +295,10 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     const identityPrincipalId = identity.principalId ?? identity.actorId;
@@ -300,7 +313,10 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     const expiresAtMs = parseTimestamp(proof.expiresAt);
@@ -313,7 +329,10 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     this.recordEvent("step_up.satisfied", identity, {
@@ -336,7 +355,8 @@ export class StepUpProofService {
       return resolveStepUpActionPolicy(command.actionId, identity.realm);
     }
 
-    const hasMethod = typeof command.method === "string" && command.method.trim();
+    const hasMethod =
+      typeof command.method === "string" && command.method.trim();
     const hasPath = typeof command.path === "string" && command.path.trim();
     if (!hasMethod && !hasPath) {
       throw new ApiRequestError(
