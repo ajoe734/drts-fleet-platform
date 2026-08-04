@@ -17,10 +17,66 @@ if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
 from approval_queue import consume_resume_override, create_approval, find_resume_override
-from common import ROOT, load_config, load_json, utc_now, write_activity_log, write_json
+from common import (
+    ROOT,
+    canonical_workspace_root,
+    load_config,
+    load_json,
+    utc_now,
+    write_activity_log,
+    write_json,
+)
 from provider_permissions import CLAUDE_LOCAL_SETTINGS_PATH, _verified_claude_policy
 from runtime_state import load_approval_state
 from worker_tree_guard import check_chatbox_tree_guard
+
+
+_WORKSPACE_ROOTS_CACHE: list[Path] | None = None
+
+
+def workspace_roots() -> list[Path]:
+    """Roots a worker may legitimately touch.
+
+    `ROOT` is the directory holding this file. The supervisor runs from a
+    reviewed runtime bundle that is not the canonical checkout, so a boundary
+    derived from `ROOT` points every path check at the bundle — while machine
+    truth, task worktrees, and the repository workers are told to edit all live
+    under the canonical workspace.
+
+    Every adapter stamps ORCH_CANONICAL_ROOT and ORCH_WORKSPACE_ROOT into the
+    worker environment (see common.apply_orchestrator_runtime_env), and this
+    broker runs as a hook inside that worker, so the environment is the
+    authoritative answer here. `load_config()` is not: it reads the config file
+    sitting next to the code, which in the bundle is not the config the
+    supervisor was started with.
+    """
+    global _WORKSPACE_ROOTS_CACHE
+    if _WORKSPACE_ROOTS_CACHE is not None:
+        return _WORKSPACE_ROOTS_CACHE
+
+    roots: list[Path] = []
+    for name in ("ORCH_CANONICAL_ROOT", "ORCH_WORKSPACE_ROOT"):
+        raw = (os.environ.get(name) or "").strip()
+        if raw:
+            roots.append(Path(raw).expanduser().resolve(strict=False))
+    if not roots:
+        try:
+            roots.append(
+                canonical_workspace_root(load_config()).resolve(strict=False)
+            )
+        except Exception:  # noqa: BLE001 - a hook must not die on config problems
+            roots.append(ROOT.resolve(strict=False))
+
+    _WORKSPACE_ROOTS_CACHE = []
+    for root in roots:
+        if root not in _WORKSPACE_ROOTS_CACHE:
+            _WORKSPACE_ROOTS_CACHE.append(root)
+    return _WORKSPACE_ROOTS_CACHE
+
+
+def workspace_root() -> Path:
+    """The primary workspace root — the canonical checkout when one is known."""
+    return workspace_roots()[0]
 
 
 SAFE_BASH_PATTERNS = [
@@ -236,9 +292,10 @@ def _normalize_shell_command(shell_command: str) -> str:
 
 def _matches_workspace_script(path_token: str, relative_path: str) -> bool:
     candidate = Path(path_token)
-    expected = ROOT / relative_path
+    root = workspace_root()
+    expected = root / relative_path
     try:
-        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (ROOT / candidate).resolve(strict=False)
+        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (root / candidate).resolve(strict=False)
     except OSError:
         return False
     return resolved == expected.resolve(strict=False)
@@ -299,7 +356,7 @@ def _writes_outside_workspace(segment: str) -> bool:
             continue
         candidate = Path(cleaned).expanduser()
         try:
-            resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (ROOT / candidate).resolve(strict=False)
+            resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (workspace_root() / candidate).resolve(strict=False)
         except OSError:
             return True
         if resolved.is_relative_to(Path("/tmp")):
@@ -581,19 +638,20 @@ def _resolve_workspace_path(base: Path, raw_path: str) -> Path:
 
 def _command_tokens_and_cwd(shell_command: str) -> tuple[list[str], Path]:
     command = _normalize_shell_command(shell_command)
+    root = workspace_root()
     if not command:
-        return [], ROOT
+        return [], root
     try:
         tokens = shlex.split(command)
     except ValueError:
-        return [], ROOT
-    cwd = ROOT
+        return [], root
+    cwd = root
     if "&&" in tokens:
         amp_index = tokens.index("&&")
         if amp_index == 2 and tokens[0] == "cd":
             cd_target = Path(tokens[1])
             if _paths_within_workspace([cd_target]):
-                cwd = _resolve_workspace_path(ROOT, tokens[1])
+                cwd = _resolve_workspace_path(root, tokens[1])
                 tokens = tokens[amp_index + 1 :]
     index = 0
     while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
@@ -653,7 +711,7 @@ def _is_canonical_root_pnpm_install_command(shell_command: str) -> bool:
 
     if index >= len(tokens) or tokens[index] not in {"install", "i"}:
         return False
-    return effective_cwd == ROOT.resolve(strict=False)
+    return effective_cwd == workspace_root()
 
 
 def _extract_package_specs(tokens: list[str], start_index: int) -> list[str]:
@@ -792,9 +850,12 @@ def _collect_paths(tool_input: dict[str, Any]) -> list[Path]:
 def _paths_within_workspace(paths: list[Path]) -> bool:
     if not paths:
         return True
-    allowed_roots = [ROOT, ROOT.parent / "pantheon", ROOT.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
+    root = workspace_root()
+    # Task worktrees usually live under the canonical root, but a worker may be
+    # dispatched into one elsewhere, so honour every root we were handed.
+    allowed_roots = [*workspace_roots(), root.parent / "pantheon", root.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
     for path in paths:
-        resolved = path if path.is_absolute() else ROOT / path
+        resolved = path if path.is_absolute() else root / path
         if not any(
             _is_relative_to(resolved, root) for root in allowed_roots
         ):
@@ -814,7 +875,7 @@ def _check_claude_allow_rules(tool_name: str, tool_input: dict[str, Any]) -> boo
     """Return True if a Claude settings allow rule matches this tool call."""
     try:
         settings_path = Path.home() / ".claude" / "projects" / "-home-edna-workspace-drts-fleet-platform" / "settings.json"
-        local_settings_path = ROOT / ".claude" / "settings.local.json"
+        local_settings_path = workspace_root() / ".claude" / "settings.local.json"
         for path in (local_settings_path, settings_path):
             if not path.exists():
                 continue
@@ -856,7 +917,7 @@ def evaluate_tool_request(tool_name: str, tool_input: dict[str, Any] | None, con
             risk_class = "repo_write"
         else:
             decision = "deny"
-            reason = f"{tool_name} targets a path outside {ROOT}."
+            reason = f"{tool_name} targets a path outside {workspace_root()}."
             risk_class = "out_of_workspace"
     elif tool_name == "Bash":
         shell_command = tool_input.get("command") or tool_input.get("cmd") or tool_input.get("raw_command") or ""
