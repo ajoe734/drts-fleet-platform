@@ -71,3 +71,10 @@ CI wiring:
 
 - Caveat:
   The hermetic IAM suite now reserves loopback port `3101` by default inside `tests/security/run-iam-negative-matrix.sh` so local or supervisor-owned listeners on `127.0.0.1:3001` cannot poison CI-equivalent runs.
+
+- `2026-08-04T04:16:00Z`
+  Commit: `e49f527d`
+  Command:
+  `npx vitest run tests/security/ --reporter=verbose`
+  Result:
+  Dynamic route-inventory gap fix. Replaced broken `getAllControllers` stub (loop that immediately broke, returning empty list) with a working recursive filesystem walker. Added third test: **every controller on disk is either in `SECURITY_CRITICAL_CONTROLLERS` or has inline security classification — no silent regressions**. Extended `resolveRouteAuthPolicy` with 13 previously-unclassified controller domains (health probe, notification read-receipt, billing/settlement ops, driver-settings, feature-flags admin, forwarder driver task-views, system/foundation manifest, geo/geocoding, product-rule catalog, sandbox-dispatch-gate, service-area admin, shift-attendance, tesla-integration). All 10 security suite tests pass (4 files). No existing unit tests broken.
