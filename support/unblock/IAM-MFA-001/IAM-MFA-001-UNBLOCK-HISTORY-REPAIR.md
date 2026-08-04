@@ -11,6 +11,8 @@
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-unblock-history-repair`
 - Assigned helper branch:
   `codex/iam-mfa-001-unblock-history-repair`
+- Latest pushed helper anchor:
+  `26b9c661e64251d4964a15a281580f4dab9b0f7d`
 
 ## Diagnosis
 
@@ -26,6 +28,16 @@ audit evidence, rebuild the task content onto a fresh branch from `origin/dev`,
 and continue integration from that new clean rail.
 
 ## Current Evidence
+
+### Helper branch repair evidence
+
+- remote branch:
+  `origin/codex/iam-mfa-001-unblock-history-repair @ 26b9c661e64251d4964a15a281580f4dab9b0f7d`
+- `git rev-list --left-right --count origin/codex/iam-mfa-001-unblock-history-repair...codex/iam-mfa-001-unblock-history-repair`
+  => `0 0`
+- conclusion:
+  the refreshed unblock evidence and parent-route corrections are now on the
+  pushed helper branch rather than stranded in a local-only anchor commit
 
 ### Canonical contaminated owner rail
 
@@ -119,18 +131,19 @@ Do not force-push any existing branch. Do not rewrite `codex/iam-mfa-001`,
 `IAM-MFA-001` must not stay `done` with `integration_status=not_applicable`.
 The unblock result proves the parent still needs active integration follow-up.
 
-That machine-truth correction has now been executed:
+That machine-truth correction has now been executed and refreshed:
 
 - `AI_NAME=Codex scripts/ai-status.sh reopen IAM-MFA-001 "..."`
-- `IAM-MFA-001` is now `status=in_progress` as of `2026-08-04T14:38:44Z`
+- `IAM-MFA-001` is now `status=in_progress` as of `2026-08-04T14:48:39Z`
 - `next` now points to PR `#1303` on
   `codex/iam-mfa-001-clean-route @ e3ecc0a0` and marks `#1287` / `#1293` as
   audit-only contaminated attempts
-
-The legacy parent `integration_status=not_applicable` field remains historical
-metadata from the earlier incorrect closeout, but the task is no longer in a
-terminal `done` state and therefore no longer claims that integration is
-complete.
+- parent integration metadata now records the live clean route instead of the
+  stale closeout residue:
+  - `integration_status=ci_failed`
+  - `pr_url=https://github.com/ajoe734/drts-fleet-platform/pull/1303`
+  - `ci_status=CI (integration trunk) failed on run 30918215661`
+  - `ci_run_url=https://github.com/ajoe734/drts-fleet-platform/actions/runs/30918215661`
 
 ## Validation Status
 
@@ -167,6 +180,10 @@ This means Acceptance 2 remains open: the clean route is documented and proven
 history-safe, but it is blocked on real runtime/auth integration failures
 rather than branch contamination.
 
+Acceptance 3 is now satisfied in machine truth: the parent may proceed only
+against PR `#1303`, and canonical status no longer implies that integration is
+complete or not applicable.
+
 ## Why This Is Safe
 
 - no shared branch was rewritten
@@ -185,6 +202,7 @@ rather than branch contamination.
   - `AI_NAME=Codex scripts/ai-status.sh show IAM-MFA-001`
   - `AI_NAME=Codex scripts/ai-status.sh progress IAM-MFA-001-UNBLOCK-HISTORY-REPAIR "..."`
   - `AI_NAME=Codex scripts/ai-status.sh reopen IAM-MFA-001 "..."`
+  - `_AI_STATUS_DELEGATED=1 AI_STATUS_ROOT=/home/lupin/drts-fleet-platform INTEGRATION_STATUS=ci_failed PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/1303 CI_STATUS="CI (integration trunk) failed on run 30918215661" CI_RUN_URL=https://github.com/ajoe734/drts-fleet-platform/actions/runs/30918215661 AI_NAME=Codex python3 scripts/ai_status.py progress IAM-MFA-001 "..."`
 - Inspected contaminated rails and PRs:
   - `gh pr view 1287 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,reviewDecision,updatedAt`
   - `gh pr view 1293 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,reviewDecision,updatedAt`
@@ -202,6 +220,7 @@ rather than branch contamination.
 - Validated and published the clean rail:
   - `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
   - `git push -u origin codex/iam-mfa-001-clean-route`
+  - `git push origin codex/iam-mfa-001-unblock-history-repair`
   - `gh pr create --base dev --head codex/iam-mfa-001-clean-route ...`
   - `gh pr view 1303 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,updatedAt`
   - `gh run view 30918215661 --job 92021690866 --log-failed`
