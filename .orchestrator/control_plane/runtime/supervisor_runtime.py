@@ -2046,13 +2046,41 @@ def ensure_planning_baton_dispatch(
     return True
 
 
+def provider_report_age_seconds(
+    path: Path, report: dict[str, Any] | None, *, now: datetime | None = None
+) -> float:
+    """Age of a cached capability report; infinite when it cannot be dated."""
+    now = now or datetime.now(timezone.utc)
+    generated_at = _parse_iso_utc(str((report or {}).get("generated_at") or ""))
+    if generated_at is not None:
+        return max(0.0, (now - generated_at).total_seconds())
+    try:
+        return max(0.0, now.timestamp() - path.stat().st_mtime)
+    except OSError:
+        return float("inf")
+
+
 def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
     try:
-        if config.get("supervisor", {}).get("auto_refresh_provider_capabilities", True):
+        supervisor_cfg = config.get("supervisor", {})
+        if supervisor_cfg.get("auto_refresh_provider_capabilities", True):
             report = build_provider_capabilities(config)
             write_provider_capabilities(config, report=report)
             return report
-        return load_json(config_path(config, "provider_capabilities"), default={}) or {}
+        path = config_path(config, "provider_capabilities")
+        report = load_json(path, default={}) or {}
+        # Probing every tick is too expensive, which is why auto-refresh is off.
+        # But a cache that is never refreshed can strand a healthy lane: one
+        # stale or wrong auth_ready=False removes it from dispatch with no
+        # pause, no error and no log line. Re-probe on an interval so the cache
+        # can heal itself; an undateable or missing report refreshes at once.
+        interval = float(
+            supervisor_cfg.get("provider_capabilities_refresh_interval_seconds", 900.0)
+        )
+        if interval > 0 and provider_report_age_seconds(path, report) >= interval:
+            report = build_provider_capabilities(config)
+            write_provider_capabilities(config, report=report)
+        return report
     except KeyError:
         return {}
 

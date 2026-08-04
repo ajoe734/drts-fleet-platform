@@ -5511,6 +5511,60 @@ class ChairmanFlowTests(unittest.TestCase):
             )
         )
 
+    def test_provider_report_age_uses_generated_at(self) -> None:
+        now = datetime(2026, 8, 4, 12, 0, 0, tzinfo=timezone.utc)
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"),
+            {"generated_at": "2026-08-04T11:45:00Z"},
+            now=now,
+        )
+        self.assertEqual(age, 900.0)
+
+    def test_provider_report_age_is_infinite_when_undateable(self) -> None:
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"), {}
+        )
+        self.assertEqual(age, float("inf"))
+
+    def test_stale_provider_report_is_reprobed(self) -> None:
+        """A cached report that is never refreshed can strand a healthy lane."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            path.write_text(
+                json.dumps({"generated_at": "2026-08-01T00:00:00Z", "providers": {}}),
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            fresh = {"generated_at": "2026-08-04T00:00:00Z", "providers": {"claude": {}}}
+            with (
+                mock.patch.object(supervisor, "build_provider_capabilities", return_value=fresh) as build,
+                mock.patch.object(supervisor, "write_provider_capabilities") as write,
+            ):
+                report = supervisor.load_provider_report(config)
+            build.assert_called_once()
+            write.assert_called_once()
+            self.assertEqual(report, fresh)
+
+    def test_fresh_provider_report_is_not_reprobed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            generated_at = (
+                datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+            cached = {"generated_at": generated_at, "providers": {"claude": {}}}
+            path.write_text(json.dumps(cached), encoding="utf-8")
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            with mock.patch.object(supervisor, "build_provider_capabilities") as build:
+                report = supervisor.load_provider_report(config)
+            build.assert_not_called()
+            self.assertEqual(report, cached)
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
