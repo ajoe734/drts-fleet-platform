@@ -81,6 +81,7 @@ switch_actor() {
   E2E_ACTOR_ID="$2"
   E2E_TENANT_ID="${3:-}"
   E2E_REALM=""   # re-derived by http_call
+  E2E_REQUEST_BEARER_TOKEN=""
   E2E_PARTNER_ID=""
   E2E_PARTNER_PROGRAM_ID=""
   E2E_PARTNER_ENTRY_SLUG=""
@@ -97,7 +98,6 @@ set_partner_context() {
 }
 
 mint_runtime_bearer_token() {
-  [[ -n "${E2E_INTERNAL_KEY:-}" ]] || return 1
   [[ -n "${E2E_ACTOR_TYPE:-}" ]] || return 1
 
   local request_id="e2e-token-$(date +%s%N | head -c 16)"
@@ -122,7 +122,6 @@ mint_runtime_bearer_token() {
     -H "Content-Type: application/json"
     -H "X-Request-ID: ${request_id}"
     -H "Idempotency-Key: ${request_id}"
-    -H "x-drts-internal-key: ${E2E_INTERNAL_KEY}"
     -H "x-actor-type: ${E2E_ACTOR_TYPE}"
     -H "x-actor-id: ${E2E_ACTOR_ID:-e2e-actor-001}"
     -H "x-realm: ${realm}"
@@ -130,6 +129,9 @@ mint_runtime_bearer_token() {
 
   if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
     curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
+  if [[ -n "${E2E_INTERNAL_KEY:-}" ]]; then
+    curl_args+=(-H "x-drts-internal-key: ${E2E_INTERNAL_KEY}")
   fi
   if [[ -n "${E2E_TENANT_ID:-}" ]]; then
     curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
@@ -205,6 +207,36 @@ resolve_step_up_reference() {
   printf '%s' "$reference"
 }
 
+should_force_runtime_bearer() {
+  local method="$1"
+  local path="$2"
+
+  case "${E2E_ACTOR_TYPE:-}" in
+    platform_admin|ops_user)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$method" in
+    POST|PUT|PATCH|DELETE)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$path" in
+    /platform-admin/*|/ops/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # ── HTTP helper ───────────────────────────────────────────────────────────────
 # Usage: http_call METHOD PATH [BODY_FILE]
 # Sets global: RESP_BODY  RESP_STATUS
@@ -216,6 +248,10 @@ http_call() {
   request_id="e2e-$(date +%s%N | head -c 16)"
   local application_bearer="${E2E_REQUEST_BEARER_TOKEN:-}"
   local step_up_reference=""
+
+  if should_force_runtime_bearer "$method" "$path"; then
+    application_bearer=""
+  fi
 
   local realm="${E2E_REALM:-}"
   if [[ -z "$realm" ]]; then
