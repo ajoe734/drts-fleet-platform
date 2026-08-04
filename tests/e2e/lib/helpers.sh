@@ -98,7 +98,6 @@ set_partner_context() {
 }
 
 mint_runtime_bearer_token() {
-  [[ -n "${E2E_INTERNAL_KEY:-}" ]] || return 1
   [[ -n "${E2E_ACTOR_TYPE:-}" ]] || return 1
 
   local request_id="e2e-token-$(date +%s%N | head -c 16)"
@@ -123,7 +122,6 @@ mint_runtime_bearer_token() {
     -H "Content-Type: application/json"
     -H "X-Request-ID: ${request_id}"
     -H "Idempotency-Key: ${request_id}"
-    -H "x-drts-internal-key: ${E2E_INTERNAL_KEY}"
     -H "x-actor-type: ${E2E_ACTOR_TYPE}"
     -H "x-actor-id: ${E2E_ACTOR_ID:-e2e-actor-001}"
     -H "x-realm: ${realm}"
@@ -131,6 +129,9 @@ mint_runtime_bearer_token() {
 
   if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
     curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
+  if [[ -n "${E2E_INTERNAL_KEY:-}" ]]; then
+    curl_args+=(-H "x-drts-internal-key: ${E2E_INTERNAL_KEY}")
   fi
   if [[ -n "${E2E_TENANT_ID:-}" ]]; then
     curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
