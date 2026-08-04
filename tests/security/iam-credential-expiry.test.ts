@@ -15,11 +15,11 @@ function expectApiRequestCode(action: () => unknown, code: string) {
 }
 
 describe("IAM credential expiry negative matrix", () => {
-  it("fails closed for invalid tenant API key expiry windows", () => {
+  it("fails closed for invalid tenant API key expiry windows", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
     const now = Date.now();
 
-    const issued = service.issueApiKey("tenant-demo-001", {
+    const issued = await service.issueApiKey("tenant-demo-001", {
       keyName: "IAM-UAT bounded key",
       scopes: ["tenant:bookings:write", "tenant:reports:read"],
     });

@@ -47,8 +47,9 @@ function getStringDecoratorArg(decorator: ts.Decorator): string {
   }
   const argument = expression.arguments[0];
   if (
-    ts.isStringLiteral(argument) ||
-    ts.isNoSubstitutionTemplateLiteral(argument)
+    argument &&
+    (ts.isStringLiteral(argument) ||
+      ts.isNoSubstitutionTemplateLiteral(argument))
   ) {
     return argument.text;
   }
