@@ -86,6 +86,17 @@ function buildAuthController(identityRepository: IdentityRepository) {
   return { authController, jwtAuthService };
 }
 
+function workloadHeaders(
+  assertion: string,
+  overrides?: Record<string, string>,
+): Record<string, string> {
+  return {
+    "x-drts-workload-assertion": assertion,
+    "x-drts-workload-exchange-nonce": crypto.randomUUID(),
+    ...overrides,
+  };
+}
+
 describe("service workload identity token exchange", () => {
   const originalEnv = { ...process.env };
 
@@ -104,9 +115,7 @@ describe("service workload identity token exchange", () => {
       buildAuthController(identityRepository);
 
     const result = await authController.issueToken({
-      headers: {
-        authorization: `Bearer ${signWorkloadAssertion()}`,
-      },
+      headers: workloadHeaders(signWorkloadAssertion()),
       method: "POST",
       originalUrl: "/api/auth/token",
     });
@@ -135,7 +144,7 @@ describe("service workload identity token exchange", () => {
     await expect(
       authController.issueToken({
         headers: {
-          authorization: `Bearer ${signWorkloadAssertion()}`,
+          ...workloadHeaders(signWorkloadAssertion()),
           "x-actor-type": "system",
           "x-actor-id": "spoofed-service",
           "x-realm": "system",
@@ -155,11 +164,11 @@ describe("service workload identity token exchange", () => {
 
     await expect(
       authController.issueToken({
-        headers: {
-          authorization: `Bearer ${signWorkloadAssertion({
+        headers: workloadHeaders(
+          signWorkloadAssertion({
             aud: DEV_EXCHANGE_AUDIENCE,
-          })}`,
-        },
+          }),
+        ),
         method: "POST",
         originalUrl: "/api/auth/token",
       }),
@@ -174,11 +183,11 @@ describe("service workload identity token exchange", () => {
 
     await expect(
       authController.issueToken({
-        headers: {
-          authorization: `Bearer ${signWorkloadAssertion({
+        headers: workloadHeaders(
+          signWorkloadAssertion({
             iss: "https://workload.dev.drts.internal",
-          })}`,
-        },
+          }),
+        ),
         method: "POST",
         originalUrl: "/api/auth/token",
       }),
@@ -194,7 +203,8 @@ describe("service workload identity token exchange", () => {
 
     await authController.issueToken({
       headers: {
-        authorization: `Bearer ${assertion}`,
+        "x-drts-workload-assertion": assertion,
+        "x-drts-workload-exchange-nonce": "nonce-replay-001",
       },
       method: "POST",
       originalUrl: "/api/auth/token",
@@ -203,13 +213,59 @@ describe("service workload identity token exchange", () => {
     await expect(
       authController.issueToken({
         headers: {
-          authorization: `Bearer ${assertion}`,
+          "x-drts-workload-assertion": assertion,
+          "x-drts-workload-exchange-nonce": "nonce-replay-001",
         },
         method: "POST",
         originalUrl: "/api/auth/token",
       }),
     ).rejects.toMatchObject({
       code: "WORKLOAD_ASSERTION_REPLAYED",
+    });
+  });
+
+  it("allows a fresh nonce to exchange the same workload assertion again", async () => {
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+    const assertion = signWorkloadAssertion();
+
+    const first = await authController.issueToken({
+      headers: {
+        "x-drts-workload-assertion": assertion,
+        "x-drts-workload-exchange-nonce": "nonce-fresh-001",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
+    const second = await authController.issueToken({
+      headers: {
+        "x-drts-workload-assertion": assertion,
+        "x-drts-workload-exchange-nonce": "nonce-fresh-002",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
+    expect(first.expiresIn).toBe("15m");
+    expect(second.expiresIn).toBe("15m");
+    expect(second.token).not.toBe(first.token);
+  });
+
+  it("rejects workload exchange requests without an explicit nonce", async () => {
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+
+    await expect(
+      authController.issueToken({
+        headers: {
+          "x-drts-workload-assertion": signWorkloadAssertion(),
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKLOAD_EXCHANGE_NONCE_REQUIRED",
     });
   });
 
@@ -220,7 +276,7 @@ describe("service workload identity token exchange", () => {
     await expect(
       authController.issueToken({
         headers: {
-          authorization: `Bearer ${signWorkloadAssertion()}`,
+          ...workloadHeaders(signWorkloadAssertion()),
           "x-drts-token-audience": "https://billing.staging.drts.internal",
         },
         method: "POST",
@@ -238,7 +294,7 @@ describe("service workload identity token exchange", () => {
 
     const result = await authController.issueToken({
       headers: {
-        authorization: `Bearer ${signWorkloadAssertion()}`,
+        ...workloadHeaders(signWorkloadAssertion()),
         "x-drts-token-audience": STAGING_CONTROL_PLANE_AUDIENCE,
       },
       method: "POST",
@@ -250,5 +306,30 @@ describe("service workload identity token exchange", () => {
 
     const verified = await jwtAuthService.verifyAccessToken(result.token);
     expect(verified).toBeNull();
+  });
+
+  it("does not treat a generic Authorization bearer as workload proof", async () => {
+    process.env.APP_ENV = "development";
+    process.env.DRTS_INTERNAL_KEY = "internal-key-for-bootstrap";
+
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+
+    const result = await authController.issueToken({
+      headers: {
+        authorization: "Bearer cloud-run-invoker-token",
+        "x-drts-internal-key": "internal-key-for-bootstrap",
+        "x-actor-type": "system",
+        "x-actor-id": "bootstrap-service",
+        "x-realm": "system",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
+    const payload = jwt.decode(result.token) as jwt.JwtPayload | null;
+    expect(payload?.sub).toBe("bootstrap-service");
+    expect(payload?.actorType).toBe("system");
+    expect(payload?.amr).not.toContain("workload_identity");
   });
 });

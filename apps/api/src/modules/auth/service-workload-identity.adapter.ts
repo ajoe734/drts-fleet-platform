@@ -49,9 +49,10 @@ export interface ResolvedWorkloadServiceIdentity {
   tokenVersion: number;
 }
 
+export const WORKLOAD_IDENTITY_ASSERTION_HEADER = "x-drts-workload-assertion";
+export const WORKLOAD_IDENTITY_EXCHANGE_NONCE_HEADER =
+  "x-drts-workload-exchange-nonce";
 export const WORKLOAD_TOKEN_AUDIENCE_HEADER = "x-drts-token-audience";
-
-const AUTHORIZATION_HEADER = "authorization";
 const DEFAULT_WORKLOAD_IDENTITY_ALGORITHM = "RS256";
 const ALLOWED_WORKLOAD_IDENTITY_ALGORITHMS = new Set<jwt.Algorithm>([
   "HS256",
@@ -145,9 +146,16 @@ function hashAssertion(assertion: string): string {
 export function extractWorkloadIdentityAssertion(
   headers: HeaderRecord | undefined,
 ): string | null {
-  const value = normalizeHeaderValue(headers?.[AUTHORIZATION_HEADER]);
-  const match = value.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || null;
+  return normalizeHeaderValue(headers?.[WORKLOAD_IDENTITY_ASSERTION_HEADER]) || null;
+}
+
+export function extractWorkloadIdentityExchangeNonce(
+  headers: HeaderRecord | undefined,
+): string | null {
+  const value = normalizeHeaderValue(
+    headers?.[WORKLOAD_IDENTITY_EXCHANGE_NONCE_HEADER],
+  );
+  return value || null;
 }
 
 export function extractRequestedWorkloadTokenAudience(
@@ -163,7 +171,10 @@ export class ServiceWorkloadIdentityAdapter {
 
   async resolveSubject(
     headers: HeaderRecord,
-    options?: { requestedTokenAudience?: string | null },
+    options?: {
+      requestedTokenAudience?: string | null;
+      exchangeNonce?: string | null;
+    },
   ): Promise<ResolvedWorkloadServiceIdentity> {
     const assertion = extractWorkloadIdentityAssertion(headers);
     if (!assertion) {
@@ -198,10 +209,11 @@ export class ServiceWorkloadIdentityAdapter {
       principal,
       options?.requestedTokenAudience,
     );
+    const exchangeNonce = this.requireExchangeNonce(options?.exchangeNonce);
 
     const replayAccepted =
       await this.identityRepository.consumeWorkloadIdentityAssertion({
-        assertionHash: hashAssertion(assertion),
+        assertionHash: hashAssertion(`${assertion}\0${exchangeNonce}`),
         issuer,
         subject,
         exchangeAudience: this.resolveMatchedExchangeAudience(
@@ -438,6 +450,27 @@ export class ServiceWorkloadIdentityAdapter {
     }
 
     return requested;
+  }
+
+  private requireExchangeNonce(rawNonce: string | null | undefined): string {
+    const nonce = rawNonce?.trim() ?? "";
+    if (!nonce) {
+      throw new ApiRequestError(
+        400,
+        "WORKLOAD_EXCHANGE_NONCE_REQUIRED",
+        "Workload identity token exchange requires a caller-generated exchange nonce.",
+      );
+    }
+
+    if (nonce.length > 256 || /[\u0000-\u001f\u007f]/.test(nonce)) {
+      throw new ApiRequestError(
+        400,
+        "WORKLOAD_EXCHANGE_NONCE_INVALID",
+        "Workload identity exchange nonce is invalid.",
+      );
+    }
+
+    return nonce;
   }
 
   private resolveMatchedExchangeAudience(

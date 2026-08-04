@@ -43,6 +43,7 @@ import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import {
+  extractWorkloadIdentityExchangeNonce,
   extractRequestedWorkloadTokenAudience,
   extractWorkloadIdentityAssertion,
   ServiceWorkloadIdentityAdapter,
@@ -123,11 +124,15 @@ export class AuthController {
       const requestedTokenAudience = extractRequestedWorkloadTokenAudience(
         request.headers as Record<string, string | string[] | undefined>,
       );
+      const exchangeNonce = extractWorkloadIdentityExchangeNonce(
+        request.headers as Record<string, string | string[] | undefined>,
+      );
       const resolved =
         await this.serviceWorkloadIdentityAdapter?.resolveSubject(
           request.headers as Record<string, string | string[] | undefined>,
           {
             requestedTokenAudience,
+            exchangeNonce,
           },
         );
       if (!resolved) {
