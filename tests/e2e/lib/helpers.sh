@@ -81,6 +81,7 @@ switch_actor() {
   E2E_ACTOR_ID="$2"
   E2E_TENANT_ID="${3:-}"
   E2E_REALM=""   # re-derived by http_call
+  E2E_REQUEST_BEARER_TOKEN=""
   E2E_PARTNER_ID=""
   E2E_PARTNER_PROGRAM_ID=""
   E2E_PARTNER_ENTRY_SLUG=""
@@ -205,6 +206,36 @@ resolve_step_up_reference() {
   printf '%s' "$reference"
 }
 
+should_force_runtime_bearer() {
+  local method="$1"
+  local path="$2"
+
+  case "${E2E_ACTOR_TYPE:-}" in
+    platform_admin|ops_user)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$method" in
+    POST|PUT|PATCH|DELETE)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$path" in
+    /platform-admin/*|/ops/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # ── HTTP helper ───────────────────────────────────────────────────────────────
 # Usage: http_call METHOD PATH [BODY_FILE]
 # Sets global: RESP_BODY  RESP_STATUS
@@ -216,6 +247,10 @@ http_call() {
   request_id="e2e-$(date +%s%N | head -c 16)"
   local application_bearer="${E2E_REQUEST_BEARER_TOKEN:-}"
   local step_up_reference=""
+
+  if should_force_runtime_bearer "$method" "$path"; then
+    application_bearer=""
+  fi
 
   local realm="${E2E_REALM:-}"
   if [[ -z "$realm" ]]; then
