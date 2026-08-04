@@ -5,8 +5,8 @@
 - Task: `IAM-MFA-001-UNBLOCK-HISTORY-REPAIR`
 - Parent: `IAM-MFA-001`
 - Owner: `Codex`
-- Reviewer: `Gemini2`
-- Audit timestamp: `2026-08-03T07:11:14+00:00`
+- Reviewer: `Claude`
+- Audit timestamp: `2026-08-04T14:18:18Z`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-unblock-history-repair`
 - Assigned helper branch:
@@ -14,214 +14,178 @@
 
 ## Diagnosis
 
-`IAM-MFA-001` is blocked by branch / worktree evidence contamination, not by a
-missing implementation diff. The implementation tree already exists on the
-parent's canonical owner rail, but the helper repair rail was created from the
-wrong base SHA and there is still an older same-tree anchor rail that can be
-mistaken for the real delivery branch.
+The prior unblock artifact is stale and now points at the wrong rail.
+`codex2/iam-mfa-001 @ c317d836` is no longer the live owner rail. The active
+implementation history moved to `codex/iam-mfa-001`, then to
+`codex/iam-mfa-001-integration`, and both open PR attempts carried contaminated
+history that fails the trailer gate without any force-push-safe repair path on
+those shared branches.
 
-1. `AI_NAME=Codex scripts/ai-status.sh show IAM-MFA-001` reports the parent as
-   `blocked`, with `next` explicitly naming
-   `codex2/iam-mfa-001 @ c317d8365b5751b5583820d64578bc38b9d6e85c` as the owner
-   closeout commit now waiting on integration review.
-2. `codex2/iam-mfa-001 @ c317d8365b5751b5583820d64578bc38b9d6e85c` is the only
-   rail that carries the formal owner closeout commit
-   `feat(IAM-MFA-001): enforce trusted step-up proof for privileged actions`.
-3. `codex/iam-mfa-001` and `gemini2/iam-mfa-001` both point at
-   `6dd795b70fdbe6861b598e3a3fe401d1c43ac7e6`, an older WIP anchor commit
-   `wip(IAM-MFA-001): anchor step-up proof policy`.
-4. `git diff --quiet codex/iam-mfa-001 codex2/iam-mfa-001` exits `0`, so the
-   old owner rail and the canonical owner rail have identical tree contents.
-5. `git range-diff origin/dev..codex/iam-mfa-001
-   origin/dev..codex2/iam-mfa-001` shows the history delta is commit metadata
-   and closeout identity only:
-   - same patch content
-   - older branch uses WIP subject / older trailers
-   - canonical branch uses final feature subject and current owner/reviewer
-     trailers plus verification note
-6. `git reflog show --date=iso codex/iam-mfa-001` proves the stale rail was
-   created from `origin/dev` on `2026-08-02`, committed once, then rebased onto
-   `74aa50ad`, which is unrelated `origin/dev` history.
-7. `git reflog show --date=iso codex2/iam-mfa-001` proves the canonical rail
-   was created fresh from `origin/dev` on `2026-08-03 01:59:00 +0000` and then
-   received one clean owner closeout commit `c317d836`.
-8. `git reflog show --date=iso codex/iam-mfa-001-unblock-history-repair` shows
-   this helper branch was also created directly from `origin/dev` at
-   `74aa50ad`, before any repair evidence existed.
-9. `git worktree list --porcelain` shows the helper worktree for
-   `codex/iam-mfa-001-unblock-history-repair` and the unrelated helper worktree
-   for `codex/iam-uat-001-unblock-history-repair` both attached to the same
-   `74aa50ad` SHA. That confirms the helper rail was provisioned as a blank
-   duplicate worktree, not as a continuation of the parent rail.
-10. `gh pr list --state all --head codex/iam-mfa-001`,
-    `--head codex2/iam-mfa-001`, `--head gemini/iam-mfa-001`, and
-    `--head gemini2/iam-mfa-001` all return `[]`. There is no active PR yet,
-    so the clean integration route must start from the canonical branch named in
-    machine truth, not from any previously opened review rail.
+As of `2026-08-04` the only safe repair is to keep the contaminated rails as
+audit evidence, rebuild the task content onto a fresh branch from `origin/dev`,
+and continue integration from that new clean rail.
 
-## Evidence
+## Current Evidence
 
-### Canonical parent rail
+### Canonical contaminated owner rail
 
-- machine truth names:
-  `codex2/iam-mfa-001 @ c317d8365b5751b5583820d64578bc38b9d6e85c`
-- `git show --stat --summary c317d836` reports the formal closeout commit:
-  `feat(IAM-MFA-001): enforce trusted step-up proof for privileged actions`
-- `git rev-list --left-right --count origin/dev...codex2/iam-mfa-001` reports
-  `0 1`
-- `git ls-remote --heads origin 'refs/heads/codex2/iam-mfa-001'` confirms the
-  remote head exists at the same SHA
+- remote branch: `origin/codex/iam-mfa-001 @ b78dcb2e7e53f0def6bb4eac9ca2bb659d6bfae7`
+- open PR: `#1287` `codex/iam-mfa-001 -> dev`
+- `gh pr view 1287 --json commits,statusCheckRollup` shows:
+  - head pinned at `b78dcb2e`
+  - `Commit trailers` failed at run `30882208407`
+  - failing commits are:
+    - `b78dcb2e` subject `fix(IAM-MFA-001): gate runtime step-up helper`
+    - `9a492365` subject `closeout(IAM-MFA-001): finalize approved MFA step-up policy`
+    - merge commits `8a92da2f`, `2183f4d8`, `6be53f18` missing required trailers
+- this rail is `4` commits ahead and `29` behind `origin/dev`
 
-### Stale same-tree rail
+### Superseded intermediate clean-up attempt
 
-- local / remote branch:
-  `codex/iam-mfa-001 @ 6dd795b70fdbe6861b598e3a3fe401d1c43ac7e6`
-- `git show --stat --summary 6dd795b7` reports only the older WIP anchor commit
-- `git rev-list --left-right --count origin/dev...codex/iam-mfa-001` reports
-  `0 1`
-- `git ls-remote --heads origin 'refs/heads/codex/iam-mfa-001'` confirms the
-  remote head exists at the same SHA
-- `git ls-remote --heads origin 'refs/heads/gemini2/iam-mfa-001'` prints
-  nothing, so the reviewer-side same-SHA branch exists only locally
+- remote branch:
+  `origin/codex/iam-mfa-001-integration @ 91c19366019ffe9e28f0f256c32d9218ef813ef2`
+- open PR: `#1293` `codex/iam-mfa-001-integration -> dev`
+- `gh pr view 1293 --json commits,statusCheckRollup` shows:
+  - commit history removed the merge commits
+  - `Commit trailers` still failed at run `30882247205`
+  - the remaining failure is only commit `91c19366` subject
+    `fix(IAM-MFA-001): gate runtime step-up helper`
+- this rail is `6` commits ahead and `3` behind `origin/dev`
+- tree diff versus `b78dcb2e` is still non-empty:
+  `16 files changed, 855 insertions, 16 deletions`
+- conclusion: cleaner than `#1287`, but not yet a valid canonical integration
+  rail
 
-### Exact history delta
+### New clean integration rail
 
-- `git diff --quiet codex/iam-mfa-001 codex2/iam-mfa-001` exits `0`
-- `git range-diff origin/dev..codex/iam-mfa-001
-  origin/dev..codex2/iam-mfa-001` reports a one-commit replacement:
-  `6dd795b7 ! c317d836`
-- the file list and patch sizes from `git show --stat --summary` are identical
-  across both commits:
-  - 12 files changed
-  - 1322 insertions
-  - 24 deletions
-
-### Helper branch / worktree contamination
-
-- `git rev-parse HEAD`, `git merge-base HEAD origin/dev`, and
-  `git rev-parse origin/dev` all resolve to
-  `74aa50add1066f51c1ddaabc35251f46c8bfb648`
-- `git rev-list --left-right --count origin/dev...HEAD` reports `0 0`
-- `git show-ref --heads | rg 'iam-mfa-001-unblock-history-repair|iam-uat-001-unblock-history-repair'`
-  shows both helper branches point at the same `74aa50ad` SHA
-- `git worktree list --porcelain` shows:
-  - helper worktree
-    `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-unblock-history-repair`
-    attached to `codex/iam-mfa-001-unblock-history-repair`
-  - unrelated helper worktree
-    `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-uat-001-unblock-history-repair`
-    attached to `codex/iam-uat-001-unblock-history-repair`
-  - both helper heads currently equal `74aa50ad`
-
-### PR state
-
-- `gh pr list --state all --head codex/iam-mfa-001 --json ...` returns `[]`
-- `gh pr list --state all --head codex2/iam-mfa-001 --json ...` returns `[]`
-- `gh pr list --state all --head gemini/iam-mfa-001 --json ...` returns `[]`
-- `gh pr list --state all --head gemini2/iam-mfa-001 --json ...` returns `[]`
+- remote branch:
+  `origin/codex/iam-mfa-001-clean-route @ e3ecc0a0ee6db9258358c25cf096ad032b054aea`
+- open PR: `#1303` `codex/iam-mfa-001-clean-route -> dev`
+- commits on the clean rail:
+  - `c0c283d2` `IAM-MFA-001: integrate MFA step-up policy to dev`
+  - `42b08904` `IAM-MFA-001: refresh step-up bearer-path integration`
+  - `e3ecc0a0` `IAM-MFA-001: gate runtime step-up helper`
+- local validation on the clean rail:
+  - `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
+    => `3 commit(s) OK.`
+  - `git rev-list --left-right --count origin/dev...HEAD` => `0 3`
+  - `gh pr view 1303 --json statusCheckRollup` at `2026-08-04T14:18:18Z`
+    shows `Commit trailers = SUCCESS`
+- PR `#1303` is the first rail that:
+  - starts directly from `origin/dev`
+  - avoids merge commits from prior contaminated rails
+  - keeps only `<TASK-ID>: <summary>` commit subjects
+  - passes the GitHub trailer gate without rewriting shared history
 
 ## Exact Contamination
 
-The exact contamination is a three-part identity split:
+The contamination was no longer a simple stale same-tree branch problem.
+By `2026-08-04` it had become a three-rail integration split:
 
-1. The implementation patch exists on two owner-facing branches with different
-   head SHAs but identical tree contents.
-2. Machine truth already chose `codex2/iam-mfa-001 @ c317d836...` as the
-   canonical owner rail, while the older `codex/iam-mfa-001 @ 6dd795b7...`
-   branch still exists remotely and can be mistaken for the live branch by
-   name alone.
-3. The dedicated helper repair branch / worktree was provisioned at plain
-   `origin/dev @ 74aa50ad`, so the "repair" rail initially contained zero task
-   evidence and visually resembled another helper worktree for a different task.
+1. `#1287` used the historical owner branch and accumulated merge commits plus
+   two invalid subjects, making trailer repair impossible without force-pushing
+   or abandoning the PR.
+2. `#1293` rebuilt part of the history but still retained one invalid
+   `fix(IAM-MFA-001): ...` subject, so the trailer gate still failed.
+3. Parent machine truth still said `IAM-MFA-001` was `done` with
+   `integration_status=not_applicable` even though the real integration state
+   was an open PR with failed CI history.
 
-That combination blocks safe continuation because a future worker could choose
-the wrong branch, believe the helper worktree contains task state when it does
-not, or open the first PR from the stale WIP rail instead of from the canonical
-owner closeout rail.
+That combination meant a future worker could pick the wrong PR, assume the
+parent was already integrated, or keep retrying CI on history that can never
+pass the trailer gate as-is.
 
 ## Non-Destructive Repair Path
 
-Do not force-push any branch. Do not rewrite or delete the stale rails.
+Do not force-push any existing branch. Do not rewrite `codex/iam-mfa-001`,
+`codex/iam-mfa-001-integration`, or their PR history.
 
-1. Treat `codex2/iam-mfa-001 @ c317d836...` as the only canonical owner rail
-   for `IAM-MFA-001`.
-2. Treat `codex/iam-mfa-001 @ 6dd795b7...` and local-only
-   `gemini2/iam-mfa-001 @ 6dd795b7...` as audit evidence only.
-3. Treat `codex/iam-mfa-001-unblock-history-repair @ 74aa50ad...` as the
-   documentation rail for this helper task only. It is not a code continuation
-   branch for the parent.
-4. Open or continue integration only from the canonical owner branch:
+1. Treat `#1287` and `#1293` as audit evidence only.
+2. Treat `codex/iam-mfa-001-clean-route @ e3ecc0a0` and PR `#1303` as the only
+   canonical clean integration route.
+3. Continue review and CI only on `#1303`.
+4. Keep the older branches/PRs open only long enough for reviewers to cross-map
+   evidence, then close them without merging once `#1303` becomes the accepted
+   integration rail.
+5. Do not move the parent forward as integrated until machine truth references
+   the clean rail rather than the contaminated rails.
 
-```bash
-git fetch origin
-git switch codex2/iam-mfa-001
-gh pr create --base dev --head codex2/iam-mfa-001 \
-  --title "IAM-MFA-001: enforce trusted step-up proof for privileged actions"
-```
+## Parent Resume Contract
 
-5. Have `Gemini` review the canonical PR / SHA only. Ignore
-   `codex/iam-mfa-001` for review, merge, and closeout evidence.
-6. After CI and review pass, merge the canonical PR to `dev`. Only then may the
-   parent task move past the integration gate from branch-only evidence.
+`IAM-MFA-001` must not stay `done` with `integration_status=not_applicable`.
+The unblock result proves the parent still needs active integration follow-up.
 
-## Concrete Parent Next Step
+When this unblock task is finalized, the parent should be resumed via the
+automatic `helper_parent` handoff with:
 
-As of `2026-08-03`, `IAM-MFA-001` can proceed without any history rewrite, but
-only on the canonical rail already named in machine truth:
+- `PARENT_STATUS=in_progress`
+- `PARENT_NEXT` describing `#1303` as the canonical clean route and explicitly
+  calling out that `#1287` / `#1293` are superseded contaminated attempts
 
-1. Resume from `codex2/iam-mfa-001 @ c317d836...`.
-2. Open the missing PR from `codex2/iam-mfa-001` to `dev`.
-3. Run CI on that PR head and request `Gemini` review there.
-4. Ignore `codex/iam-mfa-001`, `gemini2/iam-mfa-001`, and the helper branch for
-   all future integration evidence.
+That is the machine-truth proof that the parent can proceed only after the
+canonical evidence is updated.
+
+## Validation Status
+
+### What is now validated
+
+- a force-push-free repair path exists
+- the repaired path is materialized as branch
+  `codex/iam-mfa-001-clean-route`
+- the repaired path is materialized as PR `#1303`
+- the repaired path passes the `Commit trailers` GitHub gate
+
+### What is still pending on the new clean rail
+
+At `2026-08-04T14:18:18Z`, PR `#1303` still has in-flight integration checks
+(`build`, `unit`, `integration`, `iam-negative-matrix`, `e2e`, etc.).
+This task repairs history contamination; it does not claim those broader suites
+have already passed.
 
 ## Why This Is Safe
 
-- No shared history is rewritten.
-- No force-push is required.
-- The parent already has a clean single-commit owner rail on `codex2`.
-- The stale WIP rail remains preserved as audit evidence.
-- The helper worktree contamination is neutralized by documentation rather than
-  by risky branch surgery.
+- no shared branch was rewritten
+- no force-push was used
+- contaminated rails remain preserved for audit
+- the clean route is reproducible from `origin/dev` plus three explicit commits
+- the new canonical route is already recognized by GitHub as trailer-compliant
 
 ## Verification Performed
 
 - Read `AI_COLLABORATION_GUIDE.md`
 - Read `.orchestrator/skills/worker-anchor-commit.md`
-- Read `docs/ops/branch-strategy.md` with focus on §11
+- Read `docs/ops/branch-strategy.md`
 - Checked machine truth:
   - `AI_NAME=Codex scripts/ai-status.sh show IAM-MFA-001-UNBLOCK-HISTORY-REPAIR`
-  - `AI_NAME=Codex scripts/ai-status.sh start IAM-MFA-001-UNBLOCK-HISTORY-REPAIR "Documenting canonical IAM-MFA-001 rail and helper worktree contamination"`
   - `AI_NAME=Codex scripts/ai-status.sh show IAM-MFA-001`
-- Inspected local branch / worktree state:
-  - `git branch --show-current`
-  - `git status --short`
-  - `git fetch origin --prune`
-  - `git branch -vv | rg 'iam-mfa-001|iam-idp-001|iam-idp-002|iam-ses-002'`
-  - `git show-ref --heads | rg 'iam-mfa-001($|-unblock-history-repair)|iam-uat-001-unblock-history-repair'`
-  - `git worktree list --porcelain`
-  - `git rev-parse HEAD`
-  - `git merge-base HEAD origin/dev`
-  - `git rev-parse origin/dev`
-  - `git rev-list --left-right --count origin/dev...codex/iam-mfa-001`
-  - `git rev-list --left-right --count origin/dev...codex2/iam-mfa-001`
-  - `git rev-list --left-right --count origin/dev...HEAD`
-  - `git log --oneline --decorate --graph --max-count=20 origin/dev..codex/iam-mfa-001`
-  - `git log --oneline --decorate --graph --max-count=20 origin/dev..codex2/iam-mfa-001`
-  - `git reflog show --date=iso codex/iam-mfa-001`
-  - `git reflog show --date=iso codex2/iam-mfa-001`
-  - `git reflog show --date=iso codex/iam-mfa-001-unblock-history-repair`
-  - `git diff --quiet codex/iam-mfa-001 codex2/iam-mfa-001`
-  - `git range-diff origin/dev..codex/iam-mfa-001 origin/dev..codex2/iam-mfa-001`
-  - `git show --stat --summary 6dd795b7`
-  - `git show --stat --summary c317d836`
-  - `git ls-remote --heads origin 'refs/heads/codex/iam-mfa-001' 'refs/heads/codex2/iam-mfa-001' 'refs/heads/gemini2/iam-mfa-001' 'refs/heads/codex/iam-mfa-001-unblock-history-repair'`
-- Inspected GitHub PR state:
-  - `gh pr list --state all --head codex/iam-mfa-001 --json number,title,state,url,headRefName,baseRefName,headRefOid,updatedAt`
-  - `gh pr list --state all --head codex2/iam-mfa-001 --json number,title,state,url,headRefName,baseRefName,headRefOid,updatedAt`
-  - `gh pr list --state all --head gemini/iam-mfa-001 --json number,title,state,url,headRefName,baseRefName,headRefOid,updatedAt`
-  - `gh pr list --state all --head gemini2/iam-mfa-001 --json number,title,state,url,headRefName,baseRefName,headRefOid,updatedAt`
+  - `AI_NAME=Codex scripts/ai-status.sh progress IAM-MFA-001-UNBLOCK-HISTORY-REPAIR "..."`
+- Inspected contaminated rails and PRs:
+  - `gh pr view 1287 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,reviewDecision,updatedAt`
+  - `gh pr view 1293 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,reviewDecision,updatedAt`
+  - `gh run view 30882208407 --log-failed`
+  - `gh run view 30882247205 --log-failed`
+  - `gh run view 30882247215 --job 91905876695 --log-failed`
+  - `gh run view 30882247215 --job 91905876663 --log-failed`
+- Rebuilt the clean rail in a temporary worktree from `origin/dev`:
+  - `git worktree add -b codex/iam-mfa-001-clean-route /tmp/iam-mfa-001-clean-route origin/dev`
+  - `git cherry-pick a398dcd03a09f61fff145eae581904a9628b3ccb`
+  - `git cherry-pick 7e3e7603516756cd20b461219be5f3a302c7f126`
+  - `git cherry-pick --no-commit 91c19366019ffe9e28f0f256c32d9218ef813ef2`
+  - recommitted as
+    `IAM-MFA-001: gate runtime step-up helper`
+- Validated and published the clean rail:
+  - `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
+  - `git push -u origin codex/iam-mfa-001-clean-route`
+  - `gh pr create --base dev --head codex/iam-mfa-001-clean-route ...`
+  - `gh pr view 1303 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,updatedAt`
 
-No application code or runtime tests were changed or rerun in this helper task.
-This repair is limited to branch / commit / worktree / PR evidence and
-machine-truth triage.
+## Verification Limits
+
+- `pnpm exec vitest ...` could not be rerun inside `/tmp/iam-mfa-001-clean-route`
+  because that temporary worktree did not have an immediately resolvable
+  `vitest` binary (`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "vitest" not found`)
+- this task therefore relies on:
+  - original commit verification trailers already recorded on the replayed
+    commits
+  - fresh local trailer validation
+  - live GitHub `Commit trailers` success on `#1303`
