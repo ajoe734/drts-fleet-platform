@@ -133,9 +133,23 @@ Scope boundary for the session wave:
 | `IAM-ACC-003` | P1 | Implement tenant joiner/mover/leaver and proof-based invitation lifecycle. Enforce invited-not-active, self-escalation denial, last-admin protection, offboarding revoke and reactivation review. |
 | `IAM-RBAC-001` | P0 | Create one generated policy catalog for API guards, control-plane proxy and UI capability hints. Add role/scope/resource constraints, migration aliases and parity/drift tests. |
 | `IAM-RBAC-002` | P1 | Implement privileged role request, independent approval, effective/expiry time and removal. Enforce separation of duties, no self-approval, fresh MFA and session invalidation. |
-| `IAM-MFA-001` | P1 | Enforce trusted `amr`/`acr`/`auth_time` step-up policy for every named high-risk action. Frontend booleans are ignored; stale or missing proof returns stable step-up errors. |
+| `IAM-MFA-001` | P1 | Enforce the server-owned step-up policy registry for every named high-risk action using trusted `amr`/`acr`/`auth_time` or server-owned device proof already present on the current identity/session. Frontend booleans are ignored; stale or missing proof returns stable `MFA_REQUIRED` / `STEP_UP_REQUIRED` errors without requiring a new first-party challenge API in this task. |
 | `IAM-GOV-001` | P1 | Implement privileged access review campaigns, owner certification, reduce/remove remediation, overdue alerts and immutable evidence with tenant/resource boundaries. |
 | `IAM-BG-001` | P1 | Implement break-glass request, two-person approval, least-scope activation, maximum 60-minute non-refreshable session, visible banner, immediate expiry/revoke and post-use review. |
+
+Scope boundary for the MFA wave:
+
+- `IAM-MFA-001` owns the named action policy map, freshness evaluation, and
+  stable denial behavior.
+- `IAM-IDP-001`, `IAM-IDP-002`, and `IAM-SES-002` own obtaining and projecting
+  trusted MFA/session proof onto the current identity.
+- `IAM-DRV-001` owns driver-specific device-proof refresh and rebind flows.
+- `IAM-UI-PLAT-001`, `IAM-UI-TEN-001`, and `IAM-UI-DRV-001` consume the stable
+  deny codes and preflight hints, but they do not define authority or replace
+  backend enforcement.
+- A dedicated DRTS-managed step-up challenge or ticket issuance API is out of
+  scope for `IAM-MFA-001`; if later required, it must be registered as a new
+  follow-up task rather than inferred here.
 
 ### 5.4 Driver, partner and service credentials
 

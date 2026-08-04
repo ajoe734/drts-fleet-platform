@@ -237,6 +237,25 @@ Task boundary note:
 
 MFA evidence 必須來自可信 IdP claims（如 `amr / acr / auth_time`）或 server-owned device proof，前端 boolean 不得作為依據。SMS 僅可作 transitional fallback，不作 privileged user 的唯一 MFA。
 
+Task boundary note:
+
+- `IAM-MFA-001` owns the server-side step-up policy registry and enforcement
+  for named high-risk actions. It evaluates trusted proof already present on
+  the current identity/session (`amr`, `acr`, `auth_time`,
+  `mfaVerifiedAt`, or server-owned device proof) and returns stable
+  `MFA_REQUIRED` / `STEP_UP_REQUIRED` denials when that proof is missing,
+  stale, or bound to the wrong session.
+- `IAM-MFA-001` does not need to invent a new first-party MFA challenge,
+  ticket, or enrollment product to unblock Stage 1.5. Human step-up proof is
+  reacquired through the approved IdP / BFF login flows already owned by
+  `IAM-IDP-001`, `IAM-IDP-002`, and `IAM-SES-002`; driver device-proof refresh
+  continues to flow through `IAM-DRV-001`.
+- The existing `stepUpReference` field in mutation metadata is an audit and
+  replay-correlation hook, not proof that a separate challenge-issuance API
+  must ship inside `IAM-MFA-001`. If a dedicated DRTS-managed step-up
+  challenge surface is later required, it must be registered as a follow-up
+  task instead of silently expanding this task's scope.
+
 ## 8. Authorization 模型
 
 ### 8.1 RBAC + resource-bound ABAC
