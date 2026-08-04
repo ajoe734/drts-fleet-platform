@@ -12,7 +12,7 @@
 - Assigned helper branch:
   `codex/iam-mfa-001-unblock-history-repair`
 - Latest pushed helper anchor:
-  `26b9c661e64251d4964a15a281580f4dab9b0f7d`
+  `f831b6360f463ef1614e22450acc5668ecb0a2cf`
 
 ## Diagnosis
 
@@ -32,7 +32,7 @@ and continue integration from that new clean rail.
 ### Helper branch repair evidence
 
 - remote branch:
-  `origin/codex/iam-mfa-001-unblock-history-repair @ 26b9c661e64251d4964a15a281580f4dab9b0f7d`
+  `origin/codex/iam-mfa-001-unblock-history-repair @ f831b6360f463ef1614e22450acc5668ecb0a2cf`
 - `git rev-list --left-right --count origin/codex/iam-mfa-001-unblock-history-repair...codex/iam-mfa-001-unblock-history-repair`
   => `0 0`
 - conclusion:
