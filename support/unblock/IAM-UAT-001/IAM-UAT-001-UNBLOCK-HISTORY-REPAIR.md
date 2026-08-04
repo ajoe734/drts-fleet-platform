@@ -6,7 +6,7 @@
 - Parent: `IAM-UAT-001`
 - Owner: `Codex`
 - Reviewer: `Gemini`
-- Audit timestamp: `2026-08-03T07:20:00+00:00`
+- Audit timestamp: `2026-08-04T00:21:15+00:00`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-uat-001-unblock-history-repair`
 - Assigned helper branch:
@@ -29,16 +29,16 @@ away from the actual GitHub review rail:
 3. `git range-diff origin/dev..origin/codex/iam-uat-001
    origin/dev..codex/iam-uat-001` shows the local owner rail is identical to
    the remote rail; there is no hidden local-only commit anymore.
-4. `gh pr list --head codex/iam-uat-001 --state all` and `gh pr list --search
-   'IAM-UAT-001 in:title' --state all` both return `[]`, so there is still no
-   GitHub PR for the canonical branch.
+4. Historical GitHub evidence showed the original PR-create path failed with
+   `422 must be a collaborator`, which is why the parent blocker text drifted
+   into a "branch pushed, PR missing" state.
 5. Parent machine truth currently says:
    `2026-08-03 branch closeout completed at dc4de718 on origin/codex/iam-uat-001, but integration closeout is blocked because GitHub PR creation to dev failed with 422 'must be a collaborator'; merge to origin/dev is still required before done.`
 6. The activity log confirms that blockage came from a failed PR-create path,
    not from missing branch content:
    - `2026-08-03T06:43:18Z` parent `IAM-UAT-001` entered `blocked`
    - the branch was already pushed
-   - no PR object exists afterward
+   - the original PR-create attempt did not leave a usable GitHub review object
 7. This helper task itself briefly suffered reassignment churn:
    - `2026-08-03T07:07:36Z` assigned to `Gemini` with reviewer `Codex`
    - sync failed because the intermediate state collided with the invalid
@@ -60,14 +60,20 @@ away from the actual GitHub review rail:
   reports `1 3`, so the branch is three commits ahead of `origin/dev` and one
   commit behind it.
 
-### No PR rail exists yet
+### PR rail restored on the canonical branch
 
-- `gh pr list --head codex/iam-uat-001 --state all --json ...` returns `[]`
-- `gh pr list --search 'IAM-UAT-001 in:title' --state all --json ...` returns
-  `[]`
-- Therefore the current contamination is not a duplicate PR or duplicate branch
-  issue. It is a pushed implementation branch with no surviving GitHub review
-  object.
+- `gh pr view 1286 --json number,state,title,headRefName,baseRefName,url,mergeStateStatus` confirms:
+  - PR `#1286` is `OPEN`
+  - title: `IAM-UAT-001: finalize durable session matrix closeout`
+  - head: `codex/iam-uat-001`
+  - base: `dev`
+  - URL: `https://github.com/ajoe734/drts-fleet-platform/pull/1286`
+  - merge state: `BLOCKED`
+- `gh pr view 1286 --json commits` shows the PR head remains
+  `dc4de71862f050bba08e9b85131d3290512798ba`
+- Therefore the repair path is now validated end-to-end: the canonical branch
+  rail survived unchanged, and the missing review object has been restored as
+  PR `#1286`.
 
 ### Closeout commit is a real code commit, not an empty marker
 
@@ -89,17 +95,16 @@ away from the actual GitHub review rail:
 
 ## Exact Contamination
 
-The contamination is a branch-closeout / integration-closeout split with stale
+The contamination was a branch-closeout / integration-closeout split with stale
 or incomplete GitHub review evidence:
 
 1. The implementation branch is valid and already pushed.
 2. The final closeout commit is part of that pushed branch and changes real
    content.
-3. GitHub still has no PR for `codex/iam-uat-001`, so the branch has no clean
-   review/merge rail into `dev`.
-4. Parent machine truth correctly says merge to `origin/dev` is still required,
-   but the branch/PR story was incomplete until this helper task documented that
-   the branch itself is canonical and only the PR layer is missing.
+3. The original PR-create path failed, leaving machine truth stuck on stale
+   "missing PR" evidence even though the branch itself was already canonical.
+4. PR `#1286` now restores the clean review/merge rail into `dev` without any
+   branch rewrite, so the remaining work is ordinary PR review / CI / merge.
 
 ## Non-Destructive Repair Path
 
@@ -107,33 +112,42 @@ Do not force-push `codex/iam-uat-001`. Do not replay the branch onto a second
 "clean" owner rail unless the current branch later becomes unmergeable.
 
 1. Treat `origin/codex/iam-uat-001 @ dc4de718...` as the canonical owner rail.
-2. Treat the lack of PR as the only missing integration object.
-3. Open a normal PR from `codex/iam-uat-001` to `dev` using an actor with repo
-   collaborator permission.
-4. Keep the existing branch history intact; the repair is to restore the review
-   rail, not to rewrite the commit rail.
-5. After the PR exists, rerun CI on that PR head if GitHub does not reuse the
-   already-recorded branch checks.
-6. Resume normal parent review/merge flow from the existing branch rather than
+2. Use PR `#1286` as the restored integration object for that exact branch.
+3. Keep the existing branch history intact; the repair is to preserve the
+   canonical commit rail and continue through the normal PR path.
+4. Re-run or confirm CI on PR `#1286` head `dc4de718...` if required.
+5. Resume normal parent review/merge flow from the existing branch rather than
    from a new replay branch.
-
-If the same actor continues to receive GitHub `422 must be a collaborator`
-errors, escalate only the PR-creation step to a collaborator or maintainer. The
-branch and commit evidence do not need any destructive repair.
+6. Merge to `dev` through the standard non-force route once PR review and CI are
+   satisfied.
 
 ## Concrete Parent Next Step
 
-As of `2026-08-03`, `IAM-UAT-001` can proceed on its existing pushed branch as
-soon as a collaborator restores the missing PR rail:
+As of `2026-08-04`, `IAM-UAT-001` can proceed on its existing pushed branch via
+the restored PR rail:
 
 1. Use `codex/iam-uat-001 @ dc4de718...` as the branch to review and merge.
-2. Open the missing PR to `dev` from that exact branch head.
+2. Continue review on PR `#1286` targeting `dev`.
 3. Re-run or confirm PR CI on `dc4de718...`.
-4. Continue reviewer approval on the same branch once the PR exists.
-5. Merge to `origin/dev` through the normal non-force path, then re-run parent
+4. Merge the same PR to `origin/dev` through the normal non-force path once
+   approvals and CI are satisfied, then re-run parent
    `done` with `INTEGRATION_STATUS=merged_to_dev` and merge evidence.
 
 No clean replay branch is currently required.
+
+## Reviewer Verification & Status Update
+
+- Review approval timestamp: `2026-08-04T00:21:15Z`
+- Reviewer outcome: `review_approved`
+- Verified GitHub state:
+  - PR `#1286` is `OPEN` on `codex/iam-uat-001` targeting `dev`
+  - PR head SHA remains `dc4de71862f050bba08e9b85131d3290512798ba`
+  - No force-push or history rewrite was required to restore the review rail
+- Closeout conclusion:
+  - The unblock task has validated the canonical branch rail, documented the
+    historical contamination, and confirmed the clean integration route now runs
+    through PR `#1286`.
+  - Parent task `IAM-UAT-001` can proceed using the existing branch and PR.
 
 ## Why This Is Safe
 
@@ -171,8 +185,8 @@ No clean replay branch is currently required.
   - `git show origin/codex/iam-uat-001:support/sidecars/IAM-UAT-001/IAM-UAT-001-NEGATIVE-MATRIX.md`
   - `git show dc4de718:support/sidecars/IAM-UAT-001/IAM-UAT-001-NEGATIVE-MATRIX.md`
 - Inspected GitHub review state:
-  - `gh pr list --head codex/iam-uat-001 --state all --json number,title,headRefName,baseRefName,state,url,closedAt,mergedAt`
-  - `gh pr list --search 'IAM-UAT-001 in:title' --state all --json number,title,headRefName,baseRefName,state,url,closedAt,mergedAt`
+  - `gh pr view 1286 --json number,title,state,url,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision,commits`
+  - Verified PR `#1286` is `OPEN` on `codex/iam-uat-001` @ `dc4de71862f050bba08e9b85131d3290512798ba`
 - Inspected canonical activity / dashboard excerpts:
   - `rg -n -C 2 'IAM-UAT-001|must be a collaborator|codex/iam-uat-001' /home/lupin/drts-fleet-platform/current-work.md /home/lupin/drts-fleet-platform/ai-activity-log.jsonl`
 
