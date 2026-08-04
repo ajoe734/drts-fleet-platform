@@ -138,6 +138,51 @@ jobs:
       - name: Run PostgreSQL UAT gates serially
         run: pnpm --filter @drts/api run test:integration:postgres-gates
 
+  iam-negative-matrix:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      API_PORT: "3001"
+      API_HOST: 0.0.0.0
+      E2E_API_URL: http://localhost:3001
+      AUTH_MODE: test
+      JWT_SECRET: ci-e2e-secret
+      JWT_ISSUER: drts-local
+      JWT_AUDIENCE: drts-api
+      CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
+      PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
+      PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - name: Run IAM negative matrix
+        run: pnpm run test:security:iam-negative-matrix
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -257,6 +302,7 @@ jobs:
         typecheck,
         unit,
         integration,
+        iam-negative-matrix,
         build,
         i18n-guard,
         orchestrator-tests,
@@ -267,7 +313,7 @@ jobs:
     steps:
       - name: Aggregate
         run: |
-          for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}' '${{ needs.e2e.result }}'; do
+          for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.iam-negative-matrix.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}' '${{ needs.e2e.result }}'; do
             [ "$r" = "success" ] || { echo "Required check failed: $r"; exit 1; }
           done
           echo "All integration checks passed."

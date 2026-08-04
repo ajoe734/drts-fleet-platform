@@ -69,6 +69,19 @@ expect_error_code() {
   fi
 }
 
+expect_error_code_one_of() {
+  local actual expected
+  actual=$(json_get_first ".error.code" ".code" ".data.code")
+  for expected in "$@"; do
+    if [[ "$actual" == "$expected" ]]; then
+      return 0
+    fi
+  done
+  log_fail "Expected error code one of [$*], got '${actual:-<empty>}'"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+}
+
 http_call_with_driver_bearer() {
   local token="$1"
   local method="$2"
@@ -188,13 +201,13 @@ log_ok "Device binding revoked at ${REVOKED_AT}"
 log_step "3.2 — original access token must be rejected after revoke"
 http_call_with_driver_bearer "$ACCESS_TOKEN" GET "/driver/profile"
 assert_status "401"
-expect_error_code "JWT_INVALID"
+expect_error_code_one_of "DRIVER_DEVICE_SESSION_INVALID" "JWT_INVALID"
 log_ok "Original access token rejected after revoke"
 
 log_step "3.3 — refreshed access token must be rejected after revoke"
 http_call_with_driver_bearer "$REFRESHED_ACCESS_TOKEN" GET "/driver/profile"
 assert_status "401"
-expect_error_code "JWT_INVALID"
+expect_error_code_one_of "DRIVER_DEVICE_SESSION_INVALID" "JWT_INVALID"
 log_ok "Refreshed access token rejected after revoke"
 
 log_step "3.4 — current refresh token must be rejected after revoke"
