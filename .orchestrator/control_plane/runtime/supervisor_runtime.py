@@ -2443,6 +2443,23 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
                 target_agent=event.get("target_display_name") or event.get("target_agent"),
             ) or changed
             continue
+        if not isinstance(event.get("message"), str) or not event["message"].strip():
+            # Never let a malformed persisted event crash the supervisor or be auto-delivered.
+            record["status"] = "manual_pending"
+            record["processed_at"] = utc_now()
+            record["error"] = "invalid_queue_event_missing_message"
+            write_activity_log(
+                config,
+                {
+                    "type": "wake_manual_pending",
+                    "task_id": event.get("task_id"),
+                    "target_agent": event.get("target_display_name") or event.get("target_agent"),
+                    "message": "Queue event is missing a non-empty delivery message; manual reconciliation required.",
+                    "queue_event_id": event_id,
+                },
+            )
+            changed = True
+            continue
         request = build_request(config, event)
         record["attempt_count"] = int(record.get("attempt_count", 0)) + 1
         record["last_attempt_at"] = utc_now()
