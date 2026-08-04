@@ -11,9 +11,12 @@ from unittest.mock import patch
 import permission_broker
 from provider_permissions import (
     ROOT,
+    _antigravity_app_data_dir,
+    _antigravity_auth_ready,
     _codex_auth_ready,
     _copilot_auth_ready,
     _copilot_plaintext_token,
+    _provider_uses_antigravity,
     _verified_claude_hooks,
     _verified_claude_policy,
     provider_capabilities,
@@ -339,3 +342,55 @@ class ProviderPermissionsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AntigravityCapabilityTest(unittest.TestCase):
+    """A lane migrated to the Antigravity CLI must be probed through `agy`.
+
+    Probing the retired Gemini CLI reports auth_ready=False, and the dispatch
+    gate rejects on that before it ever consults the adapter capability, which
+    silently removes the lane from the fleet.
+    """
+
+    def _config(self, *, adapter: str = "antigravity", config_home: str | None = None) -> dict:
+        antigravity: dict = {"cli": "agy"}
+        if config_home:
+            antigravity["config_home"] = config_home
+        return {
+            "agents": {"gemini": {"provider": "gemini", "adapter": adapter}},
+            "providers": {"gemini": {"delivery_mode": "gemini", "antigravity": antigravity}},
+        }
+
+    def test_detects_lane_backed_by_antigravity_adapter(self) -> None:
+        self.assertTrue(_provider_uses_antigravity(self._config(), "gemini"))
+
+    def test_ignores_lane_still_on_the_gemini_adapter(self) -> None:
+        self.assertFalse(_provider_uses_antigravity(self._config(adapter="gemini"), "gemini"))
+
+    def test_app_data_dir_follows_config_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(
+                _antigravity_app_data_dir({"config_home": tmpdir}),
+                Path(tmpdir) / ".gemini" / "antigravity-cli",
+            )
+
+    def test_auth_ready_requires_a_non_empty_oauth_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = {"cli": "agy", "config_home": tmpdir}
+            base = Path(tmpdir) / ".gemini" / "antigravity-cli"
+            base.mkdir(parents=True)
+
+            self.assertFalse(_antigravity_auth_ready(settings))
+
+            token = base / "antigravity-oauth-token"
+            token.write_text("", encoding="utf-8")
+            self.assertFalse(_antigravity_auth_ready(settings))
+
+            token.write_text("token-material", encoding="utf-8")
+            self.assertTrue(_antigravity_auth_ready(settings))
+
+    def test_assume_authed_short_circuits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertTrue(
+                _antigravity_auth_ready({"config_home": tmpdir, "assume_authed": "true"})
+            )
