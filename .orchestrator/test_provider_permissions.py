@@ -394,3 +394,95 @@ class AntigravityCapabilityTest(unittest.TestCase):
             self.assertTrue(
                 _antigravity_auth_ready({"config_home": tmpdir, "assume_authed": "true"})
             )
+
+
+class CompoundCommandClassificationTest(unittest.TestCase):
+    """Every part of a compound command has to clear the gate on its own.
+
+    SAFE_BASH_PATTERNS are anchored with ^ but not $, and used to be applied
+    with .search() against the whole command, so anything after the first safe
+    token was never inspected.
+    """
+
+    def test_deny_pattern_in_a_later_segment_denies_the_whole_command(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command("echo hi && git reset --hard HEAD~5"),
+            "deny",
+        )
+        self.assertEqual(
+            permission_broker.classify_command("git status && sudo rm -rf /etc"),
+            "deny",
+        )
+
+    def test_unsafe_tail_after_safe_prefix_is_not_allowed(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command(
+                "git status ; rm -rf /home/lupin/drts-fleet-platform"
+            ),
+            "defer",
+        )
+
+    def test_command_substitution_is_not_allowed(self) -> None:
+        for command in ("echo $(rm -rf /tmp/x)", "echo `rm -rf /tmp/x`"):
+            self.assertEqual(
+                permission_broker.classify_command(command), "defer", command
+            )
+
+    def test_write_redirection_is_not_allowed(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command("echo pwned > /home/lupin/.bashrc"),
+            "defer",
+        )
+
+    def test_descriptor_redirection_is_still_allowed(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command("git status 2>&1"), "allow"
+        )
+
+    def test_separator_inside_quotes_does_not_split(self) -> None:
+        # The `;` here is data, not a separator; this stays a single echo.
+        self.assertEqual(
+            permission_broker.classify_command('echo "a ; rm -rf /tmp/x"'), "allow"
+        )
+
+    def test_all_read_only_segments_are_allowed(self) -> None:
+        # Exactly the diagnostics Claude workers were being blocked on.
+        self.assertEqual(
+            permission_broker.classify_command(
+                "git branch -a --list '*iam*' 2>&1; echo '---'; git worktree list 2>&1 | head -20"
+            ),
+            "allow",
+        )
+
+    def test_single_safe_command_is_unchanged(self) -> None:
+        for command in ("git status", "ls -la", "git log --oneline | head -5"):
+            self.assertEqual(
+                permission_broker.classify_command(command), "allow", command
+            )
+
+
+class ReadOnlyGitQueryTest(unittest.TestCase):
+    def test_read_only_git_queries_are_allowed(self) -> None:
+        for command in (
+            "git worktree list",
+            "git rev-parse HEAD",
+            "git ls-tree -r --name-only HEAD",
+            "git for-each-ref --format='%(refname)'",
+            "git rev-list --count HEAD",
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(command), "allow", command
+            )
+
+
+class DestructiveRemovalTest(unittest.TestCase):
+    """`rm` is no longer routine: deleting files needs a human decision."""
+
+    def test_rm_requires_review(self) -> None:
+        for command in ("rm file.txt", "rm -rf /tmp/scratch", "rm -r build"):
+            self.assertEqual(
+                permission_broker.classify_command(command), "defer", command
+            )
+
+    def test_rm_of_filesystem_root_is_still_denied(self) -> None:
+        self.assertEqual(permission_broker.classify_command("rm -rf /"), "deny")
