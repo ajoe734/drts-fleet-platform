@@ -280,8 +280,7 @@ export const IAM_PRIVILEGED_ACTION_CATALOG: readonly IamPrivilegedActionRule[] =
     // ---- Platform governance (§7.2 platform_superadmin / platform_user_admin)
     {
       actionId: "platform.access_review.decide",
-      description:
-        "Certify, revoke or defer a privileged access review item.",
+      description: "Certify, revoke or defer a privileged access review item.",
       domain: "platform_governance",
       methods: ["POST"],
       routePattern: "platform-admin/access-reviews/:reviewId/decision",

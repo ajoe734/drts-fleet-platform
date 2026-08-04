@@ -256,7 +256,10 @@ export function evaluateStepUpPolicy(
     );
   }
 
-  if (rule.requiresPhishingResistant && !hasPhishingResistantMethod(trustedMethods)) {
+  if (
+    rule.requiresPhishingResistant &&
+    !hasPhishingResistantMethod(trustedMethods)
+  ) {
     return deny(
       rule,
       "mfa_required",
@@ -387,7 +390,10 @@ function evaluateBoundProof(args: {
     );
   }
 
-  if (rule.requiresPhishingResistant && !hasPhishingResistantMethod(proofMethods)) {
+  if (
+    rule.requiresPhishingResistant &&
+    !hasPhishingResistantMethod(proofMethods)
+  ) {
     return deny(
       rule,
       "step_up_required",
@@ -411,12 +417,7 @@ function evaluateBoundProof(args: {
 
   const proofAge = ageSeconds(proof.verifiedAt, now);
   if (proofAge === null) {
-    return deny(
-      rule,
-      "step_up_required",
-      "STEP_UP_PROOF_STALE",
-      proofMethods,
-    );
+    return deny(rule, "step_up_required", "STEP_UP_PROOF_STALE", proofMethods);
   }
 
   // A proof from the future is as unusable as one from the distant past.

@@ -83,7 +83,8 @@ export class StepUpProofService {
     if (
       rule.requiresPhishingResistant &&
       !acceptedMethods.some(
-        (method) => findIamTrustedAuthMethod(method)?.phishingResistant === true,
+        (method) =>
+          findIamTrustedAuthMethod(method)?.phishingResistant === true,
       )
     ) {
       throw new ApiRequestError(
@@ -97,7 +98,8 @@ export class StepUpProofService {
     const assurance = stepUpAssuranceForMethods(acceptedMethods);
     if (
       !assurance ||
-      rankIamAuthAssurance(assurance) < rankIamAuthAssurance(rule.minimumAssurance)
+      rankIamAuthAssurance(assurance) <
+        rankIamAuthAssurance(rule.minimumAssurance)
     ) {
       throw new ApiRequestError(
         403,
