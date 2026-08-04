@@ -97,7 +97,28 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run test:unit
+      # Built here rather than inside the test: a cold image build is minutes of
+      # work, and paying for it inside a vitest budget made the suite fail with
+      # "Test timed out" on branches that never touched it. Buildx cache keeps
+      # this near-free on repeat runs, and the failure now names the real cause.
+      # The default docker driver cannot export a cache; the container driver can.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image for the control-plane resolution test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: drts-api:test
+          push: false
+          load: true
+          cache-from: type=gha,scope=api-test-image
+          cache-to: type=gha,scope=api-test-image,mode=max
+      - name: Run unit tests
+        # Only this job builds drts-api:test, so only here is a missing image a
+        # failure. Smoke acceptance runs the same suite without one.
+        env:
+          DRTS_REQUIRE_API_TEST_IMAGE: "1"
+        run: pnpm run test:unit
 
   integration:
     runs-on: ubuntu-latest
