@@ -5511,6 +5511,60 @@ class ChairmanFlowTests(unittest.TestCase):
             )
         )
 
+    def test_provider_report_age_uses_generated_at(self) -> None:
+        now = datetime(2026, 8, 4, 12, 0, 0, tzinfo=timezone.utc)
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"),
+            {"generated_at": "2026-08-04T11:45:00Z"},
+            now=now,
+        )
+        self.assertEqual(age, 900.0)
+
+    def test_provider_report_age_is_infinite_when_undateable(self) -> None:
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"), {}
+        )
+        self.assertEqual(age, float("inf"))
+
+    def test_stale_provider_report_is_reprobed(self) -> None:
+        """A cached report that is never refreshed can strand a healthy lane."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            path.write_text(
+                json.dumps({"generated_at": "2026-08-01T00:00:00Z", "providers": {}}),
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            fresh = {"generated_at": "2026-08-04T00:00:00Z", "providers": {"claude": {}}}
+            with (
+                mock.patch.object(supervisor, "build_provider_capabilities", return_value=fresh) as build,
+                mock.patch.object(supervisor, "write_provider_capabilities") as write,
+            ):
+                report = supervisor.load_provider_report(config)
+            build.assert_called_once()
+            write.assert_called_once()
+            self.assertEqual(report, fresh)
+
+    def test_fresh_provider_report_is_not_reprobed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            generated_at = (
+                datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+            cached = {"generated_at": generated_at, "providers": {"claude": {}}}
+            path.write_text(json.dumps(cached), encoding="utf-8")
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            with mock.patch.object(supervisor, "build_provider_capabilities") as build:
+                report = supervisor.load_provider_report(config)
+            build.assert_not_called()
+            self.assertEqual(report, cached)
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
@@ -5535,6 +5589,98 @@ class ChairmanFlowTests(unittest.TestCase):
             mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
         ):
             queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_dispatch_pause_review_respects_cooldown_after_recent_review(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"chair_review": {"enabled": True}}
+
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_dispatch_pause_recorded_after_last_review_bypasses_cooldown(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T13:10:00Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+
+        self.assertTrue(
+            supervisor.chair_review_needs_immediate_attention(state, {"tasks": []})
+        )
+
+    def test_dependency_ready_blocked_task_does_not_bypass_cooldown(self) -> None:
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-005",
+                    "status": "blocked",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "depends_on": ["DEP-001"],
+                    "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                },
+            ]
+        }
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"paths": {}, "chair_review": {"enabled": True}}
+
+        # The blocked task is still triage-worthy, so the reason stays set...
+        self.assertEqual(
+            supervisor.chair_review_reason(state, {"pending": []}, status=status, config=config),
+            "blocked_task_triage",
+        )
+
+        # ...but it must not re-queue a review on every tick while the cooldown
+        # is active, because the chair cannot clear the condition itself.
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, status, provider_report={})
 
         self.assertFalse(queued)
         choose_chair_reviewer.assert_not_called()

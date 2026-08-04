@@ -68,15 +68,21 @@ describe("control-plane-auth production resolution regression", () => {
       imageExists = false;
     }
 
+    let buildFailure: string | null = null;
     if (!imageExists) {
       try {
         execSync("docker build -t drts-api:test -f apps/api/Dockerfile .", {
           cwd: rootDir,
-          stdio: "ignore",
+          stdio: "pipe",
+          encoding: "utf-8",
         });
         imageExists = true;
-      } catch {
+      } catch (err: any) {
         imageExists = false;
+        // Keep the build output: without it a failure here surfaces only as
+        // `expected false to be true`, with no way to tell a broken image
+        // from a runner that could not build one.
+        buildFailure = String(err?.stderr || err?.message || err).slice(-4000);
       }
     }
 
@@ -90,6 +96,7 @@ describe("control-plane-auth production resolution regression", () => {
     }
 
     if (dockerAvailable) {
+      expect(buildFailure, `docker build failed:\n${buildFailure}`).toBeNull();
       expect(imageExists).toBe(true);
     } else if (!imageExists) {
       console.warn("Skipping Docker smoke test: Docker daemon not available.");
@@ -122,5 +129,9 @@ describe("control-plane-auth production resolution regression", () => {
     ).trim();
 
     expect(loadAdapterOutput).toContain("ADAPTER_LOADED_OK");
-  }, 120000);
+    // A cold `docker build` of the API image is part of this test's own work
+    // and takes several minutes on a clean runner — the CI image build job
+    // alone runs ~5.5 min. The previous 120s budget could only pass on a warm
+    // Docker cache, so the test failed intermittently on unrelated branches.
+  }, 900000);
 });
