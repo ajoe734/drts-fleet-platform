@@ -552,27 +552,6 @@ def integration_metadata_from_env(commit_required: bool, timestamp: str) -> dict
     return metadata
 
 
-def apply_optional_integration_metadata(task: dict[str, Any], *, timestamp: str) -> None:
-    if "INTEGRATION_STATUS" not in os.environ:
-        return
-
-    metadata = integration_metadata_from_env(commit_required=False, timestamp=timestamp)
-    for key in (
-        "integration_status",
-        "integration_recorded_at",
-        "pr_url",
-        "ci_status",
-        "ci_run_url",
-        "merged_ref",
-        "merge_commit",
-        "dev_deploy_run_url",
-        "dev_deploy_sha",
-        "dev_deploy_source_ref",
-    ):
-        task.pop(key, None)
-    task.update(metadata)
-
-
 def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, Any]:
     commit_required = task_requires_commit(task)
     no_commit_required = os.environ.get("NO_COMMIT_REQUIRED", "").strip().lower() in {"1", "true", "yes"}
@@ -2067,7 +2046,6 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
-    apply_optional_integration_metadata(task, timestamp=timestamp)
     mark_handoffs_done_for_actor(state, task_id, actor)
     mark_blockers_resolved(state, task_id)
     append_log({"ts": timestamp, "agent": actor, "type": "start", "task_id": task_id, "message": message})
@@ -2088,7 +2066,6 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
-    apply_optional_integration_metadata(task, timestamp=timestamp)
     mark_handoffs_done_for_actor(state, task_id, actor)
     append_log({"ts": timestamp, "agent": actor, "type": "progress", "task_id": task_id, "message": message})
 
@@ -2104,7 +2081,6 @@ def command_note(state: dict[str, Any], args: list[str]) -> None:
     timestamp = iso_now()
     task["last_update"] = timestamp
     task["next"] = message
-    apply_optional_integration_metadata(task, timestamp=timestamp)
     append_log({"ts": timestamp, "agent": actor, "type": "note", "task_id": task_id, "message": message})
 
 
@@ -2125,7 +2101,6 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
-    apply_optional_integration_metadata(task, timestamp=timestamp)
     task.pop("waiting_for", None)
     mark_blockers_resolved(state, task_id)
     mark_handoffs_done(state, task_id)

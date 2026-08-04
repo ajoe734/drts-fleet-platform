@@ -80,7 +80,8 @@ and continue integration from that new clean rail.
 - local validation on the clean rail:
   - `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
     => `3 commit(s) OK.`
-  - `git rev-list --left-right --count origin/dev...HEAD` => `0 3`
+  - `git rev-list --left-right --count origin/dev...e3ecc0a0ee6db9258358c25cf096ad032b054aea`
+    => `1 3`
   - `gh pr view 1303 --json statusCheckRollup` at `2026-08-04T14:18:18Z`
     shows `Commit trailers = SUCCESS`
 - current GitHub integration state for the same PR:
@@ -184,27 +185,43 @@ This means Acceptance 2 remains open: the clean route is documented and proven
 history-safe, but it is blocked on real runtime/auth integration failures
 rather than branch contamination.
 
-Those failures are now narrowed to the clean-route helper delta rather than an
-ambient `dev` outage:
+Those failures are not yet narrowed to a single clean-route-only delta.
+What is established from the current evidence is narrower than the earlier
+artifact claimed:
 
 - `origin/dev` had a successful completed `CI (integration trunk)` run
   (`30906537102`) earlier on `2026-08-04`
-- the last clean-route-only commit on PR `#1303` is
-  `e3ecc0a0 IAM-MFA-001: gate runtime step-up helper`
-- that commit only changes `tests/e2e/lib/helpers.sh`
-- the helper now auto-mints `x-drts-authorization` runtime bearer tokens for
-  every mutating request, and when such a bearer exists it suppresses the
-  legacy bootstrap `x-actor-*` headers
-- the resulting failures are concentrated on authenticated mutating routes that
-  previously relied on bootstrap actor headers, producing `401 JWT_INVALID` on
-  paths such as `/api/platform-admin/tenants`,
+- `e3ecc0a0 IAM-MFA-001: gate runtime step-up helper` does not introduce
+  runtime bearer suppression; it only adds the
+  `E2E_ENABLE_RUNTIME_STEP_UP` opt-in guard around
+  `should_force_runtime_bearer`
+- the `should_force_runtime_bearer` helper and the
+  `application_bearer=""` suppression were introduced earlier in
+  `42b08904 IAM-MFA-001: refresh step-up bearer-path integration`
+- `git grep -n "E2E_ENABLE_RUNTIME_STEP_UP" e3ecc0a0 -- tests/e2e/lib/helpers.sh`
+  shows the new env gate is defined and read only inside that helper, and
+  nothing on the clean route evidence shows CI setting it
+- the observed `JWT_INVALID` failures include
   `/api/regulatory-registry/driver-location`,
   `/api/forwarder/orders/inbound`,
-  `/api/admin/service-products`, and
-  `/api/driver/location-heartbeats/batch`
+  `/api/callcenter/sessions`, and
+  `/api/auth/driver/device/register`; those surfaces are outside the
+  `/platform-admin/*|/ops/*` path match hard-coded in
+  `should_force_runtime_bearer`, so the `e3ecc0a0` gate cannot by itself
+  explain the full failure set
+- the stronger currently documented candidate is
+  `c0c283d2 IAM-MFA-001: integrate MFA step-up policy to dev`, because it
+  changes `apps/api/src/common/auth/bootstrap-auth.guard.ts`,
+  `apps/api/src/common/auth/auth.constants.ts`,
+  `apps/api/src/modules/identity/identity.controller.ts`, and
+  `tests/e2e/lib/helpers.sh`, affecting bootstrap-token and step-up flows
+  across multiple surfaces
 
-So the remaining block is no longer "clean route unknown"; it is a concrete
-runtime-bearer regression introduced on top of the repaired history-safe rail.
+So the remaining block is no longer "clean route unknown", but the root cause
+is still open. The artifact now records only defensible scope: CI fails on the
+history-safe rail, `e3ecc0a0` is not sufficient to explain the failures, and
+future debugging should start with the broader bootstrap-token / step-up auth
+path rather than the clean-route helper gate alone.
 
 Acceptance 3 is now satisfied in machine truth: the parent may proceed only
 against PR `#1303`, and canonical status no longer implies that integration is
