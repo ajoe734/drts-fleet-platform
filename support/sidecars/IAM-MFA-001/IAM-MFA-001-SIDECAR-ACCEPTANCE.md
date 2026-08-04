@@ -3,9 +3,9 @@
 **Sidecar Kind:** `acceptance_packet`  
 **Parent Task:** `IAM-MFA-001` — Enforce MFA and fresh step-up for privileged actions  
 **Sidecar Owner:** `Codex`  
-**Assigned Reviewer:** `Codex2`  
-**Parent Owner / Reviewer:** `Codex2` / `Gemini`  
-**Generated:** `2026-08-03` (UTC)  
+**Assigned Reviewer:** `Gemini`  
+**Parent Owner / Reviewer:** `Codex` / `Gemini`  
+**Generated:** `2026-08-04` (UTC)  
 **Mutates Canonical Truth:** `false`
 
 This packet is a support artifact only. It does not change L1 product truth, canonical contracts, or the parent implementation branch. It exists to help the reviewer and parent owner close the MFA step-up slice with a focused acceptance pass.
@@ -26,15 +26,15 @@ This packet is a support artifact only. It does not change L1 product truth, can
 以 `scripts/ai-status.sh show <task>`、執行 runbook 與 repo 現況為準：
 
 - Parent `IAM-MFA-001`
-  - Owner=`Codex2`
+  - Owner=`Codex`
   - Reviewer=`Gemini`
   - Status=`blocked`
   - Depends on: `IAM-IDP-001`, `IAM-IDP-002`, `IAM-SES-002`
-  - Current machine-truth note (`2026-08-03T02:45:25Z`): owner closeout commit `c317d836` 已存在並已 push，但 `done` 被 integration gate 擋下，因為 `.orchestrator/config.json` 不接受 `INTEGRATION_STATUS=branch_pushed`；需要更高等級的 integration evidence。
+  - Current machine-truth note (`2026-08-03T11:31:11Z`): PR `#1287` 已開啟，typecheck 仍失敗且 e2e 仍在處理中；等待 reviewer `Gemini` 與後續 integration closeout。
 - 本 sidecar `IAM-MFA-001-SIDECAR-ACCEPTANCE`
   - Owner=`Codex`
-  - Reviewer=`Codex2`
-  - Status=`in_progress` after `2026-08-03T07:23:32Z` start update
+  - Reviewer=`Gemini`
+  - Status=`review_approved`
   - Artifact target: `support/sidecars/IAM-MFA-001/IAM-MFA-001-SIDECAR-ACCEPTANCE.md`
 
 ### Dependency Snapshot
@@ -136,7 +136,7 @@ The checklist below expands those bullets into reviewer-facing checks without ch
 | Blocker | Layer | Meaning |
 | --- | --- | --- |
 | Parent `IAM-MFA-001` is `blocked` | integration closeout | This is **not** a functional dependency gap. Machine truth says implementation and closeout commit exist, but formal `done` is blocked by insufficient integration-status evidence. |
-| Reviewer wait on parent (`Gemini`) | task lifecycle | Parent owner/reviewer still need to resolve the integration gate and final closeout path. |
+| Reviewer wait on parent (`Gemini`) | task lifecycle | Parent owner/reviewer still need to resolve the remaining implementation verification and final integration closeout path. |
 
 ---
 
@@ -154,7 +154,7 @@ The checklist below expands those bullets into reviewer-facing checks without ch
 
 ---
 
-## 6) Reviewer Hotspots (`Codex2`)
+## 6) Reviewer Hotspots (`Gemini`)
 
 Reviewer should prioritize these checks:
 
@@ -195,33 +195,45 @@ Reviewer should prioritize these checks:
 
 ## 8) Handoff Commands
 
-Owner (`Codex`) -> Reviewer (`Codex2`):
+Owner (`Codex`) -> Reviewer (`Gemini`):
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff IAM-MFA-001-SIDECAR-ACCEPTANCE Codex2 "IAM-MFA-001 acceptance packet prepared at support/sidecars/IAM-MFA-001/IAM-MFA-001-SIDECAR-ACCEPTANCE.md. It freezes machine truth on completed upstream dependencies (IAM-IDP-001, IAM-IDP-002, IAM-SES-002), distinguishes the parent's current integration-closeout blocker from functional dependency gaps, and provides a reviewer checklist for server-owned step-up policy, trusted amr/acr/auth_time enforcement, stable IAM step-up errors, stale/wrong-session/wrong-action proof negatives, and audit-event coverage."
+AI_NAME=Codex scripts/ai-status.sh handoff IAM-MFA-001-SIDECAR-ACCEPTANCE Gemini "IAM-MFA-001 acceptance packet prepared at support/sidecars/IAM-MFA-001/IAM-MFA-001-SIDECAR-ACCEPTANCE.md. It freezes machine truth on completed upstream dependencies (IAM-IDP-001, IAM-IDP-002, IAM-SES-002), distinguishes the parent's current integration-closeout and verification blockers from functional dependency gaps, and provides a reviewer checklist for server-owned step-up policy, trusted amr/acr/auth_time enforcement, stable IAM step-up errors, stale/wrong-session/wrong-action proof negatives, and audit-event coverage."
 ```
 
-Reviewer (`Codex2`) approve:
+Reviewer (`Gemini`) approve:
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh approve IAM-MFA-001-SIDECAR-ACCEPTANCE "IAM-MFA-001 acceptance packet ready: the packet keeps machine truth aligned on completed upstream identity/session dependencies, correctly distinguishes the parent's current integration-closeout blocker from functional acceptance, and freezes a reviewer checklist around server-owned step-up policy, trusted amr/acr/auth_time enforcement, stable IAM step-up error codes, wrong-session/wrong-action/stale-proof negatives, and audit-event coverage without mutating canonical truth."
+AI_NAME=Gemini scripts/ai-status.sh approve IAM-MFA-001-SIDECAR-ACCEPTANCE "IAM-MFA-001 acceptance packet ready: the packet keeps machine truth aligned on completed upstream identity/session dependencies, correctly distinguishes the parent's current verification/integration blockers from functional acceptance, and freezes a reviewer checklist around server-owned step-up policy, trusted amr/acr/auth_time enforcement, stable IAM step-up error codes, wrong-session/wrong-action/stale-proof negatives, and audit-event coverage without mutating canonical truth."
 ```
 
-Reviewer (`Codex2`) reopen:
+Reviewer (`Gemini`) reopen:
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh reopen IAM-MFA-001-SIDECAR-ACCEPTANCE "packet needs revision: [specify machine-truth mismatch / dependency status error / acceptance framing gap / incorrect parent blocker characterization / scope drift beyond support-only sidecar]"
+AI_NAME=Gemini scripts/ai-status.sh reopen IAM-MFA-001-SIDECAR-ACCEPTANCE "packet needs revision: [specify machine-truth mismatch / dependency status error / acceptance framing gap / incorrect parent blocker characterization / scope drift beyond support-only sidecar]"
 ```
 
 ---
 
 ## 9) Owner Closeout
 
-If this sidecar reaches `review_approved`, the owner can finalize it without claiming parent integration closeout:
+If this sidecar reaches `review_approved`, the owner can finalize it as a support-only branch closeout after committing and pushing the artifact update:
 
 ```bash
-export NO_COMMIT_REQUIRED=1
-AI_NAME=Codex scripts/ai-status.sh done IAM-MFA-001-SIDECAR-ACCEPTANCE "Owner finalized approved support-only acceptance packet for IAM-MFA-001 at support/sidecars/IAM-MFA-001/IAM-MFA-001-SIDECAR-ACCEPTANCE.md. The packet preserves machine truth on completed upstream dependencies, parent integration-closeout blocker context, reviewer hotspots for server-owned step-up enforcement and stable error handling, and handoff guidance without changing canonical truth."
+git add support/sidecars/IAM-MFA-001/IAM-MFA-001-SIDECAR-ACCEPTANCE.md
+git commit -m "IAM-MFA-001-SIDECAR-ACCEPTANCE: finalize approved acceptance packet" \
+  -m "LLM-Agent: Codex" \
+  -m "Task-ID: IAM-MFA-001-SIDECAR-ACCEPTANCE" \
+  -m "Reviewer: Gemini" \
+  -m "Verification: sed -n '1,260p' support/sidecars/IAM-MFA-001/IAM-MFA-001-SIDECAR-ACCEPTANCE.md; AI_NAME=Codex scripts/ai-status.sh show IAM-MFA-001-SIDECAR-ACCEPTANCE"
+git push -u origin HEAD:codex/iam-mfa-001-sidecar-acceptance
+AI_NAME=Codex \
+COMMIT_HASH=<commit-sha> \
+COMMIT_SUBJECT="IAM-MFA-001-SIDECAR-ACCEPTANCE: finalize approved acceptance packet" \
+PUSH_REMOTE=origin \
+PUSH_BRANCH=codex/iam-mfa-001-sidecar-acceptance \
+INTEGRATION_STATUS=not_applicable \
+scripts/ai-status.sh done IAM-MFA-001-SIDECAR-ACCEPTANCE "Owner finalized approved support-only acceptance packet for IAM-MFA-001 at support/sidecars/IAM-MFA-001/IAM-MFA-001-SIDECAR-ACCEPTANCE.md. The packet preserves machine truth on completed upstream dependencies, parent verification/integration blocker context, reviewer hotspots for server-owned step-up enforcement and stable error handling, and handoff guidance without changing canonical truth."
 ```
 
 ---
@@ -233,4 +245,3 @@ AI_NAME=Codex scripts/ai-status.sh done IAM-MFA-001-SIDECAR-ACCEPTANCE "Owner fi
 - [x] Packet cites machine-truth task state rather than reading `ai-status.json` wholesale.
 - [x] Packet distinguishes dependency completion from parent integration closeout.
 - [x] Packet includes executable handoff / approve / reopen / done commands.
-
