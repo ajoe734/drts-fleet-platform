@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 import permission_broker
@@ -486,3 +487,80 @@ class DestructiveRemovalTest(unittest.TestCase):
 
     def test_rm_of_filesystem_root_is_still_denied(self) -> None:
         self.assertEqual(permission_broker.classify_command("rm -rf /"), "deny")
+
+
+class WorkspaceRootBoundaryTest(unittest.TestCase):
+    """The trust boundary is the workspace, not wherever this code is running.
+
+    The supervisor executes from a reviewed runtime bundle that is not the
+    canonical checkout. Deriving the boundary from the module's own location
+    pointed every path check at the bundle, so the commands workers are told to
+    run — which start `cd <canonical root>` — were all held for approval, while
+    the canonical-root pnpm guard was watching the bundle instead.
+    """
+
+    def setUp(self) -> None:
+        permission_broker._WORKSPACE_ROOTS_CACHE = None
+
+    def tearDown(self) -> None:
+        permission_broker._WORKSPACE_ROOTS_CACHE = None
+
+    def test_canonical_root_comes_from_the_worker_environment(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ORCH_CANONICAL_ROOT": "/home/example/repo",
+                "ORCH_WORKSPACE_ROOT": "/home/example/repo/.artifacts/worktrees/task",
+            },
+            clear=False,
+        ):
+            roots = [str(root) for root in permission_broker.workspace_roots()]
+
+        self.assertEqual(roots[0], "/home/example/repo")
+        self.assertIn("/home/example/repo/.artifacts/worktrees/task", roots)
+
+    def test_commands_in_the_canonical_root_are_not_held_for_approval(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"ORCH_CANONICAL_ROOT": "/home/example/repo"}, clear=False
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(
+                    "cd /home/example/repo && git status"
+                ),
+                "allow",
+            )
+
+    def test_a_dispatched_worktree_outside_the_canonical_root_is_honoured(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ORCH_CANONICAL_ROOT": "/home/example/repo",
+                "ORCH_WORKSPACE_ROOT": "/srv/isolated/task-worktree",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(
+                    "cd /srv/isolated/task-worktree && ls"
+                ),
+                "allow",
+            )
+
+    def test_paths_outside_every_known_root_still_need_review(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"ORCH_CANONICAL_ROOT": "/home/example/repo"}, clear=False
+        ):
+            self.assertEqual(
+                permission_broker.classify_command("cd /etc && ls"), "defer"
+            )
+
+    def test_canonical_root_pnpm_install_guard_follows_the_canonical_root(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"ORCH_CANONICAL_ROOT": "/home/example/repo"}, clear=False
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(
+                    "cd /home/example/repo && pnpm install"
+                ),
+                "defer",
+            )
