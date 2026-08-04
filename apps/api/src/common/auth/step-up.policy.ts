@@ -51,6 +51,33 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
     matches: regexMatch("POST", /^platform-admin\/users\/[^/]+\/role$/),
   },
   {
+    actionId: "platform:access-reviews:decide",
+    description: "Privileged access review decision",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/access-reviews\/[^/]+\/decision$/,
+    ),
+  },
+  {
+    actionId: "platform:break-glass:request",
+    description: "Break-glass request creation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: exactMatch("POST", "platform-admin/break-glass/requests"),
+  },
+  {
+    actionId: "platform:break-glass:approve",
+    description: "Break-glass approval",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/break-glass\/requests\/[^/]+\/approve$/,
+    ),
+  },
+  {
     actionId: "platform:partner-entries:create",
     description: "Platform partner entry creation",
     freshnessWindowMs: 10 * MINUTE_MS,
