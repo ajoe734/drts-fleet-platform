@@ -79,10 +79,10 @@ The sidecar execution verified the following test suites in isolated worker envi
 
 | Verification Target | Command Executed | Result | Output Details |
 | ------------------- | ---------------- | ------ | -------------- |
-| **Tenant Partner Unit Suite** | `pnpm test:unit tests/unit/tenant-partner-foundation.test.ts` | `PASS` | `25 passed (25)` in 1.95s |
+| **Tenant Partner Foundation Suite** | `pnpm exec vitest run tests/unit/tenant-partner-foundation.test.ts` | `PASS` | `25 passed (25)` |
+| **Tenant Partner Service Suite** | `pnpm exec vitest run apps/api/tests/unit/tenant-partner.service.test.ts` | `PASS` | `55 passed (55)` |
+| **Security Audit Events Unit Suite** | `pnpm exec vitest run tests/unit/security-events.test.ts` | `PASS` | `4 passed (4)` Security event persistence & masking verified |
 | **API Module Typecheck** | `pnpm --filter @drts/api typecheck` | `PASS` | Zero TypeScript errors across `@drts/api` |
-| **Security Audit Events Unit Suite** | `pnpm test:unit tests/unit/security-events.test.ts` | `PASS` | Security event persistence & masking verified |
-| **Contract Error Codes** | `pnpm test:unit tests/contract/iam-contracts.test.ts` | `PASS` | `PUBLIC_PARTNER_AUTH_ERROR_CODE` contract mapping verified |
 
 ---
 
