@@ -582,12 +582,16 @@ components:
                 - AUTH_CREDENTIALS_INVALID
                 - AUTH_APPROVAL_REQUIRED
                 - AUTH_STEP_UP_REQUIRED
+                - AUTH_MFA_REQUIRED
+                - MFA_REQUIRED
+                - STEP_UP_REQUIRED
                 - AUTHZ_SCOPE_DENIED
                 - AUTHZ_REALM_DENIED
                 - IAM_CONCURRENCY_CONFLICT
                 - IAM_REASON_REQUIRED
                 - IAM_APPROVAL_REFERENCE_REQUIRED
                 - IAM_STEP_UP_REQUIRED
+                - IAM_MFA_REQUIRED
                 - IAM_MEMBERSHIP_NOT_ACTIVE
                 - IAM_INVITATION_INVALID
                 - IAM_CREDENTIAL_NOT_FOUND
