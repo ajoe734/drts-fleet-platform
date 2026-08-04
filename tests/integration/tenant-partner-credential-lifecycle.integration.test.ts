@@ -1,3 +1,4 @@
+import type { IdentityContext } from "@drts/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -115,24 +116,31 @@ describe("tenant partner credential lifecycle integration", () => {
       undefined,
       new WebhookDispatchService(fetchImpl as never),
     );
-    const tenantIdentity = {
+    const tenantIdentity: IdentityContext = {
       actorType: "tenant_admin",
       actorId: "tenant-admin-001",
       realm: "tenant",
       tenantId: TENANT_ID,
       roles: ["tc_admin"],
+      roleFamilies: ["tenant"],
       scopes: ["tenant:webhooks:read", "tenant:webhooks:write", "tenant:read"],
       authMode: "jwt_bearer",
-    } as const;
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
 
-    const created = service.createWebhookEndpoint(
-      TENANT_ID,
-      {
-        url: "https://tenant.example/webhooks/overlap-secret",
-        secret: "whsec_overlap_v1",
-        events: ["booking.created"],
-      },
-      "req-integ-webhook-001",
+    const created = await Promise.resolve(
+      service.createWebhookEndpoint(
+        TENANT_ID,
+        {
+          url: "https://tenant.example/webhooks/overlap-secret",
+          secret: "whsec_overlap_v1",
+          events: ["booking.created"],
+        },
+        "req-integ-webhook-001",
+      ),
     );
 
     await service.sendTestWebhook(
@@ -149,6 +157,7 @@ describe("tenant partner credential lifecycle integration", () => {
       "req-integ-webhook-003",
       tenantIdentity,
     );
+    expect(failedDelivery).toBeDefined();
     expect(failedDelivery).toMatchObject({
       status: "delivery_failed",
       secretVersion: 1,

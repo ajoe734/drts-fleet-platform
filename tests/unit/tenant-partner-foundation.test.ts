@@ -1454,9 +1454,9 @@ describe("tenant partner foundation service", () => {
         ],
       }),
     );
-    const persistedChanges = persistChanges.mock.calls.map(
-      ([changes]) => changes as PersistTenantPartnerChanges,
-    );
+    const persistedChanges = (
+      persistChanges.mock.calls as Array<[PersistTenantPartnerChanges]>
+    ).map(([changes]) => changes);
     const apiKeyPersistCall = persistedChanges
       .find(
         (changes) =>
