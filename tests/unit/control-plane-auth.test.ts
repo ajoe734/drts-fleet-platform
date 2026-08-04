@@ -1,7 +1,10 @@
+import jwt from "jsonwebtoken";
 import { describe, expect, it } from "vitest";
 
 import {
   CONTROL_PLANE_REQUEST_AUTH_HEADER,
+  DEFAULT_CONTROL_PLANE_JWT_AUDIENCE,
+  DEFAULT_CONTROL_PLANE_JWT_ISSUER,
   detectControlPlaneAuthEnvironment,
   extractAuthenticatedUserEmail,
   isStrictControlPlaneIapEnvironment,
@@ -350,5 +353,69 @@ describe("control-plane deployment environment detection", () => {
         STRICT_IAP_MODE: "true",
       }),
     ).toBe(true);
+  });
+});
+
+describe("control-plane proxy token is accepted by the API", () => {
+  // Asserted as literals on purpose: comparing against the imported constants
+  // would pass even when the export is missing, because both sides would be
+  // undefined and the token would carry no iss/aud at all.
+  const EXPECTED_ISSUER = "https://auth.local.drts.internal";
+  const EXPECTED_AUDIENCE = "https://api.local.drts.internal";
+
+  function mintToken(overrides: Record<string, unknown> = {}) {
+    const auth = issueControlPlaneRequestAuth({
+      actorType: "ops_user",
+      headers: {},
+      jwtSecret: "control-plane-secret",
+      requestId: "req-iss-001",
+      ...overrides,
+    });
+    return (
+      auth.headers[CONTROL_PLANE_REQUEST_AUTH_HEADER]?.replace(
+        /^Bearer\s+/i,
+        "",
+      ) ?? ""
+    );
+  }
+
+  it("keeps the shared defaults aligned with the API", () => {
+    expect(DEFAULT_CONTROL_PLANE_JWT_ISSUER).toBe(EXPECTED_ISSUER);
+    expect(DEFAULT_CONTROL_PLANE_JWT_AUDIENCE).toBe(EXPECTED_AUDIENCE);
+  });
+
+  it("stamps issuer and audience when the env vars are unset", () => {
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+
+    const decoded = jwt.decode(mintToken()) as jwt.JwtPayload;
+
+    expect(decoded.iss).toBe(EXPECTED_ISSUER);
+    expect(decoded.aud).toBe(EXPECTED_AUDIENCE);
+  });
+
+  it("verifies under the claims the API enforces", () => {
+    // The API resolves iss/aud from JWT_ISSUER/JWT_AUDIENCE and falls back to
+    // these same values. A token minted without them was rejected with
+    // JWT_INVALID, which silently emptied every control-plane page.
+    expect(() =>
+      jwt.verify(mintToken(), "control-plane-secret", {
+        issuer: EXPECTED_ISSUER,
+        audience: EXPECTED_AUDIENCE,
+      }),
+    ).not.toThrow();
+  });
+
+  it("still honours an explicitly configured issuer and audience", () => {
+    const decoded = jwt.decode(
+      mintToken({
+        actorType: "platform_admin",
+        jwtIssuer: "https://issuer.example",
+        jwtAudience: "https://audience.example",
+      }),
+    ) as jwt.JwtPayload;
+
+    expect(decoded.iss).toBe("https://issuer.example");
+    expect(decoded.aud).toBe("https://audience.example");
   });
 });
