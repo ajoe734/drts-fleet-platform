@@ -51,6 +51,19 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git show(\s|$)"),
     re.compile(r"^git log(\s|$)"),
     re.compile(r"^git branch(\s|$)"),
+    # Read-only git queries. Kept separate from the mutating subcommands
+    # below so the read set can grow without widening write access.
+    re.compile(r"^git worktree list(\s|$)"),
+    re.compile(r"^git rev-parse(\s|$)"),
+    re.compile(r"^git ls-tree(\s|$)"),
+    re.compile(r"^git ls-files(\s|$)"),
+    re.compile(r"^git for-each-ref(\s|$)"),
+    re.compile(r"^git describe(\s|$)"),
+    re.compile(r"^git rev-list(\s|$)"),
+    re.compile(r"^git shortlog(\s|$)"),
+    re.compile(r"^git blame(\s|$)"),
+    re.compile(r"^git tag -l(\s|$)"),
+    re.compile(r"^git config --get(\s|$)"),
     re.compile(r"^git push(\s|$)"),
     re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
     re.compile(r"^gh issue comment(\s|$)"),
@@ -101,7 +114,6 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^mv(\s|$)"),
     re.compile(r"^mkdir(\s|$)"),
     re.compile(r"^touch(\s|$)"),
-    re.compile(r"^rm(\s|$)"),
     # node / pnpm / npx development commands
     re.compile(r"^node(\s|$)"),
     re.compile(r"^pnpm(\s|$)"),
@@ -267,6 +279,131 @@ def hook_payload() -> dict[str, Any]:
         return {"raw": raw}
 
 
+# `&&`, `||`, `;`, `|` and a trailing `&` all start a new command. Splitting on
+# them is what keeps an unreviewed tail from riding along behind a safe prefix:
+# SAFE_BASH_PATTERNS are anchored with ^ but not $ and are applied with
+# .search(), and `rm`/`bash`/`curl` are themselves in the safe set.
+_REDIRECT_TARGET_RE = re.compile(r"(?<![0-9<>])>{1,2}\s*(?!&\s*[0-9])([^\s;|&]+)")
+
+
+def _writes_outside_workspace(segment: str) -> bool:
+    """True when the segment redirects into a path we would not let it edit.
+
+    Writing under the workspace or /tmp is ordinary; writing to a home dotfile
+    or a system path is not, and used to pass because only the leading token
+    was ever inspected.
+    """
+    for target in _REDIRECT_TARGET_RE.findall(segment):
+        cleaned = target.strip("\"'")
+        if not cleaned or cleaned == "/dev/null":
+            continue
+        candidate = Path(cleaned).expanduser()
+        try:
+            resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (ROOT / candidate).resolve(strict=False)
+        except OSError:
+            return True
+        if resolved.is_relative_to(Path("/tmp")):
+            continue
+        if _paths_within_workspace([resolved]):
+            continue
+        return True
+    return False
+
+
+def _split_shell_segments(shell_command: str) -> list[str] | None:
+    """Split a command on shell separators, honouring quotes.
+
+    Returns None when the command contains a construct whose real behaviour is
+    not visible to static inspection (command or process substitution), so the
+    caller must not treat it as safe.
+    """
+    command = _normalize_shell_command(shell_command)
+    if not command:
+        return []
+
+    segments: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    index = 0
+    length = len(command)
+
+    while index < length:
+        char = command[index]
+        if quote:
+            buffer.append(char)
+            if char == "\\" and quote == '"' and index + 1 < length:
+                buffer.append(command[index + 1])
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            buffer.append(char)
+            buffer.append(command[index + 1])
+            index += 2
+            continue
+        if char == "`":
+            return None
+        if char == "$" and command[index + 1 : index + 2] == "(":
+            return None
+        if char in ("<", ">") and command[index + 1 : index + 2] == "(":
+            return None
+        if command[index : index + 2] in ("&&", "||"):
+            segments.append("".join(buffer))
+            buffer = []
+            index += 2
+            continue
+        if char in (";", "|", "\n"):
+            segments.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        if char == "&":
+            # `2>&1` duplicates a descriptor; a bare `&` backgrounds the command.
+            previous = "".join(buffer).rstrip()
+            if previous.endswith(">"):
+                buffer.append(char)
+                index += 1
+                continue
+            segments.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+
+    if quote:
+        return None
+    segments.append("".join(buffer))
+    return [segment.strip() for segment in segments if segment.strip()]
+
+
+def _segment_is_safe(segment: str) -> bool:
+    """A single separator-free command that needs no human review."""
+    if _writes_outside_workspace(segment):
+        return False
+    if _cd_target_is_within_workspace(segment):
+        return True
+    return any(pattern.search(segment) for pattern in SAFE_BASH_PATTERNS)
+
+
+def _cd_target_is_within_workspace(segment: str) -> bool:
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        return False
+    if len(tokens) != 2 or tokens[0] != "cd":
+        return False
+    return _paths_within_workspace([Path(tokens[1])])
+
+
 def classify_command(shell_command: str) -> str:
     if _is_safe_status_sync_command(shell_command):
         return "allow"
@@ -285,14 +422,26 @@ def classify_command(shell_command: str) -> str:
     if _is_canonical_root_pnpm_install_command(shell_command):
         return "defer"
     normalized = _normalize_shell_command(shell_command)
-    for pattern in DENY_BASH_PATTERNS:
-        if pattern.search(normalized):
-            return "deny"
+    segments = _split_shell_segments(normalized)
+    if segments is None:
+        # Command/process substitution hides what actually runs.
+        return "defer"
+    for segment in segments:
+        for pattern in DENY_BASH_PATTERNS:
+            if pattern.search(segment):
+                return "deny"
+    if len(segments) > 1:
+        # Every part has to stand on its own, otherwise a safe prefix would
+        # carry the rest of the line past the gate.
+        return "allow" if all(_segment_is_safe(segment) for segment in segments) else "defer"
+    single = segments[0] if segments else normalized
+    if _writes_outside_workspace(single):
+        return "defer"
     for pattern in SAFE_BASH_PATTERNS:
-        if pattern.search(normalized):
+        if pattern.search(single):
             return "allow"
     for pattern in DEFER_BASH_PATTERNS:
-        if pattern.search(normalized):
+        if pattern.search(single):
             return "defer"
     return "defer"
 
