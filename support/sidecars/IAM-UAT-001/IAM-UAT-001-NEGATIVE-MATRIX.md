@@ -70,3 +70,15 @@ CI wiring:
   Owner closeout re-verification passed on the isolated worker branch. Root security pack `7/7` files passed, DB-backed identity/session integration `2/2` files passed, hermetic E2E `004` and `018` both passed after repairing local worktree `node_modules` for hermetic execution.
 - Caveat:
   The hermetic IAM suite now reserves loopback port `3101` by default inside `tests/security/run-iam-negative-matrix.sh` so local or supervisor-owned listeners on `127.0.0.1:3001` cannot poison CI-equivalent runs.
+
+- `2026-08-04T01:18:12Z`
+  Command:
+  `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform_iam_uat_001 AUTH_MODE=test JWT_SECRET=ci-e2e-secret JWT_ISSUER=drts-local JWT_AUDIENCE=drts-api CONTROLLED_DOWNLOAD_SIGNING_SECRET=ci-e2e-controlled-download-secret PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT=ci-e2e-alpha-ingress-key PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT=ci-e2e-beta-ingress-key API_PORT=3101 API_HOST=127.0.0.1 E2E_API_URL=http://127.0.0.1:3101 API_LOG=/tmp/drts-e2e-api-iam-uat-001.log pnpm run test:security:iam-negative-matrix`
+  Result:
+  Re-verified the current branch head after `IAM-UAT-001: fix security suite typecheck regressions` (`d41972ea`). Root security pack `7/7` files passed, DB-backed identity/session integration `2/2` files passed, hermetic E2E `004` and `018` both passed.
+
+- `2026-08-04T01:18:12Z`
+  Command:
+  `pnpm exec tsc -p tsconfig.json --noEmit`
+  Result:
+  Repo typecheck passed at the same branch head, confirming the route-inventory and credential-expiry test fixes removed the branch-local TypeScript regressions without reopening the IAM matrix.
