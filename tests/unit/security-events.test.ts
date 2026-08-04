@@ -132,6 +132,9 @@ describe("security events service", () => {
         "tenant_bootstrap_session.issued",
         "tenant_user.invited",
         "tenant_api_key.issued",
+        "step_up.proof_issued",
+        "step_up.denied",
+        "step_up.satisfied",
         "break_glass.activated",
       ]),
     );

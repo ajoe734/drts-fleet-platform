@@ -3,6 +3,8 @@ export const IAM_STAGE15_ERROR_CODES = [
   "AUTH_CREDENTIALS_INVALID",
   "AUTH_APPROVAL_REQUIRED",
   "AUTH_STEP_UP_REQUIRED",
+  "MFA_REQUIRED",
+  "STEP_UP_REQUIRED",
   "AUTHZ_SCOPE_DENIED",
   "AUTHZ_REALM_DENIED",
   "IAM_CONCURRENCY_CONFLICT",
@@ -17,6 +19,68 @@ export const IAM_STAGE15_ERROR_CODES = [
 ] as const;
 
 export type IamStage15ErrorCode = (typeof IAM_STAGE15_ERROR_CODES)[number];
+
+export const IAM_STEP_UP_ACTION_IDS = [
+  "platform:users:create",
+  "platform:users:role:update",
+  "platform:access-reviews:decide",
+  "platform:break-glass:request",
+  "platform:break-glass:approve",
+  "platform:partner-entries:create",
+  "platform:partner-entries:update",
+  "platform:partner-entries:activate",
+  "platform:partner-entries:deactivate",
+  "platform:partner-entries:revoke",
+  "platform:partner-credentials:issue",
+  "platform:partner-credentials:revoke",
+  "platform:tenants:roles:invite",
+  "platform:tenants:activate",
+  "platform:multi-taxi-trip-records:export",
+  "platform:evidence-exports:request",
+  "platform:evidence-exports:approve",
+  "platform:legal-holds:release-approve",
+  "platform:regulatory-exclusivities:approve",
+  "platform:regulatory-exclusivities:reject",
+  "ops:partner-eligibility:reviews:resolve",
+  "ops:approval-requests:acknowledge-breach",
+  "ops:approval-requests:approve",
+  "ops:approval-requests:reject",
+  "ops:approval-requests:escalate",
+  "ops:orders:manual-fare-override",
+  "ops:orders:approve-override",
+  "ops:orders:reject-override",
+  "ops:driver-device:revoke",
+  "finance:reimbursements:approve",
+  "tenant:approval-requests:approve",
+  "tenant:approval-requests:reject",
+  "tenant:approval-requests:escalate",
+  "tenant:users:create",
+  "tenant:users:role:update",
+  "tenant:api-keys:issue",
+  "tenant:api-keys:revoke",
+  "tenant:api-keys:rotate",
+  "tenant:webhooks:create",
+  "tenant:webhooks:update",
+  "tenant:webhooks:delete",
+  "tenant:webhooks:rotate-secret",
+  "tenant:billing:profile:update",
+] as const;
+
+export type IamStepUpActionId = (typeof IAM_STEP_UP_ACTION_IDS)[number];
+
+export interface CreateStepUpProofCommand {
+  actionId?: IamStepUpActionId | null;
+  method?: string | null;
+  path?: string | null;
+}
+
+export interface StepUpProof {
+  required: boolean;
+  actionId: IamStepUpActionId | null;
+  stepUpReference: string | null;
+  issuedAt: string | null;
+  expiresAt: string | null;
+}
 
 export interface IamMutationMetadata {
   reasonCode: string;
@@ -130,6 +194,12 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     operationId: "getIdentityContext",
     method: "get",
     path: "/api/identity/context",
+    domain: "identity",
+  },
+  {
+    operationId: "createStepUpProof",
+    method: "post",
+    path: "/api/identity/step-up-proofs",
     domain: "identity",
   },
   {

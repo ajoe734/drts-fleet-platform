@@ -93,6 +93,39 @@ paths:
       summary: Return the caller identity context and active IAM authority.
       operationId: getIdentityContext
       tags: [IAM]
+  /api/identity/step-up-proofs:
+    post:
+      summary: Create a short-lived step-up proof for a privileged IAM action.
+      operationId: createStepUpProof
+      tags: [IAM]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStepUpProofCommand"
+      responses:
+        "200":
+          description: Step-up proof evaluated and returned.
+        "403":
+          description: Trusted MFA or fresh step-up is required before proof issuance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicErrorEnvelope"
+              examples:
+                mfaRequired:
+                  value:
+                    error:
+                      code: MFA_REQUIRED
+                      message: Trusted multi-factor authentication is required before step-up proof can be issued.
+                      retryable: false
+                freshStepUpRequired:
+                  value:
+                    error:
+                      code: STEP_UP_REQUIRED
+                      message: A fresh step-up verification is required for this privileged action.
+                      retryable: false
   /api/tenant/users:
     get:
       summary: List tenant users and membership states for the active tenant.
@@ -419,6 +452,80 @@ components:
           type: string
         pkceVerifier:
           type: string
+    CreateStepUpProofCommand:
+      type: object
+      properties:
+        actionId:
+          type: [string, "null"]
+          enum:
+            - platform:users:create
+            - platform:users:role:update
+            - platform:access-reviews:decide
+            - platform:break-glass:request
+            - platform:break-glass:approve
+            - platform:partner-entries:create
+            - platform:partner-entries:update
+            - platform:partner-entries:activate
+            - platform:partner-entries:deactivate
+            - platform:partner-entries:revoke
+            - platform:partner-credentials:issue
+            - platform:partner-credentials:revoke
+            - platform:tenants:roles:invite
+            - platform:tenants:activate
+            - platform:multi-taxi-trip-records:export
+            - platform:evidence-exports:request
+            - platform:evidence-exports:approve
+            - platform:legal-holds:release-approve
+            - platform:regulatory-exclusivities:approve
+            - platform:regulatory-exclusivities:reject
+            - ops:partner-eligibility:reviews:resolve
+            - ops:approval-requests:acknowledge-breach
+            - ops:approval-requests:approve
+            - ops:approval-requests:reject
+            - ops:approval-requests:escalate
+            - ops:orders:manual-fare-override
+            - ops:orders:approve-override
+            - ops:orders:reject-override
+            - ops:driver-device:revoke
+            - finance:reimbursements:approve
+            - tenant:approval-requests:approve
+            - tenant:approval-requests:reject
+            - tenant:approval-requests:escalate
+            - tenant:users:create
+            - tenant:users:role:update
+            - tenant:api-keys:issue
+            - tenant:api-keys:revoke
+            - tenant:api-keys:rotate
+            - tenant:webhooks:create
+            - tenant:webhooks:update
+            - tenant:webhooks:delete
+            - tenant:webhooks:rotate-secret
+            - tenant:billing:profile:update
+        method:
+          type: [string, "null"]
+        path:
+          type: [string, "null"]
+    StepUpProof:
+      type: object
+      required:
+        - required
+        - actionId
+        - stepUpReference
+        - issuedAt
+        - expiresAt
+      properties:
+        required:
+          type: boolean
+        actionId:
+          type: [string, "null"]
+        stepUpReference:
+          type: [string, "null"]
+        issuedAt:
+          type: [string, "null"]
+          format: date-time
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
     IamApprovalDecisionCommand:
       type: object
       required:
@@ -582,6 +689,8 @@ components:
                 - AUTH_CREDENTIALS_INVALID
                 - AUTH_APPROVAL_REQUIRED
                 - AUTH_STEP_UP_REQUIRED
+                - MFA_REQUIRED
+                - STEP_UP_REQUIRED
                 - AUTHZ_SCOPE_DENIED
                 - AUTHZ_REALM_DENIED
                 - IAM_CONCURRENCY_CONFLICT
