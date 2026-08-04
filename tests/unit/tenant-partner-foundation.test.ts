@@ -1210,7 +1210,9 @@ describe("tenant partner foundation service", () => {
     const auditService = new AuditNotificationService();
     const persistChanges = vi.fn<
       (changes: PersistTenantPartnerChanges) => Promise<void>
-    >(async (_changes) => undefined);
+    >(async (changes) => {
+      void changes;
+    });
     const persistedEndpoint: StoredWebhookEndpointRecord = {
       webhookId: "wh_persisted_001",
       tenantId: "tenant-demo-001",
