@@ -6,6 +6,25 @@ import { describe, expect, it } from "vitest";
 import { resolveRouteAuthPolicy } from "../../apps/api/src/common/auth/auth.policy";
 
 const ROOT_DIR = path.resolve(__dirname, "../../apps/api/src");
+
+/**
+ * Walk the modules directory and collect all *.controller.ts paths relative to
+ * ROOT_DIR (e.g. "modules/auth/auth.controller.ts").
+ */
+function getAllControllers(dir: string, prefix = ""): string[] {
+  const result: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const nextPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      result.push(...getAllControllers(fullPath, nextPrefix));
+    } else if (entry.isFile() && entry.name.endsWith(".controller.ts")) {
+      result.push(nextPrefix);
+    }
+  }
+  return result;
+}
+
 const SECURITY_CRITICAL_CONTROLLERS = [
   "modules/auth/auth.controller.ts",
   "modules/driver-profile/driver-profile.controller.ts",
@@ -148,6 +167,71 @@ function listSecurityRoutes() {
   return { discovered, uncovered };
 }
 
+/**
+ * Check whether a controller file has at least one class-level or method-level
+ * security classification decorator, or all its routes resolve via the
+ * runtime auth policy table.
+ */
+function controllerHasSecurityClassification(relativePath: string): boolean {
+  const absolutePath = path.join(ROOT_DIR, relativePath);
+  const sourceFile = loadSourceFile(absolutePath);
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isClassDeclaration(statement)) {
+      continue;
+    }
+    const controllerDecorator = getDecorators(statement).find(
+      (decorator) => getDecoratorName(decorator) === "Controller",
+    );
+    if (!controllerDecorator) {
+      continue;
+    }
+
+    if (hasClassificationDecorator(statement)) {
+      return true;
+    }
+
+    const controllerPath = getStringDecoratorArg(controllerDecorator);
+
+    // Check every HTTP route method
+    let allMethodsCovered = true;
+    let hasRoutes = false;
+    for (const member of statement.members) {
+      if (!ts.isMethodDeclaration(member)) {
+        continue;
+      }
+      const routeDecorator = getDecorators(member).find((decorator) =>
+        HTTP_DECORATORS.has(getDecoratorName(decorator)),
+      );
+      if (!routeDecorator) {
+        continue;
+      }
+      hasRoutes = true;
+      const decoratorName = getDecoratorName(routeDecorator);
+      const method = HTTP_DECORATORS.get(decoratorName);
+      if (!method) {
+        allMethodsCovered = false;
+        continue;
+      }
+      const routePath = normalizeRoutePath(
+        controllerPath,
+        getStringDecoratorArg(routeDecorator),
+      );
+      const covered =
+        hasClassificationDecorator(member) ||
+        Boolean(resolveRouteAuthPolicy(method, routePath));
+      if (!covered) {
+        allMethodsCovered = false;
+      }
+    }
+
+    if (hasRoutes && allMethodsCovered) {
+      return true;
+    }
+  }
+  return false;
+}
+
 describe("IAM security-critical route inventory", () => {
   it("classifies every security-critical controller route including admin/service-products and admin/sandbox-governance", () => {
     const { discovered, uncovered } = listSecurityRoutes();
@@ -186,5 +270,34 @@ describe("IAM security-critical route inventory", () => {
     for (const controller of SECURITY_CRITICAL_CONTROLLERS) {
       expect(controllersOnDisk.has(controller)).toBe(true);
     }
+  });
+
+  it("every controller on disk is either in the security-critical list or has inline security classification — no silent regressions", () => {
+    // Dynamically discover all controllers to prevent silent coverage gaps when
+    // new controllers are added without a security classification.
+    const allControllersOnDisk = getAllControllers(ROOT_DIR);
+    const securityCriticalSet = new Set<string>(SECURITY_CRITICAL_CONTROLLERS);
+
+    const unclassifiedControllers: string[] = [];
+
+    for (const relativePath of allControllersOnDisk) {
+      if (securityCriticalSet.has(relativePath)) {
+        // Already audited in the matrix above — skip
+        continue;
+      }
+      // For non-matrix controllers, require that all routes are covered either
+      // by inline decorators or the runtime auth-policy table.
+      if (!controllerHasSecurityClassification(relativePath)) {
+        unclassifiedControllers.push(relativePath);
+      }
+    }
+
+    expect(
+      unclassifiedControllers,
+      "These controllers have HTTP routes with no security classification. " +
+        "Either add them to SECURITY_CRITICAL_CONTROLLERS or annotate their " +
+        "routes with @OpenRoute / @RequireRealms / @RequireScopes, or add " +
+        "their routes to resolveRouteAuthPolicy().",
+    ).toEqual([]);
   });
 });

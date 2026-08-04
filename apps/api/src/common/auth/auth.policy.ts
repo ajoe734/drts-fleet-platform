@@ -628,5 +628,163 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  // ── Routes discovered by the dynamic route-inventory audit (IAM-UAT-001) ──
+  // These controllers exist on disk but were not previously registered in this
+  // policy table, meaning any route without an inline @OpenRoute / @RequireRealms
+  // / @RequireScopes decorator would silently fall through to no policy.
+
+  // Health probe — public, no authentication required.
+  if (routePath === "health" || routePath.startsWith("health/")) {
+    return {
+      routeKey: `health:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "tenant", "driver", "partner"],
+      description: "Health probe — public liveness endpoint, no auth required",
+    };
+  }
+
+  // Notification read receipt
+  if (routePath === "notifications/read" && upperMethod === "POST") {
+    return {
+      routeKey: "notifications:read-receipt",
+      requiredScopes: ["notifications:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Mark notifications as read",
+    };
+  }
+
+  // Billing / settlement operational routes not already matched above
+  if (
+    routePath === "driver-fee-plans/publish" ||
+    routePath.startsWith("settlement/")
+  ) {
+    return {
+      routeKey: `billing:settlement:${upperMethod}`,
+      requiredScopes: methodScope("billing:read", "billing:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Billing and settlement operational access (settlement + publish)",
+    };
+  }
+
+  // Driver settings (self-service and ops read)
+  if (routePath === "driver-settings" || routePath.startsWith("driver-settings/")) {
+    return {
+      routeKey: `driver-settings:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver settings management",
+    };
+  }
+
+  // Feature flags admin
+  if (routePath === "admin/flags" || routePath.startsWith("admin/flags/")) {
+    return {
+      routeKey: `admin:feature-flags:${upperMethod}`,
+      requiredScopes: methodScope("foundation:read", "foundation:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Feature flag administration",
+    };
+  }
+
+  // Forwarder driver task views (not covered by the forwarder/ prefix branch above)
+  if (routePath === "driver/task-views" || routePath.startsWith("driver/task-views/")) {
+    return {
+      routeKey: `driver:task-views:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("ops", "driver"),
+      description: "Driver forwarded-order task views",
+    };
+  }
+
+  if (
+    routePath.startsWith("driver/forwarded-orders/")
+  ) {
+    return {
+      routeKey: `driver:forwarded-orders:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("ops", "driver"),
+      description: "Driver forwarded-order accept / reject",
+    };
+  }
+
+  // System foundation manifest — internal platform probing only
+  if (routePath.startsWith("system/foundation")) {
+    return {
+      routeKey: `system:foundation:${upperMethod}`,
+      requiredScopes: ["foundation:read"],
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "System foundation manifest — platform internal",
+    };
+  }
+
+  // Geo / geocoding services — restricted to platform and ops callers
+  if (routePath === "geo/health" || routePath.startsWith("geo/")) {
+    return {
+      routeKey: `geo:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Geo / geocoding service access",
+    };
+  }
+
+  // Product-rule catalog
+  if (routePath === "product-rule/catalog" || routePath.startsWith("product-rule/")) {
+    return {
+      routeKey: `product-rule:${upperMethod}`,
+      requiredScopes: methodScope("foundation:read", "foundation:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Product rule catalog management",
+    };
+  }
+
+  // Sandbox dispatch gate — controlled preview dispatch evaluation
+  if (routePath.startsWith("sandbox/dispatch")) {
+    return {
+      routeKey: `sandbox:dispatch:${upperMethod}`,
+      requiredScopes: methodScope("foundation:read", "foundation:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Sandbox dispatch gate evaluation and policy management",
+    };
+  }
+
+  // Service area definitions and admin management
+  if (routePath === "service-area/definitions" || routePath === "service-area/geojson" || routePath === "service-area/evaluate") {
+    return {
+      routeKey: `service-area:public:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Service area public read and evaluation",
+    };
+  }
+
+  if (routePath.startsWith("service-area/admin")) {
+    return {
+      routeKey: `service-area:admin:${upperMethod}`,
+      requiredScopes: methodScope("foundation:read", "foundation:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Service area admin management (create / publish / retire)",
+    };
+  }
+
+  // Shift attendance (driver self-service with ops oversight)
+  if (routePath.startsWith("shift-attendance")) {
+    return {
+      routeKey: `shift-attendance:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver shift attendance management",
+    };
+  }
+
+  // Tesla vehicle integration — driver + platform
+  if (routePath.startsWith("tesla-integration/")) {
+    return {
+      routeKey: `tesla-integration:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Tesla vehicle integration — OAuth, telemetry, and commands",
+    };
+  }
+
   return null;
 }
