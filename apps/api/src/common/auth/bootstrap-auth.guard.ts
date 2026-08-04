@@ -22,6 +22,7 @@ import type {
 } from "./auth.types";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
+import { evaluateMfaStepUpPolicy } from "./mfa-step-up.policy";
 import { JwtAuthService } from "./jwt-auth.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
@@ -241,7 +242,7 @@ export class BootstrapAuthGuard implements CanActivate {
   private async resolveIapAssertionAndActivate(
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
-    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+    policy: { requiredScopes: string[]; allowedRealms: string[]; routeKey?: string } | null,
   ): Promise<boolean> {
     const authEnvironment = detectAuthEnvironment(process.env);
     const isStrictIap =
@@ -285,6 +286,14 @@ export class BootstrapAuthGuard implements CanActivate {
       try {
         this.assertRealmAllowed(identity, policy.allowedRealms, request);
         this.assertScopesAllowed(identity, policy.requiredScopes, request);
+        this.assertMfaStepUpAllowed(identity, request, policy.routeKey);
+      } catch (error) {
+        this.recordAuthorizationDenialAudit(identity, request, error);
+        throw error;
+      }
+    } else {
+      try {
+        this.assertMfaStepUpAllowed(identity, request);
       } catch (error) {
         this.recordAuthorizationDenialAudit(identity, request, error);
         throw error;
@@ -297,7 +306,7 @@ export class BootstrapAuthGuard implements CanActivate {
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
-    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+    policy: { requiredScopes: string[]; allowedRealms: string[]; routeKey?: string } | null,
   ): boolean | Promise<boolean> {
     const strictEnvironment = isStrictAuthEnvironment();
     // JWT fast-path: verify Bearer token if present
@@ -333,6 +342,14 @@ export class BootstrapAuthGuard implements CanActivate {
                   policy.requiredScopes,
                   request,
                 );
+                this.assertMfaStepUpAllowed(identity, request, policy.routeKey);
+              } catch (error) {
+                this.recordAuthorizationDenialAudit(identity, request, error);
+                throw error;
+              }
+            } else {
+              try {
+                this.assertMfaStepUpAllowed(identity, request);
               } catch (error) {
                 this.recordAuthorizationDenialAudit(identity, request, error);
                 throw error;
@@ -378,6 +395,12 @@ export class BootstrapAuthGuard implements CanActivate {
       });
       if (anonymousIdentity) {
         request.identity = anonymousIdentity;
+        try {
+          this.assertMfaStepUpAllowed(anonymousIdentity, request);
+        } catch (error) {
+          this.recordAuthorizationDenialAudit(anonymousIdentity, request, error);
+          throw error;
+        }
       }
       return true;
     }
@@ -401,6 +424,7 @@ export class BootstrapAuthGuard implements CanActivate {
     try {
       this.assertRealmAllowed(identity, policy.allowedRealms, request);
       this.assertScopesAllowed(identity, policy.requiredScopes, request);
+      this.assertMfaStepUpAllowed(identity, request, policy.routeKey);
     } catch (error) {
       this.recordAuthorizationDenialAudit(identity, request, error);
       throw error;
@@ -464,10 +488,40 @@ export class BootstrapAuthGuard implements CanActivate {
     }
   }
 
+  private assertMfaStepUpAllowed(
+    identity: BootstrapRequestIdentity,
+    request: AuthenticatedRequestLike,
+    routeKey?: string,
+  ) {
+    const rawPath =
+      (request.originalUrl ?? request.url ?? "").split("?")[0] ?? "";
+    const routePath = rawPath
+      .replace(/^\/+/, "")
+      .replace(/^api\/+/, "")
+      .replace(/\/+$/, "");
+    const actionId = routeKey || routePath;
+    const result = evaluateMfaStepUpPolicy(identity, actionId, request);
+    if (!result.allowed) {
+      throw new ApiRequestError(
+        403,
+        result.errorCode ?? "AUTH_STEP_UP_REQUIRED",
+        result.message ??
+          "MFA and fresh step-up required for this privileged action.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+          actionId,
+          reason: result.reason,
+          freshnessAgeSeconds: result.freshnessAgeSeconds,
+        },
+      );
+    }
+  }
+
   // A realm/scope denial on an authenticated identity is a governance-relevant
   // security event; record it so the audit trail covers rejected/denied
   // control-plane attempts (not just successful mutations). Only AUTH_REALM_DENIED
-  // / AUTH_SCOPE_DENIED are audited; other failures propagate untouched.
+  // / AUTH_SCOPE_DENIED / AUTH_STEP_UP_REQUIRED / AUTH_MFA_REQUIRED are audited; other failures propagate untouched.
   private recordAuthorizationDenialAudit(
     identity: BootstrapRequestIdentity,
     request: AuthenticatedRequestLike,
@@ -481,7 +535,14 @@ export class BootstrapAuthGuard implements CanActivate {
         ? ((error.getResponse() as { error?: { code?: string } })?.error
             ?.code ?? null)
         : null;
-    if (code !== "AUTH_REALM_DENIED" && code !== "AUTH_SCOPE_DENIED") {
+    if (
+      code !== "AUTH_REALM_DENIED" &&
+      code !== "AUTH_SCOPE_DENIED" &&
+      code !== "AUTH_STEP_UP_REQUIRED" &&
+      code !== "AUTH_MFA_REQUIRED" &&
+      code !== "IAM_STEP_UP_REQUIRED" &&
+      code !== "MFA_REQUIRED"
+    ) {
       return;
     }
     // The audit actorType union excludes driver_user; coerce that lone case.

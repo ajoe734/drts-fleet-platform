@@ -155,6 +155,7 @@ const SIGN_KEY_MATERIAL_ERROR_MESSAGE =
 const VERIFY_KEY_MATERIAL_ERROR_MESSAGE =
   "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)";
 
+
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
 const SERVICE_EXPIRES_IN: JwtExpiresIn = "15m";
 const DEFAULT_POLICY_VERSION = "auth.jwt-session.v1";

@@ -810,7 +810,7 @@ export interface IdentityContext {
   sessionId?: string | null;
   tokenId?: string | null;
   tokenVersion?: number | null;
-  authTime?: string | null;
+  authTime?: string | number | null;
   amr?: string[];
   acr?: string | null;
   policyVersion?: string | null;
@@ -821,6 +821,8 @@ export interface IdentityContext {
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  sid?: string | null;
+  isMfaVerified?: boolean;
   supportedExecutionModes: SupervisorExecutionMode[];
 }
 

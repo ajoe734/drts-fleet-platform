@@ -4,7 +4,7 @@ import { Throttle } from "@nestjs/throttler";
 import type { IdentityContext } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
-import { CurrentIdentity, OpenRoute } from "../../common/auth";
+import { CurrentIdentity, OpenRoute, hasTrustedMfaAmr } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 
@@ -17,6 +17,7 @@ export class IdentityController {
     @CurrentIdentity() identity: BootstrapRequestIdentity,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const isMfaVerified = hasTrustedMfaAmr(identity.amr ?? identity.stepUpProof?.amr);
     const context: IdentityContext = {
       actorType: identity.actorType,
       actorId: identity.actorId,
@@ -26,6 +27,11 @@ export class IdentityController {
       roles: identity.roles,
       scopes: identity.scopes,
       tenantId: identity.tenantId,
+      sid: identity.sid ?? null,
+      amr: identity.amr ?? identity.stepUpProof?.amr ?? [],
+      acr: identity.acr ?? identity.stepUpProof?.acr ?? null,
+      authTime: identity.authTime ?? identity.stepUpProof?.authTime ?? null,
+      isMfaVerified,
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",

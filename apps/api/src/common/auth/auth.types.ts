@@ -38,6 +38,8 @@ export const AUTH_MODES = [
   "referral_bearer",
 ] as const;
 
+import type { IamStepUpProof } from "@drts/contracts";
+
 export type AuthMode = (typeof AUTH_MODES)[number];
 
 export const AUTH_MODE = "bootstrap_headers" as const;
@@ -45,7 +47,6 @@ export const AUTH_MODE = "bootstrap_headers" as const;
 export interface BootstrapRequestIdentity {
   authMode: AuthMode;
   actorType: AuthActorType;
-  actorId: string | null;
   principalId?: string | null;
   membershipId?: string | null;
   subject?: string | null;
@@ -58,7 +59,7 @@ export interface BootstrapRequestIdentity {
   sessionId?: string | null;
   tokenId?: string | null;
   tokenVersion?: number | null;
-  authTime?: string | null;
+  authTime?: string | number | null;
   amr?: string[];
   acr?: string | null;
   policyVersion?: string | null;
@@ -70,6 +71,8 @@ export interface BootstrapRequestIdentity {
   roles: string[];
   scopes: string[];
   requestId: string | null;
+  sid?: string | null;
+  stepUpProof?: IamStepUpProof | null;
 }
 
 export interface AuthBootstrapHeaders {
@@ -87,6 +90,12 @@ export interface AuthBootstrapHeaders {
   "x-scopes"?: string;
   "x-auth-mode"?: string;
   "x-request-id"?: string;
+  "x-sid"?: string;
+  "x-amr"?: string;
+  "x-acr"?: string;
+  "x-auth-time"?: string;
+  "x-step-up-proof"?: string;
+  "x-step-up-reference"?: string;
   [key: string]: string | string[] | undefined;
 }
 
@@ -95,5 +104,6 @@ export interface AuthenticatedRequestLike {
   method?: string;
   originalUrl?: string;
   url?: string;
+  body?: Record<string, unknown>;
   identity?: BootstrapRequestIdentity;
 }

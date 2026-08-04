@@ -165,6 +165,22 @@ export function extractBootstrapRequestIdentity(
     normalizeHeaderValue(headers["x-realm"]),
   );
 
+  const sid = normalizeHeaderValue(headers["x-sid"]) || null;
+  const amr = splitDelimitedList(headers["x-amr"]);
+  const acr = normalizeHeaderValue(headers["x-acr"]) || null;
+  const rawAuthTime = normalizeHeaderValue(headers["x-auth-time"]);
+  const authTime = rawAuthTime && !isNaN(Number(rawAuthTime)) ? Number(rawAuthTime) : null;
+
+  let stepUpProof: any = null;
+  const rawProof = normalizeHeaderValue(headers["x-step-up-proof"]);
+  if (rawProof) {
+    try {
+      stepUpProof = JSON.parse(rawProof);
+    } catch {
+      stepUpProof = null;
+    }
+  }
+
   return {
     authMode: AUTH_MODE,
     actorType,
@@ -184,5 +200,10 @@ export function extractBootstrapRequestIdentity(
     roles,
     scopes,
     requestId: normalizeHeaderValue(headers["x-request-id"]) || null,
+    sid,
+    amr: amr.length > 0 ? amr : undefined,
+    acr,
+    authTime,
+    stepUpProof,
   };
 }

@@ -11,5 +11,6 @@ export * from "./internal-key-exception-registry";
 export * from "./internal-key-metrics";
 export * from "./internal-key-audit";
 export * from "./jwt-auth.service";
+export * from "./mfa-step-up.policy";
 export * from "./signing-key-ring";
 

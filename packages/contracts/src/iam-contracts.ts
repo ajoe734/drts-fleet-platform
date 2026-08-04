@@ -3,12 +3,16 @@ export const IAM_STAGE15_ERROR_CODES = [
   "AUTH_CREDENTIALS_INVALID",
   "AUTH_APPROVAL_REQUIRED",
   "AUTH_STEP_UP_REQUIRED",
+  "AUTH_MFA_REQUIRED",
+  "MFA_REQUIRED",
+  "STEP_UP_REQUIRED",
   "AUTHZ_SCOPE_DENIED",
   "AUTHZ_REALM_DENIED",
   "IAM_CONCURRENCY_CONFLICT",
   "IAM_REASON_REQUIRED",
   "IAM_APPROVAL_REFERENCE_REQUIRED",
   "IAM_STEP_UP_REQUIRED",
+  "IAM_MFA_REQUIRED",
   "IAM_MEMBERSHIP_NOT_ACTIVE",
   "IAM_INVITATION_INVALID",
   "IAM_CREDENTIAL_NOT_FOUND",
@@ -25,6 +29,43 @@ export interface IamMutationMetadata {
   approvalRequestId?: string | null;
   stepUpReference?: string | null;
   note?: string | null;
+}
+
+export interface IamStepUpPolicyRule {
+  actionId: string;
+  description: string;
+  requiresMfa: boolean;
+  requiredAmr?: string[];
+  requiredAcr?: string[];
+  maxAgeSeconds: number;
+}
+
+export interface IamStepUpProof {
+  proofId: string;
+  actorId: string;
+  sessionId: string;
+  actionId: string;
+  amr: string[];
+  acr?: string | null;
+  authTime: number;
+  issuedAt: number;
+  expiresAt: number;
+}
+
+export interface IamStepUpEvaluationResult {
+  allowed: boolean;
+  actionId: string;
+  errorCode?: IamStage15ErrorCode;
+  reason?:
+    | "MISSING_MFA"
+    | "STALE_WRONG_SESSION"
+    | "STALE_WRONG_ACTION"
+    | "STALE_WRONG_PRINCIPAL"
+    | "EXPIRED_FRESHNESS_WINDOW"
+    | "CLIENT_BOOLEAN_DISALLOWED"
+    | "PASSED";
+  message?: string;
+  freshnessAgeSeconds?: number;
 }
 
 export interface IamCallbackSessionExchangeCommand {
