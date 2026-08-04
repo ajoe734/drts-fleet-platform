@@ -362,6 +362,48 @@ describe("bootstrap auth extraction", () => {
   );
 });
 
+describe("auth token issuance", () => {
+  it("issues trusted workforce MFA claims for internal-key bootstrap platform tokens", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "test-internal-secret";
+    process.env.AUTH_MODE = "explicit";
+
+    const { controller, jwtAuthService } = createAuthFixture();
+
+    const issued = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": "test-internal-secret",
+        "x-actor-type": "platform_admin",
+        "x-actor-id": "platform-admin-001",
+        "x-realm": "platform",
+        "x-request-id": "req-auth-token-platform-001",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+      url: "/api/auth/token",
+    });
+
+    const payload = jwtAuthService.verify(issued.token);
+
+    expect(issued.expiresIn).toBe("8h");
+    expect(payload).toMatchObject({
+      actorType: "platform_admin",
+      realm: "platform",
+      amr: ["verified_iap_workforce"],
+      acr: "aal2",
+    });
+    expect(typeof payload?.auth_time).toBe("number");
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.AUTH_MODE;
+  });
+});
+
 describe("bootstrap auth guard", () => {
   it("does not let a proxy-marked durable token bypass durable session checks", async () => {
     process.env.JWT_SECRET = "test-secret";

@@ -24,6 +24,10 @@ export const IAM_STAGE15_ERROR_CODES = [
 export type IamStage15ErrorCode = (typeof IAM_STAGE15_ERROR_CODES)[number];
 
 export const IAM_STEP_UP_ACTION_IDS = [
+  "platform:tenants:create",
+  "platform:tenants:settings:update",
+  "platform:tenants:onboarding:update",
+  "platform:tenants:rollout:update",
   "platform:users:create",
   "platform:users:role:update",
   "platform:access-reviews:decide",
@@ -37,7 +41,13 @@ export const IAM_STEP_UP_ACTION_IDS = [
   "platform:partner-credentials:issue",
   "platform:partner-credentials:revoke",
   "platform:tenants:roles:invite",
+  "platform:tenants:rollback-hold",
+  "platform:tenants:suspend",
   "platform:tenants:activate",
+  "platform:maintenance-mode:update",
+  "platform:pricing-rules:create",
+  "platform:pricing-rules:publish",
+  "platform:feature-flags:tenant-override:update",
   "platform:multi-taxi-trip-records:export",
   "platform:evidence-exports:request",
   "platform:evidence-exports:approve",

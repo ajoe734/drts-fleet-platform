@@ -18,6 +18,30 @@ const PRIVILEGED_ROUTE_FIXTURES: Array<{
 }> = [
   {
     method: "POST",
+    path: "/api/platform-admin/tenants",
+    realm: "platform",
+    actionId: "platform:tenants:create",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/tenants/tenant-001/settings",
+    realm: "platform",
+    actionId: "platform:tenants:settings:update",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/tenants/tenant-001/onboarding",
+    realm: "platform",
+    actionId: "platform:tenants:onboarding:update",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/tenants/tenant-001/rollout",
+    realm: "platform",
+    actionId: "platform:tenants:rollout:update",
+  },
+  {
+    method: "POST",
     path: "/api/platform-admin/users",
     realm: "platform",
     actionId: "platform:users:create",
@@ -54,6 +78,42 @@ const PRIVILEGED_ROUTE_FIXTURES: Array<{
   },
   {
     method: "POST",
+    path: "/api/platform-admin/tenants/tenant-001/rollback-hold",
+    realm: "platform",
+    actionId: "platform:tenants:rollback-hold",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/tenants/tenant-001/suspend",
+    realm: "platform",
+    actionId: "platform:tenants:suspend",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/maintenance-mode",
+    realm: "platform",
+    actionId: "platform:maintenance-mode:update",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/pricing-rules",
+    realm: "platform",
+    actionId: "platform:pricing-rules:create",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/pricing-rules/rule-001/publish",
+    realm: "platform",
+    actionId: "platform:pricing-rules:publish",
+  },
+  {
+    method: "POST",
+    path: "/api/admin/flags/phase1.smoke-paths/tenant-overrides?tenantId=tenant-001",
+    realm: "platform",
+    actionId: "platform:feature-flags:tenant-override:update",
+  },
+  {
+    method: "POST",
     path: "/api/tenant/users",
     realm: "tenant",
     actionId: "tenant:users:create",
@@ -82,11 +142,7 @@ describe("step-up policy catalog", () => {
   it("maps named privileged routes to the declared step-up action ids", () => {
     for (const fixture of PRIVILEGED_ROUTE_FIXTURES) {
       expect(
-        resolveRouteStepUpPolicy(
-          fixture.method,
-          fixture.path,
-          fixture.realm,
-        ),
+        resolveRouteStepUpPolicy(fixture.method, fixture.path, fixture.realm),
       ).toMatchObject({
         actionId: fixture.actionId,
       });
