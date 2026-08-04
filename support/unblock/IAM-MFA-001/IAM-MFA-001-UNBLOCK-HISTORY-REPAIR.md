@@ -6,7 +6,7 @@
 - Parent: `IAM-MFA-001`
 - Owner: `Codex`
 - Reviewer: `Claude`
-- Audit timestamp: `2026-08-04T14:18:18Z`
+- Audit timestamp: `2026-08-04T14:38:44Z`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-unblock-history-repair`
 - Assigned helper branch:
@@ -71,6 +71,10 @@ and continue integration from that new clean rail.
   - `git rev-list --left-right --count origin/dev...HEAD` => `0 3`
   - `gh pr view 1303 --json statusCheckRollup` at `2026-08-04T14:18:18Z`
     shows `Commit trailers = SUCCESS`
+- current GitHub integration state for the same PR:
+  - `gh pr view 1303 --json statusCheckRollup` at `2026-08-04T14:32:31Z`
+    shows `iam-negative-matrix = FAILURE`, `e2e = FAILURE`, and downstream
+    `ci-integ = FAILURE`
 - PR `#1303` is the first rail that:
   - starts directly from `origin/dev`
   - avoids merge commits from prior contaminated rails
@@ -110,20 +114,23 @@ Do not force-push any existing branch. Do not rewrite `codex/iam-mfa-001`,
 5. Do not move the parent forward as integrated until machine truth references
    the clean rail rather than the contaminated rails.
 
-## Parent Resume Contract
+## Parent Resume Status
 
 `IAM-MFA-001` must not stay `done` with `integration_status=not_applicable`.
 The unblock result proves the parent still needs active integration follow-up.
 
-When this unblock task is finalized, the parent should be resumed via the
-automatic `helper_parent` handoff with:
+That machine-truth correction has now been executed:
 
-- `PARENT_STATUS=in_progress`
-- `PARENT_NEXT` describing `#1303` as the canonical clean route and explicitly
-  calling out that `#1287` / `#1293` are superseded contaminated attempts
+- `AI_NAME=Codex scripts/ai-status.sh reopen IAM-MFA-001 "..."`
+- `IAM-MFA-001` is now `status=in_progress` as of `2026-08-04T14:38:44Z`
+- `next` now points to PR `#1303` on
+  `codex/iam-mfa-001-clean-route @ e3ecc0a0` and marks `#1287` / `#1293` as
+  audit-only contaminated attempts
 
-That is the machine-truth proof that the parent can proceed only after the
-canonical evidence is updated.
+The legacy parent `integration_status=not_applicable` field remains historical
+metadata from the earlier incorrect closeout, but the task is no longer in a
+terminal `done` state and therefore no longer claims that integration is
+complete.
 
 ## Validation Status
 
@@ -137,10 +144,28 @@ canonical evidence is updated.
 
 ### What is still pending on the new clean rail
 
-At `2026-08-04T14:18:18Z`, PR `#1303` still has in-flight integration checks
-(`build`, `unit`, `integration`, `iam-negative-matrix`, `e2e`, etc.).
-This task repairs history contamination; it does not claim those broader suites
-have already passed.
+At `2026-08-04T14:32:31Z`, PR `#1303` no longer has in-flight integration
+checks. The clean rail is trailer-compliant, but it is not yet a validated
+`merged_to_dev` route because `CI (integration trunk)` failed:
+
+- `iam-negative-matrix` failed in run `30918215661`
+  - hermetic `E2E-004` failed on `POST /api/platform-admin/tenants`
+  - hermetic `E2E-018` failed on `POST /api/auth/driver/device/register`
+  - both returned `401` with `JWT_INVALID`
+- `e2e` failed in run `30918215661`
+  - hermetic failures include `E2E-001`, `002`, `003`, `004`, `007`, `008`,
+    `011`, `012`, `013`, `014`, `015`, `016`, `017`, `018`, `019`, `020`,
+    `021`, and `022`
+  - the repeated signature is `401 JWT_INVALID` on authenticated routes such as
+    `/api/regulatory-registry/driver-location`,
+    `/api/forwarder/orders/inbound`, `/api/admin/service-products`, and
+    `/api/driver/location-heartbeats/batch`
+- `ci-integ` then concluded `FAILURE` because the upstream integration jobs did
+  not pass
+
+This means Acceptance 2 remains open: the clean route is documented and proven
+history-safe, but it is blocked on real runtime/auth integration failures
+rather than branch contamination.
 
 ## Why This Is Safe
 
@@ -159,6 +184,7 @@ have already passed.
   - `AI_NAME=Codex scripts/ai-status.sh show IAM-MFA-001-UNBLOCK-HISTORY-REPAIR`
   - `AI_NAME=Codex scripts/ai-status.sh show IAM-MFA-001`
   - `AI_NAME=Codex scripts/ai-status.sh progress IAM-MFA-001-UNBLOCK-HISTORY-REPAIR "..."`
+  - `AI_NAME=Codex scripts/ai-status.sh reopen IAM-MFA-001 "..."`
 - Inspected contaminated rails and PRs:
   - `gh pr view 1287 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,reviewDecision,updatedAt`
   - `gh pr view 1293 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,reviewDecision,updatedAt`
@@ -178,6 +204,8 @@ have already passed.
   - `git push -u origin codex/iam-mfa-001-clean-route`
   - `gh pr create --base dev --head codex/iam-mfa-001-clean-route ...`
   - `gh pr view 1303 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,updatedAt`
+  - `gh run view 30918215661 --job 92021690866 --log-failed`
+  - `gh run view 30918215661 --job 92021690769 --log-failed`
 
 ## Verification Limits
 
