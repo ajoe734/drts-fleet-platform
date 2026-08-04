@@ -132,6 +132,8 @@ describe("security events service", () => {
         "tenant_bootstrap_session.issued",
         "tenant_user.invited",
         "tenant_api_key.issued",
+        "tenant_webhook.issued",
+        "tenant_webhook.rotated",
         "break_glass.activated",
       ]),
     );
@@ -219,5 +221,76 @@ describe("tenant-partner privileged security events", () => {
       plaintextKey: "[REDACTED]",
     });
     expect(JSON.stringify(event)).not.toContain(issued.plaintextKey);
+  });
+
+  it("records webhook credential issuance and rotation without persisting plaintext secrets", async () => {
+    const securityEventsService = new SecurityEventsService();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService,
+    );
+
+    const identity = makeIdentity({ actorId: "tenant-admin-888" });
+    const created = await Promise.resolve(
+      service.createWebhookEndpoint(
+        TENANT_ID,
+        {
+          url: "https://tenant.example/webhooks/security",
+          secret: "whsec_issue_secret_001",
+          events: ["booking.created"],
+        },
+        "req-webhook-sec-001",
+        identity,
+      ),
+    );
+
+    await Promise.resolve(
+      service.rotateWebhookSecret(
+        TENANT_ID,
+        {
+          webhookId: created.webhookId,
+          secret: "whsec_rotate_secret_002",
+          rotationReason: "scheduled_rotation",
+        },
+        "req-webhook-sec-002",
+        identity,
+      ),
+    );
+
+    const issuedItems = await securityEventsService.listEvents(identity, {
+      eventType: "tenant_webhook.issued",
+      limit: 1,
+    });
+    const rotatedItems = await securityEventsService.listEvents(identity, {
+      eventType: "tenant_webhook.rotated",
+      limit: 1,
+    });
+
+    expect(issuedItems).toHaveLength(1);
+    expect(rotatedItems).toHaveLength(1);
+
+    const issuedEvent = issuedItems[0] as SecurityEventRecord;
+    const rotatedEvent = rotatedItems[0] as SecurityEventRecord;
+
+    expect(issuedEvent.actorId).toBe("tenant-admin-888");
+    expect(rotatedEvent.actorId).toBe("tenant-admin-888");
+    expect(issuedEvent.maskedContext).toMatchObject({
+      plaintextSecret: "[REDACTED]",
+      secretVersion: 1,
+    });
+    expect(rotatedEvent.maskedContext).toMatchObject({
+      plaintextSecret: "[REDACTED]",
+      secretVersion: 2,
+    });
+    expect(JSON.stringify(issuedEvent)).not.toContain("whsec_issue_secret_001");
+    expect(JSON.stringify(rotatedEvent)).not.toContain(
+      "whsec_rotate_secret_002",
+    );
   });
 });

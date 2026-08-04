@@ -1602,6 +1602,7 @@ export class TenantPartnerController {
   @Post("tenant/webhooks")
   createWebhookEndpoint(
     @Body() command: CreateTenantWebhookEndpointCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -1610,6 +1611,7 @@ export class TenantPartnerController {
         this.requireTenantId(tenantId),
         command,
         requestId,
+        identity,
       ),
       requestId,
     );
@@ -1639,6 +1641,7 @@ export class TenantPartnerController {
   updateWebhookEndpoint(
     @Param("webhookId") webhookId: string,
     @Body() command: UpdateTenantWebhookEndpointCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -1648,6 +1651,7 @@ export class TenantPartnerController {
         webhookId,
         command,
         requestId,
+        identity,
       ),
       requestId,
     );
@@ -1657,6 +1661,7 @@ export class TenantPartnerController {
   deleteWebhookEndpoint(
     @Param("webhookId") webhookId: string,
     @Body() command: DeleteTenantWebhookEndpointCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -1666,6 +1671,7 @@ export class TenantPartnerController {
         webhookId,
         command,
         requestId,
+        identity,
       ) ?? {
         status: "not_found",
       },
@@ -1681,6 +1687,7 @@ export class TenantPartnerController {
       secret: string;
       rotationReason?: string;
     },
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -1694,6 +1701,7 @@ export class TenantPartnerController {
           : {}),
       },
       requestId,
+      identity,
     );
 
     return toApiSuccessEnvelope(

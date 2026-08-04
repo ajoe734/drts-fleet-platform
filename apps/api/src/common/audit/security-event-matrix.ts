@@ -106,6 +106,24 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     requiredOutcomes: ["revoked", "success"],
   },
   {
+    eventType: "tenant_webhook.issued",
+    eventFamily: "credential",
+    description:
+      "Tenant webhook credential issuance with masked secret metadata only.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "tenant_webhook.rotated",
+    eventFamily: "credential",
+    description:
+      "Tenant webhook credential rotation with overlap and expiry metadata.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success", "revoked"],
+  },
+  {
     eventType: "authz.denied",
     eventFamily: "policy",
     description:

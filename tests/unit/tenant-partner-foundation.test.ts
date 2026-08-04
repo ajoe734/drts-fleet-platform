@@ -699,7 +699,7 @@ describe("tenant partner foundation service", () => {
     expect(endpoint?.secretVersion).toBe(2);
     expect(endpoint?.runtimeMetadata.secretRotation.rotationCount).toBe(2);
     expect(
-      endpoint?.runtimeMetadata.secretRotation.history[1]?.rotationReason,
+      endpoint?.runtimeMetadata.secretRotation.history[0]?.rotationReason,
     ).toBe("quarterly-rotation");
     expect(auditService.listAuditLogs()[0]?.actionName).toBe(
       "rotate_webhook_secret",
@@ -819,6 +819,45 @@ describe("tenant partner foundation service", () => {
     expect(rotatedApiKey.revokedApiKeyId).toBe(issuedApiKey.apiKey.apiKeyId);
     expect(rotatedApiKey.plaintextKey).toMatch(/^tk_/);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe("rotate_api_key");
+  });
+
+  it("fails closed when rotating a revoked tenant api key", async () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const issuedApiKey = await tenantPartnerService.issueApiKey(
+      TENANT_ID,
+      {
+        keyName: "Revoked Tenant Key",
+        scopes: ["tenant:read"],
+      },
+      "tenant-api-key-issue-request",
+    );
+
+    tenantPartnerService.revokeApiKey(
+      TENANT_ID,
+      issuedApiKey.apiKey.apiKeyId,
+      "tenant-api-key-revoke-request",
+    );
+
+    expect(() =>
+      tenantPartnerService.rotateApiKey(
+        TENANT_ID,
+        issuedApiKey.apiKey.apiKeyId,
+        {
+          scopes: ["tenant:read", "tenant:write"],
+        },
+        "tenant-api-key-rotate-request",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "API_KEY_ROTATION_NOT_ALLOWED",
+          }),
+        }),
+      }),
+    );
   });
 
   it("isolates tenant-partner state by tenant id", async () => {
@@ -1415,15 +1454,33 @@ describe("tenant partner foundation service", () => {
         ],
       }),
     );
-    expect(persistChanges).toHaveBeenCalledWith(
+    const apiKeyPersistCall = persistChanges.mock.calls
+      .map(([changes]) => changes)
+      .find(
+        (changes) =>
+          Array.isArray(changes?.apiKeys) &&
+          changes.apiKeys.some(
+            (apiKey: { apiKeyId?: string }) =>
+              apiKey.apiKeyId === "tenant-api-key-persisted-001",
+          ) &&
+          changes.apiKeys.some(
+            (apiKey: { keyName?: string }) =>
+              apiKey.keyName === "Persisted Tenant Key v2",
+          ),
+      );
+
+    expect(apiKeyPersistCall).toEqual(
       expect.objectContaining({
         apiKeys: expect.arrayContaining([
           expect.objectContaining({
             apiKeyId: "tenant-api-key-persisted-001",
-            revokedAt: expect.any(String),
+            status: "overlap_active",
+            revokedAt: null,
+            supersededByApiKeyId: expect.any(String),
           }),
           expect.objectContaining({
             keyName: "Persisted Tenant Key v2",
+            rotatedFromApiKeyId: "tenant-api-key-persisted-001",
           }),
         ]),
       }),
