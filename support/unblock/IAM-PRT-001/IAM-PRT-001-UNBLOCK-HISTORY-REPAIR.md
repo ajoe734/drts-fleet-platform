@@ -204,3 +204,15 @@ Concrete next step:
 
 No runtime tests were run in this helper task. This repair is branch-history
 triage plus unblock routing only.
+
+## Owner Closeout Evidence
+
+- reviewer approval is recorded in machine truth as `review_approved` for
+  `IAM-PRT-001-UNBLOCK-HISTORY-REPAIR`
+- helper branch tip for owner closeout:
+  `codex/iam-prt-001-unblock-history-repair @ 43196e75eec6f52343a3e3f21a070b8d9a527e6b`
+- remote branch tip confirmed with
+  `git ls-remote --heads origin 'refs/heads/codex/iam-prt-001-unblock-history-repair'`
+  at the same `43196e75eec6f52343a3e3f21a070b8d9a527e6b`
+- owner finalization remains branch-level only for this helper task, so
+  `INTEGRATION_STATUS=branch_pushed` is the correct closeout status
