@@ -97,6 +97,20 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
+      # Built here rather than inside the test: a cold image build is minutes of
+      # work, and paying for it inside a vitest budget made the suite fail with
+      # "Test timed out" on branches that never touched it. Buildx cache keeps
+      # this near-free on repeat runs, and the failure now names the real cause.
+      - name: Build API image for the control-plane resolution test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: drts-api:test
+          push: false
+          load: true
+          cache-from: type=gha,scope=api-test-image
+          cache-to: type=gha,scope=api-test-image,mode=max
       - run: pnpm run test:unit
 
   integration:
