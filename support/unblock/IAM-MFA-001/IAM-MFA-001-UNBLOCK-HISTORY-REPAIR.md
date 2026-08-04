@@ -6,7 +6,7 @@
 - Parent: `IAM-MFA-001`
 - Owner: `Codex`
 - Reviewer: `Claude`
-- Audit timestamp: `2026-08-04T14:38:44Z`
+- Audit timestamp: `2026-08-04T15:08:00Z`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-unblock-history-repair`
 - Assigned helper branch:
@@ -87,6 +87,10 @@ and continue integration from that new clean rail.
   - `gh pr view 1303 --json statusCheckRollup` at `2026-08-04T14:32:31Z`
     shows `iam-negative-matrix = FAILURE`, `e2e = FAILURE`, and downstream
     `ci-integ = FAILURE`
+- baseline integration comparison on `dev`:
+  - `gh run list --workflow "CI (integration trunk)" --branch dev --limit 5`
+    at `2026-08-04T15:01:xxZ` shows the most recent completed `dev` run
+    `30906537102` for `ORCH-QUEUE-VALIDATION-004` concluded `success`
 - PR `#1303` is the first rail that:
   - starts directly from `origin/dev`
   - avoids merge commits from prior contaminated rails
@@ -180,6 +184,28 @@ This means Acceptance 2 remains open: the clean route is documented and proven
 history-safe, but it is blocked on real runtime/auth integration failures
 rather than branch contamination.
 
+Those failures are now narrowed to the clean-route helper delta rather than an
+ambient `dev` outage:
+
+- `origin/dev` had a successful completed `CI (integration trunk)` run
+  (`30906537102`) earlier on `2026-08-04`
+- the last clean-route-only commit on PR `#1303` is
+  `e3ecc0a0 IAM-MFA-001: gate runtime step-up helper`
+- that commit only changes `tests/e2e/lib/helpers.sh`
+- the helper now auto-mints `x-drts-authorization` runtime bearer tokens for
+  every mutating request, and when such a bearer exists it suppresses the
+  legacy bootstrap `x-actor-*` headers
+- the resulting failures are concentrated on authenticated mutating routes that
+  previously relied on bootstrap actor headers, producing `401 JWT_INVALID` on
+  paths such as `/api/platform-admin/tenants`,
+  `/api/regulatory-registry/driver-location`,
+  `/api/forwarder/orders/inbound`,
+  `/api/admin/service-products`, and
+  `/api/driver/location-heartbeats/batch`
+
+So the remaining block is no longer "clean route unknown"; it is a concrete
+runtime-bearer regression introduced on top of the repaired history-safe rail.
+
 Acceptance 3 is now satisfied in machine truth: the parent may proceed only
 against PR `#1303`, and canonical status no longer implies that integration is
 complete or not applicable.
@@ -225,6 +251,10 @@ complete or not applicable.
   - `gh pr view 1303 --json number,title,state,url,headRefName,baseRefName,headRefOid,commits,statusCheckRollup,mergeable,updatedAt`
   - `gh run view 30918215661 --job 92021690866 --log-failed`
   - `gh run view 30918215661 --job 92021690769 --log-failed`
+  - `gh run list --workflow "CI (integration trunk)" --branch dev --limit 5 --json databaseId,headSha,status,conclusion,createdAt,updatedAt,displayTitle,event`
+  - `git show --stat --summary e3ecc0a0ee6db9258358c25cf096ad032b054aea`
+  - `sed -n '1,260p' tests/e2e/lib/helpers.sh`
+  - `git show e3ecc0a0ee6db9258358c25cf096ad032b054aea^:tests/e2e/lib/helpers.sh | sed -n '1,260p'`
 
 ## Verification Limits
 
