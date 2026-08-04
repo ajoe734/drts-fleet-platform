@@ -98,13 +98,27 @@ helper worktree being on a separate audit rail, not by missing feature work.
 ### Machine-truth evidence
 
 - `AI_NAME=Codex scripts/ai-status.sh show IAM-PRT-001` reports the parent as
-  `blocked`.
-- Its `next` field currently says the owner closeout commit `ff27bbb0` is
-  pushed and that the remaining gate is integration-level evidence.
+  `in_progress` after this repair.
+- Its `next` field now explicitly says the history ambiguity is resolved and
+  PR `#1294` is the canonical integration rail to monitor.
 - That statement is only half-usable in this clone because the local
   `origin/codex/iam-prt-001` ref contradicts it. Without checking `ls-remote`,
   a worker is led toward the false conclusion that the owner branch was never
   pushed.
+
+### Review and verification evidence
+
+- helper task commit:
+  `6b2bf90fcdb15402273c96e362428883f09e7d2c`
+  (`docs(IAM-PRT-001-UNBLOCK-HISTORY-REPAIR): record branch history repair`)
+- helper task pushed branch:
+  `origin/codex/iam-prt-001-unblock-history-repair`
+- helper task PR:
+  `#1295`
+  `https://github.com/ajoe734/drts-fleet-platform/pull/1295`
+- repaired parent integration PR:
+  `#1294`
+  `https://github.com/ajoe734/drts-fleet-platform/pull/1294`
 
 ## Exact Contamination
 
