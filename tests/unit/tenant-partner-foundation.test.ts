@@ -1208,7 +1208,9 @@ describe("tenant partner foundation service", () => {
 
   it("rehydrates persisted tenant settings and writes webhook delivery changes through the repository", async () => {
     const auditService = new AuditNotificationService();
-    const persistChanges = vi.fn(async () => undefined);
+    const persistChanges = vi.fn<
+      (changes: PersistTenantPartnerChanges) => Promise<void>
+    >(async (_changes) => undefined);
     const persistedEndpoint: StoredWebhookEndpointRecord = {
       webhookId: "wh_persisted_001",
       tenantId: "tenant-demo-001",
@@ -1454,9 +1456,9 @@ describe("tenant partner foundation service", () => {
         ],
       }),
     );
-    const persistedChanges = (
-      persistChanges.mock.calls as Array<[PersistTenantPartnerChanges]>
-    ).map(([changes]) => changes);
+    const persistedChanges = persistChanges.mock.calls.map(
+      ([changes]) => changes as PersistTenantPartnerChanges,
+    );
     const apiKeyPersistCall = persistedChanges
       .find(
         (changes) =>

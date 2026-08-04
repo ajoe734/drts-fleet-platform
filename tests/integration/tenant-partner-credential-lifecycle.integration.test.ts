@@ -158,6 +158,9 @@ describe("tenant partner credential lifecycle integration", () => {
       tenantIdentity,
     );
     expect(failedDelivery).toBeDefined();
+    if (!failedDelivery) {
+      throw new Error("Expected failed webhook delivery fixture");
+    }
     expect(failedDelivery).toMatchObject({
       status: "delivery_failed",
       secretVersion: 1,
