@@ -23,6 +23,9 @@ export type IamStage15ErrorCode = (typeof IAM_STAGE15_ERROR_CODES)[number];
 export const IAM_STEP_UP_ACTION_IDS = [
   "platform:users:create",
   "platform:users:role:update",
+  "platform:access-reviews:decide",
+  "platform:break-glass:request",
+  "platform:break-glass:approve",
   "platform:partner-entries:create",
   "platform:partner-entries:update",
   "platform:partner-entries:activate",
