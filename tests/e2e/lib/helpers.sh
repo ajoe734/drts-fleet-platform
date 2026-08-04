@@ -19,6 +19,10 @@ E2E_AUTH_BEARER_TOKEN="${E2E_AUTH_BEARER_TOKEN:-}"
 # Optional application bearer token. This uses x-drts-authorization so it does
 # not collide with Cloud Run / ingress Authorization headers.
 E2E_REQUEST_BEARER_TOKEN="${E2E_REQUEST_BEARER_TOKEN:-}"
+# Opt-in for runtime-minted bearer + step-up proof flow. Leave disabled by
+# default because workforce bootstrap tokens without durable memberships fail
+# platform/ops JWT validation in the generic hermetic suites.
+E2E_ENABLE_RUNTIME_STEP_UP="${E2E_ENABLE_RUNTIME_STEP_UP:-}"
 E2E_INTERNAL_KEY="${E2E_INTERNAL_KEY:-${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}}"
 
 # ── Bootstrap auth (overridden per surface leg via switch_actor) ───────────────
@@ -210,6 +214,14 @@ resolve_step_up_reference() {
 should_force_runtime_bearer() {
   local method="$1"
   local path="$2"
+
+  case "${E2E_ENABLE_RUNTIME_STEP_UP:-}" in
+    1|true|TRUE|yes|YES)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 
   case "${E2E_ACTOR_TYPE:-}" in
     platform_admin|ops_user)
