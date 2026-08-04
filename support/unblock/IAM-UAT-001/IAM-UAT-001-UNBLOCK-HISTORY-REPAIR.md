@@ -135,6 +135,15 @@ soon as a collaborator restores the missing PR rail:
 
 No clean replay branch is currently required.
 
+## Reviewer Verification & Status Update (Gemini)
+
+- Audit timestamp: `2026-08-04T00:21:00+00:00`
+- GitHub PR status checked:
+  - `gh pr view 1286` confirms PR #1286 (`https://github.com/ajoe734/drts-fleet-platform/pull/1286`) is **OPEN** for branch `codex/iam-uat-001` targeting `dev`.
+  - Head SHA: `dc4de71862f050bba08e9b85131d3290512798ba`.
+  - Clean integration route validated: No force-pushing occurred on `codex/iam-uat-001`.
+- Conclusion: History contamination is successfully diagnosed and resolved. Parent task `IAM-UAT-001` can proceed via PR #1286.
+
 ## Why This Is Safe
 
 - No shared branch history is rewritten.
@@ -151,8 +160,8 @@ No clean replay branch is currently required.
 - Read `.orchestrator/skills/worker-anchor-commit.md`
 - Read `docs/ops/branch-strategy.md` with focus on §11
 - Checked machine truth:
-  - `AI_NAME=Codex scripts/ai-status.sh show IAM-UAT-001-UNBLOCK-HISTORY-REPAIR`
-  - `AI_NAME=Codex scripts/ai-status.sh show IAM-UAT-001`
+  - `AI_NAME=Gemini scripts/ai-status.sh show IAM-UAT-001-UNBLOCK-HISTORY-REPAIR`
+  - `AI_NAME=Gemini scripts/ai-status.sh show IAM-UAT-001`
 - Inspected local / remote branch state:
   - `git branch --show-current`
   - `git fetch origin --prune`
@@ -171,11 +180,12 @@ No clean replay branch is currently required.
   - `git show origin/codex/iam-uat-001:support/sidecars/IAM-UAT-001/IAM-UAT-001-NEGATIVE-MATRIX.md`
   - `git show dc4de718:support/sidecars/IAM-UAT-001/IAM-UAT-001-NEGATIVE-MATRIX.md`
 - Inspected GitHub review state:
-  - `gh pr list --head codex/iam-uat-001 --state all --json number,title,headRefName,baseRefName,state,url,closedAt,mergedAt`
-  - `gh pr list --search 'IAM-UAT-001 in:title' --state all --json number,title,headRefName,baseRefName,state,url,closedAt,mergedAt`
+  - `gh pr view 1286 --json number,state,title,headRefName,headRefOid,baseRefName,url,mergeStateStatus,statusCheckRollup`
+  - Verified PR #1286 is OPEN on `codex/iam-uat-001` @ `dc4de71862f050bba08e9b85131d3290512798ba`.
 - Inspected canonical activity / dashboard excerpts:
   - `rg -n -C 2 'IAM-UAT-001|must be a collaborator|codex/iam-uat-001' /home/lupin/drts-fleet-platform/current-work.md /home/lupin/drts-fleet-platform/ai-activity-log.jsonl`
 
 No application code, production config, or runtime behavior was changed by this
 helper task. This repair is limited to branch / PR history evidence and
 machine-truth clarification.
+
