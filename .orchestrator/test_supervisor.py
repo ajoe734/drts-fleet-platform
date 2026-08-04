@@ -1012,6 +1012,42 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["skip_reason"], "stale_dispatch_event")
 
+    def test_marks_event_without_message_manual_pending_without_crashing(self) -> None:
+        task = {
+            "id": "BUS-VAL-MALFORMED-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "last_update": "2026-04-05T11:45:16Z",
+        }
+        queue_payload = {
+            "event_id": "evt-missing-message",
+            "task_id": task["id"],
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+        }
+        state = {"queue": {"events": {}}, "workers": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_event_queue", return_value=[queue_payload]),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
+            mock.patch.object(
+                supervisor,
+                "start_worker_for_request",
+                side_effect=AssertionError("malformed event must not start a worker"),
+            ),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.process_queue(self.config, state, self.provider_report)
+
+        self.assertTrue(changed)
+        record = state["queue"]["events"]["evt-missing-message"]
+        self.assertEqual(record["status"], "manual_pending")
+        self.assertEqual(record["error"], "invalid_queue_event_missing_message")
+        write_activity_log.assert_called_once()
+
     def test_skips_queued_dispatch_when_external_integration_is_pending(self) -> None:
         task = {
             "id": "BUS-VAL-CI-001",
