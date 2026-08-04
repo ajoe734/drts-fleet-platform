@@ -1132,7 +1132,7 @@ describe("owned mobility service", () => {
         new WebhookDispatchService(fetchMock),
       );
 
-      const acmeEndpoint = tenantPartnerService.createWebhookEndpoint(
+      const acmeEndpoint = await tenantPartnerService.createWebhookEndpoint(
         TENANT_ACME,
         {
           url: "https://acme.example.com/webhooks/orders",
@@ -1140,7 +1140,7 @@ describe("owned mobility service", () => {
           events: ["order.created", "order.cancelled"],
         },
       );
-      const newcoEndpoint = tenantPartnerService.createWebhookEndpoint(
+      const newcoEndpoint = await tenantPartnerService.createWebhookEndpoint(
         TENANT_NEWCO,
         {
           url: "https://newco.example.com/webhooks/orders",

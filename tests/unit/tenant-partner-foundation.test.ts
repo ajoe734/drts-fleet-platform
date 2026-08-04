@@ -459,7 +459,7 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -542,7 +542,7 @@ describe("tenant partner foundation service", () => {
         new WebhookDispatchService(fetchMock),
       );
 
-      const webhook = tenantPartnerService.createWebhookEndpoint(
+      const webhook = await tenantPartnerService.createWebhookEndpoint(
         TENANT_ID,
         {
           url: "https://tenant.example.com/webhooks/retry",
@@ -596,7 +596,7 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    const tenantWebhook = tenantPartnerService.createWebhookEndpoint(
+    const tenantWebhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/completed",
@@ -604,7 +604,7 @@ describe("tenant partner foundation service", () => {
         events: ["order.completed"],
       },
     );
-    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+    const otherWebhook = await tenantPartnerService.createWebhookEndpoint(
       OTHER_TENANT_ID,
       {
         url: "https://other.example.com/webhooks/orders",
@@ -668,11 +668,11 @@ describe("tenant partner foundation service", () => {
     expect(String(firstRequestInit?.body)).toContain("order.completed");
   });
 
-  it("rotates webhook secrets and records rotation history", () => {
+  it("rotates webhook secrets and records rotation history", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -682,7 +682,7 @@ describe("tenant partner foundation service", () => {
       "webhook-create-request",
     );
 
-    const rotated = tenantPartnerService.rotateWebhookSecret(
+    const rotated = await tenantPartnerService.rotateWebhookSecret(
       TENANT_ID,
       {
         webhookId: webhook.webhookId,
@@ -706,11 +706,11 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("updates webhook metadata through a first-class tenant command path", () => {
+  it("updates webhook metadata through a first-class tenant command path", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -888,7 +888,7 @@ describe("tenant partner foundation service", () => {
         fullName: "Other Tenant Passenger",
       },
     );
-    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+    const otherWebhook = await tenantPartnerService.createWebhookEndpoint(
       OTHER_TENANT_ID,
       {
         url: "https://other.example.com/webhooks/drts",
@@ -1454,8 +1454,10 @@ describe("tenant partner foundation service", () => {
         ],
       }),
     );
-    const apiKeyPersistCall = persistChanges.mock.calls
-      .map(([changes]) => changes)
+    const persistedChanges = persistChanges.mock.calls.map(
+      ([changes]) => changes as PersistTenantPartnerChanges,
+    );
+    const apiKeyPersistCall = persistedChanges
       .find(
         (changes) =>
           Array.isArray(changes?.apiKeys) &&
