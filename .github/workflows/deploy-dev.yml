@@ -65,6 +65,8 @@ env:
   DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
   DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
   DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
+  DEV_JWT_ISSUER: ${{ vars.DEV_JWT_ISSUER }}
+  DEV_JWT_AUDIENCE: ${{ vars.DEV_JWT_AUDIENCE }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
   DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
   DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
@@ -618,6 +620,12 @@ jobs:
           openclaw_auth_provider=""
           openclaw_home=""
 
+          # One source for both the API (which validates) and the control-plane
+          # web apps (which mint the proxy token). Splitting these is what let
+          # the minted and expected claims drift apart.
+          jwt_issuer="${DEV_JWT_ISSUER:-https://auth.local.drts.internal}"
+          jwt_audience="${DEV_JWT_AUDIENCE:-https://api.local.drts.internal}"
+
           controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
           if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
             echo "::error::Required secret ${controlled_download_secret} not found in project ${project_id}."
@@ -690,6 +698,8 @@ jobs:
             fi
           fi
 
+          echo "jwt_issuer=${jwt_issuer}" >> "$GITHUB_OUTPUT"
+          echo "jwt_audience=${jwt_audience}" >> "$GITHUB_OUTPUT"
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
@@ -723,7 +733,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,AUTH_MODE=explicit,API_PORT=3001,DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,AUTH_MODE=explicit,API_PORT=3001,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
@@ -779,7 +789,7 @@ jobs:
             api_origin="${{ steps.api_url.outputs.url }}"
           fi
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
