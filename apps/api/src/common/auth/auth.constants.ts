@@ -19,6 +19,8 @@ export const AUTH_ROUTE_WRITE_METHODS = new Set([
   "DELETE",
 ]);
 
+export const AUTH_STEP_UP_REFERENCE_HEADER = "x-drts-step-up-reference";
+
 export const AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE: Record<
   AuthActorType,
   AuthRoleFamily[]

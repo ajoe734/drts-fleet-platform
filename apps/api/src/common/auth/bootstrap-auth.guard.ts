@@ -23,6 +23,7 @@ import type {
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { JwtAuthService } from "./jwt-auth.service";
+import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
 
@@ -160,6 +161,8 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional() private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly stepUpProofService?: StepUpProofService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -387,6 +390,7 @@ export class BootstrapAuthGuard implements CanActivate {
                   policy.requiredScopes,
                   request,
                 );
+                this.stepUpProofService?.assertRequestSatisfied(identity, request);
               } catch (error) {
                 this.recordAuthorizationDenialAudit(identity, request, error);
                 throw error;
@@ -455,6 +459,7 @@ export class BootstrapAuthGuard implements CanActivate {
     try {
       this.assertRealmAllowed(identity, policy.allowedRealms, request);
       this.assertScopesAllowed(identity, policy.requiredScopes, request);
+      this.stepUpProofService?.assertRequestSatisfied(identity, request);
     } catch (error) {
       this.recordAuthorizationDenialAudit(identity, request, error);
       throw error;
