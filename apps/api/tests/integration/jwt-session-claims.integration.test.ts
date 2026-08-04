@@ -38,14 +38,33 @@ async function deleteSessionTestData(
   sessionIds: string[],
   principalIds: string[],
 ) {
-  if (sessionIds.length > 0) {
+  const allSessionIds = new Set(sessionIds);
+
+  if (principalIds.length > 0) {
+    const principalSessions = await database.query<{ session_id: string }>(
+      `
+        SELECT session_id
+        FROM iam.identity_sessions
+        WHERE principal_id = ANY($1::text[])
+      `,
+      [principalIds],
+    );
+    for (const row of principalSessions.rows) {
+      if (row.session_id) {
+        allSessionIds.add(row.session_id);
+      }
+    }
+  }
+
+  if (allSessionIds.size > 0) {
+    const resolvedSessionIds = Array.from(allSessionIds);
     await database.query(
       `DELETE FROM iam.identity_refresh_families WHERE session_id = ANY($1::text[])`,
-      [sessionIds],
+      [resolvedSessionIds],
     );
     await database.query(
       `DELETE FROM iam.identity_sessions WHERE session_id = ANY($1::text[])`,
-      [sessionIds],
+      [resolvedSessionIds],
     );
   }
   if (principalIds.length > 0) {

@@ -45,6 +45,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/token" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:token:exchange",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Private token exchange for verified control-plane callers",
+    };
+  }
+
   if (routePath === "notifications") {
     return {
       routeKey: `notifications:${upperMethod}`,
@@ -332,6 +341,18 @@ export function resolveRouteAuthPolicy(
       requiredScopes: scope,
       allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
       description: readRoute ? "Owned mobility read" : "Owned mobility write",
+    };
+  }
+
+  if (
+    routePath === "passenger/orders/:orderId/cancel" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "passenger:orders:cancel",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(),
+      description: "Passenger order cancellation bridge",
     };
   }
 
