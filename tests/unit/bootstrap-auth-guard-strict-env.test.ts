@@ -77,19 +77,17 @@ describe("BootstrapAuthGuard strict environment behavior", () => {
     process.env.JWT_AUDIENCE = "drts-api";
 
     const jwtAuthService = new JwtAuthService();
-    const token = jwtAuthService.sign(
-      {
-        authMode: "jwt_bearer",
-        actorType: "platform_admin",
-        actorId: "platform-admin-001",
-        realm: "platform",
-        tenantId: null,
-        roles: ["superadmin"],
-        scopes: ["foundation:read"],
-        roleFamilies: ["platform"],
-        requestId: null,
-      },
-    );
+    const token = jwtAuthService.sign({
+      authMode: "jwt_bearer",
+      actorType: "platform_admin",
+      actorId: "platform-admin-001",
+      realm: "platform",
+      tenantId: null,
+      roles: ["superadmin"],
+      scopes: ["foundation:read"],
+      roleFamilies: ["platform"],
+      requestId: null,
+    });
     const guard = new BootstrapAuthGuard(
       { getAllAndOverride: () => undefined } as never,
       jwtAuthService,
@@ -116,6 +114,34 @@ describe("BootstrapAuthGuard strict environment behavior", () => {
     } catch (error) {
       expect(error).toMatchObject({
         code: "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+      });
+    }
+  });
+
+  it("enforces authentication policy on runtime request POST /passenger/orders/:orderId/cancel", async () => {
+    process.env.APP_ENV = "development";
+
+    const guard = new BootstrapAuthGuard(
+      { getAllAndOverride: () => undefined } as never,
+      new JwtAuthService(),
+    );
+    const unauthenticatedRequest: any = {
+      headers: {},
+      method: "POST",
+      url: "/api/passenger/orders/ord_123456/cancel",
+    };
+    const context: any = {
+      switchToHttp: () => ({ getRequest: () => unauthenticatedRequest }),
+      getHandler: () => () => undefined,
+      getClass: () => class {},
+    };
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+    try {
+      guard.canActivate(context);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "AUTH_REQUIRED",
       });
     }
   });

@@ -11,9 +11,15 @@ const SECURITY_CRITICAL_CONTROLLERS = [
   "modules/driver-profile/driver-profile.controller.ts",
   "modules/identity/identity.controller.ts",
   "modules/owned-mobility/owned-mobility.controller.ts",
+  "modules/platform-admin/platform-admin.controller.ts",
+  "modules/platform-admin/platform-admin-compliance.controller.ts",
+  "modules/platform-admin/tenant-governance.controller.ts",
   "modules/platform-admin/tenants.controller.ts",
   "modules/regulatory-registry/driver-heartbeat.controller.ts",
   "modules/regulatory-registry/ops-driver-tracking.controller.ts",
+  "modules/regulatory-registry/regulatory-registry.controller.ts",
+  "modules/sandbox-governance/sandbox-governance.controller.ts",
+  "modules/service-product/service-product.controller.ts",
   "modules/tenant-partner/tenant-partner.controller.ts",
 ] as const;
 const HTTP_DECORATORS = new Map<string, string>([
@@ -143,11 +149,19 @@ function listSecurityRoutes() {
 }
 
 describe("IAM security-critical route inventory", () => {
-  it("classifies every security-critical controller route", () => {
+  it("classifies every security-critical controller route including admin/service-products and admin/sandbox-governance", () => {
     const { discovered, uncovered } = listSecurityRoutes();
 
-    expect(discovered.length).toBeGreaterThan(40);
+    expect(discovered.length).toBeGreaterThan(60);
     expect(uncovered).toEqual([]);
+
+    const set = new Set(SECURITY_CRITICAL_CONTROLLERS as readonly string[]);
+    expect(
+      set.has("modules/service-product/service-product.controller.ts"),
+    ).toBe(true);
+    expect(
+      set.has("modules/sandbox-governance/sandbox-governance.controller.ts"),
+    ).toBe(true);
   });
 
   it("keeps the inventory rooted in the expected controller set", () => {
