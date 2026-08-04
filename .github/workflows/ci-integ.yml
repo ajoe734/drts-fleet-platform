@@ -180,6 +180,11 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
+      # The suite asserts denial behaviour against real iam.* tables; without
+      # the schema every case fails with `relation "iam.identity_principals"
+      # does not exist` rather than testing anything.
+      - name: Apply migrations
+        run: pnpm db:migrate
       - name: Run IAM negative matrix
         run: pnpm run test:security:iam-negative-matrix
 
