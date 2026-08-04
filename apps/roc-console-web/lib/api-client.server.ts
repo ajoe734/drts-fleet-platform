@@ -1,5 +1,8 @@
 import { ApiClient } from "@drts/api-client";
-import { issueControlPlaneRequestAuth } from "@drts/control-plane-auth";
+import {
+  isStrictControlPlaneIapEnvironment,
+  issueControlPlaneRequestAuth,
+} from "@drts/control-plane-auth";
 import { headers as nextHeaders } from "next/headers";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
@@ -39,9 +42,7 @@ async function mintMetadataIdentityToken(
 export async function getServerRocClient(): Promise<ApiClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
-  const strictIapMode =
-    process.env.STRICT_IAP_MODE === "true" ||
-    process.env.NODE_ENV === "production";
+  const strictIapMode = isStrictControlPlaneIapEnvironment();
   const iapJwtSecretOrPublicKey =
     process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
     process.env.IAP_JWT_SECRET ||
