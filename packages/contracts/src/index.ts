@@ -1,6 +1,7 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 export * from "./iam-contracts";
+export * from "./iam-step-up-contracts";
 import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
 import type {
   SandboxAuthorizationStatus,

@@ -8,4 +8,6 @@ export * from "./bootstrap-auth.guard";
 export * from "./feature-gate.guard";
 export * from "./internal-key.middleware";
 export * from "./jwt-auth.service";
+export * from "./mfa-step-up.policy";
+export * from "./step-up.guard";
 export * from "./signing-key-ring";

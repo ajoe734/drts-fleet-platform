@@ -12,6 +12,7 @@ import {
   BootstrapAuthGuard,
   FeatureGateGuard,
   InternalKeyMiddleware,
+  StepUpGuard,
 } from "./common/auth";
 import { JwtAuthService } from "./common/auth/jwt-auth.service";
 import { LlmGatewayModule } from "./common/llm-gateway";
@@ -125,6 +126,12 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     {
       provide: APP_GUARD,
       useClass: BootstrapAuthGuard,
+    },
+    {
+      // Runs after BootstrapAuthGuard so it evaluates the canonical
+      // server-projected identity rather than anything the caller sent.
+      provide: APP_GUARD,
+      useClass: StepUpGuard,
     },
     {
       provide: APP_GUARD,

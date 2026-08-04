@@ -115,6 +115,33 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     requiredOutcomes: ["denied"],
   },
   {
+    eventType: "mfa.step_up_satisfied",
+    eventFamily: "policy",
+    description:
+      "Privileged action cleared the MFA / step-up policy through trusted amr, acr and auth_time evidence.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "mfa.step_up_denied",
+    eventFamily: "policy",
+    description:
+      "Privileged action was refused because MFA evidence was missing, untrusted, too weak, stale, or bound to another session or action.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["denied"],
+  },
+  {
+    eventType: "mfa.step_up_not_enforced",
+    eventFamily: "policy",
+    description:
+      "Privileged action ran under a local bootstrap fixture identity where step-up is not enforced; impossible in strict environments.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
     eventType: "break_glass.activated",
     eventFamily: "break_glass",
     description:

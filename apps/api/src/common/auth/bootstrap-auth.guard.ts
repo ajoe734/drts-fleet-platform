@@ -274,6 +274,18 @@ export class BootstrapAuthGuard implements CanActivate {
       subject: resolved.principal.subject,
       realm: resolved.membership.realm as "platform" | "ops",
       tenantId: null,
+      principalId: resolved.principal.principalId,
+      membershipId: resolved.membership.membershipId,
+      // The IAP path has no durable session record yet (that lands with the
+      // identity session store), so the membership is the session binding a
+      // step-up proof can be tied to.
+      sessionId: `iap:${resolved.membership.membershipId}`,
+      tokenVersion: resolved.tokenVersion,
+      // Server-owned authentication evidence from the verified IAP assertion.
+      // The MFA / step-up policy reads these; a caller cannot supply them.
+      authTime: resolved.authTime,
+      amr: resolved.authMethods,
+      acr: resolved.assurance,
       roleFamilies: [resolved.membership.realm as "platform" | "ops"],
       roles: resolved.effectiveRoles,
       scopes: resolved.effectiveScopes,

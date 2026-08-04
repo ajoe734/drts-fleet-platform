@@ -52,6 +52,11 @@ export interface ResolvedIapWorkforceSubject {
   effectiveScopes: string[];
   tokenVersion: number;
   driftDetected: boolean;
+  /** Server-owned authentication evidence for the MFA / step-up policy. */
+  authMethods: string[];
+  assurance: "aal1" | "aal2" | "aal3";
+  /** Authentication time from the verified assertion, or null when absent. */
+  authTime: string | null;
   driftDetails?: {
     originalRoles: string[];
     effectiveRoles: string[];
@@ -651,8 +656,29 @@ export class IAPSubjectAdapter {
       effectiveScopes: Array.from(effectiveScopesSet),
       tokenVersion,
       driftDetected: hasDrift,
+      authMethods: ["verified_iap_workforce"],
+      assurance: "aal2",
+      authTime: this.resolveAssertionAuthTime(payload),
       ...(driftDetails ? { driftDetails } : {}),
     };
+  }
+
+  /**
+   * Authentication time for the step-up freshness window, taken only from the
+   * verified assertion. When the assertion carries neither `auth_time` nor
+   * `iat` the result is null, and the MFA / step-up policy fails closed rather
+   * than treating an unknown login time as "just now".
+   */
+  private resolveAssertionAuthTime(payload: IapJwtPayload): string | null {
+    const rawAuthTime = payload["auth_time"];
+    const seconds =
+      typeof rawAuthTime === "number" && Number.isFinite(rawAuthTime)
+        ? rawAuthTime
+        : typeof payload.iat === "number" && Number.isFinite(payload.iat)
+          ? payload.iat
+          : null;
+
+    return seconds === null ? null : new Date(seconds * 1000).toISOString();
   }
 
   private isInactiveStatus(status: CanonicalAccountStatus): boolean {
