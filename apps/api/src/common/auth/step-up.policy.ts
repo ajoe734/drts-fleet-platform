@@ -37,6 +37,34 @@ function regexMatch(expectedMethod: string, pattern: RegExp) {
 
 const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
   {
+    actionId: "platform:tenants:create",
+    description: "Platform tenant creation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: exactMatch("POST", "platform-admin/tenants"),
+  },
+  {
+    actionId: "platform:tenants:settings:update",
+    description: "Platform tenant settings update",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch("POST", /^platform-admin\/tenants\/[^/]+\/settings$/),
+  },
+  {
+    actionId: "platform:tenants:onboarding:update",
+    description: "Platform tenant onboarding update",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch("POST", /^platform-admin\/tenants\/[^/]+\/onboarding$/),
+  },
+  {
+    actionId: "platform:tenants:rollout:update",
+    description: "Platform tenant rollout stage update",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch("POST", /^platform-admin\/tenants\/[^/]+\/rollout$/),
+  },
+  {
     actionId: "platform:users:create",
     description: "Platform user invitation and privileged user creation",
     freshnessWindowMs: 10 * MINUTE_MS,
@@ -152,11 +180,59 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
     ),
   },
   {
+    actionId: "platform:tenants:rollback-hold",
+    description: "Platform tenant rollback hold",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/tenants\/[^/]+\/rollback-hold$/,
+    ),
+  },
+  {
+    actionId: "platform:tenants:suspend",
+    description: "Platform tenant suspension",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch("POST", /^platform-admin\/tenants\/[^/]+\/suspend$/),
+  },
+  {
     actionId: "platform:tenants:activate",
     description: "Platform tenant activation",
     freshnessWindowMs: 10 * MINUTE_MS,
     enforcedRealms: ["platform"],
     matches: regexMatch("POST", /^platform-admin\/tenants\/[^/]+\/activate$/),
+  },
+  {
+    actionId: "platform:maintenance-mode:update",
+    description: "Platform maintenance mode mutation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: exactMatch("POST", "platform-admin/maintenance-mode"),
+  },
+  {
+    actionId: "platform:pricing-rules:create",
+    description: "Platform pricing rule creation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: exactMatch("POST", "platform-admin/pricing-rules"),
+  },
+  {
+    actionId: "platform:pricing-rules:publish",
+    description: "Platform pricing rule publication",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/pricing-rules\/[^/]+\/publish$/,
+    ),
+  },
+  {
+    actionId: "platform:feature-flags:tenant-override:update",
+    description: "Tenant-scoped feature flag override update",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch("POST", /^admin\/flags\/[^/]+\/tenant-overrides$/),
   },
   {
     actionId: "platform:multi-taxi-trip-records:export",
@@ -293,30 +369,21 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
     description: "Tenant approval request approval",
     freshnessWindowMs: 15 * MINUTE_MS,
     enforcedRealms: ["tenant", "platform"],
-    matches: regexMatch(
-      "POST",
-      /^tenant\/approval-requests\/[^/]+\/approve$/,
-    ),
+    matches: regexMatch("POST", /^tenant\/approval-requests\/[^/]+\/approve$/),
   },
   {
     actionId: "tenant:approval-requests:reject",
     description: "Tenant approval request rejection",
     freshnessWindowMs: 15 * MINUTE_MS,
     enforcedRealms: ["tenant", "platform"],
-    matches: regexMatch(
-      "POST",
-      /^tenant\/approval-requests\/[^/]+\/reject$/,
-    ),
+    matches: regexMatch("POST", /^tenant\/approval-requests\/[^/]+\/reject$/),
   },
   {
     actionId: "tenant:approval-requests:escalate",
     description: "Tenant approval request escalation",
     freshnessWindowMs: 15 * MINUTE_MS,
     enforcedRealms: ["tenant", "platform"],
-    matches: regexMatch(
-      "POST",
-      /^tenant\/approval-requests\/[^/]+\/escalate$/,
-    ),
+    matches: regexMatch("POST", /^tenant\/approval-requests\/[^/]+\/escalate$/),
   },
   {
     actionId: "tenant:users:create",
@@ -421,7 +488,9 @@ export function resolveStepUpActionPolicy(
   actionId: IamStepUpActionId,
   realm?: AuthRealm,
 ): StepUpRoutePolicy | null {
-  const matched = STEP_UP_ROUTE_RULES.find((rule) => rule.actionId === actionId);
+  const matched = STEP_UP_ROUTE_RULES.find(
+    (rule) => rule.actionId === actionId,
+  );
   if (!matched) {
     return null;
   }
