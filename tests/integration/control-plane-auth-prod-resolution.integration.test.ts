@@ -79,14 +79,23 @@ describe("control-plane-auth production resolution regression", () => {
       imageExists = false;
     }
 
-    if (!dockerAvailable) {
-      console.warn("Skipping Docker smoke test: Docker daemon not available.");
+    // Only the job that builds the image treats a missing one as a failure.
+    // Every other consumer of this suite — Smoke acceptance, a local run —
+    // skips, so the check never silently degrades where it is meant to run.
+    const imageRequired = process.env.DRTS_REQUIRE_API_TEST_IMAGE === "1";
+
+    if (!dockerAvailable || (!imageExists && !imageRequired)) {
+      console.warn(
+        !dockerAvailable
+          ? "Skipping Docker smoke test: Docker daemon not available."
+          : "Skipping Docker smoke test: drts-api:test not built in this job.",
+      );
       return;
     }
 
     expect(
       imageExists,
-      "drts-api:test is missing. CI builds it in the unit job; locally run " +
+      "drts-api:test is missing in the job that builds it. Locally run " +
         "`docker build -t drts-api:test -f apps/api/Dockerfile .` first.",
     ).toBe(true);
 
