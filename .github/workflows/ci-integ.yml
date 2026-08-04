@@ -114,6 +114,11 @@ jobs:
           cache-from: type=gha,scope=api-test-image
           cache-to: type=gha,scope=api-test-image,mode=max
       - run: pnpm run test:unit
+      # Lives outside the default vitest globs so only this job — the one that
+      # builds the image — pays for it. Smoke acceptance runs test:unit too and
+      # has no image.
+      - name: Verify the runtime image resolves @drts/control-plane-auth
+        run: pnpm run test:docker-image
 
   integration:
     runs-on: ubuntu-latest
