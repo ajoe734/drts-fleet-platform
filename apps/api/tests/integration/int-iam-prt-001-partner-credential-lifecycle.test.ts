@@ -11,6 +11,22 @@ import { WebhookDispatchService } from "../../src/modules/tenant-partner/webhook
 
 const TENANT_A = "tenant-demo-001";
 const TENANT_B = "tenant-demo-002";
+const SECRET_V1 = "whsec_iam_prt_001_leak_probe_v1";
+const SECRET_V2 = "whsec_iam_prt_001_leak_probe_v2";
+
+/**
+ * Hash-only authority means no tenant-facing webhook payload may carry raw
+ * secret material, whatever shape it arrives in. Asserting on the serialized
+ * response covers `secretHistory`, `runtimeMetadata.secretRotation.history`,
+ * and any field a future change adds without thinking about it.
+ */
+function expectNoWebhookSecretMaterial(payload: unknown) {
+  const serialized = JSON.stringify(payload);
+  expect(serialized).not.toContain(SECRET_V1);
+  expect(serialized).not.toContain(SECRET_V2);
+  expect(serialized).not.toContain("secretValue");
+  expect(serialized).not.toContain("secretCredentials");
+}
 
 function cloneState(state: TenantPartnerState): TenantPartnerState {
   return JSON.parse(JSON.stringify(state)) as TenantPartnerState;
@@ -522,5 +538,114 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
       secretVersion: 1,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps webhook secret material out of tenant reads across rotation and a tampered snapshot reload", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+
+    const repository = createDurableTenantPartnerRepository();
+    const { controller } = await createCredentialSurface(repository);
+
+    const tenantAdminIdentity = {
+      actorType: "tenant_admin",
+      actorId: "tenant-admin-001",
+      realm: "tenant",
+      tenantId: TENANT_A,
+      roles: ["tc_admin"],
+      scopes: ["tenant:webhooks:read", "tenant:webhooks:write", "tenant:read"],
+    } as const;
+
+    const created = controller.createWebhookEndpoint(
+      {
+        url: "https://tenant.example/webhooks/iam-prt-001-leak",
+        secret: SECRET_V1,
+        events: ["booking.created"],
+      },
+      TENANT_A,
+      "req-iam-prt-001-leak-create",
+    );
+    expect(JSON.stringify(created)).not.toContain(SECRET_V1);
+
+    vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+    const rotated = controller.rotateWebhookSecret(
+      created.data.webhookId,
+      {
+        webhookId: created.data.webhookId,
+        secret: SECRET_V2,
+        rotationReason: "scheduled_rotation",
+        overlapDays: 2,
+      },
+      TENANT_A,
+      "req-iam-prt-001-leak-rotate",
+    );
+    expect(rotated.data).toMatchObject({ secretVersion: 2 });
+
+    const listed = controller.listWebhookEndpoints(
+      tenantAdminIdentity as never,
+      TENANT_A,
+      "req-iam-prt-001-leak-list",
+    );
+    const endpoint = listed.data.items.find(
+      (item) => item.webhookId === created.data.webhookId,
+    );
+
+    // The read must still be substantive: both versions are published as
+    // previews, so a clean payload is not just an empty payload.
+    expect(endpoint?.secretHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ secretVersion: 1 }),
+        expect.objectContaining({ secretVersion: 2, status: "active" }),
+      ]),
+    );
+    expectNoWebhookSecretMaterial(listed);
+
+    // A snapshot row written before hash-only authority landed can still carry
+    // raw secrets in the outward-facing history shapes. Reload must re-project
+    // them away rather than pass them straight back to the tenant.
+    const persisted = repository.getState();
+    const storedEndpoint = persisted.webhookEndpoints.find(
+      (row) => row.webhookId === created.data.webhookId,
+    );
+    if (!storedEndpoint) {
+      throw new Error("Expected the rotated webhook endpoint to be persisted.");
+    }
+    const tampered = {
+      ...storedEndpoint,
+      secretHistory: storedEndpoint.secretHistory.map((record) => ({
+        ...record,
+        secretValue: record.secretVersion === 1 ? SECRET_V1 : SECRET_V2,
+      })),
+      runtimeMetadata: {
+        ...storedEndpoint.runtimeMetadata,
+        secretRotation: {
+          ...storedEndpoint.runtimeMetadata.secretRotation,
+          history: storedEndpoint.runtimeMetadata.secretRotation.history.map(
+            (record) => ({
+              ...record,
+              secretValue: record.secretVersion === 1 ? SECRET_V1 : SECRET_V2,
+            }),
+          ),
+        },
+      },
+      // Pre-migration rows have no per-version credential table, so hydration
+      // has to rebuild the history from the endpoint's own secret material.
+      secretCredentials: undefined,
+    };
+    await repository.persistChanges({
+      webhookEndpoints: [tampered],
+    } as never);
+
+    const restarted = await createCredentialSurface(repository);
+    const afterReload = restarted.controller.listWebhookEndpoints(
+      tenantAdminIdentity as never,
+      TENANT_A,
+      "req-iam-prt-001-leak-reload-list",
+    );
+    const reloadedEndpoint = afterReload.data.items.find(
+      (item) => item.webhookId === created.data.webhookId,
+    );
+    expect(reloadedEndpoint?.secretHistory?.length ?? 0).toBeGreaterThan(0);
+    expectNoWebhookSecretMaterial(afterReload);
   });
 });
