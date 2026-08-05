@@ -7,8 +7,6 @@ import { resolveMapProviderRuntimeConfig } from "./common/map-provider";
 import { validateAuthStartupConfig } from "./config/auth-startup-config";
 import { buildHealthPayload } from "./health/health.controller";
 
-import { internalKeyMetrics } from "./common/auth/internal-key-metrics";
-
 async function bootstrap() {
   validateAuthStartupConfig(process.env);
   resolveMapProviderRuntimeConfig(process.env);
