@@ -224,3 +224,14 @@ Concrete next step:
 No additional runtime tests were executed in this helper task beyond the parent
 task's recorded verification and the new branch trailer validation. The clean
 replay branch is tree-identical to the already-verified accepted implementation.
+
+## Owner Closeout Evidence
+
+- Closeout date: `2026-08-05`
+- Owner branch: `codex/iam-svc-001-unblock-history-repair`
+- Reviewer-approved artifact commit remains preserved at
+  `d30df257d7b66b151359ee21b726b83d72024437`
+- Owner closeout adds the required formal `Verification:` commit trailer and
+  pushes the finalized branch tip before marking machine truth `done`
+- Integration status for this helper task remains `branch_pushed`; the canonical
+  product integration path is still PR `#1310` on `codex/iam-svc-001-clean`
