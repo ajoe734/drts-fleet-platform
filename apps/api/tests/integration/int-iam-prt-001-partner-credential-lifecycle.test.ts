@@ -6,13 +6,20 @@ import type {
   TenantPartnerState,
 } from "../../src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
-import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
+import { TenantPartnerRepository } from "../../src/modules/tenant-partner/tenant-partner.repository";
+import {
+  TenantPartnerService,
+  resolvePartnerIngressCredentialsFromEnv,
+} from "../../src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../src/modules/tenant-partner/webhook-dispatch.service";
 
 const TENANT_A = "tenant-demo-001";
 const TENANT_B = "tenant-demo-002";
 const SECRET_V1 = "whsec_iam_prt_001_leak_probe_v1";
 const SECRET_V2 = "whsec_iam_prt_001_leak_probe_v2";
+const PARTNER_ENTRY_SLUG = "bank-demo-alpha-airport";
+const SEEDED_PARTNER_KEY_ID = "partner-key-alpha-demo";
+const SEEDED_PARTNER_KEY = "pk_test_alpha_ingress_secret";
 
 /**
  * Hash-only authority means no tenant-facing webhook payload may carry raw
@@ -92,6 +99,11 @@ function createDurableTenantPartnerRepository() {
           changes.webhookDeliveries,
           (value) => value.deliveryId,
         ),
+        partnerEntries: mergeByKey(
+          state.partnerEntries,
+          changes.partnerEntries,
+          (value) => value.entrySlug,
+        ),
         partnerIngressCredentials: mergeByKey(
           state.partnerIngressCredentials,
           changes.partnerIngressCredentials,
@@ -114,12 +126,13 @@ type DurableRepository = ReturnType<typeof createDurableTenantPartnerRepository>
 async function createCredentialSurface(
   repository: DurableRepository,
   fetchImpl?: ReturnType<typeof vi.fn>,
+  partnerIngressCredentialSeeds: readonly unknown[] = [],
 ) {
   const service = new TenantPartnerService(
     new AuditNotificationService(),
     repository as never,
     fetchImpl ? new WebhookDispatchService(fetchImpl as never) : undefined,
-    [],
+    partnerIngressCredentialSeeds as never,
   );
   await service.onModuleInit();
 
@@ -144,6 +157,7 @@ function expectErrorCode(error: unknown) {
 describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
   afterEach(() => {
     vi.useRealTimers();
+    delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
   });
 
   it("carries owner expiry and rotation overlap through the tenant control surface and an API restart", async () => {
@@ -647,5 +661,108 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
     );
     expect(reloadedEndpoint?.secretHistory?.length ?? 0).toBeGreaterThan(0);
     expectNoWebhookSecretMaterial(afterReload);
+  });
+
+  it("keeps every credential a repeat rotation retires revoked across a restart", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT = SEEDED_PARTNER_KEY;
+    const seeds = resolvePartnerIngressCredentialsFromEnv();
+
+    const repository = createDurableTenantPartnerRepository();
+    const { service } = await createCredentialSurface(
+      repository,
+      undefined,
+      seeds,
+    );
+
+    // First rotation holds the seeded key open for overlap, so it is still a
+    // live credential going into the second rotation.
+    const firstRotation = service.issuePlatformPartnerIngressCredential(
+      PARTNER_ENTRY_SLUG,
+      { rotationReason: "scheduled_rotation", overlapDays: 7 },
+      "req-iam-prt-001-partner-rotate-1",
+    );
+    expect(firstRotation.revokedCredentialId).toBe(SEEDED_PARTNER_KEY_ID);
+
+    // The second rotation only holds the newest key open. The seeded key is
+    // retired in the same pass and has to reach the snapshot with it.
+    vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+    const secondRotation = service.issuePlatformPartnerIngressCredential(
+      PARTNER_ENTRY_SLUG,
+      { rotationReason: "scheduled_rotation", overlapDays: 7 },
+      "req-iam-prt-001-partner-rotate-2",
+    );
+    expect(secondRotation.revokedCredentialId).toBe(
+      firstRotation.credential.keyId,
+    );
+
+    const storedSeededKey = repository
+      .getState()
+      .partnerIngressCredentials.find(
+        (credential) => credential.keyId === SEEDED_PARTNER_KEY_ID,
+      );
+    expect(storedSeededKey).toMatchObject({
+      status: "revoked",
+      revokeReason: "scheduled_rotation",
+      overlapEndsAt: null,
+    });
+    expect(storedSeededKey?.revokedAt).toEqual(expect.any(String));
+
+    // Still inside the 7-day overlap window the first rotation granted, so a
+    // stale snapshot row would come back as a live credential here.
+    const restarted = await createCredentialSurface(
+      repository,
+      undefined,
+      seeds,
+    );
+    expect(
+      restarted.service.listPlatformPartnerIngressCredentials(
+        PARTNER_ENTRY_SLUG,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyId: SEEDED_PARTNER_KEY_ID,
+          status: "revoked",
+        }),
+      ]),
+    );
+
+    expect(() =>
+      restarted.service.authenticatePartnerBootstrap(
+        { entrySlug: PARTNER_ENTRY_SLUG, apiKey: SEEDED_PARTNER_KEY },
+        "req-iam-prt-001-partner-retired-auth",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({ code: "PARTNER_API_KEY_REVOKED" }),
+        }),
+      }),
+    );
+  });
+
+  it("refuses an identity governance transaction that carries a bucket it cannot write", async () => {
+    const repository = new TenantPartnerRepository(undefined as never);
+    const executor = { query: vi.fn() };
+
+    await expect(
+      repository.persistIdentityGovernanceChanges(executor as never, {
+        // A bucket outside the identity-governance set would otherwise be
+        // audited by the shared transaction and then silently dropped.
+        webhookDeliveries: [],
+      } as never),
+    ).rejects.toThrowError(/webhookDeliveries/);
+    expect(executor.query).not.toHaveBeenCalled();
+
+    await expect(
+      repository.persistIdentityGovernanceChanges(executor as never, {
+        userRoles: [],
+        apiKeys: [],
+        partnerIngressCredentials: [],
+        webhookEndpoints: [],
+      }),
+    ).resolves.toBeUndefined();
   });
 });

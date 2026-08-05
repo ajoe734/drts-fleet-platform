@@ -174,6 +174,26 @@ export type PersistTenantPartnerChanges = {
   deletedApprovalDecisionIds?: readonly string[];
 };
 
+/**
+ * The change buckets `persistIdentityGovernanceChanges` knows how to write
+ * inside the security-event transaction. Anything outside this set is rejected
+ * rather than dropped, so an audited credential mutation can never go unwritten.
+ */
+export const IDENTITY_GOVERNANCE_CHANGE_KEYS = [
+  "userRoles",
+  "apiKeys",
+  "partnerIngressCredentials",
+  "webhookEndpoints",
+] as const;
+
+export type IdentityGovernanceChangeKey =
+  (typeof IDENTITY_GOVERNANCE_CHANGE_KEYS)[number];
+
+export type IdentityGovernanceChanges = Pick<
+  PersistTenantPartnerChanges,
+  IdentityGovernanceChangeKey
+>;
+
 @Injectable()
 export class TenantPartnerRepository {
   private readonly logger = new Logger(TenantPartnerRepository.name);
@@ -809,32 +829,11 @@ export class TenantPartnerRepository {
       );
     }
 
-    for (const credential of changes.partnerIngressCredentials ?? []) {
+    if ((changes.partnerIngressCredentials?.length ?? 0) > 0) {
       writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO admin.phase1_partner_ingress_credentials (
-              key_id,
-              entry_slug,
-              revoked_at,
-              created_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5::jsonb
-            )
-            ON CONFLICT (key_id) DO UPDATE SET
-              entry_slug = EXCLUDED.entry_slug,
-              revoked_at = EXCLUDED.revoked_at,
-              created_at = EXCLUDED.created_at,
-              record = EXCLUDED.record
-          `,
-          [
-            credential.keyId,
-            credential.entrySlug,
-            credential.revokedAt,
-            credential.createdAt,
-            JSON.stringify(credential),
-          ],
+        this.persistPartnerIngressCredentialsWithExecutor(
+          this.databaseService!,
+          changes.partnerIngressCredentials ?? [],
         ),
       );
     }
@@ -1001,35 +1000,11 @@ export class TenantPartnerRepository {
       );
     }
 
-    for (const endpoint of changes.webhookEndpoints ?? []) {
+    if ((changes.webhookEndpoints?.length ?? 0) > 0) {
       writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO admin.phase1_tenant_webhook_endpoints (
-              webhook_id,
-              tenant_id,
-              status,
-              created_at,
-              updated_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6::jsonb
-            )
-            ON CONFLICT (webhook_id) DO UPDATE SET
-              tenant_id = EXCLUDED.tenant_id,
-              status = EXCLUDED.status,
-              created_at = EXCLUDED.created_at,
-              updated_at = EXCLUDED.updated_at,
-              record = EXCLUDED.record
-          `,
-          [
-            endpoint.webhookId,
-            endpoint.tenantId,
-            endpoint.status,
-            endpoint.createdAt,
-            endpoint.updatedAt,
-            JSON.stringify(endpoint),
-          ],
+        this.persistWebhookEndpointsWithExecutor(
+          this.databaseService!,
+          changes.webhookEndpoints ?? [],
         ),
       );
     }
@@ -1303,11 +1278,34 @@ export class TenantPartnerRepository {
 
   async persistIdentityGovernanceChanges(
     executor: TenantPartnerQueryExecutor,
-    changes: Pick<PersistTenantPartnerChanges, "userRoles" | "apiKeys">,
+    changes: IdentityGovernanceChanges,
   ) {
+    // This path shares a transaction with the security-event write, so a bucket
+    // it does not know how to write would be audited and then silently dropped.
+    // Refuse the whole mutation instead of half-applying it.
+    const unsupported = Object.keys(changes).filter(
+      (key) =>
+        !IDENTITY_GOVERNANCE_CHANGE_KEYS.includes(
+          key as IdentityGovernanceChangeKey,
+        ),
+    );
+    if (unsupported.length > 0) {
+      throw new Error(
+        `Identity governance transaction cannot persist: ${unsupported.join(", ")}`,
+      );
+    }
+
     await Promise.all([
       this.persistTenantUserRolesWithExecutor(executor, changes.userRoles ?? []),
       this.persistTenantApiKeysWithExecutor(executor, changes.apiKeys ?? []),
+      this.persistPartnerIngressCredentialsWithExecutor(
+        executor,
+        changes.partnerIngressCredentials ?? [],
+      ),
+      this.persistWebhookEndpointsWithExecutor(
+        executor,
+        changes.webhookEndpoints ?? [],
+      ),
     ]);
   }
 
@@ -1858,6 +1856,79 @@ export class TenantPartnerRepository {
             apiKey.revokedAt,
             apiKey.createdAt,
             JSON.stringify(apiKey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistPartnerIngressCredentialsWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    credentials: readonly StoredPartnerIngressCredentialRecord[],
+  ) {
+    await Promise.all(
+      credentials.map((credential) =>
+        executor.query(
+          `
+            INSERT INTO admin.phase1_partner_ingress_credentials (
+              key_id,
+              entry_slug,
+              revoked_at,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5::jsonb
+            )
+            ON CONFLICT (key_id) DO UPDATE SET
+              entry_slug = EXCLUDED.entry_slug,
+              revoked_at = EXCLUDED.revoked_at,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+          [
+            credential.keyId,
+            credential.entrySlug,
+            credential.revokedAt,
+            credential.createdAt,
+            JSON.stringify(credential),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistWebhookEndpointsWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    endpoints: readonly StoredWebhookEndpointRecord[],
+  ) {
+    await Promise.all(
+      endpoints.map((endpoint) =>
+        executor.query(
+          `
+            INSERT INTO admin.phase1_tenant_webhook_endpoints (
+              webhook_id,
+              tenant_id,
+              status,
+              created_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (webhook_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              status = EXCLUDED.status,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            endpoint.webhookId,
+            endpoint.tenantId,
+            endpoint.status,
+            endpoint.createdAt,
+            endpoint.updatedAt,
+            JSON.stringify(endpoint),
           ],
         ),
       ),

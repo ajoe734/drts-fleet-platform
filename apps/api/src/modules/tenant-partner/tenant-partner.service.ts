@@ -231,6 +231,7 @@ import {
 } from "./referral-embed-handoff.repository";
 import {
   TenantPartnerRepository,
+  type IdentityGovernanceChanges,
   type PersistTenantPartnerChanges,
   type StoredPartnerIngressCredentialRecord,
   type StoredTenantApiKeyRecord,
@@ -5056,12 +5057,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
     let revokedCredentialId: string | null = null;
     let preservedOverlap = false;
+    // A rotation pass touches every live credential on the entry, not only the
+    // new key and the one held open for overlap. On a second rotation the
+    // remaining historical credentials are retired here too, so they all have
+    // to reach the snapshot or they come back live on the next reload.
+    const mutatedCredentialIds = new Set<string>([
+      issued.storedCredential.keyId,
+    ]);
     this.partnerIngressCredentials = this.partnerIngressCredentials.map(
       (credential) => {
         if (credential.entrySlug !== entry.entrySlug || credential.revokedAt) {
           return credential;
         }
 
+        mutatedCredentialIds.add(credential.keyId);
         this.reconcileStoredPartnerIngressCredential(credential, rotatedAt);
         if (
           !preservedOverlap &&
@@ -5097,10 +5106,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...this.partnerIngressCredentials,
     ];
     const persistedCredentials = this.partnerIngressCredentials.filter(
-      (credential) =>
-        credential.entrySlug === entry.entrySlug &&
-        (credential.keyId === issued.storedCredential.keyId ||
-          credential.keyId === revokedCredentialId),
+      (credential) => mutatedCredentialIds.has(credential.keyId),
     );
 
     this.persistChanges(
@@ -8941,7 +8947,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private persistIdentityGovernanceMutation(params: {
-    changes: Pick<PersistTenantPartnerChanges, "userRoles" | "apiKeys">;
+    changes: IdentityGovernanceChanges;
     context: string;
     rollback: () => void;
     event: CreateSecurityEventInput | null;
