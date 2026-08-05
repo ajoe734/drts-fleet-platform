@@ -97,7 +97,28 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run test:unit
+      # Built here rather than inside the test: a cold image build is minutes of
+      # work, and paying for it inside a vitest budget made the suite fail with
+      # "Test timed out" on branches that never touched it. Buildx cache keeps
+      # this near-free on repeat runs, and the failure now names the real cause.
+      # The default docker driver cannot export a cache; the container driver can.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image for the control-plane resolution test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: drts-api:test
+          push: false
+          load: true
+          cache-from: type=gha,scope=api-test-image
+          cache-to: type=gha,scope=api-test-image,mode=max
+      - name: Run unit tests
+        # Only this job builds drts-api:test, so only here is a missing image a
+        # failure. Smoke acceptance runs the same suite without one.
+        env:
+          DRTS_REQUIRE_API_TEST_IMAGE: "1"
+        run: pnpm run test:unit
 
   integration:
     runs-on: ubuntu-latest
@@ -137,6 +158,56 @@ jobs:
         run: pnpm run test:integration
       - name: Run PostgreSQL UAT gates serially
         run: pnpm --filter @drts/api run test:integration:postgres-gates
+
+  iam-negative-matrix:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      API_PORT: "3001"
+      API_HOST: 0.0.0.0
+      E2E_API_URL: http://localhost:3001
+      AUTH_MODE: test
+      JWT_SECRET: ci-e2e-secret
+      JWT_ISSUER: drts-local
+      JWT_AUDIENCE: drts-api
+      CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
+      PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
+      PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm install --frozen-lockfile
+      # The suite asserts denial behaviour against real iam.* tables; without
+      # the schema every case fails with `relation "iam.identity_principals"
+      # does not exist` rather than testing anything.
+      - name: Apply migrations
+        run: pnpm db:migrate
+      - name: Run IAM negative matrix
+        run: pnpm run test:security:iam-negative-matrix
 
   build:
     runs-on: ubuntu-latest
@@ -257,6 +328,7 @@ jobs:
         typecheck,
         unit,
         integration,
+        iam-negative-matrix,
         build,
         i18n-guard,
         orchestrator-tests,
@@ -267,7 +339,7 @@ jobs:
     steps:
       - name: Aggregate
         run: |
-          for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}' '${{ needs.e2e.result }}'; do
+          for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.iam-negative-matrix.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}' '${{ needs.e2e.result }}'; do
             [ "$r" = "success" ] || { echo "Required check failed: $r"; exit 1; }
           done
           echo "All integration checks passed."

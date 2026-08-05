@@ -2046,13 +2046,41 @@ def ensure_planning_baton_dispatch(
     return True
 
 
+def provider_report_age_seconds(
+    path: Path, report: dict[str, Any] | None, *, now: datetime | None = None
+) -> float:
+    """Age of a cached capability report; infinite when it cannot be dated."""
+    now = now or datetime.now(timezone.utc)
+    generated_at = _parse_iso_utc(str((report or {}).get("generated_at") or ""))
+    if generated_at is not None:
+        return max(0.0, (now - generated_at).total_seconds())
+    try:
+        return max(0.0, now.timestamp() - path.stat().st_mtime)
+    except OSError:
+        return float("inf")
+
+
 def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
     try:
-        if config.get("supervisor", {}).get("auto_refresh_provider_capabilities", True):
+        supervisor_cfg = config.get("supervisor", {})
+        if supervisor_cfg.get("auto_refresh_provider_capabilities", True):
             report = build_provider_capabilities(config)
             write_provider_capabilities(config, report=report)
             return report
-        return load_json(config_path(config, "provider_capabilities"), default={}) or {}
+        path = config_path(config, "provider_capabilities")
+        report = load_json(path, default={}) or {}
+        # Probing every tick is too expensive, which is why auto-refresh is off.
+        # But a cache that is never refreshed can strand a healthy lane: one
+        # stale or wrong auth_ready=False removes it from dispatch with no
+        # pause, no error and no log line. Re-probe on an interval so the cache
+        # can heal itself; an undateable or missing report refreshes at once.
+        interval = float(
+            supervisor_cfg.get("provider_capabilities_refresh_interval_seconds", 900.0)
+        )
+        if interval > 0 and provider_report_age_seconds(path, report) >= interval:
+            report = build_provider_capabilities(config)
+            write_provider_capabilities(config, report=report)
+        return report
     except KeyError:
         return {}
 
@@ -2414,6 +2442,23 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
                 task_id=event.get("task_id"),
                 target_agent=event.get("target_display_name") or event.get("target_agent"),
             ) or changed
+            continue
+        if not isinstance(event.get("message"), str) or not event["message"].strip():
+            # Never let a malformed persisted event crash the supervisor or be auto-delivered.
+            record["status"] = "manual_pending"
+            record["processed_at"] = utc_now()
+            record["error"] = "invalid_queue_event_missing_message"
+            write_activity_log(
+                config,
+                {
+                    "type": "wake_manual_pending",
+                    "task_id": event.get("task_id"),
+                    "target_agent": event.get("target_display_name") or event.get("target_agent"),
+                    "message": "Queue event is missing a non-empty delivery message; manual reconciliation required.",
+                    "queue_event_id": event_id,
+                },
+            )
+            changed = True
             continue
         request = build_request(config, event)
         record["attempt_count"] = int(record.get("attempt_count", 0)) + 1
@@ -3455,10 +3500,19 @@ def chair_review_needs_immediate_attention(
     state: dict[str, Any],
     status: dict[str, Any] | None = None,
 ) -> bool:
-    if repeated_failure_records(state, status) or actionable_dispatch_pause_records(state, status, limit=1):
+    # Failure streaks carry an awaiting_chair flag that the chair clears, so a
+    # streak that is still awaiting review is always new information.
+    if repeated_failure_records(state, status):
         return True
+    # Dispatch and provider pauses persist until the underlying lane recovers.
+    # Only a pause recorded since the last review is new information; one the
+    # chair has already seen must fall back to the normal review cooldown
+    # instead of re-triggering a review on every tick.
     last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
-    for pause in active_provider_pause_records(state):
+    for pause in (
+        *actionable_dispatch_pause_records(state, status, limit=1),
+        *active_provider_pause_records(state),
+    ):
         paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
         if last_review_at is None or paused_at is None or paused_at > last_review_at:
             return True
@@ -7134,8 +7188,13 @@ def queue_chair_review(
     reason = chair_review_reason(state, approval_state, status=status, config=config)
     if reason is None:
         return False
-    immediate_attention = bool(chair_review_needs_immediate_attention(state, status) or ready_blocked_tasks)
-    bypass_cooldown = bool(pending_approval_items(approval_state) or immediate_attention)
+    needs_immediate_attention = chair_review_needs_immediate_attention(state, status)
+    immediate_attention = bool(needs_immediate_attention or ready_blocked_tasks)
+    # A dependency-ready blocked task stays listed until the parent is actually
+    # unblocked, which the chair's own repair action cannot do on its own. It
+    # therefore raises urgency for reviewer-lane selection but must not bypass
+    # the cooldown, or every tick re-queues the same blocked_task_triage.
+    bypass_cooldown = bool(pending_approval_items(approval_state) or needs_immediate_attention)
     cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
@@ -7401,23 +7460,16 @@ def _approval_is_routine_safe(approval: dict[str, Any]) -> bool:
             return False
         positionals = [token for token in tokens[2:] if not token.startswith("-")]
         return len(positionals) >= 2
+    # The chairman is the escalation path for commands the classifier cannot
+    # judge. Asking the classifier again — "would this have run unreviewed?" —
+    # sends the escalation back to what escalated it, so every gap in the
+    # pattern set became a permanent deadlock rather than a review. Bound the
+    # chairman by what no reviewer may permit instead.
     try:
-        from permission_broker import classify_command
-    except Exception:
-        classify_command = None
-    if classify_command is not None and classify_command(normalized) == "allow":
-        return True
-    verify_prefixes = (
-        "pytest",
-        "python3 -m pytest",
-        "python3 -m unittest",
-        "npm test",
-        "npm run test",
-        "pnpm test",
-        "go test",
-        "cargo test",
-    )
-    return normalized.startswith(verify_prefixes)
+        from permission_broker import command_hard_boundary_reason
+    except Exception:  # noqa: BLE001 - fall back to the conservative answer
+        return False
+    return command_hard_boundary_reason(command) is None
 
 
 def apply_chair_approval_actions(config: dict[str, Any], payload: dict[str, Any]) -> bool:

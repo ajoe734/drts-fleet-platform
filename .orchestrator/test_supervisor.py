@@ -1012,6 +1012,42 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["skip_reason"], "stale_dispatch_event")
 
+    def test_marks_event_without_message_manual_pending_without_crashing(self) -> None:
+        task = {
+            "id": "BUS-VAL-MALFORMED-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "last_update": "2026-04-05T11:45:16Z",
+        }
+        queue_payload = {
+            "event_id": "evt-missing-message",
+            "task_id": task["id"],
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+        }
+        state = {"queue": {"events": {}}, "workers": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_event_queue", return_value=[queue_payload]),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
+            mock.patch.object(
+                supervisor,
+                "start_worker_for_request",
+                side_effect=AssertionError("malformed event must not start a worker"),
+            ),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.process_queue(self.config, state, self.provider_report)
+
+        self.assertTrue(changed)
+        record = state["queue"]["events"]["evt-missing-message"]
+        self.assertEqual(record["status"], "manual_pending")
+        self.assertEqual(record["error"], "invalid_queue_event_missing_message")
+        write_activity_log.assert_called_once()
+
     def test_skips_queued_dispatch_when_external_integration_is_pending(self) -> None:
         task = {
             "id": "BUS-VAL-CI-001",
@@ -5511,6 +5547,60 @@ class ChairmanFlowTests(unittest.TestCase):
             )
         )
 
+    def test_provider_report_age_uses_generated_at(self) -> None:
+        now = datetime(2026, 8, 4, 12, 0, 0, tzinfo=timezone.utc)
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"),
+            {"generated_at": "2026-08-04T11:45:00Z"},
+            now=now,
+        )
+        self.assertEqual(age, 900.0)
+
+    def test_provider_report_age_is_infinite_when_undateable(self) -> None:
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"), {}
+        )
+        self.assertEqual(age, float("inf"))
+
+    def test_stale_provider_report_is_reprobed(self) -> None:
+        """A cached report that is never refreshed can strand a healthy lane."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            path.write_text(
+                json.dumps({"generated_at": "2026-08-01T00:00:00Z", "providers": {}}),
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            fresh = {"generated_at": "2026-08-04T00:00:00Z", "providers": {"claude": {}}}
+            with (
+                mock.patch.object(supervisor, "build_provider_capabilities", return_value=fresh) as build,
+                mock.patch.object(supervisor, "write_provider_capabilities") as write,
+            ):
+                report = supervisor.load_provider_report(config)
+            build.assert_called_once()
+            write.assert_called_once()
+            self.assertEqual(report, fresh)
+
+    def test_fresh_provider_report_is_not_reprobed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            generated_at = (
+                datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+            cached = {"generated_at": generated_at, "providers": {"claude": {}}}
+            path.write_text(json.dumps(cached), encoding="utf-8")
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            with mock.patch.object(supervisor, "build_provider_capabilities") as build:
+                report = supervisor.load_provider_report(config)
+            build.assert_not_called()
+            self.assertEqual(report, cached)
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
@@ -5535,6 +5625,98 @@ class ChairmanFlowTests(unittest.TestCase):
             mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
         ):
             queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_dispatch_pause_review_respects_cooldown_after_recent_review(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"chair_review": {"enabled": True}}
+
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_dispatch_pause_recorded_after_last_review_bypasses_cooldown(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T13:10:00Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+
+        self.assertTrue(
+            supervisor.chair_review_needs_immediate_attention(state, {"tasks": []})
+        )
+
+    def test_dependency_ready_blocked_task_does_not_bypass_cooldown(self) -> None:
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-005",
+                    "status": "blocked",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "depends_on": ["DEP-001"],
+                    "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                },
+            ]
+        }
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"paths": {}, "chair_review": {"enabled": True}}
+
+        # The blocked task is still triage-worthy, so the reason stays set...
+        self.assertEqual(
+            supervisor.chair_review_reason(state, {"pending": []}, status=status, config=config),
+            "blocked_task_triage",
+        )
+
+        # ...but it must not re-queue a review on every tick while the cooldown
+        # is active, because the chair cannot clear the condition itself.
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, status, provider_report={})
 
         self.assertFalse(queued)
         choose_chair_reviewer.assert_not_called()
@@ -8634,5 +8816,89 @@ class AntigravityModelRotationTests(unittest.TestCase):
         self.assertFalse(
             supervisor.maybe_rotate_antigravity_lane(
                 self.config, state, {}, self._worker(), {"kind": "auth"}, "401", authorized=True
+            )
+        )
+
+
+class ChairApprovalBoundaryTests(unittest.TestCase):
+    """What the chairman may wave through.
+
+    An approval only exists because `classify_command` said `defer` — "I cannot
+    tell, ask someone". Gating the chairman on `classify_command(...) == "allow"`
+    therefore let it approve only what would already have run unreviewed, and
+    every gap in the pattern set became a permanent deadlock: 149 of 273
+    recorded denials carry the chairman's own read-only justification.
+    """
+
+    def _bash(self, command: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "risk_class": "needs_review",
+        }
+
+    def test_unrecognised_read_only_commands_are_the_chairs_to_approve(self) -> None:
+        # Exactly the commands that had two workers suspended for 81 minutes.
+        for command in (
+            'git cat-file -t fc426709 2>&1; echo "---"; git branch -a --contains fc426709 | head',
+            "timeout 900 pnpm exec vitest run tests/unit/tenant-partner.service.test.ts 2>&1 | tail -40",
+            "./node_modules/.bin/vitest run tests/unit/x.test.ts",
+        ):
+            self.assertTrue(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_denied_patterns_stay_beyond_the_chairs_reach(self) -> None:
+        for command in (
+            "sudo rm -rf /etc",
+            "git reset --hard HEAD~5",
+            "echo hi && git reset --hard HEAD~5",
+            "rm -rf /",
+        ):
+            self.assertFalse(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_writes_outside_the_workspace_stay_beyond_reach(self) -> None:
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(
+                self._bash("echo pwned > /home/lupin/.bashrc")
+            )
+        )
+
+    def test_backticks_stay_beyond_reach(self) -> None:
+        # Backticks do not nest and are rare in ordinary usage, so they stay
+        # refused. `$(...)` is judged like `$VAR` — see
+        # CommandSubstitutionBoundaryTest in test_provider_permissions.
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(self._bash("echo `rm -rf /tmp/x`"))
+        )
+
+    def test_substitution_is_treated_the_same_as_a_plain_variable(self) -> None:
+        # `rm` is not a denied pattern — it left the safe set, meaning "needs a
+        # decision", not "nobody may permit it". Wrapping it in a substitution
+        # must not change that, in either direction.
+        self.assertEqual(
+            supervisor._approval_is_routine_safe(self._bash("rm -rf /tmp/x")),
+            supervisor._approval_is_routine_safe(self._bash("echo $(rm -rf /tmp/x)")),
+        )
+
+    def test_denied_patterns_inside_a_substitution_stay_beyond_reach(self) -> None:
+        for command in ("echo $(rm -rf /)", "x=$(sudo cat /etc/shadow)"):
+            self.assertFalse(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_broad_git_push_stays_beyond_reach(self) -> None:
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(
+                self._bash("git push --force origin main")
+            )
+        )
+
+    def test_ordinary_git_push_remains_approvable(self) -> None:
+        self.assertTrue(
+            supervisor._approval_is_routine_safe(
+                self._bash("git push origin feature-branch")
             )
         )

@@ -4,6 +4,10 @@ import type {
   CanonicalPrincipalType,
   IdentityContext,
 } from "@drts/contracts";
+import {
+  DEFAULT_CONTROL_PLANE_JWT_AUDIENCE,
+  DEFAULT_CONTROL_PLANE_JWT_ISSUER,
+} from "@drts/control-plane-auth";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
@@ -154,8 +158,11 @@ const VERIFY_KEY_MATERIAL_ERROR_MESSAGE =
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
 const SERVICE_EXPIRES_IN: JwtExpiresIn = "15m";
 const DEFAULT_POLICY_VERSION = "auth.jwt-session.v1";
-const DEFAULT_JWT_ISSUER = "https://auth.local.drts.internal";
-const DEFAULT_JWT_AUDIENCE = "https://api.local.drts.internal";
+// Shared with the control-plane web apps, which mint the proxy token this
+// service verifies. Keeping one copy stops the minted and expected claims from
+// drifting apart.
+const DEFAULT_JWT_ISSUER = DEFAULT_CONTROL_PLANE_JWT_ISSUER;
+const DEFAULT_JWT_AUDIENCE = DEFAULT_CONTROL_PLANE_JWT_AUDIENCE;
 
 const HMAC_ALGORITHMS = new Set<jwt.Algorithm>(["HS256", "HS384", "HS512"]);
 const ASYMMETRIC_ALGORITHMS = new Set<jwt.Algorithm>([

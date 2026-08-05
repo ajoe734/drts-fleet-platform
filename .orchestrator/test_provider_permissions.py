@@ -6,14 +6,18 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 import permission_broker
 from provider_permissions import (
     ROOT,
+    _antigravity_app_data_dir,
+    _antigravity_auth_ready,
     _codex_auth_ready,
     _copilot_auth_ready,
     _copilot_plaintext_token,
+    _provider_uses_antigravity,
     _verified_claude_hooks,
     _verified_claude_policy,
     provider_capabilities,
@@ -339,3 +343,282 @@ class ProviderPermissionsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AntigravityCapabilityTest(unittest.TestCase):
+    """A lane migrated to the Antigravity CLI must be probed through `agy`.
+
+    Probing the retired Gemini CLI reports auth_ready=False, and the dispatch
+    gate rejects on that before it ever consults the adapter capability, which
+    silently removes the lane from the fleet.
+    """
+
+    def _config(self, *, adapter: str = "antigravity", config_home: str | None = None) -> dict:
+        antigravity: dict = {"cli": "agy"}
+        if config_home:
+            antigravity["config_home"] = config_home
+        return {
+            "agents": {"gemini": {"provider": "gemini", "adapter": adapter}},
+            "providers": {"gemini": {"delivery_mode": "gemini", "antigravity": antigravity}},
+        }
+
+    def test_detects_lane_backed_by_antigravity_adapter(self) -> None:
+        self.assertTrue(_provider_uses_antigravity(self._config(), "gemini"))
+
+    def test_ignores_lane_still_on_the_gemini_adapter(self) -> None:
+        self.assertFalse(_provider_uses_antigravity(self._config(adapter="gemini"), "gemini"))
+
+    def test_app_data_dir_follows_config_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(
+                _antigravity_app_data_dir({"config_home": tmpdir}),
+                Path(tmpdir) / ".gemini" / "antigravity-cli",
+            )
+
+    def test_auth_ready_requires_a_non_empty_oauth_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = {"cli": "agy", "config_home": tmpdir}
+            base = Path(tmpdir) / ".gemini" / "antigravity-cli"
+            base.mkdir(parents=True)
+
+            self.assertFalse(_antigravity_auth_ready(settings))
+
+            token = base / "antigravity-oauth-token"
+            token.write_text("", encoding="utf-8")
+            self.assertFalse(_antigravity_auth_ready(settings))
+
+            token.write_text("token-material", encoding="utf-8")
+            self.assertTrue(_antigravity_auth_ready(settings))
+
+    def test_assume_authed_short_circuits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertTrue(
+                _antigravity_auth_ready({"config_home": tmpdir, "assume_authed": "true"})
+            )
+
+
+class CompoundCommandClassificationTest(unittest.TestCase):
+    """Every part of a compound command has to clear the gate on its own.
+
+    SAFE_BASH_PATTERNS are anchored with ^ but not $, and used to be applied
+    with .search() against the whole command, so anything after the first safe
+    token was never inspected.
+    """
+
+    def test_deny_pattern_in_a_later_segment_denies_the_whole_command(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command("echo hi && git reset --hard HEAD~5"),
+            "deny",
+        )
+        self.assertEqual(
+            permission_broker.classify_command("git status && sudo rm -rf /etc"),
+            "deny",
+        )
+
+    def test_unsafe_tail_after_safe_prefix_is_not_allowed(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command(
+                "git status ; rm -rf /home/lupin/drts-fleet-platform"
+            ),
+            "defer",
+        )
+
+    def test_command_substitution_is_not_allowed(self) -> None:
+        for command in ("echo $(rm -rf /tmp/x)", "echo `rm -rf /tmp/x`"):
+            self.assertEqual(
+                permission_broker.classify_command(command), "defer", command
+            )
+
+    def test_write_redirection_is_not_allowed(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command("echo pwned > /home/lupin/.bashrc"),
+            "defer",
+        )
+
+    def test_descriptor_redirection_is_still_allowed(self) -> None:
+        self.assertEqual(
+            permission_broker.classify_command("git status 2>&1"), "allow"
+        )
+
+    def test_separator_inside_quotes_does_not_split(self) -> None:
+        # The `;` here is data, not a separator; this stays a single echo.
+        self.assertEqual(
+            permission_broker.classify_command('echo "a ; rm -rf /tmp/x"'), "allow"
+        )
+
+    def test_all_read_only_segments_are_allowed(self) -> None:
+        # Exactly the diagnostics Claude workers were being blocked on.
+        self.assertEqual(
+            permission_broker.classify_command(
+                "git branch -a --list '*iam*' 2>&1; echo '---'; git worktree list 2>&1 | head -20"
+            ),
+            "allow",
+        )
+
+    def test_single_safe_command_is_unchanged(self) -> None:
+        for command in ("git status", "ls -la", "git log --oneline | head -5"):
+            self.assertEqual(
+                permission_broker.classify_command(command), "allow", command
+            )
+
+
+class ReadOnlyGitQueryTest(unittest.TestCase):
+    def test_read_only_git_queries_are_allowed(self) -> None:
+        for command in (
+            "git worktree list",
+            "git rev-parse HEAD",
+            "git ls-tree -r --name-only HEAD",
+            "git for-each-ref --format='%(refname)'",
+            "git rev-list --count HEAD",
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(command), "allow", command
+            )
+
+
+class DestructiveRemovalTest(unittest.TestCase):
+    """`rm` is no longer routine: deleting files needs a human decision."""
+
+    def test_rm_requires_review(self) -> None:
+        for command in ("rm file.txt", "rm -rf /tmp/scratch", "rm -r build"):
+            self.assertEqual(
+                permission_broker.classify_command(command), "defer", command
+            )
+
+    def test_rm_of_filesystem_root_is_still_denied(self) -> None:
+        self.assertEqual(permission_broker.classify_command("rm -rf /"), "deny")
+
+
+class WorkspaceRootBoundaryTest(unittest.TestCase):
+    """The trust boundary is the workspace, not wherever this code is running.
+
+    The supervisor executes from a reviewed runtime bundle that is not the
+    canonical checkout. Deriving the boundary from the module's own location
+    pointed every path check at the bundle, so the commands workers are told to
+    run — which start `cd <canonical root>` — were all held for approval, while
+    the canonical-root pnpm guard was watching the bundle instead.
+    """
+
+    def setUp(self) -> None:
+        permission_broker._WORKSPACE_ROOTS_CACHE = None
+
+    def tearDown(self) -> None:
+        permission_broker._WORKSPACE_ROOTS_CACHE = None
+
+    def test_canonical_root_comes_from_the_worker_environment(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ORCH_CANONICAL_ROOT": "/home/example/repo",
+                "ORCH_WORKSPACE_ROOT": "/home/example/repo/.artifacts/worktrees/task",
+            },
+            clear=False,
+        ):
+            roots = [str(root) for root in permission_broker.workspace_roots()]
+
+        self.assertEqual(roots[0], "/home/example/repo")
+        self.assertIn("/home/example/repo/.artifacts/worktrees/task", roots)
+
+    def test_commands_in_the_canonical_root_are_not_held_for_approval(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"ORCH_CANONICAL_ROOT": "/home/example/repo"}, clear=False
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(
+                    "cd /home/example/repo && git status"
+                ),
+                "allow",
+            )
+
+    def test_a_dispatched_worktree_outside_the_canonical_root_is_honoured(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ORCH_CANONICAL_ROOT": "/home/example/repo",
+                "ORCH_WORKSPACE_ROOT": "/srv/isolated/task-worktree",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(
+                    "cd /srv/isolated/task-worktree && ls"
+                ),
+                "allow",
+            )
+
+    def test_paths_outside_every_known_root_still_need_review(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"ORCH_CANONICAL_ROOT": "/home/example/repo"}, clear=False
+        ):
+            self.assertEqual(
+                permission_broker.classify_command("cd /etc && ls"), "defer"
+            )
+
+    def test_canonical_root_pnpm_install_guard_follows_the_canonical_root(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"ORCH_CANONICAL_ROOT": "/home/example/repo"}, clear=False
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(
+                    "cd /home/example/repo && pnpm install"
+                ),
+                "defer",
+            )
+
+
+class CommandSubstitutionBoundaryTest(unittest.TestCase):
+    """`$(...)` is judged like `$VAR`, because neither can be judged statically.
+
+    `git -C "$WT" status` was already permitted, so refusing `WT=$(pwd)` drew
+    the line by syntax rather than by risk — and deadlocked ordinary shell
+    idiom: five real approvals were held on `cb=$(git merge-base ...)`.
+    """
+
+    def _reason(self, command: str):
+        return permission_broker.command_hard_boundary_reason(command)
+
+    def test_value_producing_substitution_is_the_reviewers_call(self) -> None:
+        for command in (
+            "cb=$(git merge-base origin/dev origin/x); git diff $cb origin/x -- a.ts",
+            'grep -rn "x" $(readlink -f apps/api/node_modules/@drts/contracts)/src',
+            "x=$(pwd); echo $x",
+            "x=$(echo $(pwd)); ls",
+        ):
+            self.assertIsNone(self._reason(command), command)
+
+    def test_it_matches_how_plain_variables_are_already_treated(self) -> None:
+        self.assertIsNone(self._reason('WT=/tmp/x; git -C "$WT" rev-parse HEAD'))
+        self.assertIsNone(self._reason('WT=$(pwd); git -C "$WT" rev-parse HEAD'))
+
+    def test_destructive_content_inside_a_substitution_still_stops_it(self) -> None:
+        # `^`-anchored DENY patterns would skip over a substitution body, so the
+        # bodies are checked in their own right.
+        for command in (
+            "x=$(rm -rf /); echo $x",
+            "x=$(sudo cat /etc/shadow); echo $x",
+            "y=$(git reset --hard HEAD~3); echo $y",
+        ):
+            reason = self._reason(command)
+            self.assertIsNotNone(reason, command)
+            self.assertIn("denied pattern", reason, command)
+
+    def test_a_write_inside_a_substitution_still_stops_it(self) -> None:
+        reason = self._reason("x=$(echo pwned > /home/lupin/.bashrc)")
+        self.assertIsNotNone(reason)
+        self.assertIn("writes outside", reason)
+
+    def test_backticks_and_process_substitution_remain_refused(self) -> None:
+        # Rare in ordinary usage, and backticks do not nest, so the cost of
+        # keeping them out is low.
+        for command in ("echo `rm -rf /tmp/x`", "diff <(ls) <(ls)"):
+            self.assertIsNotNone(self._reason(command), command)
+
+    def test_an_unbalanced_substitution_is_refused(self) -> None:
+        reason = self._reason("x=$(echo unbalanced")
+        self.assertIsNotNone(reason)
+        self.assertIn("unbalanced", reason)
+
+    def test_classify_command_is_unchanged_for_substitution(self) -> None:
+        # Substitution still never runs unreviewed; only the reviewer's reach
+        # changes.
+        self.assertEqual(permission_broker.classify_command("x=$(pwd); echo $x"), "defer")
