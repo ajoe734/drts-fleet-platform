@@ -42,6 +42,12 @@ import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import {
+  extractWorkloadIdentityExchangeNonce,
+  extractRequestedWorkloadTokenAudience,
+  extractWorkloadIdentityAssertion,
+  ServiceWorkloadIdentityAdapter,
+} from "./service-workload-identity.adapter";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -76,19 +82,22 @@ export class AuthController {
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
+    @Optional()
+    private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
   ) {}
 
+  @OpenRoute()
   @Post("token")
   async issueToken(@Req() request: TokenRequest): Promise<{
     token: string;
     expiresIn: string;
   }> {
-    // Require internal key to issue tokens
-    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
-
     const strictEnvironment = isStrictAuthEnvironment();
     const isStrictIap =
       process.env.STRICT_IAP_MODE === "true" || strictEnvironment;
+    const rawWorkloadAssertion = extractWorkloadIdentityAssertion(
+      request.headers as Record<string, string | string[] | undefined>,
+    );
     const rawAssertion = extractIapJwtAssertion(request.headers);
     const bootstrapIdentity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
@@ -103,6 +112,72 @@ export class AuthController {
         "Bootstrap identity headers are disabled in strict auth environments.",
       );
     }
+
+    if (rawWorkloadAssertion && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled when workload identity proof is provided.",
+      );
+    }
+
+    if (rawWorkloadAssertion) {
+      const requestedTokenAudience = extractRequestedWorkloadTokenAudience(
+        request.headers as Record<string, string | string[] | undefined>,
+      );
+      const exchangeNonce = extractWorkloadIdentityExchangeNonce(
+        request.headers as Record<string, string | string[] | undefined>,
+      );
+      const resolved =
+        await this.serviceWorkloadIdentityAdapter?.resolveSubject(
+          request.headers as Record<string, string | string[] | undefined>,
+          {
+            requestedTokenAudience,
+            exchangeNonce,
+          },
+        );
+      if (!resolved) {
+        throw new ApiRequestError(
+          503,
+          "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+          "Workload identity validation is not configured for this environment.",
+        );
+      }
+
+      const expiresIn: JwtExpiresIn = "15m";
+      const issued = await this.issueJwtSession(
+        {
+          authMode: "jwt_bearer",
+          actorType: "system",
+          actorId: resolved.actorId,
+          principalId: resolved.principalId,
+          subject: resolved.subject,
+          realm: "system",
+          tenantId: null,
+          roleFamilies: [],
+          roles: resolved.roles,
+          scopes: resolved.scopes,
+          requestId:
+            (request.headers["x-request-id"] as string | undefined) ?? null,
+        },
+        {
+          expiresIn,
+          principalId: resolved.principalId,
+          subject: resolved.subject,
+          ensurePrincipal: false,
+          authTime: resolved.authTime,
+          amr: ["workload_identity"],
+          acr: "aal2",
+          tokenVersion: resolved.tokenVersion,
+          audience: [resolved.tokenAudience],
+          workloadExchangeNonceHash: resolved.exchangeNonceHash,
+        },
+      );
+      return { token: issued.token, expiresIn };
+    }
+
+    // Require internal key to issue tokens when workload proof is not used.
+    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
 
     if (rawAssertion && this.iapSubjectAdapter) {
       const expectedAudience =
@@ -179,7 +254,7 @@ export class AuthController {
     }
 
     const expiresIn: JwtExpiresIn =
-      identity.actorType === "system" ? "1h" : "8h";
+      identity.actorType === "system" ? "15m" : "8h";
     const issuedAt = new Date().toISOString();
     const issued = await this.issueJwtSession(identity, {
       expiresIn,

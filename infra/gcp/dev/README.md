@@ -38,6 +38,8 @@ Required values:
 | `DEV_GCP_RUNTIME_SERVICE_ACCOUNT` | variable or secret | Runtime identity attached to Cloud Run job/services |
 | `DEV_WIF_PROVIDER`                | secret             | Workload Identity Federation provider resource      |
 | `DEV_WIF_SERVICE_ACCOUNT`         | secret             | GitHub Actions deployer identity                    |
+| `DEV_WORKLOAD_IDENTITY_ISSUER`    | variable           | Expected issuer for runtime workload proof exchange |
+| `DEV_WORKLOAD_IDENTITY_AUDIENCE`  | variable           | Expected audience for runtime workload proof exchange |
 
 Optional but recommended:
 
@@ -68,7 +70,16 @@ project:
 - `drts-dev-api-key-salt`
 - `drts-dev-jwt-secret`
 - `drts-dev-controlled-download-signing-secret`
-- `drts-dev-internal-key` (optional)
+- `drts-dev-workload-identity-jwt-public-key`
+- `drts-dev-workload-identity-service-principals`
+- `drts-dev-internal-key` (optional break-glass only)
+
+When `drts-dev-internal-key` is omitted, the API runtime must still receive:
+
+- `WORKLOAD_IDENTITY_ISSUER`
+- `WORKLOAD_IDENTITY_AUDIENCE`
+- `WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY`
+- `WORKLOAD_IDENTITY_SERVICE_PRINCIPALS`
 
 Set `DEV_SECRET_PREFIX` if your secret names differ.
 

@@ -52,6 +52,7 @@ export interface JwtIdentityPayload {
   iat?: number | undefined;
   exp?: number | undefined;
   controlPlaneProxy?: boolean | undefined;
+  workloadExchangeNonceHash?: string | undefined;
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
@@ -119,6 +120,7 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   audience?: string[] | null;
   issuedAt?: string | null;
   expiresAt?: string | null;
+  workloadExchangeNonceHash?: string | null;
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
@@ -138,6 +140,8 @@ export interface IssueSessionTokenOptions {
   ensurePrincipal?: boolean;
   idleExpiresAt?: string | null;
   absoluteExpiresAt?: string;
+  audience?: string[] | null;
+  workloadExchangeNonceHash?: string | null;
 }
 
 const SIGN_KEY_REQUIRED_ENV = ["JWT_PRIVATE_KEY", "JWT_SECRET"] as const;
@@ -152,7 +156,7 @@ const VERIFY_KEY_MATERIAL_ERROR_MESSAGE =
   "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)";
 
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
-const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
+const SERVICE_EXPIRES_IN: JwtExpiresIn = "15m";
 const DEFAULT_POLICY_VERSION = "auth.jwt-session.v1";
 // Shared with the control-plane web apps, which mint the proxy token this
 // service verifies. Keeping one copy stops the minted and expected claims from
@@ -393,9 +397,14 @@ export class JwtAuthService {
     expiresIn: JwtExpiresIn | undefined,
     jwtId?: string,
     keyInfo?: { algorithm: jwt.Algorithm; kid: string },
+    audienceOverride?: string[] | null,
   ): jwt.SignOptions {
     const issuer = this.getIssuer();
-    const audience = this.getAudienceOption();
+    const overrideAudience = normalizeAudience(audienceOverride);
+    const audience =
+      overrideAudience && overrideAudience.length > 0
+        ? overrideAudience
+        : normalizeAudience(this.getAudienceOption());
     const algorithms = this.getAlgorithms();
     const options: jwt.SignOptions = {
       algorithm: keyInfo?.algorithm ?? algorithms[0],
@@ -409,7 +418,7 @@ export class JwtAuthService {
     if (issuer) {
       options.issuer = issuer;
     }
-    if (audience) {
+    if (audience && audience.length > 0) {
       options.audience = Array.isArray(audience)
         ? ([...audience] as [string, ...string[]])
         : audience;
@@ -538,6 +547,10 @@ export class JwtAuthService {
       exp: payload.exp,
       iss: payload.iss,
       jti: payload.jti,
+      workloadExchangeNonceHash:
+        typeof payload.workloadExchangeNonceHash === "string"
+          ? payload.workloadExchangeNonceHash
+          : undefined,
     };
   }
 
@@ -600,8 +613,19 @@ export class JwtAuthService {
     const principalId =
       options?.principalId ?? identity.principalId ?? identity.actorId;
     const membershipId = options?.membershipId ?? identity.membershipId ?? null;
-    const audience = this.getAudienceList();
+    const optionAudience = normalizeAudience(options?.audience);
+    const identityAudience = normalizeAudience(identity.audience);
+    const audience =
+      optionAudience && optionAudience.length > 0
+        ? optionAudience
+        : identityAudience && identityAudience.length > 0
+          ? identityAudience
+          : this.getAudienceList();
     const issuer = this.getIssuer() ?? null;
+    const workloadExchangeNonceHash =
+      options?.workloadExchangeNonceHash ??
+      identity.workloadExchangeNonceHash ??
+      null;
     const subject =
       options?.subject ??
       identity.subject ??
@@ -666,7 +690,13 @@ export class JwtAuthService {
             ? { deviceId: identity.driverDeviceId }
             : {}),
         },
-        riskSummary: {},
+        riskSummary: {
+          ...(workloadExchangeNonceHash
+            ? {
+                workloadExchangeNonceHash,
+              }
+            : {}),
+        },
         createdAt: issuedAt,
         updatedAt: issuedAt,
       };
@@ -690,6 +720,7 @@ export class JwtAuthService {
         audience,
         issuedAt,
         expiresAt,
+        workloadExchangeNonceHash,
       },
       { expiresIn, jwtId: tokenId },
     );
@@ -731,6 +762,8 @@ export class JwtAuthService {
       amr: unique(identity.amr),
       acr: identity.acr ?? undefined,
       policyVersion: identity.policyVersion ?? undefined,
+      workloadExchangeNonceHash:
+        identity.workloadExchangeNonceHash ?? undefined,
       drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
@@ -750,6 +783,7 @@ export class JwtAuthService {
         expiresIn,
         opts?.jwtId ?? identity.tokenId ?? undefined,
         activeKey,
+        identity.audience,
       ),
     );
   }

@@ -87,6 +87,8 @@ env:
   DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED }}
   DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
+  DEV_WORKLOAD_IDENTITY_ISSUER: ${{ vars.DEV_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
+  DEV_WORKLOAD_IDENTITY_AUDIENCE: ${{ vars.DEV_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
   DEV_IAP_CLIENT_ID: ${{ vars.DEV_IAP_CLIENT_ID }}
   DEV_PLATFORM_ADMIN_ORIGIN: ${{ vars.DEV_PLATFORM_ADMIN_ORIGIN }}
   DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
@@ -317,6 +319,8 @@ jobs:
           [[ -n "$runtime_sa" ]] || missing+=("vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT")
           [[ -n "$deployer_sa" ]] || missing+=("secrets.DEV_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
           [[ -n "$wif_provider" ]] || missing+=("secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${DEV_WORKLOAD_IDENTITY_ISSUER:-}" ]] || missing+=("vars.DEV_WORKLOAD_IDENTITY_ISSUER or vars.WORKLOAD_IDENTITY_ISSUER")
+          [[ -n "${DEV_WORKLOAD_IDENTITY_AUDIENCE:-}" ]] || missing+=("vars.DEV_WORKLOAD_IDENTITY_AUDIENCE or vars.WORKLOAD_IDENTITY_AUDIENCE")
 
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing GitHub Actions dev configuration: ${missing[*]}."
@@ -627,11 +631,22 @@ jobs:
           jwt_audience="${DEV_JWT_AUDIENCE:-https://api.local.drts.internal}"
 
           controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
+          workload_key_secret="${secret_prefix}-workload-identity-jwt-public-key"
+          workload_registry_secret="${secret_prefix}-workload-identity-service-principals"
           if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
             echo "::error::Required secret ${controlled_download_secret} not found in project ${project_id}."
             exit 1
           fi
+          if ! gcloud secrets describe "$workload_key_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${workload_key_secret} not found in project ${project_id}."
+            exit 1
+          fi
+          if ! gcloud secrets describe "$workload_registry_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${workload_registry_secret} not found in project ${project_id}."
+            exit 1
+          fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
+          secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
 
           # Dev reuses the already-managed JWT secret for internal handoff.
           # Production environments can map these slots to distinct secrets.
@@ -733,7 +748,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,AUTH_MODE=explicit,API_PORT=3001,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,AUTH_MODE=explicit,API_PORT=3001,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER},WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE},LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi

@@ -8,6 +8,7 @@ import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { AuthController } from "./auth.controller";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
+import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adapter";
 
 @Module({
   imports: [
@@ -17,7 +18,17 @@ import { IAPSubjectAdapter } from "./iap-subject.adapter";
     IdentityModule,
   ],
   controllers: [AuthController],
-  providers: [JwtAuthService, DriverDeviceSessionService, IAPSubjectAdapter],
-  exports: [JwtAuthService, DriverDeviceSessionService, IAPSubjectAdapter],
+  providers: [
+    JwtAuthService,
+    DriverDeviceSessionService,
+    IAPSubjectAdapter,
+    ServiceWorkloadIdentityAdapter,
+  ],
+  exports: [
+    JwtAuthService,
+    DriverDeviceSessionService,
+    IAPSubjectAdapter,
+    ServiceWorkloadIdentityAdapter,
+  ],
 })
 export class AuthModule {}

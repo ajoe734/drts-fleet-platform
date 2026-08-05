@@ -55,6 +55,8 @@ env:
   OPS_CONSOLE_ORIGIN: ${{ vars.PROD_OPS_CONSOLE_ORIGIN }}
   CONTROL_PLANE_API_ORIGIN_ENV: ${{ vars.PROD_CONTROL_PLANE_API_ORIGIN }}
   IAP_CLIENT_ID_ENV: ${{ vars.PROD_IAP_CLIENT_ID }}
+  WORKLOAD_IDENTITY_ISSUER_ENV: ${{ vars.PROD_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
+  WORKLOAD_IDENTITY_AUDIENCE_ENV: ${{ vars.PROD_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
 
 jobs:
   validate-config:
@@ -103,6 +105,8 @@ jobs:
           [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.PROD_WIF_PROVIDER")
           [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.PROD_WIF_SERVICE_ACCOUNT")
           [[ -n "${RUNTIME_SERVICE_ACCOUNT:-}" ]] || missing+=("vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT")
+          [[ -n "${WORKLOAD_IDENTITY_ISSUER_ENV:-}" ]] || missing+=("vars.PROD_WORKLOAD_IDENTITY_ISSUER or vars.WORKLOAD_IDENTITY_ISSUER")
+          [[ -n "${WORKLOAD_IDENTITY_AUDIENCE_ENV:-}" ]] || missing+=("vars.PROD_WORKLOAD_IDENTITY_AUDIENCE or vars.WORKLOAD_IDENTITY_AUDIENCE")
           [[ -n "${PLATFORM_ADMIN_ORIGIN:-}" ]] || missing+=("vars.PROD_PLATFORM_ADMIN_ORIGIN")
           [[ -n "${OPS_CONSOLE_ORIGIN:-}" ]] || missing+=("vars.PROD_OPS_CONSOLE_ORIGIN")
           [[ -n "${CONTROL_PLANE_API_ORIGIN_ENV:-}" ]] || missing+=("vars.PROD_CONTROL_PLANE_API_ORIGIN")
@@ -488,6 +492,16 @@ jobs:
 
           secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest,CONTROLLED_DOWNLOAD_SIGNING_SECRET=${SECRET_PREFIX}-controlled-download-signing-secret:latest"
           ops_secret_args="JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
+          workload_key_secret="${SECRET_PREFIX}-workload-identity-jwt-public-key"
+          workload_registry_secret="${SECRET_PREFIX}-workload-identity-service-principals"
+
+          for required_secret in "$workload_key_secret" "$workload_registry_secret"; do
+            if ! gcloud secrets describe "$required_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+              echo "::error::Required secret ${required_secret} not found in project ${PROJECT_ID}."
+              exit 1
+            fi
+          done
+          secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
 
           if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"
@@ -537,7 +551,7 @@ jobs:
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,APP_ENV=production,DRTS_ENV=production,API_PORT=3001,MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
+            --set-env-vars "NODE_ENV=production,APP_ENV=production,DRTS_ENV=production,API_PORT=3001,WORKLOAD_IDENTITY_ISSUER=${WORKLOAD_IDENTITY_ISSUER_ENV},WORKLOAD_IDENTITY_AUDIENCE=${WORKLOAD_IDENTITY_AUDIENCE_ENV},MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
             ${{ steps.exposure.outputs.api }} \
             --min-instances 1 \
             --max-instances 6 \
