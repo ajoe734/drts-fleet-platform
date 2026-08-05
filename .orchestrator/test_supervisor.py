@@ -8818,3 +8818,70 @@ class AntigravityModelRotationTests(unittest.TestCase):
                 self.config, state, {}, self._worker(), {"kind": "auth"}, "401", authorized=True
             )
         )
+
+
+class ChairApprovalBoundaryTests(unittest.TestCase):
+    """What the chairman may wave through.
+
+    An approval only exists because `classify_command` said `defer` — "I cannot
+    tell, ask someone". Gating the chairman on `classify_command(...) == "allow"`
+    therefore let it approve only what would already have run unreviewed, and
+    every gap in the pattern set became a permanent deadlock: 149 of 273
+    recorded denials carry the chairman's own read-only justification.
+    """
+
+    def _bash(self, command: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "risk_class": "needs_review",
+        }
+
+    def test_unrecognised_read_only_commands_are_the_chairs_to_approve(self) -> None:
+        # Exactly the commands that had two workers suspended for 81 minutes.
+        for command in (
+            'git cat-file -t fc426709 2>&1; echo "---"; git branch -a --contains fc426709 | head',
+            "timeout 900 pnpm exec vitest run tests/unit/tenant-partner.service.test.ts 2>&1 | tail -40",
+            "./node_modules/.bin/vitest run tests/unit/x.test.ts",
+        ):
+            self.assertTrue(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_denied_patterns_stay_beyond_the_chairs_reach(self) -> None:
+        for command in (
+            "sudo rm -rf /etc",
+            "git reset --hard HEAD~5",
+            "echo hi && git reset --hard HEAD~5",
+            "rm -rf /",
+        ):
+            self.assertFalse(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_writes_outside_the_workspace_stay_beyond_reach(self) -> None:
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(
+                self._bash("echo pwned > /home/lupin/.bashrc")
+            )
+        )
+
+    def test_hidden_commands_stay_beyond_reach(self) -> None:
+        for command in ("echo $(rm -rf /tmp/x)", "echo `rm -rf /tmp/x`"):
+            self.assertFalse(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_broad_git_push_stays_beyond_reach(self) -> None:
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(
+                self._bash("git push --force origin main")
+            )
+        )
+
+    def test_ordinary_git_push_remains_approvable(self) -> None:
+        self.assertTrue(
+            supervisor._approval_is_routine_safe(
+                self._bash("git push origin feature-branch")
+            )
+        )
