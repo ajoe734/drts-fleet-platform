@@ -8866,8 +8866,25 @@ class ChairApprovalBoundaryTests(unittest.TestCase):
             )
         )
 
-    def test_hidden_commands_stay_beyond_reach(self) -> None:
-        for command in ("echo $(rm -rf /tmp/x)", "echo `rm -rf /tmp/x`"):
+    def test_backticks_stay_beyond_reach(self) -> None:
+        # Backticks do not nest and are rare in ordinary usage, so they stay
+        # refused. `$(...)` is judged like `$VAR` — see
+        # CommandSubstitutionBoundaryTest in test_provider_permissions.
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(self._bash("echo `rm -rf /tmp/x`"))
+        )
+
+    def test_substitution_is_treated_the_same_as_a_plain_variable(self) -> None:
+        # `rm` is not a denied pattern — it left the safe set, meaning "needs a
+        # decision", not "nobody may permit it". Wrapping it in a substitution
+        # must not change that, in either direction.
+        self.assertEqual(
+            supervisor._approval_is_routine_safe(self._bash("rm -rf /tmp/x")),
+            supervisor._approval_is_routine_safe(self._bash("echo $(rm -rf /tmp/x)")),
+        )
+
+    def test_denied_patterns_inside_a_substitution_stay_beyond_reach(self) -> None:
+        for command in ("echo $(rm -rf /)", "x=$(sudo cat /etc/shadow)"):
             self.assertFalse(
                 supervisor._approval_is_routine_safe(self._bash(command)), command
             )

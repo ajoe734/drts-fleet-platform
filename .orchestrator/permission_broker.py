@@ -367,12 +367,17 @@ def _writes_outside_workspace(segment: str) -> bool:
     return False
 
 
-def _split_shell_segments(shell_command: str) -> list[str] | None:
+def _split_shell_segments(
+    shell_command: str, *, opaque_substitution: bool = False
+) -> list[str] | None:
     """Split a command on shell separators, honouring quotes.
 
     Returns None when the command contains a construct whose real behaviour is
-    not visible to static inspection (command or process substitution), so the
-    caller must not treat it as safe.
+    not visible to static inspection, so the caller must not treat it as safe.
+
+    `opaque_substitution` keeps `$(...)` in the segment text instead of
+    refusing the whole command. Callers that use it must inspect the
+    substitution bodies themselves — see `substitution_bodies`.
     """
     command = _normalize_shell_command(shell_command)
     if not command:
@@ -409,7 +414,14 @@ def _split_shell_segments(shell_command: str) -> list[str] | None:
         if char == "`":
             return None
         if char == "$" and command[index + 1 : index + 2] == "(":
-            return None
+            if not opaque_substitution:
+                return None
+            end = _matching_paren(command, index + 1)
+            if end is None:
+                return None
+            buffer.append(command[index:end + 1])
+            index = end + 1
+            continue
         if char in ("<", ">") and command[index + 1 : index + 2] == "(":
             return None
         if command[index : index + 2] in ("&&", "||"):
@@ -461,6 +473,64 @@ def _cd_target_is_within_workspace(segment: str) -> bool:
     return _paths_within_workspace([Path(tokens[1])])
 
 
+def _matching_paren(command: str, open_index: int) -> int | None:
+    """Index of the `)` closing the `(` at open_index, or None when unbalanced."""
+    depth = 0
+    index = open_index
+    quote: str | None = None
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < len(command):
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+def substitution_bodies(shell_command: str) -> list[str] | None:
+    """The commands inside `$(...)`, or None when they cannot be delimited."""
+    command = _normalize_shell_command(shell_command)
+    bodies: list[str] = []
+    index = 0
+    quote: str | None = None
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < len(command):
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            continue
+        if char == "$" and command[index + 1 : index + 2] == "(":
+            end = _matching_paren(command, index + 1)
+            if end is None:
+                return None
+            bodies.append(command[index + 2 : end])
+            index = end + 1
+            continue
+        index += 1
+    return bodies
+
+
 def command_hard_boundary_reason(shell_command: str) -> str | None:
     """Why no reviewer may wave this command through, or None if it is theirs to judge.
 
@@ -473,14 +543,25 @@ def command_hard_boundary_reason(shell_command: str) -> str | None:
     case a reviewer exists to decide. Treating `defer` as forbidden makes the
     reviewer able to approve only what would already have run unreviewed, so an
     unrecognised-but-harmless command deadlocks instead of being waved through.
+
+    `$(...)` is judged the same way as `$VAR`. Neither value exists until the
+    command runs, so neither is something a static check can rule on: `git -C
+    "$WT" status` is already permitted here, and refusing `WT=$(pwd)` alongside
+    it drew the line by syntax rather than by risk. What stays refusable is what
+    is statically visible — a denied pattern or a write outside the workspace —
+    and that is checked inside substitution bodies too, since `^`-anchored
+    patterns would otherwise skip over them.
     """
     normalized = _normalize_shell_command(shell_command)
     if not normalized:
         return "the command is empty"
-    segments = _split_shell_segments(normalized)
+    bodies = substitution_bodies(normalized)
+    if bodies is None:
+        return "an unbalanced command substitution cannot be read"
+    segments = _split_shell_segments(normalized, opaque_substitution=True)
     if segments is None:
-        return "command or process substitution hides what would actually run"
-    for segment in segments:
+        return "a backtick or process substitution hides what would actually run"
+    for segment in [*segments, *bodies]:
         for pattern in DENY_BASH_PATTERNS:
             if pattern.search(segment):
                 return f"a denied pattern matches: {segment[:100]}"
