@@ -7632,6 +7632,59 @@ class ChairmanFlowTests(unittest.TestCase):
             )
         )
 
+    def _pause_entry(self, reason: str, *, kind: str, reset_seconds: int | None) -> dict:
+        state: dict[str, object] = {}
+        supervisor.pause_provider(
+            state, "codex2", reason, kind=kind, reset_seconds=reset_seconds
+        )
+        return state["provider_pauses"]["codex2"]
+
+    def test_reset_hint_later_than_caller_default_wins(self) -> None:
+        # Quota pauses hardcode reset_seconds=14400, which used to discard the
+        # provider's own reset time. The lane then woke 4h later, hit the same
+        # quota error and re-paused, on repeat.
+        before = datetime.now(timezone.utc).timestamp()
+        entry = self._pause_entry(
+            "You've hit your usage limit. Resets in 96h.",
+            kind="quota",
+            reset_seconds=14400,
+        )
+
+        self.assertEqual(entry.get("resume_at_source"), "reason_hint")
+        self.assertGreaterEqual(entry["resume_at"], before + 96 * 3600 - 60)
+
+    def test_reset_hint_shorter_than_caller_default_does_not_pull_wakeup_forward(
+        self,
+    ) -> None:
+        before = datetime.now(timezone.utc).timestamp()
+        entry = self._pause_entry(
+            "429 Too Many Requests. Resets in 5m.",
+            kind="capacity",
+            reset_seconds=14400,
+        )
+
+        self.assertEqual(entry.get("resume_at_source"), "reset_seconds")
+        self.assertGreaterEqual(entry["resume_at"], before + 14400 - 60)
+
+    def test_pause_without_reset_hint_keeps_caller_reset_seconds(self) -> None:
+        before = datetime.now(timezone.utc).timestamp()
+        entry = self._pause_entry(
+            "quota_exhausted: no reset time stated",
+            kind="quota",
+            reset_seconds=14400,
+        )
+
+        self.assertEqual(entry.get("resume_at_source"), "reset_seconds")
+        self.assertGreaterEqual(entry["resume_at"], before + 14400 - 60)
+
+    def test_auth_pause_ignores_reset_hint_and_stays_indefinite(self) -> None:
+        entry = self._pause_entry(
+            "invalid api key. Resets in 96h.", kind="auth", reset_seconds=None
+        )
+
+        self.assertIsNone(entry["resume_at"])
+        self.assertNotIn("resume_at_source", entry)
+
 
 class WorkerTreeGuardSettingsTests(unittest.TestCase):
     def test_defaults_off_with_canonical_blocking_globs(self) -> None:
