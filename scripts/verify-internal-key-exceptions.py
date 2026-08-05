@@ -2,11 +2,10 @@
 """
 Internal Key Exception Registry Verification Script (IAM-SVC-002)
 
-Validates:
+Validates static inventory metadata integrity:
 1. Complete metadata for every internal-key exception (owner, purpose, scope, TTL, network boundary, rotation cadence, usage signal, removal date, removal plan).
 2. Expiration status of exceptions against current UTC time.
 3. Documentation alignment between docs/02-architecture/internal-key-exceptions.md and machine-readable registry.
-4. Absence of undocumented production exceptions.
 """
 
 import datetime

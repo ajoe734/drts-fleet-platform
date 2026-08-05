@@ -5,10 +5,10 @@ import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import {
   evaluateInternalKey,
-  INTERNAL_KEY_EXCEPTION_REGISTRY,
   parseCsvKeys,
-  type InternalKeyExceptionMetadata,
 } from "./internal-key-exception-registry";
+import { internalKeyMetrics } from "./internal-key-metrics";
+import { internalKeyAuditRecorder } from "./internal-key-audit";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -184,6 +184,16 @@ export function validateInternalKey(
   });
 
   if (evalResult.valid) {
+    if (evalResult.keyState === "rotated_previous") {
+      internalKeyMetrics.recordRotationPreviousUsed(
+        evalResult.exception?.exceptionId,
+        evalResult.exception?.owner,
+      );
+    }
+    internalKeyAuditRecorder.recordUsage(evalResult, {
+      header: INTERNAL_KEY_HEADER,
+      route: `${requestMethod} ${requestPath}`,
+    });
     const usageSignal =
       evalResult.exception?.usageSignal ?? "AUTH_INTERNAL_KEY_USED";
     logger.log(
@@ -191,6 +201,20 @@ export function validateInternalKey(
     );
     return;
   }
+
+  internalKeyMetrics.recordDriftAlert(
+    evalResult.exception?.exceptionId,
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyMetrics.recordUnauthorizedAttempt(
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyAuditRecorder.recordDrift(evalResult, {
+    header: INTERNAL_KEY_HEADER,
+    route: `${requestMethod} ${requestPath}`,
+  });
 
   logger.warn(
     `[AUTH_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} route=${requestMethod} ${requestPath}`,
@@ -271,6 +295,16 @@ export function requireScopedInternalKey(
   });
 
   if (evalResult.valid) {
+    if (evalResult.keyState === "rotated_previous") {
+      internalKeyMetrics.recordRotationPreviousUsed(
+        evalResult.exception?.exceptionId,
+        evalResult.exception?.owner,
+      );
+    }
+    internalKeyAuditRecorder.recordUsage(evalResult, {
+      header: options.header,
+      route: `${requestMethod} ${requestPath}`,
+    });
     const usageSignal =
       evalResult.exception?.usageSignal ?? "AUTH_SCOPED_INTERNAL_KEY_USED";
     logger.log(
@@ -278,6 +312,20 @@ export function requireScopedInternalKey(
     );
     return;
   }
+
+  internalKeyMetrics.recordDriftAlert(
+    evalResult.exception?.exceptionId,
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyMetrics.recordUnauthorizedAttempt(
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyAuditRecorder.recordDrift(evalResult, {
+    header: options.header,
+    route: `${requestMethod} ${requestPath}`,
+  });
 
   logger.warn(
     `[AUTH_SCOPED_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} header=${options.header} route=${requestMethod} ${requestPath}`,

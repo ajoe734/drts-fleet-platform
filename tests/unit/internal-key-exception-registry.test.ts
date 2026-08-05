@@ -71,6 +71,8 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       {
         headerName: "x-drts-internal-key",
+        requestMethod: "GET",
+        requestPath: "/api/tenants",
       },
     );
 
@@ -145,7 +147,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
     expect(result.keyState).toBe("expired");
   });
 
-  it("enforces scope metadata and matches EXCP_003 correctly on ops and health routes", () => {
+  it("enforces scope metadata and matches control-plane proxy and break-glass routes correctly", () => {
     // EXCP_003 matches GET health or POST ops/*
     const resultHealth = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
@@ -154,6 +156,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         headerName: "x-drts-internal-key",
         requestMethod: "GET",
         requestPath: "/health",
+        environment: "staging",
       },
     );
     expect(resultHealth.valid).toBe(true);
@@ -166,37 +169,52 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/ops/breakglass/activate",
+        environment: "staging",
       },
     );
     expect(resultOps.valid).toBe(true);
     expect(resultOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
 
-    // EXCP_002 matches POST partner/ingress/handoff or POST auth/token
-    const resultHandoff = evaluateInternalKey(
+    // EXCP_002 matches control-plane proxy routes like GET /api/tenants, POST /api/partner/bookings, etc.
+    const resultTenants = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "GET",
+        requestPath: "/api/tenants",
+      },
+    );
+    expect(resultTenants.valid).toBe(true);
+    expect(resultTenants.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
+
+    const resultBookings = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
-        requestPath: "/api/partner/ingress/handoff",
+        requestPath: "/api/partner/bookings",
       },
     );
-    expect(resultHandoff.valid).toBe(true);
-    expect(resultHandoff.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
+    expect(resultBookings.valid).toBe(true);
+    expect(resultBookings.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
+  });
 
-    // Out of scope route returns INTERNAL_KEY_UNDOCUMENTED
-    const resultUnscoped = evaluateInternalKey(
+  it("enforces network boundary constraints and rejects EXCP_003 under production", () => {
+    const resultProdOps = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
         headerName: "x-drts-internal-key",
-        requestMethod: "DELETE",
-        requestPath: "/api/users/123",
+        requestMethod: "POST",
+        requestPath: "/api/ops/dispatch",
+        environment: "production",
       },
     );
-    expect(resultUnscoped.valid).toBe(false);
-    expect(resultUnscoped.code).toBe("INTERNAL_KEY_UNDOCUMENTED");
-    expect(resultUnscoped.keyState).toBe("undocumented");
+    expect(resultProdOps.valid).toBe(false);
+    expect(resultProdOps.code).toBe("INTERNAL_KEY_BOUNDARY_VIOLATION");
+    expect(resultProdOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
   });
 
   it("triggers EXCP_003 expiration after 2026-08-31", () => {
@@ -208,6 +226,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         requestMethod: "POST",
         requestPath: "/api/ops/test",
         now: new Date("2026-09-01T00:00:00Z"),
+        environment: "staging",
       },
     );
     expect(resultPostExpiry.valid).toBe(false);

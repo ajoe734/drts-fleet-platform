@@ -29,7 +29,7 @@ To prevent undocumented credential proliferation and unmonitored backdoor access
 | Exception ID | Owner | Purpose | Scope / Header | Network Boundary | TTL / ExpiresAt | Rotation Cadence | Usage Signal | Target Removal Date | Removal Plan |
 |---|---|---|---|---|---|---|---|---|---|
 | `INTERNAL_KEY_EXCP_001` | `referral-team` | Scoped server-to-server referral embed handoff artifact issuance and consumption | `x-drts-referral-handoff-key`<br>`POST partner/ingress/referral-embed-handoff`<br>`POST partner/ingress/referral-embed-handoff/consume`<br>`POST partner/ingress/referral-embed-handoff/consent` | `internal-vpc-to-api-ingress` | `2026-10-31T23:59:59Z` | `30d` | `AUTH_SCOPED_INTERNAL_KEY_USED` | `2026-10-31` | Migrate `referral-embed-web` BFF caller to IAM-SVC-001 WIF token exchange once WIF proxy is enabled on referral web app. |
-| `INTERNAL_KEY_EXCP_002` | `control-plane-ops` | Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent | `x-drts-internal-key`<br>`POST partner/ingress/handoff`<br>`POST auth/token` | `control-plane-proxy-to-api` | `2026-09-15T23:59:59Z` | `14d` | `AUTH_LEGACY_INTERNAL_KEY_USED` | `2026-09-15` | Full deprecation of `DRTS_INTERNAL_KEY` fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies. |
+| `INTERNAL_KEY_EXCP_002` | `control-plane-ops` | Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent | `x-drts-internal-key`<br>`* *`<br>`POST partner/ingress/handoff`<br>`POST auth/token` | `control-plane-proxy-to-api` | `2026-09-15T23:59:59Z` | `14d` | `AUTH_LEGACY_INTERNAL_KEY_USED` | `2026-09-15` | Full deprecation of `DRTS_INTERNAL_KEY` fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies. |
 | `INTERNAL_KEY_EXCP_003` | `sre-ops` | Staging emergency break-glass local operations key | `x-drts-internal-key`<br>`GET health`<br>`POST ops/*` | `staging-break-glass-only` | `2026-08-31T23:59:59Z` | `7d` | `AUTH_BREAKGLASS_INTERNAL_KEY_USED` | `2026-08-31` | Replace with IAM-BG-001 break-glass two-person approval and short session token. |
 
 ---
@@ -78,8 +78,8 @@ Automated verification is integrated at two layers:
    - Incomplete metadata triggers `MISSING_CONTROL` / `INVALID_FORMAT`. Expired exceptions trigger `UNSAFE_VALUE`.
 
 2. **Automated Audit Script (`scripts/verify-internal-key-exceptions.py`)**:
-   - Executable verification tool that checks code registry against documentation and live environment configuration.
-   - Detects undocumented keys, missing metadata fields, past expiration dates, and unmonitored routes.
+   - Executable verification tool that checks code registry against documentation metadata integrity.
+   - Verifies machine-readable exception inventory, required metadata fields, document synchronization, and expiration timestamps. Live runtime route enforcement and drift detection are executed continuously by `AuthStartupConfig` and `InternalKeyMiddleware`.
 
 ```bash
 python3 scripts/verify-internal-key-exceptions.py

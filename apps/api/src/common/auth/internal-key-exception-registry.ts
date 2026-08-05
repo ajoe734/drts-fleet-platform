@@ -45,29 +45,6 @@ export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
     status: "active",
   },
   {
-    exceptionId: "INTERNAL_KEY_EXCP_002",
-    owner: "control-plane-ops",
-    purpose:
-      "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
-    scope: [
-      "POST partner/ingress/handoff",
-      "POST auth/token",
-    ],
-    ttl: "2026-09-15T23:59:59Z",
-    expiresAt: "2026-09-15T23:59:59Z",
-    networkBoundary: "control-plane-proxy-to-api",
-    rotationCadence: "14d",
-    usageSignal: "AUTH_LEGACY_INTERNAL_KEY_USED",
-    removalDate: "2026-09-15",
-    removalPlan:
-      "Full deprecation of DRTS_INTERNAL_KEY fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies",
-    header: "x-drts-internal-key",
-    envVar: "DRTS_INTERNAL_KEY",
-    rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
-    revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
-    status: "active",
-  },
-  {
     exceptionId: "INTERNAL_KEY_EXCP_003",
     owner: "sre-ops",
     purpose: "Staging emergency break-glass local operations key",
@@ -83,6 +60,30 @@ export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
     removalDate: "2026-08-31",
     removalPlan:
       "Replace with IAM-BG-001 break-glass two-person approval and short session token",
+    header: "x-drts-internal-key",
+    envVar: "DRTS_INTERNAL_KEY",
+    rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
+    revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
+    status: "active",
+  },
+  {
+    exceptionId: "INTERNAL_KEY_EXCP_002",
+    owner: "control-plane-ops",
+    purpose:
+      "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
+    scope: [
+      "* *",
+      "POST partner/ingress/handoff",
+      "POST auth/token",
+    ],
+    ttl: "2026-09-15T23:59:59Z",
+    expiresAt: "2026-09-15T23:59:59Z",
+    networkBoundary: "control-plane-proxy-to-api",
+    rotationCadence: "14d",
+    usageSignal: "AUTH_LEGACY_INTERNAL_KEY_USED",
+    removalDate: "2026-09-15",
+    removalPlan:
+      "Full deprecation of DRTS_INTERNAL_KEY fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies",
     header: "x-drts-internal-key",
     envVar: "DRTS_INTERNAL_KEY",
     rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
@@ -179,6 +180,7 @@ export function matchesScope(
 
   const spaceIndex = scopePattern.indexOf(" ");
   if (spaceIndex === -1) {
+    if (scopePattern === "*") return true;
     return false;
   }
 
@@ -186,11 +188,15 @@ export function matchesScope(
   const rawPatternPath = scopePattern.slice(spaceIndex + 1).trim();
   const patternPath = normalizeRequestPath(rawPatternPath);
 
-  if (requestMethod.toUpperCase() !== patternMethod) {
+  if (patternMethod !== "*" && requestMethod.toUpperCase() !== patternMethod) {
     return false;
   }
 
   const normReqPath = normalizeRequestPath(requestPath);
+
+  if (patternPath === "*" || patternPath === "**" || rawPatternPath === "*") {
+    return true;
+  }
 
   if (patternPath === normReqPath) {
     return true;
@@ -266,6 +272,7 @@ export interface EvaluateInternalKeyOptions {
   previousKeyExpiresAt?: string | Date | undefined;
   revokedKeys?: string[] | undefined;
   now?: Date | undefined;
+  environment?: string | undefined;
   registry?: InternalKeyExceptionMetadata[] | undefined;
 }
 
@@ -302,6 +309,19 @@ export function evaluateInternalKey(
       reason: err instanceof Error ? err.message : String(err),
       exception,
       keyState: "undocumented",
+    };
+  }
+
+  // Check network boundary
+  const rawEnv = options.environment ?? process.env.DRTS_ENV ?? process.env.APP_ENV ?? process.env.NODE_ENV ?? "local";
+  const isProduction = ["prod", "production"].includes(rawEnv.trim().toLowerCase());
+  if (isProduction && exception.networkBoundary === "staging-break-glass-only") {
+    return {
+      valid: false,
+      code: "INTERNAL_KEY_BOUNDARY_VIOLATION",
+      reason: `Internal key exception ${exception.exceptionId} is restricted to network boundary '${exception.networkBoundary}' and cannot be used in production.`,
+      exception,
+      keyState: "invalid",
     };
   }
 
