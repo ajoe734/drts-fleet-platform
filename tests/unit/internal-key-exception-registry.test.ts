@@ -5,6 +5,7 @@ import {
   evaluateInternalKey,
   INTERNAL_KEY_EXCEPTION_REGISTRY,
   isExceptionExpired,
+  isProductionAllowedBoundary,
   validateExceptionMetadata,
   type InternalKeyExceptionMetadata,
 } from "../../apps/api/src/common/auth/internal-key-exception-registry";
@@ -29,6 +30,13 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       expect(exception.header).toBeTruthy();
       expect(exception.envVar).toBeTruthy();
     }
+  });
+
+  it("classifies production allowed network boundaries correctly using isProductionAllowedBoundary (F14)", () => {
+    expect(isProductionAllowedBoundary("internal-vpc-to-api-ingress")).toBe(true);
+    expect(isProductionAllowedBoundary("control-plane-proxy-to-api")).toBe(true);
+    expect(isProductionAllowedBoundary("staging-break-glass-only")).toBe(false);
+    expect(isProductionAllowedBoundary("custom-staging-network")).toBe(false);
   });
 
   it("throws metadata incomplete error when required field is missing or empty", () => {

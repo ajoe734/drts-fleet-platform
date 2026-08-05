@@ -190,4 +190,12 @@ describe("Authentication Startup Configuration Integration Smoke", () => {
     expect(issueCodes.has("UNSAFE_VALUE")).toBe(true);
     expect(issueCodes.has("MISSING_CONTROL")).toBe(true);
   });
+
+  it("evaluates all registry entries for DRTS_INTERNAL_KEY without order dependency and ignores staging-only boundary in production (F12)", () => {
+    const env = getValidProdEnv();
+    const report = buildAuthStartupConfigReport(env);
+
+    expect(report.valid).toBe(true);
+    expect(report.issues).toHaveLength(0);
+  });
 });

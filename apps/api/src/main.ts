@@ -33,26 +33,6 @@ async function bootstrap() {
       },
     );
 
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .get(
-      "/api/metrics",
-      (
-        _req: unknown,
-        res: {
-          setHeader: (key: string, value: string) => void;
-          send: (body: string) => void;
-        },
-      ) => {
-        res.setHeader(
-          "Content-Type",
-          "text/plain; version=0.0.4; charset=utf-8",
-        );
-        res.send(internalKeyMetrics.toPrometheusFormat());
-      },
-    );
-
   const port = Number(process.env.API_PORT ?? 3001);
   const host = process.env.API_HOST ?? "0.0.0.0";
   await app.listen(port, host);

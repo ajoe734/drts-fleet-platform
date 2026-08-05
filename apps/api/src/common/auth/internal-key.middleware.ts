@@ -25,7 +25,6 @@ export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
-const METRICS_PATHS = new Set(["/metrics", "/api/metrics"]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
   "GET tenant/roles",
@@ -66,13 +65,6 @@ export function isHealthRequest(path: string | undefined): boolean {
     return false;
   }
   return HEALTH_PATHS.has(stripQueryString(path));
-}
-
-export function isMetricsRequest(path: string | undefined): boolean {
-  if (!path) {
-    return false;
-  }
-  return METRICS_PATHS.has(stripQueryString(path));
 }
 
 function isOptionsRequest(method: string | undefined): boolean {
@@ -138,7 +130,6 @@ export function validateInternalKey(
 
   if (
     isHealthRequest(rawPath) ||
-    isMetricsRequest(rawPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, rawPath) ||
     hasBearerAuthorization(request)
@@ -217,10 +208,12 @@ export function validateInternalKey(
     evalResult.exception?.exceptionId,
     evalResult.code,
     `${requestMethod} ${requestPath}`,
+    evalResult.exception,
   );
   internalKeyMetrics.recordUnauthorizedAttempt(
     evalResult.code,
     `${requestMethod} ${requestPath}`,
+    evalResult.exception,
   );
   internalKeyAuditRecorder.recordDrift(evalResult, {
     header: INTERNAL_KEY_HEADER,
@@ -329,10 +322,12 @@ export function requireScopedInternalKey(
     evalResult.exception?.exceptionId,
     evalResult.code,
     `${requestMethod} ${requestPath}`,
+    evalResult.exception,
   );
   internalKeyMetrics.recordUnauthorizedAttempt(
     evalResult.code,
     `${requestMethod} ${requestPath}`,
+    evalResult.exception,
   );
   internalKeyAuditRecorder.recordDrift(evalResult, {
     header: options.header,

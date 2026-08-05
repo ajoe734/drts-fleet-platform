@@ -1,6 +1,7 @@
 import {
   INTERNAL_KEY_EXCEPTION_REGISTRY,
   isExceptionExpired,
+  isProductionAllowedBoundary,
   validateExceptionMetadata,
 } from "../common/auth/internal-key-exception-registry";
 
@@ -906,10 +907,10 @@ export function buildAuthStartupConfigReport(
         });
       }
 
-      const matchedExcp = INTERNAL_KEY_EXCEPTION_REGISTRY.find(
+      const matchedExcps = INTERNAL_KEY_EXCEPTION_REGISTRY.filter(
         (e) => e.envVar === "DRTS_INTERNAL_KEY",
       );
-      if (!matchedExcp) {
+      if (matchedExcps.length === 0) {
         issues.push({
           control: "DRTS_INTERNAL_KEY",
           issue:
@@ -917,21 +918,31 @@ export function buildAuthStartupConfigReport(
           code: "MISSING_CONTROL",
         });
       } else {
-        try {
-          validateExceptionMetadata(matchedExcp);
-        } catch (err) {
-          issues.push({
-            control: "DRTS_INTERNAL_KEY",
-            issue: `Invalid exception metadata for DRTS_INTERNAL_KEY: ${err instanceof Error ? err.message : String(err)}`,
-            code: "INVALID_FORMAT",
-          });
-        }
-        if (isExceptionExpired(matchedExcp)) {
-          issues.push({
-            control: "DRTS_INTERNAL_KEY",
-            issue: `Unsafe control value: DRTS_INTERNAL_KEY exception (${matchedExcp.exceptionId}) expired on ${matchedExcp.expiresAt}`,
-            code: "UNSAFE_VALUE",
-          });
+        for (const matchedExcp of matchedExcps) {
+          try {
+            validateExceptionMetadata(matchedExcp);
+          } catch (err) {
+            issues.push({
+              control: "DRTS_INTERNAL_KEY",
+              issue: `Invalid exception metadata for DRTS_INTERNAL_KEY (${matchedExcp.exceptionId}): ${err instanceof Error ? err.message : String(err)}`,
+              code: "INVALID_FORMAT",
+            });
+          }
+
+          if (
+            environment === "production" &&
+            !isProductionAllowedBoundary(matchedExcp.networkBoundary)
+          ) {
+            continue;
+          }
+
+          if (isExceptionExpired(matchedExcp)) {
+            issues.push({
+              control: "DRTS_INTERNAL_KEY",
+              issue: `Unsafe control value: DRTS_INTERNAL_KEY exception (${matchedExcp.exceptionId}) expired on ${matchedExcp.expiresAt}`,
+              code: "UNSAFE_VALUE",
+            });
+          }
         }
       }
     }
