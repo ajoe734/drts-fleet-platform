@@ -1,4 +1,4 @@
-import { Injectable, Logger, type NestMiddleware } from "@nestjs/common";
+import { Injectable, Logger, Optional, type NestMiddleware } from "@nestjs/common";
 
 import { ApiRequestError } from "../api-envelope";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
@@ -9,6 +9,7 @@ import {
 } from "./internal-key-exception-registry";
 import { internalKeyMetrics } from "./internal-key-metrics";
 import { internalKeyAuditRecorder } from "./internal-key-audit";
+import { SecurityEventsService } from "../../modules/security-events/security-events.service";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -24,6 +25,7 @@ export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
+const METRICS_PATHS = new Set(["/metrics", "/api/metrics"]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
   "GET tenant/roles",
@@ -64,6 +66,13 @@ export function isHealthRequest(path: string | undefined): boolean {
     return false;
   }
   return HEALTH_PATHS.has(stripQueryString(path));
+}
+
+export function isMetricsRequest(path: string | undefined): boolean {
+  if (!path) {
+    return false;
+  }
+  return METRICS_PATHS.has(stripQueryString(path));
 }
 
 function isOptionsRequest(method: string | undefined): boolean {
@@ -122,14 +131,16 @@ export function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
 ): void {
-  const requestPath = request.originalUrl ?? request.url ?? "";
+  const rawPath = request.originalUrl ?? request.url ?? "";
+  const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
   const strictEnvironment = isStrictAuthEnvironment();
 
   if (
-    isHealthRequest(requestPath) ||
+    isHealthRequest(rawPath) ||
+    isMetricsRequest(rawPath) ||
     isOptionsRequest(requestMethod) ||
-    isExplicitPublicRequest(requestMethod, requestPath) ||
+    isExplicitPublicRequest(requestMethod, rawPath) ||
     hasBearerAuthorization(request)
   ) {
     return;
@@ -251,7 +262,8 @@ export function requireScopedInternalKey(
   expectedKey: string | undefined,
   options: { header: string; requiredEnv: string },
 ): void {
-  const requestPath = request.originalUrl ?? request.url ?? "";
+  const rawPath = request.originalUrl ?? request.url ?? "";
+  const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
   const configuredKey = expectedKey?.trim();
 
@@ -344,7 +356,16 @@ export function requireScopedInternalKey(
 
 @Injectable()
 export class InternalKeyMiddleware implements NestMiddleware {
+  constructor(
+    @Optional() private readonly securityEventsService?: SecurityEventsService,
+  ) {}
+
   use(request: RequestLike, _response: unknown, next: () => void) {
+    if (this.securityEventsService) {
+      internalKeyAuditRecorder.setSecurityEventsService(
+        this.securityEventsService,
+      );
+    }
     if (isInternalKeyEnforcementDisabled()) {
       next();
       return;

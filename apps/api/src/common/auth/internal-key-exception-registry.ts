@@ -221,13 +221,14 @@ export function matchesScope(
   return false;
 }
 
-export function findMatchingException(
+export function findMatchingExceptions(
   headerName: string,
   requestPath?: string,
   requestMethod?: string,
   registry: InternalKeyExceptionMetadata[] = INTERNAL_KEY_EXCEPTION_REGISTRY,
-): InternalKeyExceptionMetadata | null {
+): InternalKeyExceptionMetadata[] {
   const normalizedHeader = headerName.trim().toLowerCase();
+  const matches: InternalKeyExceptionMetadata[] = [];
 
   for (const entry of registry) {
     if (entry.header.toLowerCase() !== normalizedHeader) {
@@ -239,13 +240,33 @@ export function findMatchingException(
         matchesScope(pattern, requestMethod, requestPath),
       );
       if (scopeMatches) {
-        return entry;
+        matches.push(entry);
       }
     } else {
-      return entry;
+      matches.push(entry);
     }
   }
-  return null;
+
+  // Sort candidate exceptions so specific route scope matches precede generic wildcard ("* *") patterns
+  matches.sort((a, b) => {
+    const aHasWildcard = a.scope.some((s) => s === "* *" || s === "*");
+    const bHasWildcard = b.scope.some((s) => s === "* *" || s === "*");
+    if (aHasWildcard && !bHasWildcard) return 1;
+    if (!aHasWildcard && bHasWildcard) return -1;
+    return 0;
+  });
+
+  return matches;
+}
+
+export function findMatchingException(
+  headerName: string,
+  requestPath?: string,
+  requestMethod?: string,
+  registry: InternalKeyExceptionMetadata[] = INTERNAL_KEY_EXCEPTION_REGISTRY,
+): InternalKeyExceptionMetadata | null {
+  const candidates = findMatchingExceptions(headerName, requestPath, requestMethod, registry);
+  return candidates[0] ?? null;
 }
 
 export function parseCsvKeys(raw: string | undefined): string[] {
@@ -283,14 +304,14 @@ export function evaluateInternalKey(
 ): KeyEvaluationResult {
   const registry = options.registry ?? INTERNAL_KEY_EXCEPTION_REGISTRY;
   const now = options.now ?? new Date();
-  const exception = findMatchingException(
+  const candidates = findMatchingExceptions(
     options.headerName,
     options.requestPath,
     options.requestMethod,
     registry,
   );
 
-  if (!exception) {
+  if (candidates.length === 0) {
     return {
       valid: false,
       code: "INTERNAL_KEY_UNDOCUMENTED",
@@ -299,94 +320,127 @@ export function evaluateInternalKey(
     };
   }
 
-  // Validate complete metadata
-  try {
-    validateExceptionMetadata(exception);
-  } catch (err) {
-    return {
-      valid: false,
-      code: "INTERNAL_KEY_UNDOCUMENTED",
-      reason: err instanceof Error ? err.message : String(err),
-      exception,
-      keyState: "undocumented",
-    };
-  }
-
-  // Check network boundary
   const rawEnv = options.environment ?? process.env.DRTS_ENV ?? process.env.APP_ENV ?? process.env.NODE_ENV ?? "local";
   const isProduction = ["prod", "production"].includes(rawEnv.trim().toLowerCase());
-  if (isProduction && exception.networkBoundary === "staging-break-glass-only") {
+
+  let boundaryViolationCandidate: InternalKeyExceptionMetadata | null = null;
+  let expiredCandidate: InternalKeyExceptionMetadata | null = null;
+  let invalidKeyCandidate: InternalKeyExceptionMetadata | null = null;
+
+  for (const exception of candidates) {
+    // Validate complete metadata
+    try {
+      validateExceptionMetadata(exception);
+    } catch {
+      continue;
+    }
+
+    // Check network boundary
+    if (isProduction && exception.networkBoundary === "staging-break-glass-only") {
+      boundaryViolationCandidate = boundaryViolationCandidate ?? exception;
+      continue;
+    }
+
+    // Check expiration
+    if (isExceptionExpired(exception, now)) {
+      expiredCandidate = expiredCandidate ?? exception;
+      continue;
+    }
+
+    // Check revocation
+    const revokedSet = new Set(options.revokedKeys ?? []);
+    if (revokedSet.has(providedKey)) {
+      return {
+        valid: false,
+        code: "INTERNAL_KEY_REVOKED",
+        reason: `Provided internal key for exception ${exception.exceptionId} has been revoked.`,
+        exception,
+        keyState: "revoked",
+      };
+    }
+
+    // Check primary key match
+    if (expectedKey && timingSafeMatch(providedKey, expectedKey)) {
+      return {
+        valid: true,
+        exception,
+        keyState: "active",
+      };
+    }
+
+    // Check rotation previous key match and check rotation overlap key expiry
+    if (options.previousKey && timingSafeMatch(providedKey, options.previousKey)) {
+      if (options.previousKeyExpiresAt) {
+        const prevExpiresTime =
+          typeof options.previousKeyExpiresAt === "string"
+            ? Date.parse(options.previousKeyExpiresAt)
+            : options.previousKeyExpiresAt.getTime();
+        if (!Number.isNaN(prevExpiresTime) && now.getTime() > prevExpiresTime) {
+          return {
+            valid: false,
+            code: "INTERNAL_KEY_EXPIRED",
+            reason: `Rotation overlap key for exception ${exception.exceptionId} has expired.`,
+            exception,
+            keyState: "expired",
+          };
+        }
+      }
+      return {
+        valid: true,
+        exception,
+        keyState: "rotated_previous",
+      };
+    }
+
+    invalidKeyCandidate = invalidKeyCandidate ?? exception;
+  }
+
+  if (invalidKeyCandidate) {
     return {
       valid: false,
-      code: "INTERNAL_KEY_BOUNDARY_VIOLATION",
-      reason: `Internal key exception ${exception.exceptionId} is restricted to network boundary '${exception.networkBoundary}' and cannot be used in production.`,
-      exception,
+      code: "INTERNAL_KEY_INVALID",
+      reason: `Provided key does not match active or rotation overlap keys for ${invalidKeyCandidate.exceptionId}.`,
+      exception: invalidKeyCandidate,
       keyState: "invalid",
     };
   }
 
-  // Check expiration
-  if (isExceptionExpired(exception, now)) {
+  if (expiredCandidate) {
     return {
       valid: false,
       code: "INTERNAL_KEY_EXPIRED",
-      reason: `Internal key exception ${exception.exceptionId} expired on ${exception.expiresAt}.`,
-      exception,
+      reason: `Internal key exception ${expiredCandidate.exceptionId} expired on ${expiredCandidate.expiresAt}.`,
+      exception: expiredCandidate,
       keyState: "expired",
     };
   }
 
-  // Check revocation
-  const revokedSet = new Set(options.revokedKeys ?? []);
-  if (revokedSet.has(providedKey)) {
+  if (boundaryViolationCandidate) {
     return {
       valid: false,
-      code: "INTERNAL_KEY_REVOKED",
-      reason: `Provided internal key for exception ${exception.exceptionId} has been revoked.`,
-      exception,
-      keyState: "revoked",
+      code: "INTERNAL_KEY_BOUNDARY_VIOLATION",
+      reason: `Internal key exception ${boundaryViolationCandidate.exceptionId} is restricted to network boundary '${boundaryViolationCandidate.networkBoundary}' and cannot be used in production.`,
+      exception: boundaryViolationCandidate,
+      keyState: "invalid",
     };
   }
 
-  // Check primary key match
-  if (expectedKey && timingSafeMatch(providedKey, expectedKey)) {
+  const fallbackCandidate = candidates[0];
+  if (fallbackCandidate) {
     return {
-      valid: true,
-      exception,
-      keyState: "active",
-    };
-  }
-
-  // Check rotation previous key match and check rotation overlap key expiry
-  if (options.previousKey && timingSafeMatch(providedKey, options.previousKey)) {
-    if (options.previousKeyExpiresAt) {
-      const prevExpiresTime =
-        typeof options.previousKeyExpiresAt === "string"
-          ? Date.parse(options.previousKeyExpiresAt)
-          : options.previousKeyExpiresAt.getTime();
-      if (!Number.isNaN(prevExpiresTime) && now.getTime() > prevExpiresTime) {
-        return {
-          valid: false,
-          code: "INTERNAL_KEY_EXPIRED",
-          reason: `Rotation overlap key for exception ${exception.exceptionId} has expired.`,
-          exception,
-          keyState: "expired",
-        };
-      }
-    }
-    return {
-      valid: true,
-      exception,
-      keyState: "rotated_previous",
+      valid: false,
+      code: "INTERNAL_KEY_INVALID",
+      reason: `Provided key does not match active or rotation overlap keys for ${fallbackCandidate.exceptionId}.`,
+      exception: fallbackCandidate,
+      keyState: "invalid",
     };
   }
 
   return {
     valid: false,
-    code: "INTERNAL_KEY_INVALID",
-    reason: `Provided key does not match active or rotation overlap keys for ${exception.exceptionId}.`,
-    exception,
-    keyState: "invalid",
+    code: "INTERNAL_KEY_UNDOCUMENTED",
+    reason: `No documented exception metadata found for header '${options.headerName}' matching route ${options.requestMethod ?? "GET"} ${options.requestPath ?? "*"}.`,
+    keyState: "undocumented",
   };
 }
 

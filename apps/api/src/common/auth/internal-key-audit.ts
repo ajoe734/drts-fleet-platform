@@ -1,4 +1,12 @@
 import type { KeyEvaluationResult } from "./internal-key-exception-registry";
+import { type CreateSecurityEventInput } from "../audit/security-event-sanitizer";
+import { SECURITY_EVENT_POLICY_VERSION } from "../audit/security-event-matrix";
+
+const MAX_IN_MEMORY_AUDIT_EVENTS = 1000;
+
+export interface SecurityEventsSink {
+  recordEvent(input: CreateSecurityEventInput): unknown;
+}
 
 export interface InternalKeyAuditEvent {
   eventType: "internal_key.used" | "internal_key_drift.detected";
@@ -25,12 +33,53 @@ export interface InternalKeyAuditEvent {
 export class InternalKeyAuditRecorder {
   private static instance: InternalKeyAuditRecorder;
   private readonly events: InternalKeyAuditEvent[] = [];
+  private securityEventsService: SecurityEventsSink | undefined;
 
   public static getInstance(): InternalKeyAuditRecorder {
     if (!InternalKeyAuditRecorder.instance) {
       InternalKeyAuditRecorder.instance = new InternalKeyAuditRecorder();
     }
     return InternalKeyAuditRecorder.instance;
+  }
+
+  public setSecurityEventsService(service: SecurityEventsSink | undefined): void {
+    this.securityEventsService = service;
+  }
+
+  private pushEvent(event: InternalKeyAuditEvent): void {
+    if (this.events.length >= MAX_IN_MEMORY_AUDIT_EVENTS) {
+      this.events.shift();
+    }
+    this.events.push(event);
+
+    if (this.securityEventsService) {
+      const input: CreateSecurityEventInput = {
+        eventType: event.eventType,
+        eventFamily: "credential",
+        outcome: event.outcome,
+        severity: event.eventType === "internal_key.used" ? "low" : "medium",
+        actorId: event.actorId,
+        actorType: "system",
+        realm: "system",
+        targetType: "internal_key_exception",
+        targetId: event.targetId,
+        authMethods: ["internal_key"],
+        reasonCode: event.reasonCode,
+        policyVersion: SECURITY_EVENT_POLICY_VERSION,
+        tenantId: null,
+        partnerId: null,
+        sessionId: null,
+        requestId: null,
+        traceId: null,
+        approvalId: null,
+        maskedContext: event.context as Record<string, unknown>,
+      };
+      try {
+        this.securityEventsService.recordEvent(input);
+      } catch {
+        // Fallback gracefully if service throws
+      }
+    }
   }
 
   public recordUsage(
@@ -59,7 +108,7 @@ export class InternalKeyAuditRecorder {
         owner: evalResult.exception?.owner,
       },
     };
-    this.events.push(event);
+    this.pushEvent(event);
     return event;
   }
 
@@ -94,7 +143,7 @@ export class InternalKeyAuditRecorder {
         header: options.header,
       },
     };
-    this.events.push(event);
+    this.pushEvent(event);
     return event;
   }
 

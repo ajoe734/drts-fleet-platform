@@ -1,3 +1,19 @@
+const MAX_METRIC_ENTRIES = 1000;
+
+export function escapePrometheusLabelValue(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n");
+}
+
+function normalizeMetricRoute(route: string | undefined): string {
+  if (!route) return "unknown";
+  const queryIndex = route.indexOf("?");
+  const pathOnly = queryIndex >= 0 ? route.slice(0, queryIndex) : route;
+  return pathOnly.trim() || "unknown";
+}
+
 export class InternalKeyMetrics {
   private static instance: InternalKeyMetrics;
 
@@ -12,35 +28,43 @@ export class InternalKeyMetrics {
     return InternalKeyMetrics.instance;
   }
 
+  private incrementBoundedMap(map: Map<string, number>, key: string): void {
+    if (!map.has(key) && map.size >= MAX_METRIC_ENTRIES) {
+      return;
+    }
+    map.set(key, (map.get(key) ?? 0) + 1);
+  }
+
   public recordDriftAlert(
     exceptionId: string | undefined,
     code: string | undefined,
     route: string | undefined,
   ): void {
-    const key = `exception_id=${exceptionId ?? "none"},code=${code ?? "unknown"},route=${route ?? "unknown"}`;
-    this.driftAlertCounter.set(key, (this.driftAlertCounter.get(key) ?? 0) + 1);
+    const safeExceptionId = escapePrometheusLabelValue(exceptionId ?? "none");
+    const safeCode = escapePrometheusLabelValue(code ?? "unknown");
+    const safeRoute = escapePrometheusLabelValue(normalizeMetricRoute(route));
+    const key = `exception_id="${safeExceptionId}",code="${safeCode}",route="${safeRoute}"`;
+    this.incrementBoundedMap(this.driftAlertCounter, key);
   }
 
   public recordUnauthorizedAttempt(
     code: string | undefined,
     route: string | undefined,
   ): void {
-    const key = `code=${code ?? "unknown"},route=${route ?? "unknown"}`;
-    this.unauthorizedAttemptsCounter.set(
-      key,
-      (this.unauthorizedAttemptsCounter.get(key) ?? 0) + 1,
-    );
+    const safeCode = escapePrometheusLabelValue(code ?? "unknown");
+    const safeRoute = escapePrometheusLabelValue(normalizeMetricRoute(route));
+    const key = `code="${safeCode}",route="${safeRoute}"`;
+    this.incrementBoundedMap(this.unauthorizedAttemptsCounter, key);
   }
 
   public recordRotationPreviousUsed(
     exceptionId: string | undefined,
     owner: string | undefined,
   ): void {
-    const key = `exception_id=${exceptionId ?? "none"},owner=${owner ?? "unknown"}`;
-    this.rotationPreviousUsedCounter.set(
-      key,
-      (this.rotationPreviousUsedCounter.get(key) ?? 0) + 1,
-    );
+    const safeExceptionId = escapePrometheusLabelValue(exceptionId ?? "none");
+    const safeOwner = escapePrometheusLabelValue(owner ?? "unknown");
+    const key = `exception_id="${safeExceptionId}",owner="${safeOwner}"`;
+    this.incrementBoundedMap(this.rotationPreviousUsedCounter, key);
   }
 
   public reset(): void {
@@ -56,19 +80,17 @@ export class InternalKeyMetrics {
       "# HELP drts_internal_key_drift_alert_total Counter of internal key drift alerts",
     );
     lines.push("# TYPE drts_internal_key_drift_alert_total counter");
-    for (const [key, val] of this.driftAlertCounter.entries()) {
-      lines.push(
-        `drts_internal_key_drift_alert_total{${key.replace(/,/g, '",').replace(/=/g, '="')}"} ${val}`,
-      );
+    for (const [keyLabels, val] of this.driftAlertCounter.entries()) {
+      lines.push(`drts_internal_key_drift_alert_total{${keyLabels}} ${val}`);
     }
 
     lines.push(
       "# HELP drts_internal_key_unauthorized_attempts_total Counter of unauthorized internal key attempts",
     );
     lines.push("# TYPE drts_internal_key_unauthorized_attempts_total counter");
-    for (const [key, val] of this.unauthorizedAttemptsCounter.entries()) {
+    for (const [keyLabels, val] of this.unauthorizedAttemptsCounter.entries()) {
       lines.push(
-        `drts_internal_key_unauthorized_attempts_total{${key.replace(/,/g, '",').replace(/=/g, '="')}"} ${val}`,
+        `drts_internal_key_unauthorized_attempts_total{${keyLabels}} ${val}`,
       );
     }
 
@@ -78,9 +100,9 @@ export class InternalKeyMetrics {
     lines.push(
       "# TYPE drts_internal_key_rotation_previous_used_total counter",
     );
-    for (const [key, val] of this.rotationPreviousUsedCounter.entries()) {
+    for (const [keyLabels, val] of this.rotationPreviousUsedCounter.entries()) {
       lines.push(
-        `drts_internal_key_rotation_previous_used_total{${key.replace(/,/g, '",').replace(/=/g, '="')}"} ${val}`,
+        `drts_internal_key_rotation_previous_used_total{${keyLabels}} ${val}`,
       );
     }
 
