@@ -2733,9 +2733,13 @@ def pause_provider(
         else None
     )
     resume_source = "reset_seconds" if reset_seconds is not None else None
-    if resume_at is None and kind in {"quota", "capacity"}:
+    if kind in {"quota", "capacity"}:
         hinted = infer_pause_resume_at(reason)
-        if hinted is not None:
+        # The provider states when the quota actually resets; a caller-supplied
+        # default (quota pauses hardcode 4h) is only a guess. Waking earlier than
+        # the stated reset just burns an attempt and re-pauses, so take whichever
+        # is later.
+        if hinted is not None and (resume_at is None or hinted > resume_at):
             resume_at = hinted
             resume_source = "reason_hint"
     entry = {
