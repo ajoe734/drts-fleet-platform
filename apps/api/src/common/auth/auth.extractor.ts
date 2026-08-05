@@ -169,7 +169,13 @@ export function extractBootstrapRequestIdentity(
   const amr = splitDelimitedList(headers["x-amr"]);
   const acr = normalizeHeaderValue(headers["x-acr"]) || null;
   const rawAuthTime = normalizeHeaderValue(headers["x-auth-time"]);
-  const authTime = rawAuthTime && !isNaN(Number(rawAuthTime)) ? Number(rawAuthTime) : null;
+  const authTime = rawAuthTime
+    ? !isNaN(Number(rawAuthTime))
+      ? Number(rawAuthTime)
+      : !isNaN(Date.parse(rawAuthTime))
+        ? Math.floor(Date.parse(rawAuthTime) / 1000)
+        : null
+    : null;
 
   let stepUpProof: any = null;
   const rawProof = normalizeHeaderValue(headers["x-step-up-proof"]);

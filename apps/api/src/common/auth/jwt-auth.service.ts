@@ -106,24 +106,24 @@ type JwtSignIdentityBase =
   | IdentityContext;
 
 type JwtSignIdentity = JwtSignIdentityBase & {
-  principalId?: string | null;
-  membershipId?: string | null;
-  subject?: string | null;
-  sessionId?: string | null;
-  tokenId?: string | null;
-  tokenVersion?: number | null;
-  authTime?: string | null;
-  amr?: string[];
-  acr?: string | null;
-  policyVersion?: string | null;
-  issuer?: string | null;
-  audience?: string[] | null;
-  issuedAt?: string | null;
-  expiresAt?: string | null;
-  workloadExchangeNonceHash?: string | null;
-  drtsPassengerId?: string | null;
-  driverBindingId?: string | null;
-  driverDeviceId?: string | null;
+  principalId?: string | null | undefined;
+  membershipId?: string | null | undefined;
+  subject?: string | null | undefined;
+  sessionId?: string | null | undefined;
+  tokenId?: string | null | undefined;
+  tokenVersion?: number | null | undefined;
+  authTime?: string | number | null | undefined;
+  amr?: string[] | undefined;
+  acr?: string | null | undefined;
+  policyVersion?: string | null | undefined;
+  issuer?: string | null | undefined;
+  audience?: string[] | null | undefined;
+  issuedAt?: string | null | undefined;
+  expiresAt?: string | null | undefined;
+  workloadExchangeNonceHash?: string | null | undefined;
+  drtsPassengerId?: string | null | undefined;
+  driverBindingId?: string | null | undefined;
+  driverDeviceId?: string | null | undefined;
 };
 
 export interface IssueSessionTokenOptions {
@@ -154,7 +154,6 @@ const SIGN_KEY_MATERIAL_ERROR_MESSAGE =
   "JWT key material environment variable is not set (neither JWT_PRIVATE_KEY nor JWT_SECRET)";
 const VERIFY_KEY_MATERIAL_ERROR_MESSAGE =
   "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)";
-
 
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
 const SERVICE_EXPIRES_IN: JwtExpiresIn = "15m";
@@ -530,13 +529,23 @@ export class JwtAuthService {
   }
 
   private buildPayloadAuthTime(
-    authTime: string | null | undefined,
+    authTime: string | number | null | undefined,
   ): number | undefined {
-    if (!authTime) {
+    if (authTime === null || authTime === undefined) {
       return undefined;
     }
 
-    return Math.floor(Date.parse(authTime) / 1000);
+    if (typeof authTime === "number") {
+      return authTime;
+    }
+
+    const num = Number(authTime);
+    if (!isNaN(num)) {
+      return num;
+    }
+
+    const parsed = Date.parse(authTime);
+    return isNaN(parsed) ? undefined : Math.floor(parsed / 1000);
   }
 
   private coerceJwtPayload(payload: jwt.JwtPayload): JwtIdentityPayload {
@@ -597,7 +606,15 @@ export class JwtAuthService {
         ? SERVICE_EXPIRES_IN
         : DEFAULT_EXPIRES_IN);
     const issuedAt = new Date().toISOString();
-    const authTime = options?.authTime ?? identity.authTime ?? issuedAt;
+    const rawAuthTime = options?.authTime ?? identity.authTime ?? issuedAt;
+    const authTime: string =
+      typeof rawAuthTime === "number"
+        ? new Date(rawAuthTime * 1000).toISOString()
+        : typeof rawAuthTime === "string"
+          ? !isNaN(Number(rawAuthTime))
+            ? new Date(Number(rawAuthTime) * 1000).toISOString()
+            : rawAuthTime
+          : issuedAt;
     const sessionId =
       options?.sessionId ?? identity.sessionId ?? this.createOpaqueId("sid");
     const tokenId = identity.tokenId ?? this.createOpaqueId("jti");

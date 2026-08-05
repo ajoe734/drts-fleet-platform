@@ -1,11 +1,12 @@
 import type {
-  IamStage15ErrorCode,
   IamStepUpEvaluationResult,
   IamStepUpPolicyRule,
-  IamStepUpProof,
 } from "@drts/contracts";
 
-import type { AuthenticatedRequestLike, BootstrapRequestIdentity } from "./auth.types";
+import type {
+  AuthenticatedRequestLike,
+  BootstrapRequestIdentity,
+} from "./auth.types";
 
 export const TRUSTED_MFA_AMR_METHODS = new Set([
   "mfa",
@@ -19,135 +20,102 @@ export const TRUSTED_MFA_AMR_METHODS = new Set([
 
 export const DEFAULT_MFA_MAX_AGE_SECONDS = 300; // 5 minutes
 
-export const DECLARED_STEP_UP_POLICY_RULES: Record<string, IamStepUpPolicyRule> = {
+export const DECLARED_STEP_UP_POLICY_RULES: Record<
+  string,
+  IamStepUpPolicyRule
+> = {
   // Platform admin & break glass
-  "createBreakGlassRequest": {
+  createBreakGlassRequest: {
     actionId: "createBreakGlassRequest",
     description: "Create platform break-glass request",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "approveBreakGlassRequest": {
+  approveBreakGlassRequest: {
     actionId: "approveBreakGlassRequest",
     description: "Approve platform break-glass request",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "decideAccessReview": {
+  decideAccessReview: {
     actionId: "decideAccessReview",
     description: "Submit quarterly access review decision",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "issuePartnerIngressCredential": {
+  issuePartnerIngressCredential: {
     actionId: "issuePartnerIngressCredential",
     description: "Issue partner ingress credential",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "revokePartnerIngressCredential": {
+  revokePartnerIngressCredential: {
     actionId: "revokePartnerIngressCredential",
     description: "Revoke partner ingress credential",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "exportMultiTaxiRecords": {
+  exportMultiTaxiRecords: {
     actionId: "exportMultiTaxiRecords",
     description: "Export multi-taxi trip operational records",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "platform-admin:POST": {
-    actionId: "platform-admin:POST",
-    description: "Platform admin configuration mutation",
-    requiresMfa: true,
-    maxAgeSeconds: 300,
-  },
-  "platform-admin:PUT": {
-    actionId: "platform-admin:PUT",
-    description: "Platform admin configuration update",
-    requiresMfa: true,
-    maxAgeSeconds: 300,
-  },
 
   // Tenant admin & user/role management
-  "updateTenantUserRole": {
+  updateTenantUserRole: {
     actionId: "updateTenantUserRole",
     description: "Update tenant user role or permissions",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "createTenantUser": {
+  createTenantUser: {
     actionId: "createTenantUser",
     description: "Create tenant user membership",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "issueTenantApiKey": {
+  issueTenantApiKey: {
     actionId: "issueTenantApiKey",
     description: "Issue new tenant API key",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "revokeTenantApiKey": {
+  revokeTenantApiKey: {
     actionId: "revokeTenantApiKey",
     description: "Revoke tenant API key",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "rotateTenantApiKey": {
+  rotateTenantApiKey: {
     actionId: "rotateTenantApiKey",
     description: "Rotate tenant API key",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "tenant:billing:POST": {
-    actionId: "tenant:billing:POST",
-    description: "Tenant billing invoice or payment method mutation",
-    requiresMfa: true,
-    maxAgeSeconds: 300,
-  },
 
   // Ops, finance & approvals
-  "approveTenantApprovalRequest": {
+  approveTenantApprovalRequest: {
     actionId: "approveTenantApprovalRequest",
     description: "Approve tenant approval request",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "rejectTenantApprovalRequest": {
+  rejectTenantApprovalRequest: {
     actionId: "rejectTenantApprovalRequest",
     description: "Reject tenant approval request",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "escalateTenantApprovalRequest": {
+  escalateTenantApprovalRequest: {
     actionId: "escalateTenantApprovalRequest",
     description: "Escalate tenant approval request",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
-  "resolvePartnerEligibilityReview": {
+  resolvePartnerEligibilityReview: {
     actionId: "resolvePartnerEligibilityReview",
     description: "Resolve partner eligibility review",
-    requiresMfa: true,
-    maxAgeSeconds: 300,
-  },
-  "billing:ops:POST": {
-    actionId: "billing:ops:POST",
-    description: "Billing & settlement operational mutation",
-    requiresMfa: true,
-    maxAgeSeconds: 300,
-  },
-  "reports:POST": {
-    actionId: "reports:POST",
-    description: "Generate filing package or report export",
-    requiresMfa: true,
-    maxAgeSeconds: 300,
-  },
-  "regulatory-reporting:POST": {
-    actionId: "regulatory-reporting:POST",
-    description: "Submit regulatory notification report",
     requiresMfa: true,
     maxAgeSeconds: 300,
   },
@@ -175,7 +143,10 @@ export const DECLARED_STEP_UP_POLICY_RULES: Record<string, IamStepUpPolicyRule> 
   },
 };
 
-export function lookupStepUpPolicyRule(actionId: string, routeKey?: string): IamStepUpPolicyRule | null {
+export function lookupStepUpPolicyRule(
+  actionId: string,
+  routeKey?: string,
+): IamStepUpPolicyRule | null {
   if (DECLARED_STEP_UP_POLICY_RULES[actionId]) {
     return DECLARED_STEP_UP_POLICY_RULES[actionId];
   }
@@ -183,35 +154,40 @@ export function lookupStepUpPolicyRule(actionId: string, routeKey?: string): Iam
     return DECLARED_STEP_UP_POLICY_RULES[routeKey];
   }
 
-  // Check prefix matches
-  for (const [key, rule] of Object.entries(DECLARED_STEP_UP_POLICY_RULES)) {
-    if (actionId.startsWith(key) || (routeKey && routeKey.startsWith(key))) {
-      return rule;
-    }
-  }
-
   return null;
 }
 
-export function isPrivilegedAction(method: string, url: string, routeKey?: string): boolean {
+export function isPrivilegedAction(
+  method: string,
+  url: string,
+  routeKey?: string,
+): boolean {
   const upperMethod = method.toUpperCase();
-  if (upperMethod === "GET" || upperMethod === "HEAD" || upperMethod === "OPTIONS") {
+  if (
+    upperMethod === "GET" ||
+    upperMethod === "HEAD" ||
+    upperMethod === "OPTIONS"
+  ) {
     return false;
   }
 
-  const path = url.split("?")[0]?.replace(/^\/+/, "").replace(/^api\/+/, "") ?? "";
+  const rawPath = (url || "").split("?")[0] ?? "";
+  const path = rawPath.replace(/^\/+/, "").replace(/^api\/+/, "");
 
-  // Check if matches known high-risk path patterns
   if (
-    path.startsWith("platform-admin/") ||
+    path === "platform-admin/break-glass/requests" ||
+    path.startsWith("platform-admin/break-glass/requests/") ||
+    path.startsWith("platform-admin/tenants") ||
+    path.includes("access-reviews") ||
+    path.includes("credentials/issue") ||
+    (path.includes("credentials") && path.includes("revoke")) ||
+    path.startsWith("platform-admin/multi-taxi/export") ||
     path.startsWith("tenant/users") ||
     path.startsWith("tenant/api-keys") ||
     path.startsWith("tenant/billing") ||
     path.startsWith("tenant/approval-requests") ||
     path.startsWith("ops/partner/eligibility") ||
     path.startsWith("admin/fleet-partners/billing") ||
-    path.startsWith("regulatory") ||
-    path.startsWith("filing-packages") ||
     path === "partner/eligibility/verify" ||
     path === "auth/driver/device/revoke" ||
     path === "driver/sos-events"
@@ -230,7 +206,9 @@ export function hasTrustedMfaAmr(amr?: string[] | null): boolean {
   if (!amr || amr.length === 0) {
     return false;
   }
-  return amr.some((method) => TRUSTED_MFA_AMR_METHODS.has(method.toLowerCase()));
+  return amr.some((method) =>
+    TRUSTED_MFA_AMR_METHODS.has(method.toLowerCase()),
+  );
 }
 
 export function evaluateMfaStepUpPolicy(
@@ -240,16 +218,21 @@ export function evaluateMfaStepUpPolicy(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): IamStepUpEvaluationResult {
   const routeKey = request.originalUrl || request.url;
-  const rule = lookupStepUpPolicyRule(actionId, routeKey) ?? (
-    isPrivilegedAction(request.method ?? "POST", request.url ?? "", routeKey)
+  const isPriv = isPrivilegedAction(
+    request.method ?? "POST",
+    request.url ?? "",
+    routeKey,
+  );
+  const rule =
+    lookupStepUpPolicyRule(actionId, routeKey) ??
+    (isPriv
       ? {
           actionId,
           description: `Default privileged step-up policy for ${actionId}`,
           requiresMfa: true,
           maxAgeSeconds: DEFAULT_MFA_MAX_AGE_SECONDS,
         }
-      : null
-  );
+      : null);
 
   if (!rule || !rule.requiresMfa) {
     return {
@@ -280,7 +263,8 @@ export function evaluateMfaStepUpPolicy(
       actionId,
       errorCode: "AUTH_STEP_UP_REQUIRED",
       reason: hasClientMfaBoolean ? "CLIENT_BOOLEAN_DISALLOWED" : "MISSING_MFA",
-      message: "Server-trusted MFA proof is required for this privileged action.",
+      message:
+        "Server-trusted MFA proof is required for this privileged action.",
     };
   }
 
@@ -312,7 +296,11 @@ export function evaluateMfaStepUpPolicy(
     }
 
     // Check wrong-action proof
-    if (proof.actionId && proof.actionId !== "*" && proof.actionId !== actionId) {
+    if (
+      proof.actionId &&
+      proof.actionId !== "*" &&
+      proof.actionId !== actionId
+    ) {
       return {
         allowed: false,
         actionId,
@@ -344,8 +332,14 @@ export function evaluateMfaStepUpPolicy(
   }
 
   // 3. Validate main session auth_time freshness
-  if (identity.authTime) {
-    const freshnessAge = nowSeconds - identity.authTime;
+  if (identity.authTime !== null && identity.authTime !== undefined) {
+    const authTimeSeconds =
+      typeof identity.authTime === "number"
+        ? identity.authTime
+        : !isNaN(Number(identity.authTime))
+          ? Number(identity.authTime)
+          : Math.floor(Date.parse(identity.authTime) / 1000);
+    const freshnessAge = nowSeconds - authTimeSeconds;
     if (freshnessAge > rule.maxAgeSeconds || freshnessAge < -5) {
       return {
         allowed: false,

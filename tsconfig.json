@@ -9,7 +9,7 @@
       "@drts/contracts": ["packages/contracts/src/index.ts"],
       "@drts/control-plane-auth": ["packages/control-plane-auth/src/index.ts"]
     },
-    "types": ["node"]
+    "typeRoots": ["./node_modules/@types", "./apps/api/node_modules/@types"]
   },
   "include": [
     "playwright.config.ts",
