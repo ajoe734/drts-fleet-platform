@@ -14,6 +14,7 @@ type WorkloadIdentityPayload = jwt.JwtPayload & {
   sub?: string;
   aud?: string | string[];
   iss?: string;
+  jti?: string;
 };
 
 interface RegisteredServicePrincipal {
@@ -33,6 +34,7 @@ interface WorkloadIdentityConfig {
   audiences: string[];
   algorithms: jwt.Algorithm[];
   jwtSecretOrPublicKey: string;
+  maxAssertionLifetimeSeconds: number;
   servicePrincipals: RegisteredServicePrincipal[];
 }
 
@@ -54,6 +56,7 @@ export const WORKLOAD_IDENTITY_EXCHANGE_NONCE_HEADER =
   "x-drts-workload-exchange-nonce";
 export const WORKLOAD_TOKEN_AUDIENCE_HEADER = "x-drts-token-audience";
 const DEFAULT_WORKLOAD_IDENTITY_ALGORITHM = "RS256";
+const DEFAULT_MAX_ASSERTION_LIFETIME_SECONDS = 15 * 60;
 const ALLOWED_WORKLOAD_IDENTITY_ALGORITHMS = new Set<jwt.Algorithm>([
   "HS256",
   "HS384",
@@ -143,6 +146,20 @@ function hashAssertion(assertion: string): string {
   return createHash("sha256").update(assertion).digest("hex");
 }
 
+function normalizePositiveInteger(value: string | undefined): number | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function extractWorkloadIdentityAssertion(
   headers: HeaderRecord | undefined,
 ): string | null {
@@ -189,14 +206,15 @@ export class ServiceWorkloadIdentityAdapter {
     const payload = this.verifyAssertion(assertion, config);
     const issuer = payload.iss?.trim();
     const subject = payload.sub?.trim();
-    const expiresAt = this.resolveExpiresAt(payload);
+    const assertionId = payload.jti?.trim();
+    const temporalClaims = this.resolveTemporalClaims(payload, config);
     const authTime = this.resolveAuthTime(payload);
 
-    if (!issuer || !subject) {
+    if (!issuer || !subject || !assertionId) {
       throw new ApiRequestError(
         401,
         "WORKLOAD_ASSERTION_INVALID",
-        "Workload identity assertion is missing subject or issuer claims.",
+        "Workload identity assertion is missing required issuer, subject, or jti claims.",
       );
     }
 
@@ -213,7 +231,7 @@ export class ServiceWorkloadIdentityAdapter {
 
     const replayAccepted =
       await this.identityRepository.consumeWorkloadIdentityAssertion({
-        assertionHash: hashAssertion(`${assertion}\0${exchangeNonce}`),
+        assertionHash: hashAssertion(`${issuer}\0${assertionId}`),
         issuer,
         subject,
         exchangeAudience: this.resolveMatchedExchangeAudience(
@@ -222,7 +240,7 @@ export class ServiceWorkloadIdentityAdapter {
         ),
         tokenAudience,
         principalId: principal.principalId,
-        expiresAt,
+        expiresAt: temporalClaims.expiresAt,
       });
     if (!replayAccepted) {
       throw new ApiRequestError(
@@ -293,6 +311,10 @@ export class ServiceWorkloadIdentityAdapter {
     const jwtSecretOrPublicKey =
       env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY?.trim() ?? "";
     const rawRegistry = env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS?.trim() ?? "";
+    const maxAssertionLifetimeSeconds =
+      normalizePositiveInteger(
+        env.WORKLOAD_IDENTITY_MAX_ASSERTION_LIFETIME_SECONDS,
+      ) ?? DEFAULT_MAX_ASSERTION_LIFETIME_SECONDS;
 
     if (
       issuers.length === 0 ||
@@ -341,11 +363,30 @@ export class ServiceWorkloadIdentityAdapter {
       );
     }
 
+    const invalidPrincipal = servicePrincipals.find(
+      (principal) =>
+        !principal.principalId?.trim() ||
+        !principal.subject?.trim() ||
+        !principal.issuer?.trim(),
+    );
+    if (invalidPrincipal) {
+      throw new ApiRequestError(
+        503,
+        "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+        "Workload identity service principal registry entries must declare principalId, subject, and issuer.",
+        {
+          principalId: invalidPrincipal.principalId ?? null,
+          subject: invalidPrincipal.subject ?? null,
+        },
+      );
+    }
+
     return {
       issuers,
       audiences,
       algorithms: normalizeAlgorithms(env.WORKLOAD_IDENTITY_JWT_ALGORITHMS),
       jwtSecretOrPublicKey,
+      maxAssertionLifetimeSeconds,
       servicePrincipals,
     };
   }
@@ -359,6 +400,7 @@ export class ServiceWorkloadIdentityAdapter {
       const audience = toVerifyOptionList(config.audiences);
       return jwt.verify(assertion, config.jwtSecretOrPublicKey, {
         algorithms: config.algorithms,
+        maxAge: config.maxAssertionLifetimeSeconds,
         ...(issuer ? { issuer } : {}),
         ...(audience ? { audience } : {}),
       }) as WorkloadIdentityPayload;
@@ -395,7 +437,7 @@ export class ServiceWorkloadIdentityAdapter {
       registry.find(
         (entry) =>
           entry.subject?.trim() === subject &&
-          (!entry.issuer || entry.issuer.trim() === issuer),
+          entry.issuer?.trim() === issuer,
       ) ?? null;
     if (!match || !match.principalId?.trim()) {
       throw new ApiRequestError(
@@ -491,7 +533,20 @@ export class ServiceWorkloadIdentityAdapter {
     return matched;
   }
 
-  private resolveExpiresAt(payload: WorkloadIdentityPayload): string {
+  private resolveTemporalClaims(
+    payload: WorkloadIdentityPayload,
+    config: WorkloadIdentityConfig,
+  ): {
+    expiresAt: string;
+  } {
+    if (typeof payload.iat !== "number" || !Number.isFinite(payload.iat)) {
+      throw new ApiRequestError(
+        401,
+        "WORKLOAD_ASSERTION_INVALID",
+        "Workload identity assertion is missing an issued-at claim.",
+      );
+    }
+
     if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) {
       throw new ApiRequestError(
         401,
@@ -499,7 +554,22 @@ export class ServiceWorkloadIdentityAdapter {
         "Workload identity assertion is missing an expiry claim.",
       );
     }
-    return new Date(payload.exp * 1000).toISOString();
+
+    const lifetimeSeconds = payload.exp - payload.iat;
+    if (
+      lifetimeSeconds <= 0 ||
+      lifetimeSeconds > config.maxAssertionLifetimeSeconds
+    ) {
+      throw new ApiRequestError(
+        401,
+        "WORKLOAD_ASSERTION_INVALID",
+        "Workload identity assertion lifetime exceeds the configured maximum.",
+      );
+    }
+
+    return {
+      expiresAt: new Date(payload.exp * 1000).toISOString(),
+    };
   }
 
   private resolveAuthTime(payload: WorkloadIdentityPayload): string {

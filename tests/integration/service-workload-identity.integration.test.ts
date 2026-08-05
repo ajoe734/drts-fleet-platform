@@ -30,6 +30,7 @@ function signWorkloadAssertion(overrides?: Partial<jwt.JwtPayload>): string {
       iss: STAGING_WORKLOAD_ISSUER,
       sub: "dispatch-runtime",
       aud: STAGING_EXCHANGE_AUDIENCE,
+      jti: crypto.randomUUID(),
       iat: now,
       exp: now + 300,
       ...overrides,
@@ -55,6 +56,7 @@ function configureWorkloadIdentityEnvironment() {
     {
       principalId: "svc-dispatch-runtime",
       actorId: "dispatch-runtime",
+      issuer: STAGING_WORKLOAD_ISSUER,
       subject: "dispatch-runtime",
       displayName: "Dispatch Runtime",
       roles: ["dispatch_runtime"],
@@ -224,7 +226,7 @@ describe("service workload identity token exchange", () => {
     });
   });
 
-  it("allows a fresh nonce to exchange the same workload assertion again", async () => {
+  it("rejects the same workload assertion even when the caller changes the exchange nonce", async () => {
     const identityRepository = new IdentityRepository();
     const { authController } = buildAuthController(identityRepository);
     const assertion = signWorkloadAssertion();
@@ -238,9 +240,42 @@ describe("service workload identity token exchange", () => {
       originalUrl: "/api/auth/token",
     });
 
+    expect(first.expiresIn).toBe("15m");
+
+    await expect(
+      authController.issueToken({
+        headers: {
+          "x-drts-workload-assertion": assertion,
+          "x-drts-workload-exchange-nonce": "nonce-fresh-002",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKLOAD_ASSERTION_REPLAYED",
+    });
+  });
+
+  it("allows a newly signed workload assertion to exchange again", async () => {
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+
+    const first = await authController.issueToken({
+      headers: {
+        "x-drts-workload-assertion": signWorkloadAssertion({
+          jti: "assertion-jti-001",
+        }),
+        "x-drts-workload-exchange-nonce": "nonce-fresh-001",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    });
+
     const second = await authController.issueToken({
       headers: {
-        "x-drts-workload-assertion": assertion,
+        "x-drts-workload-assertion": signWorkloadAssertion({
+          jti: "assertion-jti-002",
+        }),
         "x-drts-workload-exchange-nonce": "nonce-fresh-002",
       },
       method: "POST",
@@ -331,5 +366,45 @@ describe("service workload identity token exchange", () => {
     expect(payload?.sub).toBe("bootstrap-service");
     expect(payload?.actorType).toBe("system");
     expect(payload?.amr).not.toContain("workload_identity");
+  });
+
+  it("rejects workload assertions whose lifetime exceeds the maximum bound", async () => {
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+    const now = Math.floor(Date.now() / 1000);
+
+    await expect(
+      authController.issueToken({
+        headers: workloadHeaders(
+          signWorkloadAssertion({
+            iat: now,
+            exp: now + 3600,
+          }),
+        ),
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKLOAD_ASSERTION_INVALID",
+    });
+  });
+
+  it("rejects workload assertions that do not carry a jti claim", async () => {
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+
+    await expect(
+      authController.issueToken({
+        headers: workloadHeaders(
+          signWorkloadAssertion({
+            jti: undefined,
+          }),
+        ),
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKLOAD_ASSERTION_INVALID",
+    });
   });
 });

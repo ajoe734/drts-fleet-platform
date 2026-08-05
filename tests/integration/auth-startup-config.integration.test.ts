@@ -40,6 +40,7 @@ function getValidProdWorkloadIdentityEnv(): Record<string, string> {
     WORKLOAD_IDENTITY_SERVICE_PRINCIPALS: JSON.stringify([
       {
         principalId: "svc-api-runtime",
+        issuer: "https://workload.prod.drts.internal",
         subject: "api-runtime",
         scopes: ["foundation:read"],
         allowedTokenAudiences: ["https://api.drts.internal"],
@@ -79,6 +80,28 @@ describe("Authentication Startup Configuration Integration Smoke", () => {
     expect(report.config.internalKey.configured).toBe(false);
     expect(report.config.workloadIdentity.configured).toBe(true);
     expect(report.config.workloadIdentity.registryConfigured).toBe(true);
+  });
+
+  it("blocks startup when a workload identity registry entry omits issuer binding", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        principalId: "svc-api-runtime",
+        subject: "api-runtime",
+        scopes: ["foundation:read"],
+        allowedTokenAudiences: ["https://api.drts.internal"],
+      },
+    ]);
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (issue) =>
+          issue.control === "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS" &&
+          issue.code === "INVALID_FORMAT",
+      ),
+    ).toBe(true);
   });
 
   it("ensures validation error message details missing controls without leaking secret values", () => {

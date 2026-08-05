@@ -938,6 +938,13 @@ export class IdentityRepository {
 
     const client = await this.databaseService!.connect();
     try {
+      await client.query(
+        `
+          DELETE FROM iam.workload_identity_assertions
+          WHERE expires_at < NOW()
+        `,
+      );
+
       const result = await client.query<{ assertion_hash: string }>(
         `
           INSERT INTO iam.workload_identity_assertions (

@@ -85,6 +85,11 @@ export class AuthConfigurationError extends Error {
 }
 
 type EnvLike = Record<string, string | undefined>;
+type WorkloadServicePrincipalRegistryEntry = {
+  principalId?: string;
+  issuer?: string;
+  subject?: string;
+};
 
 const INSECURE_DEFAULT_SECRETS = new Set([
   "secret",
@@ -169,6 +174,39 @@ function parseCsv(value: string | undefined): string[] {
     .split(/[;,]/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function parseWorkloadServicePrincipalRegistry(
+  rawRegistry: string | undefined,
+): {
+  entries: WorkloadServicePrincipalRegistryEntry[];
+  parseError: string | null;
+} {
+  const normalized = normalizeString(rawRegistry);
+  if (!normalized) {
+    return { entries: [], parseError: null };
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as unknown;
+    if (!Array.isArray(parsed)) {
+      return {
+        entries: [],
+        parseError:
+          "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be a JSON array",
+      };
+    }
+
+    return {
+      entries: parsed as WorkloadServicePrincipalRegistryEntry[],
+      parseError: null,
+    };
+  } catch (error) {
+    return {
+      entries: [],
+      parseError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function isSymmetricJwtAlgorithm(algorithm: string): boolean {
@@ -635,6 +673,9 @@ export function buildAuthStartupConfigReport(
   const workloadIdentityRegistry = normalizeString(
     env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS,
   );
+  const workloadIdentityRegistryParse = parseWorkloadServicePrincipalRegistry(
+    workloadIdentityRegistry,
+  );
   const workloadIdentityConfigured = Boolean(
     workloadIdentityIssuer &&
       workloadIdentityAudience &&
@@ -714,6 +755,29 @@ export function buildAuthStartupConfigReport(
         issue:
           "Unsafe control value: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be a valid public key/certificate or a strong shared secret when workload identity is enabled in staging/production",
         code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (workloadIdentityRegistryParse.parseError) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+        issue: `Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: ${workloadIdentityRegistryParse.parseError}`,
+        code: "INVALID_FORMAT",
+      });
+    } else if (
+      workloadIdentityConfigured &&
+      workloadIdentityRegistryParse.entries.some(
+        (entry) =>
+          !normalizeString(entry.principalId) ||
+          !normalizeString(entry.subject) ||
+          !normalizeString(entry.issuer),
+      )
+    ) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+        issue:
+          "Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: each entry must declare principalId, subject, and issuer",
+        code: "INVALID_FORMAT",
       });
     }
 
