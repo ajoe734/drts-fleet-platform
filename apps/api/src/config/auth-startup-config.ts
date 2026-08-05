@@ -126,6 +126,7 @@ const ALLOWED_JWT_ALGORITHMS = new Set([
   "PS384",
   "PS512",
 ]);
+const ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS = new Set(ALLOWED_JWT_ALGORITHMS);
 
 export function detectAuthEnvironment(
   env: EnvLike = process.env,
@@ -222,6 +223,14 @@ function looksLikePem(value: string | undefined): boolean {
     return false;
   }
   return /BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(value);
+}
+
+function parseAlgorithmList(
+  raw: string | undefined,
+  defaultAlgorithm: string,
+): string[] {
+  const parsed = parseCsv(raw).map((algorithm) => algorithm.toUpperCase());
+  return parsed.length > 0 ? parsed : [defaultAlgorithm];
 }
 
 export function isWeakSecret(value: string | undefined): boolean {
@@ -676,6 +685,10 @@ export function buildAuthStartupConfigReport(
   const workloadIdentityRegistryParse = parseWorkloadServicePrincipalRegistry(
     workloadIdentityRegistry,
   );
+  const workloadIdentityAlgorithms = parseAlgorithmList(
+    env.WORKLOAD_IDENTITY_JWT_ALGORITHMS,
+    looksLikePem(workloadIdentityKey) ? "RS256" : "HS256",
+  );
   const workloadIdentityConfigured = Boolean(
     workloadIdentityIssuer &&
       workloadIdentityAudience &&
@@ -755,6 +768,66 @@ export function buildAuthStartupConfigReport(
         issue:
           "Unsafe control value: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be a valid public key/certificate or a strong shared secret when workload identity is enabled in staging/production",
         code: "UNSAFE_VALUE",
+      });
+    }
+
+    const invalidWorkloadAlgorithms = workloadIdentityAlgorithms.filter(
+      (algorithm) =>
+        !ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS.has(algorithm),
+    );
+    if (invalidWorkloadAlgorithms.length > 0) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_JWT_ALGORITHMS",
+        issue: `Unsafe control value: WORKLOAD_IDENTITY_JWT_ALGORITHMS contains unsupported algorithms (${invalidWorkloadAlgorithms.join(", ")})`,
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    const requestsWorkloadSymmetricAlgorithms =
+      workloadIdentityAlgorithms.some(isSymmetricJwtAlgorithm);
+    const requestsWorkloadAsymmetricAlgorithms =
+      workloadIdentityAlgorithms.some(isAsymmetricJwtAlgorithm);
+    const workloadIdentityKeyLooksAsymmetric = looksLikePem(workloadIdentityKey);
+
+    if (
+      requestsWorkloadSymmetricAlgorithms &&
+      requestsWorkloadAsymmetricAlgorithms
+    ) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_JWT_ALGORITHMS",
+        issue:
+          "Unsafe control value: WORKLOAD_IDENTITY_JWT_ALGORITHMS must not mix symmetric and asymmetric families",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      workloadIdentityKeyLooksAsymmetric &&
+      requestsWorkloadSymmetricAlgorithms
+    ) {
+      issues.push({
+        control:
+          "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+        issue:
+          "Unsafe control value: HMAC workload identity algorithms cannot be paired with PEM-encoded public key or certificate material",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      !workloadIdentityKeyLooksAsymmetric &&
+      requestsWorkloadAsymmetricAlgorithms
+    ) {
+      issues.push({
+        control:
+          "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+        issue:
+          "Missing required control: asymmetric workload identity algorithms require PEM-encoded public key or certificate material",
+        code: "MISSING_CONTROL",
       });
     }
 

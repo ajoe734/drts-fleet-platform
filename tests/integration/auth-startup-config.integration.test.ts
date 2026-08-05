@@ -104,6 +104,27 @@ describe("Authentication Startup Configuration Integration Smoke", () => {
     ).toBe(true);
   });
 
+  it("blocks startup when workload identity mixes HMAC algorithms with PEM key material", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    env.WORKLOAD_IDENTITY_JWT_ALGORITHMS = "HS256";
+    env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY = [
+      "-----BEGIN PUBLIC KEY-----",
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestvalueonly",
+      "-----END PUBLIC KEY-----",
+    ].join("\n");
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (issue) =>
+          issue.control ===
+            "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY" &&
+          issue.code === "UNSAFE_VALUE",
+      ),
+    ).toBe(true);
+  });
+
   it("ensures validation error message details missing controls without leaking secret values", () => {
     const secretValueToHide = "my_super_secret_raw_key_12345";
     const unsafeEnv = {

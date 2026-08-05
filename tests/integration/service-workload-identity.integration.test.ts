@@ -132,12 +132,16 @@ describe("service workload identity token exchange", () => {
     expect(payload?.scopes).toEqual(["dispatch:read", "dispatch:write"]);
     expect(payload?.aud).toEqual([STAGING_API_AUDIENCE]);
     expect(payload?.amr).toEqual(["workload_identity"]);
+    expect(payload?.workloadExchangeNonceHash).toMatch(/^[a-f0-9]{64}$/);
 
     const sessions = await identityRepository.listSessionsByPrincipal(
       "svc-dispatch-runtime",
     );
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.audience).toEqual([STAGING_API_AUDIENCE]);
+    expect(
+      sessions[0]?.riskSummary?.workloadExchangeNonceHash,
+    ).toBe(payload?.workloadExchangeNonceHash);
   });
 
   it("allows workload assertion requests through middleware before the controller exchanges the token", async () => {
@@ -346,6 +350,57 @@ describe("service workload identity token exchange", () => {
       }),
     ).rejects.toMatchObject({
       code: "WORKLOAD_TOKEN_AUDIENCE_DENIED",
+    });
+  });
+
+  it("rejects a principal whose default token audience falls outside its allowlist", async () => {
+    process.env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        principalId: "svc-dispatch-runtime",
+        actorId: "dispatch-runtime",
+        issuer: STAGING_WORKLOAD_ISSUER,
+        subject: "dispatch-runtime",
+        displayName: "Dispatch Runtime",
+        roles: ["dispatch_runtime"],
+        scopes: ["dispatch:read", "dispatch:write"],
+        allowedTokenAudiences: [STAGING_CONTROL_PLANE_AUDIENCE],
+        defaultTokenAudience: STAGING_API_AUDIENCE,
+      },
+    ]);
+
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+
+    await expect(
+      authController.issueToken({
+        headers: workloadHeaders(signWorkloadAssertion()),
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+    });
+  });
+
+  it("rejects workload identity HMAC algorithms paired with PEM key material", async () => {
+    process.env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY = [
+      "-----BEGIN PUBLIC KEY-----",
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestvalueonly",
+      "-----END PUBLIC KEY-----",
+    ].join("\n");
+    process.env.WORKLOAD_IDENTITY_JWT_ALGORITHMS = "HS256";
+
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+
+    await expect(
+      authController.issueToken({
+        headers: workloadHeaders(signWorkloadAssertion()),
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKLOAD_IDENTITY_NOT_CONFIGURED",
     });
   });
 

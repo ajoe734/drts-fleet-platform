@@ -74,6 +74,29 @@ describe("validateInternalKey strict environment behavior", () => {
     ).not.toThrow();
   });
 
+  it("does not bypass internal key enforcement for non-token routes that carry a workload assertion header", () => {
+    process.env.APP_ENV = "staging";
+    process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
+
+    let error: ApiRequestError | null = null;
+    try {
+      validateInternalKey(
+        {
+          method: "GET",
+          originalUrl: "/api/platform-admin/tenants",
+          headers: {
+            "x-drts-workload-assertion": "signed.workload.assertion",
+          },
+        },
+        process.env.DRTS_INTERNAL_KEY,
+      );
+    } catch (caught) {
+      error = caught as ApiRequestError;
+    }
+
+    expect(error?.code).toBe("INTERNAL_KEY_REQUIRED");
+  });
+
   it("middleware still fails closed in staging even when enforcement flag is false", () => {
     process.env.APP_ENV = "staging";
     process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";

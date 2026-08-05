@@ -169,6 +169,7 @@ export class AuthController {
           acr: "aal2",
           tokenVersion: resolved.tokenVersion,
           audience: [resolved.tokenAudience],
+          workloadExchangeNonceHash: resolved.exchangeNonceHash,
         },
       );
       return { token: issued.token, expiresIn };

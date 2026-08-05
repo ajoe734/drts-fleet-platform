@@ -49,18 +49,34 @@ export interface ResolvedWorkloadServiceIdentity {
   tokenAudience: string;
   authTime: string;
   tokenVersion: number;
+  exchangeNonceHash: string;
 }
 
 export const WORKLOAD_IDENTITY_ASSERTION_HEADER = "x-drts-workload-assertion";
 export const WORKLOAD_IDENTITY_EXCHANGE_NONCE_HEADER =
   "x-drts-workload-exchange-nonce";
 export const WORKLOAD_TOKEN_AUDIENCE_HEADER = "x-drts-token-audience";
-const DEFAULT_WORKLOAD_IDENTITY_ALGORITHM = "RS256";
 const DEFAULT_MAX_ASSERTION_LIFETIME_SECONDS = 15 * 60;
 const ALLOWED_WORKLOAD_IDENTITY_ALGORITHMS = new Set<jwt.Algorithm>([
   "HS256",
   "HS384",
   "HS512",
+  "RS256",
+  "RS384",
+  "RS512",
+  "ES256",
+  "ES384",
+  "ES512",
+  "PS256",
+  "PS384",
+  "PS512",
+]);
+const HMAC_WORKLOAD_IDENTITY_ALGORITHMS = new Set<jwt.Algorithm>([
+  "HS256",
+  "HS384",
+  "HS512",
+]);
+const ASYMMETRIC_WORKLOAD_IDENTITY_ALGORITHMS = new Set<jwt.Algorithm>([
   "RS256",
   "RS384",
   "RS512",
@@ -110,9 +126,15 @@ function normalizeAudience(
   );
 }
 
-function normalizeAlgorithms(raw: string | undefined): jwt.Algorithm[] {
+function normalizeAlgorithms(
+  raw: string | undefined,
+  jwtSecretOrPublicKey: string,
+): jwt.Algorithm[] {
   const configured = splitCsv(raw);
-  const algorithms = configured.length > 0 ? configured : [DEFAULT_WORKLOAD_IDENTITY_ALGORITHM];
+  const algorithms =
+    configured.length > 0
+      ? configured
+      : [looksLikePem(jwtSecretOrPublicKey) ? "RS256" : "HS256"];
   const invalid = algorithms.filter(
     (algorithm): algorithm is string =>
       !ALLOWED_WORKLOAD_IDENTITY_ALGORITHMS.has(algorithm as jwt.Algorithm),
@@ -128,6 +150,47 @@ function normalizeAlgorithms(raw: string | undefined): jwt.Algorithm[] {
     );
   }
   return algorithms as jwt.Algorithm[];
+}
+
+function looksLikePem(value: string): boolean {
+  return /BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(value);
+}
+
+function validateAlgorithmKeyMaterialPairing(
+  algorithms: readonly jwt.Algorithm[],
+  jwtSecretOrPublicKey: string,
+): void {
+  const hasHmac = algorithms.some((algorithm) =>
+    HMAC_WORKLOAD_IDENTITY_ALGORITHMS.has(algorithm),
+  );
+  const hasAsymmetric = algorithms.some((algorithm) =>
+    ASYMMETRIC_WORKLOAD_IDENTITY_ALGORITHMS.has(algorithm),
+  );
+  const hasAsymmetricKeyMaterial = looksLikePem(jwtSecretOrPublicKey);
+
+  if (hasHmac && hasAsymmetric) {
+    throw new ApiRequestError(
+      503,
+      "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+      "Workload identity verification algorithms must not mix symmetric and asymmetric families.",
+    );
+  }
+
+  if (hasAsymmetricKeyMaterial && hasHmac) {
+    throw new ApiRequestError(
+      503,
+      "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+      "Workload identity HMAC algorithms cannot be used with asymmetric key material.",
+    );
+  }
+
+  if (!hasAsymmetricKeyMaterial && hasAsymmetric) {
+    throw new ApiRequestError(
+      503,
+      "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+      "Workload identity asymmetric algorithms require PEM-encoded public key or certificate material.",
+    );
+  }
 }
 
 function toVerifyOptionList(
@@ -228,6 +291,7 @@ export class ServiceWorkloadIdentityAdapter {
       options?.requestedTokenAudience,
     );
     const exchangeNonce = this.requireExchangeNonce(options?.exchangeNonce);
+    const exchangeNonceHash = hashAssertion(exchangeNonce);
 
     const replayAccepted =
       await this.identityRepository.consumeWorkloadIdentityAssertion({
@@ -295,6 +359,7 @@ export class ServiceWorkloadIdentityAdapter {
       tokenAudience,
       authTime,
       tokenVersion: Date.parse(authTime),
+      exchangeNonceHash,
     };
   }
 
@@ -381,10 +446,16 @@ export class ServiceWorkloadIdentityAdapter {
       );
     }
 
+    const algorithms = normalizeAlgorithms(
+      env.WORKLOAD_IDENTITY_JWT_ALGORITHMS,
+      jwtSecretOrPublicKey,
+    );
+    validateAlgorithmKeyMaterialPairing(algorithms, jwtSecretOrPublicKey);
+
     return {
       issuers,
       audiences,
-      algorithms: normalizeAlgorithms(env.WORKLOAD_IDENTITY_JWT_ALGORITHMS),
+      algorithms,
       jwtSecretOrPublicKey,
       maxAssertionLifetimeSeconds,
       servicePrincipals,
@@ -475,7 +546,20 @@ export class ServiceWorkloadIdentityAdapter {
 
     const requested = requestedTokenAudience?.trim() ?? "";
     if (!requested) {
-      return principal.defaultTokenAudience?.trim() || allowed[0]!;
+      const defaultAudience = principal.defaultTokenAudience?.trim() ?? "";
+      if (defaultAudience && !allowed.includes(defaultAudience)) {
+        throw new ApiRequestError(
+          503,
+          "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+          "Registered workload principal default audience must be included in its allowed token audiences.",
+          {
+            principalId: principal.principalId,
+            defaultAudience,
+            allowedAudiences: allowed,
+          },
+        );
+      }
+      return defaultAudience || allowed[0]!;
     }
 
     if (!allowed.includes(requested)) {
