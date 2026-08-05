@@ -564,3 +564,61 @@ class WorkspaceRootBoundaryTest(unittest.TestCase):
                 ),
                 "defer",
             )
+
+
+class CommandSubstitutionBoundaryTest(unittest.TestCase):
+    """`$(...)` is judged like `$VAR`, because neither can be judged statically.
+
+    `git -C "$WT" status` was already permitted, so refusing `WT=$(pwd)` drew
+    the line by syntax rather than by risk — and deadlocked ordinary shell
+    idiom: five real approvals were held on `cb=$(git merge-base ...)`.
+    """
+
+    def _reason(self, command: str):
+        return permission_broker.command_hard_boundary_reason(command)
+
+    def test_value_producing_substitution_is_the_reviewers_call(self) -> None:
+        for command in (
+            "cb=$(git merge-base origin/dev origin/x); git diff $cb origin/x -- a.ts",
+            'grep -rn "x" $(readlink -f apps/api/node_modules/@drts/contracts)/src',
+            "x=$(pwd); echo $x",
+            "x=$(echo $(pwd)); ls",
+        ):
+            self.assertIsNone(self._reason(command), command)
+
+    def test_it_matches_how_plain_variables_are_already_treated(self) -> None:
+        self.assertIsNone(self._reason('WT=/tmp/x; git -C "$WT" rev-parse HEAD'))
+        self.assertIsNone(self._reason('WT=$(pwd); git -C "$WT" rev-parse HEAD'))
+
+    def test_destructive_content_inside_a_substitution_still_stops_it(self) -> None:
+        # `^`-anchored DENY patterns would skip over a substitution body, so the
+        # bodies are checked in their own right.
+        for command in (
+            "x=$(rm -rf /); echo $x",
+            "x=$(sudo cat /etc/shadow); echo $x",
+            "y=$(git reset --hard HEAD~3); echo $y",
+        ):
+            reason = self._reason(command)
+            self.assertIsNotNone(reason, command)
+            self.assertIn("denied pattern", reason, command)
+
+    def test_a_write_inside_a_substitution_still_stops_it(self) -> None:
+        reason = self._reason("x=$(echo pwned > /home/lupin/.bashrc)")
+        self.assertIsNotNone(reason)
+        self.assertIn("writes outside", reason)
+
+    def test_backticks_and_process_substitution_remain_refused(self) -> None:
+        # Rare in ordinary usage, and backticks do not nest, so the cost of
+        # keeping them out is low.
+        for command in ("echo `rm -rf /tmp/x`", "diff <(ls) <(ls)"):
+            self.assertIsNotNone(self._reason(command), command)
+
+    def test_an_unbalanced_substitution_is_refused(self) -> None:
+        reason = self._reason("x=$(echo unbalanced")
+        self.assertIsNotNone(reason)
+        self.assertIn("unbalanced", reason)
+
+    def test_classify_command_is_unchanged_for_substitution(self) -> None:
+        # Substitution still never runs unreviewed; only the reviewer's reach
+        # changes.
+        self.assertEqual(permission_broker.classify_command("x=$(pwd); echo $x"), "defer")
