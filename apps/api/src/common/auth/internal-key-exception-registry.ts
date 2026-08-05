@@ -156,6 +156,65 @@ export function isExceptionExpired(
   return now.getTime() > expiresTime;
 }
 
+function stripQueryString(path: string): string {
+  const queryStart = path.indexOf("?");
+  return queryStart >= 0 ? path.slice(0, queryStart) : path;
+}
+
+export function normalizeRequestPath(path: string): string {
+  return stripQueryString(path)
+    .replace(/^\/+/, "")
+    .replace(/^api\/+/, "")
+    .replace(/\/+$/, "");
+}
+
+export function matchesScope(
+  scopePattern: string,
+  requestMethod?: string,
+  requestPath?: string,
+): boolean {
+  if (!requestMethod || !requestPath) {
+    return true;
+  }
+
+  const spaceIndex = scopePattern.indexOf(" ");
+  if (spaceIndex === -1) {
+    return false;
+  }
+
+  const patternMethod = scopePattern.slice(0, spaceIndex).trim().toUpperCase();
+  const rawPatternPath = scopePattern.slice(spaceIndex + 1).trim();
+  const patternPath = normalizeRequestPath(rawPatternPath);
+
+  if (requestMethod.toUpperCase() !== patternMethod) {
+    return false;
+  }
+
+  const normReqPath = normalizeRequestPath(requestPath);
+
+  if (patternPath === normReqPath) {
+    return true;
+  }
+
+  if (patternPath.endsWith("/*")) {
+    const prefix = patternPath.slice(0, -2);
+    return normReqPath === prefix || normReqPath.startsWith(prefix + "/");
+  }
+
+  if (patternPath.endsWith("/**")) {
+    const prefix = patternPath.slice(0, -3);
+    return normReqPath === prefix || normReqPath.startsWith(prefix + "/");
+  }
+
+  if (patternPath.includes("*")) {
+    const regexStr = "^" + patternPath.split("*").map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$";
+    const regex = new RegExp(regexStr);
+    return regex.test(normReqPath);
+  }
+
+  return false;
+}
+
 export function findMatchingException(
   headerName: string,
   requestPath?: string,
@@ -165,7 +224,18 @@ export function findMatchingException(
   const normalizedHeader = headerName.trim().toLowerCase();
 
   for (const entry of registry) {
-    if (entry.header.toLowerCase() === normalizedHeader) {
+    if (entry.header.toLowerCase() !== normalizedHeader) {
+      continue;
+    }
+
+    if (requestPath && requestMethod) {
+      const scopeMatches = entry.scope.some((pattern) =>
+        matchesScope(pattern, requestMethod, requestPath),
+      );
+      if (scopeMatches) {
+        return entry;
+      }
+    } else {
       return entry;
     }
   }
@@ -188,18 +258,21 @@ export interface KeyEvaluationResult {
   keyState?: "active" | "rotated_previous" | "expired" | "revoked" | "undocumented" | "invalid";
 }
 
+export interface EvaluateInternalKeyOptions {
+  headerName: string;
+  requestPath?: string | undefined;
+  requestMethod?: string | undefined;
+  previousKey?: string | undefined;
+  previousKeyExpiresAt?: string | Date | undefined;
+  revokedKeys?: string[] | undefined;
+  now?: Date | undefined;
+  registry?: InternalKeyExceptionMetadata[] | undefined;
+}
+
 export function evaluateInternalKey(
   providedKey: string,
   expectedKey: string | undefined,
-  options: {
-    headerName: string;
-    requestPath?: string;
-    requestMethod?: string;
-    previousKey?: string;
-    revokedKeys?: string[];
-    now?: Date;
-    registry?: InternalKeyExceptionMetadata[];
-  },
+  options: EvaluateInternalKeyOptions,
 ): KeyEvaluationResult {
   const registry = options.registry ?? INTERNAL_KEY_EXCEPTION_REGISTRY;
   const now = options.now ?? new Date();
@@ -214,7 +287,7 @@ export function evaluateInternalKey(
     return {
       valid: false,
       code: "INTERNAL_KEY_UNDOCUMENTED",
-      reason: `No documented exception metadata found for header '${options.headerName}'.`,
+      reason: `No documented exception metadata found for header '${options.headerName}' matching route ${options.requestMethod ?? "GET"} ${options.requestPath ?? "*"}.`,
       keyState: "undocumented",
     };
   }
@@ -264,8 +337,23 @@ export function evaluateInternalKey(
     };
   }
 
-  // Check rotation previous key match
+  // Check rotation previous key match and check rotation overlap key expiry
   if (options.previousKey && timingSafeMatch(providedKey, options.previousKey)) {
+    if (options.previousKeyExpiresAt) {
+      const prevExpiresTime =
+        typeof options.previousKeyExpiresAt === "string"
+          ? Date.parse(options.previousKeyExpiresAt)
+          : options.previousKeyExpiresAt.getTime();
+      if (!Number.isNaN(prevExpiresTime) && now.getTime() > prevExpiresTime) {
+        return {
+          valid: false,
+          code: "INTERNAL_KEY_EXPIRED",
+          reason: `Rotation overlap key for exception ${exception.exceptionId} has expired.`,
+          exception,
+          keyState: "expired",
+        };
+      }
+    }
     return {
       valid: true,
       exception,

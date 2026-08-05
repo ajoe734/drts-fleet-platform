@@ -171,6 +171,7 @@ export function validateInternalKey(
   }
 
   const previousKey = process.env.DRTS_INTERNAL_KEY_PREVIOUS?.trim();
+  const previousKeyExpiresAt = process.env.DRTS_INTERNAL_KEY_PREVIOUS_EXPIRES_AT?.trim();
   const revokedKeys = parseCsvKeys(process.env.DRTS_INTERNAL_KEY_REVOKED_KEYS);
 
   const evalResult = evaluateInternalKey(providedKey, expectedKey, {
@@ -178,29 +179,30 @@ export function validateInternalKey(
     requestPath,
     requestMethod,
     previousKey,
+    previousKeyExpiresAt,
     revokedKeys,
   });
 
   if (evalResult.valid) {
+    const usageSignal =
+      evalResult.exception?.usageSignal ?? "AUTH_INTERNAL_KEY_USED";
     logger.log(
-      `[AUTH_INTERNAL_KEY_USED] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} route=${requestMethod} ${requestPath}`,
+      `[${usageSignal}] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} route=${requestMethod} ${requestPath}`,
     );
     return;
   }
 
   logger.warn(
-    `[AUTH_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} route=${requestMethod} ${requestPath}`,
+    `[AUTH_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} route=${requestMethod} ${requestPath}`,
   );
 
   throw new ApiRequestError(
     401,
-    evalResult.code ?? "INTERNAL_KEY_INVALID",
-    evalResult.reason ?? "x-drts-internal-key header is invalid for this environment.",
+    "INTERNAL_KEY_INVALID",
+    "x-drts-internal-key header is invalid for this environment.",
     {
       route: requestPath,
       method: requestMethod,
-      exceptionId: evalResult.exception?.exceptionId,
-      keyState: evalResult.keyState,
     },
   );
 }
@@ -256,6 +258,7 @@ export function requireScopedInternalKey(
   }
 
   const previousKey = process.env[`${options.requiredEnv}_PREVIOUS`]?.trim();
+  const previousKeyExpiresAt = process.env[`${options.requiredEnv}_PREVIOUS_EXPIRES_AT`]?.trim();
   const revokedKeys = parseCsvKeys(process.env[`${options.requiredEnv}_REVOKED_KEYS`]);
 
   const evalResult = evaluateInternalKey(providedKey, configuredKey, {
@@ -263,29 +266,30 @@ export function requireScopedInternalKey(
     requestPath,
     requestMethod,
     previousKey,
+    previousKeyExpiresAt,
     revokedKeys,
   });
 
   if (evalResult.valid) {
+    const usageSignal =
+      evalResult.exception?.usageSignal ?? "AUTH_SCOPED_INTERNAL_KEY_USED";
     logger.log(
-      `[AUTH_SCOPED_INTERNAL_KEY_USED] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} header=${options.header} route=${requestMethod} ${requestPath}`,
+      `[${usageSignal}] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} header=${options.header} route=${requestMethod} ${requestPath}`,
     );
     return;
   }
 
   logger.warn(
-    `[AUTH_SCOPED_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} header=${options.header} route=${requestMethod} ${requestPath}`,
+    `[AUTH_SCOPED_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} header=${options.header} route=${requestMethod} ${requestPath}`,
   );
 
   throw new ApiRequestError(
     401,
-    evalResult.code ?? "INTERNAL_KEY_INVALID",
-    evalResult.reason ?? `${options.header} header is invalid for this environment.`,
+    "INTERNAL_KEY_INVALID",
+    `${options.header} header is invalid for this environment.`,
     {
       route: requestPath,
       method: requestMethod,
-      exceptionId: evalResult.exception?.exceptionId,
-      keyState: evalResult.keyState,
     },
   );
 }

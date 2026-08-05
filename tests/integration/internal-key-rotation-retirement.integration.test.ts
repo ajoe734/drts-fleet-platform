@@ -77,7 +77,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
     ).not.toThrow();
   });
 
-  it("rejects revoked key even during rotation window", () => {
+  it("rejects revoked key even during rotation window with generic 401 INTERNAL_KEY_INVALID and no leaked metadata", () => {
     const primaryKey = "primary-key-32-chars-long-secret-key-1";
     const revokedKey = "revoked-key-32-chars-long-secret-key-x";
 
@@ -100,7 +100,11 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
       caught = err as ApiRequestError;
     }
 
-    expect(caught?.code).toBe("INTERNAL_KEY_REVOKED");
+    expect(caught?.getStatus()).toBe(401);
+    expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
+    const responsePayload = caught?.getResponse() as Record<string, unknown>;
+    expect(responsePayload).not.toHaveProperty("exceptionId");
+    expect(responsePayload).not.toHaveProperty("keyState");
   });
 
   it("supports rotation overlap and revocation on scoped internal keys", () => {
@@ -165,10 +169,11 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
       caught = err as ApiRequestError;
     }
 
-    expect(caught?.code).toBe("INTERNAL_KEY_REVOKED");
+    expect(caught?.getStatus()).toBe(401);
+    expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
   });
 
-  it("fails closed when an internal key exception is expired", () => {
+  it("fails closed when an internal key exception is expired with generic 401 INTERNAL_KEY_INVALID", () => {
     const targetExcp = INTERNAL_KEY_EXCEPTION_REGISTRY.find(
       (e) => e.exceptionId === "INTERNAL_KEY_EXCP_002",
     )!;
@@ -197,7 +202,8 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
         caught = err as ApiRequestError;
       }
 
-      expect(caught?.code).toBe("INTERNAL_KEY_EXPIRED");
+      expect(caught?.getStatus()).toBe(401);
+      expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
     } finally {
       targetExcp.expiresAt = originalExpiresAt;
     }
@@ -226,6 +232,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
       caught = err as ApiRequestError;
     }
 
-    expect(caught?.code).toBe("INTERNAL_KEY_UNDOCUMENTED");
+    expect(caught?.getStatus()).toBe(401);
+    expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
   });
 });

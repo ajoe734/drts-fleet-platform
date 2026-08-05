@@ -144,4 +144,107 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
     expect(result.code).toBe("INTERNAL_KEY_EXPIRED");
     expect(result.keyState).toBe("expired");
   });
+
+  it("enforces scope metadata and matches EXCP_003 correctly on ops and health routes", () => {
+    // EXCP_003 matches GET health or POST ops/*
+    const resultHealth = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "GET",
+        requestPath: "/health",
+      },
+    );
+    expect(resultHealth.valid).toBe(true);
+    expect(resultHealth.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+
+    const resultOps = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/ops/breakglass/activate",
+      },
+    );
+    expect(resultOps.valid).toBe(true);
+    expect(resultOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+
+    // EXCP_002 matches POST partner/ingress/handoff or POST auth/token
+    const resultHandoff = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/partner/ingress/handoff",
+      },
+    );
+    expect(resultHandoff.valid).toBe(true);
+    expect(resultHandoff.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
+
+    // Out of scope route returns INTERNAL_KEY_UNDOCUMENTED
+    const resultUnscoped = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "DELETE",
+        requestPath: "/api/users/123",
+      },
+    );
+    expect(resultUnscoped.valid).toBe(false);
+    expect(resultUnscoped.code).toBe("INTERNAL_KEY_UNDOCUMENTED");
+    expect(resultUnscoped.keyState).toBe("undocumented");
+  });
+
+  it("triggers EXCP_003 expiration after 2026-08-31", () => {
+    const resultPostExpiry = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/ops/test",
+        now: new Date("2026-09-01T00:00:00Z"),
+      },
+    );
+    expect(resultPostExpiry.valid).toBe(false);
+    expect(resultPostExpiry.code).toBe("INTERNAL_KEY_EXPIRED");
+    expect(resultPostExpiry.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+  });
+
+  it("enforces expiration on rotation overlap key when previousKeyExpiresAt is passed", () => {
+    const validOverlap = evaluateInternalKey(
+      "old-key-12345678901234567890",
+      "new-key-12345678901234567890",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/auth/token",
+        previousKey: "old-key-12345678901234567890",
+        previousKeyExpiresAt: "2026-08-10T00:00:00Z",
+        now: new Date("2026-08-05T00:00:00Z"),
+      },
+    );
+    expect(validOverlap.valid).toBe(true);
+    expect(validOverlap.keyState).toBe("rotated_previous");
+
+    const expiredOverlap = evaluateInternalKey(
+      "old-key-12345678901234567890",
+      "new-key-12345678901234567890",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/auth/token",
+        previousKey: "old-key-12345678901234567890",
+        previousKeyExpiresAt: "2026-08-01T00:00:00Z",
+        now: new Date("2026-08-05T00:00:00Z"),
+      },
+    );
+    expect(expiredOverlap.valid).toBe(false);
+    expect(expiredOverlap.code).toBe("INTERNAL_KEY_EXPIRED");
+    expect(expiredOverlap.keyState).toBe("expired");
+  });
 });
