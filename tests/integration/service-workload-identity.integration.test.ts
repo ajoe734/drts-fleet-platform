@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { InternalKeyMiddleware } from "../../apps/api/src/common/auth/internal-key.middleware";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
 import { ServiceWorkloadIdentityAdapter } from "../../apps/api/src/modules/auth/service-workload-identity.adapter";
@@ -137,6 +138,32 @@ describe("service workload identity token exchange", () => {
     );
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.audience).toEqual([STAGING_API_AUDIENCE]);
+  });
+
+  it("allows workload assertion requests through middleware before the controller exchanges the token", async () => {
+    const identityRepository = new IdentityRepository();
+    const { authController, jwtAuthService } =
+      buildAuthController(identityRepository);
+    const middleware = new InternalKeyMiddleware();
+    const request = {
+      headers: workloadHeaders(signWorkloadAssertion()),
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    };
+    let forwarded = false;
+
+    middleware.use(request, {}, () => {
+      forwarded = true;
+    });
+
+    expect(forwarded).toBe(true);
+
+    const result = await authController.issueToken(request);
+    const payload = await jwtAuthService.verifyAccessToken(result.token);
+
+    expect(result.expiresIn).toBe("15m");
+    expect(payload?.actorType).toBe("system");
+    expect(payload?.aud).toEqual([STAGING_API_AUDIENCE]);
   });
 
   it("rejects caller-supplied bootstrap claims when workload proof is present", async () => {

@@ -18,6 +18,7 @@ const INTERNAL_KEY_HEADER = "x-drts-internal-key";
 export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
+const WORKLOAD_IDENTITY_ASSERTION_HEADER = "x-drts-workload-assertion";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
@@ -99,6 +100,14 @@ function hasBearerAuthorization(request: RequestLike): boolean {
   return headerValues.some((value) => /^Bearer\s+\S+/i.test(value));
 }
 
+function hasWorkloadIdentityAssertion(request: RequestLike): boolean {
+  return Boolean(
+    normalizeHeaderValue(
+      request.headers?.[WORKLOAD_IDENTITY_ASSERTION_HEADER],
+    ),
+  );
+}
+
 function isStrictAuthEnvironment(): boolean {
   const environment = detectAuthEnvironment(process.env);
   return environment === "production" || environment === "staging";
@@ -123,6 +132,7 @@ export function validateInternalKey(
     isHealthRequest(requestPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, requestPath) ||
+    hasWorkloadIdentityAssertion(request) ||
     hasBearerAuthorization(request)
   ) {
     return;

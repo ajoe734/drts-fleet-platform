@@ -56,6 +56,24 @@ describe("validateInternalKey strict environment behavior", () => {
     ).not.toThrow();
   });
 
+  it("allows workload assertion exchange requests to reach the auth controller without an internal key", () => {
+    process.env.APP_ENV = "staging";
+    delete process.env.DRTS_INTERNAL_KEY;
+
+    expect(() =>
+      validateInternalKey(
+        {
+          method: "POST",
+          originalUrl: "/api/auth/token",
+          headers: {
+            "x-drts-workload-assertion": "signed.workload.assertion",
+          },
+        },
+        process.env.DRTS_INTERNAL_KEY,
+      ),
+    ).not.toThrow();
+  });
+
   it("middleware still fails closed in staging even when enforcement flag is false", () => {
     process.env.APP_ENV = "staging";
     process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";
