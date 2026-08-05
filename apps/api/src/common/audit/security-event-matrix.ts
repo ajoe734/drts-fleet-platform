@@ -150,4 +150,22 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     tenantScoped: false,
     requiredOutcomes: ["success"],
   },
+  {
+    eventType: "internal_key.used",
+    eventFamily: "credential",
+    description:
+      "Temporary internal key exception usage recorded with owner, scope, and key state.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "internal_key_drift.detected",
+    eventFamily: "credential",
+    description:
+      "Internal key drift alert triggered by undocumented, expired, revoked, or invalid internal key presentation.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["denied", "failure", "expired", "revoked"],
+  },
 ] as const;
