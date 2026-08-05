@@ -610,10 +610,9 @@ export class ServiceWorkloadIdentityAdapter {
     payload: WorkloadIdentityPayload,
     configuredAudiences: readonly string[],
   ): string {
-    const matched =
-      normalizeAudience(payload.aud).find((audience) =>
-        configuredAudiences.includes(audience),
-      ) ?? configuredAudiences[0];
+    const matched = normalizeAudience(payload.aud).find((audience) =>
+      configuredAudiences.includes(audience),
+    );
     if (!matched) {
       throw new ApiRequestError(
         403,

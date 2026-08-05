@@ -1,25 +1,20 @@
-import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
+
+import { Module } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import type { JwtPayload } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { AppModule } from "../../apps/api/src/app.module";
-import { InternalKeyMiddleware } from "../../apps/api/src/common/auth/internal-key.middleware";
-import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
-import { SnakeCaseExceptionFilter } from "../../apps/api/src/common/snake-case.exception-filter";
-import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
-import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
-import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
-import { ServiceWorkloadIdentityAdapter } from "../../apps/api/src/modules/auth/service-workload-identity.adapter";
-import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
-import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
-
-const require = createRequire(
-  new URL("../../apps/api/package.json", import.meta.url),
-);
-const { Module } = require("@nestjs/common") as typeof import("@nestjs/common");
-const { NestFactory } =
-  require("@nestjs/core") as typeof import("@nestjs/core");
-const jwt = require("jsonwebtoken") as typeof import("jsonwebtoken");
+import { AppModule } from "../../src/app.module";
+import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
+import { SnakeCaseExceptionFilter } from "../../src/common/snake-case.exception-filter";
+import { AuthController } from "../../src/modules/auth/auth.controller";
+import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
+import { IAPSubjectAdapter } from "../../src/modules/auth/iap-subject.adapter";
+import { ServiceWorkloadIdentityAdapter } from "../../src/modules/auth/service-workload-identity.adapter";
+import { IdentityRepository } from "../../src/modules/identity/identity.repository";
+import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
 const AUTH_SIGNING_SECRET = "auth_signing_secret_value_with_minimum_length_32!";
 const WORKLOAD_ASSERTION_SECRET =
@@ -32,7 +27,7 @@ const STAGING_EXCHANGE_AUDIENCE =
 const STAGING_WORKLOAD_ISSUER = "https://workload.staging.drts.internal";
 const DEV_EXCHANGE_AUDIENCE = "https://auth.dev.drts.internal/token-exchange";
 
-function signWorkloadAssertion(overrides?: Partial<jwt.JwtPayload>): string {
+function signWorkloadAssertion(overrides?: Partial<JwtPayload>): string {
   const now = Math.floor(Date.now() / 1000);
   return jwt.sign(
     {
@@ -125,7 +120,7 @@ async function createWorkloadIdentityHttpApp(
   })
   class WorkloadIdentityHttpTestModule {
     configure(consumer: {
-      apply: (middleware: typeof InternalKeyMiddleware) => {
+      apply: (middleware: unknown) => {
         exclude: (...args: unknown[]) => {
           forRoutes: (routes: unknown) => void;
         };
@@ -208,32 +203,6 @@ describe("service workload identity token exchange", () => {
     expect(sessions[0]?.riskSummary?.workloadExchangeNonceHash).toBe(
       payload?.workloadExchangeNonceHash,
     );
-  });
-
-  it("allows workload assertion requests through middleware before the controller exchanges the token", async () => {
-    const identityRepository = new IdentityRepository();
-    const { authController, jwtAuthService } =
-      buildAuthController(identityRepository);
-    const middleware = new InternalKeyMiddleware();
-    const request = {
-      headers: workloadHeaders(signWorkloadAssertion()),
-      method: "POST",
-      originalUrl: "/api/auth/token",
-    };
-    let forwarded = false;
-
-    middleware.use(request, {}, () => {
-      forwarded = true;
-    });
-
-    expect(forwarded).toBe(true);
-
-    const result = await authController.issueToken(request);
-    const payload = await jwtAuthService.verifyAccessToken(result.token);
-
-    expect(result.expiresIn).toBe("15m");
-    expect(payload?.actorType).toBe("system");
-    expect(payload?.aud).toEqual([STAGING_API_AUDIENCE]);
   });
 
   it("exchanges a workload assertion over real HTTP without requiring DRTS_INTERNAL_KEY", async () => {
@@ -572,7 +541,7 @@ describe("service workload identity token exchange", () => {
       originalUrl: "/api/auth/token",
     });
 
-    const decoded = jwt.decode(result.token) as jwt.JwtPayload | null;
+    const decoded = jwt.decode(result.token) as JwtPayload | null;
     expect(decoded?.aud).toEqual([STAGING_CONTROL_PLANE_AUDIENCE]);
 
     const verified = await jwtAuthService.verifyAccessToken(result.token);
@@ -598,7 +567,7 @@ describe("service workload identity token exchange", () => {
       originalUrl: "/api/auth/token",
     });
 
-    const payload = jwt.decode(result.token) as jwt.JwtPayload | null;
+    const payload = jwt.decode(result.token) as JwtPayload | null;
     expect(payload?.sub).toBe("bootstrap-service");
     expect(payload?.actorType).toBe("system");
     expect(payload?.amr).not.toContain("workload_identity");

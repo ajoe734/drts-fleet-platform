@@ -56,11 +56,12 @@ describe("validateInternalKey strict environment behavior", () => {
     ).not.toThrow();
   });
 
-  it("allows workload assertion exchange requests to reach the auth controller without an internal key", () => {
+  it("does not treat a workload assertion header as a direct internal-key bypass", () => {
     process.env.APP_ENV = "staging";
     delete process.env.DRTS_INTERNAL_KEY;
 
-    expect(() =>
+    let error: ApiRequestError | null = null;
+    try {
       validateInternalKey(
         {
           method: "POST",
@@ -70,8 +71,12 @@ describe("validateInternalKey strict environment behavior", () => {
           },
         },
         process.env.DRTS_INTERNAL_KEY,
-      ),
-    ).not.toThrow();
+      );
+    } catch (caught) {
+      error = caught as ApiRequestError;
+    }
+
+    expect(error?.code).toBe("INTERNAL_KEY_NOT_CONFIGURED");
   });
 
   it("does not bypass internal key enforcement for non-token routes that carry a workload assertion header", () => {

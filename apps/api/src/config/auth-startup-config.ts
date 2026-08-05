@@ -89,6 +89,8 @@ type WorkloadServicePrincipalRegistryEntry = {
   principalId?: string;
   issuer?: string;
   subject?: string;
+  allowedTokenAudiences?: Array<string | null> | null;
+  defaultTokenAudience?: string | null;
 };
 
 const INSECURE_DEFAULT_SECRETS = new Set([
@@ -177,6 +179,21 @@ function parseCsv(value: string | undefined): string[] {
     .split(/[;,]/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function normalizeAudienceBindings(
+  entry: WorkloadServicePrincipalRegistryEntry,
+): string[] {
+  return [
+    ...new Set(
+      [
+        ...(entry.allowedTokenAudiences ?? []),
+        entry.defaultTokenAudience ?? undefined,
+      ]
+        .map((value) => value?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function parseWorkloadServicePrincipalRegistry(
@@ -846,21 +863,7 @@ export function buildAuthStartupConfigReport(
           !normalizeString(entry.principalId) ||
           !normalizeString(entry.subject) ||
           !normalizeString(entry.issuer) ||
-          (normalizeString(entry.defaultTokenAudience)
-            ? [
-                ...new Set(
-                  [...(entry.allowedTokenAudiences ?? []), entry.defaultTokenAudience]
-                    .map((value) => value?.trim() ?? "")
-                    .filter(Boolean),
-                ),
-              ].length === 0
-            : [
-                ...new Set(
-                  (entry.allowedTokenAudiences ?? [])
-                    .map((value) => value?.trim() ?? "")
-                    .filter(Boolean),
-                ),
-              ].length === 0),
+          normalizeAudienceBindings(entry).length === 0,
       )
     ) {
       issues.push({
