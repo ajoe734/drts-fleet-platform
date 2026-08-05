@@ -20,6 +20,7 @@ import type {
   TenantSlaProfile,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
+  TenantWebhookSecretRotationRecord,
   WebhookDeliveryRecord,
 } from "@drts/contracts";
 
@@ -45,10 +46,28 @@ type WebhookRetryPolicy = {
 };
 
 type WebhookSecretRotationRecord = {
+  createdAt?: string;
   secretVersion: number;
   rotatedAt: string;
   rotationReason: string | null;
   secretPreview: string;
+  status?: TenantWebhookSecretRotationRecord["status"];
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  lastUsedWorkload?: string | null;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  supersededByVersion?: number | null;
+  revokedAt?: string | null;
+  signals?: TenantWebhookSecretRotationRecord["signals"];
+};
+
+type StoredWebhookSecretRecord = WebhookSecretRotationRecord & {
+  secretValue: string;
 };
 
 type WebhookRuntimeMetadata = {
@@ -73,6 +92,7 @@ type WebhookRuntimeMetadata = {
 
 export type StoredWebhookEndpointRecord = TenantWebhookEndpoint & {
   secretValue: string;
+  secretCredentials?: StoredWebhookSecretRecord[];
   retryPolicy: WebhookRetryPolicy;
   runtimeMetadata: WebhookRuntimeMetadata;
   secretHistory: WebhookSecretRotationRecord[];

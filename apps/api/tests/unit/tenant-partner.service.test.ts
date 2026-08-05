@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -1173,7 +1174,10 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
     expect(credentialsAfterRotate[1]).toMatchObject({
       keyId: "partner-key-alpha-demo",
-      revokedAt: expect.any(String),
+      status: "overlap_active",
+      revokedAt: null,
+      overlapEndsAt: expect.any(String),
+      supersededByKeyId: issued.credential.keyId,
     });
 
     const resolution = service.authenticatePartnerBootstrap(
@@ -1207,14 +1211,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
         },
         "req-partner-credential-auth-002",
       ),
-    ).toThrowError(
-      expect.objectContaining({
-        response: expect.objectContaining({
-          error: expect.objectContaining({
-            code: "PARTNER_AUTH_NOT_CONFIGURED",
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_REVOKED",
+            }),
           }),
         }),
-      }),
     );
 
     expect(auditNotificationService.listAuditLogs()).toEqual(
@@ -1231,6 +1235,184 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
       ]),
     );
+  });
+
+  it("keeps rotated partner ingress credentials in overlap and fails closed for wrong-entry or auto-revoked keys", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T12:00:00.000Z"));
+      process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+        "pk_test_alpha_ingress_secret";
+      process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT =
+        "pk_test_beta_ingress_secret";
+
+      const service = new TenantPartnerService(new AuditNotificationService());
+      const issued = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-alpha-airport",
+        {
+          rotationReason: "scheduled_rotation",
+          overlapDays: 1,
+        },
+        "req-partner-overlap-001",
+      );
+
+      expect(issued.overlapEndsAt).toBe("2026-08-03T12:00:00.000Z");
+      expect(
+        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            keyId: issued.credential.keyId,
+            status: "active",
+          }),
+          expect.objectContaining({
+            keyId: "partner-key-alpha-demo",
+            status: "overlap_active",
+            overlapEndsAt: "2026-08-03T12:00:00.000Z",
+            supersededByKeyId: issued.credential.keyId,
+          }),
+        ]),
+      );
+
+      const overlapResolution = service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          apiKey: "pk_test_alpha_ingress_secret",
+        },
+        "req-partner-overlap-002",
+      );
+      expect(overlapResolution.identity.actorId).toBe("partner-key-alpha-demo");
+
+      expect(() =>
+        service.authenticatePartnerBootstrap(
+          {
+            entrySlug: "bank-demo-beta-airport",
+            apiKey: "pk_test_alpha_ingress_secret",
+          },
+          "req-partner-overlap-003",
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_INVALID",
+            }),
+          }),
+        }),
+      );
+
+      vi.setSystemTime(new Date("2026-08-04T12:00:00.000Z"));
+
+      expect(() =>
+        service.authenticatePartnerBootstrap(
+          {
+            entrySlug: "bank-demo-alpha-airport",
+            apiKey: "pk_test_alpha_ingress_secret",
+          },
+          "req-partner-overlap-004",
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_REVOKED",
+            }),
+          }),
+        }),
+      );
+
+      expect(
+        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            keyId: "partner-key-alpha-demo",
+            status: "auto_revoked",
+            autoRevokedAt: "2026-08-03T12:00:00.000Z",
+            revokeReason: "rotation_overlap_elapsed",
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects expired partner credentials and records dormant partner credential use", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T08:00:00.000Z"));
+      const auditNotificationService = new AuditNotificationService();
+      const service = new TenantPartnerService(auditNotificationService);
+
+      const expiring = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-alpha-airport",
+        {
+          rotationReason: "short_lived",
+          expiresAt: "2026-08-02T09:00:00.000Z",
+        },
+        "req-partner-expiry-001",
+      );
+
+      vi.setSystemTime(new Date("2026-08-02T10:00:00.000Z"));
+
+      expect(() =>
+        service.authenticatePartnerBootstrap(
+          {
+            entrySlug: "bank-demo-alpha-airport",
+            apiKey: expiring.plaintextKey,
+          },
+          "req-partner-expiry-002",
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_EXPIRED",
+            }),
+          }),
+        }),
+      );
+
+      const dormant = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-beta-airport",
+        {
+          rotationReason: "dormancy_probe",
+        },
+        "req-partner-dormant-001",
+      );
+
+      vi.setSystemTime(new Date("2026-09-05T10:00:00.000Z"));
+
+      const dormantResolution = service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          apiKey: dormant.plaintextKey,
+        },
+        "req-partner-dormant-002",
+      );
+      expect(dormantResolution.identity.actorId).toBe(dormant.credential.keyId);
+      expect(auditNotificationService.listNotifications()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            channel: "ops_notice",
+            title: "Dormant partner credential used",
+          }),
+        ]),
+      );
+      expect(
+        service.listPlatformPartnerIngressCredentials("bank-demo-beta-airport"),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            keyId: dormant.credential.keyId,
+            lastUsedWorkload: "partner_bootstrap",
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("persists partner ingress credential lifecycle changes and reloads them", async () => {
@@ -1266,8 +1448,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
         expect.objectContaining({
           keyId: "partner-key-alpha-demo",
           entrySlug: "bank-demo-alpha-airport",
-          revokedAt: expect.any(String),
-          revokeReason: "scheduled_rotation",
+          revokedAt: null,
+          revokeReason: null,
+          status: "overlap_active",
+          overlapEndsAt: expect.any(String),
+          supersededByKeyId: issued.credential.keyId,
         }),
         expect.objectContaining({
           keyId: issued.credential.keyId,
@@ -1298,8 +1483,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
         expect.objectContaining({
           keyId: "partner-key-alpha-demo",
-          revokedAt: expect.any(String),
-          revokeReason: "scheduled_rotation",
+          revokedAt: null,
+          revokeReason: null,
+          status: "overlap_active",
+          overlapEndsAt: expect.any(String),
+          supersededByKeyId: issued.credential.keyId,
         }),
       ]),
     );
@@ -2021,6 +2209,91 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(governance.baselineWebhookEvents).toContain("dispatch.assigned");
   });
 
+  it("limits tenant API key rotation to dual overlap and auto-revokes elapsed overlaps", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+      const service = new TenantPartnerService(new AuditNotificationService());
+
+      const first = service.issueApiKey("tenant-demo-001", {
+        keyName: "Partner sync key",
+        scopes: ["tenant:write"],
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "partner sync",
+      });
+      expect(first.apiKey).toMatchObject({
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "partner sync",
+        status: "active",
+        signals: expect.objectContaining({
+          approachingExpiry: false,
+          expired: false,
+        }),
+      });
+
+      vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+      const second = service.rotateApiKey(
+        "tenant-demo-001",
+        first.apiKey.apiKeyId,
+        {
+          overlapDays: 2,
+        },
+        "req-api-key-rotate-001",
+      );
+
+      vi.setSystemTime(new Date("2026-08-04T00:00:00.000Z"));
+      const third = service.rotateApiKey(
+        "tenant-demo-001",
+        second.apiKey.apiKeyId,
+        {
+          overlapDays: 2,
+        },
+        "req-api-key-rotate-002",
+      );
+
+      expect(service.listApiKeys("tenant-demo-001")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            apiKeyId: third.apiKey.apiKeyId,
+            status: "active",
+            rotatedFromApiKeyId: second.apiKey.apiKeyId,
+          }),
+          expect.objectContaining({
+            apiKeyId: second.apiKey.apiKeyId,
+            status: "overlap_active",
+            overlapEndsAt: "2026-08-06T00:00:00.000Z",
+            supersededByApiKeyId: third.apiKey.apiKeyId,
+          }),
+          expect.objectContaining({
+            apiKeyId: first.apiKey.apiKeyId,
+            status: "revoked",
+            revokeReason: "credential_rotated",
+            overlapEndsAt: null,
+          }),
+        ]),
+      );
+
+      vi.setSystemTime(new Date("2026-08-07T00:00:00.000Z"));
+
+      expect(service.listApiKeys("tenant-demo-001")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            apiKeyId: second.apiKey.apiKeyId,
+            status: "auto_revoked",
+            autoRevokedAt: "2026-08-06T00:00:00.000Z",
+            revokeReason: "rotation_overlap_elapsed",
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back to manual review after retry exhaustion with explicit adapter attempt history", async () => {
     const retryingAdapter: PartnerEligibilityAdapterInterface = {
       adapterCode: "issuer_reference_lookup_v1",
@@ -2534,6 +2807,151 @@ describe("TenantPartnerService sensitive-data governance", () => {
         disableReasonNote: null,
       }),
     });
+  });
+
+  it("retries webhook deliveries with the original secret version during overlap and fails closed after overlap expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T09:00:00.000Z"));
+      const fetchImpl = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 410,
+      });
+      const service = new TenantPartnerService(
+        new AuditNotificationService(),
+        undefined,
+        new WebhookDispatchService(fetchImpl as never),
+        [],
+      );
+      const tenantAdminIdentity = {
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roles: ["tc_admin"],
+        scopes: [
+          "tenant:webhooks:read",
+          "tenant:webhooks:write",
+          "tenant:read",
+        ],
+      } as const;
+
+      const created = service.createWebhookEndpoint(
+        "tenant-demo-001",
+        {
+          url: "https://tenant.example/webhooks/overlap-secret",
+          secret: "whsec_overlap_v1",
+          events: ["booking.created"],
+        },
+        "req-webhook-overlap-001",
+      );
+
+      await service.sendTestWebhook(
+        "tenant-demo-001",
+        {
+          webhookId: created.webhookId,
+        },
+        "req-webhook-overlap-002",
+      );
+
+      const [failedDelivery] = service.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        created.webhookId,
+        "req-webhook-overlap-003",
+        tenantAdminIdentity,
+      );
+      expect(failedDelivery).toMatchObject({
+        status: "delivery_failed",
+        secretVersion: 1,
+        signatureVersion: 1,
+      });
+
+      vi.setSystemTime(new Date("2026-08-02T12:00:00.000Z"));
+      const rotated = service.rotateWebhookSecret(
+        "tenant-demo-001",
+        {
+          webhookId: created.webhookId,
+          secret: "whsec_overlap_v2",
+          rotationReason: "scheduled_rotation",
+          overlapDays: 1,
+        },
+        "req-webhook-overlap-004",
+      );
+      expect(rotated).toMatchObject({
+        secretVersion: 2,
+        overlapEndsAt: "2026-08-03T12:00:00.000Z",
+      });
+
+      const retriedDuringOverlap = await service.retryWebhookDelivery(
+        "tenant-demo-001",
+        created.webhookId,
+        failedDelivery.deliveryId,
+        "req-webhook-overlap-005",
+        tenantAdminIdentity,
+      );
+      expect(retriedDuringOverlap).toMatchObject({
+        deliveryId: failedDelivery.deliveryId,
+        status: "delivery_failed",
+        attempt: 2,
+        httpStatus: 410,
+        secretVersion: 1,
+        signatureVersion: 1,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+      const retryInit = fetchImpl.mock.calls[1]?.[1] as
+        | (RequestInit & { headers: Record<string, string> })
+        | undefined;
+      const retryBody = String(retryInit?.body ?? "");
+      const expectedSignature = createHmac("sha256", "whsec_overlap_v1")
+        .update(`2026-08-02T12:00:00.000Z.${retryBody}`)
+        .digest("hex");
+      expect(retryInit?.headers["x-drts-webhook-signature"]).toBe(
+        `v=1;t=2026-08-02T12:00:00.000Z;sig=${expectedSignature}`,
+      );
+
+      vi.setSystemTime(new Date("2026-08-04T12:00:00.000Z"));
+
+      const retriedAfterOverlap = await service.retryWebhookDelivery(
+        "tenant-demo-001",
+        created.webhookId,
+        failedDelivery.deliveryId,
+        "req-webhook-overlap-006",
+        tenantAdminIdentity,
+      );
+      expect(retriedAfterOverlap).toMatchObject({
+        deliveryId: failedDelivery.deliveryId,
+        status: "delivery_failed",
+        attempt: 3,
+        httpStatus: null,
+        secretVersion: 1,
+        signatureVersion: 1,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(service.listWebhookEndpoints("tenant-demo-001")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            webhookId: created.webhookId,
+            secretVersion: 2,
+            credentialStatus: "active",
+            secretHistory: expect.arrayContaining([
+              expect.objectContaining({
+                secretVersion: 1,
+                status: "auto_revoked",
+                autoRevokedAt: "2026-08-03T12:00:00.000Z",
+                supersededByVersion: 2,
+              }),
+              expect.objectContaining({
+                secretVersion: 2,
+                status: "active",
+              }),
+            ]),
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retries failed webhook deliveries through the tenant command surface", async () => {
