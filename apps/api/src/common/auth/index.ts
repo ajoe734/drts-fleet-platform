@@ -7,5 +7,7 @@ export * from "./auth.types";
 export * from "./bootstrap-auth.guard";
 export * from "./feature-gate.guard";
 export * from "./internal-key.middleware";
+export * from "./internal-key-exception-registry";
 export * from "./jwt-auth.service";
 export * from "./signing-key-ring";
+

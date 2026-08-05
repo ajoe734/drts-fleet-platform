@@ -1,9 +1,14 @@
-import { Injectable, type NestMiddleware } from "@nestjs/common";
-import { timingSafeEqual } from "node:crypto";
+import { Injectable, Logger, type NestMiddleware } from "@nestjs/common";
 
 import { ApiRequestError } from "../api-envelope";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import {
+  evaluateInternalKey,
+  INTERNAL_KEY_EXCEPTION_REGISTRY,
+  parseCsvKeys,
+  type InternalKeyExceptionMetadata,
+} from "./internal-key-exception-registry";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -32,6 +37,8 @@ const PUBLIC_BOOTSTRAP_REALMS = new Set([
   "driver",
   "partner",
 ]);
+
+const logger = new Logger("InternalKeyMiddleware");
 
 function normalizeHeaderValue(value: HeaderValue): string {
   if (Array.isArray(value)) {
@@ -163,23 +170,37 @@ export function validateInternalKey(
     );
   }
 
-  const expectedBuffer = Buffer.from(expectedKey, "utf8");
-  const providedBuffer = Buffer.from(providedKey, "utf8");
-  const matches =
-    expectedBuffer.length === providedBuffer.length &&
-    timingSafeEqual(expectedBuffer, providedBuffer);
+  const previousKey = process.env.DRTS_INTERNAL_KEY_PREVIOUS?.trim();
+  const revokedKeys = parseCsvKeys(process.env.DRTS_INTERNAL_KEY_REVOKED_KEYS);
 
-  if (matches) {
+  const evalResult = evaluateInternalKey(providedKey, expectedKey, {
+    headerName: INTERNAL_KEY_HEADER,
+    requestPath,
+    requestMethod,
+    previousKey,
+    revokedKeys,
+  });
+
+  if (evalResult.valid) {
+    logger.log(
+      `[AUTH_INTERNAL_KEY_USED] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} route=${requestMethod} ${requestPath}`,
+    );
     return;
   }
 
+  logger.warn(
+    `[AUTH_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} route=${requestMethod} ${requestPath}`,
+  );
+
   throw new ApiRequestError(
     401,
-    "INTERNAL_KEY_INVALID",
-    "x-drts-internal-key header is invalid for this environment.",
+    evalResult.code ?? "INTERNAL_KEY_INVALID",
+    evalResult.reason ?? "x-drts-internal-key header is invalid for this environment.",
     {
       route: requestPath,
       method: requestMethod,
+      exceptionId: evalResult.exception?.exceptionId,
+      keyState: evalResult.keyState,
     },
   );
 }
@@ -212,7 +233,7 @@ export function requireScopedInternalKey(
     throw new ApiRequestError(
       503,
       "INTERNAL_KEY_NOT_CONFIGURED",
-      "x-drts-internal-key validation is not configured for this environment.",
+      `${options.header} validation is not configured for this environment.`,
       {
         route: requestPath,
         method: requestMethod,
@@ -234,23 +255,37 @@ export function requireScopedInternalKey(
     );
   }
 
-  const expectedBuffer = Buffer.from(configuredKey, "utf8");
-  const providedBuffer = Buffer.from(providedKey, "utf8");
-  const matches =
-    expectedBuffer.length === providedBuffer.length &&
-    timingSafeEqual(expectedBuffer, providedBuffer);
+  const previousKey = process.env[`${options.requiredEnv}_PREVIOUS`]?.trim();
+  const revokedKeys = parseCsvKeys(process.env[`${options.requiredEnv}_REVOKED_KEYS`]);
 
-  if (matches) {
+  const evalResult = evaluateInternalKey(providedKey, configuredKey, {
+    headerName: options.header,
+    requestPath,
+    requestMethod,
+    previousKey,
+    revokedKeys,
+  });
+
+  if (evalResult.valid) {
+    logger.log(
+      `[AUTH_SCOPED_INTERNAL_KEY_USED] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} header=${options.header} route=${requestMethod} ${requestPath}`,
+    );
     return;
   }
 
+  logger.warn(
+    `[AUTH_SCOPED_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} header=${options.header} route=${requestMethod} ${requestPath}`,
+  );
+
   throw new ApiRequestError(
     401,
-    "INTERNAL_KEY_INVALID",
-    `${options.header} header is invalid for this environment.`,
+    evalResult.code ?? "INTERNAL_KEY_INVALID",
+    evalResult.reason ?? `${options.header} header is invalid for this environment.`,
     {
       route: requestPath,
       method: requestMethod,
+      exceptionId: evalResult.exception?.exceptionId,
+      keyState: evalResult.keyState,
     },
   );
 }
