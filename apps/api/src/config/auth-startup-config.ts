@@ -1,3 +1,10 @@
+import {
+  INTERNAL_KEY_EXCEPTION_REGISTRY,
+  isExceptionExpired,
+  isProductionAllowedBoundary,
+  validateExceptionMetadata,
+} from "../common/auth/internal-key-exception-registry";
+
 export type AuthEnvironment = "production" | "staging" | "local" | "test";
 
 export type AuthIssueCode =
@@ -12,6 +19,7 @@ export interface AuthConfigurationIssue {
   issue: string;
   code: AuthIssueCode;
 }
+
 
 export interface AuthStartupConfig {
   environment: AuthEnvironment;
@@ -897,6 +905,45 @@ export function buildAuthStartupConfigReport(
           issue: `Unsafe control value: DRTS_INTERNAL_KEY length (${internalKey.length}) is below required minimum length of 32 characters in staging/production`,
           code: "UNSAFE_VALUE",
         });
+      }
+
+      const matchedExcps = INTERNAL_KEY_EXCEPTION_REGISTRY.filter(
+        (e) => e.envVar === "DRTS_INTERNAL_KEY",
+      );
+      if (matchedExcps.length === 0) {
+        issues.push({
+          control: "DRTS_INTERNAL_KEY",
+          issue:
+            "Missing required control: DRTS_INTERNAL_KEY is configured but lacks a documented exception entry in INTERNAL_KEY_EXCEPTION_REGISTRY",
+          code: "MISSING_CONTROL",
+        });
+      } else {
+        for (const matchedExcp of matchedExcps) {
+          try {
+            validateExceptionMetadata(matchedExcp);
+          } catch (err) {
+            issues.push({
+              control: "DRTS_INTERNAL_KEY",
+              issue: `Invalid exception metadata for DRTS_INTERNAL_KEY (${matchedExcp.exceptionId}): ${err instanceof Error ? err.message : String(err)}`,
+              code: "INVALID_FORMAT",
+            });
+          }
+
+          if (
+            environment === "production" &&
+            !isProductionAllowedBoundary(matchedExcp.networkBoundary)
+          ) {
+            continue;
+          }
+
+          if (isExceptionExpired(matchedExcp)) {
+            issues.push({
+              control: "DRTS_INTERNAL_KEY",
+              issue: `Unsafe control value: DRTS_INTERNAL_KEY exception (${matchedExcp.exceptionId}) expired on ${matchedExcp.expiresAt}`,
+              code: "UNSAFE_VALUE",
+            });
+          }
+        }
       }
     }
 
