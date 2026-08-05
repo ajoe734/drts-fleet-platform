@@ -2351,7 +2351,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
   });
 
   it("keeps raw webhook secret material out of rotation history and endpoint reads", () => {
-    const service = new TenantPartnerService(new AuditNotificationService());
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
 
     const created = service.createWebhookEndpoint(
       "tenant-demo-001",
@@ -2386,14 +2387,36 @@ describe("TenantPartnerService sensitive-data governance", () => {
       expect(record).not.toHaveProperty("secretValue");
     }
 
-    const serializedHistory = JSON.stringify({
-      secretHistory: endpoint.secretHistory,
-      rotationHistory: endpoint.runtimeMetadata.secretRotation.history ?? [],
-    });
-    expect(serializedHistory).not.toContain("whsec_initial_material");
-    expect(serializedHistory).not.toContain("whsec_rotated_material");
     expect(endpoint.ownerRef).toBe("tenant-admin-001");
     expect(endpoint.secretExpiresAt).not.toBeNull();
+
+    // The whole read surface must stay clean, not just the history arrays:
+    // list reads, the update response, and the audit trail all serialize the
+    // same webhook response shape.
+    const updated = service.updateWebhookEndpoint(
+      "tenant-demo-001",
+      created.webhookId,
+      { events: ["booking.created", "booking.cancelled"] },
+      "req-webhook-secret-hygiene-003",
+    );
+
+    const webhookAuditLogs = auditNotificationService
+      .listAuditLogs()
+      .filter((log) => log.resourceType === "webhook_endpoint");
+    expect(webhookAuditLogs.length).toBeGreaterThanOrEqual(2);
+
+    const exposedSurfaces = JSON.stringify({
+      listed: endpoint,
+      updated,
+      audit: webhookAuditLogs,
+    });
+    for (const material of [
+      "whsec_initial_material",
+      "whsec_rotated_material",
+    ]) {
+      expect(exposedSurfaces).not.toContain(material);
+    }
+    expect(exposedSurfaces).not.toContain('"secretValue"');
   });
 
   it("isolates tenant API key read and lifecycle operations across tenants", () => {

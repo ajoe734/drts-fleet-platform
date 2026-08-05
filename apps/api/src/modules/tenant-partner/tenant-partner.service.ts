@@ -309,6 +309,14 @@ type StoredWebhookSecretMaterial = WebhookSecretRotationRecord & {
   signals: IntegrationCredentialSignals;
 };
 
+/**
+ * What a rotation history entry is allowed to publish. `createdAt` is carried
+ * beyond the shared contract because tenant reads have always exposed it.
+ */
+type PublishedWebhookSecretRotationRecord = WebhookSecretRotationRecord & {
+  createdAt: string;
+};
+
 type StoredWebhookEndpoint = TenantWebhookEndpoint & {
   secretValue: string;
   secretCredentials?: StoredWebhookSecretMaterial[];
@@ -7109,10 +7117,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           currentVersion: 1,
           rotatedAt: now,
           rotationCount: 1,
-          history: [{ ...initialSecret }],
+          history: [this.toWebhookSecretHistoryRecord(initialSecret)],
         },
       },
-      secretHistory: [{ ...initialSecret }],
+      secretHistory: [this.toWebhookSecretHistoryRecord(initialSecret)],
       createdAt: now,
       updatedAt: now,
     };
@@ -8780,14 +8788,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             endpoint.runtimeMetadata.secretRotation.currentVersion,
           rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
           rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
+          // Projected, not spread: a webhook read must never carry secret
+          // material even if a stored record was hydrated with it.
           history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
-            (record) => ({ ...record }),
+            (record) => this.toWebhookSecretHistoryRecord(record),
           ),
         },
       },
-      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({
-        ...record,
-      })),
+      secretHistory: (endpoint.secretHistory ?? []).map((record) =>
+        this.toWebhookSecretHistoryRecord(record),
+      ),
     };
   }
 
@@ -9892,15 +9902,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const secretHistory: WebhookSecretRotationRecord[] = reconciledSecrets
       .slice()
       .reverse()
-      .map(({ signals, ...record }) => {
-        // Rotation history is exposed to tenants, so raw secret material never
-        // travels with it.
-        const historyRecord: WebhookSecretRotationRecord & {
-          secretValue?: string;
-        } = { ...record, signals: { ...signals } };
-        delete historyRecord.secretValue;
-        return historyRecord;
-      });
+      .map((record) => this.toWebhookSecretHistoryRecord(record));
     if (
       JSON.stringify(endpoint.secretHistory ?? null) !==
       JSON.stringify(secretHistory)
@@ -9923,6 +9925,41 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     return changed;
+  }
+
+  /**
+   * Rotation history is tenant-facing, so it is projected field by field out of
+   * the stored credential instead of spread. Raw secret material and any future
+   * field added to `StoredWebhookSecretMaterial` stay internal until they are
+   * listed here on purpose.
+   */
+  private toWebhookSecretHistoryRecord(
+    secret: WebhookSecretRotationRecord & {
+      createdAt?: string;
+      // Declared so the input type admits stored material; never projected out.
+      secretValue?: string;
+    },
+  ): PublishedWebhookSecretRotationRecord {
+    return {
+      createdAt: secret.createdAt ?? secret.rotatedAt,
+      secretVersion: secret.secretVersion,
+      rotatedAt: secret.rotatedAt,
+      rotationReason: secret.rotationReason,
+      secretPreview: secret.secretPreview,
+      ownerRef: secret.ownerRef ?? null,
+      ownerName: secret.ownerName ?? null,
+      ownerType: secret.ownerType ?? null,
+      purpose: secret.purpose ?? null,
+      expiresAt: secret.expiresAt ?? null,
+      lastUsedAt: secret.lastUsedAt ?? null,
+      lastUsedWorkload: secret.lastUsedWorkload ?? null,
+      status: secret.status ?? "active",
+      overlapEndsAt: secret.overlapEndsAt ?? null,
+      autoRevokedAt: secret.autoRevokedAt ?? null,
+      supersededByVersion: secret.supersededByVersion ?? null,
+      revokedAt: secret.revokedAt ?? null,
+      signals: secret.signals ? { ...secret.signals } : undefined,
+    };
   }
 
   private cloneStoredApiKey(
@@ -10032,15 +10069,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
           rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
           history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
-            (record) => ({
-              ...record,
-            }),
+            (record) => this.toWebhookSecretHistoryRecord(record),
           ),
         },
       },
-      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({
-        ...record,
-      })),
+      // Live secret material belongs to `secretCredentials` only; history is
+      // re-projected so hydrated rows cannot smuggle it back in.
+      secretHistory: (endpoint.secretHistory ?? []).map((record) =>
+        this.toWebhookSecretHistoryRecord(record),
+      ),
       secretCredentials: (endpoint.secretCredentials ?? []).map(
         (record): StoredWebhookSecretMaterial => ({
           ...record,
