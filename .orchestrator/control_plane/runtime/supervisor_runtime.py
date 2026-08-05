@@ -7460,23 +7460,16 @@ def _approval_is_routine_safe(approval: dict[str, Any]) -> bool:
             return False
         positionals = [token for token in tokens[2:] if not token.startswith("-")]
         return len(positionals) >= 2
+    # The chairman is the escalation path for commands the classifier cannot
+    # judge. Asking the classifier again — "would this have run unreviewed?" —
+    # sends the escalation back to what escalated it, so every gap in the
+    # pattern set became a permanent deadlock rather than a review. Bound the
+    # chairman by what no reviewer may permit instead.
     try:
-        from permission_broker import classify_command
-    except Exception:
-        classify_command = None
-    if classify_command is not None and classify_command(normalized) == "allow":
-        return True
-    verify_prefixes = (
-        "pytest",
-        "python3 -m pytest",
-        "python3 -m unittest",
-        "npm test",
-        "npm run test",
-        "pnpm test",
-        "go test",
-        "cargo test",
-    )
-    return normalized.startswith(verify_prefixes)
+        from permission_broker import command_hard_boundary_reason
+    except Exception:  # noqa: BLE001 - fall back to the conservative answer
+        return False
+    return command_hard_boundary_reason(command) is None
 
 
 def apply_chair_approval_actions(config: dict[str, Any], payload: dict[str, Any]) -> bool:

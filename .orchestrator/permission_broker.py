@@ -461,6 +461,34 @@ def _cd_target_is_within_workspace(segment: str) -> bool:
     return _paths_within_workspace([Path(tokens[1])])
 
 
+def command_hard_boundary_reason(shell_command: str) -> str | None:
+    """Why no reviewer may wave this command through, or None if it is theirs to judge.
+
+    `classify_command` answers "can this run with nobody looking". This answers
+    the narrower question an approval gate needs: is this beyond what a reviewer
+    is allowed to permit at all.
+
+    The gap between them matters. A command the classifier does not recognise is
+    `defer` — meaning "I cannot tell, ask someone" — and that is precisely the
+    case a reviewer exists to decide. Treating `defer` as forbidden makes the
+    reviewer able to approve only what would already have run unreviewed, so an
+    unrecognised-but-harmless command deadlocks instead of being waved through.
+    """
+    normalized = _normalize_shell_command(shell_command)
+    if not normalized:
+        return "the command is empty"
+    segments = _split_shell_segments(normalized)
+    if segments is None:
+        return "command or process substitution hides what would actually run"
+    for segment in segments:
+        for pattern in DENY_BASH_PATTERNS:
+            if pattern.search(segment):
+                return f"a denied pattern matches: {segment[:100]}"
+        if _writes_outside_workspace(segment):
+            return f"it writes outside the workspace: {segment[:100]}"
+    return None
+
+
 def classify_command(shell_command: str) -> str:
     if _is_safe_status_sync_command(shell_command):
         return "allow"
