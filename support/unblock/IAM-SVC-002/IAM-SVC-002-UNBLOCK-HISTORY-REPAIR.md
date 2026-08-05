@@ -6,220 +6,143 @@
 - Parent: `IAM-SVC-002`
 - Owner: `Codex`
 - Reviewer: `Claude`
-- Audit timestamp: `2026-08-05T14:40:00Z`
+- Audit timestamp: `2026-08-05T14:45:00Z`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-svc-002-unblock-history-repair`
 - Assigned helper branch:
   `codex/iam-svc-002-unblock-history-repair`
 
-## Diagnosis
+## What Kept The Parent Blocked
 
-`IAM-SVC-002` is blocked by branch/worktree/commit contamination, not by missing
-implementation code. The accepted implementation exists on a local owner rail,
-but every shared reference that another worker would naturally follow points at
-the wrong history.
+The original diagnosis correctly found a three-rail identity split, but it did
+not repair the parent's actual promotion path.
 
-1. The owner implementation rail is local `gemini2/iam-svc-002 @ e868122f`.
-   That branch contains the actual reviewed fix stack:
-   `fc34223b -> 718a3d04 -> cbc9fdca -> de0ae9af -> e868122f`.
-2. Before this repair, `git ls-remote --heads origin
-   'refs/heads/gemini2/iam-svc-002'` returned no result, so the canonical owner
-   rail had never been pushed to GitHub.
-3. The only shared remote rail for this task is reviewer branch
-   `origin/claude/iam-svc-002 @ 98520ae0`. That branch is not owner delivery
-   history; it is a reviewer-owned snapshot stack whose tip commit subject is
-   `wip(IAM-SVC-002): anchor reviewed round-4 snapshot (owner f8820f35)`.
-4. `git range-diff 717a87195d59..claude/iam-svc-002
-   717a87195d59..gemini2/iam-svc-002` shows the reviewer rail is not a clean
-   replay of the owner rail. It contains reviewer WIP anchors
-   `a1e7a087 -> d0c89c42 -> 98520ae0` in place of the owner commits
-   `fc34223b -> de0ae9af -> e868122f`.
-5. The assigned helper branch `codex/iam-svc-002-unblock-history-repair` was
-   created directly from `origin/dev` at `2026-08-05 14:22:23 +0000`, and its
-   current tip is `6a144781`, which is unrelated commit
-   `IAM-SVC-001: replay workload identity primary path for clean PR`.
-6. Before this repair, `gh pr list --state all --json
-   number,title,url,headRefName,baseRefName,state,isDraft --search
-   'iam-svc-002'` returned `[]`, so there was no GitHub PR representing either
-   the owner rail or the reviewer rail for `IAM-SVC-002`.
-7. Parent machine truth still reports the task as blocked with next-step prose
-   about missing push credentials, but it does not name the exact safe resume
-   rail or explain that the helper branch itself is contaminated.
+1. The owner implementation rail exists at
+   `gemini2/iam-svc-002 @ e868122fcd05ac2e276b44205c1ad7eb02be7489`.
+2. The reviewer rail exists at
+   `claude/iam-svc-002 @ 98520ae011ebc86c916880862554727a2241edc6`.
+3. Both rails resolve to the same tree:
+   `e74ef8cba2d04d06e8dfa9c621b14e24308f869a`.
+4. The helper branch for this unblock task is separate diagnostic history:
+   `codex/iam-svc-002-unblock-history-repair @ dbfc84f28ff66719ace5c300c36acea4308afc70`.
+
+The contamination that still blocked `IAM-SVC-002` after PR `#1311` opened was
+not missing push credentials. It was that the canonical owner PR used the raw
+five-commit owner rail, and four of those commits violate Gate 1 commit-subject
+rules:
+
+- `718a3d043985...`
+- `cbc9fdcad997...`
+- `de0ae9af0a2e...`
+- `e868122fcd05...`
+
+Those commits use `fix(IAM-SVC-002): ...` subjects instead of the required
+`<TASK-ID>: <summary>` format from `docs/ops/branch-strategy.md` §5.
+
+At the same time, the replayed tree still contains a real owner defect that
+fails `Smoke acceptance` / `lint` on GitHub Actions:
+
+- [apps/api/src/main.ts](/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-svc-002-unblock-history-repair/apps/api/src/main.ts):
+  unused `internalKeyMetrics` import on the owner rail tree
+
+So the parent was blocked by two concrete history/path issues:
+
+1. the only open owner PR (`#1311`) was built on a non-compliant multi-commit
+   rail
+2. the tree being replayed still needs an owner code fix before Gate 1 can go
+   green
+
+## Non-Destructive Repair Executed
+
+The safe repair is the same clean-replay pattern already used for
+`IAM-SVC-001`.
+
+1. Preserve the original rails as audit evidence:
+   - `origin/gemini2/iam-svc-002 @ e868122fcd05ac2e276b44205c1ad7eb02be7489`
+   - `origin/claude/iam-svc-002 @ 98520ae011ebc86c916880862554727a2241edc6`
+2. Create a fresh clean branch from `origin/dev`:
+   - `origin/gemini2/iam-svc-002-clean`
+3. Replay the reviewed tree as a single compliant commit:
+   - `a8b36035e7d96c5d238e2dfbcc71d31bd5eeb3df`
+   - subject: `IAM-SVC-002: replay internal-key exception path for clean PR`
+   - trailers:
+     - `Tree-Equivalent-To: e868122fcd05ac2e276b44205c1ad7eb02be7489`
+     - `Tree-Equivalent-To: 98520ae011ebc86c916880862554727a2241edc6`
+4. Open a new canonical PR from the clean branch:
+   - PR `#1312`
+   - `https://github.com/ajoe734/drts-fleet-platform/pull/1312`
+
+No force-push was used. No shared branch history was rewritten.
+
+## Exact Rails After Repair
+
+- helper branch:
+  `origin/codex/iam-svc-002-unblock-history-repair @ dbfc84f28ff66719ace5c300c36acea4308afc70`
+- original owner rail:
+  `origin/gemini2/iam-svc-002 @ e868122fcd05ac2e276b44205c1ad7eb02be7489`
+- original reviewer rail:
+  `origin/claude/iam-svc-002 @ 98520ae011ebc86c916880862554727a2241edc6`
+- clean replay rail:
+  `origin/gemini2/iam-svc-002-clean @ a8b36035e7d96c5d238e2dfbcc71d31bd5eeb3df`
+- superseded owner PR with bad commit history:
+  `#1311`
+- canonical clean replay PR:
+  `#1312`
+
+## Parent Next Step
+
+`IAM-SVC-002` should no longer cite HTTPS credential failure. The real next step
+is:
+
+1. resume from `origin/gemini2/iam-svc-002-clean @ a8b36035...`
+2. review PR `#1312` instead of PR `#1311`
+3. land an owner follow-up that removes the unused `internalKeyMetrics` import
+   from the replayed tree, then rerun Gate 1
+
+Until that owner code defect is fixed, the correct parent status remains
+`blocked`, but now for a true, actionable reason.
 
 ## Evidence
 
-### Branch and remote state
+### Clean replay commit
 
-- local owner rail:
-  `gemini2/iam-svc-002 @ e868122fcd05ac2e276b44205c1ad7eb02be7489`
-- local reviewer rail:
-  `claude/iam-svc-002 @ 98520ae011ebc86c916880862554727a2241edc6`
-- local helper rail:
-  `codex/iam-svc-002-unblock-history-repair @ 6a1447816875db1fd83d1e18a197be286e232feb`
-- `git ls-remote --heads origin 'refs/heads/gemini2/iam-svc-002' 'refs/heads/claude/iam-svc-002' 'refs/heads/codex/iam-svc-002-unblock-history-repair'`
-  confirmed before repair:
-  - `origin/claude/iam-svc-002 @ 98520ae011ebc86c916880862554727a2241edc6`
-  - no `origin/gemini2/iam-svc-002`
-  - no `origin/codex/iam-svc-002-unblock-history-repair`
-- After repair execution:
-  - `git push -u origin gemini2/iam-svc-002` published
-    `origin/gemini2/iam-svc-002 @ e868122fcd05ac2e276b44205c1ad7eb02be7489`
-  - `gh pr create --base dev --head ajoe734:gemini2/iam-svc-002 ...` opened
-    PR `#1311`
-    (`https://github.com/ajoe734/drts-fleet-platform/pull/1311`)
-- `gh pr list ... --search 'iam-svc-002'` returned `[]` before repair
+- `git switch -c gemini2/iam-svc-002-clean origin/dev`
+- `git restore --source e868122f --staged --worktree -- .`
+- `git commit -m "IAM-SVC-002: replay internal-key exception path for clean PR" ...`
+- `git push -u origin gemini2/iam-svc-002-clean`
 
-### Reflog / worktree evidence
+### PR evidence
 
-- `git reflog show --date=iso gemini2/iam-svc-002` records:
-  - branch created from `origin/dev` at `2026-08-05 12:16:48 +0000`
-  - owner anchor `fc34223b`
-  - owner fix commits `718a3d04`, `cbc9fdca`, `de0ae9af`
-  - final reviewed owner tip amended to `e868122f`
-- `git reflog show --date=iso claude/iam-svc-002` records:
-  - branch created from `origin/dev` at `2026-08-05 12:19:26 +0000`
-  - reviewer anchor commits `a1e7a087`, `d0c89c42`, `98520ae0`
-- `git reflog show --date=iso codex/iam-svc-002-unblock-history-repair`
-  records only:
-  - `branch: Created from origin/dev` at `2026-08-05 14:22:23 +0000`
-- `git worktree list --porcelain` shows the assigned helper worktree attached to
-  `codex/iam-svc-002-unblock-history-repair`; there is no worktree attached to
-  `gemini2/iam-svc-002` in this clone, so the owner rail is easy to lose by
-  name alone.
+- PR `#1311` remains open against the original owner rail and is expected to
+  fail `Commit trailers` plus `Smoke acceptance`
+- PR `#1312` is the new clean replay PR and the only branch that can satisfy the
+  commit-subject portion of Gate 1 without rewriting shared history
 
-### History delta
+### Gate evidence
 
-- `git rev-parse claude/iam-svc-002^{tree} gemini2/iam-svc-002^{tree}` returns
-  the same tree id:
-  `e74ef8cba2d04d06e8dfa9c621b14e24308f869a`
-- This proves the reviewer rail and the owner rail currently have the same
-  repository tree even though their commit histories differ.
-- `git range-diff 717a87195d59..claude/iam-svc-002
-  717a87195d59..gemini2/iam-svc-002` shows the exact mismatch:
-  - reviewer WIP anchor `a1e7a087` corresponds to owner anchor `fc34223b`
-  - reviewer WIP anchor `d0c89c42` corresponds to owner fix `de0ae9af`
-  - reviewer WIP anchor `98520ae0` corresponds to owner fix `e868122f`
-
-## Exact Contamination
-
-The contamination is a three-rail identity split:
-
-1. The only owner-complete implementation stack is local
-   `gemini2/iam-svc-002 @ e868122f`, but it has no remote branch and no PR.
-2. The only shared remote rail is reviewer branch
-   `origin/claude/iam-svc-002 @ 98520ae0`, which has the same tree but the wrong
-   ownership/history semantics for parent closeout.
-3. The helper branch for this unblock task is itself contaminated because it was
-   created from current `origin/dev` and now points at unrelated `IAM-SVC-001`
-   clean-replay commit `6a144781`.
-
-So the parent stayed blocked not because the code is unfinished, but because no
-single pushed branch/PR answers all of these questions at once:
-
-- Which SHA is the canonical owner delivery rail?
-- Which branch should reviewers resume from?
-- Which helper branch records the history diagnosis instead of pretending to be
-  delivery history?
-
-## Non-Destructive Repair Path
-
-Do not force-push `claude/iam-svc-002`. Do not rewrite `gemini2/iam-svc-002`.
-Do not continue the parent from the helper branch.
-
-1. Treat local `gemini2/iam-svc-002 @ e868122f...` as the canonical owner rail.
-   It already contains the accepted implementation tree and verification.
-2. Push that exact branch tip to GitHub without rewriting history:
-
-```bash
-git push -u origin gemini2/iam-svc-002
-```
-
-3. Open the first real parent PR from the owner rail to `dev`:
-
-```bash
-gh pr create \
-  --base dev \
-  --head gemini2/iam-svc-002 \
-  --title "IAM-SVC-002: inventory rotate and retire temporary internal-key exceptions" \
-  --body "Publishes the already-reviewed IAM-SVC-002 implementation from gemini2/iam-svc-002 @ e868122f. Reviewer-only branch claude/iam-svc-002 remains audit evidence; no force-push or history rewrite is used."
-```
-
-4. Keep `origin/claude/iam-svc-002 @ 98520ae0...` as audit evidence of review
-   snapshots only. It should not be used for merge or closeout.
-5. Keep `codex/iam-svc-002-unblock-history-repair` as the diagnostic helper
-   branch for this memo only. It should never be mistaken for the parent owner
-   rail.
-6. This repair executed steps 2 and 3 successfully:
-   - pushed `origin/gemini2/iam-svc-002 @ e868122f...`
-   - opened PR `#1311`
-     (`https://github.com/ajoe734/drts-fleet-platform/pull/1311`)
-7. Parent owner `Gemini2` should now refresh machine truth with a normal
-   handoff that names the pushed SHA and PR URL.
-
-## Concrete Parent Next Step
-
-`IAM-SVC-002` should resume from `gemini2/iam-svc-002 @ e868122f...`, not from
-`origin/claude/iam-svc-002` and not from
-`codex/iam-svc-002-unblock-history-repair`.
-
-Concrete next step:
-
-1. Use pushed owner rail `origin/gemini2/iam-svc-002 @
-   e868122fcd05ac2e276b44205c1ad7eb02be7489` and PR `#1311`
-   (`https://github.com/ajoe734/drts-fleet-platform/pull/1311`) as the
-   canonical delivery path.
-2. Have owner `Gemini2` rerun
-   `AI_NAME=Gemini2 scripts/ai-status.sh handoff IAM-SVC-002 Claude "..."`
-   against that pushed SHA / PR.
-3. Reviewer `Claude` continues review on the owner PR instead of on the reviewer
-   snapshot rail.
-
-## Why This Is Safe
-
-- No shared history is rewritten.
-- No force-push is required.
-- The reviewer branch remains preserved as audit evidence.
-- The helper branch remains preserved as diagnostic evidence.
-- The repair path uses the already-reviewed owner commit and normal push/PR
-  mechanics.
-
-## Repair Execution Result
-
-The non-destructive repair path is now live:
-
-- Canonical owner branch:
-  `origin/gemini2/iam-svc-002 @ e868122fcd05ac2e276b44205c1ad7eb02be7489`
-- Canonical parent PR:
-  `#1311` — `https://github.com/ajoe734/drts-fleet-platform/pull/1311`
-- Reviewer snapshot branch preserved:
-  `origin/claude/iam-svc-002 @ 98520ae011ebc86c916880862554727a2241edc6`
-- Helper branch remains diagnostic only until its own artifact commit is pushed.
+- local trailer check on clean replay:
+  `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
+  → `1 commit(s) OK`
+- GitHub Actions evidence on PR `#1311`:
+  - `Commit trailers` failed on `2026-08-05`
+  - `Smoke acceptance` failed on `2026-08-05`
+  - lint error:
+    `apps/api/src/main.ts:10:10 'internalKeyMetrics' is defined but never used`
 
 ## Verification Performed
 
-- Read `AI_COLLABORATION_GUIDE.md`
-- Read `.orchestrator/skills/worker-anchor-commit.md`
-- Checked machine truth:
-  - `AI_NAME=Codex scripts/ai-status.sh show IAM-SVC-002-UNBLOCK-HISTORY-REPAIR`
-  - `AI_NAME=Codex scripts/ai-status.sh show IAM-SVC-002`
-- Inspected local branch / worktree state:
-  - `git branch --show-current`
-  - `git status --short`
-  - `git branch -vv | rg 'iam-svc-002|iam-svc-001'`
-  - `git show-ref --heads | rg 'iam-svc-002($|-unblock-history-repair|-clean)'`
-  - `git worktree list --porcelain`
-  - `git log --graph --decorate --oneline --max-count=40 codex/iam-svc-002-unblock-history-repair dev origin/dev codex/iam-svc-001-unblock-history-repair origin/codex/iam-svc-001-unblock-history-repair gemini2/iam-svc-002 claude/iam-svc-002`
-  - `git reflog show --date=iso gemini2/iam-svc-002`
-  - `git reflog show --date=iso claude/iam-svc-002`
-  - `git reflog show --date=iso codex/iam-svc-002-unblock-history-repair`
-  - `git rev-parse claude/iam-svc-002^{tree} gemini2/iam-svc-002^{tree}`
-  - `git range-diff 717a87195d59..claude/iam-svc-002 717a87195d59..gemini2/iam-svc-002`
-  - `git show --stat --summary --decorate --no-patch 6a144781 e868122f 98520ae0 fc34223b`
-- Inspected remote / PR state:
-  - `git ls-remote --heads origin 'refs/heads/gemini2/iam-svc-002' 'refs/heads/claude/iam-svc-002' 'refs/heads/codex/iam-svc-002-unblock-history-repair'`
-  - `gh pr list --state all --json number,title,url,headRefName,baseRefName,state,isDraft --search 'iam-svc-002'`
-  - `git push -u origin gemini2/iam-svc-002`
-  - `gh pr create --base dev --head ajoe734:gemini2/iam-svc-002 --title "IAM-SVC-002: inventory rotate and retire temporary internal-key exceptions" --body "..."`
+- `AI_NAME=Codex scripts/ai-status.sh show IAM-SVC-002-UNBLOCK-HISTORY-REPAIR`
+- `AI_NAME=Codex scripts/ai-status.sh show IAM-SVC-002`
+- `git branch --show-current`
+- `git branch -vv | rg 'iam-svc-002|iam-svc-001'`
+- `git log --oneline --decorate --graph --all --max-count=60 --grep='IAM-SVC-002\\|iam-svc-002'`
+- `git rev-parse origin/dev e868122f^{tree} 98520ae0^{tree}`
+- `gh pr view 1311 --json number,title,url,headRefName,baseRefName,state,isDraft,statusCheckRollup,commits`
+- `gh run view 31015211816 --log-failed`
+- `git show e868122f:apps/api/src/main.ts | sed -n '1,80p'`
+- `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
+- `gh pr list --state all --json number,title,url,headRefName,baseRefName,state,isDraft --search 'iam-svc-002-clean'`
+- `gh pr view 1312 --json number,title,url,headRefName,baseRefName,state,isDraft,statusCheckRollup`
 
-No application code was changed in this helper task. This repair is limited to
-history diagnosis, branch routing, and machine-truth next-step clarification.
+This helper task changes history routing and machine-truth evidence only. It
+does not claim the parent implementation is ready to merge.
