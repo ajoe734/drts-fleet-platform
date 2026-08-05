@@ -69,6 +69,37 @@ class AntigravityAdapterTests(unittest.TestCase):
             add_dirs = [command[i + 1] for i, v in enumerate(command) if v == "--add-dir"]
             self.assertIn(str(tenant_repo), add_dirs)
 
+    def test_stale_include_directory_is_dropped_from_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            tenant_repo = tmp / "tenant-commute-hub"
+            tenant_repo.mkdir()
+            stale_repo = tmp / "removed-tenant-repo"
+            config = _base_config(tmp, {
+                "cli": "agy",
+                "assume_authed": True,
+                "include_directories": True,
+                "extra_include_directories": [str(stale_repo), str(tenant_repo)],
+            })
+            request = DeliveryRequest(
+                agent_id="gemini2", provider="gemini2", delivery_mode="antigravity",
+                message="wake up", task_id="XREPO-001",
+            )
+            process = mock.Mock(); process.pid = 51516
+            with (
+                mock.patch("adapters.antigravity.command_exists", return_value="/usr/bin/agy"),
+                mock.patch("adapters.antigravity.spawn_background_process", return_value=(process, Path("/tmp/agy.log"))) as spawn,
+                mock.patch("adapters.antigravity.runtime_log_path", return_value=Path("/tmp/agy.log")),
+                mock.patch("adapters.antigravity.new_runtime_id", return_value="gemini2-test"),
+            ):
+                result = AntigravityAdapter(config=config, provider_capabilities={}).deliver(request)
+
+            self.assertTrue(result.ok)
+            command = spawn.call_args.args[0]
+            add_dirs = [command[i + 1] for i, v in enumerate(command) if v == "--add-dir"]
+            self.assertIn(str(tenant_repo), add_dirs)
+            self.assertNotIn(str(stale_repo), add_dirs)
+
     def test_falls_back_to_inbox_when_not_signed_in(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

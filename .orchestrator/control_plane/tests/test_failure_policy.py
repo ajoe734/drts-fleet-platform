@@ -31,6 +31,42 @@ class FailurePolicyTests(unittest.TestCase):
             FailureKind.TERMINAL,
         )
 
+    def test_transport_outage_wrapped_in_auth_wording_is_capacity(self) -> None:
+        worker = {"provider": "gemini2"}
+
+        for reason in (
+            "Eligibility check failed: failed to fetch quota summary: "
+            "UNAVAILABLE (code 503)",
+            "permission denied: status 502 bad gateway",
+            "unauthorized: the service is currently unavailable",
+            "authentication error: deadline exceeded",
+        ):
+            with self.subTest(reason=reason):
+                decision = classify_failure({}, worker, reason)
+                self.assertEqual(decision.kind, FailureKind.CAPACITY)
+                self.assertTrue(decision.transient)
+
+    def test_quota_exhaustion_still_wins_over_transport_outage(self) -> None:
+        decision = classify_failure(
+            {},
+            {"provider": "gemini2"},
+            "quota_exhausted: backend returned code 503",
+        )
+
+        self.assertEqual(decision.kind, FailureKind.QUOTA_TERMINAL)
+        self.assertFalse(decision.transient)
+
+    def test_real_auth_failure_without_transport_marker_stays_auth(self) -> None:
+        for reason in (
+            "Eligibility check failed: user is not eligible for antigravity",
+            "status: 401 unauthorized",
+            "refresh token was revoked",
+        ):
+            with self.subTest(reason=reason):
+                decision = classify_failure({}, {"provider": "gemini2"}, reason)
+                self.assertEqual(decision.kind, FailureKind.AUTH)
+                self.assertFalse(decision.transient)
+
     def test_provider_retry_override_is_applied_before_classification(self) -> None:
         config = {
             "providers": {
