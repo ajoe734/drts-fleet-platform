@@ -89,6 +89,30 @@ CAPACITY_MARKERS = frozenset(
 UNKNOWN_CRITICAL_MARKERS = frozenset(
     {"an unexpected critical error occurred", "[object object]"}
 )
+# Transport-layer outages that providers sometimes report through an
+# auth-shaped message. The Antigravity CLI, for example, wraps a failed
+# quota-summary fetch as "Eligibility check failed: ... UNAVAILABLE (code 503)",
+# which matches AUTH_MARKERS and would otherwise pause the lane permanently.
+SERVER_UNAVAILABLE_MARKERS = frozenset(
+    {
+        "code 503",
+        "status: 503",
+        "status 503",
+        "http 503",
+        "code 502",
+        "status: 502",
+        "status 502",
+        "code 504",
+        "status: 504",
+        "status 504",
+        "service is currently unavailable",
+        "service is temporarily unavailable",
+        "currently unavailable",
+        "temporarily unavailable",
+        "server overloaded",
+        "deadline exceeded",
+    }
+)
 
 LOCAL_TZ = ZoneInfo("Asia/Taipei")
 ISO_RESET_HINT_PATTERN = re.compile(
@@ -187,6 +211,14 @@ def classify_failure(
         )
     ]
 
+    # A transport-layer outage is retryable even when the provider phrases it as
+    # an eligibility or permission failure. Check it first so a one-off 503 does
+    # not land in the auth bucket, which never auto-expires. Quota exhaustion
+    # still wins, since that is a real terminal state regardless of transport.
+    if any(marker in normalized for marker in SERVER_UNAVAILABLE_MARKERS) and not any(
+        marker in normalized for marker in QUOTA_TERMINAL_MARKERS
+    ):
+        return FailureDecision(FailureKind.CAPACITY, True, "capacity/unavailable")
     if any(marker in normalized for marker in AUTH_MARKERS):
         return FailureDecision(FailureKind.AUTH, False, "auth")
     if any(marker in normalized for marker in QUOTA_TERMINAL_MARKERS):
