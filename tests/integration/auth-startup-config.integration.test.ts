@@ -104,6 +104,28 @@ describe("Authentication Startup Configuration Integration Smoke", () => {
     ).toBe(true);
   });
 
+  it("blocks startup when a workload identity registry entry omits token audience binding", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        principalId: "svc-api-runtime",
+        issuer: "https://workload.prod.drts.internal",
+        subject: "api-runtime",
+        scopes: ["foundation:read"],
+      },
+    ]);
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (issue) =>
+          issue.control === "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS" &&
+          issue.code === "INVALID_FORMAT",
+      ),
+    ).toBe(true);
+  });
+
   it("blocks startup when workload identity mixes HMAC algorithms with PEM key material", () => {
     const env = getValidProdWorkloadIdentityEnv();
     env.WORKLOAD_IDENTITY_JWT_ALGORITHMS = "HS256";

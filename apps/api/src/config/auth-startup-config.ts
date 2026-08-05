@@ -845,13 +845,28 @@ export function buildAuthStartupConfigReport(
         (entry) =>
           !normalizeString(entry.principalId) ||
           !normalizeString(entry.subject) ||
-          !normalizeString(entry.issuer),
+          !normalizeString(entry.issuer) ||
+          (normalizeString(entry.defaultTokenAudience)
+            ? [
+                ...new Set(
+                  [...(entry.allowedTokenAudiences ?? []), entry.defaultTokenAudience]
+                    .map((value) => value?.trim() ?? "")
+                    .filter(Boolean),
+                ),
+              ].length === 0
+            : [
+                ...new Set(
+                  (entry.allowedTokenAudiences ?? [])
+                    .map((value) => value?.trim() ?? "")
+                    .filter(Boolean),
+                ),
+              ].length === 0),
       )
     ) {
       issues.push({
         control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
         issue:
-          "Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: each entry must declare principalId, subject, and issuer",
+          "Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: each entry must declare principalId, subject, issuer, and at least one allowed or default token audience",
         code: "INVALID_FORMAT",
       });
     }

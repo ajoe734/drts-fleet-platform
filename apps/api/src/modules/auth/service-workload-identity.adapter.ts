@@ -298,6 +298,22 @@ export class ServiceWorkloadIdentityAdapter {
       issuer,
       subject,
     );
+    const existingPrincipal =
+      await this.identityRepository.findPrincipalBySubject(issuer, subject);
+    if (
+      existingPrincipal &&
+      existingPrincipal.principalId !== principal.principalId
+    ) {
+      throw new ApiRequestError(
+        503,
+        "WORKLOAD_PRINCIPAL_CONFLICT",
+        "Registered workload principal conflicts with existing durable identity.",
+        {
+          principalId: principal.principalId,
+          existingPrincipalId: existingPrincipal.principalId,
+        },
+      );
+    }
     const tokenAudience = this.resolveTokenAudience(
       principal,
       options?.requestedTokenAudience,
@@ -324,23 +340,6 @@ export class ServiceWorkloadIdentityAdapter {
         409,
         "WORKLOAD_ASSERTION_REPLAYED",
         "Workload identity assertion has already been consumed.",
-      );
-    }
-
-    const existingPrincipal =
-      await this.identityRepository.findPrincipalBySubject(issuer, subject);
-    if (
-      existingPrincipal &&
-      existingPrincipal.principalId !== principal.principalId
-    ) {
-      throw new ApiRequestError(
-        503,
-        "WORKLOAD_PRINCIPAL_CONFLICT",
-        "Registered workload principal conflicts with existing durable identity.",
-        {
-          principalId: principal.principalId,
-          existingPrincipalId: existingPrincipal.principalId,
-        },
       );
     }
 
@@ -538,9 +537,7 @@ export class ServiceWorkloadIdentityAdapter {
       principal.allowedTokenAudiences ??
         (principal.defaultTokenAudience
           ? [principal.defaultTokenAudience]
-          : process.env.JWT_AUDIENCE
-            ? [process.env.JWT_AUDIENCE]
-            : []),
+          : []),
     );
 
     if (allowed.length === 0) {

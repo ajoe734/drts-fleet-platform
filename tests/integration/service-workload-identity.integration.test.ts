@@ -469,6 +469,73 @@ describe("service workload identity token exchange", () => {
     });
   });
 
+  it("rejects a workload principal registry entry without any token audience binding", async () => {
+    process.env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        principalId: "svc-dispatch-runtime",
+        actorId: "dispatch-runtime",
+        issuer: STAGING_WORKLOAD_ISSUER,
+        subject: "dispatch-runtime",
+        displayName: "Dispatch Runtime",
+        roles: ["dispatch_runtime"],
+        scopes: ["dispatch:read", "dispatch:write"],
+      },
+    ]);
+
+    const identityRepository = new IdentityRepository();
+    const { authController } = buildAuthController(identityRepository);
+
+    await expect(
+      authController.issueToken({
+        headers: workloadHeaders(signWorkloadAssertion()),
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+    });
+  });
+
+  it("does not consume a workload assertion before rejecting a principal conflict", async () => {
+    const identityRepository = new IdentityRepository();
+    const conflictedAt = new Date().toISOString();
+
+    await identityRepository.ensurePrincipalRecord({
+      principalId: "svc-conflicting-runtime",
+      sourceRef: "fixture:conflicting-principal",
+      issuer: STAGING_WORKLOAD_ISSUER,
+      subject: "dispatch-runtime",
+      principalType: "service",
+      email: null,
+      emailVerified: false,
+      displayName: "Conflicting Runtime",
+      status: "active",
+      createdAt: conflictedAt,
+      updatedAt: conflictedAt,
+    });
+
+    const { authController } = buildAuthController(identityRepository);
+    const assertion = signWorkloadAssertion({
+      jti: "assertion-conflict-001",
+    });
+    const request = {
+      headers: {
+        "x-drts-workload-assertion": assertion,
+        "x-drts-workload-exchange-nonce": "nonce-conflict-001",
+      },
+      method: "POST" as const,
+      originalUrl: "/api/auth/token",
+    };
+
+    await expect(authController.issueToken(request)).rejects.toMatchObject({
+      code: "WORKLOAD_PRINCIPAL_CONFLICT",
+    });
+
+    await expect(authController.issueToken(request)).rejects.toMatchObject({
+      code: "WORKLOAD_PRINCIPAL_CONFLICT",
+    });
+  });
+
   it("rejects workload identity HMAC algorithms paired with PEM key material", async () => {
     process.env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY = [
       "-----BEGIN PUBLIC KEY-----",
