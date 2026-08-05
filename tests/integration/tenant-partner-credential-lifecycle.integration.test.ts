@@ -230,4 +230,97 @@ describe("tenant partner credential lifecycle integration", () => {
       ]),
     );
   });
+
+  it("enforces tenant API key single plaintext return, cross-tenant isolation, dual rotation overlap, and auditability", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T10:00:00.000Z"));
+
+    const audit = new AuditNotificationService();
+    const service = new TenantPartnerService(audit);
+
+    const tenantActor = {
+      actorType: "tenant_admin",
+      actorId: "user-tenant-admin-01",
+      realm: "tenant",
+      tenantId: TENANT_ID,
+      roles: ["tc_admin"],
+      scopes: ["tenant:write", "tenant:read"],
+      authMode: "jwt_bearer",
+    } as const;
+
+    const issued = await service.issueApiKey(
+      TENANT_ID,
+      {
+        keyName: "Partner Ingress Integration Key",
+        scopes: ["tenant:bookings:write", "tenant:reports:read"],
+        ownerRef: "usr_partner_owner_001",
+        ownerName: "Partner Ops Lead",
+        ownerType: "partner_admin",
+        purpose: "Automated booking ingestion",
+      },
+      "req-tenant-key-001",
+      tenantActor,
+    );
+
+    // 1. Plaintext returned once
+    expect(issued.plaintextKey).toMatch(/^tk_/);
+    expect(issued.apiKey.keyPrefix).toBeDefined();
+    expect(issued.apiKey.maskedSuffix).toBeDefined();
+    expect((issued.apiKey as unknown as Record<string, unknown>).plaintextKey).toBeUndefined();
+
+    // 2. Listing keys does not return plaintext
+    const keys = service.listApiKeys(TENANT_ID);
+    const foundKey = keys.find((k) => k.apiKeyId === issued.apiKey.apiKeyId);
+    expect(foundKey).toBeDefined();
+    expect(foundKey?.ownerRef).toBe("usr_partner_owner_001");
+    expect((foundKey as unknown as Record<string, unknown>).plaintextKey).toBeUndefined();
+
+    // 3. Cross-tenant isolation check: cannot list keys for another tenant
+    const otherTenantKeys = service.listApiKeys("tenant-other-999");
+    expect(otherTenantKeys.find((k) => k.apiKeyId === issued.apiKey.apiKeyId)).toBeUndefined();
+
+    // 4. Dual rotation overlap
+    const rotated = await service.rotateApiKey(
+      TENANT_ID,
+      issued.apiKey.apiKeyId,
+      {
+        rotationReason: "scheduled_security_rotation",
+        overlapDays: 2,
+      },
+      "req-tenant-key-002",
+      tenantActor,
+    );
+
+    expect(rotated.plaintextKey).toMatch(/^tk_/);
+    expect(rotated.revokedApiKeyId).toBe(issued.apiKey.apiKeyId);
+    expect(rotated.overlapEndsAt).toBe("2026-08-04T10:00:00.000Z");
+
+    // Check old key is in overlap_active status
+    const keysAfterRotate = service.listApiKeys(TENANT_ID);
+    const oldKeyRecord = keysAfterRotate.find((k) => k.apiKeyId === issued.apiKey.apiKeyId);
+    expect(oldKeyRecord?.status).toBe("overlap_active");
+
+    // Fast-forward past overlap
+    vi.setSystemTime(new Date("2026-08-05T10:00:00.000Z"));
+
+    // Revoke explicit key
+    const revoked = await service.revokeApiKey(
+      TENANT_ID,
+      rotated.apiKey.apiKeyId,
+      "req-tenant-key-003",
+      tenantActor,
+    );
+    expect(revoked.status).toBe("revoked");
+
+    // 5. Auditability check
+    const auditLogs = audit.listNotifications();
+    expect(auditLogs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tenantId: TENANT_ID,
+        }),
+      ]),
+    );
+  });
 });
+
