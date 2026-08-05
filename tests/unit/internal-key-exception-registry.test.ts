@@ -201,7 +201,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
     expect(resultBookings.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
   });
 
-  it("enforces network boundary constraints and rejects EXCP_003 under production", () => {
+  it("enforces network boundary constraints and allows fallback to production-valid EXCP_002 for ops routes in production", () => {
     const resultProdOps = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
@@ -212,13 +212,33 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         environment: "production",
       },
     );
-    expect(resultProdOps.valid).toBe(false);
-    expect(resultProdOps.code).toBe("INTERNAL_KEY_BOUNDARY_VIOLATION");
-    expect(resultProdOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+    expect(resultProdOps.valid).toBe(true);
+    expect(resultProdOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
+
+    const stagingOnlyRegistry: InternalKeyExceptionMetadata[] = [
+      INTERNAL_KEY_EXCEPTION_REGISTRY.find((e) => e.exceptionId === "INTERNAL_KEY_EXCP_003")!,
+    ];
+    const resultStagingOnlyInProd = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/ops/dispatch",
+        environment: "production",
+        registry: stagingOnlyRegistry,
+      },
+    );
+    expect(resultStagingOnlyInProd.valid).toBe(false);
+    expect(resultStagingOnlyInProd.code).toBe("INTERNAL_KEY_BOUNDARY_VIOLATION");
+    expect(resultStagingOnlyInProd.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
   });
 
-  it("triggers EXCP_003 expiration after 2026-08-31", () => {
-    const resultPostExpiry = evaluateInternalKey(
+  it("triggers EXCP_003 expiration after 2026-08-31 and total expiration after 2026-09-15", () => {
+    const excp003Registry = [
+      INTERNAL_KEY_EXCEPTION_REGISTRY.find((e) => e.exceptionId === "INTERNAL_KEY_EXCP_003")!,
+    ];
+    const resultPostExpiry003 = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
@@ -227,11 +247,26 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         requestPath: "/api/ops/test",
         now: new Date("2026-09-01T00:00:00Z"),
         environment: "staging",
+        registry: excp003Registry,
       },
     );
-    expect(resultPostExpiry.valid).toBe(false);
-    expect(resultPostExpiry.code).toBe("INTERNAL_KEY_EXPIRED");
-    expect(resultPostExpiry.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+    expect(resultPostExpiry003.valid).toBe(false);
+    expect(resultPostExpiry003.code).toBe("INTERNAL_KEY_EXPIRED");
+    expect(resultPostExpiry003.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+
+    const resultAllExpired = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/ops/test",
+        now: new Date("2026-09-20T00:00:00Z"),
+        environment: "staging",
+      },
+    );
+    expect(resultAllExpired.valid).toBe(false);
+    expect(resultAllExpired.code).toBe("INTERNAL_KEY_EXPIRED");
   });
 
   it("enforces expiration on rotation overlap key when previousKeyExpiresAt is passed", () => {

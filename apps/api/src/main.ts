@@ -7,6 +7,8 @@ import { resolveMapProviderRuntimeConfig } from "./common/map-provider";
 import { validateAuthStartupConfig } from "./config/auth-startup-config";
 import { buildHealthPayload } from "./health/health.controller";
 
+import { internalKeyMetrics } from "./common/auth/internal-key-metrics";
+
 async function bootstrap() {
   validateAuthStartupConfig(process.env);
   resolveMapProviderRuntimeConfig(process.env);
@@ -15,7 +17,7 @@ async function bootstrap() {
     cors: true,
   });
   app.setGlobalPrefix("api", {
-    exclude: ["health"],
+    exclude: ["health", "metrics"],
   });
 
   app
@@ -28,6 +30,26 @@ async function bootstrap() {
         res: { json: (body: ReturnType<typeof buildHealthPayload>) => void },
       ) => {
         res.json(buildHealthPayload());
+      },
+    );
+
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .get(
+      "/api/metrics",
+      (
+        _req: unknown,
+        res: {
+          setHeader: (key: string, value: string) => void;
+          send: (body: string) => void;
+        },
+      ) => {
+        res.setHeader(
+          "Content-Type",
+          "text/plain; version=0.0.4; charset=utf-8",
+        );
+        res.send(internalKeyMetrics.toPrometheusFormat());
       },
     );
 
