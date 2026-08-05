@@ -95,16 +95,10 @@ UNKNOWN_CRITICAL_MARKERS = frozenset(
 # which matches AUTH_MARKERS and would otherwise pause the lane permanently.
 SERVER_UNAVAILABLE_MARKERS = frozenset(
     {
-        "code 503",
-        "status: 503",
-        "status 503",
-        "http 503",
-        "code 502",
-        "status: 502",
-        "status 502",
-        "code 504",
-        "status: 504",
-        "status 504",
+        "bad gateway",
+        "gateway timeout",
+        "gateway time-out",
+        "service unavailable",
         "service is currently unavailable",
         "service is temporarily unavailable",
         "currently unavailable",
@@ -113,6 +107,12 @@ SERVER_UNAVAILABLE_MARKERS = frozenset(
         "deadline exceeded",
     }
 )
+# Providers write the status code every which way -- "UNAVAILABLE (code 503)",
+# "status: 502", but also bare forms like "502 Bad Gateway" or "Error 504" with
+# no prefix at all. Match the standalone code instead of enumerating prefixes,
+# and reject word/dot neighbours so request ids ("abc502def"), versions
+# ("1.502"), and longer numbers ("5031") do not look like an outage.
+SERVER_UNAVAILABLE_CODE_PATTERN = re.compile(r"(?<![\w.])50[234](?![\w.])")
 
 LOCAL_TZ = ZoneInfo("Asia/Taipei")
 ISO_RESET_HINT_PATTERN = re.compile(
@@ -166,6 +166,12 @@ def _parse_duration_seconds(body: str) -> int | None:
     return total if matched and total > 0 else None
 
 
+def _is_transport_outage(normalized: str) -> bool:
+    return any(
+        marker in normalized for marker in SERVER_UNAVAILABLE_MARKERS
+    ) or bool(SERVER_UNAVAILABLE_CODE_PATTERN.search(normalized))
+
+
 def retry_settings(
     config: Mapping[str, Any], provider: str | None
 ) -> dict[str, Any]:
@@ -215,7 +221,7 @@ def classify_failure(
     # an eligibility or permission failure. Check it first so a one-off 503 does
     # not land in the auth bucket, which never auto-expires. Quota exhaustion
     # still wins, since that is a real terminal state regardless of transport.
-    if any(marker in normalized for marker in SERVER_UNAVAILABLE_MARKERS) and not any(
+    if _is_transport_outage(normalized) and not any(
         marker in normalized for marker in QUOTA_TERMINAL_MARKERS
     ):
         return FailureDecision(FailureKind.CAPACITY, True, "capacity/unavailable")

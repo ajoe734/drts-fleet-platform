@@ -46,6 +46,35 @@ class FailurePolicyTests(unittest.TestCase):
                 self.assertEqual(decision.kind, FailureKind.CAPACITY)
                 self.assertTrue(decision.transient)
 
+    def test_bare_transport_status_codes_are_capacity(self) -> None:
+        worker = {"provider": "gemini2"}
+
+        for reason in (
+            "502 Bad Gateway",
+            "Error 504",
+            "503 Service Unavailable",
+            "504 Gateway Timeout",
+            "upstream connect failed: 502",
+            "UNAVAILABLE (code 503)",
+            "status: 502",
+        ):
+            with self.subTest(reason=reason):
+                decision = classify_failure({}, worker, reason)
+                self.assertEqual(decision.kind, FailureKind.CAPACITY)
+                self.assertTrue(decision.transient)
+
+    def test_status_code_lookalikes_do_not_fake_a_transport_outage(self) -> None:
+        for reason in (
+            "unauthorized: request id abc502def",
+            "invalid api key (key version 1.503)",
+            "authentication failed after 5031 ms",
+            "forbidden: upstream localhost:5040 rejected the token",
+        ):
+            with self.subTest(reason=reason):
+                decision = classify_failure({}, {"provider": "gemini2"}, reason)
+                self.assertEqual(decision.kind, FailureKind.AUTH)
+                self.assertFalse(decision.transient)
+
     def test_quota_exhaustion_still_wins_over_transport_outage(self) -> None:
         decision = classify_failure(
             {},
