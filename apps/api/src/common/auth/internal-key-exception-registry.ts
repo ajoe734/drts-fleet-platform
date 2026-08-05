@@ -1,5 +1,20 @@
 import { ApiRequestError } from "../api-envelope";
 
+export type NetworkBoundary =
+  | "internal-vpc-to-api-ingress"
+  | "control-plane-proxy-to-api"
+  | "staging-break-glass-only"
+  | (string & {});
+
+export const PRODUCTION_ALLOWED_NETWORK_BOUNDARIES: ReadonlySet<string> = new Set([
+  "internal-vpc-to-api-ingress",
+  "control-plane-proxy-to-api",
+]);
+
+export function isProductionAllowedBoundary(boundary: string): boolean {
+  return PRODUCTION_ALLOWED_NETWORK_BOUNDARIES.has(boundary);
+}
+
 export interface InternalKeyExceptionMetadata {
   exceptionId: string;
   owner: string;
@@ -7,7 +22,7 @@ export interface InternalKeyExceptionMetadata {
   scope: string[];
   ttl: string;
   expiresAt: string;
-  networkBoundary: string;
+  networkBoundary: NetworkBoundary;
   rotationCadence: string;
   usageSignal: string;
   removalDate: string;
@@ -336,7 +351,7 @@ export function evaluateInternalKey(
     }
 
     // Check network boundary
-    if (isProduction && exception.networkBoundary === "staging-break-glass-only") {
+    if (isProduction && !isProductionAllowedBoundary(exception.networkBoundary)) {
       boundaryViolationCandidate = boundaryViolationCandidate ?? exception;
       continue;
     }

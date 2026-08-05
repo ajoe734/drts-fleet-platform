@@ -132,10 +132,10 @@ describe("internal key alert rules", () => {
 
     const promOutput = internalKeyMetrics.toPrometheusFormat();
     expect(promOutput).not.toContain('drts_fake_metric{evil="1');
-    expect(promOutput).toContain('route="GET /a"');
+    expect(promOutput).toContain('route="other"');
   });
 
-  it("bounds metrics map size and strips query parameters to prevent DoS (F7)", () => {
+  it("bounds metrics map size and normalizes routes to scope patterns to prevent DoS (F7 & F13)", () => {
     internalKeyMetrics.reset();
 
     for (let i = 0; i < 1500; i++) {
@@ -146,9 +146,9 @@ describe("internal key alert rules", () => {
       );
     }
 
-    // Since query params are stripped, all 1500 requests resolve to route "POST /api/ops/dispatch"
+    // Since routes are normalized to scope patterns, all 1500 requests resolve to route "POST ops/*"
     expect(internalKeyMetrics.driftAlertCounter.size).toBe(1);
-    expect(internalKeyMetrics.driftAlertCounter.get('exception_id="INTERNAL_KEY_EXCP_002",code="INTERNAL_KEY_INVALID",route="POST /api/ops/dispatch"')).toBe(1500);
+    expect(internalKeyMetrics.driftAlertCounter.get('exception_id="INTERNAL_KEY_EXCP_002",code="INTERNAL_KEY_INVALID",route="POST ops/*"')).toBe(1500);
   });
 
   it("caps audit recorder memory and forwards events to SecurityEventsService sink (F7 & F9)", () => {
