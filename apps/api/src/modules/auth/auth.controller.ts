@@ -86,6 +86,7 @@ export class AuthController {
     private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
   ) {}
 
+  @OpenRoute()
   @Post("token")
   async issueToken(@Req() request: TokenRequest): Promise<{
     token: string;
