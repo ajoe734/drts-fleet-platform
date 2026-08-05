@@ -7097,10 +7097,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       secretLastUsedWorkload: null,
       credentialStatus: "active",
       rotationOverlapEndsAt: null,
-      credentialSignals: { ...initialSecret.signals },
+      credentialSignals: this.toCredentialSignals(initialSecret.signals),
       secretValue: command.secret,
       secretCredentials: [{ ...initialSecret }],
-      retryPolicy: { ...DEFAULT_WEBHOOK_RETRY_POLICY },
+      retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
       runtimeMetadata: {
         deliveryCount: 0,
         failedDeliveryCount: 0,
@@ -7112,7 +7112,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         disabledAt: null,
         disableReason: null,
         disableReasonNote: null,
-        retryPolicy: { ...DEFAULT_WEBHOOK_RETRY_POLICY },
+        retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
         secretRotation: {
           currentVersion: 1,
           rotatedAt: now,
@@ -7480,7 +7480,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       signatureHeader: "",
       signatureVersion: endpoint.secretVersion,
       secretVersion: endpoint.secretVersion,
-      retryPolicySnapshot: { ...endpoint.retryPolicy },
+      retryPolicySnapshot: this.toWebhookRetryPolicy(endpoint.retryPolicy),
       rawBody: {},
     };
 
@@ -7610,7 +7610,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     delivery.signatureHeader = result.signatureHeader;
     delivery.signatureVersion = result.signatureVersion;
     delivery.secretVersion = result.secretVersion;
-    delivery.retryPolicySnapshot = { ...endpoint.retryPolicy };
+    delivery.retryPolicySnapshot = this.toWebhookRetryPolicy(
+      endpoint.retryPolicy,
+    );
     delivery.rawBody = { ...result.rawBody };
     this.markWebhookSecretUsed(
       endpoint,
@@ -8770,13 +8772,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       secretLastUsedWorkload: endpoint.secretLastUsedWorkload ?? null,
       credentialStatus: endpoint.credentialStatus ?? "active",
       rotationOverlapEndsAt: endpoint.rotationOverlapEndsAt ?? null,
-      credentialSignals: endpoint.credentialSignals
-        ? { ...endpoint.credentialSignals }
-        : undefined,
+      credentialSignals: this.toCredentialSignals(endpoint.credentialSignals),
       createdAt: endpoint.createdAt,
       updatedAt: endpoint.updatedAt,
       availableActions: this.buildWebhookEndpointActions(endpoint, identity),
-      retryPolicy: { ...endpoint.retryPolicy },
+      retryPolicy: this.toWebhookRetryPolicy(endpoint.retryPolicy),
       // Projected, not spread: a webhook read must never carry secret material
       // even if a stored record was hydrated with it.
       runtimeMetadata: this.toWebhookRuntimeMetadata(endpoint.runtimeMetadata),
@@ -9311,7 +9311,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     nowIso = new Date().toISOString(),
   ): IntegrationCredentialSignals {
     if (signals) {
-      return { ...signals };
+      return this.toCredentialSignals(signals);
     }
 
     return this.buildCredentialSignals(
@@ -9877,7 +9877,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         JSON.stringify(endpoint.credentialSignals ?? null) !==
         JSON.stringify(currentSecret.signals)
       ) {
-        endpoint.credentialSignals = { ...currentSecret.signals };
+        endpoint.credentialSignals = this.toCredentialSignals(
+          currentSecret.signals,
+        );
         changed = true;
       }
     }
@@ -9942,7 +9944,58 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       autoRevokedAt: secret.autoRevokedAt ?? null,
       supersededByVersion: secret.supersededByVersion ?? null,
       revokedAt: secret.revokedAt ?? null,
-      signals: secret.signals ? { ...secret.signals } : undefined,
+      signals: this.toCredentialSignals(secret.signals),
+    };
+  }
+
+  /**
+   * Signals ride along on tenant-facing credential reads, so they are projected
+   * field by field for the same reason rotation history is: a legacy persisted
+   * row can carry keys this type no longer declares.
+   */
+  private toCredentialSignals(
+    signals: IntegrationCredentialSignals,
+  ): IntegrationCredentialSignals;
+  private toCredentialSignals(
+    signals: IntegrationCredentialSignals | null | undefined,
+  ): IntegrationCredentialSignals | undefined;
+  private toCredentialSignals(
+    signals: IntegrationCredentialSignals | null | undefined,
+  ): IntegrationCredentialSignals | undefined {
+    if (!signals) {
+      return undefined;
+    }
+    return {
+      approachingExpiry: signals.approachingExpiry,
+      dormant: signals.dormant,
+      expired: signals.expired,
+      autoRevoked: signals.autoRevoked,
+      evaluatedAt: signals.evaluatedAt,
+    };
+  }
+
+  /**
+   * Projected rather than spread so hydrated rows cannot republish stray keys,
+   * and so `retryableStatusCodes` is copied instead of aliased into the clone.
+   * A spread used to silently tolerate a missing or partial persisted policy,
+   * so each field falls back to the platform default rather than projecting
+   * `undefined` into a fully required contract shape.
+   */
+  private toWebhookRetryPolicy(
+    retryPolicy: Partial<WebhookRetryPolicyRecord> | null | undefined,
+  ): WebhookRetryPolicyRecord {
+    const fallback = DEFAULT_WEBHOOK_RETRY_POLICY;
+    return {
+      maxAttempts: retryPolicy?.maxAttempts ?? fallback.maxAttempts,
+      initialBackoffSeconds:
+        retryPolicy?.initialBackoffSeconds ?? fallback.initialBackoffSeconds,
+      backoffMultiplier:
+        retryPolicy?.backoffMultiplier ?? fallback.backoffMultiplier,
+      maxBackoffSeconds:
+        retryPolicy?.maxBackoffSeconds ?? fallback.maxBackoffSeconds,
+      retryableStatusCodes: [
+        ...(retryPolicy?.retryableStatusCodes ?? fallback.retryableStatusCodes),
+      ],
     };
   }
 
@@ -9968,7 +10021,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       disabledAt: metadata.disabledAt,
       disableReason: metadata.disableReason,
       disableReasonNote: metadata.disableReasonNote ?? null,
-      retryPolicy: { ...metadata.retryPolicy },
+      retryPolicy: this.toWebhookRetryPolicy(metadata.retryPolicy),
       secretRotation: {
         currentVersion: rotation.currentVersion,
         rotatedAt: rotation.rotatedAt,
@@ -10077,7 +10130,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const cloned: StoredWebhookEndpoint = {
       ...endpoint,
       events: [...endpoint.events],
-      retryPolicy: { ...endpoint.retryPolicy },
+      retryPolicy: this.toWebhookRetryPolicy(endpoint.retryPolicy),
       runtimeMetadata: this.toWebhookRuntimeMetadata(endpoint.runtimeMetadata),
       // Live secret material belongs to `secretCredentials` only; history is
       // re-projected so hydrated rows cannot smuggle it back in.
@@ -10125,7 +10178,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return {
       ...delivery,
       rawBody: { ...delivery.rawBody },
-      retryPolicySnapshot: { ...delivery.retryPolicySnapshot },
+      retryPolicySnapshot: this.toWebhookRetryPolicy(
+        delivery.retryPolicySnapshot,
+      ),
     };
   }
 

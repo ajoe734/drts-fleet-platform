@@ -2448,6 +2448,17 @@ describe("TenantPartnerService sensitive-data governance", () => {
           backoffMultiplier: 2,
           maxBackoffSeconds: 900,
           retryableStatusCodes: [429, 500, 502, 503, 504],
+          // Stray key under retryPolicy must not survive projection either.
+          secretValue: legacyMaterial,
+        },
+        credentialSignals: {
+          approachingExpiry: false,
+          dormant: false,
+          expired: false,
+          autoRevoked: false,
+          evaluatedAt: "2026-01-01T00:00:00.000Z",
+          // Signals ride along on tenant reads, so a stray key must be dropped.
+          secretValue: legacyMaterial,
         },
         runtimeMetadata: {
           deliveryCount: 0,
@@ -2468,6 +2479,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
             backoffMultiplier: 2,
             maxBackoffSeconds: 900,
             retryableStatusCodes: [429, 500, 502, 503, 504],
+            secretValue: legacyMaterial,
           },
           secretRotation: {
             currentVersion: 1,
@@ -2517,6 +2529,78 @@ describe("TenantPartnerService sensitive-data governance", () => {
     // Signing material survives internally, so the endpoint still dispatches.
     expect(listed?.secretPreview).toBe("whsec_le");
     expect(listed?.secretVersion).toBe(1);
+
+    // Retry policy is projected, so the status-code array is copied rather than
+    // aliased back onto the persisted row.
+    expect(listed?.retryPolicy.retryableStatusCodes).toEqual([
+      429, 500, 502, 503, 504,
+    ]);
+    listed?.retryPolicy.retryableStatusCodes.push(418);
+    expect(
+      service
+        .listWebhookEndpoints("tenant-demo-001")
+        .find((value) => value.webhookId === "wh_legacy_material_001")
+        ?.retryPolicy.retryableStatusCodes,
+    ).toEqual([429, 500, 502, 503, 504]);
+  });
+
+  it("normalizes partial and missing retry policies carried by legacy persisted webhook rows", async () => {
+    const persistedState = createEmptyRepositoryState();
+    persistedState.webhookEndpoints = [
+      {
+        webhookId: "wh_partial_retry_001",
+        tenantId: "tenant-demo-001",
+        url: "https://tenant.example/webhooks/partial-retry",
+        events: ["booking.created"],
+        status: "active",
+        secretVersion: 1,
+        secretPreview: "whsec_pa",
+        secretValue: "whsec_partial_retry_material",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        // Older rows only persisted the attempt cap.
+        retryPolicy: { maxAttempts: 3 },
+        runtimeMetadata: {
+          deliveryCount: 0,
+          // ...and omitted the runtime copy entirely.
+          secretRotation: {
+            currentVersion: 1,
+            rotatedAt: "2026-01-01T00:00:00.000Z",
+            rotationCount: 0,
+            history: [],
+          },
+        },
+        secretHistory: [],
+      },
+    ] as unknown as TenantPartnerState["webhookEndpoints"];
+
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      createInMemoryTenantPartnerRepository(persistedState) as never,
+    );
+
+    await service.onModuleInit();
+
+    const listed = service
+      .listWebhookEndpoints("tenant-demo-001")
+      .find((value) => value.webhookId === "wh_partial_retry_001");
+
+    // The persisted override survives; every other field falls back to the
+    // platform default instead of projecting `undefined` into a required shape.
+    expect(listed?.retryPolicy).toEqual({
+      maxAttempts: 3,
+      initialBackoffSeconds: 30,
+      backoffMultiplier: 2,
+      maxBackoffSeconds: 900,
+      retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+    });
+    expect(listed?.runtimeMetadata.retryPolicy).toEqual({
+      maxAttempts: 5,
+      initialBackoffSeconds: 30,
+      backoffMultiplier: 2,
+      maxBackoffSeconds: 900,
+      retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+    });
   });
 
   it("isolates tenant API key read and lifecycle operations across tenants", () => {
