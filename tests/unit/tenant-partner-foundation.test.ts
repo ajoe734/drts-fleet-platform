@@ -1418,9 +1418,13 @@ describe("tenant partner foundation service", () => {
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         apiKeys: expect.arrayContaining([
+          // Dual rotation keeps the outgoing key signing through the overlap
+          // window instead of revoking it inline; auto-revoke closes it later.
           expect.objectContaining({
             apiKeyId: "tenant-api-key-persisted-001",
-            revokedAt: expect.any(String),
+            status: "overlap_active",
+            revokedAt: null,
+            overlapEndsAt: expect.any(String),
           }),
           expect.objectContaining({
             keyName: "Persisted Tenant Key v2",

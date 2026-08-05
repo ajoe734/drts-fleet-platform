@@ -9887,8 +9887,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const secretHistory: WebhookSecretRotationRecord[] = reconciledSecrets.map(
-      ({ signals, ...record }) => {
+    // `reconciledSecrets` is newest-first so the active secret resolves cheaply,
+    // but tenant-facing rotation history stays oldest-first as it always has.
+    const secretHistory: WebhookSecretRotationRecord[] = reconciledSecrets
+      .slice()
+      .reverse()
+      .map(({ signals, ...record }) => {
         // Rotation history is exposed to tenants, so raw secret material never
         // travels with it.
         const historyRecord: WebhookSecretRotationRecord & {
@@ -9896,8 +9900,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         } = { ...record, signals: { ...signals } };
         delete historyRecord.secretValue;
         return historyRecord;
-      },
-    );
+      });
     if (
       JSON.stringify(endpoint.secretHistory ?? null) !==
       JSON.stringify(secretHistory)
