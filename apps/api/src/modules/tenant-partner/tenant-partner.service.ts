@@ -9862,10 +9862,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const secretHistory: WebhookSecretRotationRecord[] = reconciledSecrets.map(
-      ({ secretValue, signals, ...record }) => ({
-        ...record,
-        signals: { ...signals },
-      }),
+      ({ signals, ...record }) => {
+        // Rotation history is exposed to tenants, so raw secret material never
+        // travels with it.
+        const historyRecord: WebhookSecretRotationRecord & {
+          secretValue?: string;
+        } = { ...record, signals: { ...signals } };
+        delete historyRecord.secretValue;
+        return historyRecord;
+      },
     );
     if (
       JSON.stringify(endpoint.secretHistory ?? null) !==

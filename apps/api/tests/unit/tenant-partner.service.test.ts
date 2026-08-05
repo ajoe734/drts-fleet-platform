@@ -2294,6 +2294,291 @@ describe("TenantPartnerService sensitive-data governance", () => {
     }
   });
 
+  it("returns credential plaintext only on issue and never re-exposes key material", () => {
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_test_alpha_ingress_secret";
+
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const issued = service.issueApiKey("tenant-demo-001", {
+      keyName: "Plaintext once key",
+      scopes: ["tenant:write"],
+    });
+    expect(typeof issued.plaintextKey).toBe("string");
+    expect(issued.plaintextKey.length).toBeGreaterThan(0);
+    expect(issued.apiKey).not.toHaveProperty("plaintextKey");
+    expect(issued.apiKey).not.toHaveProperty("keyHash");
+    expect(issued.apiKey).not.toHaveProperty("keyValue");
+
+    const rotated = service.rotateApiKey(
+      "tenant-demo-001",
+      issued.apiKey.apiKeyId,
+      { overlapDays: 1 },
+      "req-plaintext-once-rotate-001",
+    );
+    expect(rotated.plaintextKey).not.toBe(issued.plaintextKey);
+
+    const listedApiKeys = service.listApiKeys("tenant-demo-001");
+    expect(listedApiKeys.length).toBeGreaterThanOrEqual(2);
+    for (const apiKey of listedApiKeys) {
+      expect(apiKey).not.toHaveProperty("plaintextKey");
+      expect(apiKey).not.toHaveProperty("keyHash");
+      expect(apiKey).not.toHaveProperty("keyValue");
+      expect(JSON.stringify(apiKey)).not.toContain(issued.plaintextKey);
+      expect(JSON.stringify(apiKey)).not.toContain(rotated.plaintextKey);
+    }
+
+    const partnerIssued = service.issuePlatformPartnerIngressCredential(
+      "bank-demo-alpha-airport",
+      { rotationReason: "scheduled_rotation" },
+      "req-plaintext-once-partner-001",
+    );
+    expect(typeof partnerIssued.plaintextKey).toBe("string");
+    expect(partnerIssued.credential).not.toHaveProperty("plaintextKey");
+    expect(partnerIssued.credential).not.toHaveProperty("keyHash");
+
+    const listedCredentials = service.listPlatformPartnerIngressCredentials(
+      "bank-demo-alpha-airport",
+    );
+    expect(listedCredentials.length).toBeGreaterThanOrEqual(2);
+    for (const credential of listedCredentials) {
+      expect(credential).not.toHaveProperty("plaintextKey");
+      expect(credential).not.toHaveProperty("keyHash");
+      expect(JSON.stringify(credential)).not.toContain(
+        partnerIssued.plaintextKey,
+      );
+    }
+  });
+
+  it("keeps raw webhook secret material out of rotation history and endpoint reads", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const created = service.createWebhookEndpoint(
+      "tenant-demo-001",
+      {
+        url: "https://tenant.example/webhooks/secret-hygiene",
+        secret: "whsec_initial_material",
+        events: ["booking.created"],
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "booking fanout",
+      },
+      "req-webhook-secret-hygiene-001",
+    );
+
+    service.rotateWebhookSecret(
+      "tenant-demo-001",
+      {
+        webhookId: created.webhookId,
+        secret: "whsec_rotated_material",
+        rotationReason: "credential_rollover",
+      },
+      "req-webhook-secret-hygiene-002",
+    );
+
+    const [endpoint] = service.listWebhookEndpoints("tenant-demo-001");
+    expect(endpoint.secretHistory.length).toBeGreaterThanOrEqual(2);
+    for (const record of endpoint.secretHistory) {
+      expect(record).not.toHaveProperty("secretValue");
+    }
+    for (const record of endpoint.runtimeMetadata.secretRotation.history ?? []) {
+      expect(record).not.toHaveProperty("secretValue");
+    }
+
+    const serializedHistory = JSON.stringify({
+      secretHistory: endpoint.secretHistory,
+      rotationHistory: endpoint.runtimeMetadata.secretRotation.history ?? [],
+    });
+    expect(serializedHistory).not.toContain("whsec_initial_material");
+    expect(serializedHistory).not.toContain("whsec_rotated_material");
+    expect(endpoint.ownerRef).toBe("tenant-admin-001");
+    expect(endpoint.secretExpiresAt).not.toBeNull();
+  });
+
+  it("isolates tenant API key read and lifecycle operations across tenants", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const alpha = service.issueApiKey("tenant-demo-001", {
+      keyName: "Alpha tenant key",
+      scopes: ["tenant:write"],
+    });
+    const beta = service.issueApiKey("tenant-demo-002", {
+      keyName: "Beta tenant key",
+      scopes: ["tenant:write"],
+    });
+
+    const alphaKeyIds = service
+      .listApiKeys("tenant-demo-001")
+      .map((apiKey) => apiKey.apiKeyId);
+    const betaKeyIds = service
+      .listApiKeys("tenant-demo-002")
+      .map((apiKey) => apiKey.apiKeyId);
+    expect(alphaKeyIds).toContain(alpha.apiKey.apiKeyId);
+    expect(alphaKeyIds).not.toContain(beta.apiKey.apiKeyId);
+    expect(betaKeyIds).toContain(beta.apiKey.apiKeyId);
+    expect(betaKeyIds).not.toContain(alpha.apiKey.apiKeyId);
+
+    const expectCrossTenantNotFound = (act: () => unknown) => {
+      expect(act).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "API_KEY_NOT_FOUND",
+            }),
+          }),
+        }),
+      );
+    };
+
+    expectCrossTenantNotFound(() =>
+      service.rotateApiKey(
+        "tenant-demo-002",
+        alpha.apiKey.apiKeyId,
+        { overlapDays: 1 },
+        "req-cross-tenant-rotate-001",
+      ),
+    );
+    expectCrossTenantNotFound(() =>
+      service.revokeApiKey(
+        "tenant-demo-002",
+        alpha.apiKey.apiKeyId,
+        "req-cross-tenant-revoke-001",
+      ),
+    );
+
+    expect(
+      service
+        .listApiKeys("tenant-demo-001")
+        .find((apiKey) => apiKey.apiKeyId === alpha.apiKey.apiKeyId),
+    ).toMatchObject({ status: "active", revokedAt: null });
+  });
+
+  it("audits credential owner, expiry, and last-used across the issue rotate revoke lifecycle", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+      process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT =
+        "pk_test_beta_ingress_secret";
+
+      const auditNotificationService = new AuditNotificationService();
+      const service = new TenantPartnerService(auditNotificationService);
+
+      const issued = service.issueApiKey(
+        "tenant-demo-001",
+        {
+          keyName: "Auditable owner key",
+          scopes: ["tenant:write"],
+          ownerRef: "tenant-admin-001",
+          ownerName: "Tenant Admin",
+          ownerType: "tenant_admin",
+          purpose: "nightly reconciliation",
+        },
+        "req-credential-audit-issue-001",
+      );
+
+      const ownedApiKeySummary = {
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "nightly reconciliation",
+        expiresAt: issued.apiKey.expiresAt,
+        lastUsedAt: null,
+      };
+
+      vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+      const rotated = service.rotateApiKey(
+        "tenant-demo-001",
+        issued.apiKey.apiKeyId,
+        { overlapDays: 2 },
+        "req-credential-audit-rotate-001",
+      );
+
+      service.revokeApiKey(
+        "tenant-demo-001",
+        rotated.apiKey.apiKeyId,
+        "req-credential-audit-revoke-001",
+      );
+
+      const auditLogs = auditNotificationService.listAuditLogs();
+      expect(auditLogs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            actionName: "issue_api_key",
+            resourceType: "tenant_api_key",
+            resourceId: issued.apiKey.apiKeyId,
+            newValuesSummary: expect.objectContaining(ownedApiKeySummary),
+          }),
+          expect.objectContaining({
+            actionName: "rotate_api_key",
+            resourceId: rotated.apiKey.apiKeyId,
+            oldValuesSummary: expect.objectContaining({
+              apiKeyId: issued.apiKey.apiKeyId,
+              ...ownedApiKeySummary,
+            }),
+            newValuesSummary: expect.objectContaining({
+              apiKeyId: rotated.apiKey.apiKeyId,
+              ownerRef: "tenant-admin-001",
+              ownerName: "Tenant Admin",
+              expiresAt: rotated.apiKey.expiresAt,
+            }),
+          }),
+          expect.objectContaining({
+            actionName: "revoke_api_key",
+            resourceId: rotated.apiKey.apiKeyId,
+            newValuesSummary: expect.objectContaining({
+              ownerRef: "tenant-admin-001",
+              revokedAt: "2026-08-03T00:00:00.000Z",
+            }),
+          }),
+        ]),
+      );
+
+      // Partner ingress credentials must carry the same owner/expiry/last-used
+      // evidence, including a last-used timestamp observed from real traffic.
+      const partnerIssued = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-beta-airport",
+        { rotationReason: "scheduled_rotation" },
+        "req-credential-audit-partner-issue-001",
+      );
+      expect(partnerIssued.credential.expiresAt).not.toBeNull();
+
+      vi.setSystemTime(new Date("2026-08-04T00:00:00.000Z"));
+      service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          apiKey: partnerIssued.plaintextKey,
+        },
+        "req-credential-audit-partner-auth-001",
+      );
+
+      service.revokePlatformPartnerIngressCredential(
+        "bank-demo-beta-airport",
+        partnerIssued.credential.keyId,
+        { revokeReason: "compromised" },
+        "req-credential-audit-partner-revoke-001",
+      );
+
+      expect(auditNotificationService.listAuditLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            actionName: "revoke_partner_ingress_credential",
+            resourceId: partnerIssued.credential.keyId,
+            newValuesSummary: expect.objectContaining({
+              ownerName: expect.any(String),
+              expiresAt: partnerIssued.credential.expiresAt,
+              lastUsedAt: "2026-08-04T00:00:00.000Z",
+              lastUsedWorkload: "partner_bootstrap",
+              revokeReason: "compromised",
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back to manual review after retry exhaustion with explicit adapter attempt history", async () => {
     const retryingAdapter: PartnerEligibilityAdapterInterface = {
       adapterCode: "issuer_reference_lookup_v1",
