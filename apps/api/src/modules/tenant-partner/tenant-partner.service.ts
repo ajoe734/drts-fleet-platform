@@ -6750,6 +6750,23 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     identity?: IdentityContext | null,
   ): MaybePromise<TenantApiKeyIssued> {
     const currentApiKey = this.requireApiKey(tenantId, apiKeyId);
+    // Rotation reopens a signing window on the outgoing key, so a credential
+    // that is already revoked, auto-revoked, or expired must never be rotated
+    // back into service.
+    if (
+      currentApiKey.status !== "active" &&
+      currentApiKey.status !== "overlap_active"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_API_KEY_NOT_ROTATABLE",
+        "Only a live tenant API key can be rotated.",
+        {
+          apiKeyId: currentApiKey.apiKeyId,
+          status: currentApiKey.status,
+        },
+      );
+    }
     const before = this.cloneStoredApiKey(currentApiKey);
     const securityActor = this.requireSecurityEventActor(identity, tenantId);
     const previousApiKeys = this.apiKeys.map((apiKey) =>
@@ -8016,15 +8033,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    currentSecret.overlapEndsAt = overlapEndsAt;
+    // Recovering from an expired or revoked secret is a legitimate reason to
+    // rotate, but the dead secret is retired outright: only a still-live secret
+    // earns an overlap window, so signing material is never resurrected.
+    const currentSecretIsLive =
+      currentSecret.status === "active" ||
+      currentSecret.status === "overlap_active";
+    const grantedOverlapEndsAt = currentSecretIsLive ? overlapEndsAt : null;
+    currentSecret.overlapEndsAt = grantedOverlapEndsAt;
     currentSecret.supersededByVersion = endpoint.secretVersion + 1;
-    currentSecret.autoRevokedAt = null;
-    currentSecret.status = "overlap_active";
-    currentSecret.revokedAt = null;
+    if (currentSecretIsLive) {
+      currentSecret.autoRevokedAt = null;
+      currentSecret.status = "overlap_active";
+      currentSecret.revokedAt = null;
+    }
     currentSecret.signals = this.buildCredentialSignals(
       currentSecret.lastUsedAt,
       currentSecret.expiresAt ?? null,
-      null,
+      currentSecret.autoRevokedAt ?? null,
       rotatedAt,
     );
 
@@ -8122,7 +8148,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           rotationReason,
           secretPreview: endpoint.secretPreview,
           secretExpiresAt: endpoint.secretExpiresAt,
-          overlapEndsAt,
+          overlapEndsAt: grantedOverlapEndsAt,
           status: endpoint.status,
         },
       },
@@ -8135,7 +8161,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       secretPreview: endpoint.secretPreview,
       rotationCount: endpoint.secretHistory.length,
       rotatedAt,
-      overlapEndsAt,
+      overlapEndsAt: grantedOverlapEndsAt,
     };
   }
 
