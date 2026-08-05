@@ -209,6 +209,16 @@ function hashAssertion(assertion: string): string {
   return createHash("sha256").update(assertion).digest("hex");
 }
 
+function containsControlCharacters(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function normalizePositiveInteger(value: string | undefined): number | null {
   const normalized = value?.trim() ?? "";
   if (!normalized) {
@@ -226,7 +236,9 @@ function normalizePositiveInteger(value: string | undefined): number | null {
 export function extractWorkloadIdentityAssertion(
   headers: HeaderRecord | undefined,
 ): string | null {
-  return normalizeHeaderValue(headers?.[WORKLOAD_IDENTITY_ASSERTION_HEADER]) || null;
+  return (
+    normalizeHeaderValue(headers?.[WORKLOAD_IDENTITY_ASSERTION_HEADER]) || null
+  );
 }
 
 export function extractWorkloadIdentityExchangeNonce(
@@ -303,6 +315,7 @@ export class ServiceWorkloadIdentityAdapter {
           config.audiences,
         ),
         tokenAudience,
+        exchangeNonceHash,
         principalId: principal.principalId,
         expiresAt: temporalClaims.expiresAt,
       });
@@ -314,10 +327,8 @@ export class ServiceWorkloadIdentityAdapter {
       );
     }
 
-    const existingPrincipal = await this.identityRepository.findPrincipalBySubject(
-      issuer,
-      subject,
-    );
+    const existingPrincipal =
+      await this.identityRepository.findPrincipalBySubject(issuer, subject);
     if (
       existingPrincipal &&
       existingPrincipal.principalId !== principal.principalId
@@ -507,8 +518,7 @@ export class ServiceWorkloadIdentityAdapter {
     const match =
       registry.find(
         (entry) =>
-          entry.subject?.trim() === subject &&
-          entry.issuer?.trim() === issuer,
+          entry.subject?.trim() === subject && entry.issuer?.trim() === issuer,
       ) ?? null;
     if (!match || !match.principalId?.trim()) {
       throw new ApiRequestError(
@@ -588,7 +598,7 @@ export class ServiceWorkloadIdentityAdapter {
       );
     }
 
-    if (nonce.length > 256 || /[\u0000-\u001f\u007f]/.test(nonce)) {
+    if (nonce.length > 256 || containsControlCharacters(nonce)) {
       throw new ApiRequestError(
         400,
         "WORKLOAD_EXCHANGE_NONCE_INVALID",

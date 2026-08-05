@@ -126,7 +126,9 @@ const ALLOWED_JWT_ALGORITHMS = new Set([
   "PS384",
   "PS512",
 ]);
-const ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS = new Set(ALLOWED_JWT_ALGORITHMS);
+const ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS = new Set(
+  ALLOWED_JWT_ALGORITHMS,
+);
 
 export function detectAuthEnvironment(
   env: EnvLike = process.env,
@@ -193,8 +195,7 @@ function parseWorkloadServicePrincipalRegistry(
     if (!Array.isArray(parsed)) {
       return {
         entries: [],
-        parseError:
-          "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be a JSON array",
+        parseError: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be a JSON array",
       };
     }
 
@@ -673,8 +674,7 @@ export function buildAuthStartupConfigReport(
   const internalKey = normalizeString(env.DRTS_INTERNAL_KEY);
   const workloadIdentityIssuer = normalizeString(env.WORKLOAD_IDENTITY_ISSUER);
   const workloadIdentityAudience = normalizeString(
-    env.WORKLOAD_IDENTITY_AUDIENCE ??
-      env.WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE,
+    env.WORKLOAD_IDENTITY_AUDIENCE ?? env.WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE,
   );
   const workloadIdentityKey = normalizeString(
     env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY,
@@ -691,15 +691,15 @@ export function buildAuthStartupConfigReport(
   );
   const workloadIdentityConfigured = Boolean(
     workloadIdentityIssuer &&
-      workloadIdentityAudience &&
-      workloadIdentityKey &&
-      workloadIdentityRegistry,
+    workloadIdentityAudience &&
+    workloadIdentityKey &&
+    workloadIdentityRegistry,
   );
   const workloadIdentityAnyConfigured = Boolean(
     workloadIdentityIssuer ||
-      workloadIdentityAudience ||
-      workloadIdentityKey ||
-      workloadIdentityRegistry,
+    workloadIdentityAudience ||
+    workloadIdentityKey ||
+    workloadIdentityRegistry,
   );
   const passengerSubjectPepper = normalizeString(env.PASSENGER_SUBJECT_PEPPER);
   const passengerRideTokenPepper = normalizeString(
@@ -733,7 +733,8 @@ export function buildAuthStartupConfigReport(
       }
       if (!workloadIdentityAudience) {
         issues.push({
-          control: "WORKLOAD_IDENTITY_AUDIENCE / WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE",
+          control:
+            "WORKLOAD_IDENTITY_AUDIENCE / WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE",
           issue:
             "Missing required control: WORKLOAD_IDENTITY_AUDIENCE must be configured when workload identity is enabled in staging/production",
           code: "MISSING_CONTROL",
@@ -772,8 +773,7 @@ export function buildAuthStartupConfigReport(
     }
 
     const invalidWorkloadAlgorithms = workloadIdentityAlgorithms.filter(
-      (algorithm) =>
-        !ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS.has(algorithm),
+      (algorithm) => !ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS.has(algorithm),
     );
     if (invalidWorkloadAlgorithms.length > 0) {
       issues.push({
@@ -783,11 +783,13 @@ export function buildAuthStartupConfigReport(
       });
     }
 
-    const requestsWorkloadSymmetricAlgorithms =
-      workloadIdentityAlgorithms.some(isSymmetricJwtAlgorithm);
+    const requestsWorkloadSymmetricAlgorithms = workloadIdentityAlgorithms.some(
+      isSymmetricJwtAlgorithm,
+    );
     const requestsWorkloadAsymmetricAlgorithms =
       workloadIdentityAlgorithms.some(isAsymmetricJwtAlgorithm);
-    const workloadIdentityKeyLooksAsymmetric = looksLikePem(workloadIdentityKey);
+    const workloadIdentityKeyLooksAsymmetric =
+      looksLikePem(workloadIdentityKey);
 
     if (
       requestsWorkloadSymmetricAlgorithms &&

@@ -65,6 +65,7 @@ export interface ConsumeWorkloadIdentityAssertionInput {
   subject: string;
   exchangeAudience: string;
   tokenAudience: string;
+  exchangeNonceHash?: string | null;
   principalId?: string | null;
   expiresAt: string;
 }

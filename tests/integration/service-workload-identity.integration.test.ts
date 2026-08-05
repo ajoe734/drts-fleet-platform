@@ -1,19 +1,27 @@
 import { createRequire } from "node:module";
+import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { AppModule } from "../../apps/api/src/app.module";
 import { InternalKeyMiddleware } from "../../apps/api/src/common/auth/internal-key.middleware";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { SnakeCaseExceptionFilter } from "../../apps/api/src/common/snake-case.exception-filter";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
+import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
+import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
 import { ServiceWorkloadIdentityAdapter } from "../../apps/api/src/modules/auth/service-workload-identity.adapter";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 const require = createRequire(
   new URL("../../apps/api/package.json", import.meta.url),
 );
+const { Module } = require("@nestjs/common") as typeof import("@nestjs/common");
+const { NestFactory } =
+  require("@nestjs/core") as typeof import("@nestjs/core");
 const jwt = require("jsonwebtoken") as typeof import("jsonwebtoken");
 
-const AUTH_SIGNING_SECRET =
-  "auth_signing_secret_value_with_minimum_length_32!";
+const AUTH_SIGNING_SECRET = "auth_signing_secret_value_with_minimum_length_32!";
 const WORKLOAD_ASSERTION_SECRET =
   "workload_assertion_secret_value_with_minimum_length_32!";
 const STAGING_API_AUDIENCE = "https://api.staging.drts.internal";
@@ -89,6 +97,64 @@ function buildAuthController(identityRepository: IdentityRepository) {
   return { authController, jwtAuthService };
 }
 
+async function createWorkloadIdentityHttpApp(
+  identityRepository: IdentityRepository,
+) {
+  @Module({
+    controllers: [AuthController],
+    providers: [
+      JwtAuthService,
+      ServiceWorkloadIdentityAdapter,
+      {
+        provide: IdentityRepository,
+        useValue: identityRepository,
+      },
+      {
+        provide: TenantPartnerService,
+        useValue: {} satisfies Partial<TenantPartnerService>,
+      },
+      {
+        provide: DriverDeviceSessionService,
+        useValue: {} satisfies Partial<DriverDeviceSessionService>,
+      },
+      {
+        provide: IAPSubjectAdapter,
+        useValue: undefined,
+      },
+    ],
+  })
+  class WorkloadIdentityHttpTestModule {
+    configure(consumer: {
+      apply: (middleware: typeof InternalKeyMiddleware) => {
+        exclude: (...args: unknown[]) => {
+          forRoutes: (routes: unknown) => void;
+        };
+      };
+    }) {
+      new AppModule().configure(consumer as never);
+    }
+  }
+
+  const app = await NestFactory.create(WorkloadIdentityHttpTestModule, {
+    logger: false,
+  });
+  app.useGlobalFilters(new SnakeCaseExceptionFilter());
+  app.setGlobalPrefix("api", {
+    exclude: ["health"],
+  });
+  await app.listen(0, "127.0.0.1");
+
+  const address = app.getHttpServer().address() as AddressInfo | null;
+  if (!address) {
+    throw new Error("expected test server address");
+  }
+
+  return {
+    app,
+    baseUrl: `http://127.0.0.1:${address.port}`,
+  };
+}
+
 function workloadHeaders(
   assertion: string,
   overrides?: Record<string, string>,
@@ -139,9 +205,9 @@ describe("service workload identity token exchange", () => {
     );
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.audience).toEqual([STAGING_API_AUDIENCE]);
-    expect(
-      sessions[0]?.riskSummary?.workloadExchangeNonceHash,
-    ).toBe(payload?.workloadExchangeNonceHash);
+    expect(sessions[0]?.riskSummary?.workloadExchangeNonceHash).toBe(
+      payload?.workloadExchangeNonceHash,
+    );
   });
 
   it("allows workload assertion requests through middleware before the controller exchanges the token", async () => {
@@ -168,6 +234,27 @@ describe("service workload identity token exchange", () => {
     expect(result.expiresIn).toBe("15m");
     expect(payload?.actorType).toBe("system");
     expect(payload?.aud).toEqual([STAGING_API_AUDIENCE]);
+  });
+
+  it("exchanges a workload assertion over real HTTP without requiring DRTS_INTERNAL_KEY", async () => {
+    const identityRepository = new IdentityRepository();
+    const { app, baseUrl } =
+      await createWorkloadIdentityHttpApp(identityRepository);
+
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/token`, {
+        method: "POST",
+        headers: workloadHeaders(signWorkloadAssertion()),
+      });
+
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toEqual({
+        token: expect.any(String),
+        expiresIn: "15m",
+      });
+    } finally {
+      await app.close();
+    }
   });
 
   it("rejects caller-supplied bootstrap claims when workload proof is present", async () => {

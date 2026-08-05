@@ -20,7 +20,10 @@ const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const WORKLOAD_IDENTITY_ASSERTION_HEADER = "x-drts-workload-assertion";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
-const WORKLOAD_IDENTITY_EXCHANGE_PATHS = new Set(["/auth/token", "/api/auth/token"]);
+const WORKLOAD_IDENTITY_EXCHANGE_PATHS = new Set([
+  "/auth/token",
+  "/api/auth/token",
+]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
   "GET tenant/roles",
@@ -112,9 +115,9 @@ function hasWorkloadIdentityAssertion(request: RequestLike): boolean {
   return (
     isWorkloadIdentityExchangeRequest(request.originalUrl ?? request.url) &&
     Boolean(
-    normalizeHeaderValue(
-      request.headers?.[WORKLOAD_IDENTITY_ASSERTION_HEADER],
-    ),
+      normalizeHeaderValue(
+        request.headers?.[WORKLOAD_IDENTITY_ASSERTION_HEADER],
+      ),
     )
   );
 }
