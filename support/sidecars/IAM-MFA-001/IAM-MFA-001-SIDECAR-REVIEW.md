@@ -102,9 +102,9 @@ Why they matter:
   redefining
 
 Canonical task statements for this dependency chain are recorded in
-[docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md](/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-sidecar-review/docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md:136)
+[docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md](/home/lupin/drts-fleet-platform/docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md:136)
 and
-[docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md](/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-sidecar-review/docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md:604).
+[docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md](/home/lupin/drts-fleet-platform/docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md:604).
 
 ---
 
@@ -158,8 +158,8 @@ The canonical requirement for `IAM-MFA-001` is:
 
 Those requirements come from:
 
-- [docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md](/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-sidecar-review/docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md:136)
-- [docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md](/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-mfa-001-sidecar-review/docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md:604)
+- [docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md](/home/lupin/drts-fleet-platform/docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md:136)
+- [docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md](/home/lupin/drts-fleet-platform/docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md:604)
 
 ### 5.2 Policy inventory and evaluation
 
