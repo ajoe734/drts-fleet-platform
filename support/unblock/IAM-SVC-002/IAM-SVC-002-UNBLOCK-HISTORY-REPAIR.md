@@ -6,11 +6,13 @@
 - Parent: `IAM-SVC-002`
 - Owner: `Codex`
 - Reviewer: `Claude`
-- Audit timestamp: `2026-08-05T14:45:00Z`
+- Audit timestamp: `2026-08-05T15:02:00Z`
 - Assigned helper worktree:
   `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/codex-iam-svc-002-unblock-history-repair`
 - Assigned helper branch:
   `codex/iam-svc-002-unblock-history-repair`
+- Latest pushed helper closeout commit:
+  `c2e51e3015d28f51f9378a0ce997bc464ee8c18e`
 
 ## What Kept The Parent Blocked
 
@@ -77,7 +79,7 @@ No force-push was used. No shared branch history was rewritten.
 ## Exact Rails After Repair
 
 - helper branch:
-  `origin/codex/iam-svc-002-unblock-history-repair @ dbfc84f28ff66719ace5c300c36acea4308afc70`
+  `origin/codex/iam-svc-002-unblock-history-repair @ c2e51e3015d28f51f9378a0ce997bc464ee8c18e`
 - original owner rail:
   `origin/gemini2/iam-svc-002 @ e868122fcd05ac2e276b44205c1ad7eb02be7489`
 - original reviewer rail:
@@ -123,6 +125,9 @@ Until that owner code defect is fixed, the correct parent status remains
 - local trailer check on clean replay:
   `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
   → `1 commit(s) OK`
+- helper branch push evidence:
+  `git ls-remote --heads origin codex/iam-svc-002-unblock-history-repair`
+  → `c2e51e3015d28f51f9378a0ce997bc464ee8c18e`
 - GitHub Actions evidence on PR `#1311`:
   - `Commit trailers` failed on `2026-08-05`
   - `Smoke acceptance` failed on `2026-08-05`
