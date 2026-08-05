@@ -1,12 +1,13 @@
 import type { AddressInfo } from "node:net";
 
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_GUARD, NestFactory, Reflector } from "@nestjs/core";
 import type { JwtPayload } from "jsonwebtoken";
 import jwt from "jsonwebtoken";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AppModule } from "../../src/app.module";
+import { BootstrapAuthGuard } from "../../src/common/auth";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { SnakeCaseExceptionFilter } from "../../src/common/snake-case.exception-filter";
 import { AuthController } from "../../src/modules/auth/auth.controller";
@@ -100,6 +101,11 @@ async function createWorkloadIdentityHttpApp(
     providers: [
       JwtAuthService,
       ServiceWorkloadIdentityAdapter,
+      Reflector,
+      {
+        provide: APP_GUARD,
+        useClass: BootstrapAuthGuard,
+      },
       {
         provide: IdentityRepository,
         useValue: identityRepository,
