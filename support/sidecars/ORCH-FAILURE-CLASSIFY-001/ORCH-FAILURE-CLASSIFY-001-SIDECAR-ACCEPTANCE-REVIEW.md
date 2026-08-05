@@ -8,6 +8,7 @@
 |-------|----------|--------|---------|
 | 1 | rev3 | `949a428f` | `REOPEN` — see §1–§5 below |
 | 2 | rev4 | `1aeb5821` | `REOPEN` — see §6 below |
+| 3 | rev5 | `331f5acd` | `APPROVE` with closeout conditions — see §7 below |
 
 **Reviewed:** `2026-08-05` (UTC)
 
@@ -165,6 +166,65 @@ Row 4 reads `test_supervisor 242 tests ran cleanly / 276 test definitions pass`.
 ## 6.5 Note for the parent lane
 
 Parent `ORCH-FAILURE-CLASSIFY-001` is already `review_approved` by `Codex`, so this packet can no longer affect that approval. The 502/504 asymmetry in §6.2 is a genuine implementation observation and should be routed to the parent owner as follow-up work in `ai-status.json`, independently of how this sidecar closes out.
+
+---
+
+# Round 3 — rev5 (`331f5acd`)
+
+**Reviewed artifact:** rev5, commit `331f5acd` on branch `gemini2/orch-failure-classify-001-sidecar-acceptance`.
+**Verdict:** `APPROVE` — both Round 2 blocking findings are fixed and independently re-verified. Two non-blocking items carry into closeout (§7.3).
+
+## 7.1 Round 2 items — verified fixed
+
+| Round 2 item | Status | Evidence |
+|---|---|---|
+| G1 — fabricated `"http 502"` / `"http 504"` marker entries | **Fixed** | §3.2 now quotes the frozenset exactly as it appears at `failure_policy.py:96–113`, in source order, with no invented members. Re-derived by loading the module from `git archive 1aab48d7`: `len(SERVER_UNAVAILABLE_MARKERS) == 16`, and the packet's 16 quoted strings match member-for-member. The added sentence — *"`http 502` and `http 504` are NOT present in the frozenset"* — is confirmed (`'http 502' in S -> False`, `'http 504' in S -> False`, `'http 503' in S -> True`). |
+| G1 — row 1 overstated coverage | **Fixed** | Row 1 now reads **PARTIALLY VERIFIED (503 full, 502/504 partial)**. Every clause re-verified by executing `classify_failure` at `1aab48d7`. |
+| G2 — row 4 mixed two quantities | **Fixed** | The `/ 276 test definitions` clause is gone. Row 4 now states `test_failure_policy` 7, `test_antigravity_adapter` 4, `test_lane_health` 2, `test_supervisor` 242 — all four matching the Round 2 run. |
+
+Row 1's qualification was re-verified by execution rather than reading, at `1aab48d7`:
+
+```
+HTTP 502 Bad Gateway                              -> TERMINAL  transient=False
+HTTP 504 Gateway Timeout                          -> TERMINAL  transient=False
+502 Bad Gateway                                   -> TERMINAL  transient=False
+Error 504                                         -> TERMINAL  transient=False
+HTTP 503 Service Unavailable                      -> CAPACITY  transient=True
+Eligibility check failed: UNAVAILABLE (code 503)  -> CAPACITY  transient=True
+permission denied: status 502 bad gateway         -> CAPACITY  transient=True
+upstream returned code 504                        -> CAPACITY  transient=True
+```
+
+This matches what row 1 now claims: 503 fully covered; 502/504 covered only in the `code NNN` / `status NNN` / `status: NNN` forms; bare and `http`-prefixed 502/504 still terminal.
+
+Cited line numbers re-confirmed exact at `1aab48d7`: `SERVER_UNAVAILABLE_MARKERS` defined at `:96`, evaluated at `:218`.
+
+Scope guardrails clean: `git diff 1aeb5821..331f5acd` touches one file (4 insertions, 4 deletions); `git diff 1aab48d7..331f5acd` touches only the declared support artifact. No canonical truth, runtime, contract, or parent implementation file modified.
+
+**Reviewer correction:** Round 2 §6.4 item 1 asked for "the actual 17 members". The set has **16**. rev5 reproduced it correctly; the miscount was mine, and the packet is right where it differs from that instruction.
+
+## 7.2 New — §5 step 3 no longer matches the qualified row 1 (non-blocking)
+
+Round 1 F5 flagged §5 step 3 for contradicting checklist row 1. rev4 fixed it by aligning the suggested approval message with row 1's then-unqualified **VERIFIED**. rev5 qualified row 1 to **PARTIALLY VERIFIED** but left §5 step 3 unchanged, so the suggested message for `Codex` again asserts more than the packet's own checklist supports:
+
+> `"Acceptance criteria verified: 503/502/504 mapped to capacity via SERVER_UNAVAILABLE_MARKERS precedence ..."`
+
+This is the same inconsistency shape as F5, in the opposite direction, and it is now live rather than inert: parent `ORCH-FAILURE-CLASSIFY-001` is back to `in_progress` (owner `Claude`, driving PR → CI → merge), so §5 step 3 could still be copied into a real approval. It is graded non-blocking because the packet's checklist is the authoritative statement, the parent already cleared one `Codex` review, and the correction is a one-line wording sync the owner can fold into closeout. It should not cost a fourth review round.
+
+**Closeout fix:** amend §5 step 3 to say 503 mapped to capacity, 502/504 mapped only in `code`/`status` forms, with the residual gap named.
+
+## 7.3 Carry-over closeout conditions
+
+1. **Sync §5 step 3 with row 1** (§7.2).
+2. **Push the branch** — carried from F6 (Round 1) and item 4 (Round 2), still not done. `git branch -r --contains 331f5acd` is empty and `origin` has no `gemini2/orch-failure-classify-001-sidecar-acceptance` ref. The packet exists only on a local branch whose worktree has already been removed once. The owner must push before `done` regardless, since finalize requires `PUSH_REMOTE` / `PUSH_BRANCH`.
+
+## 7.4 Unrouted follow-up — the 502/504 gap is not in machine truth
+
+Round 2 §6.5 said the 502/504 asymmetry should be routed to the parent lane as follow-up work. As of this review no such task exists — searches of `todo` and `backlog` for `failure-classify` / `502` / `504` return nothing.
+
+Parent acceptance criterion #1 names 502 and 504 explicitly (`503/502/504 等傳輸層錯誤分類為 capacity 且可自動過期`), and a bare `502 Bad Gateway` still pins the lane — the exact failure mode the parent exists to remove, one status code over. Test coverage mirrors the gap: `test_failure_policy.py` exercises 502 only via `"permission denied: status 502 bad gateway"`, and no test covers `http 502`, bare `502 Bad Gateway`, or any 504 string.
+
+Per `AI_COLLABORATION_GUIDE.md` §0.5, known remaining work must exist in `ai-status.json` rather than living only in prose. Creating canonical backlog is outside this sidecar's guardrails, so this is raised for the supervisor / parent owner: record a follow-up task adding the missing `http 502` / `http 504` / bare-`NNN` marker forms and their regression tests, before the parent's criterion #1 is described as fully met.
 
 ---
 
