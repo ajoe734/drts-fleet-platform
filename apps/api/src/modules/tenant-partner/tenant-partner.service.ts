@@ -7485,19 +7485,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
-    endpoint.runtimeMetadata = {
-      ...endpoint.runtimeMetadata,
-      deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
-      secretRotation: {
+    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+      {
+        ...endpoint.runtimeMetadata,
+        deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
+        retryPolicy: endpoint.retryPolicy,
+      },
+      {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
         rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-        history: endpoint.runtimeMetadata.secretRotation.history.map(
-          (record) => ({ ...record }),
-        ),
+        history: endpoint.runtimeMetadata.secretRotation.history,
       },
-      retryPolicy: { ...endpoint.retryPolicy },
-    };
+    );
 
     await this.persistChangesRequired(
       {
@@ -7539,22 +7539,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         errorCode: "WEBHOOK_SECRET_UNAVAILABLE",
         secretVersion: delivery.secretVersion,
       };
-      endpoint.runtimeMetadata = {
-        ...endpoint.runtimeMetadata,
-        failedDeliveryCount: endpoint.runtimeMetadata.failedDeliveryCount + 1,
-        lastAttemptAt: attemptedAt,
-        nextAttemptAt: null,
-        lastSignaturePreview: null,
-        secretRotation: {
+      endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+        {
+          ...endpoint.runtimeMetadata,
+          failedDeliveryCount: endpoint.runtimeMetadata.failedDeliveryCount + 1,
+          lastAttemptAt: attemptedAt,
+          nextAttemptAt: null,
+          lastSignaturePreview: null,
+          retryPolicy: endpoint.retryPolicy,
+        },
+        {
           currentVersion: endpoint.secretVersion,
           rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
           rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: endpoint.runtimeMetadata.secretRotation.history.map(
-            (record) => ({ ...record }),
-          ),
+          history: endpoint.runtimeMetadata.secretRotation.history,
         },
-        retryPolicy: { ...endpoint.retryPolicy },
-      };
+      );
       this.applyWebhookPostDispatchPolicy(endpoint, delivery, {
         attempt: delivery.attempt,
         status: delivery.status,
@@ -7619,33 +7619,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       result.attemptedAt,
     );
 
-    endpoint.runtimeMetadata = {
-      ...endpoint.runtimeMetadata,
-      failedDeliveryCount:
-        result.status === "delivery_failed" &&
-        previousStatus !== "delivery_failed"
-          ? endpoint.runtimeMetadata.failedDeliveryCount + 1
-          : endpoint.runtimeMetadata.failedDeliveryCount,
-      lastAttemptAt: result.attemptedAt,
-      lastDeliveredAt:
-        result.status === "delivered"
-          ? result.attemptedAt
-          : endpoint.runtimeMetadata.lastDeliveredAt,
-      nextAttemptAt: result.nextAttemptAt,
-      lastSignaturePreview: (result.signature ?? "").slice(0, 16),
-      disabledAt: endpoint.runtimeMetadata.disabledAt,
-      disableReason: endpoint.runtimeMetadata.disableReason,
-      disableReasonNote: endpoint.runtimeMetadata.disableReasonNote ?? null,
-      secretRotation: {
+    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+      {
+        ...endpoint.runtimeMetadata,
+        failedDeliveryCount:
+          result.status === "delivery_failed" &&
+          previousStatus !== "delivery_failed"
+            ? endpoint.runtimeMetadata.failedDeliveryCount + 1
+            : endpoint.runtimeMetadata.failedDeliveryCount,
+        lastAttemptAt: result.attemptedAt,
+        lastDeliveredAt:
+          result.status === "delivered"
+            ? result.attemptedAt
+            : endpoint.runtimeMetadata.lastDeliveredAt,
+        nextAttemptAt: result.nextAttemptAt,
+        lastSignaturePreview: (result.signature ?? "").slice(0, 16),
+        retryPolicy: endpoint.retryPolicy,
+      },
+      {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
         rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-        history: endpoint.runtimeMetadata.secretRotation.history.map(
-          (record) => ({ ...record }),
-        ),
+        history: endpoint.runtimeMetadata.secretRotation.history,
       },
-      retryPolicy: { ...endpoint.retryPolicy },
-    };
+    );
     this.applyWebhookPostDispatchPolicy(
       endpoint,
       delivery,
@@ -8780,21 +8777,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       updatedAt: endpoint.updatedAt,
       availableActions: this.buildWebhookEndpointActions(endpoint, identity),
       retryPolicy: { ...endpoint.retryPolicy },
-      runtimeMetadata: {
-        ...endpoint.runtimeMetadata,
-        retryPolicy: { ...endpoint.runtimeMetadata.retryPolicy },
-        secretRotation: {
-          currentVersion:
-            endpoint.runtimeMetadata.secretRotation.currentVersion,
-          rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-          rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          // Projected, not spread: a webhook read must never carry secret
-          // material even if a stored record was hydrated with it.
-          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
-            (record) => this.toWebhookSecretHistoryRecord(record),
-          ),
-        },
-      },
+      // Projected, not spread: a webhook read must never carry secret material
+      // even if a stored record was hydrated with it.
+      runtimeMetadata: this.toWebhookRuntimeMetadata(endpoint.runtimeMetadata),
       secretHistory: (endpoint.secretHistory ?? []).map((record) =>
         this.toWebhookSecretHistoryRecord(record),
       ),
@@ -9911,18 +9896,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       changed = true;
     }
 
-    endpoint.runtimeMetadata = {
-      ...endpoint.runtimeMetadata,
-      retryPolicy: { ...endpoint.runtimeMetadata.retryPolicy },
-      secretRotation: {
+    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+      endpoint.runtimeMetadata,
+      {
         currentVersion: endpoint.secretVersion,
         rotatedAt:
           currentSecret?.rotatedAt ??
           endpoint.runtimeMetadata.secretRotation.rotatedAt,
         rotationCount: reconciledSecrets.length,
-        history: endpoint.secretHistory.map((record) => ({ ...record })),
+        history: endpoint.secretHistory,
       },
-    };
+    );
 
     return changed;
   }
@@ -9959,6 +9943,40 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       supersededByVersion: secret.supersededByVersion ?? null,
       revokedAt: secret.revokedAt ?? null,
       signals: secret.signals ? { ...secret.signals } : undefined,
+    };
+  }
+
+  /**
+   * Runtime metadata is tenant-facing and is rebuilt field by field rather than
+   * spread. Persisted rows are loaded through an unchecked JSONB cast, so a
+   * legacy endpoint that carried extra keys under `runtimeMetadata` cannot
+   * republish them through a webhook read.
+   */
+  private toWebhookRuntimeMetadata(
+    metadata: WebhookRuntimeMetadata,
+    secretRotation?: WebhookRuntimeMetadata["secretRotation"],
+  ): WebhookRuntimeMetadata {
+    const rotation = secretRotation ?? metadata.secretRotation;
+    return {
+      deliveryCount: metadata.deliveryCount,
+      failedDeliveryCount: metadata.failedDeliveryCount,
+      lastAttemptAt: metadata.lastAttemptAt,
+      lastDeliveredAt: metadata.lastDeliveredAt,
+      lastValidatedAt: metadata.lastValidatedAt,
+      nextAttemptAt: metadata.nextAttemptAt,
+      lastSignaturePreview: metadata.lastSignaturePreview,
+      disabledAt: metadata.disabledAt,
+      disableReason: metadata.disableReason,
+      disableReasonNote: metadata.disableReasonNote ?? null,
+      retryPolicy: { ...metadata.retryPolicy },
+      secretRotation: {
+        currentVersion: rotation.currentVersion,
+        rotatedAt: rotation.rotatedAt,
+        rotationCount: rotation.rotationCount,
+        history: (rotation.history ?? []).map((record) =>
+          this.toWebhookSecretHistoryRecord(record),
+        ),
+      },
     };
   }
 
@@ -10060,19 +10078,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...endpoint,
       events: [...endpoint.events],
       retryPolicy: { ...endpoint.retryPolicy },
-      runtimeMetadata: {
-        ...endpoint.runtimeMetadata,
-        retryPolicy: { ...endpoint.runtimeMetadata.retryPolicy },
-        secretRotation: {
-          currentVersion:
-            endpoint.runtimeMetadata.secretRotation.currentVersion,
-          rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-          rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
-            (record) => this.toWebhookSecretHistoryRecord(record),
-          ),
-        },
-      },
+      runtimeMetadata: this.toWebhookRuntimeMetadata(endpoint.runtimeMetadata),
       // Live secret material belongs to `secretCredentials` only; history is
       // re-projected so hydrated rows cannot smuggle it back in.
       secretHistory: (endpoint.secretHistory ?? []).map((record) =>

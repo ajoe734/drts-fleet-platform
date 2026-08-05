@@ -2419,6 +2419,106 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(exposedSurfaces).not.toContain('"secretValue"');
   });
 
+  it("strips secret material carried by legacy persisted webhook rows on hydrate", async () => {
+    const legacyMaterial = "whsec_legacy_persisted_material";
+    const legacyRotationRecord = {
+      secretVersion: 1,
+      rotatedAt: "2026-01-01T00:00:00.000Z",
+      rotationReason: "initial_secret",
+      secretPreview: "whsec_le",
+      // Written by an older build that persisted raw material into history.
+      secretValue: legacyMaterial,
+    };
+    const persistedState = createEmptyRepositoryState();
+    persistedState.webhookEndpoints = [
+      {
+        webhookId: "wh_legacy_material_001",
+        tenantId: "tenant-demo-001",
+        url: "https://tenant.example/webhooks/legacy-material",
+        events: ["booking.created"],
+        status: "active",
+        secretVersion: 1,
+        secretPreview: "whsec_le",
+        secretValue: legacyMaterial,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        retryPolicy: {
+          maxAttempts: 5,
+          initialBackoffSeconds: 30,
+          backoffMultiplier: 2,
+          maxBackoffSeconds: 900,
+          retryableStatusCodes: [429, 500, 502, 503, 504],
+        },
+        runtimeMetadata: {
+          deliveryCount: 0,
+          failedDeliveryCount: 0,
+          lastAttemptAt: null,
+          lastDeliveredAt: null,
+          lastValidatedAt: null,
+          nextAttemptAt: null,
+          lastSignaturePreview: null,
+          disabledAt: null,
+          disableReason: null,
+          disableReasonNote: null,
+          // A stray key directly under runtimeMetadata must not survive either.
+          secretValue: legacyMaterial,
+          retryPolicy: {
+            maxAttempts: 5,
+            initialBackoffSeconds: 30,
+            backoffMultiplier: 2,
+            maxBackoffSeconds: 900,
+            retryableStatusCodes: [429, 500, 502, 503, 504],
+          },
+          secretRotation: {
+            currentVersion: 1,
+            rotatedAt: "2026-01-01T00:00:00.000Z",
+            rotationCount: 1,
+            history: [{ ...legacyRotationRecord }],
+          },
+        },
+        secretHistory: [{ ...legacyRotationRecord }],
+      },
+    ] as unknown as TenantPartnerState["webhookEndpoints"];
+
+    const auditNotificationService = new AuditNotificationService();
+    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    const listed = service
+      .listWebhookEndpoints("tenant-demo-001")
+      .find((value) => value.webhookId === "wh_legacy_material_001");
+    expect(listed).toBeDefined();
+
+    const updated = service.updateWebhookEndpoint(
+      "tenant-demo-001",
+      "wh_legacy_material_001",
+      { events: ["booking.created", "booking.cancelled"] },
+      "req-legacy-webhook-material-001",
+    );
+
+    const webhookAuditLogs = auditNotificationService
+      .listAuditLogs()
+      .filter((log) => log.resourceId === "wh_legacy_material_001");
+    expect(webhookAuditLogs.length).toBeGreaterThanOrEqual(1);
+
+    const exposedSurfaces = JSON.stringify({
+      listed,
+      updated,
+      audit: webhookAuditLogs,
+    });
+    expect(exposedSurfaces).not.toContain(legacyMaterial);
+    expect(exposedSurfaces).not.toContain('"secretValue"');
+
+    // Signing material survives internally, so the endpoint still dispatches.
+    expect(listed?.secretPreview).toBe("whsec_le");
+    expect(listed?.secretVersion).toBe(1);
+  });
+
   it("isolates tenant API key read and lifecycle operations across tenants", () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 

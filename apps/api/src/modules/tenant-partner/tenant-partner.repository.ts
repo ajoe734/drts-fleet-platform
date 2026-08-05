@@ -1559,6 +1559,12 @@ export class TenantPartnerRepository {
     );
   }
 
+  /**
+   * JSONB rows are shape-checked, not field-checked: a row written by an older
+   * build can carry keys the current type no longer declares. Callers must not
+   * republish a parsed record by spreading it. `TenantPartnerService` re-projects
+   * every credential-bearing record field by field on hydrate for that reason.
+   */
   private parseRecord<T>(record: unknown, source: string): T {
     if (!record || typeof record !== "object") {
       throw new Error(`Invalid persisted record loaded from ${source}`);
