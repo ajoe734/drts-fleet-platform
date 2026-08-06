@@ -5,6 +5,7 @@ import json
 import signal
 import subprocess
 import tempfile
+import types
 import pathlib
 import time
 from datetime import datetime, timezone
@@ -9047,3 +9048,93 @@ class ChairDecisionMalformedJsonTests(unittest.TestCase):
 
             logged = (root / "activity-log.jsonl").read_text(encoding="utf-8")
             self.assertIn("not valid JSON", logged)
+class SupervisorTickContainmentTests(unittest.TestCase):
+    """One bad tick must not stop the fleet, and a dead loop must not stay quiet.
+
+    A tick touches every subsystem and reads files written by models, workers and
+    other tools, so letting an exception leave the loop made availability equal
+    to the least robust line on that path. A malformed decision packet stopped
+    dispatch for nine hours: the file was re-read on each restart until systemd
+    exhausted its restart budget and gave up.
+    """
+
+    def _args(self, **overrides):
+        defaults = dict(
+            config=None,
+            poll_interval=0.0,
+            once=False,
+            no_watch=True,
+            replay=False,
+            quiet=True,
+            verbose=False,
+        )
+        defaults.update(overrides)
+        return types.SimpleNamespace(**defaults)
+
+    def _run_main(self, tick_side_effects, *, config=None, max_ticks=None):
+        """Drive main() with run_once replaced, returning (exit_code, call_count)."""
+        calls = {"n": 0}
+
+        def fake_run_once(_config, **_kwargs):
+            calls["n"] += 1
+            if max_ticks is not None and calls["n"] >= max_ticks:
+                raise supervisor.SupervisorShutdown(15)
+            effect = tick_side_effects(calls["n"])
+            if effect is not None:
+                raise effect
+            return False
+
+        cfg = config or {"paths": {}, "supervisor": {}}
+        with (
+            mock.patch.object(supervisor, "parse_args", return_value=self._args()),
+            mock.patch.object(supervisor, "load_config", return_value=cfg),
+            mock.patch.object(supervisor, "run_once", side_effect=fake_run_once),
+            mock.patch.object(supervisor, "terminate_older_supervisors"),
+            mock.patch.object(supervisor, "install_supervisor_signal_handlers"),
+            mock.patch.object(supervisor, "write_supervisor_pid"),
+            mock.patch.object(supervisor, "clear_supervisor_pid"),
+            mock.patch.object(supervisor, "mark_supervisor_stopped"),
+            mock.patch.object(supervisor, "write_activity_log"),
+            mock.patch.object(supervisor, "time") as fake_time,
+        ):
+            fake_time.sleep.return_value = None
+            code = supervisor.main()
+        return code, calls["n"]
+
+    def test_a_failing_tick_does_not_stop_the_loop(self) -> None:
+        # The first tick raises exactly what took the supervisor down.
+        def effects(n):
+            if n == 1:
+                return json.JSONDecodeError("Invalid \\escape", "{}", 0)
+            return None
+
+        code, calls = self._run_main(effects, max_ticks=5)
+
+        self.assertGreater(calls, 1, "the loop stopped on the first failure")
+        self.assertEqual(code, 128 + 15)
+
+    def test_recovery_resets_the_failure_count(self) -> None:
+        # Alternating failures never reach the limit, so the loop keeps running.
+        def effects(n):
+            return RuntimeError("boom") if n % 2 else None
+
+        cfg = {"paths": {}, "supervisor": {"tick_failure_limit": 3}}
+        code, calls = self._run_main(effects, config=cfg, max_ticks=12)
+
+        self.assertEqual(calls, 12)
+        self.assertEqual(code, 128 + 15)
+
+    def test_consecutive_failures_stop_the_loop_deliberately(self) -> None:
+        # Spinning silently forever is not better than stopping; stop with a
+        # reason so the cause is visible rather than inferred from a crash loop.
+        cfg = {"paths": {}, "supervisor": {"tick_failure_limit": 3}}
+        code, calls = self._run_main(lambda n: RuntimeError("always"), config=cfg)
+
+        self.assertEqual(calls, 3)
+        self.assertEqual(code, 1)
+
+    def test_shutdown_signal_is_still_honoured(self) -> None:
+        code, calls = self._run_main(lambda n: None, max_ticks=1)
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(code, 128 + 15)

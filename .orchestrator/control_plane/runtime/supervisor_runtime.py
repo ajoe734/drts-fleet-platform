@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -9431,6 +9432,35 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
     )
 
 
+class SupervisorTickFailureLimit(Exception):
+    """Raised when consecutive ticks fail and the loop should stop deliberately."""
+
+
+def _record_tick_failure(
+    config: dict[str, Any], exc: BaseException, *, consecutive: int, limit: int
+) -> None:
+    """Log a failed tick loudly enough to diagnose without stopping the fleet."""
+    detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    console_log(
+        f"supervisor tick failed ({consecutive}/{limit}): {type(exc).__name__}: {exc}",
+        quiet=False,
+    )
+    console_log(detail.rstrip(), quiet=False)
+    try:
+        write_activity_log(
+            config,
+            {
+                "type": "supervisor_tick_failed",
+                "message": f"{type(exc).__name__}: {exc}",
+                "consecutive_failures": consecutive,
+                "failure_limit": limit,
+                "traceback": detail[-4000:],
+            },
+        )
+    except Exception:  # noqa: BLE001 - logging the failure must not mask it
+        pass
+
+
 def run_once(
     config: dict[str, Any],
     *,
@@ -9471,9 +9501,41 @@ def main() -> int:
         f"starting supervisor pid={os.getpid()} poll_interval={poll_interval:.1f}s config={args.config}",
         quiet=args.quiet,
     )
+    # A tick touches every subsystem and reads files written by models, workers
+    # and other tools. Letting one unexpected exception leave this loop made the
+    # fleet's availability equal to the least robust line on that path: a single
+    # malformed decision packet stopped dispatch for nine hours, because the file
+    # was re-read on each restart until systemd gave up retrying.
+    #
+    # Contain a failed tick and keep going, but do not spin in the dark: if
+    # nothing has succeeded for `tick_failure_limit` ticks in a row, stop on
+    # purpose with a reason, which is diagnosable in a way a crash loop is not.
+    failure_limit = max(
+        1, int(config.get("supervisor", {}).get("tick_failure_limit", 10))
+    )
+    consecutive_failures = 0
+
+    def guarded_tick(**kwargs: Any) -> None:
+        nonlocal consecutive_failures
+        try:
+            run_once(config, **kwargs)
+        except (SupervisorShutdown, KeyboardInterrupt):
+            raise
+        except Exception as exc:  # noqa: BLE001 - one bad tick must not stop the fleet
+            consecutive_failures += 1
+            _record_tick_failure(
+                config, exc, consecutive=consecutive_failures, limit=failure_limit
+            )
+            if consecutive_failures >= failure_limit:
+                raise SupervisorTickFailureLimit(
+                    f"{consecutive_failures} consecutive supervisor ticks failed; "
+                    f"last error: {type(exc).__name__}: {exc}"
+                ) from exc
+        else:
+            consecutive_failures = 0
+
     try:
-        run_once(
-            config,
+        guarded_tick(
             watch=not args.no_watch,
             replay=args.replay,
             quiet=args.quiet,
@@ -9485,8 +9547,7 @@ def main() -> int:
             return 0
         while True:
             time.sleep(poll_interval)
-            run_once(
-                config,
+            guarded_tick(
                 watch=not args.no_watch,
                 replay=False,
                 quiet=args.quiet,
@@ -9498,6 +9559,16 @@ def main() -> int:
         console_log(f"stopping supervisor after {exc.reason}", quiet=args.quiet)
         mark_supervisor_stopped(config, reason=exc.reason, signum=exc.signum, terminate_workers=True)
         return 128 + exc.signum
+    except SupervisorTickFailureLimit as exc:
+        console_log(f"stopping supervisor: {exc}", quiet=False)
+        try:
+            write_activity_log(
+                config,
+                {"type": "supervisor_tick_failure_limit", "message": str(exc)},
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return 1
     finally:
         if manage_pid_file:
             clear_supervisor_pid(config)
