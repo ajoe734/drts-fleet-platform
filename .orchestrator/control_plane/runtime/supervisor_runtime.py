@@ -8550,7 +8550,19 @@ def refresh_chair_review_state(
         return True
 
     if json_path.exists():
-        payload = load_json(json_path, default=None)
+        # The decision packet is model output, so malformed JSON is an ordinary
+        # bad review — the same thing `validate_chair_review_payload` already
+        # reports — not a reason to take the supervisor down. Letting the
+        # decoder escape here killed the process on startup, and because the
+        # file is read again on every restart, systemd exhausted its restart
+        # budget and the fleet stopped for nine hours.
+        try:
+            payload = load_json(json_path, default=None)
+        except json.JSONDecodeError as exc:
+            payload = None
+            malformed_reason: str | None = f"decision packet is not valid JSON: {exc}"
+        else:
+            malformed_reason = None
         payload = normalize_chair_review_payload_defaults(config, payload)
         payload = normalize_chair_review_payload_for_reason(
             payload,
@@ -8558,7 +8570,7 @@ def refresh_chair_review_state(
             config=config,
             status=load_status(config),
         )
-        error = validate_chair_review_payload(payload)
+        error = malformed_reason or validate_chair_review_payload(payload)
         if not error and isinstance(payload, dict):
             error = validate_chair_review_context(
                 payload,
