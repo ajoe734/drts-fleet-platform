@@ -59,7 +59,8 @@
     "test:security:iam-negative-matrix": "./tests/security/run-iam-negative-matrix.sh",
     "test:unit": "vitest run",
     "typecheck": "pnpm typecheck:root && turbo run typecheck",
-    "typecheck:root": "tsc -p tsconfig.json --noEmit"
+    "typecheck:root": "tsc -p tsconfig.json --noEmit",
+    "verify:internal-key-exceptions": "python3 scripts/verify-internal-key-exceptions.py"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}": [
