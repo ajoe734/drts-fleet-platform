@@ -483,6 +483,23 @@ When the parent owner opens these files, preserve:
 - Open contract questions enumerated with escalation owners and defaults. ✓
 - Handed off to reviewer `Gemini2` via `scripts/ai-status.sh handoff`. ✓
 
+### Re-verification pass — 2026-08-06
+
+The load-bearing claims were re-checked against the working tree before handoff,
+because a packet that is merely plausible is worse than no packet:
+
+| Claim | Check | Result |
+|---|---|---|
+| `/users` actions are inert | `app/users/` contains `page.tsx` only — no `actions.ts`, no client component; `resolveHref` appears at `page.tsx:1250` and returns a URL only when `descriptor.action === "refresh"`; row-level `ActionDescriptorList` passes no `resolveHref` | confirmed |
+| Revoke reason is discarded | `actions.ts:191–227` reads `reason`, throws `revocationReasonRequired` if empty, then calls `client.revokeApiKey(apiKeyId)`; `api-client/src/index.ts:2660` is `revokeApiKey(keyId: string)` — no body parameter | confirmed |
+| No tenant sessions surface | `apps/tenant-console-web/app/` route list has no `sessions` entry | confirmed |
+| Canvas has no step-up/MFA artboard | `grep -riE 'step-?up\|MFA\|多因素\|二階段' docs/05-ui/drts-design-canvas/` → **0 hits** across all apps | confirmed |
+| Dependency table still current | `IAM-PRT-001` `done`; `IAM-ACC-003` `in_progress`; `IAM-SES-003` `todo`; `IAM-MFA-001` `in_progress` | unchanged |
+| Support-only scope | `git diff --stat origin/dev...HEAD` → 1 file, `support/sidecars/**` | confirmed |
+
+Parent task `IAM-UI-TEN-001` is `todo` (owner `Gemini2`, reviewer `Claude`), so
+this packet lands before implementation starts — which is the point.
+
 ## Verification That Was Not Possible Here
 
 - This is a documentation artifact; it has no executable acceptance command.
