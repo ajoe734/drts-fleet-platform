@@ -8902,3 +8902,95 @@ class ChairApprovalBoundaryTests(unittest.TestCase):
                 self._bash("git push origin feature-branch")
             )
         )
+
+
+class ChairDecisionMalformedJsonTests(unittest.TestCase):
+    """A bad decision packet must fail the review, not the supervisor.
+
+    A chairman wrote shell single-quote escaping straight into a JSON string.
+    `load_json` raises on malformed content by design — right for machine truth,
+    where substituting a default would lose state — but a decision packet is
+    model output. The decoder escaped `refresh_chair_review_state`, killed the
+    process a second after start, and since the file is re-read on every restart
+    systemd burned its restart budget and gave up. The fleet was down nine hours
+    with no alert.
+    """
+
+    # The packet that took the supervisor down: shell single-quote escaping
+    # (backslash-apostrophe) written straight into a JSON string value, which
+    # JSON does not accept as an escape.
+    MALFORMED = (
+        "{\n"
+        '  "version": 1,\n'
+        '  "reason": "Executing ' + chr(92) + chr(39) + 'test_*.py' + chr(92) + chr(39) + ' is read-only."\n'
+        "}\n"
+    )
+
+    def test_load_json_still_raises_for_machine_truth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "state.json"
+            path.write_text(self.MALFORMED, encoding="utf-8")
+            with self.assertRaises(json.JSONDecodeError):
+                supervisor.load_json(path, default={})
+
+    def test_a_malformed_packet_fails_the_review_and_not_the_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260805T150630Z-gemini2.md"
+            json_path = review_dir / "20260805T150630Z-gemini2.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(self.MALFORMED, encoding="utf-8")
+
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "status_field": "status",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "gemini2",
+                        "agent": "Gemini2",
+                        "reason": "approval_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
+            ):
+                changed = supervisor.refresh_chair_review_state(
+                    config, state, provider_report={}
+                )
+
+            # The review is discarded so the chairman can run again, rather than
+            # the packet being re-read into the same crash on every tick.
+            self.assertTrue(changed)
+            self.assertIsNone(state["chair_review"].get("active_review"))
+
+            logged = (root / "activity-log.jsonl").read_text(encoding="utf-8")
+            self.assertIn("not valid JSON", logged)
