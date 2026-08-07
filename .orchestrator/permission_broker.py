@@ -121,6 +121,19 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git tag -l(\s|$)"),
     re.compile(r"^git config --get(\s|$)"),
     re.compile(r"^git push(\s|$)"),
+    # Rebasing is ordinary work here — every branch is expected to land on a
+    # current `dev` — and it stays inside the repository. Deferring it turned a
+    # routine step into a chairman review, which approved it every time.
+    #
+    # This does not widen what git can destroy. `reset --hard` is denied
+    # elsewhere, and `push --force` is already allowed by the `^git push` entry
+    # above, including to shared branches — a separate gap, not one this entry
+    # opens.
+    #
+    # `-i` is allowed too. Without an editor configured it blocks rather than
+    # damages anything, which is a worker-liveness matter, not a permission one.
+    re.compile(r"^git rebase(\s|$)"),
+    re.compile(r"^git -C .+ rebase(\s|$)"),
     re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
     re.compile(r"^gh issue comment(\s|$)"),
     re.compile(r"^gh pr create(\s|$)"),
