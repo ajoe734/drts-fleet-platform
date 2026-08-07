@@ -17,10 +17,66 @@ if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
 from approval_queue import consume_resume_override, create_approval, find_resume_override
-from common import ROOT, load_config, load_json, utc_now, write_activity_log, write_json
+from common import (
+    ROOT,
+    canonical_workspace_root,
+    load_config,
+    load_json,
+    utc_now,
+    write_activity_log,
+    write_json,
+)
 from provider_permissions import CLAUDE_LOCAL_SETTINGS_PATH, _verified_claude_policy
 from runtime_state import load_approval_state
 from worker_tree_guard import check_chatbox_tree_guard
+
+
+_WORKSPACE_ROOTS_CACHE: list[Path] | None = None
+
+
+def workspace_roots() -> list[Path]:
+    """Roots a worker may legitimately touch.
+
+    `ROOT` is the directory holding this file. The supervisor runs from a
+    reviewed runtime bundle that is not the canonical checkout, so a boundary
+    derived from `ROOT` points every path check at the bundle — while machine
+    truth, task worktrees, and the repository workers are told to edit all live
+    under the canonical workspace.
+
+    Every adapter stamps ORCH_CANONICAL_ROOT and ORCH_WORKSPACE_ROOT into the
+    worker environment (see common.apply_orchestrator_runtime_env), and this
+    broker runs as a hook inside that worker, so the environment is the
+    authoritative answer here. `load_config()` is not: it reads the config file
+    sitting next to the code, which in the bundle is not the config the
+    supervisor was started with.
+    """
+    global _WORKSPACE_ROOTS_CACHE
+    if _WORKSPACE_ROOTS_CACHE is not None:
+        return _WORKSPACE_ROOTS_CACHE
+
+    roots: list[Path] = []
+    for name in ("ORCH_CANONICAL_ROOT", "ORCH_WORKSPACE_ROOT"):
+        raw = (os.environ.get(name) or "").strip()
+        if raw:
+            roots.append(Path(raw).expanduser().resolve(strict=False))
+    if not roots:
+        try:
+            roots.append(
+                canonical_workspace_root(load_config()).resolve(strict=False)
+            )
+        except Exception:  # noqa: BLE001 - a hook must not die on config problems
+            roots.append(ROOT.resolve(strict=False))
+
+    _WORKSPACE_ROOTS_CACHE = []
+    for root in roots:
+        if root not in _WORKSPACE_ROOTS_CACHE:
+            _WORKSPACE_ROOTS_CACHE.append(root)
+    return _WORKSPACE_ROOTS_CACHE
+
+
+def workspace_root() -> Path:
+    """The primary workspace root — the canonical checkout when one is known."""
+    return workspace_roots()[0]
 
 
 SAFE_BASH_PATTERNS = [
@@ -46,12 +102,74 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^type(\s|$)"),
     re.compile(r"^date(\s|$)"),
     re.compile(r"^sleep(\s|$)"),
+    # Read-only inspection. These report on the tree without touching it, and
+    # every one of them used to park a lane on an approval nobody answers.
+    re.compile(r"^readlink(\s|$)"),
+    re.compile(r"^realpath(\s|$)"),
+    re.compile(r"^basename(\s|$)"),
+    re.compile(r"^dirname(\s|$)"),
+    re.compile(r"^stat(\s|$)"),
+    re.compile(r"^file(\s|$)"),
+    re.compile(r"^du(\s|$)"),
+    re.compile(r"^df(\s|$)"),
+    re.compile(r"^tr(\s|$)"),
+    re.compile(r"^cut(\s|$)"),
+    re.compile(r"^nl(\s|$)"),
+    re.compile(r"^column(\s|$)"),
+    re.compile(r"^diff(\s|$)"),
+    re.compile(r"^comm(\s|$)"),
+    re.compile(r"^md5sum(\s|$)"),
+    re.compile(r"^sha256sum(\s|$)"),
+    re.compile(r"^systemctl --user (list-units|list-timers|status|show|is-active|is-enabled)(\s|$)"),
     re.compile(r"^git status(\s|$)"),
     re.compile(r"^git diff(\s|$)"),
     re.compile(r"^git show(\s|$)"),
     re.compile(r"^git log(\s|$)"),
     re.compile(r"^git branch(\s|$)"),
+    # Read-only git queries. Kept separate from the mutating subcommands
+    # below so the read set can grow without widening write access.
+    re.compile(r"^git worktree list(\s|$)"),
+    re.compile(r"^git rev-parse(\s|$)"),
+    re.compile(r"^git ls-tree(\s|$)"),
+    re.compile(r"^git ls-files(\s|$)"),
+    re.compile(r"^git for-each-ref(\s|$)"),
+    re.compile(r"^git describe(\s|$)"),
+    re.compile(r"^git rev-list(\s|$)"),
+    re.compile(r"^git shortlog(\s|$)"),
+    re.compile(r"^git blame(\s|$)"),
+    re.compile(r"^git tag -l(\s|$)"),
+    re.compile(r"^git config --get"),
+    re.compile(r"^git grep(\s|$)"),
+    re.compile(r"^git switch(\s|$)"),
     re.compile(r"^git push(\s|$)"),
+    # Read-only observability. A worker that operates a service and a cloud
+    # project cannot see either of them: every `systemctl show`, `journalctl`
+    # and `gcloud … list/describe` became an approval request and a chairman
+    # review, for commands that change nothing. Only the query verbs are listed;
+    # `systemctl start/stop/restart`, `gcloud … create/update/deploy/delete` and
+    # `journalctl --vacuum*`/`--rotate` are not, and still need review.
+    re.compile(
+        r"^systemctl( --user)? (list-units|list-unit-files|list-timers|list-sockets"
+        r"|status|show|show-environment|cat|is-active|is-enabled|is-failed)(\s|$)"
+    ),
+    re.compile(r"^journalctl(\s|$)(?!.*--(vacuum|rotate|flush|relinquish))"),
+    re.compile(
+        r"^gcloud\s+(?!.*\s(create|update|delete|deploy|add|remove|set|apply|import|replace)(\s|$))"
+        r"[a-z0-9-]+(\s+[a-z0-9-]+)*\s+(list|describe|get-iam-policy|get-value|versions list)(\s|$)"
+    ),
+    # Rebasing is ordinary work here — every branch is expected to land on a
+    # current `dev` — and it stays inside the repository. Deferring it turned a
+    # routine step into a chairman review, which approved it every time.
+    #
+    # This does not widen what git can destroy. `reset --hard` is denied
+    # elsewhere, and `push --force` is already allowed by the `^git push` entry
+    # above, including to shared branches — a separate gap, not one this entry
+    # opens.
+    #
+    # `-i` is allowed too. Without an editor configured it blocks rather than
+    # damages anything, which is a worker-liveness matter, not a permission one.
+    re.compile(r"^git rebase(\s|$)"),
+    re.compile(r"^git -C .+ rebase(\s|$)"),
     re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
     re.compile(r"^gh issue comment(\s|$)"),
     re.compile(r"^gh pr create(\s|$)"),
@@ -72,6 +190,9 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^cd .+ && npm test(\s|$)"),
     re.compile(r"^npm run test(\s|$)"),
     re.compile(r"^cd .+ && npm run test(\s|$)"),
+    # `npm run <script>` is the same class of thing as the broadly-allowed
+    # `pnpm` below — typecheck, lint and build all arrive this way.
+    re.compile(r"^npm run(\s|$)"),
     re.compile(r"^cargo test(\s|$)"),
     re.compile(r"^cd .+ && cargo test(\s|$)"),
     re.compile(r"^go test(\s|$)"),
@@ -101,7 +222,6 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^mv(\s|$)"),
     re.compile(r"^mkdir(\s|$)"),
     re.compile(r"^touch(\s|$)"),
-    re.compile(r"^rm(\s|$)"),
     # node / pnpm / npx development commands
     re.compile(r"^node(\s|$)"),
     re.compile(r"^pnpm(\s|$)"),
@@ -124,6 +244,16 @@ SAFE_BASH_PATTERNS = [
     # multi-line for loops reading package.json — safe read-only pattern
     re.compile(r"^for app in .+; do\s*$", re.MULTILINE),
     re.compile(r"^for \w+ in .+; do"),
+    # Shell scaffolding. A loop header, a keyword, a file test and a bare
+    # assignment run nothing on their own — the commands they wrap are split
+    # into their own segments and judged there. Treating the scaffolding as
+    # unreviewable is what made ordinary read-only exploration defer.
+    re.compile(r"^for\s+\w+\s+in\b"),
+    re.compile(r"^(?:do|done|then|else|fi|esac)$"),
+    re.compile(r"^\[\[?\s.*\]\]?$"),
+    re.compile(r"^test\s"),
+    re.compile(r"^set\s+-[eux]+$"),
+    re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\S*)$"),
 ]
 DEFER_BASH_PATTERNS = [
     re.compile(r"^git (add|commit|remote set-url|submodule)(\s|$)"),
@@ -224,9 +354,10 @@ def _normalize_shell_command(shell_command: str) -> str:
 
 def _matches_workspace_script(path_token: str, relative_path: str) -> bool:
     candidate = Path(path_token)
-    expected = ROOT / relative_path
+    root = workspace_root()
+    expected = root / relative_path
     try:
-        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (ROOT / candidate).resolve(strict=False)
+        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (root / candidate).resolve(strict=False)
     except OSError:
         return False
     return resolved == expected.resolve(strict=False)
@@ -267,6 +398,317 @@ def hook_payload() -> dict[str, Any]:
         return {"raw": raw}
 
 
+# `&&`, `||`, `;`, `|` and a trailing `&` all start a new command. Splitting on
+# them is what keeps an unreviewed tail from riding along behind a safe prefix:
+# SAFE_BASH_PATTERNS are anchored with ^ but not $ and are applied with
+# .search(), and `rm`/`bash`/`curl` are themselves in the safe set.
+_REDIRECT_TARGET_RE = re.compile(r"(?<![0-9<>])>{1,2}\s*(?!&\s*[0-9])([^\s;|&]+)")
+
+
+def _writes_outside_workspace(segment: str) -> bool:
+    """True when the segment redirects into a path we would not let it edit.
+
+    Writing under the workspace or /tmp is ordinary; writing to a home dotfile
+    or a system path is not, and used to pass because only the leading token
+    was ever inspected.
+    """
+    for target in _REDIRECT_TARGET_RE.findall(segment):
+        cleaned = target.strip("\"'")
+        if not cleaned or cleaned == "/dev/null":
+            continue
+        candidate = Path(cleaned).expanduser()
+        try:
+            resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (workspace_root() / candidate).resolve(strict=False)
+        except OSError:
+            return True
+        if resolved.is_relative_to(Path("/tmp")):
+            continue
+        if _paths_within_workspace([resolved]):
+            continue
+        return True
+    return False
+
+
+def _split_shell_segments(
+    shell_command: str, *, opaque_substitution: bool = False
+) -> list[str] | None:
+    """Split a command on shell separators, honouring quotes.
+
+    Returns None when the command contains a construct whose real behaviour is
+    not visible to static inspection, so the caller must not treat it as safe.
+
+    `opaque_substitution` keeps `$(...)` in the segment text instead of
+    refusing the whole command. Callers that use it must inspect the
+    substitution bodies themselves — see `substitution_bodies`.
+    """
+    command = _normalize_shell_command(shell_command)
+    if not command:
+        return []
+
+    segments: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    index = 0
+    length = len(command)
+
+    while index < length:
+        char = command[index]
+        if quote:
+            buffer.append(char)
+            if char == "\\" and quote == '"' and index + 1 < length:
+                buffer.append(command[index + 1])
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            buffer.append(char)
+            buffer.append(command[index + 1])
+            index += 2
+            continue
+        if char == "`":
+            return None
+        if char == "$" and command[index + 1 : index + 2] == "(":
+            if not opaque_substitution:
+                return None
+            end = _matching_paren(command, index + 1)
+            if end is None:
+                return None
+            buffer.append(command[index:end + 1])
+            index = end + 1
+            continue
+        if char in ("<", ">") and command[index + 1 : index + 2] == "(":
+            return None
+        if command[index : index + 2] in ("&&", "||"):
+            segments.append("".join(buffer))
+            buffer = []
+            index += 2
+            continue
+        if char in (";", "|", "\n"):
+            segments.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        if char == "&":
+            # `2>&1` duplicates a descriptor; a bare `&` backgrounds the command.
+            previous = "".join(buffer).rstrip()
+            if previous.endswith(">"):
+                buffer.append(char)
+                index += 1
+                continue
+            segments.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+
+    if quote:
+        return None
+    segments.append("".join(buffer))
+    return [segment.strip() for segment in segments if segment.strip()]
+
+
+# Prefixes that say how a command runs, not what it runs. Left in place they
+# push the real command off the ^-anchor every SAFE pattern relies on, so
+# `PYTHONPATH=x timeout 900 python3 -m unittest ...` deferred forever.
+_ENV_ASSIGNMENT_PREFIX_RE = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\S*)\s+"
+)
+_TIMEOUT_PREFIX_RE = re.compile(
+    r"^timeout\s+"
+    r"(?:(?:-k|--kill-after|-s|--signal)(?:=\S+|\s+\S+)\s+|--preserve-status\s+|--foreground\s+)*"
+    r"\d+(?:\.\d+)?[smhd]?\s+"
+)
+# `do`/`then`/`while` introduce the command that follows them; that command is
+# what needs judging, not the keyword in front of it.
+_CONTROL_KEYWORD_PREFIX_RE = re.compile(r"^(?:do|then|else|elif|while|until|if)\s+")
+
+
+def _strip_invocation_prefixes(segment: str) -> str:
+    """`segment` with leading env assignments, `timeout <dur>` and control words removed."""
+    stripped = segment.strip()
+    while True:
+        for pattern in (_ENV_ASSIGNMENT_PREFIX_RE, _TIMEOUT_PREFIX_RE, _CONTROL_KEYWORD_PREFIX_RE):
+            match = pattern.match(stripped)
+            if match:
+                stripped = stripped[match.end():].lstrip()
+                break
+        else:
+            return stripped
+
+
+def _segment_forms(segment: str) -> list[str]:
+    """The segment as written, plus its form with invocation prefixes removed.
+
+    Both are checked against DENY and SAFE patterns: the stripped form so a
+    prefixed safe command is recognised, the original so nothing that only
+    looks safe once stripped can shed a deny match on the way.
+    """
+    stripped = _strip_invocation_prefixes(segment)
+    return [segment] if stripped == segment else [segment, stripped]
+
+
+def _segment_is_safe(segment: str) -> bool:
+    """A single separator-free command that needs no human review."""
+    if _writes_outside_workspace(segment):
+        return False
+    return any(
+        _cd_target_is_safe(form)
+        or any(pattern.search(form) for pattern in SAFE_BASH_PATTERNS)
+        for form in _segment_forms(segment)
+    )
+
+
+_REDIRECT_TOKEN_RE = re.compile(r"^\d*(?:>>|>&|>|<)\S*$")
+_BARE_REDIRECT_TOKEN_RE = re.compile(r"^\d*(?:>>|>&|>|<)$")
+
+
+def _strip_redirection_tokens(tokens: list[str]) -> list[str]:
+    """The operands of a command, with `2>/dev/null`-style redirections dropped.
+
+    A redirection says where output goes, not what runs, but leaving it in the
+    token list made `cd <workspace> 2>/dev/null` look like a three-token
+    command and fall through to deferral — parking a read-only lane on an
+    approval nobody answers.
+    """
+    operands: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if _REDIRECT_TOKEN_RE.match(token):
+            # `2> /dev/null` splits into the operator and its target.
+            index += 2 if _BARE_REDIRECT_TOKEN_RE.match(token) else 1
+            continue
+        operands.append(token)
+        index += 1
+    return operands
+
+
+def _cd_target_is_safe(segment: str) -> bool:
+    """True for `cd` into the workspace or a scratch directory.
+
+    /tmp is included because agents keep their scratch files there and
+    `_writes_outside_workspace` already treats it as ordinary.
+    """
+    try:
+        tokens = _strip_redirection_tokens(shlex.split(segment))
+    except ValueError:
+        return False
+    if len(tokens) != 2 or tokens[0] != "cd":
+        return False
+    target = _resolve_candidate_path(Path(tokens[1]), workspace_root())
+    if target is None:
+        return False
+    if _is_relative_to(target, Path("/tmp")):
+        return True
+    return _paths_within_workspace([target])
+
+
+def _matching_paren(command: str, open_index: int) -> int | None:
+    """Index of the `)` closing the `(` at open_index, or None when unbalanced."""
+    depth = 0
+    index = open_index
+    quote: str | None = None
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < len(command):
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+def substitution_bodies(shell_command: str) -> list[str] | None:
+    """The commands inside `$(...)`, or None when they cannot be delimited."""
+    command = _normalize_shell_command(shell_command)
+    bodies: list[str] = []
+    index = 0
+    quote: str | None = None
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < len(command):
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            continue
+        if char == "$" and command[index + 1 : index + 2] == "(":
+            end = _matching_paren(command, index + 1)
+            if end is None:
+                return None
+            bodies.append(command[index + 2 : end])
+            index = end + 1
+            continue
+        index += 1
+    return bodies
+
+
+def command_hard_boundary_reason(shell_command: str) -> str | None:
+    """Why no reviewer may wave this command through, or None if it is theirs to judge.
+
+    `classify_command` answers "can this run with nobody looking". This answers
+    the narrower question an approval gate needs: is this beyond what a reviewer
+    is allowed to permit at all.
+
+    The gap between them matters. A command the classifier does not recognise is
+    `defer` — meaning "I cannot tell, ask someone" — and that is precisely the
+    case a reviewer exists to decide. Treating `defer` as forbidden makes the
+    reviewer able to approve only what would already have run unreviewed, so an
+    unrecognised-but-harmless command deadlocks instead of being waved through.
+
+    `$(...)` is judged the same way as `$VAR`. Neither value exists until the
+    command runs, so neither is something a static check can rule on: `git -C
+    "$WT" status` is already permitted here, and refusing `WT=$(pwd)` alongside
+    it drew the line by syntax rather than by risk. What stays refusable is what
+    is statically visible — a denied pattern or a write outside the workspace —
+    and that is checked inside substitution bodies too, since `^`-anchored
+    patterns would otherwise skip over them.
+    """
+    normalized = _normalize_shell_command(shell_command)
+    if not normalized:
+        return "the command is empty"
+    bodies = substitution_bodies(normalized)
+    if bodies is None:
+        return "an unbalanced command substitution cannot be read"
+    segments = _split_shell_segments(normalized, opaque_substitution=True)
+    if segments is None:
+        return "a backtick or process substitution hides what would actually run"
+    for segment in [*segments, *bodies]:
+        for pattern in DENY_BASH_PATTERNS:
+            if pattern.search(segment):
+                return f"a denied pattern matches: {segment[:100]}"
+        if _writes_outside_workspace(segment):
+            return f"it writes outside the workspace: {segment[:100]}"
+    return None
+
+
 def classify_command(shell_command: str) -> str:
     if _is_safe_status_sync_command(shell_command):
         return "allow"
@@ -285,14 +727,35 @@ def classify_command(shell_command: str) -> str:
     if _is_canonical_root_pnpm_install_command(shell_command):
         return "defer"
     normalized = _normalize_shell_command(shell_command)
-    for pattern in DENY_BASH_PATTERNS:
-        if pattern.search(normalized):
-            return "deny"
+    bodies = substitution_bodies(normalized)
+    if bodies is None:
+        # An unbalanced `$(` hides what actually runs.
+        return "defer"
+    # A `$(...)` body is a command in its own right: judge it on its own terms
+    # rather than refusing every line that computes one of its arguments.
+    segments = _split_shell_segments(normalized, opaque_substitution=bool(bodies))
+    if segments is None:
+        # A backtick or process substitution hides what actually runs.
+        return "defer"
+    for segment in [*segments, *bodies]:
+        for pattern in DENY_BASH_PATTERNS:
+            if any(pattern.search(form) for form in _segment_forms(segment)):
+                return "deny"
+    for body in bodies:
+        if classify_command(body) != "allow":
+            return "defer"
+    if len(segments) > 1:
+        # Every part has to stand on its own, otherwise a safe prefix would
+        # carry the rest of the line past the gate.
+        return "allow" if all(_segment_is_safe(segment) for segment in segments) else "defer"
+    single = segments[0] if segments else normalized
+    if _writes_outside_workspace(single):
+        return "defer"
     for pattern in SAFE_BASH_PATTERNS:
-        if pattern.search(normalized):
+        if any(pattern.search(form) for form in _segment_forms(single)):
             return "allow"
     for pattern in DEFER_BASH_PATTERNS:
-        if pattern.search(normalized):
+        if any(pattern.search(form) for form in _segment_forms(single)):
             return "defer"
     return "defer"
 
@@ -432,19 +895,20 @@ def _resolve_workspace_path(base: Path, raw_path: str) -> Path:
 
 def _command_tokens_and_cwd(shell_command: str) -> tuple[list[str], Path]:
     command = _normalize_shell_command(shell_command)
+    root = workspace_root()
     if not command:
-        return [], ROOT
+        return [], root
     try:
         tokens = shlex.split(command)
     except ValueError:
-        return [], ROOT
-    cwd = ROOT
+        return [], root
+    cwd = root
     if "&&" in tokens:
         amp_index = tokens.index("&&")
         if amp_index == 2 and tokens[0] == "cd":
             cd_target = Path(tokens[1])
             if _paths_within_workspace([cd_target]):
-                cwd = _resolve_workspace_path(ROOT, tokens[1])
+                cwd = _resolve_workspace_path(root, tokens[1])
                 tokens = tokens[amp_index + 1 :]
     index = 0
     while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
@@ -504,7 +968,7 @@ def _is_canonical_root_pnpm_install_command(shell_command: str) -> bool:
 
     if index >= len(tokens) or tokens[index] not in {"install", "i"}:
         return False
-    return effective_cwd == ROOT.resolve(strict=False)
+    return effective_cwd == workspace_root()
 
 
 def _extract_package_specs(tokens: list[str], start_index: int) -> list[str]:
@@ -643,14 +1107,40 @@ def _collect_paths(tool_input: dict[str, Any]) -> list[Path]:
 def _paths_within_workspace(paths: list[Path]) -> bool:
     if not paths:
         return True
-    allowed_roots = [ROOT, ROOT.parent / "pantheon", ROOT.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
+    root = workspace_root()
+    # Task worktrees usually live under the canonical root, but a worker may be
+    # dispatched into one elsewhere, so honour every root we were handed.
+    allowed_roots = [*workspace_roots(), root.parent / "pantheon", root.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
+    allowed_roots = [candidate.expanduser().resolve(strict=False) for candidate in allowed_roots]
     for path in paths:
-        resolved = path if path.is_absolute() else ROOT / path
+        resolved = _resolve_candidate_path(path, root)
+        if resolved is None:
+            return False
         if not any(
-            _is_relative_to(resolved, root) for root in allowed_roots
+            _is_relative_to(resolved, allowed) for allowed in allowed_roots
         ):
             return False
     return True
+
+
+def _resolve_candidate_path(path: Path, root: Path) -> Path | None:
+    """Absolute, normalised form of `path`, or None when it cannot be judged.
+
+    `~/.ssh` and `../.ssh` are not absolute, so joining them onto the root
+    without expansion or normalisation made every escape hatch look like it
+    lived inside the workspace. A path still carrying `$VAR` is not something
+    static inspection can resolve at all, so it is never inside.
+    """
+    text = str(path)
+    if "$" in text:
+        return None
+    expanded = Path(text).expanduser()
+    if not expanded.is_absolute():
+        expanded = root / expanded
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return None
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -665,7 +1155,7 @@ def _check_claude_allow_rules(tool_name: str, tool_input: dict[str, Any]) -> boo
     """Return True if a Claude settings allow rule matches this tool call."""
     try:
         settings_path = Path.home() / ".claude" / "projects" / "-home-edna-workspace-drts-fleet-platform" / "settings.json"
-        local_settings_path = ROOT / ".claude" / "settings.local.json"
+        local_settings_path = workspace_root() / ".claude" / "settings.local.json"
         for path in (local_settings_path, settings_path):
             if not path.exists():
                 continue
@@ -707,7 +1197,7 @@ def evaluate_tool_request(tool_name: str, tool_input: dict[str, Any] | None, con
             risk_class = "repo_write"
         else:
             decision = "deny"
-            reason = f"{tool_name} targets a path outside {ROOT}."
+            reason = f"{tool_name} targets a path outside {workspace_root()}."
             risk_class = "out_of_workspace"
     elif tool_name == "Bash":
         shell_command = tool_input.get("command") or tool_input.get("cmd") or tool_input.get("raw_command") or ""
@@ -1329,11 +1819,16 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
             emit_hook_response(_decision_response(event_name, decision["decision"], decision["reason"]))
             return 0
 
-        if pending_match is None:
+        context = _approval_context(payload, config)
+        # Only a worker lane has a reviewer. An interactive session has none,
+        # so queueing its request buries a request nobody will ever answer and
+        # leaves the session waiting on it.
+        awaiting_review = bool(context.get("task_id") or context.get("worker_run_id"))
+        if pending_match is None and awaiting_review:
             create_approval(
                 config,
                 {
-                    **_approval_context(payload, config),
+                    **context,
                     "tool_name": decision["tool_name"],
                     "tool_input": decision["tool_input"],
                     "risk_class": decision["risk_class"],
@@ -1350,9 +1845,14 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
                 "broker_decision": decision,
                 "effective_decision": effective_decision,
                 "effective_reason": effective_reason,
+                "awaiting_review": awaiting_review,
             },
         )
-        emit_hook_response(_decision_response(event_name, "defer", decision["reason"]))
+        # `ask` is the only spelling of "I have no answer, use the normal
+        # flow" that PreToolUse accepts — allow/deny/ask. Emitting "defer"
+        # here handed the harness a value it cannot read, which is what hung
+        # the tool call instead of prompting for it.
+        emit_hook_response(_decision_response(event_name, "ask", decision["reason"]))
         return 0
 
     log_event(config, event_name, payload)
