@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping
 
@@ -29,6 +31,12 @@ class ReadyDispatchPolicy:
     in_progress_statuses: frozenset[str] = frozenset({"in_progress"})
     owned_statuses: frozenset[str] = frozenset({"todo", "backlog"})
     dependency_done_statuses: frozenset[str] = frozenset({"done"})
+    # How long an "integration in flight" record is believed. Nothing in the
+    # supervisor refreshes these fields — only a worker writes them, and this
+    # policy is what decides whether a worker is dispatched at all. Without a
+    # bound, a task whose worker died mid-integration waits for a state change
+    # that can no longer happen.
+    integration_in_flight_max_age_seconds: int = 6 * 60 * 60
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "ReadyDispatchPolicy":
@@ -52,6 +60,10 @@ class ReadyDispatchPolicy:
             owned_statuses=values("owned_statuses", defaults.owned_statuses),
             dependency_done_statuses=values(
                 "dependency_done_statuses", defaults.dependency_done_statuses
+            ),
+            integration_in_flight_max_age_seconds=_positive_int(
+                settings.get("integration_in_flight_max_age_seconds"),
+                defaults.integration_in_flight_max_age_seconds,
             ),
         )
 
@@ -77,8 +89,69 @@ EXTERNAL_INTEGRATION_IN_FLIGHT_STATUSES = frozenset(
 )
 
 
+def _positive_int(raw: Any, default: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+# Workers do not write a status token into `ci_status`; they write a sentence,
+# e.g. "CI (integration trunk) failed on run 30918215661". Matching whole words
+# catches what they actually record, where an exact-token comparison did not.
+_CI_FAILURE_WORDS = frozenset({"failure", "failed", "failing", "cancelled", "canceled", "timed_out", "timeout"})
+
+
+def ci_status_reports_failure(ci_status: str) -> bool:
+    """True when this `ci_status` says the run finished badly, however it is worded."""
+    normalized = ci_status.strip().lower()
+    if not normalized:
+        return False
+    words = set(re.split(r"[^a-z_]+", normalized))
+    return bool(words & _CI_FAILURE_WORDS)
+
+
+def integration_record_is_stale(
+    record: TaskRecord | Mapping[str, Any],
+    *,
+    max_age_seconds: int,
+    now: datetime | None = None,
+) -> bool:
+    """True when an in-flight integration record is too old to still be believed.
+
+    Read `integration_recorded_at`, not `last_update`. `last_update` is a
+    general "this task was touched" stamp that the supervisor refreshes every
+    tick — a task stuck at `ci_pending` since 2 August still carried a
+    `last_update` of the current minute, so measuring against it would never
+    call anything stale. `integration_recorded_at` is written only when the
+    integration state itself is recorded, which is the thing being aged here.
+
+    A record with no stamp is left alone. All 21 tasks carrying an in-flight
+    integration status when this was written had the field set, so ageing them
+    on a guess would only change behaviour for cases that do not occur, and
+    "hold an in-progress task while its CI is pending" is the rule this
+    function exists to enforce.
+    """
+    record = _task(record)
+    recorded_at = record.raw.get("integration_recorded_at")
+    if not recorded_at:
+        return False
+    try:
+        stamped = datetime.fromisoformat(str(recorded_at).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=timezone.utc)
+    reference = now or datetime.now(timezone.utc)
+    return (reference - stamped).total_seconds() > max_age_seconds
+
+
 def has_external_integration_in_flight(
     record: TaskRecord | Mapping[str, Any],
+    *,
+    max_age_seconds: int | None = None,
+    now: datetime | None = None,
 ) -> bool:
     """True when an owner should supervise external integration, not start coding again.
 
@@ -86,20 +159,40 @@ def has_external_integration_in_flight(
     Re-dispatching it to an isolated task branch creates duplicate patches and can
     overwrite the task's current PR evidence. CI failures deliberately remain
     dispatchable so the owner can fix them.
+
+    Two ways this used to hold a task forever, both seen in production:
+
+    * The failure escape hatch compared `ci_status` against exact tokens, but a
+      worker had written "CI (integration trunk) failed on run 30918215661".
+      The run had definitively failed and the task still waited on it.
+    * Nothing refreshes these fields except a worker, and this function is what
+      decides whether a worker is dispatched. A task left at `ci_pending` when
+      its worker died waited on a change that could no longer happen — one sat
+      that way for four days while its PR had been green and mergeable for three.
+
+    So a failure is now recognised however it is worded, and an in-flight record
+    is only believed while it is recent.
     """
     record = _task(record)
     ci_status = str(record.raw.get("ci_status") or "").strip().lower()
     # CI is the freshest execution signal. A delayed integration_status must not
     # trap a failed task in a permanent no-dispatch state.
-    if ci_status in {"failure", "failed", "cancelled", "timed_out"}:
+    if ci_status_reports_failure(ci_status):
         return False
 
     integration_status = str(record.raw.get("integration_status") or "").strip().lower()
-    if integration_status in EXTERNAL_INTEGRATION_IN_FLIGHT_STATUSES:
-        return True
+    in_flight = integration_status in EXTERNAL_INTEGRATION_IN_FLIGHT_STATUSES
+    if not in_flight:
+        pr_url = str(record.raw.get("pr_url") or "").strip()
+        in_flight = bool(pr_url) and ci_status in {"pending", "queued", "in_progress", "running"}
+    if not in_flight:
+        return False
 
-    pr_url = str(record.raw.get("pr_url") or "").strip()
-    return bool(pr_url) and ci_status in {"pending", "queued", "in_progress", "running"}
+    if max_age_seconds is None:
+        max_age_seconds = ReadyDispatchPolicy().integration_in_flight_max_age_seconds
+    return not integration_record_is_stale(
+        record, max_age_seconds=max_age_seconds, now=now
+    )
 
 
 def task_index(tasks: Mapping[str, Any] | list[Mapping[str, Any]]) -> dict[str, TaskRecord]:
@@ -165,7 +258,9 @@ def resolve_dispatch_target(
     if not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses):
         return None
     if record.status in policy.in_progress_statuses and record.owner:
-        if has_external_integration_in_flight(record):
+        if has_external_integration_in_flight(
+            record, max_age_seconds=policy.integration_in_flight_max_age_seconds
+        ):
             return None
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
     if record.status in policy.owned_statuses and record.owner:
