@@ -637,16 +637,33 @@ jobs:
             echo "::error::Required secret ${controlled_download_secret} not found in project ${project_id}."
             exit 1
           fi
-          if ! gcloud secrets describe "$workload_key_secret" --project "$project_id" >/dev/null 2>&1; then
-            echo "::error::Required secret ${workload_key_secret} not found in project ${project_id}."
-            exit 1
-          fi
-          if ! gcloud secrets describe "$workload_registry_secret" --project "$project_id" >/dev/null 2>&1; then
-            echo "::error::Required secret ${workload_registry_secret} not found in project ${project_id}."
-            exit 1
-          fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
-          secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
+
+          # Workload identity key material is mounted when it exists, and dev is
+          # not blocked when it does not. The API agrees: its startup validation
+          # requires the full set only for `production` and `staging`
+          # (`isStrictEnvironment` in apps/api/src/config/auth-startup-config.ts),
+          # and the verifier only reads these when a request actually presents a
+          # workload assertion. Nothing in this repository mints one, and no
+          # dev/staging GCP project has ever held these secrets.
+          #
+          # Demanding them here would only be satisfiable by inventing them, and
+          # invented values are worse than absent ones: a public key whose
+          # private half nobody holds, and a registry naming a service principal
+          # that does not exist, read as configured security while authorising a
+          # subject nobody can be. staging and prod keep their own checks.
+          workload_mounts=""
+          if gcloud secrets describe "$workload_key_secret" --project "$project_id" >/dev/null 2>&1; then
+            workload_mounts="${workload_mounts},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest"
+          else
+            echo "::notice::${workload_key_secret} is absent; dev deploys without workload identity key material."
+          fi
+          if gcloud secrets describe "$workload_registry_secret" --project "$project_id" >/dev/null 2>&1; then
+            workload_mounts="${workload_mounts},WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
+          else
+            echo "::notice::${workload_registry_secret} is absent; dev deploys without a service principal registry."
+          fi
+          secret_args="${secret_args}${workload_mounts}"
 
           # Dev reuses the already-managed JWT secret for internal handoff.
           # Production environments can map these slots to distinct secrets.
