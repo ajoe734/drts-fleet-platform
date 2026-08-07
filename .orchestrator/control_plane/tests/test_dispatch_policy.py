@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from control_plane.domain.dispatch_policy import (
     DispatchReason,
@@ -200,17 +200,21 @@ class IntegrationSelfLockTests(unittest.TestCase):
     def test_a_fresh_in_flight_record_still_holds_the_task(self) -> None:
         # The rule this function exists for: do not start a second attempt while
         # the first one is genuinely running.
+        #
+        # `resolve_dispatch_target` takes no clock, so it reads the real one.
+        # A hardcoded `integration_recorded_at` therefore made this test pass or
+        # fail depending on the hour it ran in: it was written and run at 00:30
+        # UTC against a 00:00 stamp, and failed in CI at 11:29 UTC because the
+        # same stamp was by then eleven hours old. Stamp it relative to now.
+        recorded_at = datetime.now(timezone.utc) - timedelta(minutes=30)
         task = self._task(
             integration_status="ci_pending",
             ci_status="in_progress",
-            integration_recorded_at="2026-08-07T00:00:00Z",
+            integration_recorded_at=recorded_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
-        now = datetime(2026, 8, 7, 0, 30, tzinfo=timezone.utc)
 
         self.assertTrue(
-            has_external_integration_in_flight(
-                task, max_age_seconds=6 * 60 * 60, now=now
-            )
+            has_external_integration_in_flight(task, max_age_seconds=6 * 60 * 60)
         )
         self.assertIsNone(resolve_dispatch_target(task, {"T-1": task}, self.POLICY))
 
