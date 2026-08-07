@@ -141,6 +141,14 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git config --get"),
     re.compile(r"^git grep(\s|$)"),
     re.compile(r"^git switch(\s|$)"),
+    # Index and ref moves. These change what is staged or where a ref points,
+    # never the contents of the working tree, and the reflog holds the way
+    # back. `git reset --hard` and `git checkout --` stay in DENY, which is
+    # evaluated first.
+    re.compile(r"^git reset(\s|$)"),
+    re.compile(r"^git restore --staged(\s|$)"),
+    re.compile(r"^git tag(\s|$)"),
+    re.compile(r"^git cherry-pick(\s|$)"),
     re.compile(r"^git push(\s|$)"),
     # Read-only observability. A worker that operates a service and a cloud
     # project cannot see either of them: every `systemctl show`, `journalctl`
@@ -341,9 +349,76 @@ PNPM_OPTION_TAKES_VALUE = {"--filter", "-F", "--dir", "-C"}
 PNPM_STANDALONE_FLAGS = {"-r", "--recursive", "--stream", "--parallel", "--aggregate-output", "-w", "--workspace-root"}
 
 
+# A command no SAFE pattern can match, used where the real one cannot be read.
+_UNREADABLE_COMMAND = "__unreadable_command__"
+_HEREDOC_START_RE = re.compile(
+    r"<<(-?)\s*(?:'([^']*)'|\"([^\"]*)\"|([A-Za-z_][A-Za-z0-9_]*))"
+)
+
+
+def _drop_heredoc_bodies(command: str) -> str | None:
+    """`command` with every heredoc body removed, or None if one is unterminated.
+
+    A heredoc body is data — a commit message, a JSON payload — not commands.
+    Left in place it was split on its newlines, so every line of a commit
+    message became its own unrecognised "command" and no commit written that
+    way could be classified. The `<<MARK` operator goes with the body: it
+    says where input comes from, not what runs, and leaving it behind would
+    make the stripped command look like an unterminated heredoc on the next
+    pass.
+    """
+    result: list[str] = []
+    cursor = 0
+    while True:
+        match = _HEREDOC_START_RE.search(command, cursor)
+        if not match:
+            result.append(command[cursor:])
+            return "".join(result)
+        if command[match.start():match.start() + 3] == "<<<":
+            # A here-string, not a heredoc: it has no body to skip.
+            result.append(command[cursor:match.end()])
+            cursor = match.end()
+            continue
+        delimiter = match.group(2) or match.group(3) or match.group(4)
+        allow_indent = match.group(1) == "-"
+        result.append(command[cursor:match.start()])
+        body_start = command.find("\n", match.end())
+        if body_start == -1:
+            return None
+        end = _heredoc_body_end(command, body_start, delimiter, allow_indent)
+        if end is None:
+            return None
+        # The rest of the opening line is still part of the command — a
+        # `cat <<EOF > ~/.bashrc` redirects somewhere that has to be checked.
+        result.append(command[match.end():body_start])
+        # Keep the newline that ended the heredoc so the next command still
+        # starts on its own line.
+        result.append("\n")
+        cursor = end
+
+
+def _heredoc_body_end(command: str, body_start: int, delimiter: str, allow_indent: bool) -> int | None:
+    """Index just past the line closing a heredoc body, or None when it never closes."""
+    cursor = body_start
+    while cursor < len(command):
+        line_end = command.find("\n", cursor + 1)
+        line = command[cursor + 1:line_end if line_end != -1 else len(command)]
+        if (line.lstrip("\t") if allow_indent else line).strip() == delimiter:
+            return line_end + 1 if line_end != -1 else len(command)
+        if line_end == -1:
+            return None
+        cursor = line_end
+    return None
+
+
 def _normalize_shell_command(shell_command: str) -> str:
+    command = _drop_heredoc_bodies(shell_command.replace("\r\n", "\n"))
+    if command is None:
+        # An unterminated heredoc: nothing downstream can read what the body
+        # would be, so hand back a token no SAFE pattern matches.
+        return _UNREADABLE_COMMAND
     lines = []
-    for line in shell_command.replace("\r\n", "\n").split("\n"):
+    for line in command.split("\n"):
         if line.strip().startswith("#"):
             continue
         lines.append(line)

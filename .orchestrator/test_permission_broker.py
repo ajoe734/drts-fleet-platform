@@ -314,6 +314,37 @@ class ClassifyCommandCdPrefixTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(permission_broker.classify_command(command), "allow")
 
+    def test_heredoc_body_is_not_read_as_commands(self) -> None:
+        command = (
+            "git commit -q -F - <<'MSG'\n"
+            "ORCH-001: fix the thing\n"
+            "\n"
+            "sudo rm -rf / was mentioned in prose, not run.\n"
+            "MSG"
+        )
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_heredoc_does_not_hide_the_rest_of_its_opening_line(self) -> None:
+        command = "cat <<EOF > ~/.bashrc\nevil\nEOF"
+        self.assertEqual(permission_broker.classify_command(command), "defer")
+
+    def test_unterminated_heredoc_is_not_treated_as_safe(self) -> None:
+        command = "git commit -F - <<'MSG'\nno terminator here\n"
+        self.assertEqual(permission_broker.classify_command(command), "defer")
+
+    def test_index_moves_are_allowed_but_hard_reset_is_not(self) -> None:
+        for command, expected in (
+            ("git reset --soft HEAD~1", "allow"),
+            ("git restore --staged .", "allow"),
+            ("git tag snapshot-001 70b69e9b", "allow"),
+            ("git cherry-pick 9ae9cef2", "allow"),
+            ("git reset --hard origin/dev", "deny"),
+            ("git checkout -- apps/api", "deny"),
+            ("git restore apps/api", "defer"),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(permission_broker.classify_command(command), expected)
+
     def test_unprefixed_commands_are_unchanged(self) -> None:
         for command, expected in (
             ("ls /tmp", "allow"),
