@@ -473,6 +473,119 @@ def _cd_target_is_within_workspace(segment: str) -> bool:
     return _paths_within_workspace([Path(tokens[1])])
 
 
+# An interpreter reading its program from a pipe is exactly as opaque as
+# `$(...)`, which this module already refuses: nothing on the command line says
+# what will actually run. `curl https://x | bash` splits into two segments that
+# are each individually safe — a fetch and a shell — and was allowed on that
+# basis, which is the standard way to run somebody else's code on this machine.
+_STDIN_PROGRAM_INTERPRETERS = frozenset(
+    {
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "ksh",
+        "fish",
+        "python",
+        "python2",
+        "python3",
+        "node",
+        "perl",
+        "ruby",
+        "php",
+        "Rscript",
+    }
+)
+
+# Flags that move the program out of stdin and onto the command line, where it
+# is visible to inspection like any other argument.
+_INTERPRETER_INLINE_PROGRAM_FLAGS = frozenset({"-c", "-e", "-m"})
+
+
+def _reads_its_program_from_stdin(segment: str) -> bool:
+    """True when this segment is an interpreter whose program arrives on stdin."""
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        return True
+    if not tokens:
+        return False
+    if Path(tokens[0]).name not in _STDIN_PROGRAM_INTERPRETERS:
+        return False
+    for token in tokens[1:]:
+        if token in _INTERPRETER_INLINE_PROGRAM_FLAGS:
+            return False
+        if token == "-":
+            return True
+        if token.startswith("-"):
+            # `-s`, `-u`, `-x` and friends leave stdin as the program source.
+            continue
+        # A script path: the program is a file, not whatever the pipe carries.
+        return False
+    return True
+
+
+def _pipes_program_into_interpreter(shell_command: str) -> bool:
+    """True when any stage of a pipeline feeds a program into an interpreter."""
+    command = _normalize_shell_command(shell_command)
+    stages: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < length:
+                buffer.append(command[index : index + 2])
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            buffer.append(char)
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            buffer.append(command[index : index + 2])
+            index += 2
+            continue
+        if command[index : index + 2] == "||":
+            # A fallback, not a pipe: it ends the pipeline without feeding it.
+            stages.append("".join(buffer))
+            buffer = []
+            stages.append("")
+            index += 2
+            continue
+        if char == "|":
+            stages.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        if char in (";", "&", "\n") or command[index : index + 2] == "&&":
+            stages.append("".join(buffer))
+            buffer = []
+            stages.append("")
+            index += 2 if command[index : index + 2] == "&&" else 1
+            continue
+        buffer.append(char)
+        index += 1
+    stages.append("".join(buffer))
+
+    # Only a stage that something was piped *into* can read a program from the
+    # pipe. An empty marker resets that, so `bash` after `;` is not a sink.
+    for position, stage in enumerate(stages):
+        if position == 0 or not stages[position - 1].strip():
+            continue
+        if _reads_its_program_from_stdin(stage.strip()):
+            return True
+    return False
+
+
 def _matching_paren(command: str, open_index: int) -> int | None:
     """Index of the `)` closing the `(` at open_index, or None when unbalanced."""
     depth = 0
@@ -571,6 +684,10 @@ def command_hard_boundary_reason(shell_command: str) -> str | None:
 
 
 def classify_command(shell_command: str) -> str:
+    # Checked before every allow-list below: whatever the rest of the line looks
+    # like, if a program arrives through a pipe then nothing here has seen it.
+    if _pipes_program_into_interpreter(shell_command):
+        return "defer"
     if _is_safe_status_sync_command(shell_command):
         return "allow"
     if _is_safe_python_one_liner(shell_command):
