@@ -133,12 +133,6 @@
 - auth.mfa.challenged
 - auth.device.registered
 
-### Stage 1.5 IAM Contract Supplement
-
-- Canonical Stage 1.5 IAM wire contracts live in `packages/contracts/src/iam-contracts.ts` and `openapi/iam-stage15-contracts-v1.yaml`.
-- Public auth/session exchange failures must use anti-enumeration codes and must not reveal whether a membership, invitation, or partner credential exists.
-- Mutation contracts for account, role, approval, access-review, break-glass, device, and credential governance require canonical reason and optimistic-concurrency metadata.
-
 ---
 
 ## 3.2 Tenant & Partner Service

@@ -11,7 +11,7 @@ on:
       target_service:
         description: "Cloud Run service to update"
         required: true
-        default: "drts-dev-fleet-partner-portal-web"
+        default: "drts-fleet-partner-portal-web"
         type: string
       allow_unauthenticated:
         description: "Expose the Cloud Run service publicly"
@@ -54,16 +54,6 @@ jobs:
     environment: dev
 
     steps:
-      - name: Validate active dev service target
-        env:
-          REQUESTED_TARGET_SERVICE: ${{ inputs.target_service }}
-        run: |
-          set -euo pipefail
-          if [[ "$REQUESTED_TARGET_SERVICE" != "drts-dev-fleet-partner-portal-web" ]]; then
-            echo "::error::Fleet Partner Portal may deploy only to the reviewed active dev service drts-dev-fleet-partner-portal-web."
-            exit 1
-          fi
-
       - name: Checkout source
         uses: actions/checkout@v4
         with:

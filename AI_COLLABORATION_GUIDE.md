@@ -128,7 +128,6 @@ Rules:
 - `Gemini`: runtime packaging, CI/CD, infra, worker-ops implications
 - `Gemini2`: runtime packaging, CI/CD, infra, worker-ops implications, separate Gemini account/quota lane
 - `Codex`: contracts, schema, state-system, acceptance implications
-- `Copilot`: contradiction scan, external critique, second-pass review
 
 ## 3.5 Two-Mode Supervisor
 
@@ -198,8 +197,7 @@ Default baton order:
 2. `Claude2` reviews for flow feasibility, API seams, and adapter boundaries
 3. `Gemini` reviews for rollout, infra, migration, and CI implications
 4. `Gemini2` reviews for second-pass rollout, infra, migration, and CI implications
-5. `Copilot` reviews for contradictions, weak assumptions, and missing citations
-6. `Claude` either synthesizes the accepted changes into the next draft or returns the baton for another loop
+5. `Claude` either synthesizes the accepted changes into the next draft or returns the baton for another loop
 
 Loop rule:
 

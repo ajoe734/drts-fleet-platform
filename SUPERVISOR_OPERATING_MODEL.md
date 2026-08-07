@@ -242,5 +242,5 @@ Practical templates live in:
 
 - discussion supervisor: `Claude`
 - starter lane: `Codex`
-- first review order: `Claude2 -> Gemini -> Gemini2 -> Copilot -> Claude`
+- first review order: `Claude2 -> Gemini -> Gemini2 -> Claude`
 - execution ownership later follows the accepted consensus packet

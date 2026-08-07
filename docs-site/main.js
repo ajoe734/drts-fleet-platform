@@ -13,6 +13,7 @@ import {
   renderStackList,
   workerStatusIcon,
   activityTypeLabel,
+  taskCompletionMetrics,
 } from "./utils.js";
 import {
   DATA_FILES,
@@ -52,15 +53,7 @@ function basename(value) {
 
 function renderProgressBar(status) {
   const tasks = status?.tasks || [];
-  const liveIds = new Set(tasks.map((t) => t.id));
-  // Archived task ids are completed tasks pruned from the live set to keep
-  // ai-status.json under the worker read cap. Count them as done so progress
-  // reflects cumulative completion, not just the post-prune live window.
-  const archivedDone = (status?.archived_task_ids || []).filter(
-    (id) => !liveIds.has(id),
-  ).length;
-  const total = tasks.length + archivedDone;
-  const done = tasks.filter((t) => t.status === "done").length + archivedDone;
+  const { done, total } = taskCompletionMetrics(status);
   const approved = tasks.filter((t) => t.status === "review_approved").length;
   const open = tasks.filter((t) =>
     ["backlog", "todo", "in_progress", "review", "blocked"].includes(
@@ -82,13 +75,7 @@ function renderOverviewMetrics(status, orchState, approvalQueue) {
   if (!container) return;
 
   const tasks = status.tasks || [];
-  const liveIds = new Set(tasks.map((t) => t.id));
-  // Pruned-but-completed tasks (see renderProgressBar) count toward cumulative done.
-  const archivedDone = (status.archived_task_ids || []).filter(
-    (id) => !liveIds.has(id),
-  ).length;
-  const total = tasks.length + archivedDone;
-  const done = tasks.filter((t) => t.status === "done").length + archivedDone;
+  const { done, total } = taskCompletionMetrics(status);
   const approvedTasks = tasks.filter((t) => t.status === "review_approved");
   const backlogTasks = tasks.filter((t) =>
     ["backlog", "todo", "in_progress", "review", "blocked"].includes(

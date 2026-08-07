@@ -1,47 +1,37 @@
 # smarttransport.tw 自訂網域設定 Runbook
 
-**產生日期：** 2026-08-01
-**GCP Project：** `drts-dev-ray-tw-20260730`
+**產生日期：** 2026-07-26
+**GCP Project：** `drts-dev-ray-tw-20260530`（dev live set，hash `ne55h7sy3a`）
 **Region：** `us-central1`
-**目標：** 記錄 dev active inventory 與 `smarttransport.tw` 目前可觀測的 custom-domain 狀態，僅供控管與後續清理；本 task 不部署、不改 billing。
+**目標：** 把每個 Cloud Run web app 對到 `smarttransport.tw` 下的獨立子網域。
 
 > ⚠️ **執行前提（只有具權限者能做）**
 >
-> 1. `gcloud auth login`。
-> 2. `smarttransport.tw` 的 DNS 控制權。
-> 3. `smarttransport.tw` 已在對應 GCP 帳號完成網域驗證（`gcloud domains verify smarttransport.tw` 或 Search Console）。
+> 1. `gcloud auth login`（本 runbook 產生時 CLI 認證已過期，非互動環境無法重登）。
+> 2. `smarttransport.tw` 的 **DNS 控制權**。目前 apex 解到 `185.158.133.1`（註冊商 parking），
+>    `fleets.` 等子網域尚未解析 → 代表還沒接到 Cloud Run。
+> 3. **網域驗證**：`smarttransport.tw` 需在此 GCP 帳號完成驗證
+>    （`gcloud domains verify smarttransport.tw` 或 Search Console），否則 domain-mapping 會被拒。
 
 ---
 
 ## 1. 前綴 → 服務對照
 
-| 子網域                       | Cloud Run 服務                      | 用途         |
-| ---------------------------- | ----------------------------------- | ------------ |
-| `fleets.smarttransport.tw`   | `drts-dev-platform-admin-web`       | 車隊管理後臺 |
-| `ops.smarttransport.tw`      | `drts-dev-ops-console-web`          | 營運中心     |
-| `partners.smarttransport.tw` | `drts-dev-fleet-partner-portal-web` | 車行夥伴     |
-| `dispatch.smarttransport.tw` | `drts-dev-enterprise-dispatch-web`  | 企業派車     |
-| `bank.smarttransport.tw`     | `drts-dev-bank-console-web`         | 銀行後臺     |
-| `channel.smarttransport.tw`  | `drts-channel-partner-portal-web`   | 渠道夥伴     |
-| `tenant.smarttransport.tw`   | `drts-dev-tenant-console-web`       | 企業租戶     |
-| `refer.smarttransport.tw`    | `drts-dev-referral-embed-web`       | 推薦嵌入     |
-| `api.smarttransport.tw`      | `drts-dev-api`                      | 後端 API     |
-
-> `passenger-web` 已於 2026-06-16 退休，`concierge-portal-web` / `assisted-entry-web`
-> 亦已退休；三者不得回到 authoritative domain mapping inventory、deploy workflow、smoke URL inventory。
-
-### Partner Booking — PAUSED
-
-`partner-booking-web`（含獨立網站與 bank-app embed）自 2026-08-01 起明確暫停，
-不屬於 active inventory。`domain-mappings-dev.yml` 不建立或重建
-`book.smarttransport.tw`；`deploy-dev.yml` 也不 build、deploy、公開或 smoke 此
-service，並會以 fail-closed cleanup 刪除殘留的
-`drts-dev-partner-booking-web` Cloud Run service。程式碼與 route 文件保留，恢復
-必須透過 reviewed workflow change。
+| 子網域                       | Cloud Run 服務                    | 用途             |
+| ---------------------------- | --------------------------------- | ---------------- |
+| `fleets.smarttransport.tw`   | `drts-platform-admin-web`         | 車隊管理後臺     |
+| `ops.smarttransport.tw`      | `drts-ops-console-web`            | 營運中心         |
+| `partners.smarttransport.tw` | `drts-fleet-partner-portal-web`   | 車行夥伴         |
+| `dispatch.smarttransport.tw` | `drts-enterprise-dispatch-web`    | 企業派車         |
+| `ride.smarttransport.tw`     | `drts-passenger-web`              | 智行叫車（乘客） |
+| `bank.smarttransport.tw`     | `drts-bank-console-web`           | 銀行後臺         |
+| `channel.smarttransport.tw`  | `drts-channel-partner-portal-web` | 渠道夥伴         |
+| `tenant.smarttransport.tw`   | `drts-tenant-console-web`         | 企業租戶         |
+| `api.smarttransport.tw`      | `drts-api`                        | 後端 API         |
 
 ---
 
-## 2. 建立 domain mappings（domain-maintenance；idempotent；不覆寫既有 live mapping）
+## 2. 建立 domain mappings（逐條執行）
 
 ```bash
 PROJECT=drts-dev-ray-tw-20260730
@@ -52,24 +42,28 @@ gcloud auth login   # 前提 1
 # （若尚未驗證）先驗證網域，照輸出加 TXT 記錄後再繼續：
 gcloud domains verify smarttransport.tw
 
-# 使用經審核的 helper 進行網域檢查與建立（具備 command header/NOT_FOUND 嚴格比對）
-./scripts/map-domain-service.sh fleets.smarttransport.tw     drts-dev-platform-admin-web       "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh ops.smarttransport.tw        drts-dev-ops-console-web          "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh partners.smarttransport.tw   drts-dev-fleet-partner-portal-web "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh dispatch.smarttransport.tw   drts-dev-enterprise-dispatch-web "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh bank.smarttransport.tw       drts-dev-bank-console-web        "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh channel.smarttransport.tw    drts-channel-partner-portal-web  "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh tenant.smarttransport.tw     drts-dev-tenant-console-web      "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh refer.smarttransport.tw      drts-dev-referral-embed-web      "$REGION" "$PROJECT"
-./scripts/map-domain-service.sh api.smarttransport.tw        drts-dev-api                     "$REGION" "$PROJECT"
+map() {  # map <subdomain> <service>
+  gcloud beta run domain-mappings create \
+    --service "$2" --domain "$1" \
+    --region "$REGION" --project "$PROJECT"
+}
+
+map fleets.smarttransport.tw     drts-platform-admin-web
+map ops.smarttransport.tw        drts-ops-console-web
+map partners.smarttransport.tw   drts-fleet-partner-portal-web
+map dispatch.smarttransport.tw   drts-enterprise-dispatch-web
+map ride.smarttransport.tw       drts-passenger-web
+map bank.smarttransport.tw       drts-bank-console-web
+map channel.smarttransport.tw    drts-channel-partner-portal-web
+map tenant.smarttransport.tw     drts-tenant-console-web
+map api.smarttransport.tw        drts-api
 ```
 
-每條新建 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
-若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed and hand off to the single deploy cleanup task.，不在此 repo-only task 直接覆寫 live target。
+每條 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
 
 ---
 
-## 3. DNS 記錄（active inventory 目標態）
+## 3. DNS 記錄（加到 smarttransport.tw 的 DNS）
 
 所有子網域都是 **CNAME → `ghs.googlehosted.com.`**（Cloud Run 對子網域的標準對應）：
 
@@ -78,62 +72,36 @@ fleets     CNAME  ghs.googlehosted.com.
 ops        CNAME  ghs.googlehosted.com.
 partners   CNAME  ghs.googlehosted.com.
 dispatch   CNAME  ghs.googlehosted.com.
+ride       CNAME  ghs.googlehosted.com.
 bank       CNAME  ghs.googlehosted.com.
 channel    CNAME  ghs.googlehosted.com.
 tenant     CNAME  ghs.googlehosted.com.
-refer      CNAME  ghs.googlehosted.com.
 api        CNAME  ghs.googlehosted.com.
 ```
 
-> 若 DNS 供應商不允許 CNAME 指到 apex 以外的具名 host，以 `domain-mappings create`
+> 若 DNS 供應商不允許 CNAME 指到 apex 以外的具名 host，以 domain-mappings create
 > 實際輸出的 `rrdata` 為準（Google 有時給多筆 A/AAAA 而非 CNAME）。
 
 Google 會自動為每個對應簽發受管 SSL 憑證（首次 provisioning 可能數分鐘～數小時）。
 
 ---
 
-## 4. 驗證指令
+## 4. 驗證
 
 ```bash
-for sub in fleets ops partners dispatch bank channel tenant refer api; do
+for sub in fleets ops partners dispatch ride bank channel tenant api; do
   echo -n "$sub.smarttransport.tw → "
   curl -s -o /dev/null -w "%{http_code}\n" --max-time 20 "https://$sub.smarttransport.tw" || echo "尚未生效"
 done
 gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray-tw-20260730
 ```
 
-全部 active mapping `READY=True` 且憑證 ACTIVE 即完成。`book.smarttransport.tw`
-若仍可解析或仍有既有 mapping，只代表待清理的外部殘留，不是 active surface，
-也不得由本 workflow 重建。
+全部 200 且憑證 ACTIVE 即完成。
 
-## 5. 2026-07-31 實測現況
+---
 
-- Authoritative active surface 是 `deploy-dev.yml` 內的 9 services：`drts-dev-api`、`drts-dev-platform-admin-web`、`drts-dev-ops-console-web`、`drts-dev-fleet-partner-portal-web`、`drts-dev-tenant-console-web`、`drts-dev-bank-console-web`、`drts-dev-enterprise-dispatch-web`、`drts-dev-referral-embed-web`、`drts-channel-partner-portal-web`；不含 paused `partner-booking-web`，也不含 retired `passenger-web`、`concierge-portal-web`、`assisted-entry-web`。
-- GCP target 已固定為 project `drts-dev-ray-tw-20260730`、region `us-central1`。
-- DNS 已存在：
-  - `smarttransport.tw` → `185.158.133.1`
-  - active inventory 子網域 `fleets/ops/partners/dispatch/bank/channel/tenant/refer/api.smarttransport.tw` 皆解析到 `ghs.googlehosted.com` 後的 Google anycast IP
-  - paused `book.smarttransport.tw` 若仍解析到 Google，只是外部 DNS / mapping 殘留，不是 active inventory
-  - retired `ride.smarttransport.tw` 與 `concierge.smarttransport.tw` 也仍解析到 `ghs.googlehosted.com`，代表外部 DNS / mapping 清理尚未完成；它們不是 authoritative active inventory
-- HTTPS 實測（純觀測，不構成本 task gate）：
-  - `https://refer.smarttransport.tw/` 於 2026-07-31 會 `307` 轉到 `/embed/referral-demo-community`
-  - `https://refer.smarttransport.tw/embed/referral-demo-community` 回 `200`
-  - `https://channel.smarttransport.tw`、`https://api.smarttransport.tw/health`、`https://ride.smarttransport.tw`、`https://concierge.smarttransport.tw` 於 2026-07-31 測得 TLS/SSL 連線失敗；這些是外部 live-state observation，不回寫 repo active inventory，也不阻擋本次 repo-only domain-maintenance rails 修復
-- 因此本 runbook 的 machine-truth 職責只有對齊 repo 內 authoritative inventory；外部 DNS、憑證、mapping 存活清理另案處理。
+## 5. 現況（產生本 runbook 時）
 
-## 6. 2026-08-01 Referral 正式 partner entry（dev acceptance）
-
-- Platform Admin authority 已建立正式非 demo entry：`御和物業` / `yuhe-residence`。
-- Dev acceptance URL：`https://refer.smarttransport.tw/embed/yuhe-residence`；
-  Cloud Run fallback：`https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/yuhe-residence`。
-- Authority 的 primary `entryHost` 是 `app.yuhe-living.com.tw`；dev embed
-  allowlist 同時保留 `app-stg.yuhe-living.com.tw`。允許 host 的請求必須沒有
-  `X-Frame-Options`，且 CSP `frame-ancestors` 只包含該次指定的允許 origin。
-- `deploy-dev.yml` 的 source default 已改為 `yuhe-residence`。在包含此變更的
-  publish snapshot 部署前，既有 revision 的 `/` 仍可能歷史性地導向
-  `referral-demo-community`；直接正式 URL 不受影響。
-- `referral-demo-community` 僅保留為測試 seed／歷史驗收資料，不再是 root
-  default 或對外 partner URL。
-- 本節描述的是 project `drts-dev-ray-tw-20260730` 的 dev acceptance rail。
-  `app.yuhe-living.com.tw` 在設計 authority 中代表 partner primary host，但本
-  runbook 不據此宣稱該外部 host 或 DRTS production rail 已完成 production cutover。
+- Cloud Run 服務全部已部署且 dev URL 回 200（`drts-*-web-ne55h7sy3a-uc.a.run.app`）。
+- `smarttransport.tw`：apex→`185.158.133.1`，子網域未解析 → **尚未接 Cloud Run**。
+- 本 runbook 的指令與記錄**未套用**，等前提 1+2 齊備後由具權限者執行。

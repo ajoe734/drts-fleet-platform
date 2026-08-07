@@ -24,6 +24,27 @@ export const scheduleOpenTaskStatuses = new Set([
 ]);
 export const integrationPrefixes = new Set(["OC", "RS", "LP", "OSS", "SPIKE"]);
 
+// Keep progress stable when completed task bodies are pruned from live state.
+export function taskCompletionMetrics(status) {
+  const tasks = Array.isArray(status?.tasks) ? status.tasks : [];
+  const liveIds = new Set(
+    tasks.map((task) => String(task?.id || "").trim()).filter(Boolean),
+  );
+  const archivedDone = (status?.archived_task_ids || []).filter(
+    (taskId) => !liveIds.has(String(taskId || "").trim()),
+  ).length;
+  const legacyTotal = tasks.length + archivedDone;
+  const storedTotal = Number(status?.cumulative_task_count);
+  const cumulativeTotal =
+    Number.isSafeInteger(storedTotal) && storedTotal >= 0 ? storedTotal : 0;
+  const total = Math.max(legacyTotal, cumulativeTotal);
+  const remaining = tasks.filter(
+    (task) => String(task?.status || "").toLowerCase() !== "done",
+  ).length;
+
+  return { done: Math.max(0, total - remaining), total };
+}
+
 // ── Label maps ────────────────────────────────────────────────────────────────
 
 export const statusLabelMap = {

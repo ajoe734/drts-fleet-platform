@@ -6,17 +6,12 @@ single deployable can serve any number of partner brands.
 
 ## Status
 
-**Dev deployment state: PAUSED (2026-08-01).** Both the standalone Partner
-Booking website and the bank-app embed are intentionally unavailable. The
-source, local development commands, routes, and test assets remain preserved
-so a reviewed change can re-enable the surface later. While paused,
-`deploy-dev.yml` does not build, deploy, expose, or smoke this app; the deploy
-rail removes any stale `drts-dev-partner-booking-web` Cloud Run service, and
-domain maintenance does not recreate `book.smarttransport.tw`.
+This app carries the PBK-UI-003 CTBC reference funnel baseline and the
+2026-06 credit-card airport transfer release extension:
 
-This app carries the PBK-UI-003 CTBC reference funnel baseline and the 2026-06
-credit-card airport transfer release extension:
-
+- **Dev paused.** This surface is intentionally not deployed or mapped in
+  dev from `deploy-dev.yml`; `book.smarttransport.tw` is paused and must not
+  receive active traffic in this release.
 - Brand layering now resolves through
   `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / TAISHIN /
   DBS credit-card airport-transfer issuer templates plus FUBON insurance,
@@ -25,8 +20,6 @@ credit-card airport transfer release extension:
 - The program-specific `card` / `insurance` / `travel` website funnel states
   live under `/[tenantSlug]/program/site`; banking-app embed identity states
   live under `/[tenantSlug]/program/embed`.
-- These are dev/reference surfaces. Their availability does not claim that a
-  partner entry has completed pilot or production cutover.
 - Authority-safe negative paths are implemented as direct gate routes in
   **PBK-UI-004**.
 - The cutover policy between this app and the legacy
@@ -57,16 +50,12 @@ credit-card airport transfer release extension:
   ramps.
 - Credit-card airport-transfer website booking and banking-app embedded
   hand-off are separate surfaces:
-  `http://localhost:3007/ctbc` is the PBK-UI-003 CTBC reference landing and the
-  route used by the basic deploy smoke;
-  `http://localhost:3007/ctbc/program/site` is the current dev standalone
-  cardholder website surface rendered by `AirportTransferSite`; and
-  `http://localhost:3007/ctbc/program/embed` is the bank-app identity hand-off
-  surface. The same pattern works for `cathay`, `taishin`, and `dbs`;
-  insurance (`fubon`) and travel (`lion`) expose the site funnel but do not
-  expose the banking-app embed surface. Do not present the CTBC reference
-  landing or these dev routes as evidence of a production partner-entry
-  cutover.
+  `http://localhost:3007/ctbc` is the standalone white-label website,
+  `http://localhost:3007/ctbc/program/site` is the seven-screen funnel state
+  QA surface, and `http://localhost:3007/ctbc/program/embed` is the bank-app
+  identity hand-off surface. The same pattern works for `cathay`, `taishin`,
+  and `dbs`; insurance (`fubon`) and travel (`lion`) expose the site funnel but
+  do not expose the banking-app embed surface.
 
 ## Dev / Build / Lint / Typecheck
 

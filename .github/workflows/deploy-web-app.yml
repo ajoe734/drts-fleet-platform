@@ -65,31 +65,6 @@ jobs:
     environment: dev
 
     steps:
-      - name: Validate active dev web target
-        env:
-          REQUESTED_APP_DIR: ${{ inputs.app_dir }}
-          REQUESTED_IMAGE_NAME: ${{ inputs.image_name }}
-          REQUESTED_TARGET_SERVICE: ${{ inputs.target_service }}
-          REQUESTED_PORT: ${{ inputs.port }}
-        run: |
-          set -euo pipefail
-
-          requested_target="${REQUESTED_APP_DIR}|${REQUESTED_IMAGE_NAME}|${REQUESTED_TARGET_SERVICE}|${REQUESTED_PORT}"
-          case "$requested_target" in
-            "apps/platform-admin-web|platform-admin-web|drts-dev-platform-admin-web|3002") ;;
-            "apps/ops-console-web|ops-console-web|drts-dev-ops-console-web|3003") ;;
-            "apps/fleet-partner-portal-web|fleet-partner-portal-web|drts-dev-fleet-partner-portal-web|3007") ;;
-            "apps/tenant-console-web|tenant-console-web|drts-dev-tenant-console-web|3004") ;;
-            "apps/bank-console-web|bank-console-web|drts-dev-bank-console-web|3008") ;;
-            "apps/referral-embed-web|referral-embed-web|drts-dev-referral-embed-web|3014") ;;
-            "apps/enterprise-dispatch-web|enterprise-dispatch-web|drts-dev-enterprise-dispatch-web|3010") ;;
-            "apps/channel-partner-portal-web|channel-partner-portal-web|drts-channel-partner-portal-web|3013") ;;
-            *)
-              echo "::error::Requested web deploy target is not in the exact active dev allowlist. Partner Booking is paused; app, image, service, and port must match one reviewed active tuple."
-              exit 1
-              ;;
-          esac
-
       - name: Checkout source
         uses: actions/checkout@v4
         with:

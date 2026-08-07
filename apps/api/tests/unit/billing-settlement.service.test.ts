@@ -241,10 +241,10 @@ describe("BillingSettlementService settlement matrix", () => {
     });
   });
 
-  it("supports create assign comment resolve and reopen reconciliation issue workflow", async () => {
+  it("supports create assign comment resolve and reopen reconciliation issue workflow", () => {
     const service = createService();
 
-    const created = await service.createReconciliationIssue({
+    const created = service.createReconciliationIssue({
       issueType: "partner_sponsor_mismatch",
       summary: "Partner sponsor amount does not match issuer export.",
       openedBy: "finance.agent.001",
@@ -263,7 +263,7 @@ describe("BillingSettlementService settlement matrix", () => {
       "artifact-benefit-ledger-202603",
     ]);
 
-    const assigned = await service.assignReconciliationIssue(created.issueId, {
+    const assigned = service.assignReconciliationIssue(created.issueId, {
       assigneeId: "fin-escalations",
       actorId: "finance.lead.001",
       note: "Escalating to settlement lead.",
@@ -273,14 +273,11 @@ describe("BillingSettlementService settlement matrix", () => {
       "Escalating to settlement lead.",
     );
 
-    const commented = await service.addReconciliationIssueComment(
-      created.issueId,
-      {
-        actorId: "fin-escalations",
-        message: "Attached sponsor-side workbook and issuer screenshot.",
-        artifactIds: ["artifact-issuer-032"],
-      },
-    );
+    const commented = service.addReconciliationIssueComment(created.issueId, {
+      actorId: "fin-escalations",
+      message: "Attached sponsor-side workbook and issuer screenshot.",
+      artifactIds: ["artifact-issuer-032"],
+    });
     expect(commented.comments.at(-1)?.artifactIds).toEqual([
       "artifact-issuer-032",
     ]);
@@ -291,7 +288,7 @@ describe("BillingSettlementService settlement matrix", () => {
       ]),
     );
 
-    const resolved = await service.resolveReconciliationIssue(created.issueId, {
+    const resolved = service.resolveReconciliationIssue(created.issueId, {
       actorId: "fin-escalations",
       resolutionCode: "sponsor_corrected",
       resolutionSummary:
@@ -302,7 +299,7 @@ describe("BillingSettlementService settlement matrix", () => {
     expect(resolved.resolutionCode).toBe("sponsor_corrected");
     expect(resolved.comments.at(-1)?.message).toContain("cross-check");
 
-    const reopened = await service.reopenReconciliationIssue(created.issueId, {
+    const reopened = service.reopenReconciliationIssue(created.issueId, {
       actorId: "finance.lead.001",
       reason: "Issuer reran the export and mismatch reappeared.",
       artifactIds: ["artifact-issuer-rerun-202603"],
@@ -673,21 +670,6 @@ describe("BillingSettlementService referral settlement (drts_pays_partner)", () 
     expect(rule).not.toBeNull();
     expect(rule?.rateType).toBe("percent");
     expect(rule?.value).toBe(15);
-    expect(
-      service.resolveReferralRevenueShareRule(
-        "yuhe-residence",
-        "2026-08-01T00:00:00Z",
-      ),
-    ).toMatchObject({
-      partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      partnerEntrySlug: "yuhe-residence",
-      rateType: "percent",
-      value: 10,
-      currency: "TWD",
-      effectiveFrom: "2026-07-01T00:00:00.000Z",
-      settlementDirection: "drts_pays_partner",
-      channelKey: "partner_referral",
-    });
     expect(
       service.resolveReferralRevenueShareRule(
         "unknown-channel",

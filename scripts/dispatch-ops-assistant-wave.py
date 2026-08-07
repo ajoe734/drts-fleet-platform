@@ -15,7 +15,7 @@ Parallelism design (per user: maximize parallel, minimize unnecessary deps):
   Every dependency below is NECESSARY (a task literally needs the prior
   artifact). No task depends on a sibling it does not need.
 
-Healthy lanes only (gemini/gemini2/copilot are paused indefinitely).
+Healthy lanes only (gemini/gemini2 are paused indefinitely).
 Owner hints follow feedback_agent_workload_ratio.md; supervisor may reshuffle.
 
 Usage:

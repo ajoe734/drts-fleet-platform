@@ -1127,7 +1127,6 @@ export class IncidentService implements OnModuleInit {
       case "tenant_admin":
       case "ops_user":
       case "partner_api_key":
-      case "partner_user":
         return identity.actorType;
       default:
         return fallback;

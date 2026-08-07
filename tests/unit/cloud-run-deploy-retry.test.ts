@@ -154,6 +154,20 @@ describe("Cloud Run deploy quota retry", () => {
     );
   });
 
+  it("declares the explicit non-production auth mode required by API startup", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+
+    const apiEnvStart = workflow.indexOf("- name: Build API env vars");
+    const apiEnvEnd = workflow.indexOf("\n      - name:", apiEnvStart + 1);
+    const apiEnv = workflow.slice(apiEnvStart, apiEnvEnd);
+
+    expect(apiEnv).toContain("DRTS_ENV=development");
+    expect(apiEnv).toContain("AUTH_MODE=explicit");
+  });
+
   it("keeps every dev web revision usable within the low-quota profile", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),

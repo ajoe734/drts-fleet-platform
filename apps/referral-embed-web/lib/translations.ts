@@ -6,12 +6,6 @@ const en = {
   "app.title": "Referral Embed",
   "app.description":
     "Embedded DRTS ride-hailing surface for third-party referral channels (community / property-management apps): partner-scoped handoff, booking, trip status, and explicit unsupported states.",
-  "embed.systemError.eyebrow": "Service temporarily unavailable",
-  "embed.systemError.title": "This referral entry cannot be loaded right now.",
-  "embed.systemError.body":
-    "The referral service could not reach its authority backend. No booking action was submitted. Please try again after the service recovers.",
-  "embed.systemError.reference": "Incident reference: {reference}",
-  "embed.systemError.retry": "Try again",
   "common.language.switch": "Switch language",
   "common.language.en": "English",
   "common.language.zh": "Traditional Chinese",
@@ -795,12 +789,6 @@ const zh: Record<keyof typeof en, string> = {
   "app.title": "轉介嵌入前台",
   "app.description":
     "供第三方轉介渠道（社區／物業管理 App）內嵌的 DRTS 叫車前台：渠道身分交接、下單、行程狀態與明確的不支援狀態。",
-  "embed.systemError.eyebrow": "服務暫時無法使用",
-  "embed.systemError.title": "目前無法載入此轉介入口。",
-  "embed.systemError.body":
-    "轉介服務目前無法連線至權威後端，且尚未送出任何叫車操作。請待服務恢復後再試一次。",
-  "embed.systemError.reference": "事件參照：{reference}",
-  "embed.systemError.retry": "再試一次",
   "common.language.switch": "切換語言",
   "common.language.en": "English",
   "common.language.zh": "繁體中文",

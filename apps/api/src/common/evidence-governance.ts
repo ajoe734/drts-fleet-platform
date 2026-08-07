@@ -356,7 +356,7 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
       },
       {
         realms: ["partner"],
-        actorTypes: ["partner_user", "partner_api_key"],
+        actorTypes: ["partner_api_key"],
         requiredScopes: [],
         tenantScoped: true,
       },
@@ -502,8 +502,7 @@ function matchesRule(
   // an authenticated administrative realm for Phase 1 internal tooling.
   if (
     identity.scopes.length === 0 &&
-    identity.actorType !== "partner_api_key" &&
-    identity.actorType !== "partner_user"
+    identity.actorType !== "partner_api_key"
   ) {
     return true;
   }

@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "next build --webpack",
-    "dev": "next dev --webpack --hostname 0.0.0.0 --port 3014",
+    "build": "next build",
+    "dev": "next dev --hostname 0.0.0.0 --port 3014",
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3014",
     "test": "vitest run --passWithNoTests",

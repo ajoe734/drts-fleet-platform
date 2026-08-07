@@ -59,7 +59,8 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
   {
     eventType: "driver_device_session.revoked",
     eventFamily: "device",
-    description: "Driver device binding was revoked by a server-authoritative actor.",
+    description:
+      "Driver device binding was revoked by a server-authoritative actor.",
     privileged: true,
     tenantScoped: false,
     requiredOutcomes: ["revoked", "success"],
@@ -121,5 +122,50 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     privileged: true,
     tenantScoped: false,
     requiredOutcomes: ["success", "expired", "revoked"],
+  },
+  {
+    eventType: "iap_subject.resolved",
+    eventFamily: "auth",
+    description:
+      "Verified IAP workforce subject resolved to durable platform or ops membership.",
+    privileged: false,
+    tenantScoped: false,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "iap_subject.denied",
+    eventFamily: "auth",
+    description:
+      "Rejected IAP workforce assertion, wrong audience, missing token, spoof attempt, or inactive user.",
+    privileged: false,
+    tenantScoped: false,
+    requiredOutcomes: ["denied", "failure"],
+  },
+  {
+    eventType: "iap_group_drift.detected",
+    eventFamily: "role",
+    description:
+      "Group drift detected between IAP assertion groups and durable role bindings; least privilege applied.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "internal_key.used",
+    eventFamily: "credential",
+    description:
+      "Temporary internal key exception usage recorded with owner, scope, and key state.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "internal_key_drift.detected",
+    eventFamily: "credential",
+    description:
+      "Internal key drift alert triggered by undocumented, expired, revoked, or invalid internal key presentation.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["denied", "failure", "expired", "revoked"],
   },
 ] as const;

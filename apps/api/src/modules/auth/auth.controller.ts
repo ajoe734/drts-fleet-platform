@@ -1,11 +1,10 @@
-import { Body, Controller, Get, Headers, Optional, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Headers, Optional, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
   CreatePartnerBootstrapSessionCommand,
   DriverDeviceProvisioningSession,
   CreateTenantBootstrapSessionCommand,
-  IamCallbackSessionExchangeCommand,
   IdentityContext,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
@@ -33,15 +32,22 @@ import {
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
-import type { AuthBootstrapHeaders, AuthRealm } from "../../common/auth/auth.types";
+import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
-import { OidcPkceService } from "./oidc-pkce.service";
+import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import {
+  extractWorkloadIdentityExchangeNonce,
+  extractRequestedWorkloadTokenAudience,
+  extractWorkloadIdentityAssertion,
+  ServiceWorkloadIdentityAdapter,
+} from "./service-workload-identity.adapter";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -59,8 +65,12 @@ type JwtExpiresIn = NonNullable<
 
 const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
 const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
-const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV =
-  "DRTS_TENANT_BOOTSTRAP_MODE" as const;
+const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV = "DRTS_TENANT_BOOTSTRAP_MODE" as const;
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
 
 @Controller("auth")
 export class AuthController {
@@ -68,177 +78,163 @@ export class AuthController {
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly driverDeviceSessionService: DriverDeviceSessionService,
-    private readonly oidcPkceService: OidcPkceService,
     @Optional()
     private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly iapSubjectAdapter?: IAPSubjectAdapter,
+    @Optional()
+    private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
   ) {}
 
   @OpenRoute()
-  @Throttle(OPEN_ROUTE_RATE_LIMIT)
-  @Get(":realm/login")
-  getOidcLoginUrl(
-    @Param("realm") realm: AuthRealm,
-    @Query("redirect_uri") redirectUri?: string,
-    @Query("tenant_id") tenantId?: string,
-    @Query("partner_id") partnerId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    if (realm !== "tenant" && realm !== "partner") {
-      throw new ApiRequestError(
-        400,
-        "AUTH_REALM_INVALID",
-        `Unsupported OIDC realm '${realm}'. Only 'tenant' and 'partner' are supported.`,
-      );
-    }
-    const result = this.oidcPkceService.generateLoginParameters(realm, {
-      redirectUri: redirectUri ?? null,
-      tenantId: tenantId ?? null,
-      partnerId: partnerId ?? null,
-    });
-    return toApiSuccessEnvelope(result, requestId);
-  }
-
-  @OpenRoute()
-  @Throttle(OPEN_ROUTE_RATE_LIMIT)
-  @Post("tenant/callback-session")
-  async exchangeTenantCallbackSession(
-    @Body() command: IamCallbackSessionExchangeCommand,
-    @Headers("x-forwarded-for") forwardedFor?: string,
-    @Headers("x-real-ip") realIp?: string,
-    @Headers("user-agent") userAgent?: string,
-    @Headers("x-request-id") requestId?: string,
-    @Headers("x-oidc-state-token") stateTokenHeader?: string,
-  ) {
-    const stateToken = stateTokenHeader?.trim();
-    if (!stateToken) {
-      throw new ApiRequestError(
-        400,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        "Missing x-oidc-state-token header. Managed HttpOnly BFF boundary requires state token in header.",
-      );
-    }
-    const meta = this.buildMeta(
-      forwardedFor,
-      realIp,
-      userAgent,
-      requestId,
-      stateToken,
-    );
-    try {
-      const session = await this.oidcPkceService.exchangeTenantCallbackSession(
-        command,
-        meta,
-      );
-      return toApiSuccessEnvelope(session, requestId);
-    } catch (error) {
-      throw toPublicTenantAuthError(error);
-    }
-  }
-
-  @OpenRoute()
-  @Throttle(OPEN_ROUTE_RATE_LIMIT)
-  @Post("partner/callback-session")
-  async exchangePartnerCallbackSession(
-    @Body() command: IamCallbackSessionExchangeCommand,
-    @Headers("x-forwarded-for") forwardedFor?: string,
-    @Headers("x-real-ip") realIp?: string,
-    @Headers("user-agent") userAgent?: string,
-    @Headers("x-request-id") requestId?: string,
-    @Headers("x-oidc-state-token") stateTokenHeader?: string,
-  ) {
-    const stateToken = stateTokenHeader?.trim();
-    if (!stateToken) {
-      throw new ApiRequestError(
-        400,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        "Missing x-oidc-state-token header. Managed HttpOnly BFF boundary requires state token in header.",
-      );
-    }
-    const meta = this.buildMeta(
-      forwardedFor,
-      realIp,
-      userAgent,
-      requestId,
-      stateToken,
-    );
-    try {
-      const session = await this.oidcPkceService.exchangePartnerCallbackSession(
-        command,
-        meta,
-      );
-      return toApiSuccessEnvelope(session, requestId);
-    } catch (error) {
-      throw toPublicPartnerAuthError(error);
-    }
-  }
-
-  private buildMeta(
-    forwardedFor?: string,
-    realIp?: string,
-    userAgent?: string,
-    requestId?: string,
-    stateToken?: string,
-  ) {
-    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
-    const meta: {
-      sourceIp?: string;
-      userAgent?: string;
-      requestId?: string;
-      stateToken?: string;
-    } = {};
-    if (sourceIp) meta.sourceIp = sourceIp;
-    if (userAgent) meta.userAgent = userAgent;
-    if (requestId) meta.requestId = requestId;
-    if (stateToken) meta.stateToken = stateToken;
-    return meta;
-  }
-
-  @Get("session")
-  getAuthSession(
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    if (!identity) {
-      throw new ApiRequestError(
-        401,
-        "AUTHENTICATION_REQUIRED",
-        "Active session required.",
-      );
-    }
-    return toApiSuccessEnvelope(
-      {
-        active: true,
-        identity,
-      },
-      requestId,
-    );
-  }
-
-  @OpenRoute()
-  @Post("logout")
-  revokeAuthSession(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        loggedOut: true,
-        message: "Session successfully revoked.",
-      },
-      requestId,
-    );
-  }
-
   @Post("token")
-  issueToken(@Req() request: TokenRequest): {
+  async issueToken(@Req() request: TokenRequest): Promise<{
     token: string;
     expiresIn: string;
-  } {
-    // Require internal key to issue tokens
-    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
-
-    const identity = extractBootstrapRequestIdentity(request.headers, {
+  }> {
+    const strictEnvironment = isStrictAuthEnvironment();
+    const isStrictIap =
+      process.env.STRICT_IAP_MODE === "true" || strictEnvironment;
+    const rawWorkloadAssertion = extractWorkloadIdentityAssertion(
+      request.headers as Record<string, string | string[] | undefined>,
+    );
+    const rawAssertion = extractIapJwtAssertion(request.headers);
+    const bootstrapIdentity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
       method: request.method,
       requestUrl: request.originalUrl ?? request.url,
     });
+
+    if (strictEnvironment && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+      );
+    }
+
+    if (rawWorkloadAssertion && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled when workload identity proof is provided.",
+      );
+    }
+
+    if (rawWorkloadAssertion) {
+      const requestedTokenAudience = extractRequestedWorkloadTokenAudience(
+        request.headers as Record<string, string | string[] | undefined>,
+      );
+      const exchangeNonce = extractWorkloadIdentityExchangeNonce(
+        request.headers as Record<string, string | string[] | undefined>,
+      );
+      const resolved =
+        await this.serviceWorkloadIdentityAdapter?.resolveSubject(
+          request.headers as Record<string, string | string[] | undefined>,
+          {
+            requestedTokenAudience,
+            exchangeNonce,
+          },
+        );
+      if (!resolved) {
+        throw new ApiRequestError(
+          503,
+          "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+          "Workload identity validation is not configured for this environment.",
+        );
+      }
+
+      const expiresIn: JwtExpiresIn = "15m";
+      const issued = await this.issueJwtSession(
+        {
+          authMode: "jwt_bearer",
+          actorType: "system",
+          actorId: resolved.actorId,
+          principalId: resolved.principalId,
+          subject: resolved.subject,
+          realm: "system",
+          tenantId: null,
+          roleFamilies: [],
+          roles: resolved.roles,
+          scopes: resolved.scopes,
+          requestId:
+            (request.headers["x-request-id"] as string | undefined) ?? null,
+        },
+        {
+          expiresIn,
+          principalId: resolved.principalId,
+          subject: resolved.subject,
+          ensurePrincipal: false,
+          authTime: resolved.authTime,
+          amr: ["workload_identity"],
+          acr: "aal2",
+          tokenVersion: resolved.tokenVersion,
+          audience: [resolved.tokenAudience],
+          workloadExchangeNonceHash: resolved.exchangeNonceHash,
+        },
+      );
+      return { token: issued.token, expiresIn };
+    }
+
+    // Require internal key to issue tokens when workload proof is not used.
+    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
+
+    if (rawAssertion && this.iapSubjectAdapter) {
+      const expectedAudience =
+        process.env.IAP_EXPECTED_AUDIENCE ||
+        process.env.IAP_AUDIENCE ||
+        process.env.JWT_AUDIENCE;
+      const expectedIssuer = process.env.IAP_EXPECTED_ISSUER;
+      const jwtSecretOrPublicKey =
+        process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY || process.env.IAP_JWT_SECRET;
+
+      const resolved = await this.iapSubjectAdapter.resolveSubject(
+        request.headers,
+        {
+          strictIapMode: isStrictIap,
+          ...(expectedAudience ? { expectedAudience } : {}),
+          ...(expectedIssuer ? { expectedIssuer } : {}),
+          ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
+          autoProvision: !isStrictIap,
+        },
+      );
+
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType:
+          resolved.membership.realm === "platform"
+            ? "platform_admin"
+            : "ops_user",
+        actorId: resolved.principal.principalId,
+        principalId: resolved.principal.principalId,
+        membershipId: resolved.membership.membershipId,
+        subject: resolved.principal.subject,
+        realm: resolved.membership.realm as "platform" | "ops",
+        tenantId: null,
+        tokenVersion: resolved.tokenVersion,
+        roleFamilies: [resolved.membership.realm as "platform" | "ops"],
+        roles: resolved.effectiveRoles,
+        scopes: resolved.effectiveScopes,
+        requestId:
+          (request.headers["x-request-id"] as string | undefined) ?? null,
+      };
+
+      const expiresIn: JwtExpiresIn = "8h";
+      const issued = await this.issueJwtSession(identity, {
+        expiresIn,
+        principalId: resolved.principal.principalId,
+        membershipId: resolved.membership.membershipId,
+        subject: resolved.principal.subject,
+        ensurePrincipal: false,
+        authTime: new Date().toISOString(),
+        amr: ["verified_iap_workforce"],
+        acr: "aal2",
+        tokenVersion: resolved.tokenVersion,
+      });
+      return { token: issued.token, expiresIn };
+    }
+
+    const identity = bootstrapIdentity;
 
     if (!identity) {
       throw new ApiRequestError(
@@ -249,20 +245,37 @@ export class AuthController {
       );
     }
 
+    if (isStrictIap) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+      );
+    }
+
     const expiresIn: JwtExpiresIn =
-      identity.actorType === "system" ? "1h" : "8h";
-    const token = this.signJwt(identity, expiresIn);
-    return { token, expiresIn };
+      identity.actorType === "system" ? "15m" : "8h";
+    const issuedAt = new Date().toISOString();
+    const issued = await this.issueJwtSession(identity, {
+      expiresIn,
+      principalId: identity.principalId ?? identity.actorId,
+      membershipId: identity.membershipId ?? null,
+      subject: identity.subject ?? identity.actorId,
+      ensurePrincipal: true,
+      authTime: issuedAt,
+      tokenVersion: Date.parse(issuedAt),
+    });
+    return { token: issued.token, expiresIn };
   }
 
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("driver/device/register")
-  issueDriverDeviceSession(
+  async issueDriverDeviceSession(
     @Body() command: RegisterDriverDeviceCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const session = this.driverDeviceSessionService.register(
+    const session = await this.driverDeviceSessionService.register(
       command,
       requestId,
     );
@@ -275,11 +288,11 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("driver/device/refresh")
-  refreshDriverDeviceSession(
+  async refreshDriverDeviceSession(
     @Body() command: RefreshDriverDeviceSessionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const session = this.driverDeviceSessionService.refresh(command);
+    const session = await this.driverDeviceSessionService.refresh(command);
     return toApiSuccessEnvelope<DriverDeviceProvisioningSession>(
       session,
       requestId,
@@ -287,12 +300,12 @@ export class AuthController {
   }
 
   @Post("driver/device/revoke")
-  revokeDriverDeviceSession(
+  async revokeDriverDeviceSession(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: RevokeDriverDeviceBindingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = this.driverDeviceSessionService.revoke(
+    const result = await this.driverDeviceSessionService.revoke(
       command,
       identity,
       requestId,
@@ -303,7 +316,7 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("tenant/bootstrap-session")
-  issueTenantBootstrapSession(
+  async issueTenantBootstrapSession(
     @Body() command: CreateTenantBootstrapSessionCommand,
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("x-real-ip") realIp?: string,
@@ -357,11 +370,14 @@ export class AuthController {
         resolvedRoleCode,
       );
       const identity = this.buildIdentityContext(profile);
-      const token = this.signJwt(
+      const issuedAt = new Date().toISOString();
+      const issued = await this.issueJwtSession(
         {
           authMode: "jwt_bearer",
           actorType: identity.actorType,
           actorId: identity.actorId,
+          principalId: identity.actorId,
+          subject: profile.id,
           realm: identity.realm,
           tenantId: identity.tenantId,
           roleFamilies: identity.roleFamilies,
@@ -369,10 +385,19 @@ export class AuthController {
           scopes: identity.scopes,
           requestId: requestId ?? null,
         },
-        TENANT_BOOTSTRAP_EXPIRES_IN,
+        {
+          expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
+          principalId: identity.actorId,
+          subject: profile.id,
+          ensurePrincipal: true,
+          authTime: issuedAt,
+          amr: ["tenant_bootstrap_fixture"],
+          acr: "aal1",
+          tokenVersion: Date.parse(existingUser.updatedAt),
+        },
       );
       const session: TenantBootstrapSession = {
-        accessToken: token,
+        accessToken: issued.token,
         tokenType: "Bearer",
         expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
         profile,
@@ -392,9 +417,9 @@ export class AuthController {
         severity: "low",
         targetType: "tenant_portal_session",
         targetId: profile.id,
-        sessionId: null,
-        tokenId: token,
-        authMethods: ["tenant_bootstrap_exchange"],
+        sessionId: issued.sessionId,
+        tokenId: issued.tokenId,
+        authMethods: issued.amr,
         sourceIp,
         userAgent: userAgent ?? null,
         requestId: requestId ?? null,
@@ -419,8 +444,7 @@ export class AuthController {
         actorType: "system",
         subjectId: normalizedEmail,
         realm: "tenant",
-        tenantId:
-          requestedTenantId || this.tenantPartnerService.getDefaultTenantId(),
+        tenantId: requestedTenantId,
         partnerId: null,
         eventType: "tenant_bootstrap_session.denied",
         eventFamily: "auth",
@@ -451,7 +475,7 @@ export class AuthController {
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("partner/bootstrap-session")
-  issuePartnerBootstrapSession(
+  async issuePartnerBootstrapSession(
     @Body() command: CreatePartnerBootstrapSessionCommand,
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("x-real-ip") realIp?: string,
@@ -465,11 +489,14 @@ export class AuthController {
         command,
         requestId,
       );
-      const token = this.signJwt(
+      const issuedAt = new Date().toISOString();
+      const issued = await this.issueJwtSession(
         {
-          authMode: resolved.identity.authMode,
+          authMode: "jwt_bearer",
           actorType: resolved.identity.actorType,
           actorId: resolved.identity.actorId,
+          principalId: resolved.identity.actorId,
+          subject: resolved.identity.actorId,
           realm: resolved.identity.realm,
           tenantId: resolved.identity.tenantId,
           partnerId: resolved.identity.partnerId ?? null,
@@ -480,10 +507,19 @@ export class AuthController {
           scopes: resolved.identity.scopes,
           requestId: requestId ?? null,
         },
-        "1h",
+        {
+          expiresIn: "1h",
+          principalId: resolved.identity.actorId,
+          subject: resolved.identity.actorId,
+          ensurePrincipal: true,
+          authTime: issuedAt,
+          amr: ["partner_api_key"],
+          acr: "aal1",
+          tokenVersion: Date.parse(resolved.partnerEntry.updatedAt),
+        },
       );
       const session: PartnerBootstrapSession = {
-        accessToken: token,
+        accessToken: issued.token,
         tokenType: "Bearer",
         expiresIn: "1h",
         partnerEntry: resolved.partnerEntry,
@@ -506,9 +542,9 @@ export class AuthController {
         severity: "low",
         targetType: "partner_entry",
         targetId: resolved.partnerEntry.entrySlug,
-        sessionId: null,
-        tokenId: token,
-        authMethods: ["partner_api_key"],
+        sessionId: issued.sessionId,
+        tokenId: issued.tokenId,
+        authMethods: issued.amr,
         sourceIp,
         userAgent: userAgent ?? null,
         requestId: requestId ?? null,
@@ -567,8 +603,8 @@ export class AuthController {
     }
 
     return (
-      ((error.getResponse() as { error?: { code?: string } })?.error?.code ??
-        null)
+      (error.getResponse() as { error?: { code?: string } })?.error?.code ??
+      null
     );
   }
 
@@ -722,12 +758,12 @@ export class AuthController {
     return `tenant-portal-${slug}`;
   }
 
-  private signJwt(
-    identity: Parameters<JwtAuthService["sign"]>[0],
-    expiresIn: JwtExpiresIn,
+  private async issueJwtSession(
+    identity: Parameters<JwtAuthService["issueSessionToken"]>[0],
+    options?: Parameters<JwtAuthService["issueSessionToken"]>[1],
   ) {
     try {
-      return this.jwtAuthService.sign(identity, { expiresIn });
+      return await this.jwtAuthService.issueSessionToken(identity, options);
     } catch (error) {
       if (isJwtKeyMaterialNotConfiguredError(error)) {
         throw new ApiRequestError(

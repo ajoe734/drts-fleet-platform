@@ -458,13 +458,6 @@ def desired_workspace_settings(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "claudeCode.initialPermissionMode": claude_approval.get("workspace_permission_mode", "acceptEdits"),
         "claudeCode.allowDangerouslySkipPermissions": to_bool(claude_approval.get("allow_dangerous_skip", False)),
-        "github.copilot.chat.backgroundAgent.enabled": True,
-        "github.copilot.chat.cloudAgent.enabled": True,
-        "github.copilot.chat.claudeAgent.enabled": True,
-        "github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": to_bool(
-            claude_approval.get("copilot_allow_dangerous_skip", False)
-        ),
-        "github.copilot.chat.reviewAgent.enabled": True,
         "geminicodeassist.enable": True,
         "geminicodeassist.agentYoloMode": to_bool(gemini_approval.get("workspace_agent_yolo_mode", False)),
     }
@@ -529,6 +522,51 @@ def desired_gemini_settings(config: dict[str, Any]) -> dict[str, Any]:
         },
         "security": security,
     }
+
+
+def _apply_configured_adapter_health(config: dict[str, Any], report: dict[str, Any]) -> None:
+    """Expose the health of the lane's configured delivery path to operators."""
+    adapters = report.get("agent_adapters", {}) or {}
+    providers = report.get("providers", {}) or {}
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        configured_adapter = str(agent.get("adapter") or "").strip()
+        if configured_adapter != "antigravity":
+            continue
+        adapter = adapters.get(agent_id)
+        provider_key = str(agent.get("provider") or agent_id).strip()
+        provider = providers.get(provider_key)
+        if not isinstance(adapter, dict) or not isinstance(provider, dict):
+            continue
+        if str(adapter.get("adapter") or "").strip() != configured_adapter:
+            continue
+
+        provider["native_cli_auth_ready"] = provider.get("auth_ready")
+        provider["native_cli_worker_supported"] = provider.get("local_cli_worker_supported")
+        adapter_ready = adapter.get("supported") is True and adapter.get("can_auto_deliver") is True
+        auto_approve = adapter_ready and adapter.get("can_auto_approve_edits") is True
+        provider.update(
+            {
+                "installed": adapter.get("supported") is True,
+                "host_layer": adapter.get("host") or "Antigravity CLI",
+                "delivery_mode": adapter.get("delivery_mode") or configured_adapter,
+                "default_auto_approve_supported": auto_approve,
+                "full_access_supported": auto_approve,
+                "per_tool_allow_supported": auto_approve,
+                "local_cli_worker_supported": adapter_ready,
+                "supports_auto_approve": auto_approve,
+                "auth_ready": adapter_ready,
+                "applied": adapter_ready,
+                "verified": adapter.get("verified") or ("verified" if adapter_ready else "unavailable"),
+            }
+        )
+        notes = list(provider.get("notes", []) or [])
+        note = (
+            f"Effective lane health comes from configured adapter `{configured_adapter}`; "
+            "native Gemini CLI health is retained in `native_cli_*` fields."
+        )
+        if note not in notes:
+            notes.append(note)
+        provider["notes"] = notes
 
 
 def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -609,19 +647,11 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
 
     codex_profile = config.get("providers", {}).get("codex", {}).get("codex", {})
     codex_home = _codex_home(codex_profile)
+    codex_sandbox_mode = codex_profile.get("sandbox_mode", "workspace-write")
     codex_applied = (
         codex_profile.get("ask_for_approval", "never") == "never"
-        and codex_profile.get("sandbox_mode", "workspace-write") == "workspace-write"
+        and codex_sandbox_mode in {"workspace-write", "danger-full-access"}
     )
-    copilot_applied = (
-        _workspace_setting(workspace_settings, "github.copilot.chat.backgroundAgent.enabled")
-        == desired_workspace["github.copilot.chat.backgroundAgent.enabled"]
-        and _workspace_setting(workspace_settings, "github.copilot.chat.cloudAgent.enabled")
-        == desired_workspace["github.copilot.chat.cloudAgent.enabled"]
-        and _workspace_setting(workspace_settings, "github.copilot.chat.claudeAgent.enabled")
-        == desired_workspace["github.copilot.chat.claudeAgent.enabled"]
-    )
-
     report = {
         "generated_at": utc_now(),
         "workspace": {
@@ -832,7 +862,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
                 "auth_ready": copilot_auth_ready,
                 "supported_models": copilot_model_preference.get("supported", []),
                 "selected_model": copilot_model_preference.get("default"),
-                "applied": copilot_applied,
+                "applied": False,
                 "verified": "partial" if copilot_installed else "unavailable",
                 "version": copilot_version,
                 "paths": {
@@ -1052,6 +1082,9 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             "settings": settings,
             "notes": notes,
         }
+    _apply_configured_adapter_health(config, report)
+    report["providers"].pop("copilot", None)
+    report["providers"].pop("grok", None)
     return report
 
 

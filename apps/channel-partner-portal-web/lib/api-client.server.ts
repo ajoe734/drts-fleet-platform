@@ -19,12 +19,9 @@ import { ApiClient } from "@drts/api-client";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
 import { headers as nextHeaders } from "next/headers";
 
-import {
-  buildReferralPortalBootstrapContext,
-  type ReferralPortalRequestEvidence,
-} from "./referral-bootstrap-identity";
-
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
+// Self-service portals read billing/statement data scoped to one partner.
+const PORTAL_SCOPES = ["billing:read"];
 
 function resolveServerApiBaseUrl(): string {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
@@ -61,14 +58,75 @@ export interface ServerReferralPartnerClient {
   client: ApiClient;
   partnerId: string;
   partnerEntrySlug: string;
-  requestEvidence: ReferralPortalRequestEvidence;
+}
+
+function resolveHeaderOrEnv(
+  requestHeaders: Headers,
+  headerName: string,
+  envName: string,
+  fallback?: string,
+): string | null {
+  const fromHeader = requestHeaders.get(headerName)?.trim();
+  if (fromHeader) {
+    return fromHeader;
+  }
+
+  const fromEnv = process.env[envName]?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  return fallback ?? null;
 }
 
 export async function getServerReferralPartnerClient(): Promise<ServerReferralPartnerClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
-  const { defaultHeaders, partnerId, partnerEntrySlug, requestEvidence } =
-    buildReferralPortalBootstrapContext();
+  const partnerId =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-partner-id",
+      "DRTS_PARTNER_ID",
+      "partner-referral-demo-001",
+    ) ?? "partner-referral-demo-001";
+  const tenantId = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-tenant-id",
+    "DRTS_TENANT_ID",
+    "tenant-demo-001",
+  );
+  const partnerProgramId = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-partner-program-id",
+    "DRTS_PARTNER_PROGRAM_ID",
+    "program-referral-community",
+  );
+  const partnerEntrySlug = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-partner-entry-slug",
+    "DRTS_PARTNER_ENTRY_SLUG",
+    "referral-demo-community",
+  );
+
+  const defaultHeaders: Record<string, string> = {
+    "x-actor-type": "partner_api_key",
+    "x-actor-id": partnerId,
+    "x-partner-id": partnerId,
+    "x-roles": "partner",
+    "x-role-families": "partner",
+    "x-scopes": PORTAL_SCOPES.join(","),
+    "x-realm": "partner",
+  };
+
+  if (tenantId) {
+    defaultHeaders["x-tenant-id"] = tenantId;
+  }
+  if (partnerProgramId) {
+    defaultHeaders["x-partner-program-id"] = partnerProgramId;
+  }
+  if (partnerEntrySlug) {
+    defaultHeaders["x-partner-entry-slug"] = partnerEntrySlug;
+  }
 
   const iapEmail = requestHeaders.get(CONTROL_PLANE_IAP_EMAIL_HEADER);
   if (iapEmail) {
@@ -101,7 +159,6 @@ export async function getServerReferralPartnerClient(): Promise<ServerReferralPa
       defaultHeaders,
     }),
     partnerId,
-    partnerEntrySlug,
-    requestEvidence,
+    partnerEntrySlug: partnerEntrySlug ?? "referral-demo-community",
   };
 }

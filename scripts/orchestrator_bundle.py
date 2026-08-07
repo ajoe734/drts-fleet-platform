@@ -240,7 +240,6 @@ This bundle only seeds the collaboration/control-plane layer. As the repo gains 
 - `Gemini`: cloud/runtime packaging, CI/CD, worker operations
 - `Gemini2`: cloud/runtime packaging, CI/CD, worker operations, separate Gemini account/quota lane
 - `Codex`: contracts, state system, schema, acceptance
-- `Copilot`: coding assist, research ingestion, external search, critique
 
 ### Task Ownership
 
@@ -322,14 +321,6 @@ Working rules:
 - if you are the reviewer, finish `review` tasks first
 - if you are the owner of a `review_approved` canonical task, verify, commit, normal non-force push, then finalize it to `done` with commit and push metadata
 - if review fails, write concrete changes and return the task to the owner
-"""
-
-
-def copilot_alias_brief(project_name: str) -> str:
-    return f"""# FOR_GROK
-
-`Copilot` is the canonical fourth lane name in `{project_title(project_name)}`.
-Use [FOR_COPILOT.md](FOR_COPILOT.md) as the active brief.
 """
 
 
@@ -417,7 +408,7 @@ Print the repo-aware prompt with:
 python3 scripts/ai_status.py prompt
 ```
 
-Use that output as the first prompt in Claude Code, Codex CLI, Gemini CLI, Copilot, or any other connected coding LLM.
+Use that output as the first prompt in Claude Code, Codex CLI, Gemini CLI, or any other connected coding LLM.
 
 ## 3. Shared Truth Rules
 
@@ -493,11 +484,6 @@ def workspace_settings() -> dict:
     return {
         "claudeCode.initialPermissionMode": "acceptEdits",
         "claudeCode.allowDangerouslySkipPermissions": False,
-        "github.copilot.chat.backgroundAgent.enabled": True,
-        "github.copilot.chat.cloudAgent.enabled": True,
-        "github.copilot.chat.claudeAgent.enabled": True,
-        "github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": False,
-        "github.copilot.chat.reviewAgent.enabled": True,
         "geminicodeassist.enable": True,
         "geminicodeassist.agentYoloMode": False,
     }
@@ -533,8 +519,6 @@ def ensure_clean_targets(target_root: Path, force: bool) -> None:
         target_root / "FOR_CLAUDE.md",
         target_root / "FOR_GEMINI.md",
         target_root / "FOR_CODEX.md",
-        target_root / "FOR_COPILOT.md",
-        target_root / "FOR_GROK.md",
         target_root / "LLM_ONBOARDING.md",
         target_root / "ORCHESTRATOR_QUICKSTART.md",
         target_root / "ai-status.json",
@@ -567,8 +551,6 @@ def write_bootstrap_files(target_root: Path, project_name: str, objective: str) 
     write_text(target_root / "FOR_CLAUDE.md", agent_brief("Claude", ai_status.KNOWN_AGENTS["Claude"]["capability_lane"], project_name))
     write_text(target_root / "FOR_GEMINI.md", agent_brief("Gemini", ai_status.KNOWN_AGENTS["Gemini"]["capability_lane"], project_name))
     write_text(target_root / "FOR_CODEX.md", agent_brief("Codex", ai_status.KNOWN_AGENTS["Codex"]["capability_lane"], project_name))
-    write_text(target_root / "FOR_COPILOT.md", agent_brief("Copilot", ai_status.KNOWN_AGENTS["Copilot"]["capability_lane"], project_name))
-    write_text(target_root / "FOR_GROK.md", copilot_alias_brief(project_name))
     write_text(target_root / "LLM_ONBOARDING.md", llm_onboarding_doc(project_name))
     write_text(target_root / "ORCHESTRATOR_QUICKSTART.md", quickstart_doc(project_name))
     write_json(target_root / ".orchestrator" / "bundle-manifest.json", portable_manifest(project_name))

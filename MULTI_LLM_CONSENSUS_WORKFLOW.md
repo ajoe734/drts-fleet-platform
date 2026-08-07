@@ -59,8 +59,7 @@ Default review order for the first loop:
 
 1. `Qwen`
 2. `Gemini`
-3. `Copilot`
-4. `Claude`
+3. `Claude`
 
 ### Step 4. Run discussion rounds
 

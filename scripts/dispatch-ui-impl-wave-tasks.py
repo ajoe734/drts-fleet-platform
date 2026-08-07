@@ -11,7 +11,7 @@ Total: 90 tasks (13 BE + 5 CL + 1 FE-TOKENS + 4 FE umbrellas + 67 FE sub-tasks)
 
 Owner suggestions follow the workload ratio
 ``feedback_agent_workload_ratio.md`` (Codex/Codex2 ≈ 70%, Claude/Claude2 ≈
-20%, Gemini/Gemini2/Copilot ≈ 10%). Supervisor's availability-first
+20%, Gemini/Gemini2 ≈ 10%). Supervisor's availability-first
 scheduler may reshuffle (per
 ``feedback_supervisor_ignores_explicit_owner.md``); these are best-effort
 hints, not commitments.
@@ -278,8 +278,8 @@ OPS_SUBTASKS = [
     ("VEH", "Codex", "Codex2", "Vehicles list", "vehicles/page.tsx"),
     ("VEHID", "Claude", "Codex", "Vehicle detail (NEW per Q-OPS02)", "vehicles/[vehicleId]/page.tsx"),
     ("CON", "Codex2", "Codex", "Contracts list", "contracts/page.tsx"),
-    ("CONID", "Copilot", "Codex", "Contract detail (NEW per Q-OPS03)", "contracts/[contractId]/page.tsx"),
-    ("FF", "Copilot", "Codex2", "Feature flags (read-only)", "feature-flags/page.tsx"),
+    ("CONID", "Codex2", "Codex", "Contract detail (NEW per Q-OPS03)", "contracts/[contractId]/page.tsx"),
+    ("FF", "Codex", "Codex2", "Feature flags (read-only)", "feature-flags/page.tsx"),
 ]
 
 ADM_SUBTASKS = [
@@ -299,7 +299,7 @@ ADM_SUBTASKS = [
     ("HLT", "Gemini2", "Codex", "Platform health", "health/page.tsx"),
     ("NTC", "Codex", "Codex2", "Notices + maintenance mode (multi-tab)", "notices/page.tsx"),
     ("AUD", "Codex2", "Codex", "Audit & evidence governance", "audit/page.tsx"),
-    ("FF", "Copilot", "Codex2", "Feature flags (write authority)", "feature-flags/page.tsx"),
+    ("FF", "Codex", "Codex2", "Feature flags (write authority)", "feature-flags/page.tsx"),
     ("ADP", "Codex", "Codex2", "Adapter registry (split authority)", "adapter-registry/page.tsx"),
 ]
 
@@ -322,8 +322,8 @@ TEN_SUBTASKS = [
     ("IG", "Claude2", "Codex", "Integration governance (aggregated per Q-TEN10)", "integration-governance/page.tsx"),
     ("RPT", "Codex2", "Codex", "Reports (NEW per Q-TEN02)", "reports/page.tsx"),
     ("AUD", "Codex", "Codex2", "Audit trail (cross-actor per Q-TEN13)", "audit/page.tsx"),
-    ("FF", "Copilot", "Codex2", "Feature flags (read-only NEW per Q-TEN02)", "feature-flags/page.tsx"),
-    ("SET", "Copilot", "Codex", "Tenant settings", "settings/page.tsx"),
+    ("FF", "Codex", "Codex2", "Feature flags (read-only NEW per Q-TEN02)", "feature-flags/page.tsx"),
+    ("SET", "Codex2", "Codex", "Tenant settings", "settings/page.tsx"),
 ]
 
 DRV_SUBTASKS = [

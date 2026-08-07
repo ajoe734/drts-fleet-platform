@@ -163,35 +163,6 @@ describe("RegulatoryRegistryService", () => {
     }
   });
 
-  it("preserves an explicit manual dispatch hold until an operator releases it", () => {
-    const { service } = createService();
-
-    const held = service.updateVehicleCompliance("veh-demo-001", {
-      dispatchableFlag: false,
-    });
-    expect(held).toMatchObject({
-      dispatchableFlag: false,
-      supplyLifecycle: {
-        dispatch: {
-          eligible: false,
-          blockedReasons: ["manual_hold"],
-        },
-      },
-    });
-
-    const reconciled = service.updateVehicleCompliance("veh-demo-001", {});
-    expect(reconciled.dispatchableFlag).toBe(false);
-    expect(reconciled.supplyLifecycle.dispatch.blockedReasons).toContain(
-      "manual_hold",
-    );
-
-    const released = service.updateVehicleCompliance("veh-demo-001", {
-      dispatchableFlag: true,
-    });
-    expect(released.dispatchableFlag).toBe(true);
-    expect(released.supplyLifecycle.dispatch.blockedReasons).toEqual([]);
-  });
-
   it("invalidates active supply and emits a lifecycle event when insurance expires", () => {
     const { service, opsDispatchEventsService } = createService();
 
@@ -326,7 +297,6 @@ describe("RegulatoryRegistryService", () => {
       "contract_draft",
       "insurance_pending",
       "exclusivity_pending_review",
-      "manual_hold",
     ]);
   });
 

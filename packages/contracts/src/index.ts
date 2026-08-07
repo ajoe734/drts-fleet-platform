@@ -1,6 +1,5 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-export * from "./iam-contracts";
 import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
 import type {
   SandboxAuthorizationStatus,
@@ -793,15 +792,10 @@ export interface IdentityContext {
     | "ops_user"
     | "driver_user"
     | "partner_api_key"
-    | "partner_user"
     | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
-  authMode:
-    | "bootstrap_headers"
-    | "jwt_bearer"
-    | "partner_api_key"
-    | "referral_bearer";
+  authMode: "bootstrap_headers" | "jwt_bearer";
   roleFamilies: Array<"platform" | "tenant" | "ops" | "driver" | "partner">;
   roles: string[];
   scopes: string[];
@@ -1010,9 +1004,18 @@ export interface PartnerIngressCredentialRecord {
   keyPrefix: string;
   maskedSuffix: string;
   source: "env_bootstrap" | "platform_admin";
+  ownerId: string | null;
+  purpose: string;
+  realm: IdentityContext["realm"] | null;
+  resourceScope: string;
   createdAt: string;
+  expiresAt: string | null;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  rotationWindowEndsAt: string | null;
+  replacedBy: string | null;
+  replacedAt: string | null;
+  status: "active" | "rotated" | "revoked" | "expired";
   issuedBy: string | null;
   revokedBy: string | null;
   rotationReason: string | null;
@@ -1219,7 +1222,6 @@ export interface AuditLogRecord {
     | "tenant_admin"
     | "ops_user"
     | "partner_api_key"
-    | "partner_user"
     | "referral_passenger";
   tenantId: string | null;
   moduleName: string;
@@ -1230,85 +1232,6 @@ export interface AuditLogRecord {
   newValuesSummary?: Record<string, unknown>;
   requestId: string;
   createdAt: string;
-}
-
-export const SECURITY_EVENT_FAMILIES = [
-  "auth",
-  "session",
-  "account",
-  "role",
-  "invitation",
-  "device",
-  "credential",
-  "policy",
-  "break_glass",
-] as const;
-export type SecurityEventFamily = (typeof SECURITY_EVENT_FAMILIES)[number];
-
-export const SECURITY_EVENT_OUTCOMES = [
-  "success",
-  "failure",
-  "denied",
-  "revoked",
-  "expired",
-] as const;
-export type SecurityEventOutcome = (typeof SECURITY_EVENT_OUTCOMES)[number];
-
-export const SECURITY_EVENT_SEVERITIES = [
-  "low",
-  "medium",
-  "high",
-  "critical",
-] as const;
-export type SecurityEventSeverity = (typeof SECURITY_EVENT_SEVERITIES)[number];
-
-export interface SecurityEventRecord {
-  eventId: string;
-  occurredAt: string;
-  eventType: string;
-  eventFamily: SecurityEventFamily;
-  outcome: SecurityEventOutcome;
-  severity: SecurityEventSeverity;
-  actorId: string | null;
-  actorType: IdentityContext["actorType"];
-  subjectIdHash: string | null;
-  realm: IdentityContext["realm"];
-  tenantId: string | null;
-  partnerId: string | null;
-  targetType: string | null;
-  targetId: string | null;
-  sessionId: string | null;
-  tokenIdHash: string | null;
-  authMethods: string[];
-  sourceIpPrefix: string | null;
-  userAgentHash: string | null;
-  requestId: string | null;
-  traceId: string | null;
-  reasonCode: string | null;
-  approvalId: string | null;
-  policyVersion: string | null;
-  beforeSummary: Record<string, unknown> | null;
-  afterSummary: Record<string, unknown> | null;
-  maskedContext: Record<string, unknown>;
-}
-
-export interface SecurityEventQuery {
-  tenantId?: string | null;
-  partnerId?: string | null;
-  actorId?: string | null;
-  eventFamily?: SecurityEventFamily | null;
-  eventType?: string | null;
-  outcome?: SecurityEventOutcome | null;
-  limit?: number | null;
-}
-
-export interface SecurityEventMatrixEntry {
-  eventType: string;
-  eventFamily: SecurityEventFamily;
-  description: string;
-  privileged: boolean;
-  tenantScoped: boolean;
-  requiredOutcomes: SecurityEventOutcome[];
 }
 
 export const EVIDENCE_RETENTION_FAMILIES = [
@@ -1599,6 +1522,12 @@ export type TenantWebhookEndpointStatus =
 export interface TenantWebhookEndpoint {
   webhookId: string;
   tenantId: string;
+  ownerId: string | null;
+  purpose: string;
+  realm: IdentityContext["realm"] | null;
+  resourceScope: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
   url: string;
   events: string[];
   status: TenantWebhookEndpointStatus;
@@ -2296,111 +2225,6 @@ export interface TenantBookingQuotaImpactPreview {
   combinedTriggered: "none" | "warn" | "approval" | "block";
 }
 
-// --- Canonical Identity & Membership ---
-export const CANONICAL_ACCOUNT_STATUSES = [
-  "invited",
-  "pending_verification",
-  "active",
-  "locked",
-  "suspended",
-  "disabled",
-  "deletion_pending",
-  "deleted",
-  "migration_pending",
-] as const;
-export type CanonicalAccountStatus =
-  (typeof CANONICAL_ACCOUNT_STATUSES)[number];
-
-export const CANONICAL_PRINCIPAL_TYPES = [
-  "human",
-  "service",
-  "device",
-  "partner_machine",
-] as const;
-export type CanonicalPrincipalType = (typeof CANONICAL_PRINCIPAL_TYPES)[number];
-
-export interface CanonicalIdentityPrincipalRecord {
-  principalId: string;
-  sourceRef: string | null;
-  issuer: string;
-  subject: string;
-  principalType: CanonicalPrincipalType;
-  email: string | null;
-  emailVerified: boolean;
-  displayName: string | null;
-  status: CanonicalAccountStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CanonicalIdentityMembershipRecord {
-  membershipId: string;
-  sourceRef: string | null;
-  principalId: string;
-  realm: string;
-  scopeRef: string;
-  tenantId: string | null;
-  partnerId: string | null;
-  status: CanonicalAccountStatus;
-  invitedByPrincipalId: string | null;
-  invitationId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CanonicalIdentityRoleBindingRecord {
-  roleBindingId: string;
-  sourceRef: string | null;
-  membershipId: string;
-  roleCode: string;
-  grantedByPrincipalId: string | null;
-  approvalId: string | null;
-  validFrom: string;
-  validTo: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export const CANONICAL_INVITATION_DELIVERY_STATUSES = [
-  "pending_delivery",
-  "delivered",
-  "legacy_backfill",
-  "delivery_failed",
-] as const;
-export type CanonicalInvitationDeliveryStatus =
-  (typeof CANONICAL_INVITATION_DELIVERY_STATUSES)[number];
-
-export interface CanonicalIdentityInvitationRecord {
-  invitationId: string;
-  sourceRef: string | null;
-  membershipId: string;
-  issuerPrincipalId: string | null;
-  realm: string;
-  scopeRef: string;
-  tenantId: string | null;
-  partnerId: string | null;
-  email: string;
-  roleCode: string;
-  tokenHash: string;
-  deliveryStatus: CanonicalInvitationDeliveryStatus;
-  expiresAt: string;
-  acceptedAt: string | null;
-  revokedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CanonicalTenantUserIdentitySnapshot {
-  principal: CanonicalIdentityPrincipalRecord;
-  membership: CanonicalIdentityMembershipRecord;
-  roleBinding: CanonicalIdentityRoleBindingRecord;
-  invitation: CanonicalIdentityInvitationRecord | null;
-}
-
-export function isCanonicalAccountActive(status: CanonicalAccountStatus) {
-  return status === "active";
-}
-
 // --- Tenant User & Roles ---
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 
@@ -2414,8 +2238,6 @@ export interface TenantUserRoleRecord {
   approvalNotificationOptOut: boolean;
   invitedAt: string;
   updatedAt: string;
-  subjectId?: string;
-  subject?: string;
 }
 
 export interface CreateTenantUserCommand {
@@ -2444,10 +2266,18 @@ export interface TenantApiKeyRecord {
   keyName: string;
   keyPrefix: string;
   maskedSuffix: string;
+  ownerId: string | null;
+  purpose: string;
+  realm: IdentityContext["realm"] | null;
+  resourceScope: string;
   scopes: string[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   revokedAt: string | null;
+  rotationWindowEndsAt: string | null;
+  replacedBy: string | null;
+  replacedAt: string | null;
+  status: "active" | "rotated" | "revoked" | "expired";
   createdAt: string;
 }
 
@@ -3217,17 +3047,6 @@ export interface OwnedOrderRecord {
   lastDispatchFailureReason: string | null;
   noSupplyEscalation: NoSupplyEscalationRecord | null;
   dispatchTimeout: DispatchTimeoutRecord | null;
-  referralPassengerLifecycle?: {
-    bookingIdempotencyKey?: string;
-    rating?: {
-      orderId: string;
-      score: 1 | 2 | 3 | 4 | 5;
-      comment?: string;
-      tags: string[];
-      idempotencyKey?: string;
-      submittedAt: string;
-    };
-  } | null;
   createdAt: string;
   updatedAt: string;
 }

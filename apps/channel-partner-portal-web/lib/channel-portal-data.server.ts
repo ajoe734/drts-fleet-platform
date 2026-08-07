@@ -22,10 +22,8 @@ import type {
   ReferralStatementRecord,
   ReferralStatementStatus,
 } from "./referral-portal-contracts";
-import type {
-  DataSource,
-  ReferralPortalEvidence,
-} from "./referral-portal-evidence";
+
+export type DataSource = "live" | "fallback";
 
 // --- shared formatters ------------------------------------------------------
 
@@ -158,7 +156,6 @@ export interface ReferralDashboardView {
   summary: ReferralDashboardFixture;
   periods: ReferralUsagePeriod[];
   source: DataSource;
-  evidence: ReferralPortalEvidence;
 }
 
 function mapReferralDashboard(
@@ -193,8 +190,8 @@ function mapReferralUsagePeriod(
 }
 
 export async function loadReferralDashboard(): Promise<ReferralDashboardView> {
-  const { client, requestEvidence } = await getServerReferralPartnerClient();
   try {
+    const { client } = await getServerReferralPartnerClient();
     const [summary, usageResponse] = await Promise.all([
       client.get<PartnerReferralDashboardRecord>(
         "/api/partner/referral/dashboard",
@@ -207,14 +204,12 @@ export async function loadReferralDashboard(): Promise<ReferralDashboardView> {
       summary: mapReferralDashboard(summary),
       periods: usageResponse.items.map(mapReferralUsagePeriod),
       source: "live",
-      evidence: { ...requestEvidence, source: "live" },
     };
   } catch {
     return {
       summary: FX_REFERRAL_DASHBOARD,
       periods: FX_REFERRAL_USAGE_PERIODS,
       source: "fallback",
-      evidence: { ...requestEvidence, source: "fallback" },
     };
   }
 }
@@ -224,19 +219,17 @@ export interface ReferralUsageView {
   dailyRows: ReferralUsageDailyRow[];
   tripRows: ReferralStatementLineView[];
   source: DataSource;
-  evidence: ReferralPortalEvidence;
 }
 
 export async function loadReferralUsage(): Promise<ReferralUsageView> {
-  const { client, requestEvidence } = await getServerReferralPartnerClient();
   const fallback: ReferralUsageView = {
     periods: FX_REFERRAL_USAGE_PERIODS,
     dailyRows: FX_REFERRAL_USAGE_DAILY,
     tripRows: FX_REFERRAL_STATEMENTS[0]?.lines ?? [],
     source: "fallback",
-    evidence: { ...requestEvidence, source: "fallback" },
   };
   try {
+    const { client } = await getServerReferralPartnerClient();
     const [usageResponse, statementResponse] = await Promise.all([
       client.get<{ items: PartnerReferralUsagePeriodRecord[] }>(
         "/api/partner/referral/usage",
@@ -253,7 +246,6 @@ export async function loadReferralUsage(): Promise<ReferralUsageView> {
         dailyRows: [],
         tripRows: [],
         source: "live",
-        evidence: { ...requestEvidence, source: "live" },
       };
     }
     const mappedStatement = mapReferralStatement(currentStatement);
@@ -262,7 +254,6 @@ export async function loadReferralUsage(): Promise<ReferralUsageView> {
       dailyRows: buildReferralDailyUsage(currentStatement.lines),
       tripRows: mappedStatement.lines,
       source: "live",
-      evidence: { ...requestEvidence, source: "live" },
     };
   } catch {
     return fallback;
@@ -272,25 +263,22 @@ export async function loadReferralUsage(): Promise<ReferralUsageView> {
 export interface ReferralRevenueView {
   rows: PartnerReferralRevenuePeriodRecord[];
   source: DataSource;
-  evidence: ReferralPortalEvidence;
 }
 
 export async function loadReferralRevenue(): Promise<ReferralRevenueView> {
-  const { client, requestEvidence } = await getServerReferralPartnerClient();
   try {
+    const { client } = await getServerReferralPartnerClient();
     const response = await client.get<{
       items: PartnerReferralRevenuePeriodRecord[];
     }>("/api/partner/referral/revenue");
     return {
       rows: response.items,
       source: "live",
-      evidence: { ...requestEvidence, source: "live" },
     };
   } catch {
     return {
       rows: [],
       source: "fallback",
-      evidence: { ...requestEvidence, source: "fallback" },
     };
   }
 }
@@ -298,25 +286,22 @@ export async function loadReferralRevenue(): Promise<ReferralRevenueView> {
 export interface ReferralStatementsView {
   rows: ReferralStatementView[];
   source: DataSource;
-  evidence: ReferralPortalEvidence;
 }
 
 export async function loadReferralStatements(): Promise<ReferralStatementsView> {
-  const { client, requestEvidence } = await getServerReferralPartnerClient();
   try {
+    const { client } = await getServerReferralPartnerClient();
     const response = await client.get<{ items: ReferralStatementRecord[] }>(
       "/api/partner/referral/statements",
     );
     return {
       rows: response.items.map(mapReferralStatement),
       source: "live",
-      evidence: { ...requestEvidence, source: "live" },
     };
   } catch {
     return {
       rows: FX_REFERRAL_STATEMENTS,
       source: "fallback",
-      evidence: { ...requestEvidence, source: "fallback" },
     };
   }
 }
@@ -324,28 +309,25 @@ export async function loadReferralStatements(): Promise<ReferralStatementsView> 
 export interface ReferralStatementDetailView {
   statement: ReferralStatementView | null;
   source: DataSource;
-  evidence: ReferralPortalEvidence;
 }
 
 export async function loadReferralStatementDetail(
   period: string,
 ): Promise<ReferralStatementDetailView> {
-  const { client, requestEvidence } = await getServerReferralPartnerClient();
   try {
+    const { client } = await getServerReferralPartnerClient();
     const statement = await client.get<ReferralStatementRecord>(
       `/api/partner/referral/statements/${encodeURIComponent(period)}`,
     );
     return {
       statement: mapReferralStatement(statement),
       source: "live",
-      evidence: { ...requestEvidence, source: "live" },
     };
   } catch {
     return {
       statement:
         FX_REFERRAL_STATEMENTS.find((item) => item.period === period) ?? null,
       source: "fallback",
-      evidence: { ...requestEvidence, source: "fallback" },
     };
   }
 }

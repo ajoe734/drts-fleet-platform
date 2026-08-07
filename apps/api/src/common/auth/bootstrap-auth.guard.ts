@@ -9,6 +9,8 @@ import { Reflector } from "@nestjs/core";
 import { ApiRequestError } from "../api-envelope";
 import { DriverDeviceSessionService } from "../../modules/auth/driver-device-session.service";
 import { AuditNotificationService } from "../../modules/audit-notification/audit-notification.service";
+import { IAPSubjectAdapter } from "../../modules/auth/iap-subject.adapter";
+import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
@@ -20,7 +22,8 @@ import type {
 } from "./auth.types";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
-import { JwtAuthService, type JwtIdentityPayload } from "./jwt-auth.service";
+import { JwtAuthService } from "./jwt-auth.service";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 function asHeaderRecord(
   headers: unknown,
@@ -94,6 +97,10 @@ function mergeUnique<T>(...values: readonly T[][]): T[] {
   return [...new Set(values.flat())];
 }
 
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as Promise<T> | null)?.then === "function";
+}
+
 function extractBearerToken(
   headers: Record<string, string | string[] | undefined>,
 ): string | null {
@@ -102,6 +109,42 @@ function extractBearerToken(
   const value = Array.isArray(authHeader) ? authHeader[0] : authHeader;
   if (!value || !value.startsWith("Bearer ")) return null;
   return value.slice(7).trim() || null;
+}
+
+function hasControlPlaneInnerBearer(
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  const value = headers["x-drts-authorization"];
+  const header = Array.isArray(value) ? value[0] : value;
+  return Boolean(header?.startsWith("Bearer "));
+}
+
+function hasBootstrapAuthSignal(
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  return [
+    "x-actor-type",
+    "x-actor-id",
+    "x-realm",
+    "x-roles",
+    "x-role-families",
+    "x-scopes",
+    "x-auth-mode",
+    "x-tenant-id",
+    "x-partner-id",
+    "x-partner-program-id",
+    "x-partner-entry-slug",
+  ].some((key) => {
+    const value = headers[key];
+    return Array.isArray(value)
+      ? value.some((entry) => Boolean(entry?.trim()))
+      : typeof value === "string" && value.trim().length > 0;
+  });
+}
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
 }
 
 @Injectable()
@@ -113,14 +156,30 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly driverDeviceSessionService?: DriverDeviceSessionService,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly iapSubjectAdapter?: IAPSubjectAdapter,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<AuthenticatedRequestLike>();
     const requestUrl = request.originalUrl ?? request.url ?? "";
     const baseHeaders = asHeaderRecord(request.headers);
+    const strictEnvironment = isStrictAuthEnvironment();
+
+    if (strictEnvironment && hasBootstrapAuthSignal(baseHeaders)) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
+    }
+
     const isOpenRoute =
       this.reflector.getAllAndOverride<boolean>(AUTH_OPEN_ROUTE_KEY, [
         context.getHandler(),
@@ -128,8 +187,12 @@ export class BootstrapAuthGuard implements CanActivate {
       ]) ?? false;
 
     if (isOpenRoute) {
-      this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
-      return true;
+      const resolution = this.populateOpenRouteIdentity(
+        request,
+        baseHeaders,
+        requestUrl,
+      );
+      return isPromiseLike(resolution) ? resolution.then(() => true) : true;
     }
 
     const routePolicy = resolveRouteAuthPolicy(
@@ -166,36 +229,117 @@ export class BootstrapAuthGuard implements CanActivate {
           }
         : null;
 
+    // IAP workforce subject resolution if IAP assertion is present
+    const rawIapAssertion = extractIapJwtAssertion(baseHeaders);
+    if (rawIapAssertion && this.iapSubjectAdapter) {
+      return this.resolveIapAssertionAndActivate(request, baseHeaders, policy);
+    }
+
+    return this.activateNonIap(request, baseHeaders, requestUrl, policy);
+  }
+
+  private async resolveIapAssertionAndActivate(
+    request: AuthenticatedRequestLike,
+    baseHeaders: Record<string, string | string[] | undefined>,
+    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+  ): Promise<boolean> {
+    const authEnvironment = detectAuthEnvironment(process.env);
+    const isStrictIap =
+      process.env.STRICT_IAP_MODE === "true" ||
+      authEnvironment === "production" ||
+      authEnvironment === "staging";
+    const expectedAudience =
+      process.env.IAP_EXPECTED_AUDIENCE ||
+      process.env.IAP_AUDIENCE ||
+      process.env.JWT_AUDIENCE;
+    const expectedIssuer = process.env.IAP_EXPECTED_ISSUER;
+    const jwtSecretOrPublicKey =
+      process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY || process.env.IAP_JWT_SECRET;
+
+    const resolved = await this.iapSubjectAdapter!.resolveSubject(baseHeaders, {
+      strictIapMode: isStrictIap,
+      ...(expectedAudience ? { expectedAudience } : {}),
+      ...(expectedIssuer ? { expectedIssuer } : {}),
+      ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
+      autoProvision: !isStrictIap,
+    });
+
+    const identity: BootstrapRequestIdentity = {
+      authMode: "jwt_bearer",
+      actorType:
+        resolved.membership.realm === "platform"
+          ? "platform_admin"
+          : "ops_user",
+      actorId: resolved.principal.principalId,
+      subject: resolved.principal.subject,
+      realm: resolved.membership.realm as "platform" | "ops",
+      tenantId: null,
+      roleFamilies: [resolved.membership.realm as "platform" | "ops"],
+      roles: resolved.effectiveRoles,
+      scopes: resolved.effectiveScopes,
+      requestId: (baseHeaders["x-request-id"] as string | undefined) ?? null,
+    };
+
+    request.identity = identity;
+    if (policy) {
+      try {
+        this.assertRealmAllowed(identity, policy.allowedRealms, request);
+        this.assertScopesAllowed(identity, policy.requiredScopes, request);
+      } catch (error) {
+        this.recordAuthorizationDenialAudit(identity, request, error);
+        throw error;
+      }
+    }
+    return true;
+  }
+
+  private activateNonIap(
+    request: AuthenticatedRequestLike,
+    baseHeaders: Record<string, string | string[] | undefined>,
+    requestUrl: string,
+    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+  ): boolean | Promise<boolean> {
+    const strictEnvironment = isStrictAuthEnvironment();
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
-        const payload = this.jwtAuthService.verify(token);
-        if (payload) {
-          this.assertDriverBindingActive(payload, requestUrl);
-          const identity = this.jwtAuthService.toRequestIdentity(payload);
-          request.identity = identity;
-          if (policy) {
-            try {
-              this.assertRealmAllowed(identity, policy.allowedRealms, request);
-              this.assertScopesAllowed(
-                identity,
-                policy.requiredScopes,
-                request,
+        return this.jwtAuthService
+          .verifyAccessToken(token, {
+            allowControlPlaneProxyToken:
+              hasControlPlaneInnerBearer(baseHeaders),
+          })
+          .then((payload) => {
+            if (!payload) {
+              throw new ApiRequestError(
+                401,
+                "JWT_INVALID",
+                "Bearer token is invalid or expired.",
+                { route: requestUrl },
               );
-            } catch (error) {
-              this.recordAuthorizationDenialAudit(identity, request, error);
-              throw error;
             }
-          }
-          return true;
-        }
-        throw new ApiRequestError(
-          401,
-          "JWT_INVALID",
-          "Bearer token is invalid or expired.",
-          { route: requestUrl },
-        );
+
+            const identity = this.jwtAuthService!.toRequestIdentity(payload);
+            request.identity = identity;
+            if (policy) {
+              try {
+                this.assertRealmAllowed(
+                  identity,
+                  policy.allowedRealms,
+                  request,
+                );
+                this.assertScopesAllowed(
+                  identity,
+                  policy.requiredScopes,
+                  request,
+                );
+              } catch (error) {
+                this.recordAuthorizationDenialAudit(identity, request, error);
+                throw error;
+              }
+            }
+            return true;
+          });
       }
     }
     const headers = isSseBootstrapQueryRoute(
@@ -208,6 +352,24 @@ export class BootstrapAuthGuard implements CanActivate {
         )
       : baseHeaders;
 
+    const bootstrapIdentity = extractBootstrapRequestIdentity(headers, {
+      allowAnonymous: false,
+      method: request.method ?? undefined,
+      requestUrl: requestUrl || undefined,
+    });
+
+    if (strictEnvironment && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
+    }
+
     if (!policy) {
       const anonymousIdentity = extractBootstrapRequestIdentity(headers, {
         allowAnonymous: true,
@@ -219,12 +381,7 @@ export class BootstrapAuthGuard implements CanActivate {
       }
       return true;
     }
-
-    const identity = extractBootstrapRequestIdentity(headers, {
-      allowAnonymous: false,
-      method: request.method ?? undefined,
-      requestUrl: requestUrl || undefined,
-    });
+    const identity = bootstrapIdentity;
 
     if (!identity) {
       throw new ApiRequestError(
@@ -256,23 +413,45 @@ export class BootstrapAuthGuard implements CanActivate {
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
-  ) {
+  ): void | Promise<void> {
+    const strictEnvironment = isStrictAuthEnvironment();
     if (this.jwtAuthService) {
       const token = extractBearerToken(baseHeaders);
       if (token) {
-        const payload = this.jwtAuthService.verify(token);
-        if (payload) {
-          this.assertDriverBindingActive(payload, requestUrl);
-          request.identity = this.jwtAuthService.toRequestIdentity(payload);
-          return;
-        }
-        throw new ApiRequestError(
-          401,
-          "JWT_INVALID",
-          "Bearer token is invalid or expired.",
-          { route: requestUrl },
-        );
+        return this.jwtAuthService
+          .verifyAccessToken(token, {
+            allowControlPlaneProxyToken:
+              hasControlPlaneInnerBearer(baseHeaders),
+          })
+          .then((payload) => {
+            if (!payload) {
+              throw new ApiRequestError(
+                401,
+                "JWT_INVALID",
+                "Bearer token is invalid or expired.",
+                { route: requestUrl },
+              );
+            }
+            request.identity = this.jwtAuthService!.toRequestIdentity(payload);
+          });
       }
+    }
+
+    const bootstrapIdentity = extractBootstrapRequestIdentity(baseHeaders, {
+      allowAnonymous: false,
+      method: request.method ?? undefined,
+      requestUrl: requestUrl || undefined,
+    });
+    if (strictEnvironment && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled in strict auth environments.",
+        {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+        },
+      );
     }
 
     const anonymousIdentity = extractBootstrapRequestIdentity(baseHeaders, {
@@ -394,25 +573,6 @@ export class BootstrapAuthGuard implements CanActivate {
         requiredScopes,
         grantedScopes: identity.scopes,
       },
-    );
-  }
-
-  private assertDriverBindingActive(
-    payload: JwtIdentityPayload,
-    route: string,
-  ) {
-    if (
-      payload.actorType !== "driver_user" ||
-      !this.driverDeviceSessionService
-    ) {
-      return;
-    }
-
-    this.driverDeviceSessionService.assertSessionAccessAllowed(
-      payload.driverBindingId,
-      payload.driverDeviceId,
-      payload.sub,
-      route,
     );
   }
 }

@@ -164,7 +164,7 @@ drts-fleet-platform/
   - `git remote add origin git@github.com:$GITHUB_OWNER/drts-fleet-platform.git`
   - `git push -u origin main`
 - If you want non-Codex workers to run automatically instead of inbox fallback:
-  - authenticate the installed CLIs (`claude`, `gemini`, `copilot`, `qwen`) on this machine
+  - authenticate the installed CLIs (`claude`, `gemini`, `qwen`) on this machine
 
 ## Notes
 

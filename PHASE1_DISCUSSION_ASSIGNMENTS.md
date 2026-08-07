@@ -38,12 +38,6 @@ This assignment file is used while the supervisor is in `discussion_planning` mo
 - output: `docs/02-architecture/consensus/phase1/qwen-readout.md`
 - must especially review: service contracts, migration plan, API examples, acceptance scenarios
 
-### Copilot
-
-- emphasis: contradiction scan, gap finding, critique of assumptions
-- output: `docs/02-architecture/consensus/phase1/copilot-readout.md`
-- must especially review: PRD, SA, open questions, roadmap
-
 ## Review rounds
 
 - Round 1: every lane reviews at least two other readouts
@@ -64,7 +58,6 @@ This assignment file is used while the supervisor is in `discussion_planning` mo
 
 - `Qwen` reviews the starter draft for end-to-end feasibility
 - `Gemini` reviews the starter draft for rollout and infra risk
-- `Copilot` reviews the starter draft for contradiction and unsupported assumptions
 - `Claude` performs the synthesis decision and either:
   - updates the draft directly for the next round, or
   - hands the baton back to `Codex` for a deeper rewrite

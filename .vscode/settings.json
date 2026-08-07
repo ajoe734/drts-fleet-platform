@@ -16,11 +16,6 @@
     "**/dist": true,
     "**/coverage": true
   },
-  "github.copilot.chat.backgroundAgent.enabled": true,
-  "github.copilot.chat.cloudAgent.enabled": true,
-  "github.copilot.chat.claudeAgent.enabled": true,
-  "github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": false,
-  "github.copilot.chat.reviewAgent.enabled": true,
   "geminicodeassist.enable": true,
   "geminicodeassist.agentYoloMode": false,
   "typescript.tsdk": "node_modules/typescript/lib"

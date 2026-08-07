@@ -173,13 +173,13 @@ dispatch UI-HANDOFF-PB-PAGE-LANDING-001 Gemini2 Claude2 'apps/partner-booking-we
   '對齊 PB_Landing (partner-screens.jsx)。CTBC CardHeader (gradient + 金色 EXCLUSIVE chip) + 卡片身份卡 (mask + eligible chip + 本年度剩餘趟次 progress bar) + 可使用服務 list + 禮遇條款 banner + 立即叫車 primary button。iOS 390px frame。'
 dispatch UI-HANDOFF-PB-PAGE-ELIGIBILITY-001 Gemini2 Claude2 'apps/partner-booking-web/app/[tenantSlug]/(public)/eligibility/page.tsx' PB_Eligibility partner-booking-web "$PB_DEPS" \
   '對齊 PB_Eligibility (partner-screens.jsx)。CardHeader 連結卡片 + 您的權益 PRow list + 授權同意 list (3 已勾選 check marks) + 確認連結 primary button。'
-dispatch UI-HANDOFF-PB-PAGE-BOOK-001 Copilot Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/book/page.tsx' PB_Book partner-booking-web "$PB_DEPS" \
+dispatch UI-HANDOFF-PB-PAGE-BOOK-001 Codex Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/book/page.tsx' PB_Book partner-booking-web "$PB_DEPS" \
   '對齊 PB_Book (partner-screens.jsx)。CardHeader 建立行程 + Pickup/Drop card + 出發時間 3-button toggle + 服務細節 list + 禮遇與費用 gradient card 含 World Elite −NT$ 1,580 + 確認預約 primary button。'
-dispatch UI-HANDOFF-PB-PAGE-CONFIRMED-001 Copilot Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/confirmed/page.tsx' PB_Confirmed partner-booking-web "$PB_DEPS" \
+dispatch UI-HANDOFF-PB-PAGE-CONFIRMED-001 Codex Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/confirmed/page.tsx' PB_Confirmed partner-booking-web "$PB_DEPS" \
   '對齊 PB_Confirmed (partner-screens.jsx)。CardHeader 已派車 + 駕駛 avatar card (含撥話 round button) + 地圖區 (stylized SVG route) + ETA 8 min + 行程資訊 list + 取消/客服 buttons。'
 dispatch UI-HANDOFF-PB-PAGE-TRIPS-001 Gemini Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/trips/page.tsx' PB_Trips partner-booking-web "$PB_DEPS" \
   '對齊 PB_Trips (partner-screens.jsx)。CardHeader 我的行程 + 年度禮遇 progress card (gold gradient) + Trips list (日期 + 路線 + 狀態 chip + 費用)。'
-dispatch UI-HANDOFF-PB-PAGE-RECEIPT-001 Copilot Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/receipt/page.tsx' PB_Receipt partner-booking-web "$PB_DEPS" \
+dispatch UI-HANDOFF-PB-PAGE-RECEIPT-001 Codex Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/receipt/page.tsx' PB_Receipt partner-booking-web "$PB_DEPS" \
   '對齊 PB_Receipt (partner-screens.jsx)。CardHeader 行程明細 + 時刻 PRow list (出發/抵達/行車/距離) + 費用拆解 PRow list + World Elite 禮遇 -NT$ 1,580 + 您支付 NT$ 0 + 款項 gradient card + 下載 PDF / 聯絡客服 buttons。'
 dispatch UI-HANDOFF-PB-PAGE-HELP-001 Gemini Claude2 'apps/partner-booking-web/app/[tenantSlug]/(public)/help/page.tsx' PB_Help partner-booking-web "$PB_DEPS" \
   '對齊 PB_Help (partner-screens.jsx)。CardHeader 協助 + 24 小時專線 dark-gradient card 含 0800-024-365 mono + 常見問題 FAQ list + 爭議或客訴 card + 提出爭議 button。'

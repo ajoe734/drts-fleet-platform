@@ -79,7 +79,7 @@ TASKS = [
     ),
     (
         "OPS-PARITY-CONID",
-        "Copilot",
+        "Codex2",
         "Codex",
         "Create /contracts/[contractId] route (NEW, currently 404) per OC_ContractDetail",
         "依審計 §7.19 + ops-screens-3 OC_ContractDetail 新建 apps/ops-console-web/app/contracts/[contractId]/page.tsx：header contract id + active + read-only·ops scope pills；operational-terms CanvasDL（modifiable window / proof / waiting / no-show / SLA profile / effective version / partner program / auth mode）；authority-redirect banner（mutation 在 Platform Admin /partners，新分頁）；linked tenant/partner CanvasDL；version-history CanvasTimeline。ops 端唯讀；/contracts 列可點進來。",

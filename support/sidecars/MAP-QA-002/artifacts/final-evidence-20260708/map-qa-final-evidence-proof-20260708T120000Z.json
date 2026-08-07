@@ -65,7 +65,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-map-qa-shared-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-08T07:29:40.688Z",
+        "capturedAt": "2026-08-01T19:32:14.976Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-MAP-QA-001",
         "actorType": "ops_user",
@@ -125,7 +125,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-08T07:29:40.687Z",
+          "evaluatedAt": "2026-08-01T19:32:14.975Z",
           "stops": [
             {
               "kind": "pickup",
@@ -210,7 +210,7 @@
       "orders": [
         {
           "orderId": "ORD-MAP-QA-SHARED-001",
-          "orderNo": "O-20260410-000001",
+          "orderNo": "O-ORD-MAP-QA-OUTAGE-001",
           "orderSource": "phone",
           "orderDomain": "owned",
           "tenantId": null,
@@ -256,7 +256,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-07-08T07:29:40.673Z"
+            "calculatedAt": "2026-08-01T19:32:14.940Z"
           },
           "callId": "CALL-MAP-QA-SHARED-001",
           "recordingId": "REC-MAP-QA-SHARED-001",
@@ -299,12 +299,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-08T07:29:40.673Z",
-          "updatedAt": "2026-07-08T07:29:40.673Z",
+          "createdAt": "2026-08-01T19:32:14.940Z",
+          "updatedAt": "2026-08-01T19:32:14.940Z",
           "spatialAudit": {
             "snapshotId": "snapshot-map-qa-shared-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-08T07:29:40.688Z",
+            "capturedAt": "2026-08-01T19:32:14.976Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-MAP-QA-001",
             "actorType": "ops_user",
@@ -364,7 +364,7 @@
             "serviceAreaEvaluation": {
               "decision": "serviceable",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-07-08T07:29:40.687Z",
+              "evaluatedAt": "2026-08-01T19:32:14.975Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -487,7 +487,7 @@
           "orderId": "ORD-MAP-QA-SHARED-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-08T07:29:40.689Z",
+          "createdAt": "2026-08-01T19:32:14.978Z",
           "details": {
             "callId": "CALL-MAP-QA-SHARED-001",
             "recordingId": "REC-MAP-QA-SHARED-001",
@@ -594,7 +594,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-map-qa-outage-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-08T07:29:40.693Z",
+        "capturedAt": "2026-08-01T19:32:14.990Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-MAP-QA-001",
         "actorType": "ops_user",
@@ -628,7 +628,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-08T07:29:40.693Z",
+          "evaluatedAt": "2026-08-01T19:32:14.989Z",
           "stops": [
             {
               "kind": "pickup",
@@ -682,7 +682,7 @@
       "orders": [
         {
           "orderId": "ORD-MAP-QA-OUTAGE-001",
-          "orderNo": "O-20260410-000002",
+          "orderNo": "O-ORD-MAP-QA-OUTAGE-001",
           "orderSource": "phone",
           "orderDomain": "owned",
           "tenantId": null,
@@ -714,7 +714,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-07-08T07:29:40.693Z"
+            "calculatedAt": "2026-08-01T19:32:14.987Z"
           },
           "callId": "CALL-MAP-QA-OUTAGE-001",
           "recordingId": "REC-MAP-QA-OUTAGE-001",
@@ -762,12 +762,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-08T07:29:40.693Z",
-          "updatedAt": "2026-07-08T07:29:40.693Z",
+          "createdAt": "2026-08-01T19:32:14.987Z",
+          "updatedAt": "2026-08-01T19:32:14.987Z",
           "spatialAudit": {
             "snapshotId": "snapshot-map-qa-outage-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-08T07:29:40.693Z",
+            "capturedAt": "2026-08-01T19:32:14.990Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-MAP-QA-001",
             "actorType": "ops_user",
@@ -801,7 +801,7 @@
             "serviceAreaEvaluation": {
               "decision": "serviceable",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-07-08T07:29:40.693Z",
+              "evaluatedAt": "2026-08-01T19:32:14.989Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -955,7 +955,7 @@
           "orderId": "ORD-MAP-QA-OUTAGE-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-07-08T07:29:40.694Z",
+          "createdAt": "2026-08-01T19:32:14.990Z",
           "details": {
             "callId": "CALL-MAP-QA-OUTAGE-001",
             "recordingId": "REC-MAP-QA-OUTAGE-001",
@@ -993,7 +993,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-map-qa-legacy-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-08T07:29:40.698Z",
+        "capturedAt": "2026-08-01T19:32:14.999Z",
         "capturedReason": "booking_creation",
         "actorId": null,
         "actorType": "referral_passenger",
@@ -1096,7 +1096,7 @@
       "orders": [
         {
           "orderId": "ORD-MAP-QA-LEGACY-001",
-          "orderNo": "O-20260410-000003",
+          "orderNo": "O-ORD-MAP-QA-LEGACY-001",
           "orderSource": "app",
           "orderDomain": "owned",
           "tenantId": null,
@@ -1124,7 +1124,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 8,
-            "calculatedAt": "2026-07-08T07:29:40.697Z"
+            "calculatedAt": "2026-08-01T19:32:14.997Z"
           },
           "callId": null,
           "recordingId": null,
@@ -1166,12 +1166,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-07-08T07:29:40.697Z",
-          "updatedAt": "2026-07-08T07:29:40.697Z",
+          "createdAt": "2026-08-01T19:32:14.997Z",
+          "updatedAt": "2026-08-01T19:32:14.997Z",
           "spatialAudit": {
             "snapshotId": "snapshot-map-qa-legacy-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-07-08T07:29:40.698Z",
+            "capturedAt": "2026-08-01T19:32:14.999Z",
             "capturedReason": "booking_creation",
             "actorId": null,
             "actorType": "referral_passenger",
@@ -1282,7 +1282,7 @@
           "orderId": "ORD-MAP-QA-LEGACY-001",
           "eventType": "order.ready_for_dispatch",
           "message": "order.ready_for_dispatch",
-          "createdAt": "2026-07-08T07:29:40.698Z",
+          "createdAt": "2026-08-01T19:32:15.000Z",
           "details": {
             "serviceBucket": "standard_taxi",
             "dispatchSemantics": "realtime"
@@ -1314,7 +1314,7 @@
       "evaluation": {
         "decision": "not_serviceable",
         "serviceProductType": "taxi_realtime",
-        "evaluatedAt": "2026-07-08T07:29:40.700Z",
+        "evaluatedAt": "2026-08-01T19:32:15.005Z",
         "stops": [
           {
             "kind": "pickup",
@@ -1451,7 +1451,8 @@
           "byOperation": {
             "search": 0,
             "resolve": 0,
-            "reverse": 0
+            "reverse": 0,
+            "route": 0
           },
           "byResult": {
             "resolved": 0,
@@ -1484,7 +1485,7 @@
         "stopPolicyRetiredCount": 0,
         "manualOverrideCount": 0
       },
-      "lastEventAt": "2026-07-08T07:29:40.701Z"
+      "lastEventAt": "2026-08-01T19:32:15.005Z"
     }
   },
   "geoSignals": {
@@ -1540,7 +1541,7 @@
         "provider": "mock",
         "mode": "mock",
         "failClosed": false,
-        "lastCheckedAt": "2026-07-08T07:29:40.705Z",
+        "lastCheckedAt": "2026-08-01T19:32:15.021Z",
         "quota": {
           "dailyLimit": null,
           "minuteLimit": null,
@@ -1567,7 +1568,8 @@
           "byOperation": {
             "search": 2,
             "resolve": 1,
-            "reverse": 0
+            "reverse": 0,
+            "route": 0
           },
           "byResult": {
             "resolved": 0,
@@ -1600,7 +1602,7 @@
         "stopPolicyRetiredCount": 0,
         "manualOverrideCount": 0
       },
-      "lastEventAt": "2026-07-08T07:29:40.706Z"
+      "lastEventAt": "2026-08-01T19:32:15.021Z"
     }
   }
 }

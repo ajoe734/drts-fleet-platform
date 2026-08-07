@@ -5536,6 +5536,54 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(chosen, ("codex", "Codex"))
 
+
+    def test_urgent_chair_review_can_recover_busy_lane_when_capacity_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            config = {
+                "agents": {
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "ready_dispatcher": {
+                    "active_worker_statuses": ["running"],
+                    "max_tasks_per_agent_by_lane": {"codex": 2},
+                },
+            }
+            state = {
+                "workers": {
+                    "w-codex": {
+                        "agent_id": "codex",
+                        "status": "running",
+                        "queue_event_id": "evt-codex-recover",
+                    }
+                },
+                "queue": {
+                    "events": {
+                        "evt-codex-recover": {
+                            "status": "started",
+                        }
+                    }
+                },
+                "provider_pauses": {},
+                "chair_review": {},
+            }
+
+            chosen = supervisor.choose_chair_reviewer(
+                config,
+                state,
+                {"tasks": []},
+                {},
+                allow_primary_work_fallback=True,
+            )
+
+        self.assertEqual(chosen, ("codex", "Codex"))
+
     def test_urgent_chair_review_records_blocked_when_no_lane_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -7092,6 +7140,58 @@ class ChairmanFlowTests(unittest.TestCase):
             "task should wait for the assigned lane to resume.",
         )
 
+    def test_proactive_claim_with_single_idle_lane_allows_reviewer_fallback(self) -> None:
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        task = {
+            "id": "WAVE-001",
+            "status": "backlog",
+            "owner": "Codex",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+        state = {
+            "provider_pauses": {
+                "codex": {
+                    "kind": "quota",
+                    "reason": "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage",
+                    "paused_at": "2026-08-03T02:00:00Z",
+                    "resume_at": 9999999999.0,
+                }
+            }
+        }
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"WAVE-001": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            agent_loads={"Codex": [0], "Codex2": [99]},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["backlog", "todo", "in_progress", "review", "review_approved"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": False,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["claim_agent"], "Codex2")
+        self.assertEqual(plan["new_owner"], "Codex2")
+        self.assertEqual(plan["new_reviewer"], "Codex2")
+
     def test_proactive_claim_reassigns_disabled_lane_owner(self) -> None:
         """A lane disabled via capacity=0 should not keep tasks stuck forever."""
         config = {
@@ -7216,6 +7316,43 @@ class ChairmanFlowTests(unittest.TestCase):
         provider_report = {"providers": {"gemini2": {"auth_ready": False}}}
 
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, {}, "gemini2", provider_report=provider_report))
+
+    def test_antigravity_auth_overrides_native_gemini_probe(self) -> None:
+        config = {
+            "agents": {
+                "gemini": {
+                    "id": "gemini",
+                    "display_name": "Gemini",
+                    "provider": "gemini",
+                    "adapter": "antigravity",
+                }
+            }
+        }
+        provider_report = {
+            "providers": {
+                "gemini": {
+                    "auth_ready": False,
+                    "local_cli_worker_supported": False,
+                }
+            },
+            "agent_adapters": {
+                "gemini": {
+                    "adapter": "antigravity",
+                    "supported": True,
+                    "can_auto_deliver": True,
+                }
+            },
+        }
+
+        self.assertFalse(
+            supervisor.is_agent_dispatch_paused(
+                config,
+                {},
+                "gemini",
+                provider_report=provider_report,
+            )
+        )
+        self.assertTrue(supervisor.agent_supports_auto_delivery(config, provider_report, "gemini"))
 
     def test_numbered_lane_does_not_inherit_primary_provider_pause(self) -> None:
         config = {
@@ -7957,6 +8094,21 @@ class PruneDoneTasksTests(unittest.TestCase):
         for i in range(7):
             self.assertIn(f"D{i}", s["archived_task_ids"])
 
+    def test_cumulative_task_count_survives_completed_task_pruning(self) -> None:
+        s = {
+            "tasks": (
+                [{"id": f"D{i}", "status": "done"} for i in range(10)]
+                + [{"id": "OPEN", "status": "todo"}]
+            )
+        }
+
+        supervisor.prune_done_tasks(s, keep=3)
+
+        self.assertEqual(s["cumulative_task_count"], 11)
+        self.assertEqual(len(s["tasks"]), 4)
+        supervisor.prune_done_tasks(s, keep=3)
+        self.assertEqual(s["cumulative_task_count"], 11)
+
     def test_missing_and_non_list_tasks_are_safe(self) -> None:
         empty: dict = {}
         supervisor.prune_done_tasks(empty, keep=150)
@@ -8046,13 +8198,24 @@ class BreakFullDeadlockTests(unittest.TestCase):
         self.assertFalse(changed)
         probe.assert_not_called()
 
-    def test_noop_when_chair_not_blocked(self):
+    def test_noop_when_chair_not_blocked_and_no_paused_lanes(self):
         state = self._wedged_state()
         state["chair_review"] = {}
+        state["provider_pauses"] = {}
+        state["quota_paused_agents"] = {}
         with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
             changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
         self.assertFalse(changed)
         probe.assert_not_called()
+
+    def test_recovery_runs_when_chair_not_blocked_but_pause_still_blocks(self):
+        state = self._wedged_state()
+        state["chair_review"] = {}
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": True}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report),              mock.patch.object(supervisor, "write_activity_log"):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertNotIn("claude2", state["provider_pauses"])
 
 
 class CodexRevokedTokenClassificationTests(unittest.TestCase):

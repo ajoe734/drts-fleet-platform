@@ -22,11 +22,6 @@ points so the team can answer three different questions quickly:
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
   Closeout runbook for the protected control-plane auth migration and its
   staged fallback policy.
-- `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
-  Code-backed production hardening authority for login, account lifecycle,
-  RBAC, MFA, sessions, credentials, security events, incident response and UAT.
-- `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
-  Supervisor-ready 36-task IAM/security dependency graph and release gates.
 
 ## Canonical Blueprint
 
@@ -39,7 +34,6 @@ order. They live at repo root, not under `docs/`.
 - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
 - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
 - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
-- `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
 - `phase1_service_contracts_v1.md`
 - `phase1_migration_plan_v1.md`
 - `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/`
@@ -90,7 +84,6 @@ remains open now.
 - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
 - `docs/03-runbooks/phase1-operational-remediation-execution-packet-20260430.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
-- `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
 - `docs/03-runbooks/auth-plane-separation-matrix.md`
 - `docs/03-runbooks/phase1-rollout.md`
 - `docs/04-uat/phase1-uat-checklist.md`
@@ -143,11 +136,9 @@ execution truth and later be checked back against code:
    - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
    - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
    - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
-   - `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
    - `docs/01-decisions/`
 2. Backlog materialization:
    - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
-   - `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
 3. Live task truth:
    - `ai-status.json`
    - `current-work.md`

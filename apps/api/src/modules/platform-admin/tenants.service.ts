@@ -33,6 +33,7 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   PlatformAdminRepository,
@@ -105,6 +106,12 @@ const DEFAULT_API_KEY_SCOPES = [
 ];
 
 const DEMO_CREATED_AT = "2026-04-01T00:00:00.000Z";
+const DEMO_TENANT_ID = "tenant-demo-001";
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
 
 @Injectable()
 export class TenantsService implements OnModuleInit {
@@ -116,8 +123,10 @@ export class TenantsService implements OnModuleInit {
     @Optional()
     private readonly platformAdminRepository?: PlatformAdminRepository,
   ) {
-    const seed = this.createSeedTenant();
-    this.tenants.set(seed.id, seed);
+    if (!isStrictAuthEnvironment()) {
+      const seed = this.createSeedTenant();
+      this.tenants.set(seed.id, seed);
+    }
   }
 
   async onModuleInit() {
@@ -127,6 +136,15 @@ export class TenantsService implements OnModuleInit {
 
     try {
       const persistedState = await this.platformAdminRepository.loadState();
+      const platformTenants = this.sanitizePersistedTenants(
+        persistedState.platformTenants,
+      );
+      const deletedPlatformTenantIds = this.collectRemovedKeys(
+        persistedState.platformTenants,
+        platformTenants,
+        (tenant) => tenant.id,
+      );
+
       if (persistedState.platformTenants.length === 0) {
         this.persistChanges(
           {
@@ -138,8 +156,17 @@ export class TenantsService implements OnModuleInit {
       }
 
       this.tenants.clear();
-      for (const tenant of persistedState.platformTenants) {
+      for (const tenant of platformTenants) {
         this.tenants.set(tenant.id, this.cloneTenant(tenant));
+      }
+      if (isStrictAuthEnvironment() && deletedPlatformTenantIds.length > 0) {
+        this.persistChanges(
+          {
+            platformTenants: this.list(),
+            deletedPlatformTenantIds,
+          },
+          "module init strict auth sanitize",
+        );
       }
     } catch (error) {
       this.platformAdminRepository.reportPersistenceFailure(
@@ -744,7 +771,7 @@ export class TenantsService implements OnModuleInit {
 
   private createSeedTenant() {
     return {
-      id: "tenant-demo-001",
+      id: DEMO_TENANT_ID,
       code: "demo",
       name: "Demo Tenant",
       status: "active",
@@ -780,6 +807,27 @@ export class TenantsService implements OnModuleInit {
       createdAt: DEMO_CREATED_AT,
       updatedAt: DEMO_CREATED_AT,
     } satisfies PlatformAdminTenantRecord;
+  }
+
+  private sanitizePersistedTenants(
+    tenants: readonly PlatformAdminTenantRecord[],
+  ): PlatformAdminTenantRecord[] {
+    if (!isStrictAuthEnvironment()) {
+      return tenants.map((tenant) => this.cloneTenant(tenant));
+    }
+
+    return tenants
+      .filter((tenant) => tenant.id !== DEMO_TENANT_ID)
+      .map((tenant) => this.cloneTenant(tenant));
+  }
+
+  private collectRemovedKeys<T>(
+    original: readonly T[],
+    sanitized: readonly T[],
+    keyOf: (value: T) => string,
+  ) {
+    const sanitizedKeys = new Set(sanitized.map(keyOf));
+    return original.map(keyOf).filter((key) => !sanitizedKeys.has(key));
   }
 
   private buildTenantId(code: string) {

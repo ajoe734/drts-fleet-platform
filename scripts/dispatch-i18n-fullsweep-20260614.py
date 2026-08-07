@@ -155,7 +155,7 @@ TASKS = [
         "I18N2-TC-HUB", "apps/tenant-console-web/app/sla/,apps/tenant-console-web/app/audit/,apps/tenant-console-web/lib/translations.ts", _TC_ACCEPT,
     ),
     (
-        "I18N2-TC-INVOICES-BILLING", "Copilot", "Codex",
+        "I18N2-TC-INVOICES-BILLING", "Codex2", "Codex",
         "tenant-console invoices + billing i18n centralize",
         "app/invoices/page.tsx (132) + app/billing/page.tsx (62)：發票與帳務字串收斂進 translations.ts invoices/billing 區塊並走 t()。" + _CANON,
         "I18N2-TC-HUB", "apps/tenant-console-web/app/invoices/,apps/tenant-console-web/app/billing/,apps/tenant-console-web/lib/translations.ts", _TC_ACCEPT,
@@ -167,7 +167,7 @@ TASKS = [
         "I18N2-TC-HUB", "apps/tenant-console-web/app/passengers/,apps/tenant-console-web/app/addresses/,apps/tenant-console-web/lib/translations.ts", _TC_ACCEPT,
     ),
     (
-        "I18N2-TC-USERS-INTGOV", "Codex", "Copilot",
+        "I18N2-TC-USERS-INTGOV", "Codex", "Codex2",
         "tenant-console users + integration-governance i18n centralize",
         "app/users/page.tsx (92) + app/integration-governance/page.tsx + app/integration-governance/refresh-control.tsx：使用者與整合治理字串"
         "收斂進 translations.ts users/integrationGovernance 區塊並走 t()。" + _CANON,
@@ -181,7 +181,7 @@ TASKS = [
         "I18N2-TC-HUB", "apps/tenant-console-web/app/notifications/,apps/tenant-console-web/lib/translations.ts", _TC_ACCEPT,
     ),
     (
-        "I18N2-TC-FEATUREFLAGS", "Copilot", "Gemini",
+        "I18N2-TC-FEATUREFLAGS", "Codex2", "Gemini",
         "tenant-console feature-flags i18n centralize",
         "app/feature-flags/page.tsx (67)：功能旗標字串收斂進 translations.ts featureFlags 區塊並走 t()。" + _CANON,
         "I18N2-TC-HUB", "apps/tenant-console-web/app/feature-flags/,apps/tenant-console-web/lib/translations.ts", _TC_ACCEPT,

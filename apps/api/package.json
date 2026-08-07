@@ -4,17 +4,14 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json",
     "dev": "node --watch -r ts-node/register src/main.ts",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/main.js",
     "seed:tenant-governance": "tsx --tsconfig tsconfig.seed.json seed/tenant-governance-default.ts",
-    "test:integration": "vitest run tests/integration tests/load",
-    "test:integration:postgres-gates": "vitest run tests/integration/tenant-quota-db-concurrency.integration.test.ts tests/integration/stage1-uat-pg-gate.integration.test.ts --no-file-parallelism --maxConcurrency=1",
-    "test:integration:quota-concurrency": "vitest run tests/integration/tenant-quota-db-concurrency.integration.test.ts --no-file-parallelism --maxConcurrency=1",
     "test": "vitest run --passWithNoTests",
     "test:tenant-governance-negative": "pnpm --dir ../.. exec vitest run tests/integ/tenant-governance-negative.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1094.0",

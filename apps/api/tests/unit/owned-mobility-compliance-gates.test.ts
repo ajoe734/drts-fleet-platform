@@ -386,7 +386,7 @@ describe("OwnedMobilityService compliance gates", () => {
     );
   });
 
-  it("shows partial proof bundles as submitted while remaining proof stays blocked", async () => {
+  it("shows partial proof bundles as submitted while remaining proof stays blocked", () => {
     const service = createService();
 
     service.createTenantBooking(
@@ -412,20 +412,20 @@ describe("OwnedMobilityService compliance gates", () => {
       driverId: "driver-001",
     });
 
-    await service.acceptDriverTask(assignment.taskId, {
+    service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T10:01:00.000Z",
     });
-    await service.departDriverTask(assignment.taskId, {
+    service.departDriverTask(assignment.taskId, {
       departedAt: "2026-04-29T10:05:00.000Z",
     });
-    await service.arrivedPickup(assignment.taskId, {
+    service.arrivedPickup(assignment.taskId, {
       arrivedAt: "2026-04-29T10:08:00.000Z",
     });
-    await service.startDriverTask(assignment.taskId, {
+    service.startDriverTask(assignment.taskId, {
       startedAt: "2026-04-29T10:10:00.000Z",
     });
 
-    await expect(
+    expect(() =>
       service.completeDriverTask(assignment.taskId, {
         completedAt: "2026-04-29T10:40:00.000Z",
         actualDistanceKm: 12.3,
@@ -434,7 +434,7 @@ describe("OwnedMobilityService compliance gates", () => {
           photos: ["cHJvb2YtcGhvdG8tMDAx"],
         },
       }),
-    ).rejects.toThrow();
+    ).toThrow();
 
     const task = service.getDriverTask(assignment.taskId);
     const proofGate = task.complianceGates?.find(

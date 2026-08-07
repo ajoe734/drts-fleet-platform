@@ -20,6 +20,7 @@ import type {
   TenantSlaProfile,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
+  TenantWebhookSecretRotationRecord,
   WebhookDeliveryRecord,
 } from "@drts/contracts";
 
@@ -45,10 +46,28 @@ type WebhookRetryPolicy = {
 };
 
 type WebhookSecretRotationRecord = {
+  createdAt?: string;
   secretVersion: number;
   rotatedAt: string;
   rotationReason: string | null;
   secretPreview: string;
+  status?: TenantWebhookSecretRotationRecord["status"];
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  lastUsedWorkload?: string | null;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  supersededByVersion?: number | null;
+  revokedAt?: string | null;
+  signals?: TenantWebhookSecretRotationRecord["signals"];
+};
+
+type StoredWebhookSecretRecord = WebhookSecretRotationRecord & {
+  secretValue: string;
 };
 
 type WebhookRuntimeMetadata = {
@@ -73,6 +92,7 @@ type WebhookRuntimeMetadata = {
 
 export type StoredWebhookEndpointRecord = TenantWebhookEndpoint & {
   secretValue: string;
+  secretCredentials?: StoredWebhookSecretRecord[];
   retryPolicy: WebhookRetryPolicy;
   runtimeMetadata: WebhookRuntimeMetadata;
   secretHistory: WebhookSecretRotationRecord[];
@@ -147,7 +167,32 @@ export type PersistTenantPartnerChanges = {
   quotaMonthlySnapshots?: readonly TenantQuotaMonthlySnapshotRecord[];
   userRoles?: readonly TenantUserRoleRecord[];
   apiKeys?: readonly StoredTenantApiKeyRecord[];
+  deletedTenantIds?: readonly string[];
+  deletedPartnerEntrySlugs?: readonly string[];
+  deletedPartnerIngressCredentialIds?: readonly string[];
+  deletedApprovalRequestIds?: readonly string[];
+  deletedApprovalDecisionIds?: readonly string[];
 };
+
+/**
+ * The change buckets `persistIdentityGovernanceChanges` knows how to write
+ * inside the security-event transaction. Anything outside this set is rejected
+ * rather than dropped, so an audited credential mutation can never go unwritten.
+ */
+export const IDENTITY_GOVERNANCE_CHANGE_KEYS = [
+  "userRoles",
+  "apiKeys",
+  "partnerIngressCredentials",
+  "webhookEndpoints",
+] as const;
+
+export type IdentityGovernanceChangeKey =
+  (typeof IDENTITY_GOVERNANCE_CHANGE_KEYS)[number];
+
+export type IdentityGovernanceChanges = Pick<
+  PersistTenantPartnerChanges,
+  IdentityGovernanceChangeKey
+>;
 
 @Injectable()
 export class TenantPartnerRepository {
@@ -559,6 +604,141 @@ export class TenantPartnerRepository {
 
     const writes: Promise<unknown>[] = [];
 
+    for (const tenantId of changes.deletedTenantIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_notification_preferences WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_sla_profiles WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_channel_entries WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_eligibility_verifications WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_rules WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_webhook_deliveries WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_passengers WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_addresses WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_cost_centers WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_quota_policies WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_quota_ledger WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_quota_monthly_snapshots WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_user_roles WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_tenant_api_keys WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+    }
+
+    for (const entrySlug of changes.deletedPartnerEntrySlugs ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_ingress_credentials WHERE entry_slug = $1`,
+          [entrySlug],
+        ),
+      );
+    }
+
+    for (const keyId of changes.deletedPartnerIngressCredentialIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_partner_ingress_credentials WHERE key_id = $1`,
+          [keyId],
+        ),
+      );
+    }
+
+    for (const approvalRequestId of changes.deletedApprovalRequestIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_decisions WHERE approval_request_id = $1`,
+          [approvalRequestId],
+        ),
+      );
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_requests WHERE approval_request_id = $1`,
+          [approvalRequestId],
+        ),
+      );
+    }
+
+    for (const decisionId of changes.deletedApprovalDecisionIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM core.phase1_tenant_approval_decisions WHERE decision_id = $1`,
+          [decisionId],
+        ),
+      );
+    }
+
     for (const preferences of changes.notificationPreferences ?? []) {
       writes.push(
         this.databaseService!.query(
@@ -649,32 +829,11 @@ export class TenantPartnerRepository {
       );
     }
 
-    for (const credential of changes.partnerIngressCredentials ?? []) {
+    if ((changes.partnerIngressCredentials?.length ?? 0) > 0) {
       writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO admin.phase1_partner_ingress_credentials (
-              key_id,
-              entry_slug,
-              revoked_at,
-              created_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5::jsonb
-            )
-            ON CONFLICT (key_id) DO UPDATE SET
-              entry_slug = EXCLUDED.entry_slug,
-              revoked_at = EXCLUDED.revoked_at,
-              created_at = EXCLUDED.created_at,
-              record = EXCLUDED.record
-          `,
-          [
-            credential.keyId,
-            credential.entrySlug,
-            credential.revokedAt,
-            credential.createdAt,
-            JSON.stringify(credential),
-          ],
+        this.persistPartnerIngressCredentialsWithExecutor(
+          this.databaseService!,
+          changes.partnerIngressCredentials ?? [],
         ),
       );
     }
@@ -841,35 +1000,11 @@ export class TenantPartnerRepository {
       );
     }
 
-    for (const endpoint of changes.webhookEndpoints ?? []) {
+    if ((changes.webhookEndpoints?.length ?? 0) > 0) {
       writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO admin.phase1_tenant_webhook_endpoints (
-              webhook_id,
-              tenant_id,
-              status,
-              created_at,
-              updated_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6::jsonb
-            )
-            ON CONFLICT (webhook_id) DO UPDATE SET
-              tenant_id = EXCLUDED.tenant_id,
-              status = EXCLUDED.status,
-              created_at = EXCLUDED.created_at,
-              updated_at = EXCLUDED.updated_at,
-              record = EXCLUDED.record
-          `,
-          [
-            endpoint.webhookId,
-            endpoint.tenantId,
-            endpoint.status,
-            endpoint.createdAt,
-            endpoint.updatedAt,
-            JSON.stringify(endpoint),
-          ],
+        this.persistWebhookEndpointsWithExecutor(
+          this.databaseService!,
+          changes.webhookEndpoints ?? [],
         ),
       );
     }
@@ -1143,11 +1278,37 @@ export class TenantPartnerRepository {
 
   async persistIdentityGovernanceChanges(
     executor: TenantPartnerQueryExecutor,
-    changes: Pick<PersistTenantPartnerChanges, "userRoles" | "apiKeys">,
+    changes: IdentityGovernanceChanges,
   ) {
+    // This path shares a transaction with the security-event write, so a bucket
+    // it does not know how to write would be audited and then silently dropped.
+    // Refuse the whole mutation instead of half-applying it.
+    const unsupported = Object.keys(changes).filter(
+      (key) =>
+        !IDENTITY_GOVERNANCE_CHANGE_KEYS.includes(
+          key as IdentityGovernanceChangeKey,
+        ),
+    );
+    if (unsupported.length > 0) {
+      throw new Error(
+        `Identity governance transaction cannot persist: ${unsupported.join(", ")}`,
+      );
+    }
+
     await Promise.all([
-      this.persistTenantUserRolesWithExecutor(executor, changes.userRoles ?? []),
+      this.persistTenantUserRolesWithExecutor(
+        executor,
+        changes.userRoles ?? [],
+      ),
       this.persistTenantApiKeysWithExecutor(executor, changes.apiKeys ?? []),
+      this.persistPartnerIngressCredentialsWithExecutor(
+        executor,
+        changes.partnerIngressCredentials ?? [],
+      ),
+      this.persistWebhookEndpointsWithExecutor(
+        executor,
+        changes.webhookEndpoints ?? [],
+      ),
     ]);
   }
 
@@ -1399,6 +1560,12 @@ export class TenantPartnerRepository {
     );
   }
 
+  /**
+   * JSONB rows are shape-checked, not field-checked: a row written by an older
+   * build can carry keys the current type no longer declares. Callers must not
+   * republish a parsed record by spreading it. `TenantPartnerService` re-projects
+   * every credential-bearing record field by field on hydrate for that reason.
+   */
   private parseRecord<T>(record: unknown, source: string): T {
     if (!record || typeof record !== "object") {
       throw new Error(`Invalid persisted record loaded from ${source}`);
@@ -1692,6 +1859,79 @@ export class TenantPartnerRepository {
             apiKey.revokedAt,
             apiKey.createdAt,
             JSON.stringify(apiKey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistPartnerIngressCredentialsWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    credentials: readonly StoredPartnerIngressCredentialRecord[],
+  ) {
+    await Promise.all(
+      credentials.map((credential) =>
+        executor.query(
+          `
+            INSERT INTO admin.phase1_partner_ingress_credentials (
+              key_id,
+              entry_slug,
+              revoked_at,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5::jsonb
+            )
+            ON CONFLICT (key_id) DO UPDATE SET
+              entry_slug = EXCLUDED.entry_slug,
+              revoked_at = EXCLUDED.revoked_at,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+          [
+            credential.keyId,
+            credential.entrySlug,
+            credential.revokedAt,
+            credential.createdAt,
+            JSON.stringify(credential),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistWebhookEndpointsWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    endpoints: readonly StoredWebhookEndpointRecord[],
+  ) {
+    await Promise.all(
+      endpoints.map((endpoint) =>
+        executor.query(
+          `
+            INSERT INTO admin.phase1_tenant_webhook_endpoints (
+              webhook_id,
+              tenant_id,
+              status,
+              created_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (webhook_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              status = EXCLUDED.status,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            endpoint.webhookId,
+            endpoint.tenantId,
+            endpoint.status,
+            endpoint.createdAt,
+            endpoint.updatedAt,
+            JSON.stringify(endpoint),
           ],
         ),
       ),

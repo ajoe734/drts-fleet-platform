@@ -101,7 +101,7 @@ TASKS = [
         "0 inline i18n both files; i18n-guard clean; typecheck+build pass",
     ),
     (
-        "I18N-OPS-06", "Copilot", "Codex",
+        "I18N-OPS-06", "Codex2", "Codex",
         "Ops contracts i18n centralize",
         "app/contracts/page.tsx(108/3)：全 copy()；KIND/COUNTERPARTY/TERM 表頭；forwarder/eligibility 夾雜。glossary：forwarded→轉派、eligibility→資格模式。",
         "I18N-WP0", "apps/ops-console-web/app/contracts/page.tsx,apps/ops-console-web/lib/translations.ts",
@@ -136,7 +136,7 @@ TASKS = [
         "0 inline i18n across 3 files; refresh-tier bilingual; i18n-guard clean; typecheck+build pass",
     ),
     (
-        "I18N-OPS-11", "Copilot", "Codex2",
+        "I18N-OPS-11", "Codex", "Codex2",
         "Ops incidents list + reports i18n centralize",
         "app/incidents/page.tsx(19/19)+app/reports/page.tsx(32/2)：reports 全 copyText()（filing package/artifact 夾雜）；incidents 列表時間/狀態。glossary：artifact→產物、filing package→申報包。",
         "I18N-WP0", "apps/ops-console-web/app/incidents/page.tsx,apps/ops-console-web/app/reports/page.tsx,apps/ops-console-web/lib/translations.ts",
@@ -237,7 +237,7 @@ TASKS = [
         "0 inline copy-object both files; glossary-clean; i18n-guard clean; typecheck+build pass",
     ),
     (
-        "I18N-ADM-11", "Copilot", "Codex",
+        "I18N-ADM-11", "Codex2", "Codex",
         "Admin adapter-registry (incl un-i18n'd modal+layout) i18n centralize",
         "app/adapter-registry/page.tsx(32/1)+components/AdapterList.tsx(10/1)+components/EditAdapterModal.tsx(**未接 i18n**)+layout.tsx(**未接 i18n**)：adapter 夾雜最多(×34)。glossary：adapter→轉接器、credential→憑證、pause/retry 維運詞。",
         "I18N-WP0", "apps/platform-admin-web/app/adapter-registry/,apps/platform-admin-web/lib/translations.ts",

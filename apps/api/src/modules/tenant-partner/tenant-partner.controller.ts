@@ -91,7 +91,11 @@ import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
-import { requireInternalKey } from "../../common/auth/internal-key.middleware";
+import {
+  REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+  requireInternalKey,
+  requireScopedInternalKey,
+} from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -157,12 +161,12 @@ export class TenantPartnerController {
     return identity?.roles?.[0] ?? null;
   }
 
-  private signJwt(
-    identity: Parameters<JwtAuthService["sign"]>[0],
-    expiresIn: JwtExpiresIn,
+  private async issueJwtSession(
+    identity: Parameters<JwtAuthService["issueSessionToken"]>[0],
+    options?: Parameters<JwtAuthService["issueSessionToken"]>[1],
   ) {
     try {
-      return this.jwtAuthService.sign(identity, { expiresIn });
+      return await this.jwtAuthService.issueSessionToken(identity, options);
     } catch (error) {
       if (isJwtKeyMaterialNotConfiguredError(error)) {
         throw new ApiRequestError(
@@ -217,11 +221,14 @@ export class TenantPartnerController {
       requestId,
       { allowInternalBootstrap },
     );
-    const token = this.signJwt(
+    const issuedAt = new Date().toISOString();
+    const issued = await this.issueJwtSession(
       {
-        authMode: resolved.identity.authMode,
+        authMode: "jwt_bearer",
         actorType: resolved.identity.actorType,
         actorId: resolved.identity.actorId,
+        principalId: resolved.drtsPassengerId,
+        subject: resolved.drtsPassengerId,
         realm: resolved.identity.realm,
         tenantId: resolved.identity.tenantId,
         partnerId: resolved.identity.partnerId ?? null,
@@ -233,10 +240,19 @@ export class TenantPartnerController {
         drtsPassengerId: resolved.drtsPassengerId,
         requestId: requestId ?? null,
       },
-      PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
+      {
+        expiresIn: PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
+        principalId: resolved.drtsPassengerId,
+        subject: resolved.drtsPassengerId,
+        ensurePrincipal: true,
+        authTime: issuedAt,
+        amr: ["referral_handoff"],
+        acr: "aal1",
+        tokenVersion: Date.parse(resolved.partnerEntry.updatedAt),
+      },
     );
     const session: PartnerIngressHandoffSession = {
-      accessToken: token,
+      accessToken: issued.token,
       tokenType: "Bearer",
       expiresIn: PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
       partnerEntrySlug: resolved.partnerEntry.entrySlug,
@@ -275,9 +291,14 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
-    if (allowInternalBootstrap) {
-      requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
-    }
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
+    );
     const artifact: ReferralEmbedHandoffArtifact =
       await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
         command,
@@ -306,7 +327,14 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
+    );
     const session: ReferralEmbedSession =
       await this.tenantPartnerService.consumeReferralEmbedHandoffArtifact(
         command,
@@ -328,10 +356,16 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
-    const session = await this.tenantPartnerService.recordReferralEmbedConsent(
-      command,
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
     );
+    const session =
+      await this.tenantPartnerService.recordReferralEmbedConsent(command);
     return toApiSuccessEnvelope(session, requestId);
   }
 

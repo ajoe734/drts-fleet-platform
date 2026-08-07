@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-07-11T02:33:39.688Z",
-  "branchSha": "codex/fleets-closeout-004@f9c033bb1194",
+  "generatedAt": "2026-08-01T19:32:12.298Z",
+  "branchSha": "dev@8a40248967bd",
   "closeoutTask": "FLEETS-CLOSEOUT-004",
   "scope": "repo-local backend service-layer plus Ops map model evidence; final E2E-MAP-006 promotion composes this readback with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, and MAP-OBS-001 final evidence.",
   "command": "pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility-ops-map-closeout-proof.test.ts --reporter=verbose",
@@ -8,7 +8,7 @@
   "backendReadback": {
     "order": {
       "orderId": "ORD-SMOKE-001",
-      "orderNo": "O-20260410-000001",
+      "orderNo": "O-misc-fleets-closeout-004-1",
       "orderSource": "phone",
       "serviceBucket": "standard_taxi",
       "status": "ready_for_dispatch",
@@ -47,13 +47,13 @@
       }
     },
     "dispatchJob": {
-      "dispatchJobId": "misc-fleets-closeout-004-2",
+      "dispatchJobId": "misc-fleets-closeout-004-3",
       "orderId": "ORD-SMOKE-001",
       "status": "matching",
       "mode": "auto",
       "latestEtaMinutes": 4,
-      "createdAt": "2026-07-11T02:33:39.681Z",
-      "updatedAt": "2026-07-11T02:33:39.681Z"
+      "createdAt": "2026-08-01T19:32:12.283Z",
+      "updatedAt": "2026-08-01T19:32:12.283Z"
     },
     "dispatchTrace": [
       {
@@ -61,9 +61,9 @@
         "orderId": "ORD-SMOKE-001",
         "eventType": "dispatch.matching",
         "message": "dispatch.matching",
-        "createdAt": "2026-07-11T02:33:39.682Z",
+        "createdAt": "2026-08-01T19:32:12.285Z",
         "details": {
-          "dispatchJobId": "misc-fleets-closeout-004-2",
+          "dispatchJobId": "misc-fleets-closeout-004-3",
           "candidateCount": 3
         }
       },
@@ -72,7 +72,7 @@
         "orderId": "ORD-SMOKE-001",
         "eventType": "callcenter.order_created",
         "message": "callcenter.order_created",
-        "createdAt": "2026-07-11T02:33:39.675Z",
+        "createdAt": "2026-08-01T19:32:12.273Z",
         "details": {
           "callId": "CALL-SMOKE-001",
           "recordingId": "REC-SMOKE-001",
@@ -143,7 +143,7 @@
         "key": "ORD-SMOKE-001:pickup",
         "kind": "pickup",
         "orderId": "ORD-SMOKE-001",
-        "jobId": "misc-fleets-closeout-004-2",
+        "jobId": "misc-fleets-closeout-004-3",
         "lat": 25.037519,
         "lng": 121.56368,
         "freshness": null
@@ -152,25 +152,25 @@
         "key": "ORD-SMOKE-001:dropoff",
         "kind": "dropoff",
         "orderId": "ORD-SMOKE-001",
-        "jobId": "misc-fleets-closeout-004-2",
+        "jobId": "misc-fleets-closeout-004-3",
         "lat": 25.033879,
         "lng": 121.568743,
         "freshness": null
       },
       {
-        "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-fresh:driver-map-closeout-004-fresh",
+        "key": "misc-fleets-closeout-004-3:vehicle-map-closeout-004-fresh:driver-map-closeout-004-fresh",
         "kind": "candidate",
         "orderId": "ORD-SMOKE-001",
-        "jobId": "misc-fleets-closeout-004-2",
+        "jobId": "misc-fleets-closeout-004-3",
         "lat": 25.0381,
         "lng": 121.5646,
         "freshness": "fresh"
       },
       {
-        "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-low-accuracy:driver-map-closeout-004-low-accuracy",
+        "key": "misc-fleets-closeout-004-3:vehicle-map-closeout-004-low-accuracy:driver-map-closeout-004-low-accuracy",
         "kind": "candidate",
         "orderId": "ORD-SMOKE-001",
-        "jobId": "misc-fleets-closeout-004-2",
+        "jobId": "misc-fleets-closeout-004-3",
         "lat": 25.0387,
         "lng": 121.5654,
         "freshness": "low_accuracy"
@@ -201,7 +201,7 @@
           }
         },
         {
-          "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-fresh:driver-map-closeout-004-fresh",
+          "key": "misc-fleets-closeout-004-3:vehicle-map-closeout-004-fresh:driver-map-closeout-004-fresh",
           "kind": "candidate",
           "projection": {
             "leftPct": 44.78462893800396,
@@ -210,7 +210,7 @@
           }
         },
         {
-          "key": "misc-fleets-closeout-004-2:vehicle-map-closeout-004-low-accuracy:driver-map-closeout-004-low-accuracy",
+          "key": "misc-fleets-closeout-004-3:vehicle-map-closeout-004-low-accuracy:driver-map-closeout-004-low-accuracy",
           "kind": "candidate",
           "projection": {
             "leftPct": 47.37370548136015,

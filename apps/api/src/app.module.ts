@@ -151,6 +151,10 @@ export class AppModule implements NestModule {
       .exclude(
         { path: "health", method: RequestMethod.ALL },
         { path: "api/health", method: RequestMethod.ALL },
+        { path: "metrics", method: RequestMethod.ALL },
+        { path: "api/metrics", method: RequestMethod.ALL },
+        { path: "auth/token", method: RequestMethod.POST },
+        { path: "api/auth/token", method: RequestMethod.POST },
       )
       .forRoutes({ path: "*", method: RequestMethod.ALL });
   }

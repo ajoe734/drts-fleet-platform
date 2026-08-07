@@ -1,3 +1,9 @@
+import {
+  INTERNAL_KEY_EXCEPTION_REGISTRY,
+  isExceptionExpired,
+  validateExceptionMetadata,
+} from "../common/auth/internal-key-exception-registry";
+
 export type AuthEnvironment = "production" | "staging" | "local" | "test";
 
 export type AuthIssueCode =
@@ -45,6 +51,13 @@ export interface AuthStartupConfig {
     enforced: boolean;
     configured: boolean;
   };
+  workloadIdentity: {
+    configured: boolean;
+    issuerConfigured: boolean;
+    audienceConfigured: boolean;
+    keyConfigured: boolean;
+    registryConfigured: boolean;
+  };
   peppers: {
     passengerSubjectConfigured: boolean;
     passengerRideTokenConfigured: boolean;
@@ -78,6 +91,13 @@ export class AuthConfigurationError extends Error {
 }
 
 type EnvLike = Record<string, string | undefined>;
+type WorkloadServicePrincipalRegistryEntry = {
+  principalId?: string;
+  issuer?: string;
+  subject?: string;
+  allowedTokenAudiences?: Array<string | null> | null;
+  defaultTokenAudience?: string | null;
+};
 
 const INSECURE_DEFAULT_SECRETS = new Set([
   "secret",
@@ -114,11 +134,16 @@ const ALLOWED_JWT_ALGORITHMS = new Set([
   "PS384",
   "PS512",
 ]);
+const ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS = new Set(
+  ALLOWED_JWT_ALGORITHMS,
+);
 
 export function detectAuthEnvironment(
   env: EnvLike = process.env,
 ): AuthEnvironment {
-  const raw = (env.APP_ENV ?? env.NODE_ENV)?.trim().toLowerCase();
+  const raw = (env.DRTS_ENV ?? env.APP_ENV ?? env.NODE_ENV)
+    ?.trim()
+    .toLowerCase();
 
   if (raw === "prod" || raw === "production") {
     return "production";
@@ -128,6 +153,14 @@ export function detectAuthEnvironment(
   }
   if (raw === "test" || raw === "testing" || raw === "ci") {
     return "test";
+  }
+  if (
+    raw === "dev" ||
+    raw === "development" ||
+    raw === "local" ||
+    raw === "sandbox"
+  ) {
+    return "local";
   }
 
   if ((env.CI ?? "").trim().toLowerCase() === "true") {
@@ -154,12 +187,74 @@ function parseCsv(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
+function normalizeAudienceBindings(
+  entry: WorkloadServicePrincipalRegistryEntry,
+): string[] {
+  return [
+    ...new Set(
+      [
+        ...(entry.allowedTokenAudiences ?? []),
+        entry.defaultTokenAudience ?? undefined,
+      ]
+        .map((value) => value?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function parseWorkloadServicePrincipalRegistry(
+  rawRegistry: string | undefined,
+): {
+  entries: WorkloadServicePrincipalRegistryEntry[];
+  parseError: string | null;
+} {
+  const normalized = normalizeString(rawRegistry);
+  if (!normalized) {
+    return { entries: [], parseError: null };
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as unknown;
+    if (!Array.isArray(parsed)) {
+      return {
+        entries: [],
+        parseError: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be a JSON array",
+      };
+    }
+
+    return {
+      entries: parsed as WorkloadServicePrincipalRegistryEntry[],
+      parseError: null,
+    };
+  } catch (error) {
+    return {
+      entries: [],
+      parseError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function isSymmetricJwtAlgorithm(algorithm: string): boolean {
   return algorithm.toUpperCase().startsWith("HS");
 }
 
 function isAsymmetricJwtAlgorithm(algorithm: string): boolean {
   return /^(RS|ES|PS)/.test(algorithm.toUpperCase());
+}
+
+function looksLikePem(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return /BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(value);
+}
+
+function parseAlgorithmList(
+  raw: string | undefined,
+  defaultAlgorithm: string,
+): string[] {
+  const parsed = parseCsv(raw).map((algorithm) => algorithm.toUpperCase());
+  return parsed.length > 0 ? parsed : [defaultAlgorithm];
 }
 
 export function isWeakSecret(value: string | undefined): boolean {
@@ -216,7 +311,9 @@ export function buildAuthStartupConfigReport(
   } else {
     if (
       authMode &&
-      ["local", "test", "dev", "explicit", "mock", "insecure"].includes(authMode)
+      ["local", "test", "dev", "explicit", "mock", "insecure"].includes(
+        authMode,
+      )
     ) {
       issues.push({
         control: "AUTH_MODE",
@@ -292,7 +389,62 @@ export function buildAuthStartupConfigReport(
   const jwtSecret = normalizeString(env.JWT_SECRET);
   const privateKey = normalizeString(env.JWT_PRIVATE_KEY);
   const publicKey = normalizeString(env.JWT_PUBLIC_KEY);
-  const runtimeUsesAsymmetricKey = Boolean(privateKey || publicKey);
+
+  let keyRingJsonValid = true;
+  let keyRingUsesAsymmetric = false;
+  let hasKeyRingActiveKey = false;
+
+  if (env.JWT_KEY_RING_JSON && env.JWT_KEY_RING_JSON.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(env.JWT_KEY_RING_JSON);
+      if (Array.isArray(parsed)) {
+        const activeItem = parsed.find(
+          (k: { status?: string }) => k && k.status === "active",
+        );
+        if (activeItem) {
+          hasKeyRingActiveKey = true;
+          const alg = String(activeItem.algorithm || "").toUpperCase();
+          if (
+            [
+              "RS256",
+              "RS384",
+              "RS512",
+              "PS256",
+              "PS384",
+              "PS512",
+              "ES256",
+              "ES384",
+              "ES512",
+            ].includes(alg)
+          ) {
+            keyRingUsesAsymmetric = true;
+          }
+        }
+      } else {
+        keyRingJsonValid = false;
+      }
+    } catch {
+      keyRingJsonValid = false;
+    }
+  }
+
+  if (env.JWT_KEY_RING_JSON && !keyRingJsonValid) {
+    issues.push({
+      control: "JWT_KEY_RING_JSON",
+      issue: "Unsafe control value: JWT_KEY_RING_JSON is set to invalid JSON",
+      code: "INVALID_FORMAT",
+    });
+  } else if (env.JWT_KEY_RING_JSON && !hasKeyRingActiveKey) {
+    issues.push({
+      control: "JWT_KEY_RING_JSON",
+      issue:
+        "Missing required control: JWT_KEY_RING_JSON must specify at least one active signing key",
+      code: "MISSING_CONTROL",
+    });
+  }
+
+  const runtimeUsesAsymmetricKey =
+    keyRingUsesAsymmetric || Boolean(privateKey || publicKey);
   let algorithms: string[] = [];
 
   if (parsedAlgos.length > 0) {
@@ -324,8 +476,9 @@ export function buildAuthStartupConfigReport(
   // 4. Signing Key Validation
   const isAsymmetric = runtimeUsesAsymmetricKey;
   const requestsSymmetricAlgorithms = algorithms.some(isSymmetricJwtAlgorithm);
-  const requestsAsymmetricAlgorithms =
-    algorithms.some(isAsymmetricJwtAlgorithm);
+  const requestsAsymmetricAlgorithms = algorithms.some(
+    isAsymmetricJwtAlgorithm,
+  );
 
   if (requestsAsymmetricAlgorithms && !isAsymmetric) {
     issues.push({
@@ -346,14 +499,14 @@ export function buildAuthStartupConfigReport(
   }
 
   if (isStrictEnvironment) {
-    if (!jwtSecret && !isAsymmetric) {
+    if (!jwtSecret && !isAsymmetric && !hasKeyRingActiveKey) {
       issues.push({
         control: "JWT_SECRET / JWT_PRIVATE_KEY",
         issue:
           "Missing required control: JWT_SECRET or JWT_PRIVATE_KEY/JWT_PUBLIC_KEY must be configured in staging/production",
         code: "MISSING_CONTROL",
       });
-    } else if (isAsymmetric) {
+    } else if (isAsymmetric && !hasKeyRingActiveKey) {
       if (!privateKey || !publicKey) {
         issues.push({
           control: "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY",
@@ -371,7 +524,7 @@ export function buildAuthStartupConfigReport(
           });
         }
       }
-    } else if (jwtSecret) {
+    } else if (jwtSecret && !hasKeyRingActiveKey) {
       if (isWeakSecret(jwtSecret)) {
         issues.push({
           control: "JWT_SECRET",
@@ -542,6 +695,35 @@ export function buildAuthStartupConfigReport(
   // 9. Internal Key & Pepper Secret References
   const internalKeyEnforced = normalizeString(env.DRTS_INTERNAL_KEY_ENFORCED);
   const internalKey = normalizeString(env.DRTS_INTERNAL_KEY);
+  const workloadIdentityIssuer = normalizeString(env.WORKLOAD_IDENTITY_ISSUER);
+  const workloadIdentityAudience = normalizeString(
+    env.WORKLOAD_IDENTITY_AUDIENCE ?? env.WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE,
+  );
+  const workloadIdentityKey = normalizeString(
+    env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY,
+  );
+  const workloadIdentityRegistry = normalizeString(
+    env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS,
+  );
+  const workloadIdentityRegistryParse = parseWorkloadServicePrincipalRegistry(
+    workloadIdentityRegistry,
+  );
+  const workloadIdentityAlgorithms = parseAlgorithmList(
+    env.WORKLOAD_IDENTITY_JWT_ALGORITHMS,
+    looksLikePem(workloadIdentityKey) ? "RS256" : "HS256",
+  );
+  const workloadIdentityConfigured = Boolean(
+    workloadIdentityIssuer &&
+    workloadIdentityAudience &&
+    workloadIdentityKey &&
+    workloadIdentityRegistry,
+  );
+  const workloadIdentityAnyConfigured = Boolean(
+    workloadIdentityIssuer ||
+    workloadIdentityAudience ||
+    workloadIdentityKey ||
+    workloadIdentityRegistry,
+  );
   const passengerSubjectPepper = normalizeString(env.PASSENGER_SUBJECT_PEPPER);
   const passengerRideTokenPepper = normalizeString(
     env.PASSENGER_RIDE_TOKEN_PEPPER,
@@ -557,14 +739,156 @@ export function buildAuthStartupConfigReport(
       });
     }
 
-    if (!internalKey) {
+    if (
+      workloadIdentityAnyConfigured &&
+      (!workloadIdentityIssuer ||
+        !workloadIdentityAudience ||
+        !workloadIdentityKey ||
+        !workloadIdentityRegistry)
+    ) {
+      if (!workloadIdentityIssuer) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_ISSUER",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_ISSUER must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityAudience) {
+        issues.push({
+          control:
+            "WORKLOAD_IDENTITY_AUDIENCE / WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_AUDIENCE must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityKey) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityRegistry) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      !looksLikePem(workloadIdentityKey) &&
+      (isWeakSecret(workloadIdentityKey) || workloadIdentityKey.length < 32)
+    ) {
       issues.push({
-        control: "DRTS_INTERNAL_KEY",
+        control: "WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
         issue:
-          "Missing required control: DRTS_INTERNAL_KEY must be configured in staging/production",
+          "Unsafe control value: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be a valid public key/certificate or a strong shared secret when workload identity is enabled in staging/production",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    const invalidWorkloadAlgorithms = workloadIdentityAlgorithms.filter(
+      (algorithm) => !ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS.has(algorithm),
+    );
+    if (invalidWorkloadAlgorithms.length > 0) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_JWT_ALGORITHMS",
+        issue: `Unsafe control value: WORKLOAD_IDENTITY_JWT_ALGORITHMS contains unsupported algorithms (${invalidWorkloadAlgorithms.join(", ")})`,
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    const requestsWorkloadSymmetricAlgorithms = workloadIdentityAlgorithms.some(
+      isSymmetricJwtAlgorithm,
+    );
+    const requestsWorkloadAsymmetricAlgorithms =
+      workloadIdentityAlgorithms.some(isAsymmetricJwtAlgorithm);
+    const workloadIdentityKeyLooksAsymmetric =
+      looksLikePem(workloadIdentityKey);
+
+    if (
+      requestsWorkloadSymmetricAlgorithms &&
+      requestsWorkloadAsymmetricAlgorithms
+    ) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_JWT_ALGORITHMS",
+        issue:
+          "Unsafe control value: WORKLOAD_IDENTITY_JWT_ALGORITHMS must not mix symmetric and asymmetric families",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      workloadIdentityKeyLooksAsymmetric &&
+      requestsWorkloadSymmetricAlgorithms
+    ) {
+      issues.push({
+        control:
+          "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+        issue:
+          "Unsafe control value: HMAC workload identity algorithms cannot be paired with PEM-encoded public key or certificate material",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      !workloadIdentityKeyLooksAsymmetric &&
+      requestsWorkloadAsymmetricAlgorithms
+    ) {
+      issues.push({
+        control:
+          "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+        issue:
+          "Missing required control: asymmetric workload identity algorithms require PEM-encoded public key or certificate material",
         code: "MISSING_CONTROL",
       });
-    } else {
+    }
+
+    if (workloadIdentityRegistryParse.parseError) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+        issue: `Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: ${workloadIdentityRegistryParse.parseError}`,
+        code: "INVALID_FORMAT",
+      });
+    } else if (
+      workloadIdentityConfigured &&
+      workloadIdentityRegistryParse.entries.some(
+        (entry) =>
+          !normalizeString(entry.principalId) ||
+          !normalizeString(entry.subject) ||
+          !normalizeString(entry.issuer) ||
+          normalizeAudienceBindings(entry).length === 0,
+      )
+    ) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+        issue:
+          "Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: each entry must declare principalId, subject, issuer, and at least one allowed or default token audience",
+        code: "INVALID_FORMAT",
+      });
+    }
+
+    if (!internalKey && !workloadIdentityConfigured) {
+      issues.push({
+        control:
+          "DRTS_INTERNAL_KEY / WORKLOAD_IDENTITY_{ISSUER,AUDIENCE,JWT_SECRET_OR_PUBLIC_KEY,SERVICE_PRINCIPALS}",
+        issue:
+          "Missing required control: configure DRTS_INTERNAL_KEY or the complete workload identity validation set in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else if (internalKey) {
       if (isWeakSecret(internalKey)) {
         issues.push({
           control: "DRTS_INTERNAL_KEY",
@@ -579,6 +903,35 @@ export function buildAuthStartupConfigReport(
           issue: `Unsafe control value: DRTS_INTERNAL_KEY length (${internalKey.length}) is below required minimum length of 32 characters in staging/production`,
           code: "UNSAFE_VALUE",
         });
+      }
+
+      const matchedExcp = INTERNAL_KEY_EXCEPTION_REGISTRY.find(
+        (e) => e.envVar === "DRTS_INTERNAL_KEY",
+      );
+      if (!matchedExcp) {
+        issues.push({
+          control: "DRTS_INTERNAL_KEY",
+          issue:
+            "Missing required control: DRTS_INTERNAL_KEY is configured but lacks a documented exception entry in INTERNAL_KEY_EXCEPTION_REGISTRY",
+          code: "MISSING_CONTROL",
+        });
+      } else {
+        try {
+          validateExceptionMetadata(matchedExcp);
+        } catch (err) {
+          issues.push({
+            control: "DRTS_INTERNAL_KEY",
+            issue: `Invalid exception metadata for DRTS_INTERNAL_KEY: ${err instanceof Error ? err.message : String(err)}`,
+            code: "INVALID_FORMAT",
+          });
+        }
+        if (isExceptionExpired(matchedExcp)) {
+          issues.push({
+            control: "DRTS_INTERNAL_KEY",
+            issue: `Unsafe control value: DRTS_INTERNAL_KEY exception (${matchedExcp.exceptionId}) expired on ${matchedExcp.expiresAt}`,
+            code: "UNSAFE_VALUE",
+          });
+        }
       }
     }
 
@@ -662,6 +1015,13 @@ export function buildAuthStartupConfigReport(
       internalKey: {
         enforced: internalKeyEnforced?.toLowerCase() !== "false",
         configured: Boolean(internalKey),
+      },
+      workloadIdentity: {
+        configured: workloadIdentityConfigured,
+        issuerConfigured: Boolean(workloadIdentityIssuer),
+        audienceConfigured: Boolean(workloadIdentityAudience),
+        keyConfigured: Boolean(workloadIdentityKey),
+        registryConfigured: Boolean(workloadIdentityRegistry),
       },
       peppers: {
         passengerSubjectConfigured: Boolean(passengerSubjectPepper),

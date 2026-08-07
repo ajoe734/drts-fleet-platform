@@ -29,7 +29,6 @@ export const AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE: Record<
   ops_user: ["ops"],
   driver_user: ["driver"],
   partner_api_key: ["partner"],
-  partner_user: ["partner"],
   referral_passenger: ["partner"],
 };
 
@@ -177,13 +176,6 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "incident:write",
   ],
   partner_api_key: [
-    "partner:entries:read",
-    "partner:eligibility:read",
-    "partner:eligibility:write",
-  ],
-  partner_user: [
-    "partner:read",
-    "partner:write",
     "partner:entries:read",
     "partner:eligibility:read",
     "partner:eligibility:write",

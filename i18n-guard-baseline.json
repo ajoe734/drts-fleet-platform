@@ -5,11 +5,6 @@
       "path": "apps/enterprise-dispatch-web/components/enterprise-shell.tsx",
       "rules": ["jsx-text"],
       "reason": "Demo operator display name (林宜君) is fixture/session data, not translatable UI copy."
-    },
-    {
-      "path": "apps/referral-embed-web/components/passenger-embed.tsx",
-      "rules": ["jsx-text", "jsx-copy-attribute"],
-      "reason": "Referral embed UI canvas mock surface."
     }
   ]
 }

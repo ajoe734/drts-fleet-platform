@@ -35,7 +35,7 @@ Print the repo-aware prompt with:
 python3 scripts/ai_status.py prompt
 ```
 
-Use that output as the first prompt in Claude Code, Codex CLI, Gemini CLI, Copilot, Qwen, or any other connected coding LLM.
+Use that output as the first prompt in Claude Code, Codex CLI, Gemini CLI, Qwen, or any other connected coding LLM.
 
 ## 3. Shared Truth Rules
 

@@ -32,7 +32,6 @@ __pycache__/
 *.pyc
 ai-activity-log.jsonl
 ai-task-archive.jsonl
-.runtime-consumed-oidc-states.json
 
 # IDE
 .idea/

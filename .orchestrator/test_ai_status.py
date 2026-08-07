@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import io
 import sys
@@ -19,6 +20,47 @@ SPEC = importlib.util.spec_from_file_location("ai_status", ROOT / "scripts" / "a
 assert SPEC is not None and SPEC.loader is not None
 ai_status = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ai_status)
+
+
+class RetiredAgentRegistryTest(unittest.TestCase):
+    def test_copilot_and_grok_are_not_active_config_lanes(self) -> None:
+        for filename in ("config.json", "config.example.json"):
+            config = json.loads((ROOT / ".orchestrator" / filename).read_text(encoding="utf-8"))
+            self.assertNotIn("copilot", config.get("agents", {}))
+            self.assertNotIn("grok", config.get("agents", {}))
+            self.assertNotIn("copilot", config.get("providers", {}))
+
+            reassignment = config.get("worker_reassignment", {})
+            for fallback_group in ("owner_fallbacks", "reviewer_fallbacks"):
+                fallbacks = reassignment.get(fallback_group, {})
+                self.assertNotIn("Copilot", fallbacks)
+                self.assertFalse(any("Copilot" in candidates for candidates in fallbacks.values()))
+
+            capacities = config.get("ready_dispatcher", {}).get("max_tasks_per_agent_by_lane", {})
+            self.assertNotIn("copilot", capacities)
+
+    def test_retired_copilot_is_removed_from_runtime_agent_projection(self) -> None:
+        self.assertNotIn("Copilot", ai_status.KNOWN_AGENTS)
+        self.assertIn("Copilot", ai_status.RETIRED_AGENTS)
+        state = {
+            "tasks": [],
+            "blockers": [],
+            "handoffs": [],
+            "agents": [{"name": "Copilot", "status": "idle", "current_task_ids": []}],
+            "discussion_loop": {
+                "supervisor": "Claude",
+                "starter": "Codex",
+                "current_owner": "Grok",
+                "review_order": ["Gemini", "Copilot", "Gemini", "Claude"],
+            },
+        }
+
+        ai_status.normalize_state_agents(state)
+        ai_status.recompute_agents(state)
+
+        self.assertNotIn("Copilot", [agent["name"] for agent in state["agents"]])
+        self.assertEqual(state["discussion_loop"]["current_owner"], "Codex")
+        self.assertEqual(state["discussion_loop"]["review_order"], ["Gemini", "Claude"])
 
 
 class LoadLogsRecoveryTest(unittest.TestCase):
@@ -44,6 +86,29 @@ class LoadLogsRecoveryTest(unittest.TestCase):
 
         self.assertEqual([entry["type"] for entry in logs], ["healthy", "recovered"])
         self.assertEqual(stderr.getvalue(), "")
+
+
+class TaskCountRetentionTest(unittest.TestCase):
+    def test_cumulative_task_count_survives_completed_task_pruning(self) -> None:
+        state = {
+            "tasks": (
+                [{"id": f"D{i}", "status": "done"} for i in range(10)]
+                + [{"id": "OPEN", "status": "todo"}]
+            )
+        }
+
+        with (
+            mock.patch.object(
+                ai_status,
+                "_retention_keeps",
+                return_value={"handoffs": 200, "tasks": 3, "blockers": 100},
+            ),
+            mock.patch.object(ai_status, "archive_task_bodies"),
+        ):
+            ai_status.prune_state_for_size(state)
+
+        self.assertEqual(state["cumulative_task_count"], 11)
+        self.assertEqual(len(state["tasks"]), 4)
 
 
 class CompletionMetadataTest(unittest.TestCase):
@@ -511,6 +576,40 @@ class IntegrationGateCommandDoneTest(unittest.TestCase):
         ):
             ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
         self.assertEqual(task["status"], "done")
+
+
+class RecordIntegrationTest(unittest.TestCase):
+    def test_records_merged_ci_evidence_without_changing_task_status(self) -> None:
+        task = {
+            "id": "IAM-SES-002",
+            "owner": "Codex",
+            "reviewer": "Gemini2",
+            "status": "done",
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Codex",
+            "INTEGRATION_STATUS": "merged_to_dev",
+            "MERGED_REF": "origin/dev",
+            "MERGE_COMMIT": "276a499d5940",
+            "CI_STATUS": "success",
+            "CI_RUN_URL": "https://github.com/example/repo/actions/runs/42",
+            "PR_URL": "https://github.com/example/repo/pull/1277",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log") as append_log:
+            ai_status.command_record_integration(
+                state,
+                ["IAM-SES-002", "CI passed and the PR was merged to dev"],
+            )
+
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["integration_status"], "merged_to_dev")
+        self.assertEqual(task["ci_status"], "success")
+        self.assertEqual(task["merge_commit"], "276a499d5940")
+        append_log.assert_called_once()
 
 
 if __name__ == "__main__":

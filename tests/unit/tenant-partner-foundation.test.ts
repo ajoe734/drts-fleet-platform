@@ -1418,9 +1418,13 @@ describe("tenant partner foundation service", () => {
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         apiKeys: expect.arrayContaining([
+          // Dual rotation keeps the outgoing key signing through the overlap
+          // window instead of revoking it inline; auto-revoke closes it later.
           expect.objectContaining({
             apiKeyId: "tenant-api-key-persisted-001",
-            revokedAt: expect.any(String),
+            status: "overlap_active",
+            revokedAt: null,
+            overlapEndsAt: expect.any(String),
           }),
           expect.objectContaining({
             keyName: "Persisted Tenant Key v2",
@@ -1455,6 +1459,26 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     expect(
       filtered.every((r) => r.partnerEntrySlug === "referral-demo-community"),
     ).toBe(true);
+  });
+
+  it("does not expose seeded referral rates in production", () => {
+    const originalAppEnv = process.env.APP_ENV;
+
+    process.env.APP_ENV = "production";
+    try {
+      const service = new TenantPartnerService(new AuditNotificationService());
+
+      expect(service.listReferralRevenueShareRules()).toEqual([]);
+      expect(
+        service.listReferralRevenueShareRules("referral-demo-community"),
+      ).toEqual([]);
+    } finally {
+      if (originalAppEnv === undefined) {
+        delete process.env.APP_ENV;
+      } else {
+        process.env.APP_ENV = originalAppEnv;
+      }
+    }
   });
 
   it("upserts a referral rate and writes an audit log", () => {

@@ -11,6 +11,7 @@ from unittest.mock import patch
 import permission_broker
 from provider_permissions import (
     ROOT,
+    _apply_configured_adapter_health,
     _codex_auth_ready,
     _copilot_auth_ready,
     _copilot_plaintext_token,
@@ -21,6 +22,45 @@ from provider_permissions import (
 
 
 class ProviderPermissionsTest(unittest.TestCase):
+    def test_antigravity_health_is_effective_gemini_lane_health(self) -> None:
+        config = {
+            "agents": {
+                "gemini": {
+                    "provider": "gemini",
+                    "adapter": "antigravity",
+                }
+            }
+        }
+        report = {
+            "agent_adapters": {
+                "gemini": {
+                    "adapter": "antigravity",
+                    "supported": True,
+                    "can_auto_deliver": True,
+                    "can_auto_approve_edits": True,
+                    "delivery_mode": "antigravity",
+                    "verified": "verified",
+                    "host": "Antigravity CLI",
+                }
+            },
+            "providers": {
+                "gemini": {
+                    "auth_ready": False,
+                    "local_cli_worker_supported": False,
+                    "delivery_mode": "gemini",
+                }
+            },
+        }
+
+        _apply_configured_adapter_health(config, report)
+
+        provider = report["providers"]["gemini"]
+        self.assertTrue(provider["auth_ready"])
+        self.assertTrue(provider["local_cli_worker_supported"])
+        self.assertEqual(provider["delivery_mode"], "antigravity")
+        self.assertFalse(provider["native_cli_auth_ready"])
+        self.assertFalse(provider["native_cli_worker_supported"])
+
     def test_verified_claude_hooks_use_absolute_broker_path(self) -> None:
         expected = str(Path(ROOT) / ".orchestrator" / "permission_broker.py")
         hooks = _verified_claude_hooks()
@@ -335,6 +375,8 @@ class ProviderPermissionsTest(unittest.TestCase):
         self.assertEqual(codex2["paths"]["resolved_codex_home"], str(codex2_home))
         self.assertEqual(codex2["paths"]["auth_json"], str(codex2_home / "auth.json"))
         self.assertIn(str(codex2_home), seen_homes)
+        self.assertNotIn("copilot", report["providers"])
+        self.assertNotIn("grok", report["providers"])
 
 
 if __name__ == "__main__":

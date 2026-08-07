@@ -1,8 +1,20 @@
-import { Injectable, type NestMiddleware } from "@nestjs/common";
-import { timingSafeEqual } from "node:crypto";
+import {
+  Injectable,
+  Logger,
+  Optional,
+  type NestMiddleware,
+} from "@nestjs/common";
 
 import { ApiRequestError } from "../api-envelope";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import {
+  evaluateInternalKey,
+  parseCsvKeys,
+} from "./internal-key-exception-registry";
+import { internalKeyMetrics } from "./internal-key-metrics";
+import { internalKeyAuditRecorder } from "./internal-key-audit";
+import { SecurityEventsService } from "../../modules/security-events/security-events.service";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -14,9 +26,11 @@ type RequestLike = {
 };
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
+export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
+const METRICS_PATHS = new Set(["/metrics", "/api/metrics"]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
   "GET tenant/roles",
@@ -30,6 +44,8 @@ const PUBLIC_BOOTSTRAP_REALMS = new Set([
   "driver",
   "partner",
 ]);
+
+const logger = new Logger("InternalKeyMiddleware");
 
 function normalizeHeaderValue(value: HeaderValue): string {
   if (Array.isArray(value)) {
@@ -55,6 +71,13 @@ export function isHealthRequest(path: string | undefined): boolean {
     return false;
   }
   return HEALTH_PATHS.has(stripQueryString(path));
+}
+
+export function isMetricsRequest(path: string | undefined): boolean {
+  if (!path) {
+    return false;
+  }
+  return METRICS_PATHS.has(stripQueryString(path));
 }
 
 function isOptionsRequest(method: string | undefined): boolean {
@@ -97,69 +120,45 @@ function hasBearerAuthorization(request: RequestLike): boolean {
   return headerValues.some((value) => /^Bearer\s+\S+/i.test(value));
 }
 
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
+function isInternalKeyEnforcementDisabled(): boolean {
+  return (
+    !isStrictAuthEnvironment() &&
+    process.env.DRTS_INTERNAL_KEY_ENFORCED?.trim().toLowerCase() === "false"
+  );
+}
+
 export function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
 ): void {
-  const requestPath = request.originalUrl ?? request.url ?? "";
+  const rawPath = request.originalUrl ?? request.url ?? "";
+  const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
+  const strictEnvironment = isStrictAuthEnvironment();
 
   if (
-    !expectedKey ||
-    isHealthRequest(requestPath) ||
+    isHealthRequest(rawPath) ||
+    isMetricsRequest(rawPath) ||
     isOptionsRequest(requestMethod) ||
-    isExplicitPublicRequest(requestMethod, requestPath) ||
-    hasPublicBootstrapRealm(request) ||
+    isExplicitPublicRequest(requestMethod, rawPath) ||
     hasBearerAuthorization(request)
   ) {
     return;
   }
 
-  const providedKey = normalizeHeaderValue(
-    request.headers?.[INTERNAL_KEY_HEADER],
-  );
-  if (!providedKey) {
-    throw new ApiRequestError(
-      401,
-      "INTERNAL_KEY_REQUIRED",
-      "x-drts-internal-key header is required for this environment.",
-      {
-        route: requestPath,
-        method: requestMethod,
-      },
-    );
-  }
-
-  const expectedBuffer = Buffer.from(expectedKey, "utf8");
-  const providedBuffer = Buffer.from(providedKey, "utf8");
-  const matches =
-    expectedBuffer.length === providedBuffer.length &&
-    timingSafeEqual(expectedBuffer, providedBuffer);
-
-  if (matches) {
+  if (
+    !strictEnvironment &&
+    (!expectedKey || hasPublicBootstrapRealm(request))
+  ) {
     return;
   }
 
-  throw new ApiRequestError(
-    401,
-    "INTERNAL_KEY_INVALID",
-    "x-drts-internal-key header is invalid for this environment.",
-    {
-      route: requestPath,
-      method: requestMethod,
-    },
-  );
-}
-
-export function requireInternalKey(
-  request: RequestLike,
-  expectedKey: string | undefined,
-): void {
-  const requestPath = request.originalUrl ?? request.url ?? "";
-  const requestMethod = request.method ?? "GET";
-  const configuredKey = expectedKey?.trim();
-
-  if (!configuredKey) {
+  if (!expectedKey) {
     throw new ApiRequestError(
       503,
       "INTERNAL_KEY_NOT_CONFIGURED",
@@ -187,15 +186,56 @@ export function requireInternalKey(
     );
   }
 
-  const expectedBuffer = Buffer.from(configuredKey, "utf8");
-  const providedBuffer = Buffer.from(providedKey, "utf8");
-  const matches =
-    expectedBuffer.length === providedBuffer.length &&
-    timingSafeEqual(expectedBuffer, providedBuffer);
+  const previousKey = process.env.DRTS_INTERNAL_KEY_PREVIOUS?.trim();
+  const previousKeyExpiresAt =
+    process.env.DRTS_INTERNAL_KEY_PREVIOUS_EXPIRES_AT?.trim();
+  const revokedKeys = parseCsvKeys(process.env.DRTS_INTERNAL_KEY_REVOKED_KEYS);
 
-  if (matches) {
+  const evalResult = evaluateInternalKey(providedKey, expectedKey, {
+    headerName: INTERNAL_KEY_HEADER,
+    requestPath,
+    requestMethod,
+    previousKey,
+    previousKeyExpiresAt,
+    revokedKeys,
+  });
+
+  if (evalResult.valid) {
+    if (evalResult.keyState === "rotated_previous") {
+      internalKeyMetrics.recordRotationPreviousUsed(
+        evalResult.exception?.exceptionId,
+        evalResult.exception?.owner,
+      );
+    }
+    internalKeyAuditRecorder.recordUsage(evalResult, {
+      header: INTERNAL_KEY_HEADER,
+      route: `${requestMethod} ${requestPath}`,
+    });
+    const usageSignal =
+      evalResult.exception?.usageSignal ?? "AUTH_INTERNAL_KEY_USED";
+    logger.log(
+      `[${usageSignal}] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} route=${requestMethod} ${requestPath}`,
+    );
     return;
   }
+
+  internalKeyMetrics.recordDriftAlert(
+    evalResult.exception?.exceptionId,
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyMetrics.recordUnauthorizedAttempt(
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyAuditRecorder.recordDrift(evalResult, {
+    header: INTERNAL_KEY_HEADER,
+    route: `${requestMethod} ${requestPath}`,
+  });
+
+  logger.warn(
+    `[AUTH_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} route=${requestMethod} ${requestPath}`,
+  );
 
   throw new ApiRequestError(
     401,
@@ -208,15 +248,134 @@ export function requireInternalKey(
   );
 }
 
+export function requireInternalKey(
+  request: RequestLike,
+  expectedKey: string | undefined,
+): void {
+  requireScopedInternalKey(request, expectedKey, {
+    header: INTERNAL_KEY_HEADER,
+    requiredEnv: "DRTS_INTERNAL_KEY",
+  });
+}
+
+/**
+ * Enforce a purpose-bound server credential for a sensitive internal route.
+ * Keeping the header and secret separate prevents a general control-plane key
+ * from being replayed against a public referral handoff endpoint.
+ */
+export function requireScopedInternalKey(
+  request: RequestLike,
+  expectedKey: string | undefined,
+  options: { header: string; requiredEnv: string },
+): void {
+  const rawPath = request.originalUrl ?? request.url ?? "";
+  const requestPath = stripQueryString(rawPath);
+  const requestMethod = request.method ?? "GET";
+  const configuredKey = expectedKey?.trim();
+
+  if (!configuredKey) {
+    throw new ApiRequestError(
+      503,
+      "INTERNAL_KEY_NOT_CONFIGURED",
+      `${options.header} validation is not configured for this environment.`,
+      {
+        route: requestPath,
+        method: requestMethod,
+        requiredEnv: options.requiredEnv,
+      },
+    );
+  }
+
+  const providedKey = normalizeHeaderValue(request.headers?.[options.header]);
+  if (!providedKey) {
+    throw new ApiRequestError(
+      401,
+      "INTERNAL_KEY_REQUIRED",
+      `${options.header} header is required for this environment.`,
+      {
+        route: requestPath,
+        method: requestMethod,
+      },
+    );
+  }
+
+  const previousKey = process.env[`${options.requiredEnv}_PREVIOUS`]?.trim();
+  const previousKeyExpiresAt =
+    process.env[`${options.requiredEnv}_PREVIOUS_EXPIRES_AT`]?.trim();
+  const revokedKeys = parseCsvKeys(
+    process.env[`${options.requiredEnv}_REVOKED_KEYS`],
+  );
+
+  const evalResult = evaluateInternalKey(providedKey, configuredKey, {
+    headerName: options.header,
+    requestPath,
+    requestMethod,
+    previousKey,
+    previousKeyExpiresAt,
+    revokedKeys,
+  });
+
+  if (evalResult.valid) {
+    if (evalResult.keyState === "rotated_previous") {
+      internalKeyMetrics.recordRotationPreviousUsed(
+        evalResult.exception?.exceptionId,
+        evalResult.exception?.owner,
+      );
+    }
+    internalKeyAuditRecorder.recordUsage(evalResult, {
+      header: options.header,
+      route: `${requestMethod} ${requestPath}`,
+    });
+    const usageSignal =
+      evalResult.exception?.usageSignal ?? "AUTH_SCOPED_INTERNAL_KEY_USED";
+    logger.log(
+      `[${usageSignal}] exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} owner=${evalResult.exception?.owner} header=${options.header} route=${requestMethod} ${requestPath}`,
+    );
+    return;
+  }
+
+  internalKeyMetrics.recordDriftAlert(
+    evalResult.exception?.exceptionId,
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyMetrics.recordUnauthorizedAttempt(
+    evalResult.code,
+    `${requestMethod} ${requestPath}`,
+  );
+  internalKeyAuditRecorder.recordDrift(evalResult, {
+    header: options.header,
+    route: `${requestMethod} ${requestPath}`,
+  });
+
+  logger.warn(
+    `[AUTH_SCOPED_INTERNAL_KEY_DRIFT_ALERT] code=${evalResult.code} reason=${evalResult.reason} exceptionId=${evalResult.exception?.exceptionId} keyState=${evalResult.keyState} header=${options.header} route=${requestMethod} ${requestPath}`,
+  );
+
+  throw new ApiRequestError(
+    401,
+    "INTERNAL_KEY_INVALID",
+    `${options.header} header is invalid for this environment.`,
+    {
+      route: requestPath,
+      method: requestMethod,
+    },
+  );
+}
+
 @Injectable()
 export class InternalKeyMiddleware implements NestMiddleware {
+  constructor(
+    @Optional() private readonly securityEventsService?: SecurityEventsService,
+  ) {}
+
   use(request: RequestLike, _response: unknown, next: () => void) {
-    // Non-prod escape hatch: when enforcement is explicitly disabled (dev, so
-    // every server-to-server surface — e.g. the passenger embed resolving its
-    // partner entry — works without depending on per-service key mounts), the
-    // internal-key gate is a no-op. Defaults to enforced; prod never sets the
-    // flag, so production stays locked down.
-    if (process.env.DRTS_INTERNAL_KEY_ENFORCED === "false") {
+    if (this.securityEventsService) {
+      internalKeyAuditRecorder.setSecurityEventsService(
+        this.securityEventsService,
+      );
+    }
+    if (isInternalKeyEnforcementDisabled()) {
       next();
       return;
     }

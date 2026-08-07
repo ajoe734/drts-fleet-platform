@@ -1,12 +1,6 @@
 import { notFound } from "next/navigation";
 import { PassengerEmbed } from "@/components/passenger-embed";
-import {
-  getReferralActiveTripServer,
-  getReferralTripHistoryServer,
-  getReferralTripReceiptServer,
-} from "@/lib/embed-booking-api";
 import { resolveEmbedContext } from "@/lib/embed-context";
-import { isPublicPartnerEntryNotFoundError } from "@/lib/embed-api";
 
 export default async function PassengerEmbedPage({
   params,
@@ -17,11 +11,11 @@ export default async function PassengerEmbedPage({
 }) {
   const { entrySlug } = await params;
   const query = await searchParams;
-  // Only authority-confirmed missing/revoked/inactive entries become a 404.
-  // Connectivity, gateway, and other upstream failures must reach error.tsx so
-  // operators and riders do not receive a misleading "entry missing" result.
-  // Auth/handoff failures for a valid entry remain explicit reauth/fallback
-  // states inside resolveEmbedContext.
+  // resolveEmbedContext resolves the partner entry by slug; an unknown/invalid
+  // entrySlug means there is no such referral channel → 404, not a 500. (The
+  // embed component hard-depends on a present entry, so it cannot render a
+  // degraded state without one.) Auth/handoff failures for a VALID entry are
+  // already handled inside resolveEmbedContext as reauth/fallback states.
   let context: Awaited<ReturnType<typeof resolveEmbedContext>>;
   try {
     context = await resolveEmbedContext(
@@ -32,45 +26,15 @@ export default async function PassengerEmbedPage({
         typeof query.entryHost === "string"
           ? { entryHost: query.entryHost }
           : null,
+        typeof query.apiKey === "string" ? { apiKey: query.apiKey } : null,
+        typeof query.partnerUserRef === "string"
+          ? { partnerUserRef: query.partnerUserRef }
+          : null,
       ),
     );
-  } catch (error) {
-    if (isPublicPartnerEntryNotFoundError(error)) {
-      notFound();
-    }
-    throw error;
+  } catch {
+    notFound();
   }
 
-  let liveData: Parameters<typeof PassengerEmbed>[0]["liveData"] = null;
-
-  if (context.state === "handoff") {
-    const screen = typeof query.screen === "string" ? query.screen : "book";
-    const shouldLoadActive =
-      screen === "trip" ||
-      screen === "receipt" ||
-      screen === "completed" ||
-      screen === "cancelled";
-    const shouldLoadHistory =
-      screen === "trips" ||
-      screen === "receipt" ||
-      screen === "completed" ||
-      screen === "cancelled";
-
-    const activeTrip = shouldLoadActive
-      ? await getReferralActiveTripServer().catch(() => null)
-      : null;
-    const history = shouldLoadHistory
-      ? await getReferralTripHistoryServer().catch(() => null)
-      : null;
-    const receiptOrderId =
-      activeTrip?.trip?.orderId ?? history?.items?.[0]?.orderId ?? null;
-    const receipt =
-      screen === "receipt" && receiptOrderId
-        ? await getReferralTripReceiptServer(receiptOrderId).catch(() => null)
-        : null;
-
-    liveData = { activeTrip, history, receipt };
-  }
-
-  return <PassengerEmbed context={context} liveData={liveData} />;
+  return <PassengerEmbed context={context} />;
 }

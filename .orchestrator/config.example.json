@@ -73,20 +73,18 @@
     "reassign_on_terminal_failure": true,
     "eligible_statuses": ["todo", "in_progress", "review"],
     "owner_fallbacks": {
-      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
-      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
-      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
-      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
+      "Claude": ["Claude2", "Codex", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Claude", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2"],
+      "Codex": ["Claude2", "Claude", "Gemini", "Gemini2"]
     },
     "reviewer_fallbacks": {
-      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
-      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
-      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
-      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
+      "Claude": ["Claude2", "Codex", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Claude", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2"],
+      "Codex": ["Claude2", "Claude", "Gemini", "Gemini2"]
     }
   },
   "underutilization_dispatch": {
@@ -140,8 +138,7 @@
       "Claude2": ["your-github-handle"],
       "Gemini": ["your-github-handle"],
       "Gemini2": ["your-github-handle"],
-      "Codex": ["your-github-handle"],
-      "Copilot": ["your-github-handle"]
+      "Codex": ["your-github-handle"]
     },
     "templates": {
       "ops_issue": ".orchestrator/templates/github_ops_issue.md",
@@ -227,20 +224,6 @@
       "adapter": "codex",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/codex.md"
-    },
-    "copilot": {
-      "display_name": "Copilot",
-      "provider": "copilot",
-      "adapter": "copilot_local",
-      "wake_template": ".orchestrator/templates/wakeup.txt",
-      "file_inbox_path": ".llm-inbox/copilot.md"
-    },
-    "grok": {
-      "display_name": "Copilot (legacy alias)",
-      "provider": "copilot",
-      "adapter": "copilot_local",
-      "wake_template": ".orchestrator/templates/wakeup.txt",
-      "file_inbox_path": ".llm-inbox/grok.md"
     }
   },
   "providers": {
@@ -271,7 +254,6 @@
       "approval": {
         "workspace_permission_mode": "acceptEdits",
         "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
         "rule_default_mode": "acceptEdits",
         "disable_bypass_permissions": true
       }
@@ -304,7 +286,6 @@
       "approval": {
         "workspace_permission_mode": "acceptEdits",
         "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
         "rule_default_mode": "acceptEdits",
         "disable_bypass_permissions": true
       }
@@ -382,42 +363,6 @@
         "ask_for_approval": "never",
         "sandbox_mode": "workspace-write",
         "dangerously_bypass": true
-      }
-    },
-    "copilot": {
-      "delivery_mode": "copilot_local",
-      "file_inbox": {
-        "path": ".llm-inbox/copilot.md",
-        "open_in_vscode": false,
-        "agent_paths": {
-          "grok": ".llm-inbox/grok.md",
-          "copilot": ".llm-inbox/copilot.md"
-        }
-      },
-      "local": {
-        "cli": "copilot",
-        "autopilot": true,
-        "max_autopilot_continues": 12,
-        "allow_all_tools": true,
-        "add_workspace_dir": true,
-        "no_ask_user": true,
-        "allow_tools": [],
-        "deny_tools": [],
-        "extra_args": []
-      },
-      "cloud": {
-        "cli": "gh",
-        "enabled": true,
-        "min_version": "2.80.0",
-        "follow": false,
-        "base_branch": "main",
-        "repo": null,
-        "extra_args": []
-      },
-      "model_preference": {
-        "default": "claude",
-        "grok": null,
-        "supported": ["claude"]
       }
     }
   },

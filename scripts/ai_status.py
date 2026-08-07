@@ -61,17 +61,17 @@ KNOWN_AGENTS = {
         "default_branch": "feat/codex2-parallel-worker",
         "target_workload": 15,
     },
-    "Copilot": {
-        "capability_lane": ["research-ingest", "external-search", "spec-review", "critique"],
-        "default_branch": "feat/copilot-spec-critique",
-        "target_workload": 15,
-    },
 }
 
 RETIRED_AGENTS = {
     "Qwen": {
         "capability_lane": ["integration", "api-implementation", "adapter-execution", "acceptance"],
         "default_branch": "feat/qwen-integration-slices",
+        "target_workload": 0,
+    },
+    "Copilot": {
+        "capability_lane": ["research-ingest", "external-search", "spec-review", "critique"],
+        "default_branch": "feat/copilot-spec-critique",
         "target_workload": 0,
     },
 }
@@ -659,7 +659,7 @@ def default_state() -> dict[str, Any]:
             "supervisor": "Claude",
             "starter": "Codex",
             "current_owner": "Codex",
-            "review_order": ["Claude2", "Gemini", "Gemini2", "Copilot", "Claude"],
+            "review_order": ["Claude2", "Gemini", "Gemini2", "Claude"],
             "loop_rule": "Only the current owner edits starter-draft.md. Reviewers write cited feedback. Supervisor advances the baton.",
             "promotion_gate": "human_accepts_consensus_packet",
         },
@@ -773,6 +773,40 @@ def archive_task_bodies(dropped: list[dict[str, Any]]) -> None:
         pass
 
 
+def preserve_cumulative_task_count(state: dict[str, Any]) -> None:
+    """Persist a stable task denominator before completed task bodies are pruned.
+
+    The dashboard uses this counter to keep project totals stable after done
+    tasks leave the live state file. Reopened tasks remain live and therefore
+    still reduce the current completion count in the dashboard.
+    """
+    tasks = state.get("tasks")
+    if not isinstance(tasks, list):
+        return
+
+    live_ids: set[str] = set()
+    idless_tasks = 0
+    for task in tasks:
+        task_id = str(task.get("id") or "").strip() if isinstance(task, dict) else ""
+        if task_id:
+            live_ids.add(task_id)
+        else:
+            idless_tasks += 1
+
+    archived_ids = {
+        str(task_id).strip()
+        for task_id in state.get("archived_task_ids", [])
+        if str(task_id).strip()
+    }
+    observed_total = len(live_ids | archived_ids) + idless_tasks
+    stored_total = state.get("cumulative_task_count", 0)
+    try:
+        stored_total = max(0, int(stored_total))
+    except (TypeError, ValueError):
+        stored_total = 0
+    state["cumulative_task_count"] = max(stored_total, observed_total)
+
+
 def prune_state_for_size(state: dict[str, Any]) -> None:
     """Bound the unbounded audit tails (done handoffs, done tasks, resolved
     blockers) in place. Mirrors supervisor.{prune_done_handoffs,prune_done_tasks,
@@ -793,6 +827,7 @@ def prune_state_for_size(state: dict[str, Any]) -> None:
 
     tasks = state.get("tasks")
     if isinstance(tasks, list):
+        preserve_cumulative_task_count(state)
         keep = keeps["tasks"]
         done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
         if len(done) > keep:
@@ -1278,6 +1313,32 @@ def normalize_state_agents(state: dict[str, Any]) -> None:
     for agent in state.get("agents", []):
         agent["name"] = canonical_agent_name(agent.get("name"))
 
+    discussion_loop = state.get("discussion_loop")
+    if isinstance(discussion_loop, dict):
+        for key in ("supervisor", "starter"):
+            name = canonical_agent_name(discussion_loop.get(key))
+            if name in KNOWN_AGENTS:
+                discussion_loop[key] = name
+            else:
+                discussion_loop.pop(key, None)
+
+        current_owner = canonical_agent_name(discussion_loop.get("current_owner"))
+        if current_owner in KNOWN_AGENTS:
+            discussion_loop["current_owner"] = current_owner
+        else:
+            fallback = discussion_loop.get("starter") or discussion_loop.get("supervisor")
+            if fallback:
+                discussion_loop["current_owner"] = fallback
+            else:
+                discussion_loop.pop("current_owner", None)
+
+        review_order: list[str] = []
+        for value in discussion_loop.get("review_order", []):
+            name = canonical_agent_name(value)
+            if name in KNOWN_AGENTS and name not in review_order:
+                review_order.append(name)
+        discussion_loop["review_order"] = review_order
+
 
 def recompute_agents(state: dict[str, Any]) -> None:
     deduped_agents: list[dict[str, Any]] = []
@@ -1374,7 +1435,6 @@ def default_next_for_idle_agent(state: dict[str, Any], agent_name: str) -> str:
             "Gemini": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
             "Gemini2": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
             "Codex": "Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.",
-            "Copilot": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
         }
         return execution_defaults.get(agent_name, "Wait for the next execution slice.")
 
@@ -1401,7 +1461,6 @@ def planning_next_for_idle_agent(
         "Claude2": "implementation-boundary review",
         "Gemini": "rollout, infra, and evidence review",
         "Gemini2": "rollout, infra, and evidence review",
-        "Copilot": "scope-completeness and critique review",
         "Claude": "final synthesis and architecture arbitration",
     }
 
@@ -1957,6 +2016,35 @@ def command_note(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "note", "task_id": task_id, "message": message})
 
 
+def command_record_integration(state: dict[str, Any], args: list[str]) -> None:
+    """Record CI or deployment evidence without changing the task lifecycle."""
+    if len(args) < 2:
+        raise SystemExit("Usage: record-integration <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    ensure_agent(actor)
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    owner = canonical_agent_name(task.get("owner"))
+    reviewer = canonical_agent_name(task.get("reviewer"))
+    if actor not in {owner, reviewer}:
+        raise SystemExit(f"Only the owner ({owner}) or reviewer ({reviewer}) can record integration for {task_id}")
+
+    timestamp = iso_now()
+    task.update(integration_metadata_from_env(task_requires_commit(task), timestamp))
+    task["last_update"] = timestamp
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": actor,
+            "type": "record_integration",
+            "task_id": task_id,
+            "message": message,
+        }
+    )
+
+
 def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: reopen <task-id> <message>")
@@ -2313,6 +2401,7 @@ def main(argv: list[str]) -> int:
         "start": command_start,
         "progress": command_progress,
         "note": command_note,
+        "record-integration": command_record_integration,
         "reopen": command_reopen,
         "handoff": command_handoff,
         "blocker": command_blocker,

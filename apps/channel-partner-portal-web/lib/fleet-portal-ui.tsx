@@ -9,23 +9,15 @@ export function DataSourceNotice({
   theme,
   source,
   body,
-  evidenceMarker,
 }: {
   theme: CanvasTheme;
   source: "live" | "fallback";
   body: string;
-  evidenceMarker?: string;
 }) {
-  return (
-    <>
-      <span hidden data-testid="drts-runtime-evidence">
-        {evidenceMarker ?? `drts-data-source:${source}`}
-      </span>
-      {source === "live" ? null : (
-        <CanvasBanner theme={theme} tone="info" icon="warn" body={body} />
-      )}
-    </>
-  );
+  if (source === "live") {
+    return null;
+  }
+  return <CanvasBanner theme={theme} tone="info" icon="warn" body={body} />;
 }
 
 function humanizeCode(value: string) {

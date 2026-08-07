@@ -29,6 +29,27 @@ function getValidProdEnv(): Record<string, string> {
   };
 }
 
+function getValidProdWorkloadIdentityEnv(): Record<string, string> {
+  const env = getValidProdEnv();
+  delete env.DRTS_INTERNAL_KEY;
+  return {
+    ...env,
+    WORKLOAD_IDENTITY_ISSUER: "https://workload.prod.drts.internal",
+    WORKLOAD_IDENTITY_AUDIENCE:
+      "https://auth.prod.drts.internal/token-exchange",
+    WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY: VALID_PROD_SECRET,
+    WORKLOAD_IDENTITY_SERVICE_PRINCIPALS: JSON.stringify([
+      {
+        principalId: "svc-api-runtime",
+        issuer: "https://workload.prod.drts.internal",
+        subject: "api-runtime",
+        scopes: ["foundation:read"],
+        allowedTokenAudiences: ["https://api.drts.internal"],
+      },
+    ]),
+  };
+}
+
 describe("Authentication Startup Configuration Integration Smoke", () => {
   it("passes startup preflight validation with complete production environment", () => {
     const env = getValidProdEnv();
@@ -50,6 +71,81 @@ describe("Authentication Startup Configuration Integration Smoke", () => {
     expect(() => validateAuthStartupConfig(unsafeEnv)).toThrowError(
       AuthConfigurationError,
     );
+  });
+
+  it("passes startup preflight validation with workload identity and no internal key secret", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    const report = validateAuthStartupConfig(env);
+
+    expect(report.valid).toBe(true);
+    expect(report.config.internalKey.configured).toBe(false);
+    expect(report.config.workloadIdentity.configured).toBe(true);
+    expect(report.config.workloadIdentity.registryConfigured).toBe(true);
+  });
+
+  it("blocks startup when a workload identity registry entry omits issuer binding", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        principalId: "svc-api-runtime",
+        subject: "api-runtime",
+        scopes: ["foundation:read"],
+        allowedTokenAudiences: ["https://api.drts.internal"],
+      },
+    ]);
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (issue) =>
+          issue.control === "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS" &&
+          issue.code === "INVALID_FORMAT",
+      ),
+    ).toBe(true);
+  });
+
+  it("blocks startup when a workload identity registry entry omits token audience binding", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        principalId: "svc-api-runtime",
+        issuer: "https://workload.prod.drts.internal",
+        subject: "api-runtime",
+        scopes: ["foundation:read"],
+      },
+    ]);
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (issue) =>
+          issue.control === "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS" &&
+          issue.code === "INVALID_FORMAT",
+      ),
+    ).toBe(true);
+  });
+
+  it("blocks startup when workload identity mixes HMAC algorithms with PEM key material", () => {
+    const env = getValidProdWorkloadIdentityEnv();
+    env.WORKLOAD_IDENTITY_JWT_ALGORITHMS = "HS256";
+    env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY = [
+      "-----BEGIN PUBLIC KEY-----",
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestvalueonly",
+      "-----END PUBLIC KEY-----",
+    ].join("\n");
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (issue) =>
+          issue.control ===
+            "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY" &&
+          issue.code === "UNSAFE_VALUE",
+      ),
+    ).toBe(true);
   });
 
   it("ensures validation error message details missing controls without leaking secret values", () => {

@@ -1,17 +1,10 @@
 import type {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
-  ConsumeReferralEmbedHandoffArtifactCommand,
   PartnerChannelEntryRecord,
-  RecordReferralEmbedConsentCommand,
 } from "@drts/contracts";
 import type { CreatePartnerIngressHandoffCommand } from "@drts/contracts";
 import type { PartnerIngressHandoffSession } from "@drts/contracts";
-import type {
-  CreateReferralEmbedHandoffArtifactCommand,
-  ReferralEmbedHandoffArtifact,
-  ReferralEmbedSession,
-} from "@drts/contracts";
 import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
@@ -41,7 +34,7 @@ function deepCamelize(value: unknown): unknown {
   return value;
 }
 
-export type EmbedAuthorityError = Error & {
+type EmbedAuthorityError = Error & {
   status: number;
   code: string;
   details: Record<string, unknown> | undefined;
@@ -148,42 +141,6 @@ export async function issuePartnerIngressHandoff(
   );
 }
 
-export async function issueReferralEmbedHandoffArtifact(
-  command: CreateReferralEmbedHandoffArtifactCommand,
-) {
-  return requestAuthority<ReferralEmbedHandoffArtifact>(
-    "/api/partner/ingress/referral-embed-handoff",
-    {
-      method: "POST",
-      body: JSON.stringify(command),
-    },
-  );
-}
-
-export async function consumeReferralEmbedHandoffArtifact(
-  command: ConsumeReferralEmbedHandoffArtifactCommand,
-) {
-  return requestAuthority<ReferralEmbedSession>(
-    "/api/partner/ingress/referral-embed-handoff/consume",
-    {
-      method: "POST",
-      body: JSON.stringify(command),
-    },
-  );
-}
-
-export async function recordReferralEmbedConsent(
-  command: RecordReferralEmbedConsentCommand,
-) {
-  return requestAuthority<ReferralEmbedSession>(
-    "/api/partner/ingress/referral-embed-handoff/consent",
-    {
-      method: "POST",
-      body: JSON.stringify(command),
-    },
-  );
-}
-
 export function isEmbedAuthorityError(
   error: unknown,
 ): error is EmbedAuthorityError {
@@ -193,25 +150,5 @@ export function isEmbedAuthorityError(
     "code" in error &&
     typeof (error as EmbedAuthorityError).status === "number" &&
     typeof (error as EmbedAuthorityError).code === "string"
-  );
-}
-
-const PUBLIC_PARTNER_ENTRY_NOT_FOUND_CODES = new Set([
-  "PARTNER_ENTRY_NOT_FOUND",
-  "PARTNER_ENTRY_REVOKED",
-  "PARTNER_ENTRY_INACTIVE",
-]);
-
-/**
- * The public authority deliberately hides missing, revoked, and inactive
- * partner entries behind 404 responses. Other 404s (for example, a gateway or
- * route misconfiguration) and all 5xx responses are service failures and must
- * reach the route error boundary instead of masquerading as a missing entry.
- */
-export function isPublicPartnerEntryNotFoundError(error: unknown) {
-  return (
-    isEmbedAuthorityError(error) &&
-    error.status === 404 &&
-    PUBLIC_PARTNER_ENTRY_NOT_FOUND_CODES.has(error.code)
   );
 }

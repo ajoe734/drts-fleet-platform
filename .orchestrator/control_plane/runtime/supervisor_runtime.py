@@ -234,6 +234,40 @@ def archive_task_bodies(archive_path: Path | None, dropped: list[dict[str, Any]]
         pass
 
 
+def preserve_cumulative_task_count(status: dict[str, Any]) -> None:
+    """Persist a non-decreasing task total before completed tasks are pruned.
+
+    The dashboard needs a stable denominator even though completed task bodies
+    are intentionally removed from the live state file. A reopened task remains
+    live and non-done, so the dashboard still reduces the current done count.
+    """
+    tasks = status.get("tasks")
+    if not isinstance(tasks, list):
+        return
+
+    live_ids: set[str] = set()
+    idless_tasks = 0
+    for task in tasks:
+        task_id = str(task.get("id") or "").strip() if isinstance(task, dict) else ""
+        if task_id:
+            live_ids.add(task_id)
+        else:
+            idless_tasks += 1
+
+    archived_ids = {
+        str(task_id).strip()
+        for task_id in status.get("archived_task_ids", [])
+        if str(task_id).strip()
+    }
+    observed_total = len(live_ids | archived_ids) + idless_tasks
+    stored_total = status.get("cumulative_task_count", 0)
+    try:
+        stored_total = max(0, int(stored_total))
+    except (TypeError, ValueError):
+        stored_total = 0
+    status["cumulative_task_count"] = max(stored_total, observed_total)
+
+
 def prune_done_tasks(
     status: dict[str, Any], keep: int = 150, archive_path: Path | None = None
 ) -> None:
@@ -254,6 +288,7 @@ def prune_done_tasks(
     tasks = status.get("tasks") or []
     if not isinstance(tasks, list):
         return
+    preserve_cumulative_task_count(status)
     done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
     if len(done) <= keep:
         return
@@ -2948,7 +2983,17 @@ def is_agent_dispatch_paused(
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     report = provider_report or load_provider_report(config)
     provider_info = provider_info_for_agent(config, report, normalized)
-    if provider_info.get("auth_ready") is False:
+    adapter_info = adapter_info_for_agent(config, report, normalized)
+    expected_adapter = str(agent_config_for(config, normalized).get("adapter") or "").strip()
+    reported_adapter = str(adapter_info.get("adapter") or "").strip()
+    adapter_can_deliver = (
+        adapter_info.get("supported") is not False
+        and adapter_info.get("can_auto_deliver") is True
+        and (not expected_adapter or not reported_adapter or expected_adapter == reported_adapter)
+    )
+    # Adapter-specific auth is authoritative. For example, Antigravity can be
+    # signed in even when the unrelated native Gemini CLI probe is not.
+    if not adapter_can_deliver and provider_info.get("auth_ready") is False:
         return True
     pauses = provider_pause_registry(state)
     entry = pauses.get(normalized)
@@ -3095,13 +3140,12 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
                 default_eligible_statuses.append(normalized)
     settings.setdefault("eligible_statuses", default_eligible_statuses or ["backlog", "todo", "in_progress", "review", "review_approved"])
     default_fallbacks = {
-        "Claude": ["Claude2", "Codex", "Codex2", "Gemini", "Gemini2", "Copilot"],
-        "Claude2": ["Codex", "Codex2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "Gemini": ["Gemini2", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
-        "Gemini2": ["Gemini", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
-        "Codex": ["Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "Codex2": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "Copilot": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
+        "Claude": ["Claude2", "Codex", "Codex2", "Gemini", "Gemini2"],
+        "Claude2": ["Codex", "Codex2", "Claude", "Gemini", "Gemini2"],
+        "Gemini": ["Gemini2", "Codex", "Codex2", "Claude", "Claude2"],
+        "Gemini2": ["Gemini", "Codex", "Codex2", "Claude", "Claude2"],
+        "Codex": ["Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
+        "Codex2": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"],
     }
     settings.setdefault("owner_fallbacks", default_fallbacks)
     settings.setdefault("reviewer_fallbacks", default_fallbacks)
@@ -3612,9 +3656,6 @@ def agent_supports_auto_delivery(
     agent_id: str,
 ) -> bool:
     report = provider_report if isinstance(provider_report, dict) else {}
-    provider_info = provider_info_for_agent(config, report, agent_id)
-    if provider_info.get("auth_ready") is False:
-        return False
     adapter_info = adapter_info_for_agent(config, report, agent_id)
     if adapter_info:
         expected_adapter = str(agent_config_for(config, agent_id).get("adapter") or "").strip()
@@ -3625,6 +3666,9 @@ def agent_supports_auto_delivery(
             return False
         if adapter_info.get("can_auto_deliver") is True:
             return True
+    provider_info = provider_info_for_agent(config, report, agent_id)
+    if provider_info.get("auth_ready") is False:
+        return False
     if provider_info.get("local_cli_worker_supported") is False:
         return False
     return True
@@ -3878,7 +3922,13 @@ def proactive_claim_plan_for_idle_agent(
     reviewer_candidates.extend(normalized_mapping_values(reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent))
     if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
         reviewer_candidates.extend(ordered_idle)
-    new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={idle_agent_name}, state=state)
+    reviewer_exclude = set() if len(idle_agent_names) == 1 else {idle_agent_name}
+    new_reviewer = first_viable_agent(
+        config,
+        reviewer_candidates,
+        exclude=reviewer_exclude,
+        state=state,
+    )
     if not new_reviewer:
         return None
     return {
@@ -5782,11 +5832,11 @@ def dynamic_sidecar_kind(task: dict[str, Any]) -> str | None:
 
 def preferred_agents_for_sidecar(kind: str) -> list[str]:
     mapping = {
-        "review_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "acceptance_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "bff_handoff_packet": ["Copilot", "Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
+        "review_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
+        "acceptance_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
+        "bff_handoff_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
     }
-    return mapping.get(kind, ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"])
+    return mapping.get(kind, ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"])
 
 
 def agent_has_dispatchable_primary_work(
@@ -5836,11 +5886,14 @@ def eligible_idle_agents_for_sidecars(
     *,
     max_active_sidecars_per_agent: int,
     provider_report: dict[str, Any] | None = None,
+    allow_primary_work_fallback: bool = False,
 ) -> list[str]:
     settings = ready_dispatch_settings(config)
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
+    active_agent_counts = active_worker_agent_counts(state, active_statuses)
     pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
+    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     task_map = task_index_from_status(config, status)
     agents: list[str] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
@@ -5849,7 +5902,12 @@ def eligible_idle_agents_for_sidecars(
         if "legacy alias" in display_name.lower():
             continue
         normalized = normalize_agent_id(agent_id)
-        if normalized in active_agents or normalized in pending_agents:
+        if normalized in pending_agents:
+            continue
+        lane_capacity = max_tasks_per_agent_for_lane(settings, normalized)
+        if lane_capacity <= 0:
+            continue
+        if not allow_primary_work_fallback and normalized in active_agents:
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
@@ -7060,17 +7118,34 @@ def choose_chair_reviewer(
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
+    active_agent_counts = active_worker_agent_counts(state, active_statuses)
+    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     task_map = task_index_from_status(config, status)
     failing_agents = failing_agents_in_reassignment_loops(state, status)
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
+    active_recovery_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         display_name = task_agent_display_name(config, status, agent_id)
         if not display_name or display_name_is_legacy_alias(display_name) or display_name_is_legacy_alias(configured_display_name):
             continue
         normalized = normalize_agent_id(agent_id)
-        if normalized in active_agents or normalized in pending_agents:
+        if normalized in pending_agents:
+            continue
+        if normalized in active_agents:
+            if not allow_primary_work_fallback:
+                continue
+            if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+                continue
+            if not agent_supports_auto_delivery(config, provider_report, agent_id):
+                continue
+            if display_name in failing_agents:
+                continue
+            lane_capacity = max_tasks_per_agent_for_lane(settings, normalized)
+            lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
+            if lane_load < lane_capacity:
+                active_recovery_candidates.append((normalized, display_name))
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
@@ -7084,7 +7159,9 @@ def choose_chair_reviewer(
             continue
         candidates.append((normalized, display_name))
     if not candidates and allow_primary_work_fallback:
-        candidates = primary_work_candidates
+        candidates = primary_work_candidates or active_recovery_candidates
+    if not candidates:
+        return None
     if not candidates:
         return None
     rotation_index = int(state.setdefault("chair_review", {}).get("rotation_index", 0) or 0)
@@ -7723,7 +7800,7 @@ def create_chair_workspace_baseline_task(
         config,
         state,
         provider_report,
-        [preferred_owner or "", "Claude", "Codex", "Claude2", "Codex2", "Gemini2", "Gemini", "Copilot"],
+        [preferred_owner or "", "Claude", "Codex", "Claude2", "Codex2", "Gemini2", "Gemini"],
         exclude=set(),
     )
     if owner is None:
@@ -7732,7 +7809,7 @@ def create_chair_workspace_baseline_task(
         config,
         state,
         provider_report,
-        ["Codex", "Claude", "Claude2", "Codex2", "Gemini2", "Gemini", "Copilot"],
+        ["Codex", "Claude", "Claude2", "Codex2", "Gemini2", "Gemini"],
         exclude={owner},
     )
     if reviewer is None:
@@ -7990,7 +8067,7 @@ def create_chair_unblock_task(
         config,
         state,
         provider_report,
-        [requested_owner, parent_owner, "Codex", "Codex2", "Claude2", "Claude", "Gemini2", "Gemini", "Copilot"],
+        [requested_owner, parent_owner, "Codex", "Codex2", "Claude2", "Claude", "Gemini2", "Gemini"],
         exclude=set(),
     )
     if owner is None:
@@ -7999,7 +8076,7 @@ def create_chair_unblock_task(
         config,
         state,
         provider_report,
-        [requested_reviewer, parent_reviewer, "Codex2", "Codex", "Claude2", "Claude", "Gemini2", "Gemini", "Copilot"],
+        [requested_reviewer, parent_reviewer, "Codex2", "Codex", "Claude2", "Claude", "Gemini2", "Gemini"],
         exclude={owner},
     )
     if reviewer is None:
@@ -9215,19 +9292,43 @@ def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
     return False
 
 
+def _has_any_dispatchable_lane(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
+    settings = ready_dispatch_settings(config)
+    report = provider_report or load_provider_report(config)
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        if not configured_display_name or display_name_is_legacy_alias(configured_display_name):
+            continue
+        normalized = normalize_agent_id(agent_id)
+        if is_agent_dispatch_paused(config, state, normalized, provider_report=report):
+            continue
+        if not agent_supports_auto_delivery(config, report, normalized):
+            continue
+        if max_tasks_per_agent_for_lane(settings, normalized) <= 0:
+            continue
+        return True
+    return False
+
+
 def break_full_deadlock(
     config: dict[str, Any],
     state: dict[str, Any],
     status: dict[str, Any],
 ) -> bool:
     """Last-resort recovery when the orchestrator is fully wedged: zero active
-    workers, an empty queue, the chairman review blocked for lack of a
-    dispatch-capable lane, yet dispatchable backlog remains. Forces a fresh
-    capability probe and clears any paused lane the probe now reports healthy
-    (auth OR an indefinite quota hold whose underlying probe has recovered). If
-    nothing recovers, raises a loud operator-attention escalation instead of
-    sitting silently at zero workers. Rate-limited by a cooldown so genuinely
-    dead lanes are not thrashed."""
+    workers, an empty queue, dispatchable backlog remains, and either
+    - chairman review is blocked for lack of a dispatch-capable lane
+    - provider pauses are present while no dispatch-capable lane is available.
+
+    Forces a fresh capability probe and clears any paused lane the probe now
+    reports healthy (auth OR an indefinite quota hold whose underlying probe
+    has recovered). If nothing recovers, raises a loud
+    operator-attention escalation instead of sitting silently at zero workers.
+    Rate-limited by a cooldown so genuinely dead lanes are not thrashed."""
     settings = config.get("supervisor", {})
     if not settings.get("deadlock_breaker_enabled", True):
         return False
@@ -9237,10 +9338,18 @@ def break_full_deadlock(
         return False
     if state.get("queue", {}).get("events", {}):
         return False
-    if not state.get("chair_review", {}).get("blocked"):
-        return False
+
+    chair_blocked = bool(state.get("chair_review", {}).get("blocked"))
+    if not chair_blocked:
+        if not active_provider_pause_records(state):
+            return False
+        provider_report = load_provider_report(config)
+        if _has_any_dispatchable_lane(config, state, provider_report=provider_report):
+            return False
+
     if not _has_dispatchable_backlog(status):
         return False
+
     rec = state.setdefault("deadlock_recovery", {})
     cooldown = float(settings.get("deadlock_breaker_cooldown_seconds", 1800))
     last_attempt = _parse_iso_utc(rec.get("last_attempt_at"))
@@ -9248,11 +9357,18 @@ def break_full_deadlock(
     if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
         return False
     rec["last_attempt_at"] = utc_now()
-    console_log(
-        "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
-        "blocked, backlog pending) - forcing recovery probe",
-        quiet=False,
-    )
+    if chair_blocked:
+        console_log(
+            "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
+            "blocked, backlog pending) - forcing recovery probe",
+            quiet=False,
+        )
+    else:
+        console_log(
+            "FULL DEADLOCK detected (0 active workers, queue empty, paused lanes present, "
+            "no chair review blocked marker, backlog pending) - forcing recovery probe",
+            quiet=False,
+        )
     fresh_report = _force_recovery_probe(config)
     paused = list(provider_pause_registry(state).keys())
     recovered = [a for a in paused if _lane_probe_healthy(config, fresh_report, a) is True]

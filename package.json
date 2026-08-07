@@ -56,9 +56,11 @@
     "test:e2e:tenant-localization": "playwright test -c playwright.tenant-localization.config.ts",
     "test:e2e:dev-runtime-matrix": "playwright test -c playwright.dev-runtime-matrix.config.ts",
     "test:e2e:google-map-live": "playwright test -c playwright.google-map-live.config.ts",
+    "test:security:iam-negative-matrix": "./tests/security/run-iam-negative-matrix.sh",
     "test:unit": "vitest run",
     "typecheck": "pnpm typecheck:root && turbo run typecheck",
-    "typecheck:root": "tsc -p tsconfig.json --noEmit"
+    "typecheck:root": "tsc -p tsconfig.json --noEmit",
+    "verify:internal-key-exceptions": "python3 scripts/verify-internal-key-exceptions.py"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}": [
@@ -71,6 +73,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.59.1",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.8.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
@@ -78,6 +81,7 @@
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.4.0",
     "husky": "^9.1.7",
+    "jsonwebtoken": "^9.0.3",
     "lint-staged": "^16.2.4",
     "next": "^16.2.3",
     "prettier": "^3.6.2",

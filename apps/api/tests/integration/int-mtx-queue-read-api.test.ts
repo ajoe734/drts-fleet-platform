@@ -71,7 +71,6 @@ function createQueueService() {
     },
   };
   const repository = {
-    isEnabled: vi.fn(() => false),
     loadState: vi.fn(async () => ({
       orders: [],
       dispatchJobs: [],
