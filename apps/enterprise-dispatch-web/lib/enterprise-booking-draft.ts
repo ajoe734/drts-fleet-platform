@@ -1,7 +1,6 @@
 import type { CreateTenantBookingCommand } from "@drts/contracts";
 import {
   enterpriseBookingDraft,
-  enterpriseQuotaSummary,
   getEnterpriseBookingDraft,
 } from "@/lib/enterprise-fixtures";
 import type { Locale } from "@/lib/translations";
@@ -18,7 +17,7 @@ export type EnterpriseBookingDraftForm = {
   dropoff: string;
   reservationDate: string;
   reservationTime: string;
-  onsiteContact: string;
+  onsiteContactPhone: string;
   costCenterCode: string;
   costCenterLabel: string;
   vehicle: EnterpriseVehiclePreference;
@@ -65,17 +64,29 @@ const QUERY_KEYS = {
 const DISPLAY_BUDGET_TOTAL = 60_000;
 const DISPLAY_BUDGET_AVAILABLE = 31_000;
 const APPROVAL_THRESHOLD = 1_500;
-const DEFAULT_PASSENGER_PHONE = "+886912000118";
-const DEFAULT_BOOKED_BY_EMAIL = "lin.yijun@hongshuo.example";
 const DEFAULT_TIMEZONE_OFFSET = "+08:00";
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function trimOrFallback(value: string | undefined, fallback: string): string {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+function hasQueryKey(
+  params: SearchParamRecord,
+  key: (typeof QUERY_KEYS)[keyof typeof QUERY_KEYS],
+) {
+  return Object.hasOwn(params, key);
+}
+
+function parseEditableText(
+  params: SearchParamRecord,
+  key: (typeof QUERY_KEYS)[keyof typeof QUERY_KEYS],
+  fallback: string,
+) {
+  if (!hasQueryKey(params, key)) {
+    return fallback;
+  }
+
+  return firstParam(params[key])?.trim() ?? "";
 }
 
 function formatCurrency(amount: number) {
@@ -87,6 +98,7 @@ function hasAirportContext(value: string) {
 }
 
 function estimateFare(draft: EnterpriseBookingDraftForm) {
+  // Stage 1 has no enterprise quote API yet; this is display-only preview logic.
   let amount = 620;
   const routeText = `${draft.pickup} ${draft.dropoff}`;
 
@@ -157,7 +169,7 @@ export function createEnterpriseBookingDraft(
     dropoff: seed.dropoff,
     reservationDate: "2026-06-13",
     reservationTime: "15:20",
-    onsiteContact: seed.onsiteContact,
+    onsiteContactPhone: seed.onsiteContact,
     costCenterCode: enterpriseBookingDraft.costCenterCode,
     costCenterLabel: seed.costCenter,
     vehicle,
@@ -179,61 +191,53 @@ export function parseEnterpriseBookingDraft(
 
   const draft: EnterpriseBookingDraftForm = {
     passengerMode: passengerMode === "self" ? "self" : "other",
-    passenger: trimOrFallback(
-      firstParam(params[QUERY_KEYS.passenger]),
+    passenger: parseEditableText(
+      params,
+      QUERY_KEYS.passenger,
       fallback.passenger,
     ),
-    bookedBy: trimOrFallback(
-      firstParam(params[QUERY_KEYS.bookedBy]),
-      fallback.bookedBy,
-    ),
-    pickup: trimOrFallback(
-      firstParam(params[QUERY_KEYS.pickup]),
-      fallback.pickup,
-    ),
-    dropoff: trimOrFallback(
-      firstParam(params[QUERY_KEYS.dropoff]),
-      fallback.dropoff,
-    ),
-    reservationDate: trimOrFallback(
-      firstParam(params[QUERY_KEYS.reservationDate]),
+    bookedBy: parseEditableText(params, QUERY_KEYS.bookedBy, fallback.bookedBy),
+    pickup: parseEditableText(params, QUERY_KEYS.pickup, fallback.pickup),
+    dropoff: parseEditableText(params, QUERY_KEYS.dropoff, fallback.dropoff),
+    reservationDate: parseEditableText(
+      params,
+      QUERY_KEYS.reservationDate,
       fallback.reservationDate,
     ),
-    reservationTime: trimOrFallback(
-      firstParam(params[QUERY_KEYS.reservationTime]),
+    reservationTime: parseEditableText(
+      params,
+      QUERY_KEYS.reservationTime,
       fallback.reservationTime,
     ),
-    onsiteContact: trimOrFallback(
-      firstParam(params[QUERY_KEYS.onsiteContact]),
-      fallback.onsiteContact,
+    onsiteContactPhone: parseEditableText(
+      params,
+      QUERY_KEYS.onsiteContact,
+      fallback.onsiteContactPhone,
     ),
-    costCenterCode: trimOrFallback(
-      firstParam(params[QUERY_KEYS.costCenterCode]),
+    costCenterCode: parseEditableText(
+      params,
+      QUERY_KEYS.costCenterCode,
       fallback.costCenterCode,
     ),
-    costCenterLabel: trimOrFallback(
-      firstParam(params[QUERY_KEYS.costCenterLabel]),
+    costCenterLabel: parseEditableText(
+      params,
+      QUERY_KEYS.costCenterLabel,
       fallback.costCenterLabel,
     ),
     vehicle: normalizeVehicle(
       firstParam(params[QUERY_KEYS.vehicle]),
       fallback.vehicle,
     ),
-    notes: trimOrFallback(firstParam(params[QUERY_KEYS.notes]), fallback.notes),
+    notes: parseEditableText(params, QUERY_KEYS.notes, fallback.notes),
     airportDirection:
       firstParam(params[QUERY_KEYS.airportDirection]) === "dropoff"
         ? "dropoff"
         : "pickup",
-    terminal: trimOrFallback(
-      firstParam(params[QUERY_KEYS.terminal]),
-      fallback.terminal,
-    ),
-    flight: trimOrFallback(
-      firstParam(params[QUERY_KEYS.flight]),
-      fallback.flight,
-    ),
-    luggageCount: trimOrFallback(
-      firstParam(params[QUERY_KEYS.luggageCount]),
+    terminal: parseEditableText(params, QUERY_KEYS.terminal, fallback.terminal),
+    flight: parseEditableText(params, QUERY_KEYS.flight, fallback.flight),
+    luggageCount: parseEditableText(
+      params,
+      QUERY_KEYS.luggageCount,
       fallback.luggageCount,
     ),
   };
@@ -266,7 +270,7 @@ export function serializeEnterpriseBookingDraft(
   params.set(QUERY_KEYS.dropoff, draft.dropoff);
   params.set(QUERY_KEYS.reservationDate, draft.reservationDate);
   params.set(QUERY_KEYS.reservationTime, draft.reservationTime);
-  params.set(QUERY_KEYS.onsiteContact, draft.onsiteContact);
+  params.set(QUERY_KEYS.onsiteContact, draft.onsiteContactPhone);
   params.set(QUERY_KEYS.costCenterCode, draft.costCenterCode);
   params.set(QUERY_KEYS.costCenterLabel, draft.costCenterLabel);
   params.set(QUERY_KEYS.vehicle, draft.vehicle);
@@ -328,6 +332,9 @@ export function buildEnterpriseBookingCommand(
   );
   const preview = getEnterpriseBookingPreview(draft, "zh");
   const luggageCount = Number.parseInt(draft.luggageCount, 10);
+  const passengerName =
+    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
+  const onsiteContactPhone = draft.onsiteContactPhone.trim();
 
   return {
     businessDispatchSubtype: "enterprise_dispatch",
@@ -342,16 +349,12 @@ export function buildEnterpriseBookingCommand(
     reservationWindowStart: reservationWindowStart.toISOString(),
     reservationWindowEnd: reservationWindowEnd.toISOString(),
     passenger: {
-      name: draft.passengerMode === "self" ? draft.bookedBy : draft.passenger,
-      phone: DEFAULT_PASSENGER_PHONE,
-    },
-    bookedBy: {
-      name: draft.bookedBy,
-      email: DEFAULT_BOOKED_BY_EMAIL,
+      name: passengerName,
+      phone: onsiteContactPhone,
     },
     onsiteContact: {
-      name: draft.onsiteContact,
-      phone: DEFAULT_PASSENGER_PHONE,
+      name: passengerName,
+      phone: onsiteContactPhone,
     },
     costCenter: draft.costCenterCode,
     vehiclePreference: draft.vehicle,
@@ -378,7 +381,7 @@ export function isEnterpriseDraftComplete(draft: EnterpriseBookingDraftForm) {
     draft.dropoff,
     draft.reservationDate,
     draft.reservationTime,
-    draft.onsiteContact,
+    draft.onsiteContactPhone,
     draft.costCenterCode,
     draft.costCenterLabel,
   ].every((value) => value.trim().length > 0);
@@ -397,12 +400,4 @@ export function getVehicleLabelFromDraft(
   }
 
   return locale === "zh" ? "商務車" : "Business sedan";
-}
-
-export function getEnterpriseQuotaContext() {
-  return {
-    ...enterpriseQuotaSummary,
-    displayBudgetAvailable: DISPLAY_BUDGET_AVAILABLE,
-    displayBudgetTotal: DISPLAY_BUDGET_TOTAL,
-  };
 }

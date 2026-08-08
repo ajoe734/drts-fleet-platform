@@ -14,7 +14,6 @@ import {
 } from "@/components/ent-kit";
 import {
   getEnterpriseBookingPreview,
-  getVehicleLabelFromDraft,
   isEnterpriseDraftComplete,
   serializeEnterpriseBookingDraft,
   type EnterpriseAirportDirection,
@@ -71,6 +70,7 @@ function chipButtonStyle(): CSSProperties {
 function TextControl({
   value,
   onChange,
+  onFocus,
   icon,
   type = "text",
   mono,
@@ -78,6 +78,7 @@ function TextControl({
 }: {
   value: string;
   onChange: (value: string) => void;
+  onFocus?: () => void;
   icon?: string;
   type?: "text" | "date" | "time";
   mono?: boolean;
@@ -94,6 +95,7 @@ function TextControl({
         type={type}
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
+        onFocus={onFocus}
         placeholder={placeholder}
         style={textInputStyle(mono)}
       />
@@ -238,6 +240,9 @@ export function EnterpriseBookingForm({
 }) {
   const { locale, t: tr } = useTranslation();
   const [draft, setDraft] = useState(initialDraft);
+  const [addressTarget, setAddressTarget] = useState<"pickup" | "dropoff">(
+    "pickup",
+  );
   const preview = getEnterpriseBookingPreview(draft, locale);
   const reviewHref = `/bookings/review?${serializeEnterpriseBookingDraft(
     draft,
@@ -326,27 +331,29 @@ export function EnterpriseBookingForm({
               </EField>
             </>
           ) : null}
-          <div
-            style={{
-              display: "flex",
-              gap: 7,
-              flexWrap: "wrap",
-              marginTop: 12,
-            }}
-          >
-            {passengers.map((passenger) => (
-              <button
-                key={passenger}
-                type="button"
-                onClick={() =>
-                  patch({ passengerMode: "other", passenger: passenger })
-                }
-                style={chipButtonStyle()}
-              >
-                {passenger}
-              </button>
-            ))}
-          </div>
+          {draft.passengerMode === "other" ? (
+            <div
+              style={{
+                display: "flex",
+                gap: 7,
+                flexWrap: "wrap",
+                marginTop: 12,
+              }}
+            >
+              {passengers.map((passenger) => (
+                <button
+                  key={passenger}
+                  type="button"
+                  onClick={() =>
+                    patch({ passengerMode: "other", passenger: passenger })
+                  }
+                  style={chipButtonStyle()}
+                >
+                  {passenger}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </ECard>
 
         <ECard
@@ -366,6 +373,7 @@ export function EnterpriseBookingForm({
                 icon="pin"
                 value={draft.pickup}
                 onChange={(pickup) => patch({ pickup })}
+                onFocus={() => setAddressTarget("pickup")}
               />
             </EField>
             <EField t={t} label={tr("new.field.dropoff")} req full>
@@ -373,6 +381,7 @@ export function EnterpriseBookingForm({
                 icon="pin"
                 value={draft.dropoff}
                 onChange={(dropoff) => patch({ dropoff })}
+                onFocus={() => setAddressTarget("dropoff")}
               />
             </EField>
             <EField t={t} label={tr("new.field.window")} req>
@@ -406,13 +415,13 @@ export function EnterpriseBookingForm({
               <button
                 key={address}
                 type="button"
-                onClick={() => {
-                  if (draft.pickup === initialDraft.pickup) {
-                    patch({ dropoff: address });
-                    return;
-                  }
-                  patch({ pickup: address });
-                }}
+                onClick={() =>
+                  patch(
+                    addressTarget === "pickup"
+                      ? { pickup: address }
+                      : { dropoff: address },
+                  )
+                }
                 style={chipButtonStyle()}
               >
                 {address}
@@ -522,8 +531,8 @@ export function EnterpriseBookingForm({
             <EField t={t} label={tr("new.field.contact")} req>
               <TextControl
                 icon="phone"
-                value={draft.onsiteContact}
-                onChange={(onsiteContact) => patch({ onsiteContact })}
+                value={draft.onsiteContactPhone}
+                onChange={(onsiteContactPhone) => patch({ onsiteContactPhone })}
                 mono
               />
             </EField>
@@ -589,11 +598,6 @@ export function EnterpriseBookingForm({
                 {preview.approvalLabel}
               </EPill>
             }
-          />
-          <ERow
-            t={t}
-            k={tr("new.policy.vehicle")}
-            v={getVehicleLabelFromDraft(draft, locale)}
             last
           />
           <div style={{ marginTop: 12 }}>
@@ -605,25 +609,6 @@ export function EnterpriseBookingForm({
             />
           </div>
         </ECard>
-        <div
-          style={{
-            background: t.surface,
-            border: "1px solid " + t.line,
-            borderRadius: t.radius,
-            boxShadow: t.shadowSm,
-            padding: 16,
-          }}
-        >
-          <div style={{ fontSize: 12.5, color: t.muted, marginBottom: 8 }}>
-            {tr("review.card.submit")}
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.5 }}>
-            {draft.passengerMode === "self" ? draft.bookedBy : draft.passenger}
-          </div>
-          <div style={{ fontSize: 12, color: t.muted, marginTop: 4 }}>
-            {preview.reservationWindowLabel} · {draft.costCenterCode}
-          </div>
-        </div>
         <Link
           href={reviewHref}
           aria-disabled={!canContinue}

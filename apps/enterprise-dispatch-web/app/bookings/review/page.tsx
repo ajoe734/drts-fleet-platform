@@ -25,6 +25,20 @@ import { type TranslationKey, t as translate } from "@/lib/translations";
 
 type ReviewSearchParams = Record<string, string | string[] | undefined>;
 
+function displayDraftValue(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "—";
+}
+
+function formatLuggageLabel(value: string, locale: "zh" | "en") {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "—";
+  }
+
+  return locale === "zh" ? `${trimmed} 件` : trimmed;
+}
+
 export default async function ReviewBookingPage({
   searchParams,
 }: {
@@ -36,6 +50,8 @@ export default async function ReviewBookingPage({
   const draft = parseEnterpriseBookingDraft((await searchParams) ?? {}, locale);
   const preview = getEnterpriseBookingPreview(draft, locale);
   const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
+  const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(Boolean);
+  const airportLabel = airportParts.length > 0 ? airportParts.join(" · ") : undefined;
 
   return (
     <>
@@ -193,7 +209,7 @@ export default async function ReviewBookingPage({
                 <div
                   style={{ fontSize: 13, fontWeight: 600, fontFamily: t.mono }}
                 >
-                  {draft.onsiteContact}
+                  {displayDraftValue(draft.onsiteContactPhone)}
                 </div>
               </div>
               <div
@@ -226,12 +242,21 @@ export default async function ReviewBookingPage({
               from={draft.pickup}
               to={draft.dropoff}
               win={preview.reservationWindowLabel}
-              airportLabel={`${draft.flight} · ${draft.terminal}`}
+              airportLabel={airportLabel}
             />
             <div style={{ marginTop: 16 }}>
               <ERow t={t} k={tr("new.policy.vehicle")} v={vehicleLabel} />
-              <ERow t={t} k={tr("new.airport.luggage")} v={draft.luggageCount} />
-              <ERow t={t} k={tr("new.field.notes")} v={draft.notes} last />
+              <ERow
+                t={t}
+                k={tr("new.airport.luggage")}
+                v={formatLuggageLabel(draft.luggageCount, locale)}
+              />
+              <ERow
+                t={t}
+                k={tr("new.field.notes")}
+                v={displayDraftValue(draft.notes)}
+                last
+              />
             </div>
           </ECard>
           <ECard
