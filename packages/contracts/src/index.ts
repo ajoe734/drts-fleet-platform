@@ -2610,6 +2610,7 @@ export interface MaskedIdentitySessionRecord {
 
 export interface RevokeSessionCommand {
   reason?: string;
+  expectedVersion?: number;
 }
 
 export interface LogoutAllSessionsCommand {

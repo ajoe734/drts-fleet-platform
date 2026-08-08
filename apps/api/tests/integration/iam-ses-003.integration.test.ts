@@ -536,4 +536,145 @@ describe("IAM-SES-003 Session Inventory, Logout, & Boundary-Safe Admin Revoke In
       (err: any) => err.code === "CSRF_TOKEN_INVALID" || err.response?.error?.code === "CSRF_TOKEN_INVALID",
     );
   });
+
+  it("6. expectedVersion concurrency check rejects version mismatch with 409 IAM_CONCURRENCY_CONFLICT", async () => {
+    const now = new Date().toISOString();
+    const principalId = `usr_version_${Date.now()}`;
+    const sid = `sid_version_${Date.now()}`;
+
+    await ensureTestPrincipal(database, principalId);
+
+    await identityRepo.createSession({
+      sessionId: sid,
+      sourceRef: `ref_${sid}`,
+      principalId,
+      membershipId: null,
+      realm: "tenant",
+      actorType: "tenant_admin",
+      actorId: principalId,
+      tenantId: "tenant_alpha",
+      status: "active",
+      authTime: now,
+      authMethods: ["oidc"],
+      tokenVersion: 5,
+      idleExpiresAt: null,
+      absoluteExpiresAt: new Date(Date.now() + 86400000).toISOString(),
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: { ip: "10.0.0.88" },
+      riskSummary: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const identity = {
+      authMode: "jwt_bearer" as const,
+      actorType: "tenant_admin" as const,
+      actorId: principalId,
+      principalId,
+      realm: "tenant" as const,
+      tenantId: "tenant_alpha",
+      roleFamilies: ["tenant" as const],
+      roles: ["tenant_admin"],
+      scopes: ["identity:sessions:read", "identity:sessions:write"],
+      sessionId: sid,
+    };
+
+    // Negative: wrong expectedVersion -> 409 IAM_CONCURRENCY_CONFLICT
+    await expect(
+      authController.revokeSelfSession(
+        sid,
+        identity,
+        { reason: "Wrong version attempt", expectedVersion: 3 },
+        { headers: {} },
+        "req_ver_01",
+      ),
+    ).rejects.toSatisfy(
+      (err: any) =>
+        err.code === "IAM_CONCURRENCY_CONFLICT" ||
+        err.response?.error?.code === "IAM_CONCURRENCY_CONFLICT",
+    );
+
+    // Positive: matching expectedVersion -> 200 OK
+    const revokeRes = await authController.revokeSelfSession(
+      sid,
+      identity,
+      { reason: "Correct version revoke", expectedVersion: 5 },
+      { headers: {} },
+      "req_ver_02",
+    );
+
+    expect(revokeRes.data.status).toBe("revoked");
+  });
+
+  it("7. Concurrent revokes on same session: only one succeeds, second gets 409 IAM_CONCURRENCY_CONFLICT", async () => {
+    const now = new Date().toISOString();
+    const principalId = `usr_concurrent_${Date.now()}`;
+    const sid = `sid_concurrent_${Date.now()}`;
+
+    await ensureTestPrincipal(database, principalId);
+
+    await identityRepo.createSession({
+      sessionId: sid,
+      sourceRef: `ref_${sid}`,
+      principalId,
+      membershipId: null,
+      realm: "tenant",
+      actorType: "tenant_admin",
+      actorId: principalId,
+      tenantId: "tenant_alpha",
+      status: "active",
+      authTime: now,
+      authMethods: ["oidc"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt: new Date(Date.now() + 86400000).toISOString(),
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: { ip: "10.0.0.77" },
+      riskSummary: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const identity = {
+      authMode: "jwt_bearer" as const,
+      actorType: "tenant_admin" as const,
+      actorId: principalId,
+      principalId,
+      realm: "tenant" as const,
+      tenantId: "tenant_alpha",
+      roleFamilies: ["tenant" as const],
+      roles: ["tenant_admin"],
+      scopes: ["identity:sessions:read", "identity:sessions:write"],
+      sessionId: sid,
+    };
+
+    // First revoke succeeds
+    const firstRes = await authController.revokeSelfSession(
+      sid,
+      identity,
+      { reason: "First revoke" },
+      { headers: {} },
+      "req_conc_01",
+    );
+    expect(firstRes.data.status).toBe("revoked");
+
+    // Second revoke fails atomically with 409 IAM_CONCURRENCY_CONFLICT
+    await expect(
+      authController.revokeSelfSession(
+        sid,
+        identity,
+        { reason: "Second concurrent revoke" },
+        { headers: {} },
+        "req_conc_02",
+      ),
+    ).rejects.toSatisfy(
+      (err: any) =>
+        err.code === "IAM_CONCURRENCY_CONFLICT" ||
+        err.response?.error?.code === "IAM_CONCURRENCY_CONFLICT",
+    );
+  });
 });

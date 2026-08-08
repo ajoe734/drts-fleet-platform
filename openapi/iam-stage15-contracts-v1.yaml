@@ -123,6 +123,11 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeSessionCommand'
       responses:
         "200":
           description: Target self session revoked.
@@ -145,6 +150,11 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeSessionCommand'
       responses:
         "200":
           description: Target admin-scoped session revoked.
@@ -597,6 +607,14 @@ components:
         expiresAt:
           type: [string, "null"]
           format: date-time
+    RevokeSessionCommand:
+      type: object
+      properties:
+        reason:
+          type: [string, "null"]
+        expectedVersion:
+          type: [integer, "null"]
+          minimum: 0
     IssuePartnerIngressCredentialCommand:
       type: object
       properties:

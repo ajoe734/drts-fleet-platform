@@ -175,6 +175,8 @@ const CONTROL_PLANE_REALMS: Record<ControlPlaneActorType, AuthRealm> = {
 const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
   platform_admin: [
     "identity:read",
+    "identity:sessions:read",
+    "identity:sessions:write",
     "foundation:read",
     "foundation:write",
     "audit:read",
@@ -216,6 +218,8 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
   ],
   ops_user: [
     "identity:read",
+    "identity:sessions:read",
+    "identity:sessions:write",
     "audit:read",
     "notifications:read",
     "notifications:write",

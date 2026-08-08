@@ -308,13 +308,13 @@ describe("bootstrap auth extraction", () => {
   it("resolves admin identity session routes to control-plane and tenant realms", () => {
     expect(resolveRouteAuthPolicy("GET", "/api/identity/sessions")).toEqual({
       routeKey: "identity:sessions:GET",
-      requiredScopes: [],
+      requiredScopes: ["identity:sessions:read"],
       allowedRealms: ["system", "platform", "ops", "tenant"],
       description: "Administrator session inventory and remote revocation",
     });
     expect(resolveRouteAuthPolicy("POST", "/api/identity/sessions/sid-123/revoke")).toEqual({
       routeKey: "identity:sessions:POST",
-      requiredScopes: [],
+      requiredScopes: ["identity:sessions:write"],
       allowedRealms: ["system", "platform", "ops", "tenant"],
       description: "Administrator session inventory and remote revocation",
     });

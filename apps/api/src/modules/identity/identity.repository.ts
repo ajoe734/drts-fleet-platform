@@ -18,6 +18,7 @@ import type {
   TenantUserRoleRecord,
 } from "@drts/contracts";
 
+import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
@@ -635,6 +636,7 @@ export class IdentityRepository {
     sessionId: string,
     reason: string,
     revokedByPrincipalId?: string,
+    expectedVersion?: number,
   ): Promise<CanonicalIdentitySessionRecord | null> {
     const revokedAt = new Date().toISOString();
 
@@ -643,6 +645,24 @@ export class IdentityRepository {
       if (!session) {
         return null;
       }
+      if (session.status !== "active") {
+        throw new ApiRequestError(
+          409,
+          "IAM_CONCURRENCY_CONFLICT",
+          "Session is not active or has already been revoked",
+        );
+      }
+      if (
+        typeof expectedVersion === "number" &&
+        session.tokenVersion !== expectedVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "IAM_CONCURRENCY_CONFLICT",
+          `Expected version ${expectedVersion} does not match current version ${session.tokenVersion}`,
+        );
+      }
+
       const updated: CanonicalIdentitySessionRecord = {
         ...session,
         status: "revoked",
@@ -668,6 +688,19 @@ export class IdentityRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      const hasExpectedVersion = typeof expectedVersion === "number";
+      const params: unknown[] = [
+        sessionId,
+        revokedAt,
+        revokedByPrincipalId || null,
+        reason,
+      ];
+      let versionClause = "";
+      if (hasExpectedVersion) {
+        params.push(expectedVersion);
+        versionClause = ` AND token_version = $${params.length}::bigint`;
+      }
+
       const sessionResult = await client.query<PersistedSessionRow>(
         `
           UPDATE iam.identity_sessions
@@ -692,15 +725,40 @@ export class IdentityRepository {
                 ),
                 '{status}', '"revoked"'::jsonb
               )
-          WHERE session_id = $1::text
+          WHERE session_id = $1::text AND status = 'active'${versionClause}
           RETURNING *
         `,
-        [sessionId, revokedAt, revokedByPrincipalId || null, reason],
+        params,
       );
 
       if (sessionResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return null;
+        const existing = await this.getSession(sessionId);
+        if (!existing) {
+          return null;
+        }
+        if (existing.status !== "active") {
+          throw new ApiRequestError(
+            409,
+            "IAM_CONCURRENCY_CONFLICT",
+            "Session is not active or has already been revoked",
+          );
+        }
+        if (
+          hasExpectedVersion &&
+          existing.tokenVersion !== expectedVersion
+        ) {
+          throw new ApiRequestError(
+            409,
+            "IAM_CONCURRENCY_CONFLICT",
+            `Expected version ${expectedVersion} does not match current version ${existing.tokenVersion}`,
+          );
+        }
+        throw new ApiRequestError(
+          409,
+          "IAM_CONCURRENCY_CONFLICT",
+          "Concurrent session update detected",
+        );
       }
 
       await client.query(

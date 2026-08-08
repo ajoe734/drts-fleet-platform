@@ -55,6 +55,8 @@ const MULTI_TAXI_RATING_GOVERNANCE_SCOPES = [
 export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   system: [
     "identity:read",
+    "identity:sessions:read",
+    "identity:sessions:write",
     "foundation:read",
     "foundation:write",
     "audit:read",
@@ -95,6 +97,8 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   ],
   platform_admin: [
     "identity:read",
+    "identity:sessions:read",
+    "identity:sessions:write",
     "foundation:read",
     "foundation:write",
     "audit:read",
@@ -124,6 +128,8 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   ],
   tenant_admin: [
     "identity:read",
+    "identity:sessions:read",
+    "identity:sessions:write",
     "audit:read",
     "tenant:read",
     "tenant:write",
@@ -140,6 +146,8 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   ],
   ops_user: [
     "identity:read",
+    "identity:sessions:read",
+    "identity:sessions:write",
     "audit:read",
     "notifications:read",
     "notifications:write",
@@ -192,6 +200,8 @@ export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
   {
     tenant_admin: [
       "identity:read",
+      "identity:sessions:read",
+      "identity:sessions:write",
       "audit:read",
       "tenant:read",
       "tenant:write",

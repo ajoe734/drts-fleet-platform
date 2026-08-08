@@ -221,6 +221,25 @@ export class IdentityController {
       );
     }
 
+    if (targetSession.status !== "active") {
+      throw new ApiRequestError(
+        409,
+        "IAM_CONCURRENCY_CONFLICT",
+        "Session is not active or has already been revoked",
+      );
+    }
+
+    if (
+      typeof body?.expectedVersion === "number" &&
+      targetSession.tokenVersion !== body.expectedVersion
+    ) {
+      throw new ApiRequestError(
+        409,
+        "IAM_CONCURRENCY_CONFLICT",
+        `Expected version ${body.expectedVersion} does not match current version ${targetSession.tokenVersion}`,
+      );
+    }
+
     const reason = body.reason.trim();
     const principalId = identity.principalId || identity.actorId;
 
@@ -230,6 +249,7 @@ export class IdentityController {
         sid,
         reason,
         principalId || undefined,
+        body?.expectedVersion,
       );
     }
 

@@ -138,7 +138,9 @@ export function resolveRouteAuthPolicy(
   ) {
     return {
       routeKey: `identity:sessions:${upperMethod}`,
-      requiredScopes: [],
+      requiredScopes: isReadMethod(upperMethod)
+        ? ["identity:sessions:read"]
+        : ["identity:sessions:write"],
       allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
       description: "Administrator session inventory and remote revocation",
     };
