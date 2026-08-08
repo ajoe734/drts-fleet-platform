@@ -121,6 +121,34 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git tag -l(\s|$)"),
     re.compile(r"^git config --get(\s|$)"),
     re.compile(r"^git push(\s|$)"),
+    # Read-only observability. A worker that operates a service and a cloud
+    # project cannot see either of them: every `systemctl show`, `journalctl`
+    # and `gcloud … list/describe` became an approval request and a chairman
+    # review, for commands that change nothing. Only the query verbs are listed;
+    # `systemctl start/stop/restart`, `gcloud … create/update/deploy/delete` and
+    # `journalctl --vacuum*`/`--rotate` are not, and still need review.
+    re.compile(
+        r"^systemctl( --user)? (list-units|list-unit-files|list-timers|list-sockets"
+        r"|status|show|show-environment|cat|is-active|is-enabled|is-failed)(\s|$)"
+    ),
+    re.compile(r"^journalctl(\s|$)(?!.*--(vacuum|rotate|flush|relinquish))"),
+    re.compile(
+        r"^gcloud\s+(?!.*\s(create|update|delete|deploy|add|remove|set|apply|import|replace)(\s|$))"
+        r"[a-z0-9-]+(\s+[a-z0-9-]+)*\s+(list|describe|get-iam-policy|get-value|versions list)(\s|$)"
+    ),
+    # Rebasing is ordinary work here — every branch is expected to land on a
+    # current `dev` — and it stays inside the repository. Deferring it turned a
+    # routine step into a chairman review, which approved it every time.
+    #
+    # This does not widen what git can destroy. `reset --hard` is denied
+    # elsewhere, and `push --force` is already allowed by the `^git push` entry
+    # above, including to shared branches — a separate gap, not one this entry
+    # opens.
+    #
+    # `-i` is allowed too. Without an editor configured it blocks rather than
+    # damages anything, which is a worker-liveness matter, not a permission one.
+    re.compile(r"^git rebase(\s|$)"),
+    re.compile(r"^git -C .+ rebase(\s|$)"),
     re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
     re.compile(r"^gh issue comment(\s|$)"),
     re.compile(r"^gh pr create(\s|$)"),
