@@ -269,14 +269,37 @@ export class BootstrapAuthGuard implements CanActivate {
       autoProvision: !isStrictIap,
     });
 
-    const sid = (baseHeaders["x-sid"] as string | undefined) ?? null;
+    const sid =
+      (baseHeaders["x-sid"] as string | undefined) ??
+      (baseHeaders["x-session-id"] as string | undefined) ??
+      null;
+    const sessionIdentifier =
+      sid ?? `session_iap_${resolved.principal.principalId}`;
+
     const rawAmr = baseHeaders["x-amr"];
     const amrList = Array.isArray(rawAmr)
       ? rawAmr
       : typeof rawAmr === "string"
         ? rawAmr.split(/[,|;\s]+/).filter(Boolean)
         : [];
-    const acr = (baseHeaders["x-acr"] as string | undefined) ?? null;
+    const resolvedAmr =
+      amrList.length > 0
+        ? amrList
+        : Array.isArray(resolved.payload?.amr)
+          ? (resolved.payload!.amr as string[])
+          : typeof resolved.payload?.amr === "string"
+            ? (resolved.payload!.amr as string)
+                .split(/[,|;\s]+/)
+                .filter(Boolean)
+            : undefined;
+
+    const acrHeader = (baseHeaders["x-acr"] as string | undefined) ?? null;
+    const resolvedAcr =
+      acrHeader ??
+      (typeof resolved.payload?.acr === "string"
+        ? resolved.payload!.acr
+        : null);
+
     const rawAuthTime = baseHeaders["x-auth-time"];
     const authTimeStr = Array.isArray(rawAuthTime)
       ? rawAuthTime[0]
@@ -288,6 +311,14 @@ export class BootstrapAuthGuard implements CanActivate {
           ? Math.floor(Date.parse(authTimeStr) / 1000)
           : null
       : null;
+
+    const resolvedAuthTime =
+      authTime ??
+      (typeof resolved.payload?.auth_time === "number"
+        ? resolved.payload.auth_time
+        : typeof resolved.payload?.iat === "number"
+          ? resolved.payload.iat
+          : Math.floor(Date.now() / 1000));
 
     let stepUpProof: any = null;
     const rawProofHeader =
@@ -312,6 +343,8 @@ export class BootstrapAuthGuard implements CanActivate {
           ? "platform_admin"
           : "ops_user",
       actorId: resolved.principal.principalId,
+      principalId: resolved.principal.principalId,
+      membershipId: resolved.membership.membershipId,
       subject: resolved.principal.subject,
       realm: resolved.membership.realm as "platform" | "ops",
       tenantId: null,
@@ -319,10 +352,11 @@ export class BootstrapAuthGuard implements CanActivate {
       roles: resolved.effectiveRoles,
       scopes: resolved.effectiveScopes,
       requestId: (baseHeaders["x-request-id"] as string | undefined) ?? null,
-      sid,
-      amr: amrList.length > 0 ? amrList : undefined,
-      acr,
-      authTime,
+      sid: sessionIdentifier,
+      sessionId: sessionIdentifier,
+      amr: resolvedAmr,
+      acr: resolvedAcr,
+      authTime: resolvedAuthTime,
       stepUpProof,
     };
 

@@ -57,6 +57,7 @@ export interface ResolvedIapWorkforceSubject {
     effectiveRoles: string[];
     missingGroups: string[];
   };
+  payload?: IapJwtPayload;
 }
 
 @Injectable()
@@ -652,6 +653,7 @@ export class IAPSubjectAdapter {
       tokenVersion,
       driftDetected: hasDrift,
       ...(driftDetails ? { driftDetails } : {}),
+      payload,
     };
   }
 
