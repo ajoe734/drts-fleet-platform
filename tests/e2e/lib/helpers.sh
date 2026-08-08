@@ -211,17 +211,22 @@ resolve_step_up_reference() {
   printf '%s' "$reference"
 }
 
-should_force_runtime_bearer() {
-  local method="$1"
-  local path="$2"
-
+runtime_step_up_enabled() {
   case "${E2E_ENABLE_RUNTIME_STEP_UP:-}" in
     1|true|TRUE|yes|YES)
+      return 0
       ;;
     *)
       return 1
       ;;
   esac
+}
+
+should_force_runtime_bearer() {
+  local method="$1"
+  local path="$2"
+
+  runtime_step_up_enabled || return 1
 
   case "${E2E_ACTOR_TYPE:-}" in
     platform_admin|ops_user)
@@ -301,7 +306,7 @@ http_call() {
     curl_args+=(-H "x-drts-authorization: Bearer ${E2E_REQUEST_BEARER_TOKEN}")
   fi
 
-  if [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
+  if runtime_step_up_enabled && [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
     if [[ -z "$application_bearer" ]]; then
       application_bearer=$(mint_runtime_bearer_token || true)
     fi
