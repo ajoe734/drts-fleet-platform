@@ -15,10 +15,10 @@ import {
   formatPercent,
   formatPeriod,
   formatSignedPercent,
-  getContractRecord,
   metricDelta,
   metricValue,
 } from "@/lib/contracts-data";
+import { loadBankContractsData } from "@/lib/bank-dev-read-models";
 import { t } from "@/lib/translations";
 
 export default async function ContractDetailPage({
@@ -37,7 +37,10 @@ export default async function ContractDetailPage({
     locale,
     resolvedSearchParams.role,
   );
-  const contract = getContractRecord(contractId);
+  const contractData = await loadBankContractsData(tenant.tenantId, session.role);
+  const contract =
+    contractData.data.contracts.find((item) => item.contractId === contractId) ??
+    null;
 
   if (!contract) {
     notFound();
@@ -53,6 +56,11 @@ export default async function ContractDetailPage({
       >
         {t("contracts.detail.back", locale)}
       </Link>
+      {contractData.degradedMessage ? (
+        <section className="surface-card">
+          <p>{contractData.degradedMessage}</p>
+        </section>
+      ) : null}
 
       <PageHero
         eyebrow={t("contracts.eyebrow", locale)}
@@ -60,14 +68,20 @@ export default async function ContractDetailPage({
           <span className="pending-title">
             {tenantDisplayText(contractRecord.displayName, tenant)}
             <ContractHealthBadge
-              health={contractRecord.health}
+              health={
+                contractRecord.status === "active"
+                  ? "healthy"
+                  : contractRecord.status === "at_risk"
+                    ? "at_risk"
+                    : "breached"
+              }
               locale={locale}
             />
             <IssuerBrandPill locale={locale} tenant={tenant} />
           </span>
         }
         description={tenantDisplayText(
-          contractRecord.attainmentSummary,
+          `${contractRecord.exceptions.filter((item) => item.status === "open").length} open exceptions in ${contractRecord.periodAttainment.period}`,
           tenant,
         )}
       />

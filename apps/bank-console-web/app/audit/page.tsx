@@ -10,6 +10,7 @@ import {
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
+import { loadBankAuditData } from "@/lib/bank-dev-read-models";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { t, type Locale, type TranslationKey } from "@/lib/translations";
@@ -132,111 +133,6 @@ const auditReasonLabelKeys: Record<AuditReasonCode, TranslationKey> = {
   ACCESS_DENIED: "audit.reason.ACCESS_DENIED",
 };
 
-const sampleAuditRecords: AuditRecord[] = [
-  {
-    id: "AUD-20260611-001",
-    timestamp: "2026-06-11T09:42:00+08:00",
-    period: "2026-06",
-    type: "eligibility_decision",
-    actor: "bank_program_admin",
-    actorLabel: "方案管理員",
-    actorHandle: "ctbc.program-admin",
-    subjectMasked: "卡友 CH-****-4821 / 卡號 **** 4821",
-    reasonCode: "ELIGIBLE_APPROVED",
-    summary: "中信鼎極卡權益驗證通過，扣減 1 趟機場接送配額。",
-    relatedEntity: {
-      kind: "booking",
-      href: "/bookings/BK-240611-018",
-      label: "BK-240611-018",
-    },
-  },
-  {
-    id: "AUD-20260611-002",
-    timestamp: "2026-06-11T10:05:00+08:00",
-    period: "2026-06",
-    type: "dispatch_assignment",
-    actor: "bank_ops_viewer",
-    actorLabel: "營運查詢",
-    actorHandle: "ctbc.ops-viewer",
-    subjectMasked: "卡友 CH-****-4821 / 卡號 **** 4821",
-    reasonCode: "DRIVER_ASSIGNED",
-    summary: "已看到派遣結果：機場接送訂單指派完成，銀行側僅供唯讀追蹤。",
-    relatedEntity: {
-      kind: "booking",
-      href: "/bookings/BK-240611-018",
-      label: "BK-240611-018",
-    },
-  },
-  {
-    id: "AUD-20260610-003",
-    timestamp: "2026-06-10T18:20:00+08:00",
-    period: "2026-06",
-    type: "settlement_close",
-    actor: "bank_finance",
-    actorLabel: "財務對帳",
-    actorHandle: "ctbc.finance",
-    subjectMasked: "卡友 CH-****-1014 / 卡號 **** 1014",
-    reasonCode: "STATEMENT_PUBLISHED",
-    summary: "2026-06 期別對帳單已發布，補貼與自付拆帳完成。",
-    relatedEntity: {
-      kind: "statement",
-      href: "/statements/2026-06",
-      label: "2026-06",
-    },
-  },
-  {
-    id: "AUD-20260610-004",
-    timestamp: "2026-06-10T18:48:00+08:00",
-    period: "2026-06",
-    type: "access",
-    actor: "system",
-    actorLabel: "System",
-    actorHandle: "policy-gateway",
-    subjectMasked: "結算單 STMT-2026-06 / 卡友 CH-****-1014",
-    reasonCode: "ACCESS_GRANTED",
-    summary: "下載已簽章對帳 artifact，保留存取稽核足跡。",
-    relatedEntity: {
-      kind: "statement",
-      href: "/statements/2026-06",
-      label: "2026-06",
-    },
-  },
-  {
-    id: "AUD-20260531-005",
-    timestamp: "2026-05-31T21:13:00+08:00",
-    period: "2026-05",
-    type: "eligibility_decision",
-    actor: "bank_program_admin",
-    actorLabel: "方案管理員",
-    actorHandle: "ctbc.program-admin",
-    subjectMasked: "卡友 CH-****-7750 / 卡號 **** 7750",
-    reasonCode: "MANUAL_REVIEW_REQUIRED",
-    summary: "卡友資格需人工覆核，權益 Token 僅保留 masked preview。",
-    relatedEntity: {
-      kind: "booking",
-      href: "/bookings/BK-240531-077",
-      label: "BK-240531-077",
-    },
-  },
-  {
-    id: "AUD-20260531-006",
-    timestamp: "2026-05-31T21:25:00+08:00",
-    period: "2026-05",
-    type: "access",
-    actor: "bank_ops_viewer",
-    actorLabel: "營運查詢",
-    actorHandle: "ctbc.ops-viewer",
-    subjectMasked: "卡友 CH-****-7750 / 卡號 **** 7750",
-    reasonCode: "ACCESS_DENIED",
-    summary: "跨 app ops 明細連結因權限不足而停用，僅保留事件記錄。",
-    relatedEntity: {
-      kind: "booking",
-      href: "/bookings/BK-240531-077",
-      label: "BK-240531-077",
-    },
-  },
-];
-
 function getSingleQueryValue(value: SearchParamValue) {
   return Array.isArray(value) ? (value.find(Boolean) ?? "") : (value ?? "");
 }
@@ -330,10 +226,14 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
     locale,
     resolvedSearchParams.role,
   );
+  const auditData = await loadBankAuditData(tenant.tenantId, session.role);
   const issuerBrand = tenant.template.tokens.light;
   const filters = parseFilters(resolvedSearchParams);
-  const records = filterRecords(sampleAuditRecords, filters);
-  const periods = getPeriodOptions(sampleAuditRecords);
+  const records = filterRecords(
+    auditData.data.records as AuditRecord[],
+    filters,
+  );
+  const periods = getPeriodOptions(auditData.data.records as AuditRecord[]);
   const allMasked = records.every((record) =>
     isMaskedReference(record.subjectMasked),
   );
@@ -387,6 +287,11 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
             : t("audit.callout.bodyFallback", locale)
         }
       />
+      {auditData.degradedMessage ? (
+        <section className="surface-card">
+          <p>{auditData.degradedMessage}</p>
+        </section>
+      ) : null}
 
       <section className="audit-panel">
         <div className="audit-panel-head">
