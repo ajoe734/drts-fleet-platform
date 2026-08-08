@@ -117,7 +117,9 @@ export default function SupplyReviewDetailPage() {
     [submissionId],
   );
 
-  const [record, setRecord] = useState<Partial<SupplySubmissionRecord> & Record<string, any>>({
+  const [record, setRecord] = useState<
+    Partial<SupplySubmissionRecord> & Record<string, any>
+  >({
     submissionId,
     fleetPartnerId: seedMatch?.fleetPartnerId || "fleet-demo-001",
     submissionType: seedMatch?.submissionType || "vehicle_onboarding",
@@ -128,11 +130,21 @@ export default function SupplyReviewDetailPage() {
     reviewStartedBy: seedMatch?.lockedBy || "林佩璇",
   });
 
-  const [driverDraft, setDriverDraft] = useState<DriverSupplyDraft | null>(null);
-  const [vehicleDraft, setVehicleDraft] = useState<VehicleSupplyDraft | null>(null);
+  const [driverDraft, setDriverDraft] = useState<DriverSupplyDraft | null>(
+    null,
+  );
+  const [vehicleDraft, setVehicleDraft] = useState<VehicleSupplyDraft | null>(
+    null,
+  );
   const [documents, setDocuments] = useState<SupplyDocumentRecord[]>([]);
-  const [canonicalDriver, setCanonicalDriver] = useState<Record<string, any> | null>(null);
-  const [canonicalVehicle, setCanonicalVehicle] = useState<Record<string, any> | null>(null);
+  const [canonicalDriver, setCanonicalDriver] = useState<Record<
+    string,
+    any
+  > | null>(null);
+  const [canonicalVehicle, setCanonicalVehicle] = useState<Record<
+    string,
+    any
+  > | null>(null);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<boolean>(false);
@@ -148,7 +160,9 @@ export default function SupplyReviewDetailPage() {
     "request_revision" | "reject" | null
   >(null);
 
-  const [previewDoc, setPreviewDoc] = useState<SupplyDocumentRecord | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<SupplyDocumentRecord | null>(
+    null,
+  );
 
   const loadDetail = async () => {
     setErrorMsg(null);
@@ -163,8 +177,10 @@ export default function SupplyReviewDetailPage() {
         if (data.driverDraft) setDriverDraft(data.driverDraft);
         if (data.vehicleDraft) setVehicleDraft(data.vehicleDraft);
         if (data.documents) setDocuments(data.documents);
-        if (rawData.canonicalDriver) setCanonicalDriver(rawData.canonicalDriver);
-        if (rawData.canonicalVehicle) setCanonicalVehicle(rawData.canonicalVehicle);
+        if (rawData.canonicalDriver)
+          setCanonicalDriver(rawData.canonicalDriver);
+        if (rawData.canonicalVehicle)
+          setCanonicalVehicle(rawData.canonicalVehicle);
       }
     } catch (e: any) {
       console.warn(
@@ -598,23 +614,25 @@ export default function SupplyReviewDetailPage() {
                       icon="eye"
                       onClick={() =>
                         setPreviewDoc(
-                          (r as unknown as DocumentRow).rawDoc || ({
-                            documentId: "doc-preview",
-                            fleetPartnerId: record.fleetPartnerId || "fleet-001",
-                            submissionId,
-                            documentType: "registration",
-                            fileObjectKey: `files/${r.file}`,
-                            originalFileName: String(r.file),
-                            contentType: "application/pdf",
-                            fileSize: 2048,
-                            checksumSha256: "sha256-mock",
-                            effectiveFrom: String(r.from),
-                            effectiveUntil: String(r.until),
-                            reviewStatus: "approved",
-                            reviewComment: null,
-                            uploadedBy: "fleet-user",
-                            uploadedAt: "2026-06-18T14:02:00.000Z",
-                          } as SupplyDocumentRecord),
+                          (r as unknown as DocumentRow).rawDoc ||
+                            ({
+                              documentId: "doc-preview",
+                              fleetPartnerId:
+                                record.fleetPartnerId || "fleet-001",
+                              submissionId,
+                              documentType: "vehicle_registration",
+                              fileObjectKey: `files/${r.file}`,
+                              originalFileName: String(r.file),
+                              contentType: "application/pdf",
+                              fileSize: 2048,
+                              checksumSha256: "sha256-mock",
+                              effectiveFrom: String(r.from),
+                              effectiveUntil: String(r.until),
+                              reviewStatus: "approved",
+                              reviewComment: null,
+                              uploadedBy: "fleet-user",
+                              uploadedAt: "2026-06-18T14:02:00.000Z",
+                            } as SupplyDocumentRecord),
                         )
                       }
                     >
@@ -793,7 +811,8 @@ export default function SupplyReviewDetailPage() {
         <div style={modalOverlayStyle}>
           <div style={modalContainerStyle}>
             <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
-              文件預覽 · {previewDoc.originalFileName || previewDoc.documentType}
+              文件預覽 ·{" "}
+              {previewDoc.originalFileName || previewDoc.documentType}
             </div>
             <div
               style={{
@@ -811,14 +830,18 @@ export default function SupplyReviewDetailPage() {
               <div>• 大小: {previewDoc.fileSize} bytes</div>
               <div>• SHA-256 Checksum: {previewDoc.checksumSha256}</div>
               <div>
-                • 生效起迄: {previewDoc.effectiveFrom} ~ {previewDoc.effectiveUntil}
+                • 生效起迄: {previewDoc.effectiveFrom} ~{" "}
+                {previewDoc.effectiveUntil}
               </div>
               <div>• 審核狀態: {previewDoc.reviewStatus}</div>
             </div>
             <div
               style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
             >
-              <CanvasBtn variant="secondary" onClick={() => setPreviewDoc(null)}>
+              <CanvasBtn
+                variant="secondary"
+                onClick={() => setPreviewDoc(null)}
+              >
                 關閉預覽
               </CanvasBtn>
             </div>
