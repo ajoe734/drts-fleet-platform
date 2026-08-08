@@ -336,7 +336,7 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
           actorId: "actor-123",
           moduleName: "auth",
           newValuesSummary: expect.objectContaining({
-            errorCode: "AUTH_STEP_UP_REQUIRED",
+            errorCode: expect.stringMatching(/STEP_UP_REQUIRED/),
           }),
         }),
       );

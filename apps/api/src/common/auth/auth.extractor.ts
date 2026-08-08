@@ -165,7 +165,12 @@ export function extractBootstrapRequestIdentity(
     normalizeHeaderValue(headers["x-realm"]),
   );
 
-  const sid = normalizeHeaderValue(headers["x-sid"]) || null;
+  const sid =
+    normalizeHeaderValue(headers["x-sid"]) ||
+    normalizeHeaderValue(headers["x-session-id"]) ||
+    null;
+  const actorId = normalizeHeaderValue(headers["x-actor-id"]) || null;
+  const sessionId = sid ?? (actorId ? `session_${actorId}` : null);
   const amr = splitDelimitedList(headers["x-amr"]);
   const acr = normalizeHeaderValue(headers["x-acr"]) || null;
   const rawAuthTime = normalizeHeaderValue(headers["x-auth-time"]);
@@ -177,12 +182,24 @@ export function extractBootstrapRequestIdentity(
         : null
     : null;
 
-  const stepUpProof: any = null;
+  const rawStepUpProof =
+    headers["x-step-up-proof"] ?? headers["x-step-up-reference"];
+  const stepUpProofHeader = Array.isArray(rawStepUpProof)
+    ? rawStepUpProof[0]
+    : rawStepUpProof;
+  let stepUpProof: any = null;
+  if (stepUpProofHeader && typeof stepUpProofHeader === "string") {
+    try {
+      stepUpProof = JSON.parse(stepUpProofHeader);
+    } catch {
+      stepUpProof = null;
+    }
+  }
 
   return {
     authMode: AUTH_MODE,
     actorType,
-    actorId: normalizeHeaderValue(headers["x-actor-id"]) || null,
+    actorId,
     realm,
     tenantId: normalizeHeaderValue(headers["x-tenant-id"]) || null,
     partnerId: normalizeHeaderValue(headers["x-partner-id"]) || null,
@@ -191,14 +208,13 @@ export function extractBootstrapRequestIdentity(
     partnerEntrySlug:
       normalizeHeaderValue(headers["x-partner-entry-slug"]) || null,
     drtsPassengerId:
-      normalizeHeaderValue(headers["x-drts-passenger-id"]) ||
-      normalizeHeaderValue(headers["x-actor-id"]) ||
-      null,
+      normalizeHeaderValue(headers["x-drts-passenger-id"]) || actorId || null,
     roleFamilies: normalizeRoleFamilies(explicitRoleFamilies, actorType),
     roles,
     scopes,
     requestId: normalizeHeaderValue(headers["x-request-id"]) || null,
     sid,
+    sessionId,
     amr: amr.length > 0 ? amr : undefined,
     acr,
     authTime,

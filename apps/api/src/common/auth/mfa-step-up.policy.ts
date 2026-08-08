@@ -225,7 +225,7 @@ export function hasTrustedMfaAmr(amr?: string[] | null): boolean {
   );
 }
 
-function matchesActionId(
+export function matchesActionId(
   proofActionId: string,
   targetActionId: string,
   ruleActionId?: string,
@@ -398,7 +398,12 @@ export function evaluateMfaStepUpPolicy(
     }
 
     // Check wrong-session proof
-    if (proof.sessionId && identity.sid && proof.sessionId !== identity.sid) {
+    const identitySessionId = identity.sessionId ?? identity.sid;
+    if (
+      proof.sessionId &&
+      identitySessionId &&
+      proof.sessionId !== identitySessionId
+    ) {
       return {
         allowed: false,
         actionId,

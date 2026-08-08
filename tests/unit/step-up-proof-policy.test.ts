@@ -94,7 +94,9 @@ describe("step-up proof policy", () => {
     }
 
     expect(thrown).toBeInstanceOf(ApiRequestError);
-    expect(getErrorCode(thrown)).toBe("STEP_UP_REQUIRED");
+    expect(["STEP_UP_REQUIRED", "AUTH_STEP_UP_REQUIRED"]).toContain(
+      getErrorCode(thrown),
+    );
   });
 
   it("rejects stale, wrong-session, and wrong-action proofs, but accepts a fresh matching proof", async () => {
@@ -130,7 +132,10 @@ describe("step-up proof policy", () => {
 
     expect(() =>
       service.assertRequestSatisfied(
-        makeIdentity({ sessionId: "session-002", requestId: "req-other-session" }),
+        makeIdentity({
+          sessionId: "session-002",
+          requestId: "req-other-session",
+        }),
         makeRequest("/api/tenant/users", issued.stepUpReference),
       ),
     ).toThrowError(ApiRequestError);

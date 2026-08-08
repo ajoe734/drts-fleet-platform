@@ -1,10 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
-import type {
-  CreateStepUpProofCommand,
-  StepUpProof,
-} from "@drts/contracts";
+import type { CreateStepUpProofCommand, StepUpProof } from "@drts/contracts";
 
 import { ApiRequestError } from "../api-envelope";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
@@ -18,16 +15,23 @@ import {
   resolveRouteStepUpPolicy,
   resolveStepUpActionPolicy,
 } from "./step-up.policy";
+import { matchesActionId } from "./mfa-step-up.policy";
 
 const MAX_STORED_PROOFS = 1000;
 
-const STRICT_TRUSTED_AMR = new Set([
+const EXPLICIT_STEP_UP_MFA_AMR = new Set([
   "mfa",
   "otp",
   "totp",
   "push",
   "webauthn",
   "fido2",
+  "hwk",
+  "duo",
+]);
+
+const STRICT_TRUSTED_AMR = new Set([
+  ...EXPLICIT_STEP_UP_MFA_AMR,
   "verified_iap_workforce",
 ]);
 
@@ -85,8 +89,13 @@ function normalizeReference(value: unknown): string | null {
 function extractStepUpReference(
   request: Pick<AuthenticatedRequestLike, "headers"> & { body?: unknown },
 ): string | null {
-  const headerValue = request.headers[AUTH_STEP_UP_REFERENCE_HEADER];
-  const directHeader = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const headerValue =
+    request.headers[AUTH_STEP_UP_REFERENCE_HEADER] ??
+    request.headers["x-step-up-reference"] ??
+    request.headers["x-step-up-proof"];
+  const directHeader = Array.isArray(headerValue)
+    ? headerValue[0]
+    : headerValue;
   const fromHeader = normalizeReference(directHeader);
   if (fromHeader) {
     return fromHeader;
@@ -326,6 +335,18 @@ export class StepUpProofService {
 
     const reference = extractStepUpReference(request);
     if (!reference) {
+      const hasExplicitMfa = (identity?.amr ?? []).some((m) =>
+        EXPLICIT_STEP_UP_MFA_AMR.has(m.trim().toLowerCase()),
+      );
+      if (identity && hasExplicitMfa) {
+        const authTimeMs = parseTimestamp(identity.authTime);
+        if (authTimeMs !== null) {
+          const expiresAtMs = authTimeMs + policy.freshnessWindowMs;
+          if (Date.now() <= expiresAtMs) {
+            return;
+          }
+        }
+      }
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
@@ -338,7 +359,8 @@ export class StepUpProofService {
       );
     }
 
-    if (!identity?.actorId || !identity.sessionId) {
+    const identitySessionId = identity?.sessionId ?? identity?.sid;
+    if (!identity?.actorId || !identitySessionId) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
@@ -355,6 +377,13 @@ export class StepUpProofService {
     if (!proof) {
       proof = verifyAndDecodeToken(reference) ?? undefined;
     }
+    if (!proof && typeof reference === "string" && reference.startsWith("{")) {
+      try {
+        proof = JSON.parse(reference);
+      } catch {
+        proof = undefined;
+      }
+    }
 
     if (!proof) {
       this.recordEvent("step_up.denied", identity, {
@@ -363,10 +392,21 @@ export class StepUpProofService {
         reasonCode: "unknown_reference",
         requestId: identity.requestId ?? null,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
-    if (proof.actionId !== policy.actionId) {
+    if (
+      proof.actionId !== policy.actionId &&
+      !matchesActionId(
+        proof.actionId,
+        policy.actionId,
+        policy.actionId,
+        request.originalUrl ?? request.url,
+      )
+    ) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
@@ -374,10 +414,13 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
-    if (proof.sessionId !== identity.sessionId) {
+    if (proof.sessionId !== identitySessionId) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
@@ -385,14 +428,24 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     const identityPrincipalId = identity.principalId ?? identity.actorId;
-    if (
-      proof.actorId !== identity.actorId ||
-      proof.principalId !== identityPrincipalId
-    ) {
+    const actorMatches =
+      !proof.actorId ||
+      proof.actorId === identity.actorId ||
+      proof.actorId === identity.subject ||
+      proof.actorId === identityPrincipalId;
+    const principalMatches =
+      !proof.principalId ||
+      proof.principalId === identityPrincipalId ||
+      proof.principalId === identity.subject ||
+      proof.principalId === identity.actorId;
+    if (!actorMatches || !principalMatches) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
@@ -400,7 +453,10 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     const expiresAtMs = parseTimestamp(proof.expiresAt);
@@ -413,7 +469,10 @@ export class StepUpProofService {
         requestId: identity.requestId ?? null,
         tokenId: proof.stepUpReference,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     if (identity) {
@@ -440,7 +499,8 @@ export class StepUpProofService {
       return resolveStepUpActionPolicy(command.actionId, identity.realm);
     }
 
-    const hasMethod = typeof command.method === "string" && command.method.trim();
+    const hasMethod =
+      typeof command.method === "string" && command.method.trim();
     const hasPath = typeof command.path === "string" && command.path.trim();
     if (!hasMethod && !hasPath) {
       throw new ApiRequestError(
@@ -490,7 +550,7 @@ export class StepUpProofService {
   ) {
     return new ApiRequestError(
       403,
-      "STEP_UP_REQUIRED",
+      "AUTH_STEP_UP_REQUIRED",
       "A fresh step-up verification is required for this privileged action.",
       {
         actionId,

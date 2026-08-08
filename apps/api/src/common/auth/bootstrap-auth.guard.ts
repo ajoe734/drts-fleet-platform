@@ -152,6 +152,8 @@ function isStrictAuthEnvironment(): boolean {
 
 @Injectable()
 export class BootstrapAuthGuard implements CanActivate {
+  private readonly stepUpProofService: StepUpProofService;
+
   constructor(
     private readonly reflector: Reflector,
     @Optional() private readonly jwtAuthService?: JwtAuthService,
@@ -162,8 +164,10 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional()
-    private readonly stepUpProofService?: StepUpProofService,
-  ) {}
+    stepUpProofService?: StepUpProofService,
+  ) {
+    this.stepUpProofService = stepUpProofService ?? new StepUpProofService();
+  }
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
     const request = context
@@ -324,7 +328,19 @@ export class BootstrapAuthGuard implements CanActivate {
           ? resolved.payload.iat
           : Math.floor(Date.now() / 1000));
 
-    const stepUpProof: any = null;
+    const rawStepUpProof =
+      baseHeaders["x-step-up-proof"] ?? baseHeaders["x-step-up-reference"];
+    const stepUpProofHeader = Array.isArray(rawStepUpProof)
+      ? rawStepUpProof[0]
+      : rawStepUpProof;
+    let stepUpProof: any = null;
+    if (stepUpProofHeader && typeof stepUpProofHeader === "string") {
+      try {
+        stepUpProof = JSON.parse(stepUpProofHeader);
+      } catch {
+        stepUpProof = null;
+      }
+    }
 
     const identity: BootstrapRequestIdentity = {
       authMode: "jwt_bearer",
@@ -417,12 +433,10 @@ export class BootstrapAuthGuard implements CanActivate {
                   policy.requiredScopes,
                   request,
                 );
-                this.stepUpProofService?.assertRequestSatisfied(identity, request);
-              } catch (error) {
-                this.recordAuthorizationDenialAudit(identity, request, error);
-                throw error;
-              }
-            }
+                this.stepUpProofService?.assertRequestSatisfied(
+                  identity,
+                  request,
+                );
               } catch (error) {
                 this.recordAuthorizationDenialAudit(identity, request, error);
                 throw error;

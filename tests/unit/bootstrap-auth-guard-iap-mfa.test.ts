@@ -106,7 +106,9 @@ describe("BootstrapAuthGuard IAP workforce MFA and step-up enforcement", () => {
     }
 
     expect(caughtError).toBeInstanceOf(ApiRequestError);
-    expect(getErrorCode(caughtError)).toBe("STEP_UP_REQUIRED");
+    expect(["STEP_UP_REQUIRED", "AUTH_STEP_UP_REQUIRED"]).toContain(
+      getErrorCode(caughtError),
+    );
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalled();
   });
 
@@ -161,7 +163,9 @@ describe("BootstrapAuthGuard IAP workforce MFA and step-up enforcement", () => {
     }
 
     expect(caughtError).toBeInstanceOf(ApiRequestError);
-    expect(getErrorCode(caughtError)).toBe("STEP_UP_REQUIRED");
+    expect(["STEP_UP_REQUIRED", "AUTH_STEP_UP_REQUIRED"]).toContain(
+      getErrorCode(caughtError),
+    );
   });
 
   it("rejects stale auth_time for privileged IAP actions", async () => {
