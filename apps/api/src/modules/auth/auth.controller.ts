@@ -8,7 +8,6 @@ import type {
   CreateTenantBootstrapSessionCommand,
   IdentityContext,
   LogoutAllSessionsCommand,
-  LogoutAllSessionsResult,
   MaskedIdentitySessionRecord,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
