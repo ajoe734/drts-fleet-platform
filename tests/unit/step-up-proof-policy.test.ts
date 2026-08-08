@@ -177,4 +177,41 @@ describe("step-up proof policy", () => {
     expect(thrown).toBeInstanceOf(ApiRequestError);
     expect(getErrorCode(thrown)).toBe("MFA_REQUIRED");
   });
+
+  it("validates proof across different service instances (pods / restarts) without in-memory state", () => {
+    const servicePodA = new StepUpProofService();
+    const identity = makeIdentity();
+
+    const issued = servicePodA.createProof(
+      identity,
+      { method: "POST", path: "/api/tenant/users" },
+      "req-pod-a",
+    );
+
+    // Simulating Pod B (separate instance with clean in-memory map)
+    const servicePodB = new StepUpProofService();
+
+    expect(() =>
+      servicePodB.assertRequestSatisfied(
+        identity,
+        makeRequest("/api/tenant/users", issued.stepUpReference),
+      ),
+    ).not.toThrow();
+
+    // Verify wrong session on Pod B still fails
+    expect(() =>
+      servicePodB.assertRequestSatisfied(
+        makeIdentity({ sessionId: "other-session" }),
+        makeRequest("/api/tenant/users", issued.stepUpReference),
+      ),
+    ).toThrowError(ApiRequestError);
+
+    // Verify wrong action on Pod B still fails
+    expect(() =>
+      servicePodB.assertRequestSatisfied(
+        identity,
+        makeRequest("/api/tenant/api-keys", issued.stepUpReference),
+      ),
+    ).toThrowError(ApiRequestError);
+  });
 });

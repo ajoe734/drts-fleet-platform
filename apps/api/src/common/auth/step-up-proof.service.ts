@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
 import type {
@@ -112,6 +112,66 @@ function extractStepUpReference(
   );
 }
 
+function getStepUpSecret(): string {
+  return (
+    process.env.STEP_UP_TOKEN_SECRET ||
+    process.env.JWT_SECRET ||
+    "drts-step-up-token-signing-key-default-2026"
+  );
+}
+
+function signToken(
+  payload: Omit<StoredStepUpProof, "stepUpReference">,
+): string {
+  const secret = getStepUpSecret();
+  const rawPayload = { ...payload, stepUpReference: undefined };
+  const jsonStr = JSON.stringify(rawPayload);
+  const payloadB64 = Buffer.from(jsonStr, "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(payloadB64)
+    .digest("base64url");
+  return `stepup_${payloadB64}.${signature}`;
+}
+
+function verifyAndDecodeToken(token: string): StoredStepUpProof | null {
+  if (!token || typeof token !== "string" || !token.startsWith("stepup_")) {
+    return null;
+  }
+  const body = token.slice(7);
+  const dotIndex = body.lastIndexOf(".");
+  if (dotIndex <= 0) {
+    return null;
+  }
+  const payloadB64 = body.slice(0, dotIndex);
+  const signature = body.slice(dotIndex + 1);
+  const secret = getStepUpSecret();
+  const expectedSignature = createHmac("sha256", secret)
+    .update(payloadB64)
+    .digest("base64url");
+
+  if (signature !== expectedSignature) {
+    return null;
+  }
+
+  try {
+    const jsonStr = Buffer.from(payloadB64, "base64url").toString("utf8");
+    const payload = JSON.parse(jsonStr) as StoredStepUpProof;
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      !payload.actionId ||
+      !payload.sessionId ||
+      !payload.expiresAt
+    ) {
+      return null;
+    }
+    payload.stepUpReference = token;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 function isStrictAuthEnvironment(): boolean {
   const environment = detectAuthEnvironment(process.env);
   return environment === "production" || environment === "staging";
@@ -209,8 +269,7 @@ export class StepUpProofService {
     }
 
     const issuedAt = new Date().toISOString();
-    const proof: StoredStepUpProof = {
-      stepUpReference: `stepup_${randomUUID().replace(/-/g, "")}`,
+    const rawProofPayload = {
       actionId: policy.actionId,
       actorId: identity.actorId,
       principalId: identity.principalId ?? identity.actorId,
@@ -224,7 +283,13 @@ export class StepUpProofService {
       acr: identity.acr ?? null,
     };
 
-    this.storedProofs.set(proof.stepUpReference, proof);
+    const token = signToken(rawProofPayload);
+    const proof: StoredStepUpProof = {
+      ...rawProofPayload,
+      stepUpReference: token,
+    };
+
+    this.storedProofs.set(token, proof);
     this.trimProofStore();
     this.recordEvent("step_up.proof_issued", identity, {
       actionId: proof.actionId,
@@ -270,7 +335,11 @@ export class StepUpProofService {
       throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
     }
 
-    const proof = this.storedProofs.get(reference);
+    let proof = this.storedProofs.get(reference);
+    if (!proof) {
+      proof = verifyAndDecodeToken(reference) ?? undefined;
+    }
+
     if (!proof) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
