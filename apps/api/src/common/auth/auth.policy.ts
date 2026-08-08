@@ -118,6 +118,32 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "auth/logout" ||
+    routePath === "auth/logout-all" ||
+    routePath === "auth/sessions" ||
+    routePath.startsWith("auth/sessions/")
+  ) {
+    return {
+      routeKey: `auth:self-session:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      description: "Authenticated self-service session management and revocation",
+    };
+  }
+
+  if (
+    routePath === "identity/sessions" ||
+    routePath.startsWith("identity/sessions/")
+  ) {
+    return {
+      routeKey: `identity:sessions:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Administrator session inventory and remote revocation",
+    };
+  }
+
   if (routePath.startsWith("partner/eligibility/")) {
     return {
       routeKey: "partner:eligibility:get",

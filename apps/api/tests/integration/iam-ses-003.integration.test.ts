@@ -386,6 +386,19 @@ describe("IAM-SES-003 Session Inventory, Logout, & Boundary-Safe Admin Revoke In
       sessionId: sidAlpha,
     };
 
+    // Negative: Self-service endpoint rejects remote admin revoke -> 403 AUTHZ_SCOPE_DENIED
+    await expect(
+      authController.revokeSelfSession(
+        sidBeta,
+        adminAlphaIdentity,
+        { reason: "Attempt remote revoke via self endpoint" },
+        { headers: {} },
+        "req_admin_00",
+      ),
+    ).rejects.toSatisfy(
+      (err: any) => err.code === "AUTHZ_SCOPE_DENIED" || err.response?.error?.code === "AUTHZ_SCOPE_DENIED",
+    );
+
     // Negative: Admin remote revoke without reason -> 400 Bad Request
     await expect(
       identityController.revokeAdminSession(

@@ -278,6 +278,48 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("resolves self-service auth session routes to all active user realms", () => {
+    expect(resolveRouteAuthPolicy("POST", "/api/auth/logout")).toEqual({
+      routeKey: "auth:self-session:POST",
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "tenant", "partner", "driver"],
+      description: "Authenticated self-service session management and revocation",
+    });
+    expect(resolveRouteAuthPolicy("POST", "/api/auth/logout-all")).toEqual({
+      routeKey: "auth:self-session:POST",
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "tenant", "partner", "driver"],
+      description: "Authenticated self-service session management and revocation",
+    });
+    expect(resolveRouteAuthPolicy("GET", "/api/auth/sessions")).toEqual({
+      routeKey: "auth:self-session:GET",
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "tenant", "partner", "driver"],
+      description: "Authenticated self-service session management and revocation",
+    });
+    expect(resolveRouteAuthPolicy("POST", "/api/auth/sessions/sid-123/revoke")).toEqual({
+      routeKey: "auth:self-session:POST",
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "tenant", "partner", "driver"],
+      description: "Authenticated self-service session management and revocation",
+    });
+  });
+
+  it("resolves admin identity session routes to control-plane and tenant realms", () => {
+    expect(resolveRouteAuthPolicy("GET", "/api/identity/sessions")).toEqual({
+      routeKey: "identity:sessions:GET",
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "tenant"],
+      description: "Administrator session inventory and remote revocation",
+    });
+    expect(resolveRouteAuthPolicy("POST", "/api/identity/sessions/sid-123/revoke")).toEqual({
+      routeKey: "identity:sessions:POST",
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "tenant"],
+      description: "Administrator session inventory and remote revocation",
+    });
+  });
+
   it("keeps call-center order creation on ops-only callcenter scopes", () => {
     const policy = resolveRouteAuthPolicy("POST", "/api/call-center/orders");
 

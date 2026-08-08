@@ -178,7 +178,8 @@ export class IdentityController {
       identity.roles?.includes("platform_user_admin") ||
       identity.roles?.includes("tenant_admin") ||
       identity.actorType === "platform_admin" ||
-      identity.actorType === "tenant_admin";
+      identity.actorType === "tenant_admin" ||
+      identity.scopes?.includes("identity:sessions:write");
 
     if (!isAdmin) {
       throw new ApiRequestError(

@@ -998,46 +998,14 @@ export class AuthController {
       targetSession.principalId === identity.actorId;
 
     if (!isSelf) {
-      const isAdmin =
-        identity.roles?.includes("platform_superadmin") ||
-        identity.roles?.includes("platform_user_admin") ||
-        identity.roles?.includes("tenant_admin") ||
-        identity.actorType === "platform_admin" ||
-        identity.actorType === "tenant_admin";
-
-      if (!isAdmin) {
-        throw new ApiRequestError(
-          403,
-          "AUTHZ_SCOPE_DENIED",
-          "Cannot revoke sessions belonging to another principal",
-        );
-      }
-
-      if (
-        (identity.actorType === "tenant_admin" ||
-          identity.realm === "tenant") &&
-        identity.tenantId &&
-        targetSession.tenantId !== identity.tenantId
-      ) {
-        throw new ApiRequestError(
-          403,
-          "AUTHZ_REALM_DENIED",
-          "Tenant admins cannot revoke sessions outside their tenant",
-        );
-      }
-
-      if (!body?.reason || !body.reason.trim()) {
-        throw new ApiRequestError(
-          400,
-          "IAM_REASON_REQUIRED",
-          "Revoke reason is required for administrator session revocation",
-        );
-      }
+      throw new ApiRequestError(
+        403,
+        "AUTHZ_SCOPE_DENIED",
+        "Cannot revoke sessions belonging to another principal",
+      );
     }
 
-    const reason =
-      body?.reason?.trim() ||
-      (isSelf ? "Self session revoke" : "Admin remote revoke");
+    const reason = body?.reason?.trim() || "Self session revoke";
 
     let updatedSession: CanonicalIdentitySessionRecord | null = null;
     if (this.identityRepository) {
@@ -1053,7 +1021,7 @@ export class AuthController {
         eventType: "AUTH_SESSION_REVOKED",
         eventFamily: "session",
         outcome: "success",
-        severity: isSelf ? "low" : "medium",
+        severity: "low",
         actorId: identity.actorId ?? null,
         actorType: identity.actorType,
         realm: identity.realm,
@@ -1063,8 +1031,8 @@ export class AuthController {
         targetId: sid,
         sessionId: identity.sessionId ?? null,
         authMethods: ["bearer"],
-        reasonCode: isSelf ? "SELF_SESSION_REVOKED" : "ADMIN_SESSION_REVOKED",
-        maskedContext: { reason, isSelf },
+        reasonCode: "SELF_SESSION_REVOKED",
+        maskedContext: { reason, isSelf: true },
         requestId: requestId ?? null,
         traceId: null,
         approvalId: null,
