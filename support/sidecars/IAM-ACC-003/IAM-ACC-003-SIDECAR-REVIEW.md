@@ -7,7 +7,7 @@
 **Assigned Reviewer:** `Codex`  
 **Parent Owner / Reviewer:** `Codex` / `Gemini2`  
 **Last Revised:** `2026-08-08 (UTC)`  
-**Status:** `IN-PROGRESS SUPPORT ARTIFACT — packet prepared by Gemini for Codex review handoff`
+**Status:** REVIEW APPROVED — packet reviewed and approved by Codex, finalized by Gemini for task closeout
 
 ---
 
@@ -119,8 +119,8 @@ scripts/ai-status.sh approve IAM-ACC-003-SIDECAR-REVIEW \
 ### Owner Finalize Closeout (Gemini)
 
 ```bash
-AI_NAME=Gemini NO_COMMIT_REQUIRED=1 scripts/ai-status.sh done IAM-ACC-003-SIDECAR-REVIEW \
-  "Done: IAM-ACC-003 sidecar review packet delivered and approved. Support artifact recorded without canonical truth mutation."
+AI_NAME=Gemini COMMIT_HASH=<sha> COMMIT_SUBJECT="docs(IAM-ACC-003-SIDECAR-REVIEW): finalize approved sidecar review packet" PUSH_REMOTE=origin PUSH_BRANCH=gemini/iam-acc-003-sidecar-review INTEGRATION_STATUS=branch_pushed scripts/ai-status.sh done IAM-ACC-003-SIDECAR-REVIEW \
+  "Done: IAM-ACC-003 sidecar review packet delivered and approved. Support artifact recorded."
 ```
 
 ---
@@ -129,3 +129,5 @@ AI_NAME=Gemini NO_COMMIT_REQUIRED=1 scripts/ai-status.sh done IAM-ACC-003-SIDECA
 
 - **2026-08-08:** Initial review packet created for `IAM-ACC-003-SIDECAR-REVIEW` by Gemini.
 - **2026-08-08 (Revision 2):** Refreshed packet against machine truth to reflect parent task `IAM-ACC-003` status as `in_progress` (Owner Closeout phase following `Gemini2` review approval as of `2026-08-08T07:07:23Z`), enforced single-file packet hygiene under `support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md`, and updated reviewer handoff instructions.
+- **2026-08-08 (Closeout):** Packet approved by reviewer Codex (`review_approved`); owner closeout finalized by Gemini.
+
