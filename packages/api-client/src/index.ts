@@ -106,6 +106,7 @@ import type {
   FleetPartnerPortalVehicleRecord,
   FleetPartnerRevenueShareRuleRecord,
   DriverSupplyDraft,
+  SupplyReviewActionCommand,
   FleetPartnerStatementRecord,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
@@ -3631,6 +3632,58 @@ export class ApiClient {
 
   async listFleetPartners(): Promise<FleetPartnerRecord[]> {
     return this.getList<FleetPartnerRecord>("/api/admin/fleet-partners");
+  }
+
+  async listSupplyReviewSubmissions(): Promise<SupplySubmissionRecord[]> {
+    return this.getList<SupplySubmissionRecord>("/api/admin/supply-review/submissions");
+  }
+
+  async getSupplyReviewSubmission(
+    submissionId: string,
+  ): Promise<SupplySubmissionRecord> {
+    return this.get<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}`,
+    );
+  }
+
+  async startSupplyReview(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/start`,
+      { body: command },
+    );
+  }
+
+  async requestSupplyRevision(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/request-revision`,
+      { body: command },
+    );
+  }
+
+  async approveSupplySubmission(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/approve`,
+      { body: command },
+    );
+  }
+
+  async rejectSupplySubmission(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/reject`,
+      { body: command },
+    );
   }
 
   async createFleetPartner(
