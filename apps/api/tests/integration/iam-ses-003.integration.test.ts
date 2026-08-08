@@ -399,6 +399,32 @@ describe("IAM-SES-003 Session Inventory, Logout, & Boundary-Safe Admin Revoke In
       (err: any) => err.code === "AUTHZ_SCOPE_DENIED" || err.response?.error?.code === "AUTHZ_SCOPE_DENIED",
     );
 
+    const platformAdminIdentity = {
+      authMode: "jwt_bearer" as const,
+      actorType: "platform_admin" as const,
+      actorId: "usr_platform_admin_001",
+      principalId: "usr_platform_admin_001",
+      realm: "platform" as const,
+      tenantId: null,
+      roleFamilies: ["platform" as const],
+      roles: ["platform_superadmin"],
+      scopes: ["identity:sessions:write"],
+      sessionId: "sid_platform_admin_001",
+    };
+
+    // Negative: Self-service endpoint rejects remote platform admin revoke -> 403 AUTHZ_SCOPE_DENIED
+    await expect(
+      authController.revokeSelfSession(
+        sidBeta,
+        platformAdminIdentity,
+        { reason: "Attempt platform admin remote revoke via self endpoint" },
+        { headers: {} },
+        "req_admin_platform_00",
+      ),
+    ).rejects.toSatisfy(
+      (err: any) => err.code === "AUTHZ_SCOPE_DENIED" || err.response?.error?.code === "AUTHZ_SCOPE_DENIED",
+    );
+
     // Negative: Admin remote revoke without reason -> 400 Bad Request
     await expect(
       identityController.revokeAdminSession(
