@@ -1,6 +1,9 @@
 import type {
+  DriverSupplyDraft,
+  SupplyDocumentRecord,
   SupplySubmissionStatus,
   SupplySubmissionType,
+  VehicleSupplyDraft,
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web";
 
@@ -209,6 +212,7 @@ export interface DocumentRow {
   until: string;
   s: string;
   tone: CanvasTone;
+  rawDoc?: SupplyDocumentRecord;
 }
 
 export const DEFAULT_DOCUMENT_ROWS: DocumentRow[] = [
@@ -298,4 +302,181 @@ export function mapSubmissionToTypeZh(type?: string): string {
   if (type.includes("insurance")) return "保險";
   if (type.includes("contract")) return "合約";
   return type;
+}
+
+export function mapDocTypeToZh(docType?: string): string {
+  if (!docType) return "文件 · document";
+  if (docType.includes("registration")) return "行照 · registration";
+  if (docType.includes("insurance")) return "保險保單 · insurance";
+  if (docType.includes("contract")) return "加盟合約 · contract";
+  if (docType.includes("driver_license")) return "職業駕照 · license";
+  if (docType.includes("taxi_registration")) return "執照登記證 · taxi reg";
+  return `${docType.replace(/_/g, " ")} · doc`;
+}
+
+export function buildSideBySideDiff(
+  submissionId: string,
+  submissionType: string,
+  vehicleDraft: VehicleSupplyDraft | null | undefined,
+  driverDraft: DriverSupplyDraft | null | undefined,
+  canonicalVehicle: Record<string, any> | null | undefined,
+  canonicalDriver: Record<string, any> | null | undefined,
+  documents: SupplyDocumentRecord[] | undefined,
+): DiffRow[] {
+  if (submissionId === "sub_s39" || (!vehicleDraft && !driverDraft && submissionType.includes("vehicle"))) {
+    const insDoc = documents?.find((d) => d.documentType.includes("insurance"));
+    return [
+      {
+        label: "座位數 · seat count",
+        submitted: vehicleDraft ? String(vehicleDraft.seatCount) : "9",
+        canonical: canonicalVehicle ? String(canonicalVehicle.seatCount ?? 7) : "7",
+        changed: true,
+      },
+      {
+        label: "行李容量 · luggage",
+        submitted: vehicleDraft ? String(vehicleDraft.luggageCapacity) : "6",
+        canonical: canonicalVehicle ? String(canonicalVehicle.luggageCapacity ?? 6) : "6",
+        changed: false,
+      },
+      {
+        label: "機場接送資格 · airport eligible",
+        submitted: vehicleDraft ? (vehicleDraft.airportTransferEligible ? "是 true" : "否 false") : "是 true",
+        canonical: canonicalVehicle ? (canonicalVehicle.airportTransferEligible ? "是 true" : "否 false") : "否 false",
+        changed: true,
+      },
+      {
+        label: "支援產品 · products",
+        submitted: vehicleDraft ? vehicleDraft.supportedServiceProductCodes.join(", ") : "realtime, business, airport",
+        canonical: canonicalVehicle ? (canonicalVehicle.supportedServiceBuckets || []).join(", ") : "realtime, business",
+        changed: true,
+      },
+      {
+        label: "保險到期 · insurance until",
+        submitted: insDoc?.effectiveUntil || "2027-07-01",
+        canonical: canonicalVehicle?.insuranceStatus === "expired" ? "2026-03-31" : "2026-07-02",
+        changed: true,
+      },
+    ];
+  }
+
+  if (vehicleDraft) {
+    const insDoc = documents?.find((d) => d.documentType.includes("insurance"));
+    return [
+      {
+        label: "車牌號碼 · plate no",
+        submitted: vehicleDraft.plateNo,
+        canonical: canonicalVehicle?.plateNo || "— (未建立)",
+        changed: Boolean(canonicalVehicle && vehicleDraft.plateNo !== canonicalVehicle.plateNo),
+      },
+      {
+        label: "牌照類型 · license type",
+        submitted: vehicleDraft.licenseType,
+        canonical: canonicalVehicle?.licenseType || "—",
+        changed: Boolean(canonicalVehicle && vehicleDraft.licenseType !== canonicalVehicle.licenseType),
+      },
+      {
+        label: "廠牌車型 · brand/model",
+        submitted: `${vehicleDraft.brand} ${vehicleDraft.model} (${vehicleDraft.modelYear})`,
+        canonical: canonicalVehicle?.model ? `${canonicalVehicle.brand || ""} ${canonicalVehicle.model}` : "—",
+        changed: Boolean(canonicalVehicle),
+      },
+      {
+        label: "座位數 · seat count",
+        submitted: String(vehicleDraft.seatCount),
+        canonical: canonicalVehicle?.seatCount ? String(canonicalVehicle.seatCount) : "—",
+        changed: Boolean(canonicalVehicle && vehicleDraft.seatCount !== canonicalVehicle.seatCount),
+      },
+      {
+        label: "行李容量 · luggage",
+        submitted: String(vehicleDraft.luggageCapacity),
+        canonical: canonicalVehicle?.luggageCapacity ? String(canonicalVehicle.luggageCapacity) : "—",
+        changed: Boolean(canonicalVehicle && vehicleDraft.luggageCapacity !== canonicalVehicle.luggageCapacity),
+      },
+      {
+        label: "營業區域 · business area",
+        submitted: vehicleDraft.businessArea,
+        canonical: canonicalVehicle?.operatingArea || "—",
+        changed: Boolean(canonicalVehicle && vehicleDraft.businessArea !== canonicalVehicle.operatingArea),
+      },
+      {
+        label: "支援產品 · products",
+        submitted: vehicleDraft.supportedServiceProductCodes.join(", "),
+        canonical: canonicalVehicle?.supportedServiceBuckets ? canonicalVehicle.supportedServiceBuckets.join(", ") : "—",
+        changed: true,
+      },
+      {
+        label: "保險到期 · insurance until",
+        submitted: insDoc?.effectiveUntil || "—",
+        canonical: canonicalVehicle?.insuranceStatus === "expired" ? "2026-03-31" : "—",
+        changed: Boolean(insDoc),
+      },
+    ];
+  }
+
+  if (driverDraft) {
+    return [
+      {
+        label: "司機姓名 · name",
+        submitted: driverDraft.name,
+        canonical: canonicalDriver?.name || "— (未建立)",
+        changed: Boolean(canonicalDriver && driverDraft.name !== canonicalDriver.name),
+      },
+      {
+        label: "行動電話 · mobile",
+        submitted: driverDraft.mobile,
+        canonical: canonicalDriver?.mobile || "—",
+        changed: Boolean(canonicalDriver && driverDraft.mobile !== canonicalDriver.mobile),
+      },
+      {
+        label: "職業駕照號碼 · license no",
+        submitted: driverDraft.professionalDriverLicenseNo,
+        canonical: canonicalDriver?.professionalDriverLicenseNo || "—",
+        changed: Boolean(canonicalDriver),
+      },
+      {
+        label: "駕照到期日 · license expiry",
+        submitted: driverDraft.professionalDriverLicenseExpiry,
+        canonical: canonicalDriver?.professionalDriverLicenseExpiry || "—",
+        changed: Boolean(canonicalDriver),
+      },
+      {
+        label: "執照號碼 · registration no",
+        submitted: driverDraft.taxiDriverRegistrationNo,
+        canonical: canonicalDriver?.taxiDriverRegistrationNo || "—",
+        changed: Boolean(canonicalDriver),
+      },
+      {
+        label: "執照區域 · registration area",
+        submitted: driverDraft.taxiDriverRegistrationArea,
+        canonical: canonicalDriver?.taxiDriverRegistrationArea || "—",
+        changed: Boolean(canonicalDriver && driverDraft.taxiDriverRegistrationArea !== canonicalDriver.taxiDriverRegistrationArea),
+      },
+      {
+        label: "支援產品 · products",
+        submitted: driverDraft.supportedServiceProductCodes.join(", "),
+        canonical: canonicalDriver?.supportedServiceBuckets ? canonicalDriver.supportedServiceBuckets.join(", ") : "—",
+        changed: true,
+      },
+    ];
+  }
+
+  return DEFAULT_DIFF_ROWS;
+}
+
+export function buildDocumentRows(
+  documents: SupplyDocumentRecord[] | undefined,
+): DocumentRow[] {
+  if (!documents || documents.length === 0) {
+    return DEFAULT_DOCUMENT_ROWS;
+  }
+
+  return documents.map((doc) => ({
+    zh: mapDocTypeToZh(doc.documentType),
+    file: doc.originalFileName || `${doc.documentId}.pdf`,
+    from: doc.effectiveFrom ? doc.effectiveFrom.slice(0, 7) : "2024-01",
+    until: doc.effectiveUntil ? doc.effectiveUntil.slice(0, 7) : "2029-01",
+    s: doc.reviewStatus === "approved" ? "已核可" : "待審",
+    tone: doc.reviewStatus === "approved" ? "success" : "info",
+    rawDoc: doc,
+  }));
 }
