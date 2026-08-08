@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
 
-import { FLEET_SELF } from "@/lib/fleet-portal-fixtures";
-
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
@@ -49,7 +47,9 @@ function resolveFleetPartnerId(requestHeaders: Headers): string {
     return fromEnv;
   }
 
-  return FLEET_SELF.id;
+  throw new Error(
+    "Missing fleet scope configuration: DRTS_FLEET_PARTNER_ID environment variable or x-fleet-partner-id header is required.",
+  );
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
@@ -170,7 +170,17 @@ async function forward(
   const method = request.method.toUpperCase();
   const targetUrl = buildTargetUrl(request, path);
   const headers = copyRequestHeaders(request);
-  await applyUpstreamAuth(headers, request, targetUrl);
+  try {
+    await applyUpstreamAuth(headers, request, targetUrl);
+  } catch (err) {
+    return NextResponse.json(
+      {
+        status: "error",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      { status: 400 },
+    );
+  }
 
   const init: RequestInit = {
     method,
