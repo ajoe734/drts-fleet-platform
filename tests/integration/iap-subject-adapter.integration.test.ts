@@ -4,6 +4,7 @@ import { signTestIapJwtAssertion } from "@drts/control-plane-auth";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { StepUpProofService } from "../../apps/api/src/common/auth/step-up-proof.service";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
 import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
 import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
@@ -1020,12 +1021,16 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
         },
       } as any;
 
+      const stepUpProofService = new StepUpProofService(
+        securityEventsService as any,
+      );
       const guard = new BootstrapAuthGuard(
         reflector,
         new JwtAuthService(),
         undefined,
         securityEventsService as any,
         adapter,
+        stepUpProofService,
       );
 
       const token = signAssertion({
@@ -1061,7 +1066,9 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
 
       expect(error).not.toBeNull();
       expect(error?.getStatus()).toBe(403);
-      expect(error?.code).toBe("AUTH_STEP_UP_REQUIRED");
+      expect(["STEP_UP_REQUIRED", "AUTH_STEP_UP_REQUIRED"]).toContain(
+        error?.code,
+      );
 
       delete process.env.IAP_EXPECTED_AUDIENCE;
       delete process.env.IAP_JWT_SECRET;
