@@ -1760,7 +1760,7 @@ function TripScreen({
           />
           <ActionButton
             href={buildHref(context, { screen: "cancelled", state: "handoff" })}
-            label={`取消行程 · 剩 ${embedTrip.cancelWindowMin} 分鐘可免費取消`}
+            label={`取消行程 · 剩 ${trip.cancelWindowMin ?? embedTrip.cancelWindowMin} 分鐘可免費取消`}
             theme={theme}
             variant="danger"
           />
