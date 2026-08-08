@@ -238,6 +238,8 @@ export default function SettingsScreen() {
 
       if (!isActive) return;
 
+      const failures: string[] = [];
+
       if (settingsResult.status === "fulfilled") {
         const next = settingsValuesFromRecord(
           settingsResult.value as DriverSettings,
