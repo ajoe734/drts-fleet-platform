@@ -443,6 +443,44 @@ export class IdentityRepository {
     }
   }
 
+  async findMembershipById(
+    membershipId: string,
+  ): Promise<CanonicalIdentityMembershipRecord | null> {
+    if (!this.isEnabled()) {
+      const membership = this.fallbackMemberships.get(membershipId);
+      if (membership) {
+        return { ...membership };
+      }
+      for (const candidate of this.fallbackMemberships.values()) {
+        if (candidate.membershipId === membershipId) {
+          return { ...candidate };
+        }
+      }
+      return null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<JsonRecordRow>(
+        `
+          SELECT record FROM iam.identity_memberships
+          WHERE membership_id = $1
+          LIMIT 1
+        `,
+        [membershipId],
+      );
+      if (!result.rows[0]?.record) {
+        return null;
+      }
+      return this.parseRecord<CanonicalIdentityMembershipRecord>(
+        result.rows[0].record,
+        "iam.identity_memberships",
+      );
+    } finally {
+      client.release();
+    }
+  }
+
   async findRoleBindingsByMembershipId(
     membershipId: string,
   ): Promise<CanonicalIdentityRoleBindingRecord[]> {
@@ -471,6 +509,57 @@ export class IdentityRepository {
           "iam.identity_role_bindings",
         ),
       );
+    } finally {
+      client.release();
+    }
+  }
+
+  async listAllMemberships(): Promise<CanonicalIdentityMembershipRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackMemberships.values(), (membership) => ({
+        ...membership,
+      }));
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_memberships`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<CanonicalIdentityMembershipRecord>(
+        row.record,
+        "iam.identity_memberships",
+      ),
+    );
+  }
+
+  async listAllRoleBindings(): Promise<CanonicalIdentityRoleBindingRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackRoleBindings.values(), (binding) => ({
+        ...binding,
+      }));
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_role_bindings`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+        row.record,
+        "iam.identity_role_bindings",
+      ),
+    );
+  }
+
+  async ensureRoleBinding(
+    record: CanonicalIdentityRoleBindingRecord,
+  ): Promise<CanonicalIdentityRoleBindingRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackRoleBinding(record);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertRoleBinding(client, record);
     } finally {
       client.release();
     }
@@ -747,6 +836,31 @@ export class IdentityRepository {
     return result.rows.map((row) =>
       this.hydrateSessionRecord(row, "iam.identity_sessions"),
     );
+  }
+
+  async revokeSessionsByPrincipal(
+    principalId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ): Promise<CanonicalIdentitySessionRecord[]> {
+    const sessions = await this.listSessionsByPrincipal(principalId);
+    const revoked: CanonicalIdentitySessionRecord[] = [];
+
+    for (const session of sessions) {
+      if (session.status !== "active") {
+        continue;
+      }
+      const updated = await this.revokeSession(
+        session.sessionId,
+        reason,
+        revokedByPrincipalId,
+      );
+      if (updated) {
+        revoked.push(updated);
+      }
+    }
+
+    return revoked;
   }
 
   async findActiveSessionByDevice(

@@ -14,6 +14,8 @@ export const IAM_STAGE15_ERROR_CODES = [
   "IAM_CREDENTIAL_NOT_FOUND",
   "IAM_ACCESS_REVIEW_NOT_FOUND",
   "IAM_BREAK_GLASS_NOT_FOUND",
+  "IAM_PRIVILEGED_ROLE_REQUEST_NOT_FOUND",
+  "IAM_LAST_ADMIN_CONFLICT",
 ] as const;
 
 export type IamStage15ErrorCode = (typeof IAM_STAGE15_ERROR_CODES)[number];
@@ -131,6 +133,42 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     method: "get",
     path: "/api/identity/context",
     domain: "identity",
+  },
+  {
+    operationId: "listPrivilegedRoleRequests",
+    method: "get",
+    path: "/api/identity/privileged-role-requests",
+    domain: "role",
+  },
+  {
+    operationId: "createPrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests",
+    domain: "role",
+  },
+  {
+    operationId: "getPrivilegedRoleRequest",
+    method: "get",
+    path: "/api/identity/privileged-role-requests/{requestId}",
+    domain: "role",
+  },
+  {
+    operationId: "approvePrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/approve",
+    domain: "role",
+  },
+  {
+    operationId: "rejectPrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/reject",
+    domain: "role",
+  },
+  {
+    operationId: "removePrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/remove",
+    domain: "role",
   },
   {
     operationId: "listTenantUsers",

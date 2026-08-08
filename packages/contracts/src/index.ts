@@ -2471,6 +2471,65 @@ export interface CanonicalIdentityInvitationRecord {
   updatedAt: string;
 }
 
+export const PRIVILEGED_ROLE_REQUEST_STATUSES = [
+  "pending_approval",
+  "approved",
+  "active",
+  "rejected",
+  "expired",
+  "removed",
+] as const;
+export type PrivilegedRoleRequestStatus =
+  (typeof PRIVILEGED_ROLE_REQUEST_STATUSES)[number];
+
+export interface PrivilegedRoleRequestRecord {
+  requestId: string;
+  approvalId: string | null;
+  membershipId: string;
+  principalId: string;
+  realm: "platform" | "ops" | "tenant";
+  roleCode: string;
+  requestedByPrincipalId: string;
+  approvedByPrincipalId: string | null;
+  rejectedByPrincipalId: string | null;
+  removedByPrincipalId: string | null;
+  justification: string;
+  status: PrivilegedRoleRequestStatus;
+  version: number;
+  activateAt: string;
+  expiresAt: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  removedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePrivilegedRoleRequestCommand {
+  membershipId: string;
+  roleCode: string;
+  justification: string;
+  activateAt?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface PrivilegedRoleRequestDecisionCommand {
+  expectedVersion: number;
+  note?: string | null;
+}
+
+export interface PrivilegedRoleRequestRemovalCommand {
+  expectedVersion: number;
+  reasonCode: string;
+  note?: string | null;
+}
+
+export interface ListPrivilegedRoleRequestsQuery {
+  membershipId?: string | null;
+  principalId?: string | null;
+  status?: PrivilegedRoleRequestStatus | null;
+}
+
 export interface CanonicalTenantUserIdentitySnapshot {
   principal: CanonicalIdentityPrincipalRecord;
   membership: CanonicalIdentityMembershipRecord;
