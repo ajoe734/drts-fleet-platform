@@ -1,8 +1,10 @@
 import { createTenantClient, type ApiClient } from "@drts/api-client";
 import type {
   BookingRecord,
+  CancelOwnedOrderCommand,
   CreateTenantBookingCommand,
   CrossAppResourceLink,
+  UpdateTenantBookingCommand,
 } from "@drts/contracts";
 import {
   adaptBookingFixtureToCreateCommand,
@@ -43,6 +45,30 @@ export class EnterpriseDispatchTenantClient {
 
   async getBooking(bookingId: string): Promise<BookingRecord> {
     return this.client.getTenantBooking(bookingId) as Promise<BookingRecord>;
+  }
+
+  async listBookings(): Promise<BookingRecord[]> {
+    return this.client.listTenantBookings();
+  }
+
+  async updateBooking(
+    bookingId: string,
+    command: UpdateTenantBookingCommand,
+  ): Promise<BookingRecord> {
+    return this.client.updateTenantBooking(
+      bookingId,
+      command,
+    ) as Promise<BookingRecord>;
+  }
+
+  async cancelBooking(
+    bookingId: string,
+    command: CancelOwnedOrderCommand,
+  ): Promise<BookingRecord> {
+    return this.client.cancelTenantBooking(
+      bookingId,
+      command,
+    ) as Promise<BookingRecord>;
   }
 
   async getBookingGateSnapshot(bookingId: string) {
