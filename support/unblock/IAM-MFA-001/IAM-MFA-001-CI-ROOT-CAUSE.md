@@ -4,7 +4,8 @@
 - Author lane: `Claude` (owner after the 2026-08-08 chairman reassignment)
 - Reviewer: `Codex`
 - Produced: 2026-08-08
-- Status of this artifact: diagnosis + exact patch, **not yet applied to the integration rail**
+- Status of this artifact: diagnosis + exact patch, **applied to the integration rail**
+  as commit `a4a9303516b346e72eb6fe440a4298a4fdd81d1f`; see §8 for what is still blocked
 
 ## 1. Why this artifact exists
 
@@ -171,4 +172,43 @@ IAM-MFA-001.
 - `tests/unit/mfa-step-up-guard.test.ts` — could not run: this worktree has no
   per-package `node_modules` and `pnpm install` is blocked by the worker sandbox.
 - The patch itself was **not** executed against a live API; CI on PR #1303 is the
-  verification gate for §4.
+  verification gate for §4, and that gate has **not yet been able to run** (see §8).
+
+## 8. What this dispatch delivered, and what is still blocked
+
+Delivered:
+
+- `a4a9303516b346e72eb6fe440a4298a4fdd81d1f` on `codex/iam-mfa-001-clean-route` —
+  the §4 patch, pushed as a normal non-force commit via the GitHub contents API.
+  PR #1303 `headRefOid` is now this commit.
+- This artifact, on `claude/iam-mfa-001`.
+
+Still blocked — **PR #1303 cannot be validated or merged**:
+
+- `PUT /repos/ajoe734/drts-fleet-platform/pulls/1303/update-branch` returns
+  `422 merge conflict between base and head`. The conflict is real, not a stale
+  mergeability cache.
+- Because the PR is `CONFLICTING`, GitHub cannot compute a merge ref, so **no CI run
+  was triggered for `a4a9303`**. The newest runs on this branch are still
+  `30918215661` / `30918216460` against the old head `e3ecc0a0`. The §4 fix is
+  therefore pushed but *unverified*.
+- The three files that conflict with the 14 commits `dev` has gained since the merge
+  base are:
+  - `apps/api/src/common/audit/security-event-matrix.ts`
+  - `apps/api/src/common/auth/index.ts`
+  - `apps/api/src/modules/auth/auth.controller.ts`
+
+Why this worker could not resolve the conflict: the assigned sandbox refused
+`git worktree add`, `git read-tree` / `git hash-object -w`, `cp`, and
+`pnpm install`. Without a checkout of `codex/iam-mfa-001-clean-route` there is no
+way to perform a three-way merge, and the contents API cannot express one. The
+next dispatch needs a worker whose cwd is a checkout of that branch.
+
+Next dispatch should:
+
+1. Check out `codex/iam-mfa-001-clean-route`, merge `origin/dev`, resolve the three
+   files above, and push the merge (non-force).
+2. Confirm CI now triggers for the head and that `iam-negative-matrix`, `e2e`, and
+   `ci-integ` pass with the §4 fix in place.
+3. Decide the fate of the superseded `claude/iam-mfa-001` branch (§6) — it should not
+   be merged.
