@@ -688,5 +688,52 @@ describe("Session Management (IAM-SES-003)", () => {
         ),
       ).rejects.toThrow(ApiRequestError);
     });
+
+    it("should reject tenant and platform admins from remote-revoking non-self sessions via authController.revokeSelfSession (403 AUTHZ_SCOPE_DENIED)", async () => {
+      const targetSession: CanonicalIdentitySessionRecord = {
+        sessionId: "sid_target_admin_remote_attempt",
+        sourceRef: "jwt_session:sid_target_admin_remote_attempt",
+        principalId: "prn_victim_user_2",
+        membershipId: "mem_victim_2",
+        realm: "tenant",
+        tenantId: "tenant_alpha",
+        status: "active",
+        authTime: new Date().toISOString(),
+        authMethods: ["tenant_bootstrap_fixture"],
+        tokenVersion: 950,
+        idleExpiresAt: null,
+        absoluteExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        revokedAt: null,
+        revokedByPrincipalId: null,
+        revokeReason: null,
+        deviceSummary: {},
+        riskSummary: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await identityRepository.createSession(targetSession);
+
+      // Tenant admin trying to call authController.revokeSelfSession for non-self session
+      await expect(
+        authController.revokeSelfSession(
+          tenantAdminIdentity,
+          "sid_target_admin_remote_attempt",
+          { reason: "tenant_admin_self_endpoint_bypassing_admin_rail" },
+          { headers: {} },
+          "req_tenant_admin_self_revoke_bypass_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      // Platform admin trying to call authController.revokeSelfSession for non-self session
+      await expect(
+        authController.revokeSelfSession(
+          platformAdminIdentity,
+          "sid_target_admin_remote_attempt",
+          { reason: "platform_admin_self_endpoint_bypassing_admin_rail" },
+          { headers: {} },
+          "req_platform_admin_self_revoke_bypass_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
   });
 });

@@ -856,47 +856,20 @@ export class AuthController {
     }
 
     const callerPrincipalId = identity.principalId ?? identity.actorId;
-    const isSelf = targetSession.principalId === callerPrincipalId;
+    const isSelf =
+      (callerPrincipalId && targetSession.principalId === callerPrincipalId) ||
+      (identity.actorId && targetSession.actorId === identity.actorId) ||
+      (identity.subject && targetSession.subject === identity.subject);
 
     if (!isSelf) {
-      const isPlatformOrOpsAdmin =
-        (identity.realm === "platform" || identity.realm === "ops") &&
-        (identity.actorType === "platform_admin" ||
-          identity.roles.includes("platform_superadmin") ||
-          identity.roles.includes("platform_user_admin") ||
-          identity.roles.includes("ops_admin") ||
-          identity.scopes.includes("platform:superadmin") ||
-          identity.scopes.includes("identity:sessions:write") ||
-          identity.scopes.includes("identity:users:write"));
-
-      const isTenantAdmin =
-        identity.realm === "tenant" &&
-        (identity.actorType === "tenant_admin" ||
-          identity.roles.includes("tenant_admin") ||
-          identity.scopes.includes("identity:users:write") ||
-          identity.scopes.includes("identity:sessions:write"));
-
-      if (!isPlatformOrOpsAdmin && !isTenantAdmin) {
-        throw new ApiRequestError(
-          403,
-          "AUTHZ_SCOPE_DENIED",
-          "You are not authorized to revoke another user's session.",
-        );
-      }
-
-      if (
-        identity.realm === "tenant" &&
-        targetSession.tenantId !== identity.tenantId
-      ) {
-        throw new ApiRequestError(
-          403,
-          "RESOURCE_SCOPE_DENIED",
-          "Tenant administrators cannot revoke sessions outside their tenant boundary.",
-        );
-      }
+      throw new ApiRequestError(
+        403,
+        "AUTHZ_SCOPE_DENIED",
+        "Self session revocation endpoints can only be used to revoke your own sessions. Use administrative session endpoints for remote revocation.",
+      );
     }
 
-    const reason = command.reason?.trim() || "remote_revoke";
+    const reason = command.reason?.trim() || "self_revoke";
     const updated = await this.identityRepository.revokeSession(
       sid,
       reason,
