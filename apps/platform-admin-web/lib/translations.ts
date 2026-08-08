@@ -3713,7 +3713,6 @@ const en = {
   "partnerDetail.action.deactivateEntry": "Deactivate",
   "partnerDetail.action.activateEntry": "Activate",
   "partnerDetail.action.revokeEntry": "Revoke entry",
-  "partnerDetail.previewFixtureMode": "Preview fixture mode",
   "partnerDetail.governance.title": "Governance actions",
   "partnerDetail.governance.subtitle":
     "State transitions and high-risk lifecycle controls.",
@@ -6553,7 +6552,6 @@ const zh: typeof en = {
   "partnerDetail.action.deactivateEntry": "停用 entry",
   "partnerDetail.action.activateEntry": "啟用 entry",
   "partnerDetail.action.revokeEntry": "撤銷 entry",
-  "partnerDetail.previewFixtureMode": "Preview fixture 模式",
   "partnerDetail.governance.title": "治理動作",
   "partnerDetail.governance.subtitle":
     "集中執行狀態切換與高風險 lifecycle 控制。",
