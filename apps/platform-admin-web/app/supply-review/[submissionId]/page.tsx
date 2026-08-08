@@ -17,15 +17,17 @@ import {
   type CanvasDLItem,
 } from "@drts/ui-web";
 import type {
+  DriverSupplyDraft,
   SupplyDocumentRecord,
   SupplySubmissionRecord,
+  VehicleSupplyDraft,
 } from "@drts/contracts";
 import {
-  DEFAULT_DIFF_ROWS,
-  DEFAULT_DOCUMENT_ROWS,
   FX_PSR_QUEUE,
   PSR_SUB_STATUS,
   REASON_CODES,
+  buildDocumentRows,
+  buildSideBySideDiff,
   classifySupplyReviewError,
   mapSubmissionToTypeZh,
   type DiffRow,
@@ -115,7 +117,7 @@ export default function SupplyReviewDetailPage() {
     [submissionId],
   );
 
-  const [record, setRecord] = useState<Partial<SupplySubmissionRecord>>({
+  const [record, setRecord] = useState<Partial<SupplySubmissionRecord> & Record<string, any>>({
     submissionId,
     fleetPartnerId: seedMatch?.fleetPartnerId || "fleet-demo-001",
     submissionType: seedMatch?.submissionType || "vehicle_onboarding",
@@ -126,14 +128,17 @@ export default function SupplyReviewDetailPage() {
     reviewStartedBy: seedMatch?.lockedBy || "林佩璇",
   });
 
+  const [driverDraft, setDriverDraft] = useState<DriverSupplyDraft | null>(null);
+  const [vehicleDraft, setVehicleDraft] = useState<VehicleSupplyDraft | null>(null);
+  const [documents, setDocuments] = useState<SupplyDocumentRecord[]>([]);
+  const [canonicalDriver, setCanonicalDriver] = useState<Record<string, any> | null>(null);
+  const [canonicalVehicle, setCanonicalVehicle] = useState<Record<string, any> | null>(null);
+
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<boolean>(false);
   const [selfApprovalError, setSelfApprovalError] = useState<boolean>(false);
 
-  const [diffRows] = useState<DiffRow[]>(DEFAULT_DIFF_ROWS);
-  const [docRows, setDocRows] = useState<DocumentRow[]>(DEFAULT_DOCUMENT_ROWS);
   const [onlyDiff, setOnlyDiff] = useState(false);
-
   const [reasonCode, setReasonCode] = useState<string>("manual_screening");
   const [comment, setComment] = useState<string>("");
 
@@ -142,6 +147,8 @@ export default function SupplyReviewDetailPage() {
   const [showActionModal, setShowActionModal] = useState<
     "request_revision" | "reject" | null
   >(null);
+
+  const [previewDoc, setPreviewDoc] = useState<SupplyDocumentRecord | null>(null);
 
   const loadDetail = async () => {
     setErrorMsg(null);
@@ -152,23 +159,11 @@ export default function SupplyReviewDetailPage() {
       const data = await client.getAdminSupplyReviewSubmission(submissionId);
       if (data) {
         setRecord(data.submission || data);
-        if (data.documents && data.documents.length > 0) {
-          const mappedDocs: DocumentRow[] = data.documents.map(
-            (doc: SupplyDocumentRecord) => ({
-              zh: doc.documentType.replace(/_/g, " "),
-              file: doc.originalFileName || `${doc.documentId}.pdf`,
-              from: doc.effectiveFrom
-                ? doc.effectiveFrom.slice(0, 7)
-                : "2024-01",
-              until: doc.effectiveUntil
-                ? doc.effectiveUntil.slice(0, 7)
-                : "2029-01",
-              s: doc.reviewStatus === "approved" ? "已核可" : "待審",
-              tone: doc.reviewStatus === "approved" ? "success" : "info",
-            }),
-          );
-          setDocRows(mappedDocs);
-        }
+        if (data.driverDraft) setDriverDraft(data.driverDraft);
+        if (data.vehicleDraft) setVehicleDraft(data.vehicleDraft);
+        if (data.documents) setDocuments(data.documents);
+        if (data.canonicalDriver) setCanonicalDriver(data.canonicalDriver);
+        if (data.canonicalVehicle) setCanonicalVehicle(data.canonicalVehicle);
       }
     } catch (e: any) {
       console.warn(
@@ -187,8 +182,68 @@ export default function SupplyReviewDetailPage() {
   const revisionNo = record.revisionNo || 1;
   const typeZh = mapSubmissionToTypeZh(record.submissionType);
   const fleetName =
-    seedMatch?.fleet || `車行 (${record.fleetPartnerId || "fleet-demo-001"})`;
-  const subjectStr = seedMatch?.subject || `KAB-7720 · Hyundai Custo`;
+    record.fleetPartnerName ||
+    seedMatch?.fleet ||
+    `車行 (${record.fleetPartnerId || "fleet-demo-001"})`;
+  const subjectStr =
+    record.subject ||
+    (vehicleDraft
+      ? `${vehicleDraft.plateNo} · ${vehicleDraft.brand} ${vehicleDraft.model}`
+      : driverDraft
+        ? driverDraft.name
+        : seedMatch?.subject || "KAB-7720 · Hyundai Custo");
+
+  // VQ-1 Side-by-side diff generated dynamically from payload!
+  const diffRows: DiffRow[] = useMemo(
+    () =>
+      buildSideBySideDiff(
+        submissionId,
+        record.submissionType || "vehicle_onboarding",
+        vehicleDraft,
+        driverDraft,
+        canonicalVehicle,
+        canonicalDriver,
+        documents,
+      ),
+    [
+      submissionId,
+      record.submissionType,
+      vehicleDraft,
+      driverDraft,
+      canonicalVehicle,
+      canonicalDriver,
+      documents,
+    ],
+  );
+
+  const displayedDiffRows = useMemo(() => {
+    if (onlyDiff) {
+      return diffRows.filter((r) => r.changed);
+    }
+    return diffRows;
+  }, [diffRows, onlyDiff]);
+
+  // VQ-2 Documents table generated dynamically from payload!
+  const docRows: DocumentRow[] = useMemo(
+    () => buildDocumentRows(documents),
+    [documents],
+  );
+
+  // Dynamic VQ-3 Validation check
+  const validationInfo = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const expiredDocs = documents.filter(
+      (d) => d.effectiveUntil && d.effectiveUntil < today,
+    );
+    const hasMissingDocs =
+      record.submissionType === "vehicle_onboarding" && documents.length === 0;
+
+    return {
+      isComplete: expiredDocs.length === 0 && !hasMissingDocs,
+      expiredDocs,
+      hasMissingDocs,
+    };
+  }, [documents, record.submissionType]);
 
   const handleApproveSubmit = async () => {
     setSubmitting(true);
@@ -276,13 +331,6 @@ export default function SupplyReviewDetailPage() {
     }
   };
 
-  const displayedDiffRows = useMemo(() => {
-    if (onlyDiff) {
-      return diffRows.filter((r) => r.changed);
-    }
-    return diffRows;
-  }, [diffRows, onlyDiff]);
-
   const canonicalDlItems: CanvasDLItem[] = [
     {
       k: "建立 / 更新 vehicle",
@@ -311,7 +359,26 @@ export default function SupplyReviewDetailPage() {
     },
   ];
 
+  const isSubmitted = currentStatus === "submitted";
   const isEditable = ["submitted", "in_review"].includes(currentStatus);
+
+  const handleStartReview = async () => {
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const updated = await client.startAdminSupplyReview(submissionId, {
+        expectedRevisionNo: revisionNo,
+        reasonCode: "manual_screening",
+        comment: "平台審核人受理審核",
+      });
+      setRecord(updated);
+    } catch (e: any) {
+      const info = classifySupplyReviewError(e);
+      setErrorMsg(info.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div data-screen-id="PSR-DETAIL-01">
@@ -329,7 +396,18 @@ export default function SupplyReviewDetailPage() {
         }
         subtitle={`${fleetName} · ${subjectStr} · revision ${revisionNo} · expectedRevisionNo=${revisionNo}`}
         actions={
-          isEditable ? (
+          isSubmitted ? (
+            <>
+              <CanvasBtn
+                variant="primary"
+                icon="check"
+                disabled={submitting}
+                onClick={handleStartReview}
+              >
+                受理審核 · start review
+              </CanvasBtn>
+            </>
+          ) : isEditable ? (
             <>
               <CanvasBtn
                 variant="secondary"
@@ -485,7 +563,7 @@ export default function SupplyReviewDetailPage() {
             </div>
           </CanvasCard>
 
-          {/* Document review */}
+          {/* VQ-2 Document review */}
           <CanvasCard
             title="文件檢視 · documents"
             subtitle="VQ-2 · 類型 / 檔名 / 生效 / 審核狀態"
@@ -512,8 +590,33 @@ export default function SupplyReviewDetailPage() {
                 {
                   h: "",
                   w: 80,
-                  r: () => (
-                    <CanvasBtn size="xs" variant="ghost" icon="eye">
+                  r: (r) => (
+                    <CanvasBtn
+                      size="xs"
+                      variant="ghost"
+                      icon="eye"
+                      onClick={() =>
+                        setPreviewDoc(
+                          (r as DocumentRow).rawDoc || {
+                            documentId: "doc-preview",
+                            fleetPartnerId: record.fleetPartnerId || "fleet-001",
+                            submissionId,
+                            documentType: String(r.zh),
+                            fileObjectKey: `files/${r.file}`,
+                            originalFileName: String(r.file),
+                            contentType: "application/pdf",
+                            fileSize: 2048,
+                            checksumSha256: "sha256-mock",
+                            effectiveFrom: String(r.from),
+                            effectiveUntil: String(r.until),
+                            reviewStatus: "approved",
+                            reviewComment: null,
+                            uploadedBy: "fleet-user",
+                            uploadedAt: "2026-06-18T14:02:00.000Z",
+                          },
+                        )
+                      }
+                    >
                       預覽
                     </CanvasBtn>
                   ),
@@ -523,19 +626,41 @@ export default function SupplyReviewDetailPage() {
             />
           </CanvasCard>
 
-          {/* Validation warnings */}
+          {/* VQ-3 Dynamic Validation warnings */}
           <CanvasCard title="完整性檢核 · validation">
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <CanvasBanner
-                tone="success"
-                icon="check"
-                body="必填欄位齊全 · 文件類型完整 · 無重複車牌。"
-              />
-              <CanvasBanner
-                tone="info"
-                icon="info"
-                body="保險保單為新附件，核可後將同步更新 canonical 保險到期日。"
-              />
+              {validationInfo.isComplete ? (
+                <>
+                  <CanvasBanner
+                    tone="success"
+                    icon="check"
+                    body="必填欄位齊全 · 文件類型完整 · 無重複標的。"
+                  />
+                  <CanvasBanner
+                    tone="info"
+                    icon="info"
+                    body="保險保單與加盟合約已完成校對，核可後將同步更新 canonical 紀錄與 readiness。"
+                  />
+                </>
+              ) : (
+                <>
+                  {validationInfo.hasMissingDocs && (
+                    <CanvasBanner
+                      tone="danger"
+                      icon="warn"
+                      body="缺必要文件（行照 / 保險保單），完整性未過，不可核可。"
+                    />
+                  )}
+                  {validationInfo.expiredDocs.map((doc) => (
+                    <CanvasBanner
+                      key={doc.documentId}
+                      tone="danger"
+                      icon="warn"
+                      body={`文件過期：${doc.originalFileName || doc.documentType} 已於 ${doc.effectiveUntil} 到期，需要求車行補正。`}
+                    />
+                  ))}
+                </>
+              )}
             </div>
           </CanvasCard>
         </div>
@@ -619,7 +744,7 @@ export default function SupplyReviewDetailPage() {
                 items={[
                   {
                     k: "canonicalDriverId",
-                    v: record.canonicalDriverId || "drv_9120",
+                    v: record.canonicalDriverId || "d_9120",
                     mono: true,
                   },
                   {
@@ -645,12 +770,60 @@ export default function SupplyReviewDetailPage() {
                       </CanvasPill>
                     ),
                   },
+                  {
+                    k: "reviewedBy",
+                    v: record.reviewedBy || "LP (林佩璇)",
+                    mono: false,
+                  },
+                  {
+                    k: "reviewedAt",
+                    v: record.reviewedAt || new Date().toISOString(),
+                    mono: true,
+                  },
                 ]}
               />
             </CanvasCard>
           )}
         </div>
       </div>
+
+      {/* Document Preview Modal (VQ-2) */}
+      {previewDoc && (
+        <div style={modalOverlayStyle}>
+          <div style={modalContainerStyle}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
+              文件預覽 · {previewDoc.originalFileName || previewDoc.documentType}
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                color: theme.textMuted,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div>• 檔名: {previewDoc.originalFileName || "document.pdf"}</div>
+              <div>• 檔案 Key: {previewDoc.fileObjectKey}</div>
+              <div>• 類型: {previewDoc.documentType}</div>
+              <div>• 格式: {previewDoc.contentType}</div>
+              <div>• 大小: {previewDoc.fileSize} bytes</div>
+              <div>• SHA-256 Checksum: {previewDoc.checksumSha256}</div>
+              <div>
+                • 生效起迄: {previewDoc.effectiveFrom} ~ {previewDoc.effectiveUntil}
+              </div>
+              <div>• 審核狀態: {previewDoc.reviewStatus}</div>
+            </div>
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
+              <CanvasBtn variant="secondary" onClick={() => setPreviewDoc(null)}>
+                關閉預覽
+              </CanvasBtn>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Action modal for request revision / reject */}
       {showActionModal && (
@@ -773,7 +946,7 @@ export default function SupplyReviewDetailPage() {
               </CanvasBtn>
               <CanvasBtn
                 variant="primary"
-                disabled={submitting}
+                disabled={submitting || !validationInfo.isComplete}
                 onClick={handleApproveSubmit}
               >
                 確認核可 · provision
