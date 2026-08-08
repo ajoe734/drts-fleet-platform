@@ -177,15 +177,7 @@ export function extractBootstrapRequestIdentity(
         : null
     : null;
 
-  let stepUpProof: any = null;
-  const rawProof = normalizeHeaderValue(headers["x-step-up-proof"]);
-  if (rawProof) {
-    try {
-      stepUpProof = JSON.parse(rawProof);
-    } catch {
-      stepUpProof = null;
-    }
-  }
+  const stepUpProof: any = null;
 
   return {
     authMode: AUTH_MODE,

@@ -325,14 +325,30 @@ export class StepUpProofService {
     }
 
     const reference = extractStepUpReference(request);
-    if (!reference || !identity?.actorId || !identity.sessionId) {
+    if (!reference) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
-        reasonCode: reference ? "missing_identity_session" : "missing_reference",
+        reasonCode: "missing_reference",
         requestId: identity?.requestId ?? null,
       });
-      throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
+    }
+
+    if (!identity?.actorId || !identity.sessionId) {
+      this.recordEvent("step_up.denied", identity, {
+        actionId: policy.actionId,
+        outcome: "denied",
+        reasonCode: "missing_identity_session",
+        requestId: identity?.requestId ?? null,
+      });
+      throw this.buildStepUpRequiredError(
+        policy.actionId,
+        policy.freshnessWindowMs,
+      );
     }
 
     let proof = this.storedProofs.get(reference);
@@ -398,6 +414,10 @@ export class StepUpProofService {
         tokenId: proof.stepUpReference,
       });
       throw this.buildStepUpRequiredError(policy.actionId, policy.freshnessWindowMs);
+    }
+
+    if (identity) {
+      identity.stepUpProof = proof;
     }
 
     this.recordEvent("step_up.satisfied", identity, {

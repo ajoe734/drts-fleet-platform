@@ -324,21 +324,7 @@ export class BootstrapAuthGuard implements CanActivate {
           ? resolved.payload.iat
           : Math.floor(Date.now() / 1000));
 
-    let stepUpProof: any = null;
-    const rawProofHeader =
-      baseHeaders["x-step-up-proof"] ??
-      baseHeaders["x-mfa-proof"] ??
-      baseHeaders["x-drts-step-up-proof"];
-    const rawProof = Array.isArray(rawProofHeader)
-      ? rawProofHeader[0]
-      : rawProofHeader;
-    if (rawProof) {
-      try {
-        stepUpProof = JSON.parse(rawProof);
-      } catch {
-        stepUpProof = null;
-      }
-    }
+    const stepUpProof: any = null;
 
     const identity: BootstrapRequestIdentity = {
       authMode: "jwt_bearer",
@@ -595,7 +581,10 @@ export class BootstrapAuthGuard implements CanActivate {
       request.originalUrl ?? request.url ?? "",
       identity.realm,
     );
-    const actionId = routeKey || routeStepUpPolicy?.routeKey || routePath;
+    const actionId =
+      routeStepUpPolicy?.routeKey ||
+      (routeKey && routeKey !== "decorator" ? routeKey : undefined) ||
+      routePath;
     const result = evaluateMfaStepUpPolicy(identity, actionId, request);
     if (!result.allowed) {
       throw new ApiRequestError(

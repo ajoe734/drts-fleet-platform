@@ -428,7 +428,21 @@ export function evaluateMfaStepUpPolicy(
     }
 
     // Check freshness window
-    const freshnessAge = nowSeconds - proof.authTime;
+    const proofAuthTimeSeconds =
+      typeof proof.authTime === "number"
+        ? proof.authTime < 100000000000
+          ? proof.authTime
+          : Math.floor(proof.authTime / 1000)
+        : typeof proof.authTime === "string"
+          ? !isNaN(Number(proof.authTime))
+            ? Number(proof.authTime) < 100000000000
+              ? Number(proof.authTime)
+              : Math.floor(Number(proof.authTime) / 1000)
+            : !isNaN(Date.parse(proof.authTime))
+              ? Math.floor(Date.parse(proof.authTime) / 1000)
+              : nowSeconds
+          : nowSeconds;
+    const freshnessAge = nowSeconds - proofAuthTimeSeconds;
     if (freshnessAge > rule.maxAgeSeconds || freshnessAge < -5) {
       return {
         allowed: false,
