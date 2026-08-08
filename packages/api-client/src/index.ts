@@ -105,6 +105,7 @@ import type {
   FleetPartnerPortalTripRecord,
   FleetPartnerPortalVehicleRecord,
   FleetPartnerRevenueShareRuleRecord,
+  DriverSupplyDraft,
   FleetPartnerStatementRecord,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
@@ -218,6 +219,12 @@ import type {
   TenantAddressRecord,
   TenantAddressExportViewRecord,
   TenantApiKeyRecord,
+  SupplyDocumentRecord,
+  SupplyReadinessRecord,
+  SupplySubmissionRecord,
+  SupplySubmissionStatus,
+  SupplySubmissionType,
+  VehicleSupplyDraft,
   TenantApiKeyIssued,
   TenantBillingProfile,
   TenantBootstrapSession,
@@ -2011,6 +2018,73 @@ export class ApiClient {
     return this.getList<FleetPartnerPortalVehicleRecord>(
       "/api/fleet-partner/vehicles",
     );
+  }
+
+  async listFleetPortalSupplySubmissions(filters?: {
+    status?: SupplySubmissionStatus;
+    submissionType?: SupplySubmissionType;
+    subjectDriverId?: string;
+    subjectVehicleId?: string;
+  }): Promise<
+    {
+      submission: SupplySubmissionRecord;
+      driverDraft: DriverSupplyDraft | null;
+      vehicleDraft: VehicleSupplyDraft | null;
+      documents: SupplyDocumentRecord[];
+      reviewEvents: {
+        eventId: string;
+        submissionId: string;
+        eventType: string;
+        actorId: string;
+        actorType: string;
+        reasonCode: string | null;
+        comment: string | null;
+        createdAt: string;
+      }[];
+    }[]
+  > {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.submissionType) {
+      params.set("submissionType", filters.submissionType);
+    }
+    if (filters?.subjectDriverId) {
+      params.set("subjectDriverId", filters.subjectDriverId);
+    }
+    if (filters?.subjectVehicleId) {
+      params.set("subjectVehicleId", filters.subjectVehicleId);
+    }
+    const query = params.toString();
+    return this.getList(
+      query
+        ? `/api/fleet-partner/supply-submissions?${query}`
+        : "/api/fleet-partner/supply-submissions",
+    );
+  }
+
+  async getFleetPortalSupplySubmission(submissionId: string): Promise<{
+    submission: SupplySubmissionRecord;
+    driverDraft: DriverSupplyDraft | null;
+    vehicleDraft: VehicleSupplyDraft | null;
+    documents: SupplyDocumentRecord[];
+    reviewEvents: {
+      eventId: string;
+      submissionId: string;
+      eventType: string;
+      actorId: string;
+      actorType: string;
+      reasonCode: string | null;
+      comment: string | null;
+      createdAt: string;
+    }[];
+  }> {
+    return this.get(
+      `/api/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`,
+    );
+  }
+
+  async listFleetPortalReadiness(): Promise<SupplyReadinessRecord[]> {
+    return this.getList<SupplyReadinessRecord>("/api/fleet-partner/readiness");
   }
 
   async listFleetPortalTrips(
