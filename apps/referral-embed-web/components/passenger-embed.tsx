@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import type {
   ReferralPassengerActiveTripResult,
@@ -484,6 +486,85 @@ function Field({
         <Icon name={icon} size={15} />
         <span style={{ fontSize: 14, color: theme.ink }}>{value}</span>
       </div>
+    </div>
+  );
+}
+
+function InputField({
+  theme,
+  label,
+  icon,
+  id,
+  value,
+  onChange,
+  placeholder,
+  required,
+  readOnly,
+  error,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  label: string;
+  icon: string;
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  readOnly?: boolean;
+  error?: string | null;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <label
+        htmlFor={id}
+        style={{ fontSize: 11.5, color: theme.muted, fontWeight: 600 }}
+      >
+        {label}
+        {required ? (
+          <span style={{ color: theme.primary, marginLeft: 3 }}>*</span>
+        ) : null}
+      </label>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minHeight: 42,
+          borderRadius: 12,
+          padding: "0 12px",
+          background: readOnly ? theme.surfaceLo : theme.surface,
+          border: `1px solid ${
+            error ? theme.dangerBorder ?? "#FECACA" : theme.line
+          }`,
+        }}
+      >
+        <Icon name={icon} size={15} style={{ flexShrink: 0, color: theme.muted }} />
+        <input
+          id={id}
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder ?? ""}
+          readOnly={readOnly}
+          style={{
+            flex: 1,
+            fontSize: 14,
+            color: theme.ink,
+            background: "transparent",
+            border: "none",
+            outline: "none",
+            fontFamily: "inherit",
+            minWidth: 0,
+          }}
+          aria-invalid={!!error}
+          aria-required={required}
+        />
+      </div>
+      {error ? (
+        <div style={{ fontSize: 11, color: theme.dangerFg ?? "#DC2626" }}>
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1127,43 +1208,155 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
   );
 }
 
+type BookSubmitStatus = "idle" | "pending" | "error";
+
+type BookFormValues = {
+  pickupAddress: string;
+  dropoffAddress: string;
+  vehicleType: string;
+};
+
+function validateBookForm(values: BookFormValues): Partial<Record<keyof BookFormValues, string>> {
+  const errors: Partial<Record<keyof BookFormValues, string>> = {};
+  if (!values.pickupAddress.trim()) errors.pickupAddress = "請填寫上車地點";
+  if (!values.dropoffAddress.trim()) errors.dropoffAddress = "請填寫下車地點";
+  if (!values.vehicleType) errors.vehicleType = "請選擇車種";
+  return errors;
+}
+
 function BookScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const router = useRouter();
+
+  // Initialise form from the partner-entry default pickup address when available,
+  // otherwise fall back to the first fixture saved place so the form is not blank.
+  const defaultPickup =
+    (context.entry.brandingMetadata as { defaultPickupAddress?: string } | null)
+      ?.defaultPickupAddress?.trim() ||
+    embedSavedPlaces[0]?.addr ||
+    "";
+
+  const [pickup, setPickup] = useState(defaultPickup);
+  const [dropoff, setDropoff] = useState("");
+  const [vehicleType, setVehicleType] = useState<string>(
+    embedVehicles[1]?.code ?? embedVehicles[0]?.code ?? "standard",
+  );
+  const [submitStatus, setSubmitStatus] = useState<BookSubmitStatus>("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<keyof BookFormValues, string>>
+  >({});
+
+  // Idempotency key — stable per form mount; reset on new attempt
+  const idempotencyKey = useRef(
+    `book-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const values: BookFormValues = { pickupAddress: pickup, dropoffAddress: dropoff, vehicleType };
+      const errors = validateBookForm(values);
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
+        return;
+      }
+      setFieldErrors({});
+      setSubmitStatus("pending");
+      setSubmitError(null);
+
+      try {
+        const response = await fetch("/api/referral/booking", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entrySlug: context.entry.entrySlug,
+            pickupAddress: pickup.trim(),
+            dropoffAddress: dropoff.trim(),
+            vehicleType,
+            idempotencyKey: idempotencyKey.current,
+          }),
+        });
+        const payload = (await response.json()) as {
+          ok: boolean;
+          data?: { orderId?: string; orderNo?: string };
+          error?: { message?: string };
+        };
+        if (!response.ok || !payload.ok) {
+          // Reset idempotency key so a retry sends a fresh request
+          idempotencyKey.current = `book-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          setSubmitStatus("error");
+          setSubmitError(
+            payload.error?.message ?? `叫車失敗（${response.status}），請稍後再試`,
+          );
+          return;
+        }
+        // Success — navigate to the trip screen
+        setSubmitStatus("idle");
+        router.push(buildHref(context, { screen: "trip", state: "handoff" }));
+      } catch {
+        idempotencyKey.current = `book-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        setSubmitStatus("error");
+        setSubmitError("網路錯誤，請確認連線後再試");
+      }
+    },
+    [context, dropoff, pickup, router, vehicleType],
+  );
+
+  const isPending = submitStatus === "pending";
+
   return (
     <AppShell
       context={context}
       badgeTone="live"
       footer={
         <>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              fontSize: 12,
-            }}
-          >
-            <span style={{ color: theme.muted }}>預估車資</span>
-            <span
+          {submitError ? (
+            <div
+              role="alert"
               style={{
-                fontSize: 16,
-                fontWeight: 700,
-                color: theme.ink,
-                fontFamily: theme.mono,
+                fontSize: 12,
+                color: theme.dangerFg ?? "#DC2626",
+                background: theme.dangerBg ?? "#FEF2F2",
+                border: `1px solid ${theme.dangerBorder ?? "#FECACA"}`,
+                borderRadius: 10,
+                padding: "8px 12px",
+                lineHeight: 1.45,
               }}
             >
-              約 NT$ 290
-            </span>
-          </div>
-          <ActionButton
-            href={buildHref(context, { screen: "trip", state: "handoff" })}
-            label="確認叫車"
-            theme={theme}
-            iconRight="arrow"
-          />
+              {submitError}
+            </div>
+          ) : null}
+          <button
+            id="book-submit-btn"
+            type="submit"
+            form="booking-form"
+            disabled={isPending}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              width: "100%",
+              padding: "13px 16px",
+              borderRadius: 14,
+              border: "none",
+              cursor: isPending ? "not-allowed" : "pointer",
+              background: isPending ? theme.surfaceLo : theme.primary,
+              color: isPending ? theme.muted : "#fff",
+              fontSize: 15,
+              fontWeight: 700,
+              fontFamily: "inherit",
+              transition: "background 0.15s",
+            }}
+          >
+            {isPending ? "送出中…" : "確認叫車"}
+            {!isPending ? <Icon name="arrow" size={16} /> : null}
+          </button>
         </>
       }
     >
+      {/* Passenger identity chip */}
       <div
         style={{
           display: "flex",
@@ -1193,93 +1386,145 @@ function BookScreen({ context }: { context: EmbedContext }) {
         </Pill>
       </div>
 
-      <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
-        <div style={{ display: "grid", gap: 10 }}>
-          <Field
-            theme={theme}
-            label="上車地點"
-            icon="pin"
-            value={embedTrip.from}
-          />
-          <Field
-            theme={theme}
-            label="下車地點"
-            icon="pin"
-            value={embedTrip.to}
-          />
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
-          >
-            <Field
+      {/* Booking form — the form id is referenced by the submit button above */}
+      <form id="booking-form" onSubmit={handleSubmit} noValidate>
+        <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
+          <div style={{ display: "grid", gap: 10 }}>
+            <InputField
               theme={theme}
-              label="用車時間"
-              icon="clock"
-              value="現在出發"
+              id="booking-pickup"
+              label="上車地點"
+              icon="pin"
+              value={pickup}
+              onChange={setPickup}
+              placeholder="請輸入上車地點"
+              required
+              error={fieldErrors.pickupAddress ?? null}
             />
-            <Field theme={theme} label="乘客人數" icon="user" value="1 人" />
-          </div>
-        </div>
-        <div
-          style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 11 }}
-        >
-          {embedSavedPlaces.map((place) => (
-            <span
-              key={place.label}
+            <InputField
+              theme={theme}
+              id="booking-dropoff"
+              label="下車地點"
+              icon="pin"
+              value={dropoff}
+              onChange={setDropoff}
+              placeholder="請輸入下車地點"
+              required
+              error={fieldErrors.dropoffAddress ?? null}
+            />
+            <div
               style={{
-                fontSize: 11.5,
-                color: theme.muted,
-                background: theme.surfaceLo,
-                border: `1px solid ${theme.line}`,
-                padding: "4px 9px",
-                borderRadius: 999,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 10,
               }}
             >
-              {place.label}
-            </span>
-          ))}
-        </div>
-      </Card>
-
-      <Card theme={theme} title="車種" subtitle="owned mobility">
-        <div style={{ display: "grid", gap: 8 }}>
-          {embedVehicles.map((vehicle, index) => {
-            const selected = index === 1;
-            return (
-              <div
-                key={vehicle.id}
+              <Field
+                theme={theme}
+                label="用車時間"
+                icon="clock"
+                value="現在出發"
+              />
+              <Field theme={theme} label="乘客人數" icon="user" value="1 人" />
+            </div>
+          </div>
+          {/* Saved-place quick-fill chips */}
+          <div
+            style={{
+              display: "flex",
+              gap: 7,
+              flexWrap: "wrap",
+              marginTop: 11,
+            }}
+          >
+            {embedSavedPlaces.map((place) => (
+              <button
+                key={place.label}
+                type="button"
+                onClick={() => setDropoff(place.addr)}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 11,
-                  padding: "10px 12px",
-                  borderRadius: 11,
-                  border: `1px solid ${selected ? theme.primary : theme.line}`,
-                  background: selected ? theme.primaryBg : theme.surface,
+                  fontSize: 11.5,
+                  color: theme.muted,
+                  background: theme.surfaceLo,
+                  border: `1px solid ${theme.line}`,
+                  padding: "4px 9px",
+                  borderRadius: 999,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
                 }}
               >
-                <span style={{ color: selected ? theme.primary : theme.muted }}>
-                  <Icon name="car" size={20} />
-                </span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-                    {vehicle.name}
+                {place.label}
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        {/* Vehicle selector */}
+        <Card theme={theme} title="車種" subtitle="owned mobility">
+          <div style={{ display: "grid", gap: 8 }}>
+            {embedVehicles.map((vehicle) => {
+              const selected = vehicleType === vehicle.code;
+              return (
+                <button
+                  key={vehicle.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setVehicleType(vehicle.code)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 11,
+                    padding: "10px 12px",
+                    borderRadius: 11,
+                    border: `1px solid ${
+                      selected ? theme.primary : theme.line
+                    }`,
+                    background: selected ? theme.primaryBg : theme.surface,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    width: "100%",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <span
+                    style={{
+                      color: selected ? theme.primary : theme.muted,
+                    }}
+                  >
+                    <Icon name="car" size={20} />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                      {vehicle.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: theme.muted }}>
+                      {vehicle.sub}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: theme.muted }}>
-                    {vehicle.sub}
-                  </div>
-                </div>
-                {selected ? (
-                  <Icon
-                    name="check"
-                    size={17}
-                    style={{ color: theme.primary }}
-                  />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+                  {selected ? (
+                    <Icon
+                      name="check"
+                      size={17}
+                      style={{ color: theme.primary }}
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          {fieldErrors.vehicleType ? (
+            <div
+              style={{
+                fontSize: 11,
+                color: theme.dangerFg ?? "#DC2626",
+                marginTop: 6,
+              }}
+            >
+              {fieldErrors.vehicleType}
+            </div>
+          ) : null}
+        </Card>
+      </form>
     </AppShell>
   );
 }
@@ -1393,7 +1638,13 @@ const tripStateLabel: Record<
   cancelled: { zh: "已取消", tone: "neutral" },
 };
 
-function TripScreen({ context }: { context: EmbedContext }) {
+function TripScreen({
+  context,
+  liveData,
+}: {
+  context: EmbedContext;
+  liveData: PassengerEmbedLiveData;
+}) {
   const theme = buildEmbedTheme(context.accent);
   const state = tripStateLabel[embedTrip.state] || {
     zh: "媒合中",
@@ -1577,7 +1828,13 @@ function TripScreen({ context }: { context: EmbedContext }) {
   );
 }
 
-function TripsScreen({ context }: { context: EmbedContext }) {
+function TripsScreen({
+  context,
+  liveData,
+}: {
+  context: EmbedContext;
+  liveData: PassengerEmbedLiveData;
+}) {
   const theme = buildEmbedTheme(context.accent);
   return (
     <AppShell context={context} badgeTone="live">
@@ -1691,7 +1948,13 @@ function TripsScreen({ context }: { context: EmbedContext }) {
   );
 }
 
-function ReceiptScreen({ context }: { context: EmbedContext }) {
+function ReceiptScreen({
+  context,
+  liveData,
+}: {
+  context: EmbedContext;
+  liveData: PassengerEmbedLiveData;
+}) {
   const theme = buildEmbedTheme(context.accent);
   return (
     <AppShell
@@ -2267,6 +2530,7 @@ function isFallbackScreen(screen: string): screen is EmbedTripFallbackScreen {
 
 export function PassengerEmbed({
   context,
+  liveData,
 }: {
   context: EmbedContext;
   liveData?: PassengerEmbedLiveData;
@@ -2290,11 +2554,11 @@ export function PassengerEmbed({
 
   switch (context.screen) {
     case "trip":
-      return <TripScreen context={context} />;
+      return <TripScreen context={context} liveData={liveData ?? null} />;
     case "trips":
-      return <TripsScreen context={context} />;
+      return <TripsScreen context={context} liveData={liveData ?? null} />;
     case "receipt":
-      return <ReceiptScreen context={context} />;
+      return <ReceiptScreen context={context} liveData={liveData ?? null} />;
     case "completed":
       return <OutcomeScreen context={context} kind="completed" />;
     case "cancelled":
