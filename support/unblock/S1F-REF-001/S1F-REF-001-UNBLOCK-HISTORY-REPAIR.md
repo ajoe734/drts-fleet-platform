@@ -22,7 +22,8 @@ environment had no GitHub credentials.
   `feat(S1F-REF-001): wire formal Referral booking form with BFF submit`.
 - It has parent `6a43f1a9afef7a41b38c24187727801c27fb2bdb`, which was the
   then-current `origin/dev` tip, and contains the required `LLM-Agent`,
-  `Task-ID`, `Reviewer`, and `Verification` trailers.
+  `Task-ID`, `Reviewer`, and `Verification` trailers. Its `feat(...)` subject
+  is nevertheless rejected by the repository's stricter PR-range rule.
 - Before repair, `git branch -r --contains 57dcb4ed` returned no remote branch.
   Thus machine truth correctly reported a push block even though the local
   commit and review evidence were sound.
@@ -60,15 +61,36 @@ The resulting delivery PR is [#1339](https://github.com/ajoe734/drts-fleet-platf
 
 ## Concrete Parent Next Step
 
-`S1F-REF-001` is unblocked from history repair. Continue solely on the
-canonical rail `origin/gemini2/s1f-ref-001 @ 57dcb4ed...` and PR #1339:
+`S1F-REF-001` is unblocked from history repair, but is still blocked by
+concrete CI failures on canonical rail `origin/gemini2/s1f-ref-001 @
+57dcb4ed...` / PR #1339. Do not return to the obsolete local-only state.
 
-1. Have the parent reviewer validate PR #1339 and its recorded acceptance
-   evidence.
-2. Address only any PR/CI findings on that branch; do not revive the blocked
-   local-only state or create duplicate implementation branches.
-3. After the normal PR/CI/merge evidence is available, close the parent with
-   the appropriate integration status. The parent is not yet merged to `dev`.
+1. The parent owner (or a newly assigned repair owner) should create a normal
+   follow-up commit on `gemini2/s1f-ref-001`; do not amend or force-push
+   `57dcb4ed`.
+2. The follow-up must fix the three lint failures in
+   `apps/referral-embed-web/components/passenger-embed.tsx` (unused
+   `liveData` parameters at lines 1643, 1833, and 1953 in the CI checkout).
+3. It must also carry a valid commit subject beginning
+   `S1F-REF-001:` so the PR-range `Commit trailers` check can pass. Because
+   the immutable original commit's subject is invalid, a clean replacement
+   branch/PR may be required if the policy validates every ancestor; that
+   replacement must be created by normal push without rewriting PR #1339.
+4. Have the parent reviewer validate the corrected canonical PR and its
+   acceptance evidence. Only after normal PR/CI/merge evidence is available
+   may the parent close with the appropriate integration status.
+
+### CI Evidence At Repair Time
+
+PR #1339's CI run `31259951320` established that the original commit is
+published but not merge-ready:
+
+- `Commit trailers` rejects subject
+  `feat(S1F-REF-001): wire formal Referral booking form with BFF submit`; the
+  required form is `<TASK-ID>: <summary>`.
+- `Smoke acceptance / Lint` reports three
+  `@typescript-eslint/no-unused-vars` errors for `liveData` in
+  `apps/referral-embed-web/components/passenger-embed.tsx`.
 
 ## Safety Statement
 
