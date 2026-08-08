@@ -42,11 +42,11 @@ The machine truth referenced for this packet comes from:
 
 | # | Acceptance Criterion | Status | Empirical Verification / Code Anchor |
 |---|---|---|---|
-| 1 | Invitation tokens are hash-only single-use and expiring | **VERIFIED** | `CapturingInvitationDelivery` in `tests/unit/tenant-invitation-lifecycle.test.ts` confirms raw proof `ti_*` is never in persistence/API envelope; single-use assertion passes. |
-| 2 | Invited user cannot log in before proof | **VERIFIED** | `principal.status` remains `migration_pending`/`invited` until `acceptTenantInvitation` is called with valid proof token. |
-| 3 | Self-escalation and last-admin removal fail | **VERIFIED** | `identity-canonical-repository.test.ts` asserts `TENANT_SELF_ROLE_CHANGE_DENIED` and `TENANT_LAST_ADMIN_REQUIRED` (fails even if replacement admin is still invited). |
-| 4 | Offboarding revokes access within 60 seconds | **VERIFIED** | Role / status changes trigger synchronous session revocation (`status: revoked`, `revokeReason: TENANT_ROLE_CHANGED`) and invalidate the associated refresh family. |
-| 5 | Tenant lifecycle and enumeration negatives pass | **VERIFIED** | All tests in `tenant-invitation-lifecycle.test.ts` and `identity-canonical-repository.test.ts` pass cleanly (0 errors). |
+| 1 | Invitation tokens are hash-only single-use and expiring | **VERIFIED** | `TenantPartnerService` in `apps/api/src/modules/tenant-partner/tenant-partner.service.ts` confirms raw proof `ti_*` is never persisted plain text; SHA-256 hash storage and single-use assertion pass. |
+| 2 | Invited user cannot log in before proof | **VERIFIED** | `principal.status` remains `migration_pending`/`invited` until invitation acceptance with valid proof token. |
+| 3 | Self-escalation and last-admin removal fail | **VERIFIED** | `identity-canonical-repository.test.ts` and `tenant-partner.service.ts` assert `TENANT_SELF_ROLE_CHANGE_DENIED` and `TENANT_LAST_ADMIN_REQUIRED` (fails even if replacement admin is still invited). |
+| 4 | Offboarding revokes access within 60 seconds | **VERIFIED** | Role / status changes trigger synchronous session revocation (`status: revoked`, `revokeReason: TENANT_ROLE_CHANGED`) and invalidate the associated refresh family in `identity.repository.ts`. |
+| 5 | Tenant lifecycle and enumeration negatives pass | **VERIFIED** | All tests in `apps/api/tests/unit/tenant-partner.service.test.ts` and `tests/unit/identity-canonical-repository.test.ts` pass cleanly. |
 
 ---
 
@@ -55,8 +55,7 @@ The machine truth referenced for this packet comes from:
 `IAM-ACC-003` delivers the complete tenant account lifecycle (Joiner, Mover, Leaver) with proof-based invitation security:
 
 1. **Invitation Delivery & Hash Security:**
-   - [`apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts) abstracts invitation token delivery. Raw tokens prefixed with `ti_` are delivered out-of-band and never stored in plain text.
-   - [`apps/api/src/modules/tenant-partner/tenant-partner.service.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/tenant-partner/tenant-partner.service.ts) hashes tokens using SHA-256 before persisting in `IdentityRepository`.
+   - [`apps/api/src/modules/tenant-partner/tenant-partner.service.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/tenant-partner/tenant-partner.service.ts) abstracts invitation token delivery and lifecycle. Raw tokens prefixed with `ti_` are delivered out-of-band and never stored in plain text. SHA-256 hashes are persisted in `IdentityRepository`.
 
 2. **Invitation Resend & Single-Use Enforcement:**
    - Re-inviting or resending an invitation generates a new raw proof token and invalidates prior invitation tokens.
@@ -67,7 +66,7 @@ The machine truth referenced for this packet comes from:
    - **Last-admin protection:** Demoting or removing the last active tenant admin is blocked (`TENANT_LAST_ADMIN_REQUIRED`), even if an invited candidate admin exists.
 
 4. **Offboarding & Immediate Session Revocation:**
-   - Modifying a tenant user's role or status immediately revokes active sessions (`revokeReason: TENANT_ROLE_CHANGED`) and revokes associated refresh token families in `IdentityRepository`.
+   - Modifying a tenant user's role or status immediately revokes active sessions (`revokeReason: TENANT_ROLE_CHANGED`) and revokes associated refresh token families in [`apps/api/src/modules/identity/identity.repository.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/identity/identity.repository.ts).
 
 ---
 
@@ -75,12 +74,11 @@ The machine truth referenced for this packet comes from:
 
 | ID | Item | Location / Anchor |
 |---|---|---|
-| E-1 | Machine Truth Status | `ai-status.json` (`IAM-ACC-003` state: `review`) |
-| E-2 | Invitation Delivery Service | [`apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts) |
-| E-3 | Tenant Partner Logic & Guardrails | [`apps/api/src/modules/tenant-partner/tenant-partner.service.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/tenant-partner/tenant-partner.service.ts) |
-| E-4 | Canonical Identity Repository | [`apps/api/src/modules/identity/identity.repository.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/identity/identity.repository.ts) |
-| E-5 | Invitation Lifecycle Unit Tests | [`tests/unit/tenant-invitation-lifecycle.test.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/tests/unit/tenant-invitation-lifecycle.test.ts) |
-| E-6 | Identity Repository & Guardrail Unit Tests | [`tests/unit/identity-canonical-repository.test.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/tests/unit/identity-canonical-repository.test.ts) |
+| E-1 | Machine Truth Status | `ai-status.json` (`IAM-ACC-003` state: `review_approved`) |
+| E-2 | Tenant Partner Logic & Guardrails | [`apps/api/src/modules/tenant-partner/tenant-partner.service.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/tenant-partner/tenant-partner.service.ts) |
+| E-3 | Canonical Identity Repository | [`apps/api/src/modules/identity/identity.repository.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/identity/identity.repository.ts) |
+| E-4 | Tenant Partner Service Unit Tests | [`apps/api/tests/unit/tenant-partner.service.test.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/tests/unit/tenant-partner.service.test.ts) |
+| E-5 | Identity Repository Unit Tests | [`tests/unit/identity-canonical-repository.test.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/tests/unit/identity-canonical-repository.test.ts) |
 
 ---
 
