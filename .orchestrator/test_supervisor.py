@@ -5845,6 +5845,54 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(chosen, ("codex", "Codex"))
 
+
+    def test_urgent_chair_review_can_recover_busy_lane_when_capacity_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            config = {
+                "agents": {
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "ready_dispatcher": {
+                    "active_worker_statuses": ["running"],
+                    "max_tasks_per_agent_by_lane": {"codex": 2},
+                },
+            }
+            state = {
+                "workers": {
+                    "w-codex": {
+                        "agent_id": "codex",
+                        "status": "running",
+                        "queue_event_id": "evt-codex-recover",
+                    }
+                },
+                "queue": {
+                    "events": {
+                        "evt-codex-recover": {
+                            "status": "started",
+                        }
+                    }
+                },
+                "provider_pauses": {},
+                "chair_review": {},
+            }
+
+            chosen = supervisor.choose_chair_reviewer(
+                config,
+                state,
+                {"tasks": []},
+                {},
+                allow_primary_work_fallback=True,
+            )
+
+        self.assertEqual(chosen, ("codex", "Codex"))
+
     def test_urgent_chair_review_records_blocked_when_no_lane_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -8408,14 +8456,25 @@ class BreakFullDeadlockTests(unittest.TestCase):
         self.assertFalse(changed)
         probe.assert_not_called()
 
-    def test_noop_when_chair_not_blocked(self):
+    def test_noop_when_chair_not_blocked_and_no_paused_lanes(self):
         state = self._wedged_state()
         state["chair_review"] = {}
+        state["provider_pauses"] = {}
+        state["quota_paused_agents"] = {}
         with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
             changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
         self.assertFalse(changed)
         probe.assert_not_called()
 
+    def test_recovery_runs_when_chair_not_blocked_but_pause_still_blocks(self):
+        state = self._wedged_state()
+        state["chair_review"] = {}
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": True}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log"):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertNotIn("claude2", state["provider_pauses"])
 
 class CodexRevokedTokenClassificationTests(unittest.TestCase):
     """Fix ①: codex CLI revoked/expired-session 401s only surface as runtime
