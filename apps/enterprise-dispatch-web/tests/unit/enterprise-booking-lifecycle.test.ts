@@ -24,6 +24,12 @@ describe("enterprise booking lifecycle API wiring", () => {
     const listed = (await client.listBookings())[0]!;
     const read = await client.getBooking(listed.bookingId);
     const draft = createEnterpriseBookingDraftFromRecord(read);
+
+    expect(draft).toMatchObject({
+      reservationDate: "2026-06-12",
+      reservationTime: "18:00",
+    });
+
     const update = buildEnterpriseBookingUpdateCommand({ ...draft, notes: "Updated at browser review" });
     await client.updateBooking(listed.bookingId, update);
     await client.cancelBooking(listed.bookingId, { reason: "Cancelled from browser" });
@@ -40,6 +46,8 @@ describe("enterprise booking lifecycle API wiring", () => {
       notes: "Updated at browser review",
       passenger: { name: enterpriseDispatchBookingRecord.passenger.name },
       costCenter: enterpriseDispatchBookingRecord.costCenter,
+      reservationWindowStart:
+        enterpriseDispatchBookingRecord.reservationWindowStart,
     });
     expect(fetchMock.mock.calls[3]![1]).toMatchObject({ method: "POST" });
   });
