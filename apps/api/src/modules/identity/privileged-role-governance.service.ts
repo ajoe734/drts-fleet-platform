@@ -220,28 +220,30 @@ export class PrivilegedRoleGovernanceService {
     validFrom?: string,
     validTo?: string | null,
   ): Promise<PrivilegedRoleGrantRecord> {
-    const grantId = `grant_${randomUUID()}`;
-    const now = new Date().toISOString();
-    const grant: PrivilegedRoleGrantRecord = {
-      grantId,
-      requestId: null,
-      tenantId: tenantId ?? null,
-      realm,
-      targetUserId: userId,
-      roleCode,
-      grantedByPrincipalId: "system",
-      approvalId: "bootstrap",
-      validFrom: validFrom ?? now,
-      validTo: validTo !== undefined ? validTo : null,
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.grants.set(grantId, grant);
-    if (this.identityRepository) {
-      await this.identityRepository.savePrivilegedRoleGrant(grant);
-    }
-    return { ...grant };
+    return this.withTenantLock(tenantId, async (client) => {
+      const grantId = `grant_${randomUUID()}`;
+      const now = new Date().toISOString();
+      const grant: PrivilegedRoleGrantRecord = {
+        grantId,
+        requestId: null,
+        tenantId: tenantId ?? null,
+        realm,
+        targetUserId: userId,
+        roleCode,
+        grantedByPrincipalId: "system",
+        approvalId: "bootstrap",
+        validFrom: validFrom ?? now,
+        validTo: validTo !== undefined ? validTo : null,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.grants.set(grantId, grant);
+      if (this.identityRepository) {
+        await this.identityRepository.savePrivilegedRoleGrant(grant, client);
+      }
+      return { ...grant };
+    });
   }
 
   /**
@@ -530,6 +532,7 @@ export class PrivilegedRoleGovernanceService {
           request.targetUserId,
           "PRIVILEGED_ROLE_APPROVED",
           approverIdentity.actorId ?? undefined,
+          client,
         );
       }
 
@@ -797,6 +800,7 @@ export class PrivilegedRoleGovernanceService {
           targetUserId,
           "PRIVILEGED_ROLE_REMOVED",
           actorIdentity.actorId ?? undefined,
+          client,
         );
       }
 
@@ -860,6 +864,8 @@ export class PrivilegedRoleGovernanceService {
               await this.identityRepository.revokeSessionsByPrincipal(
                 grant.targetUserId,
                 "PRIVILEGED_ROLE_ACTIVATED",
+                undefined,
+                client,
               );
             }
 
@@ -905,6 +911,8 @@ export class PrivilegedRoleGovernanceService {
               await this.identityRepository.revokeSessionsByPrincipal(
                 grant.targetUserId,
                 "PRIVILEGED_ROLE_EXPIRED",
+                undefined,
+                client,
               );
             }
 

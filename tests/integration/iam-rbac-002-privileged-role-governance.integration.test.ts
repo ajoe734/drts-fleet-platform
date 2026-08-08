@@ -731,4 +731,87 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(activeAdmins).toHaveLength(1);
     });
   });
+
+  describe("10. Durable Scheduler Worker Service", () => {
+    it("runs background reconciliation on module init and handles tick cycle", async () => {
+      const { PrivilegedRoleGovernanceSchedulerService } = await import(
+        "../../apps/api/src/modules/identity/privileged-role-governance-scheduler.service"
+      );
+
+      const pastTo = new Date(Date.now() - 1000).toISOString();
+      await service.registerActiveGrant(
+        "usr_worker_expired",
+        "ten_worker",
+        "tenant_admin",
+        "tenant",
+        new Date(Date.now() - 3600000).toISOString(),
+        pastTo,
+      );
+
+      const scheduler = new PrivilegedRoleGovernanceSchedulerService(service);
+      scheduler.onModuleInit();
+
+      // Trigger manual tick
+      const count = await scheduler.tick();
+      expect(count).toBeGreaterThanOrEqual(1);
+
+      const grants = await service.listGrants("ten_worker");
+      const expiredGrant = grants.find((g) => g.targetUserId === "usr_worker_expired");
+      expect(expiredGrant?.status).toBe("expired");
+
+      scheduler.onModuleDestroy();
+    });
+  });
+
+  describe("11. Real DATABASE_URL-Backed Concurrent Removal Integration", () => {
+    it.runIf(Boolean(process.env.DATABASE_URL))(
+      "executes real pg_advisory_xact_lock transaction across concurrent connections when DATABASE_URL is set",
+      async () => {
+        const { DatabaseService } = await import("../../apps/api/src/common/db");
+        const realDb = new DatabaseService();
+        try {
+          const repo = new IdentityRepository(realDb);
+          const govService = new PrivilegedRoleGovernanceService(repo, undefined, realDb);
+          const tenantId = `ten_real_pg_${Date.now()}`;
+          const actor = createMockIdentity({ actorId: "usr_pg_actor", tenantId });
+
+          await govService.registerActiveGrant("usr_admin_real_1", tenantId, "tenant_admin");
+          await govService.registerActiveGrant("usr_admin_real_2", tenantId, "tenant_admin");
+
+          const task1 = govService.removeGrant(
+            {
+              targetUserId: "usr_admin_real_1",
+              roleCode: "tenant_admin",
+              tenantId,
+              reason: "Real PG concurrent 1",
+            },
+            actor,
+          );
+
+          const task2 = govService.removeGrant(
+            {
+              targetUserId: "usr_admin_real_2",
+              roleCode: "tenant_admin",
+              tenantId,
+              reason: "Real PG concurrent 2",
+            },
+            actor,
+          );
+
+          const results = await Promise.allSettled([task1, task2]);
+          const fulfilled = results.filter((r) => r.status === "fulfilled");
+          const rejected = results.filter((r) => r.status === "rejected");
+
+          expect(fulfilled).toHaveLength(1);
+          expect(rejected).toHaveLength(1);
+
+          const remaining = (await govService.listGrants(tenantId)).filter((g) => g.status === "active");
+          expect(remaining).toHaveLength(1);
+        } finally {
+          await realDb.onModuleDestroy();
+        }
+      },
+    );
+  });
 });
+
