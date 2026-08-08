@@ -102,6 +102,25 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^type(\s|$)"),
     re.compile(r"^date(\s|$)"),
     re.compile(r"^sleep(\s|$)"),
+    # Read-only inspection. These report on the tree without touching it, and
+    # each one was costing a chairman review to answer a question about a
+    # symlink or a file size.
+    re.compile(r"^readlink(\s|$)"),
+    re.compile(r"^realpath(\s|$)"),
+    re.compile(r"^basename(\s|$)"),
+    re.compile(r"^dirname(\s|$)"),
+    re.compile(r"^stat(\s|$)"),
+    re.compile(r"^file(\s|$)"),
+    re.compile(r"^du(\s|$)"),
+    re.compile(r"^df(\s|$)"),
+    re.compile(r"^tr(\s|$)"),
+    re.compile(r"^cut(\s|$)"),
+    re.compile(r"^nl(\s|$)"),
+    re.compile(r"^column(\s|$)"),
+    re.compile(r"^diff(\s|$)"),
+    re.compile(r"^comm(\s|$)"),
+    re.compile(r"^md5sum(\s|$)"),
+    re.compile(r"^sha256sum(\s|$)"),
     re.compile(r"^git status(\s|$)"),
     re.compile(r"^git diff(\s|$)"),
     re.compile(r"^git show(\s|$)"),
@@ -119,8 +138,21 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git shortlog(\s|$)"),
     re.compile(r"^git blame(\s|$)"),
     re.compile(r"^git tag -l(\s|$)"),
-    re.compile(r"^git config --get(\s|$)"),
+    # `--get-all` and `--get-regexp` are the same question asked of more than
+    # one value; the `(\s|$)` boundary excluded them for no reason.
+    re.compile(r"^git config --get"),
+    re.compile(r"^git grep(\s|$)"),
     re.compile(r"^git push(\s|$)"),
+    # Index and ref moves. These change what is staged or where a ref points,
+    # never the contents of the working tree, and the reflog holds the way
+    # back. The destructive spellings — `reset --hard`, `checkout --` — are in
+    # DENY, which is evaluated first, and `restore` without `--staged` is left
+    # out because it overwrites the working tree.
+    re.compile(r"^git reset(\s|$)"),
+    re.compile(r"^git restore --staged(\s|$)"),
+    re.compile(r"^git switch(\s|$)"),
+    re.compile(r"^git tag(\s|$)"),
+    re.compile(r"^git cherry-pick(\s|$)"),
     # Read-only observability. A worker that operates a service and a cloud
     # project cannot see either of them: every `systemctl show`, `journalctl`
     # and `gcloud … list/describe` became an approval request and a chairman
@@ -169,6 +201,9 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^cd .+ && npm test(\s|$)"),
     re.compile(r"^npm run test(\s|$)"),
     re.compile(r"^cd .+ && npm run test(\s|$)"),
+    # `pnpm` and `npx` are already allowed in full below; `npm run <script>` is
+    # the same class of thing, and typecheck, lint and build all arrive by it.
+    re.compile(r"^npm run(\s|$)"),
     re.compile(r"^cargo test(\s|$)"),
     re.compile(r"^cd .+ && cargo test(\s|$)"),
     re.compile(r"^go test(\s|$)"),
@@ -220,6 +255,17 @@ SAFE_BASH_PATTERNS = [
     # multi-line for loops reading package.json — safe read-only pattern
     re.compile(r"^for app in .+; do\s*$", re.MULTILINE),
     re.compile(r"^for \w+ in .+; do"),
+    # Shell scaffolding. A loop header, a keyword, a file test and a bare
+    # assignment run nothing on their own: the commands they wrap are split
+    # into their own segments and judged there. Treating the scaffolding
+    # itself as unreadable is what made ordinary read-only exploration —
+    # `for f in …; do … done` — defer on its punctuation.
+    re.compile(r"^for\s+\w+\s+in\b"),
+    re.compile(r"^(?:do|done|then|else|fi|esac)$"),
+    re.compile(r"^\[\[?\s.*\]\]?$"),
+    re.compile(r"^test\s"),
+    re.compile(r"^set\s+-[eux]+$"),
+    re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\S*)$"),
 ]
 DEFER_BASH_PATTERNS = [
     re.compile(r"^git (add|commit|remote set-url|submodule)(\s|$)"),
@@ -307,9 +353,73 @@ PNPM_OPTION_TAKES_VALUE = {"--filter", "-F", "--dir", "-C"}
 PNPM_STANDALONE_FLAGS = {"-r", "--recursive", "--stream", "--parallel", "--aggregate-output", "-w", "--workspace-root"}
 
 
+# A command no SAFE pattern matches, standing in for one that cannot be read.
+_UNREADABLE_COMMAND = "__unreadable_command__"
+_HEREDOC_START_RE = re.compile(
+    r"<<(-?)\s*(?:'([^']*)'|\"([^\"]*)\"|([A-Za-z_][A-Za-z0-9_]*))"
+)
+
+
+def _drop_heredoc_bodies(command: str) -> str | None:
+    """`command` with every heredoc body removed, or None if one never closes.
+
+    A heredoc body is data — a commit message, a JSON payload — not commands.
+    Left in place it was split on its newlines, so every line of a commit
+    message became its own unrecognised "command" and no commit written that
+    way could be classified. The `<<MARK` operator goes with the body: it says
+    where input comes from, not what runs, and leaving it behind would make
+    the stripped command look like an unterminated heredoc on the next pass.
+    The rest of the opening line stays, so `cat <<EOF > ~/.bashrc` is still
+    judged on where it writes.
+    """
+    result: list[str] = []
+    cursor = 0
+    while True:
+        match = _HEREDOC_START_RE.search(command, cursor)
+        if not match:
+            result.append(command[cursor:])
+            return "".join(result)
+        if command[match.start():match.start() + 3] == "<<<":
+            # A here-string: its content is on the line, with no body to skip.
+            result.append(command[cursor:match.end()])
+            cursor = match.end()
+            continue
+        delimiter = match.group(2) or match.group(3) or match.group(4)
+        allow_indent = match.group(1) == "-"
+        result.append(command[cursor:match.start()])
+        body_start = command.find("\n", match.end())
+        if body_start == -1:
+            return None
+        end = _heredoc_body_end(command, body_start, delimiter, allow_indent)
+        if end is None:
+            return None
+        result.append(command[match.end():body_start])
+        result.append("\n")
+        cursor = end
+
+
+def _heredoc_body_end(command: str, body_start: int, delimiter: str, allow_indent: bool) -> int | None:
+    """Index just past the line closing a heredoc body, or None if it never closes."""
+    cursor = body_start
+    while cursor < len(command):
+        line_end = command.find("\n", cursor + 1)
+        line = command[cursor + 1:line_end if line_end != -1 else len(command)]
+        if (line.lstrip("\t") if allow_indent else line).strip() == delimiter:
+            return line_end + 1 if line_end != -1 else len(command)
+        if line_end == -1:
+            return None
+        cursor = line_end
+    return None
+
+
 def _normalize_shell_command(shell_command: str) -> str:
+    command = _drop_heredoc_bodies(shell_command.replace("\r\n", "\n"))
+    if command is None:
+        # An unterminated heredoc: what its body would be read as cannot be
+        # known, so hand back something no SAFE pattern matches.
+        return _UNREADABLE_COMMAND
     lines = []
-    for line in shell_command.replace("\r\n", "\n").split("\n"):
+    for line in command.split("\n"):
         if line.strip().startswith("#"):
             continue
         lines.append(line)
@@ -486,19 +596,59 @@ def _segment_is_safe(segment: str) -> bool:
     """A single separator-free command that needs no human review."""
     if _writes_outside_workspace(segment):
         return False
-    if _cd_target_is_within_workspace(segment):
-        return True
-    return any(pattern.search(segment) for pattern in SAFE_BASH_PATTERNS)
+    if _force_pushes_a_shared_branch(segment):
+        return False
+    return any(
+        _cd_target_is_safe(form)
+        or any(pattern.search(form) for pattern in SAFE_BASH_PATTERNS)
+        for form in _segment_forms(segment)
+    )
 
 
-def _cd_target_is_within_workspace(segment: str) -> bool:
+_REDIRECT_TOKEN_RE = re.compile(r"^\d*(?:>>|>&|>|<)\S*$")
+_BARE_REDIRECT_TOKEN_RE = re.compile(r"^\d*(?:>>|>&|>|<)$")
+
+
+def _operand_tokens(segment: str) -> list[str]:
+    """`segment`'s tokens with redirections dropped.
+
+    A redirection says where the output goes, not what runs. Counted as an
+    operand it made `cd <workspace> 2>/dev/null` a three-token command, which
+    the check below reads as "not a plain cd" and defers — for a directory
+    change that never left the workspace.
+    """
+    operands: list[str] = []
+    index = 0
+    tokens = shlex.split(segment)
+    while index < len(tokens):
+        token = tokens[index]
+        if _REDIRECT_TOKEN_RE.match(token):
+            # `2> /dev/null` splits into the operator and its target.
+            index += 2 if _BARE_REDIRECT_TOKEN_RE.match(token) else 1
+            continue
+        operands.append(token)
+        index += 1
+    return operands
+
+
+def _cd_target_is_safe(segment: str) -> bool:
+    """True for a `cd` into the workspace or a scratch directory.
+
+    /tmp is included because agents keep scratch files there and
+    `_writes_outside_workspace` already treats writing under it as ordinary.
+    """
     try:
-        tokens = shlex.split(segment)
+        tokens = _operand_tokens(segment)
     except ValueError:
         return False
     if len(tokens) != 2 or tokens[0] != "cd":
         return False
-    return _paths_within_workspace([Path(tokens[1])])
+    target = _resolve_candidate_path(Path(tokens[1]), workspace_root())
+    if target is None:
+        return False
+    if _is_relative_to(target, Path("/tmp")):
+        return True
+    return _paths_within_workspace([target])
 
 
 # An interpreter reading its program from a pipe is exactly as opaque as
@@ -529,9 +679,56 @@ _STDIN_PROGRAM_INTERPRETERS = frozenset(
 # is visible to inspection like any other argument.
 _INTERPRETER_INLINE_PROGRAM_FLAGS = frozenset({"-c", "-e", "-m"})
 
+# Words that say how a command runs, not what it runs: environment
+# assignments, `timeout <duration>`, and the shell keywords that introduce a
+# command. Every check here reads the first token to decide what it is looking
+# at, so a prefix in front of that token hid the command from all of them —
+# `timeout 5 bash` was not an interpreter and `timeout 5 git push --force
+# origin dev` was not a push.
+_ENV_ASSIGNMENT_PREFIX_RE = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\S*)\s+"
+)
+_TIMEOUT_PREFIX_RE = re.compile(
+    r"^timeout\s+"
+    r"(?:(?:-k|--kill-after|-s|--signal)(?:=\S+|\s+\S+)\s+|--preserve-status\s+|--foreground\s+)*"
+    r"\d+(?:\.\d+)?[smhd]?\s+"
+)
+_CONTROL_KEYWORD_PREFIX_RE = re.compile(r"^(?:do|then|else|elif|while|until|if)\s+")
+_INVOCATION_PREFIX_RES = (
+    _ENV_ASSIGNMENT_PREFIX_RE,
+    _TIMEOUT_PREFIX_RE,
+    _CONTROL_KEYWORD_PREFIX_RE,
+)
+
+
+def _strip_invocation_prefixes(segment: str) -> str:
+    """`segment` with leading env assignments, `timeout <dur>` and keywords removed."""
+    stripped = segment.strip()
+    while True:
+        for pattern in _INVOCATION_PREFIX_RES:
+            match = pattern.match(stripped)
+            if match:
+                stripped = stripped[match.end():].lstrip()
+                break
+        else:
+            return stripped
+
+
+def _segment_forms(segment: str) -> list[str]:
+    """The segment as written, and its form with invocation prefixes removed.
+
+    Checks that decide something is *safe* must satisfy themselves on the
+    stripped form, so a prefix cannot smuggle a command past a pattern.
+    Checks that decide something is *dangerous* look at both, so a prefix
+    cannot hide it either.
+    """
+    stripped = _strip_invocation_prefixes(segment)
+    return [segment] if stripped == segment else [segment, stripped]
+
 
 def _reads_its_program_from_stdin(segment: str) -> bool:
     """True when this segment is an interpreter whose program arrives on stdin."""
+    segment = _strip_invocation_prefixes(segment)
     try:
         tokens = shlex.split(segment)
     except ValueError:
@@ -551,6 +748,23 @@ def _reads_its_program_from_stdin(segment: str) -> bool:
         # A script path: the program is a file, not whatever the pipe carries.
         return False
     return True
+
+
+def _heredoc_feeds_interpreter(shell_command: str) -> bool:
+    """True when a heredoc supplies an interpreter's program.
+
+    A heredoc is stdin. `bash <<'EOF' … EOF` is the same opacity as
+    `curl … | bash`, and more so now that bodies are dropped before the
+    command is read: what the interpreter would run is no longer on the line
+    at all.
+    """
+    for line in shell_command.replace("\r\n", "\n").split("\n"):
+        match = _HEREDOC_START_RE.search(line)
+        if not match or line[match.start():match.start() + 3] == "<<<":
+            continue
+        if _reads_its_program_from_stdin(line[:match.start()].strip()):
+            return True
+    return False
 
 
 def _pipes_program_into_interpreter(shell_command: str) -> bool:
@@ -742,7 +956,7 @@ def _force_pushes_a_shared_branch(shell_command: str) -> bool:
     """True when this rewrites history on a branch other people build on."""
     for segment in _split_shell_segments(shell_command, opaque_substitution=True) or []:
         try:
-            tokens = shlex.split(segment)
+            tokens = shlex.split(_strip_invocation_prefixes(segment))
         except ValueError:
             continue
         if len(tokens) < 2 or tokens[0] != "git" or tokens[1] != "push":
@@ -777,6 +991,9 @@ def classify_command(shell_command: str) -> str:
     # like, if a program arrives through a pipe then nothing here has seen it.
     if _pipes_program_into_interpreter(shell_command):
         return "defer"
+    # Same reasoning for the other way a program reaches stdin.
+    if _heredoc_feeds_interpreter(shell_command):
+        return "defer"
     if _is_safe_status_sync_command(shell_command):
         return "allow"
     if _is_safe_python_one_liner(shell_command):
@@ -796,11 +1013,16 @@ def classify_command(shell_command: str) -> str:
     normalized = _normalize_shell_command(shell_command)
     segments = _split_shell_segments(normalized)
     if segments is None:
-        # Command/process substitution hides what actually runs.
+        # Command/process substitution hides what actually runs. Judging the
+        # body on its own would be possible, but the policy is that
+        # substitution never runs unreviewed — only a reviewer's reach into it
+        # changes (see `command_hard_boundary_reason`).
         return "defer"
     for segment in segments:
         for pattern in DENY_BASH_PATTERNS:
-            if pattern.search(segment):
+            # Both forms: an invocation prefix must not shed a deny match on
+            # the way in, so `FOO=1 sudo rm -rf /` is still denied.
+            if any(pattern.search(form) for form in _segment_forms(segment)):
                 return "deny"
     if len(segments) > 1:
         # Every part has to stand on its own, otherwise a safe prefix would
@@ -809,11 +1031,12 @@ def classify_command(shell_command: str) -> str:
     single = segments[0] if segments else normalized
     if _writes_outside_workspace(single):
         return "defer"
+    forms = _segment_forms(single)
     for pattern in SAFE_BASH_PATTERNS:
-        if pattern.search(single):
+        if any(pattern.search(form) for form in forms):
             return "allow"
     for pattern in DEFER_BASH_PATTERNS:
-        if pattern.search(single):
+        if any(pattern.search(form) for form in forms):
             return "defer"
     return "defer"
 
