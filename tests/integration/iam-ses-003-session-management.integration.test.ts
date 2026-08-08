@@ -6,6 +6,8 @@ import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service"
 import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
+import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
 import type { CanonicalIdentitySessionRecord } from "@drts/contracts";
@@ -13,7 +15,6 @@ import {
   maskIpAddress,
   maskDeviceSummary,
   maskRiskSummary,
-  maskSessionRecord,
   validateCsrfHeader,
 } from "../../apps/api/src/modules/auth/session-masking.utility";
 
@@ -82,9 +83,13 @@ describe("Session Management (IAM-SES-003)", () => {
     identityRepository = new IdentityRepository(undefined);
     securityEventsService = new SecurityEventsService();
     jwtAuthService = new JwtAuthService(identityRepository);
-    const tenantPartnerService = new TenantPartnerService();
+    const auditNotificationService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditNotificationService);
     const driverDeviceSessionService = new DriverDeviceSessionService(
       jwtAuthService,
+      new DriverProfileService(auditNotificationService),
+      undefined,
+      securityEventsService,
       identityRepository,
     );
 
@@ -92,8 +97,10 @@ describe("Session Management (IAM-SES-003)", () => {
       jwtAuthService,
       tenantPartnerService,
       driverDeviceSessionService,
-      identityRepository,
       securityEventsService,
+      undefined,
+      undefined,
+      identityRepository,
     );
 
     identityController = new IdentityController(
@@ -363,7 +370,7 @@ describe("Session Management (IAM-SES-003)", () => {
       );
 
       expect(res.data.length).toBe(1);
-      const s = res.data[0];
+      const s = res.data[0]!;
       expect(s.sessionId).toBe("sid_user_session_1");
       expect(s.isCurrent).toBe(true);
       expect(s.deviceSummary.ipAddress).toBe("172.16.***.***");
@@ -438,8 +445,8 @@ describe("Session Management (IAM-SES-003)", () => {
       );
 
       expect(res.data.length).toBe(1);
-      expect(res.data[0].sessionId).toBe("sid_in_alpha");
-      expect(res.data[0].deviceSummary.ipAddress).toBe("10.0.***.***");
+      expect(res.data[0]!.sessionId).toBe("sid_in_alpha");
+      expect(res.data[0]!.deviceSummary.ipAddress).toBe("10.0.***.***");
     });
 
     it("should reject tenant admin querying sessions for a different tenant with 403 RESOURCE_SCOPE_DENIED", async () => {
@@ -589,6 +596,7 @@ describe("Session Management (IAM-SES-003)", () => {
         sessionId: "sid_ops_viewer_session",
         tokenId: "jti_ops_viewer_token",
         tokenVersion: 4000,
+        requestId: "req_read_only_identity",
       };
 
       const targetSession: CanonicalIdentitySessionRecord = {
@@ -653,6 +661,7 @@ describe("Session Management (IAM-SES-003)", () => {
         sessionId: "sid_plain_ops_session",
         tokenId: "jti_plain_ops_token",
         tokenVersion: 5000,
+        requestId: "req_ops_user_identity",
       };
 
       const targetSession: CanonicalIdentitySessionRecord = {

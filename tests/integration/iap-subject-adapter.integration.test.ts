@@ -342,7 +342,6 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       jwtAuthService,
       tenantPartnerService,
       driverDeviceSessionService,
-      identityRepo,
       securityEventsService,
       adapter,
     );
