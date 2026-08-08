@@ -301,127 +301,6 @@ const monoValueStyle = {
   color: theme.textMuted,
 } satisfies CSSProperties;
 
-const LOCAL_PARTNER_ENTRY: PartnerChannelEntryRecord = {
-  partnerId: "partner_ctbc_world_elite",
-  partnerCode: "ctbc",
-  partnerType: "bank_partner",
-  programId: "World Elite",
-  programCode: "world_elite",
-  tenantId: "tnt_003",
-  bankCode: "CTBC_BIZ",
-  entrySlug: "ctbc-elite",
-  displayName: "CTBC World Elite",
-  businessDispatchSubtype: "credit_card_airport_transfer",
-  authMode: "partner_api_key",
-  eligibilityMode: "bank_card_inline",
-  entryHost: "ctbc.drts.io",
-  entryPath: "/partner/ctbc-elite",
-  themeAccent: "#0B7285",
-  brandingMetadata: {
-    displayName: "CTBC World Elite",
-    themeAccent: "#0B7285",
-    supportEmail: "biz-card@ctbcbank.com",
-    supportPhone: "+886-2-1234-5678",
-  },
-  eligibilityContract: {
-    contractId: "elig_ctbc_we_2026q2",
-    adapterCode: "card_bin",
-    adapterKind: "issuer_card_lookup",
-    adapterVersion: "2026.05",
-    eligibilityMode: "bank_card_inline",
-    decisionTtlSeconds: 300,
-    retryPolicy: {
-      timeoutMs: 1500,
-      maxAttempts: 2,
-      initialBackoffMs: 250,
-      backoffMultiplier: 2,
-      maxBackoffMs: 1000,
-      retryableErrorCodes: ["timeout", "upstream_5xx"],
-    },
-    manualFallbackPolicy: {
-      queue: "ops_console",
-      requiredOnTimeout: true,
-      requiredOnRetryExhausted: true,
-      requiredOnAmbiguousResponse: true,
-      requiredAuditFields: ["reasonCode", "requestedBy", "notes"],
-    },
-    sensitiveDataPolicy: {
-      referenceTokenStorage: "hash_only",
-      rawTokenExposure: "never",
-      benefitReferencePolicy: "canonical_internal_masked_exports",
-      issuerAuthorizationReferencePolicy: "canonical_internal_masked_exports",
-      auditExposure: "status_reason_only",
-    },
-    notes: ["World Elite card BIN list synced with issuer on 2026-05-20."],
-  },
-  status: "active",
-  activeFlag: true,
-  revokedAt: null,
-  revokedBy: null,
-  revokeReason: null,
-  createdAt: "2026-04-12T03:20:00.000Z",
-  updatedAt: "2026-06-01T09:15:00.000Z",
-  auditMetadata: {
-    source: "platform-admin.preview",
-    requestId: "req_preview_ctbc_elite",
-    createdBy: "platform-admin",
-    updatedBy: "platform-admin",
-  },
-};
-
-const LOCAL_PARTNER_CREDENTIALS: PartnerIngressCredentialRecord[] = [
-  {
-    keyId: "cred_ctbc_oauth",
-    entrySlug: "ctbc-elite",
-    keyPrefix: "drts_partner_live_",
-    maskedSuffix: "aE32",
-    source: "platform_admin",
-    createdAt: "2026-04-12T03:22:00.000Z",
-    lastUsedAt: "2026-06-02T18:45:00.000Z",
-    revokedAt: null,
-    issuedBy: "platform-admin",
-    revokedBy: null,
-    rotationReason: "initial production launch",
-    revokeReason: null,
-  },
-  {
-    keyId: "cred_ctbc_webhook",
-    entrySlug: "ctbc-elite",
-    keyPrefix: "drts_partner_live_",
-    maskedSuffix: "8B2k",
-    source: "platform_admin",
-    createdAt: "2026-04-12T03:23:00.000Z",
-    lastUsedAt: "2026-06-02T18:43:00.000Z",
-    revokedAt: null,
-    issuedBy: "platform-admin",
-    revokedBy: null,
-    rotationReason: "webhook bootstrap",
-    revokeReason: null,
-  },
-  {
-    keyId: "cred_ctbc_ingress",
-    entrySlug: "ctbc-elite",
-    keyPrefix: "drts_partner_live_",
-    maskedSuffix: "K1yQ",
-    source: "platform_admin",
-    createdAt: "2026-03-01T02:10:00.000Z",
-    lastUsedAt: "2026-06-02T18:41:00.000Z",
-    revokedAt: null,
-    issuedBy: "platform-admin",
-    revokedBy: null,
-    rotationReason: "quarterly refresh",
-    revokeReason: null,
-  },
-];
-
-function cloneLocalPartnerEntry() {
-  return structuredClone(LOCAL_PARTNER_ENTRY);
-}
-
-function cloneLocalPartnerCredentials() {
-  return structuredClone(LOCAL_PARTNER_CREDENTIALS);
-}
-
 function buildLocalIssuedCredential(
   entrySlug: string,
   reason: string,
@@ -1281,24 +1160,14 @@ export default function PartnerDetailPage() {
           );
         setCredentials(nextCredentials ?? []);
       } catch (nextError: unknown) {
-        if (entrySlug === LOCAL_PARTNER_ENTRY.entrySlug) {
-          const fallbackEntry = cloneLocalPartnerEntry();
-          setEntry(fallbackEntry);
-          setEditForm(toPartnerFormState(fallbackEntry));
-          setCredentials(cloneLocalPartnerCredentials());
-          setIsPreviewMode(true);
-          setPreviewNotice(copy.previewNotice);
-          setError(null);
-        } else {
-          setError(
-            nextError instanceof Error ? nextError.message : String(nextError),
-          );
-          setEntry(null);
-          setEditForm(EMPTY_ENTRY_FORM);
-          setCredentials([]);
-          setIsPreviewMode(false);
-          setPreviewNotice(null);
-        }
+        setError(
+          nextError instanceof Error ? nextError.message : String(nextError),
+        );
+        setEntry(null);
+        setEditForm(EMPTY_ENTRY_FORM);
+        setCredentials([]);
+        setIsPreviewMode(false);
+        setPreviewNotice(null);
       } finally {
         setLoading(false);
       }
