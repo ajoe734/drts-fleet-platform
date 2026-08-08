@@ -2255,7 +2255,7 @@ describe("driver device-session auth controller", () => {
         deviceLabel: "Rebound Test Device 2",
       });
 
-      // Attempting to refresh original session should report DRIVER_DEVICE_REBOUND or DRIVER_DEVICE_REFRESH_INVALID
+      // Attempting to refresh original session should report DRIVER_DEVICE_REBOUND
       await expect(
         driverDeviceSessionService.refresh({
           deviceId: "device-rebound-01",
@@ -2263,9 +2263,10 @@ describe("driver device-session auth controller", () => {
         }),
       ).rejects.toMatchObject({
         status: 401,
+        code: "DRIVER_DEVICE_REBOUND",
       });
 
-      // Verify assertSessionAccessAllowed throws for old binding
+      // Verify assertSessionAccessAllowed throws DRIVER_DEVICE_REBOUND for old binding
       await expect(
         driverDeviceSessionService.assertSessionAccessAllowed(
           session1.bindingId,
@@ -2275,6 +2276,7 @@ describe("driver device-session auth controller", () => {
         ),
       ).rejects.toMatchObject({
         status: 401,
+        code: "DRIVER_DEVICE_REBOUND",
       });
     });
   });

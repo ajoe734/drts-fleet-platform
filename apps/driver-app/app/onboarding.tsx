@@ -1308,7 +1308,10 @@ export default function OnboardingScreen() {
   }
 
   if (!provisioned) {
-    const currentAuthState = getDriverIdentityAuthState(provisioningError);
+    const currentAuthState = getDriverIdentityAuthState(
+      provisioningError,
+      submitting,
+    );
 
     return (
       <AppScreen contentContainerStyle={styles.provisionContent}>

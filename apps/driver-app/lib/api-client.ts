@@ -174,7 +174,12 @@ function getDriverIdentityIssueMessage(error: unknown): string {
 
 export function getDriverIdentityAuthState(
   error?: unknown,
+  submitting?: boolean,
 ): DriverMobileAuthState {
+  if (submitting) {
+    return "register";
+  }
+
   if (error) {
     const parsed = parseApiError(error);
     switch (parsed.code) {

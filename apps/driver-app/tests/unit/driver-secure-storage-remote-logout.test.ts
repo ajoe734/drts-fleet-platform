@@ -55,6 +55,11 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
     expect(isDriverIdentityProvisioned()).toBe(false);
   });
 
+  it("resolves to register auth state deterministically when registration form submission is active", () => {
+    const authState = getDriverIdentityAuthState(undefined, true);
+    expect(authState).toBe("register");
+  });
+
   it("handles remote revoke error and maps to deterministic revoked auth state", async () => {
     const error = new Error(
       'API error 401: {"error":{"code":"DRIVER_AUTH_REVOKED","message":"此司機帳號已退役或撤銷，請聯絡平台管理員。"}}',
