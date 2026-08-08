@@ -22,6 +22,18 @@ export function buildFleetPortalNav(
     },
     { divider: t("nav.supply", locale) },
     {
+      key: "supply",
+      href: "/supply",
+      icon: "dashboard",
+      label: t("nav.supplyDashboard", locale),
+    },
+    {
+      key: "supply-submissions",
+      href: "/supply/submissions",
+      icon: "audit",
+      label: t("nav.supplySubmissions", locale),
+    },
+    {
       key: "drivers",
       href: "/drivers",
       icon: "users",
