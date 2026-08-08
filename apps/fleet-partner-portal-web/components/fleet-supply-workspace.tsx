@@ -33,11 +33,11 @@ import type {
   SupplyDashboardView,
   SupplyDocumentsView,
   SupplySubmissionDetail,
-} from "@/lib/fleet-portal-supply.server";
+} from "@/lib/fleet-portal-supply";
 import {
   formatSupplySubject,
   isEditableStatus,
-} from "@/lib/fleet-portal-supply.server";
+} from "@/lib/fleet-portal-supply";
 
 type ApiEnvelope<T> = { data: T; meta: { requestId: string; timestamp: string } };
 

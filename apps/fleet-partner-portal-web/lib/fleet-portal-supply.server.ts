@@ -1,79 +1,31 @@
 import "server-only";
 
 import type {
-  DriverSupplyDraft,
   SupplyDocumentRecord,
   SupplyDocumentType,
-  SupplyReadinessReasonCode,
   SupplyReadinessRecord,
-  SupplyReadinessState,
-  SupplySubmissionRecord,
   SupplySubmissionStatus,
   SupplySubmissionType,
-  VehicleSupplyDraft,
 } from "@drts/contracts";
 
 import { getServerFleetPartnerClient } from "./api-client.server";
+import {
+  formatSupplySubject,
+  type SupplyDashboardCard,
+  type SupplyDashboardGroup,
+  type SupplyDashboardView,
+  type SupplyDataSource,
+  type SupplyDocumentsView,
+  type SupplySubmissionDetail,
+  type SupplySubjectSummary,
+  type SupplyReviewEvent,
+} from "./fleet-portal-supply";
 
-export type SupplyDataSource = "live" | "fallback";
-
-export type SupplyReviewEvent = {
-  eventId: string;
-  submissionId: string;
-  eventType: string;
-  actorId: string;
-  actorType: string;
-  reasonCode: string | null;
-  comment: string | null;
-  createdAt: string;
-};
-
-export type SupplySubmissionDetail = {
-  submission: SupplySubmissionRecord;
-  driverDraft: DriverSupplyDraft | null;
-  vehicleDraft: VehicleSupplyDraft | null;
-  documents: SupplyDocumentRecord[];
-  reviewEvents: SupplyReviewEvent[];
-};
-
-export type SupplySubjectSummary = {
-  title: string;
-  subtitle: string;
-};
-
-export type SupplyDashboardGroup =
-  | "draft"
-  | "review"
-  | "revision"
-  | "approved"
-  | "expiring"
-  | "not_ready";
-
-export type SupplyDashboardCard = {
-  id: string;
-  title: string;
-  subtitle: string;
-  href: string;
-  status?: SupplySubmissionStatus;
-  tone?: "neutral" | "info" | "warn" | "success" | "danger";
-  reasons?: SupplyReadinessReasonCode[];
-};
-
-export type SupplyDashboardView = {
-  groups: Record<SupplyDashboardGroup, SupplyDashboardCard[]>;
-  source: SupplyDataSource;
-};
-
-export type SupplyDocumentsView = {
-  rows: Array<
-    SupplyDocumentRecord & {
-      submissionStatus: SupplySubmissionStatus;
-      submissionType: SupplySubmissionType;
-      subject: SupplySubjectSummary;
-    }
-  >;
-  source: SupplyDataSource;
-};
+export type {
+  SupplyDashboardView,
+  SupplyDocumentsView,
+  SupplySubmissionDetail,
+} from "./fleet-portal-supply";
 
 type SupplyBundle = {
   submissions: SupplySubmissionDetail[];
@@ -422,24 +374,7 @@ async function loadSupplyBundle(): Promise<SupplyBundle> {
 }
 
 function mapSubmissionSubject(detail: SupplySubmissionDetail): SupplySubjectSummary {
-  if (detail.driverDraft) {
-    return {
-      title: detail.driverDraft.name,
-      subtitle: detail.driverDraft.mobile,
-    };
-  }
-  if (detail.vehicleDraft) {
-    return {
-      title: detail.vehicleDraft.plateNo,
-      subtitle: [detail.vehicleDraft.brand, detail.vehicleDraft.model]
-        .filter(Boolean)
-        .join(" ") || detail.vehicleDraft.businessArea,
-    };
-  }
-  return {
-    title: detail.submission.submissionType,
-    subtitle: detail.submission.submissionId,
-  };
+  return formatSupplySubject(detail);
 }
 
 function mapDashboardGroups(
@@ -568,23 +503,4 @@ export async function loadSupplyDocuments(): Promise<SupplyDocumentsView> {
 export async function loadSupplyReadiness() {
   const bundle = await loadSupplyBundle();
   return { rows: bundle.readiness, source: bundle.source };
-}
-
-export function formatSupplySubject(detail: SupplySubmissionDetail) {
-  return mapSubmissionSubject(detail);
-}
-
-export function isEditableStatus(status: SupplySubmissionStatus) {
-  return status === "draft" || status === "needs_revision";
-}
-
-export function readinessTone(state: SupplyReadinessState) {
-  switch (state) {
-    case "ready":
-      return "success";
-    case "suspended":
-      return "danger";
-    default:
-      return "warn";
-  }
 }
