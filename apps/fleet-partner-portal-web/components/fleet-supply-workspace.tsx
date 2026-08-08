@@ -16,7 +16,6 @@ import type {
   SupplyDocumentRecord,
   SupplyReadinessReasonCode,
   SupplySubmissionStatus,
-  SupplySubmissionType,
   VehicleSupplyDraft,
 } from "@drts/contracts";
 import {
@@ -38,7 +37,6 @@ import type {
 import {
   formatSupplySubject,
   isEditableStatus,
-  readinessTone,
 } from "@/lib/fleet-portal-supply.server";
 
 type ApiEnvelope<T> = { data: T; meta: { requestId: string; timestamp: string } };
