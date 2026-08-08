@@ -1,5 +1,6 @@
 import { CanvasCard, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
+import { getServerFleetPartnerClient } from "@/lib/api-client.server";
 import { loadStatements } from "@/lib/fleet-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { StatementsTable } from "@/components/portal-tables";
@@ -11,7 +12,10 @@ export const dynamic = "force-dynamic";
 export default async function FleetStatementsPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const { rows, source } = await loadStatements();
+  const [{ rows, source }, { fleetPartnerId }] = await Promise.all([
+    loadStatements(),
+    getServerFleetPartnerClient(),
+  ]);
 
   return (
     <>
@@ -34,7 +38,7 @@ export default async function FleetStatementsPage() {
           body={t("data.fixtureNotice", locale)}
         />
         <CanvasCard theme={theme} padding={0}>
-          <StatementsTable rows={rows} />
+          <StatementsTable fleetPartnerId={fleetPartnerId} rows={rows} />
         </CanvasCard>
       </div>
     </>
