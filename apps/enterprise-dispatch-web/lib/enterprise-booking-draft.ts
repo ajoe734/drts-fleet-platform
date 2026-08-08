@@ -3,7 +3,7 @@ import {
   enterpriseBookingDraft,
   getEnterpriseBookingDraft,
 } from "@/lib/enterprise-fixtures";
-import type { Locale } from "@/lib/translations";
+import { t as translate, type Locale } from "@/lib/translations";
 
 export type EnterprisePassengerMode = "self" | "other";
 export type EnterpriseAirportDirection = "pickup" | "dropoff";
@@ -392,12 +392,12 @@ export function getVehicleLabelFromDraft(
   locale: Locale,
 ) {
   if (draft.vehicle === "sedan") {
-    return locale === "zh" ? "一般轎車" : "Standard sedan";
+    return translate("fixture.vehicle.standard", undefined, locale);
   }
 
   if (draft.vehicle === "van") {
-    return locale === "zh" ? "七人座" : "6-seater";
+    return translate("fixture.vehicle.van", undefined, locale);
   }
 
-  return locale === "zh" ? "商務車" : "Business sedan";
+  return translate("fixture.vehicle.business", undefined, locale);
 }

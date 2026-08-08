@@ -30,13 +30,16 @@ function displayDraftValue(value: string) {
   return trimmed.length > 0 ? trimmed : "—";
 }
 
-function formatLuggageLabel(value: string, locale: "zh" | "en") {
+function formatLuggageLabel(
+  value: string,
+  tr: (key: TranslationKey, params?: Record<string, string | number>) => string,
+) {
   const trimmed = value.trim();
   if (!trimmed) {
     return "—";
   }
 
-  return locale === "zh" ? `${trimmed} 件` : trimmed;
+  return tr("review.luggage.count", { count: trimmed });
 }
 
 export default async function ReviewBookingPage({
@@ -249,7 +252,7 @@ export default async function ReviewBookingPage({
               <ERow
                 t={t}
                 k={tr("new.airport.luggage")}
-                v={formatLuggageLabel(draft.luggageCount, locale)}
+                v={formatLuggageLabel(draft.luggageCount, tr)}
               />
               <ERow
                 t={t}
