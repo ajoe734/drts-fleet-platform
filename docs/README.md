@@ -19,6 +19,10 @@ points so the team can answer three different questions quickly:
   `./scripts/init-local-workspace.sh`.
 - `docs/03-runbooks/master-system-closeout-checklist.md`
   Current closeout definition for the whole system.
+- `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`
+  Current code/live-backed Stage 1 operation gap and minimum completion gates.
+- `docs/03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md`
+  Supervisor-ready functional completion DAG with design and readback acceptance.
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
   Closeout runbook for the protected control-plane auth migration and its
   staged fallback policy.
@@ -39,6 +43,7 @@ order. They live at repo root, not under `docs/`.
 - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
 - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
 - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
+- `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`
 - `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
 - `phase1_service_contracts_v1.md`
 - `phase1_migration_plan_v1.md`
@@ -79,6 +84,8 @@ remains open now.
   Code-verified alignment and residual gaps.
 - `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
   Cross-repo code-backed annex audit capturing the historical workspace-vs-clean-clone split state, plus later addenda for the merged remote-baseline closeout.
+- `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`
+  Current Dev surface-by-surface functional status, confirmed gaps and completion gates.
 
 ## Runbooks, Rollout, and Evidence
 
@@ -90,6 +97,7 @@ remains open now.
 - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
 - `docs/03-runbooks/phase1-operational-remediation-execution-packet-20260430.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
+- `docs/03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md`
 - `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
 - `docs/03-runbooks/auth-plane-separation-matrix.md`
 - `docs/03-runbooks/phase1-rollout.md`
@@ -143,10 +151,12 @@ execution truth and later be checked back against code:
    - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
    - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
    - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
+   - `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`
    - `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
    - `docs/01-decisions/`
 2. Backlog materialization:
    - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
+   - `docs/03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md`
    - `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
 3. Live task truth:
    - `ai-status.json`
@@ -167,6 +177,6 @@ execution truth and later be checked back against code:
   then confirm against `apps/*` and `apps/api/src/modules/*`.
 - "What is still blocking closeout?"  
   Read `ai-status.json`, `current-work.md`, and
-  `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`.
+  `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`.
 - "Why was a planning or topology decision made?"  
   Read the relevant directory under `docs/02-architecture/consensus/`.
