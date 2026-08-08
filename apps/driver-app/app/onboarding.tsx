@@ -489,10 +489,10 @@ function getAuthStateLabel(state: DriverMobileAuthState): string {
 
 function getAuthStateVariant(
   state: DriverMobileAuthState,
-): "neutral" | "info" | "warning" | "danger" | "success" {
+): "default" | "info" | "warning" | "danger" | "success" {
   switch (state) {
     case "not_provisioned":
-      return "neutral";
+      return "default";
     case "register":
       return "info";
     case "expired":
@@ -503,7 +503,7 @@ function getAuthStateVariant(
     case "reuse":
       return "danger";
     default:
-      return "neutral";
+      return "default";
   }
 }
 
