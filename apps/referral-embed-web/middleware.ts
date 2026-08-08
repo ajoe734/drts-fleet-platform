@@ -49,7 +49,7 @@ function createBlockedResponse(
 }
 
 export function middleware(request: NextRequest) {
-  const decision = buildEmbedSecurityDecision({
+  let decision = buildEmbedSecurityDecision({
     allowedEntryHostsEnv: process.env[EMBED_ALLOWED_ENTRY_HOSTS_ENV],
     headers: request.headers,
     requestUrl: request.nextUrl,
@@ -90,6 +90,20 @@ export function middleware(request: NextRequest) {
         contentSecurityPolicy:
           "base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'",
         xFrameOptions: "DENY",
+      });
+    }
+    if (
+      sessionHint &&
+      decision.blockReason === "origin_not_authorized" &&
+      decision.requestedEntryHost === sessionHint.entryHost
+    ) {
+      const trustedHeaders = new Headers(request.headers);
+      trustedHeaders.delete("origin");
+      trustedHeaders.delete("referer");
+      decision = buildEmbedSecurityDecision({
+        allowedEntryHostsEnv: process.env[EMBED_ALLOWED_ENTRY_HOSTS_ENV],
+        headers: trustedHeaders,
+        requestUrl: request.nextUrl,
       });
     }
   }

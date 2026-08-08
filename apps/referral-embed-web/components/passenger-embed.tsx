@@ -1,8 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import {
+  type ChangeEvent,
+  type ReactNode,
+  useEffect,
+  useState,
+  useTransition,
+} from "react";
 import type {
+  CreateReferralPassengerBookingCommand,
   ReferralPassengerActiveTripResult,
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
@@ -28,9 +35,92 @@ export type PassengerEmbedLiveData = {
   receipt: ReferralPassengerReceipt | null;
 } | null;
 
+type BookingFormState = {
+  passengerName: string;
+  passengerPhone: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  scheduledAt: string;
+  vehicleType: string;
+};
+
+const DEMO_PASSENGER_PHONE = "0912345820";
+
+function createInitialBookingForm(): BookingFormState {
+  return {
+    passengerName: embedResident.name,
+    passengerPhone: DEMO_PASSENGER_PHONE,
+    pickupAddress: embedTrip.from,
+    dropoffAddress: embedTrip.to,
+    scheduledAt: "現在出發",
+    vehicleType: embedVehicles[1]?.code ?? embedVehicles[0]?.code ?? "standard",
+  };
+}
+
+function formatShortDateTime(value: string | null | undefined) {
+  if (!value) return "時間待更新";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hours}:${minutes}`;
+}
+
+function formatFare(amount: number | null | undefined) {
+  return amount === null || amount === undefined ? "—" : `NT$ ${amount}`;
+}
+
+function normalizeTripState(state: string | null | undefined) {
+  const value = state?.toLowerCase() ?? "";
+  if (value === "in_progress") return "inprogress";
+  return value || "matching";
+}
+
+function parseScheduledAt(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "現在出發") {
+    return undefined;
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? trimmed : parsed.toISOString();
+}
+
+function buildBookingCommand(
+  context: EmbedContext,
+  form: BookingFormState,
+): CreateReferralPassengerBookingCommand {
+  const sanitizedPhone = form.passengerPhone.replace(/[^\d+]/g, "");
+  const command: CreateReferralPassengerBookingCommand = {
+    entrySlug: context.entry.entrySlug,
+    pickupAddress: form.pickupAddress.trim(),
+    dropoffAddress: form.dropoffAddress.trim(),
+    vehicleType: form.vehicleType,
+    idempotencyKey:
+      globalThis.crypto?.randomUUID?.() ??
+      `referral-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  };
+  const passengerName = form.passengerName.trim();
+  const scheduledAt = parseScheduledAt(form.scheduledAt);
+  if (passengerName) {
+    command.passengerName = passengerName;
+  }
+  if (sanitizedPhone) {
+    command.passengerPhone = sanitizedPhone;
+  }
+  if (scheduledAt) {
+    command.scheduledAt = scheduledAt;
+  }
+  return command;
+}
+
 function buildHref(context: EmbedContext, next: Record<string, string>) {
   const params = new URLSearchParams({
-    entryHost: context.entry.entryHost?.trim() || "",
+    entryHost:
+      context.decision.requestedEntryHost ||
+      context.session?.entryHost ||
+      getEntryHost(context.entry),
   });
 
   for (const [key, value] of Object.entries(next)) {
@@ -485,6 +575,70 @@ function Field({
         <span style={{ fontSize: 14, color: theme.ink }}>{value}</span>
       </div>
     </div>
+  );
+}
+
+function EditableField({
+  theme,
+  label,
+  icon,
+  name,
+  value,
+  onChange,
+  type = "text",
+  inputMode,
+  autoComplete,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  label: string;
+  icon: string;
+  name: keyof BookingFormState;
+  value: string;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  type?: "text" | "tel";
+  inputMode?: "text" | "tel" | "search" | "email" | "url" | "numeric" | "decimal" | "none";
+  autoComplete?: string;
+}) {
+  return (
+    <label style={{ display: "grid", gap: 6 }}>
+      <span style={{ fontSize: 11.5, color: theme.muted, fontWeight: 600 }}>
+        {label}
+      </span>
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minHeight: 42,
+          borderRadius: 12,
+          padding: "0 12px",
+          background: theme.surface,
+          border: `1px solid ${theme.line}`,
+          color: theme.ink2,
+        }}
+      >
+        <Icon name={icon} size={15} />
+        <input
+          aria-label={label}
+          name={name}
+          value={value}
+          onChange={onChange}
+          type={type}
+          inputMode={inputMode}
+          autoComplete={autoComplete}
+          style={{
+            flex: 1,
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            color: theme.ink,
+            fontFamily: theme.sans,
+            fontSize: 14,
+            padding: "11px 0",
+          }}
+        />
+      </span>
+    </label>
   );
 }
 
@@ -1127,8 +1281,104 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
   );
 }
 
+async function bootstrapDemoSession(context: EmbedContext) {
+  const response = await fetch("/api/referral/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "demo-bootstrap",
+      entrySlug: context.entry.entrySlug,
+      entryHost:
+        context.decision.requestedEntryHost ||
+        context.session?.entryHost ||
+        getEntryHost(context.entry),
+    }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) {
+    throw new Error(
+      payload?.message || payload?.error?.message || "Demo session bootstrap failed",
+    );
+  }
+}
+
 function BookScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const [form, setForm] = useState<BookingFormState>(createInitialBookingForm);
+  const [error, setError] = useState<string | null>(null);
+  const [bootstrapped, setBootstrapped] = useState(Boolean(context.session));
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (context.session || bootstrapped) {
+      return;
+    }
+
+    let active = true;
+    void bootstrapDemoSession(context)
+      .then(() => {
+        if (!active) return;
+        setBootstrapped(true);
+        setBootstrapError(null);
+      })
+      .catch((cause) => {
+        if (!active) return;
+        setBootstrapError(
+          cause instanceof Error ? cause.message : "無法建立 demo 工作階段",
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [bootstrapped, context]);
+
+  function updateField(event: ChangeEvent<HTMLInputElement>) {
+    const { name, value } = event.currentTarget;
+    setForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  function handleSubmit() {
+    startTransition(async () => {
+      try {
+        setError(null);
+
+        if (!form.pickupAddress.trim() || !form.dropoffAddress.trim()) {
+          setError("請先填寫上下車地點。");
+          return;
+        }
+
+        if (!context.session && !bootstrapped) {
+          await bootstrapDemoSession(context);
+          setBootstrapped(true);
+        }
+
+        const response = await fetch("/api/referral/booking", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildBookingCommand(context, form)),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.ok) {
+          throw new Error(
+            payload?.error?.message || payload?.message || "建立叫車失敗",
+          );
+        }
+
+        window.location.assign(
+          buildHref(context, { screen: "trip", state: "handoff" }),
+        );
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "建立叫車失敗");
+      }
+    });
+  }
+
   return (
     <AppShell
       context={context}
@@ -1155,12 +1405,32 @@ function BookScreen({ context }: { context: EmbedContext }) {
               約 NT$ 290
             </span>
           </div>
-          <ActionButton
-            href={buildHref(context, { screen: "trip", state: "handoff" })}
-            label="確認叫車"
-            theme={theme}
-            iconRight="arrow"
-          />
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isPending}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              width: "100%",
+              minHeight: 44,
+              borderRadius: 12,
+              padding: "11px 14px",
+              border: `1px solid ${theme.primary}`,
+              background: theme.primary,
+              color: "#fff",
+              fontFamily: theme.sans,
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: isPending ? "progress" : "pointer",
+              opacity: isPending ? 0.75 : 1,
+            }}
+          >
+            <span>{isPending ? "送出中…" : "確認叫車"}</span>
+            <Icon name="arrow" size={14} />
+          </button>
         </>
       }
     >
@@ -1193,30 +1463,57 @@ function BookScreen({ context }: { context: EmbedContext }) {
         </Pill>
       </div>
 
+      {bootstrapError ? (
+        <Banner theme={theme} tone="warn" icon="clock">
+          Demo 身分工作階段尚未建立完成。{bootstrapError}
+        </Banner>
+      ) : null}
+      {error ? (
+        <Banner theme={theme} tone="danger" icon="alert">
+          {error}
+        </Banner>
+      ) : null}
+
       <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
         <div style={{ display: "grid", gap: 10 }}>
-          <Field
+          <EditableField
             theme={theme}
             label="上車地點"
             icon="pin"
-            value={embedTrip.from}
+            name="pickupAddress"
+            value={form.pickupAddress}
+            onChange={updateField}
           />
-          <Field
+          <EditableField
             theme={theme}
             label="下車地點"
             icon="pin"
-            value={embedTrip.to}
+            name="dropoffAddress"
+            value={form.dropoffAddress}
+            onChange={updateField}
           />
           <div
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
           >
-            <Field
+            <EditableField
               theme={theme}
               label="用車時間"
               icon="clock"
-              value="現在出發"
+              name="scheduledAt"
+              value={form.scheduledAt}
+              onChange={updateField}
             />
-            <Field theme={theme} label="乘客人數" icon="user" value="1 人" />
+            <EditableField
+              theme={theme}
+              label="聯絡電話"
+              icon="phone"
+              name="passengerPhone"
+              value={form.passengerPhone}
+              onChange={updateField}
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+            />
           </div>
         </div>
         <div
@@ -1242,12 +1539,13 @@ function BookScreen({ context }: { context: EmbedContext }) {
 
       <Card theme={theme} title="車種" subtitle="owned mobility">
         <div style={{ display: "grid", gap: 8 }}>
-          {embedVehicles.map((vehicle, index) => {
-            const selected = index === 1;
+          {embedVehicles.map((vehicle) => {
+            const selected = form.vehicleType === vehicle.code;
             return (
-              <div
+              <label
                 key={vehicle.id}
                 style={{
+                  position: "relative",
                   display: "flex",
                   alignItems: "center",
                   gap: 11,
@@ -1257,6 +1555,25 @@ function BookScreen({ context }: { context: EmbedContext }) {
                   background: selected ? theme.primaryBg : theme.surface,
                 }}
               >
+                <input
+                  type="radio"
+                  name="vehicleType"
+                  aria-label={vehicle.name}
+                  checked={selected}
+                  onChange={() =>
+                    setForm((current) => ({
+                      ...current,
+                      vehicleType: vehicle.code,
+                    }))
+                  }
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    margin: 0,
+                    opacity: 0,
+                    cursor: "pointer",
+                  }}
+                />
                 <span style={{ color: selected ? theme.primary : theme.muted }}>
                   <Icon name="car" size={20} />
                 </span>
@@ -1275,7 +1592,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
                     style={{ color: theme.primary }}
                   />
                 ) : null}
-              </div>
+              </label>
             );
           })}
         </div>
@@ -1393,9 +1710,38 @@ const tripStateLabel: Record<
   cancelled: { zh: "已取消", tone: "neutral" },
 };
 
-function TripScreen({ context }: { context: EmbedContext }) {
+function TripScreen({
+  context,
+  liveData,
+}: {
+  context: EmbedContext;
+  liveData: PassengerEmbedLiveData;
+}) {
   const theme = buildEmbedTheme(context.accent);
-  const state = tripStateLabel[embedTrip.state] || {
+  const activeTrip = liveData?.activeTrip?.trip;
+  const trip = activeTrip
+    ? {
+        id: activeTrip.orderNo,
+        orderId: activeTrip.orderId,
+        state: normalizeTripState(activeTrip.statusCode || activeTrip.status),
+        from: activeTrip.pickupAddress,
+        to: activeTrip.dropoffAddress,
+        win: formatShortDateTime(activeTrip.createdAt),
+        vehicle: activeTrip.vehicleType,
+        driver: activeTrip.driverName || "媒合中",
+        plate: activeTrip.plateNumber || "待更新",
+        rating: activeTrip.driverName ? 4.9 : 0,
+        etaMin: activeTrip.etaMin ?? 5,
+        cancelWindowMin: activeTrip.cancelWindowMin,
+        driverPhoneMasked: activeTrip.driverPhoneMasked,
+        estimatedFare: activeTrip.estimatedFare,
+      }
+    : {
+        ...embedTrip,
+        driverPhoneMasked: "0912-***-888",
+        estimatedFare: 290,
+      };
+  const state = tripStateLabel[trip.state] || {
     zh: "媒合中",
     tone: "warn" as const,
   };
@@ -1457,14 +1803,15 @@ function TripScreen({ context }: { context: EmbedContext }) {
           <span
             style={{ fontSize: 11, color: theme.faint, fontFamily: theme.mono }}
           >
-            {embedTrip.id}
+            {trip.id} · {trip.orderId}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-          <Avatar theme={theme} name={embedTrip.driver} size={50} />
+          <Avatar theme={theme} name={trip.driver} size={50} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 15, fontWeight: 700 }}>
-              {embedTrip.driver} · {embedTrip.rating} ★
+              {trip.driver}
+              {trip.rating ? ` · ${trip.rating} ★` : ""}
             </div>
             <div
               style={{
@@ -1473,7 +1820,7 @@ function TripScreen({ context }: { context: EmbedContext }) {
                 fontFamily: theme.mono,
               }}
             >
-              {embedTrip.vehicle} · {embedTrip.plate}
+              {trip.vehicle} · {trip.plate}
             </div>
           </div>
           <div
@@ -1494,7 +1841,7 @@ function TripScreen({ context }: { context: EmbedContext }) {
                 lineHeight: 1,
               }}
             >
-              {embedTrip.etaMin}
+              {trip.etaMin}
             </div>
             <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>
               分鐘 · 估計
@@ -1541,9 +1888,9 @@ function TripScreen({ context }: { context: EmbedContext }) {
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 18 }}>
-              {embedTrip.from}
+              {trip.from}
             </div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{embedTrip.to}</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{trip.to}</div>
           </div>
         </div>
         <div
@@ -1556,7 +1903,7 @@ function TripScreen({ context }: { context: EmbedContext }) {
           <DetailRow
             theme={theme}
             label="預計上車"
-            value={embedTrip.win}
+            value={trip.win}
             mono
             last
           />
@@ -1577,8 +1924,25 @@ function TripScreen({ context }: { context: EmbedContext }) {
   );
 }
 
-function TripsScreen({ context }: { context: EmbedContext }) {
+function TripsScreen({
+  context,
+  liveData,
+}: {
+  context: EmbedContext;
+  liveData: PassengerEmbedLiveData;
+}) {
   const theme = buildEmbedTheme(context.accent);
+  const historyItems =
+    liveData?.history?.items?.length
+      ? liveData.history.items.map((trip) => ({
+          id: trip.orderNo,
+          date: formatShortDateTime(trip.completedAt || trip.createdAt),
+          from: trip.pickupAddress,
+          to: trip.dropoffAddress,
+          state: normalizeTripState(trip.status),
+          fare: trip.formattedFare || formatFare(trip.fareTotal),
+        }))
+      : embedTripHistory;
   return (
     <AppShell context={context} badgeTone="live">
       <div
@@ -1606,7 +1970,7 @@ function TripsScreen({ context }: { context: EmbedContext }) {
         <Icon name="shield" size={13} style={{ color: theme.primary }} />
         重開 App 後行程與收據仍可找回
       </div>
-      {embedTripHistory.map((trip) => {
+      {historyItems.map((trip) => {
         const tripState = tripStateLabel[trip.state] || {
           zh: trip.state,
           tone: "neutral" as const,
@@ -1691,8 +2055,36 @@ function TripsScreen({ context }: { context: EmbedContext }) {
   );
 }
 
-function ReceiptScreen({ context }: { context: EmbedContext }) {
+function ReceiptScreen({
+  context,
+  liveData,
+}: {
+  context: EmbedContext;
+  liveData: PassengerEmbedLiveData;
+}) {
   const theme = buildEmbedTheme(context.accent);
+  const receipt = liveData?.receipt
+    ? {
+        id: liveData.receipt.orderNo,
+        orderId: liveData.receipt.orderId,
+        date: formatShortDateTime(
+          liveData.receipt.completedAt || liveData.activeTrip?.trip?.createdAt,
+        ),
+        from: liveData.receipt.pickupAddress,
+        to: liveData.receipt.dropoffAddress,
+        vehicle: liveData.receipt.vehicleType,
+        driver: liveData.receipt.driverName || "媒合中",
+        plate: liveData.receipt.plateNumber || "待更新",
+        passenger: liveData.receipt.passengerNameMasked,
+        maskedPhone: liveData.receipt.passengerPhoneMasked,
+        fareBase: formatFare(liveData.receipt.fareBase),
+        fareDistance: formatFare(liveData.receipt.fareDistance),
+        fareTime: formatFare(liveData.receipt.fareTime),
+        total: liveData.receipt.formattedTotal,
+        payment: "社區月結 · 綁定住戶帳號",
+        channel: context.strings.appName,
+      }
+    : embedReceipt;
   return (
     <AppShell
       context={context}
@@ -1716,9 +2108,9 @@ function ReceiptScreen({ context }: { context: EmbedContext }) {
           marginTop: -6,
         }}
       >
-        {embedReceipt.id} · {embedReceipt.orderId}
+        {receipt.id} · {receipt.orderId}
       </div>
-      <Card theme={theme} title="行程" subtitle={embedReceipt.date}>
+      <Card theme={theme} title="行程" subtitle={receipt.date}>
         <div style={{ display: "flex", gap: 11 }}>
           <div
             style={{
@@ -1756,31 +2148,31 @@ function ReceiptScreen({ context }: { context: EmbedContext }) {
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 14 }}>
-              {embedReceipt.from}
+              {receipt.from}
             </div>
             <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-              {embedReceipt.to}
+              {receipt.to}
             </div>
           </div>
         </div>
       </Card>
       <Card theme={theme} title="乘客與車輛" subtitle="PII 已遮罩">
-        <DetailRow theme={theme} label="乘客" value={embedReceipt.passenger} />
+        <DetailRow theme={theme} label="乘客" value={receipt.passenger} />
         <DetailRow
           theme={theme}
           label="聯絡電話"
-          value={embedReceipt.maskedPhone}
+          value={receipt.maskedPhone}
           mono
         />
         <DetailRow
           theme={theme}
           label="司機 / 車牌"
-          value={`${embedReceipt.driver} · ${embedReceipt.plate}`}
+          value={`${receipt.driver} · ${receipt.plate}`}
         />
         <DetailRow
           theme={theme}
           label="車種"
-          value={embedReceipt.vehicle}
+          value={receipt.vehicle}
           last
         />
       </Card>
@@ -1788,32 +2180,32 @@ function ReceiptScreen({ context }: { context: EmbedContext }) {
         <DetailRow
           theme={theme}
           label="起步價"
-          value={embedReceipt.fareBase}
+          value={receipt.fareBase}
           mono
         />
         <DetailRow
           theme={theme}
           label="里程"
-          value={embedReceipt.fareDistance}
+          value={receipt.fareDistance}
           mono
         />
         <DetailRow
           theme={theme}
           label="時間"
-          value={embedReceipt.fareTime}
+          value={receipt.fareTime}
           mono
         />
         <DetailRow
           theme={theme}
           label="合計"
-          value={embedReceipt.total}
+          value={receipt.total}
           strong
           mono
           last
         />
         <div style={{ marginTop: 12 }}>
           <Banner theme={theme} tone="neutral" icon="building">
-            {embedReceipt.payment} · 經 {embedReceipt.channel}
+            {receipt.payment} · 經 {receipt.channel}
           </Banner>
         </div>
       </Card>
@@ -2267,6 +2659,7 @@ function isFallbackScreen(screen: string): screen is EmbedTripFallbackScreen {
 
 export function PassengerEmbed({
   context,
+  liveData = null,
 }: {
   context: EmbedContext;
   liveData?: PassengerEmbedLiveData;
@@ -2290,11 +2683,11 @@ export function PassengerEmbed({
 
   switch (context.screen) {
     case "trip":
-      return <TripScreen context={context} />;
+      return <TripScreen context={context} liveData={liveData} />;
     case "trips":
-      return <TripsScreen context={context} />;
+      return <TripsScreen context={context} liveData={liveData} />;
     case "receipt":
-      return <ReceiptScreen context={context} />;
+      return <ReceiptScreen context={context} liveData={liveData} />;
     case "completed":
       return <OutcomeScreen context={context} kind="completed" />;
     case "cancelled":

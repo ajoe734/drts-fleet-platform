@@ -3,6 +3,9 @@ import { createServer } from "node:http";
 const host = "127.0.0.1";
 const port = Number(process.env.REFERRAL_EMBED_FIXTURE_PORT ?? "3099");
 
+const ordersByPassenger = new Map();
+let orderCounter = 1;
+
 function writeJson(response, status, payload) {
   response.writeHead(status, {
     "Cache-Control": "no-store",
@@ -59,7 +62,69 @@ function buildEntry(entrySlug) {
   };
 }
 
-const server = createServer((request, response) => {
+function getPassengerKey(request) {
+  const passengerId = request.headers["x-drts-passenger-id"] || "referral-demo";
+  const entrySlug = request.headers["x-partner-entry-slug"] || "yuhe-residence";
+  return `${entrySlug}:${passengerId}`;
+}
+
+function getPassengerOrders(request) {
+  const key = getPassengerKey(request);
+  if (!ordersByPassenger.has(key)) {
+    ordersByPassenger.set(key, []);
+  }
+  return ordersByPassenger.get(key);
+}
+
+function maskPhone(phone) {
+  const cleaned = String(phone || "").replace(/[^\d+]/g, "");
+  if (cleaned.length >= 10) {
+    return `${cleaned.slice(0, 4)}-***-${cleaned.slice(-3)}`;
+  }
+  return "0912-***-820";
+}
+
+function buildReceipt(order) {
+  return {
+    orderId: order.orderId,
+    orderNo: order.orderNo,
+    status: order.status,
+    completedAt: order.createdAt,
+    passengerNameMasked: order.passengerName,
+    passengerPhoneMasked: maskPhone(order.passengerPhone),
+    driverName: "吳明翰",
+    plateNumber: "BKR-2208",
+    vehicleType: order.vehicleType,
+    pickupAddress: order.pickupAddress,
+    dropoffAddress: order.dropoffAddress,
+    fareBase: 102,
+    fareDistance: 131,
+    fareTime: 57,
+    totalFare: 290,
+    formattedTotal: "NT$ 290",
+    paymentChannel: "yuhe-residence (月結)",
+    downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
+  };
+}
+
+function jsonBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${host}:${port}`);
 
   if (url.pathname === "/health") {
@@ -81,38 +146,146 @@ const server = createServer((request, response) => {
     return;
   }
 
-  const prefix = "/api/partner/entries/";
-  if (request.method !== "GET" || !url.pathname.startsWith(prefix)) {
-    writeJson(response, 404, {
-      error: { code: "FIXTURE_ROUTE_NOT_FOUND", message: "Not found." },
-    });
+  const entryPrefix = "/api/partner/entries/";
+  if (request.method === "GET" && url.pathname.startsWith(entryPrefix)) {
+    const entrySlug = decodeURIComponent(url.pathname.slice(entryPrefix.length));
+    if (entrySlug === "missing-entry") {
+      writeJson(response, 404, {
+        error: {
+          code: "PARTNER_ENTRY_NOT_FOUND",
+          message: "The partner entry could not be found.",
+          retryable: false,
+        },
+      });
+      return;
+    }
+
+    if (entrySlug === "authority-down") {
+      writeJson(response, 503, {
+        error: {
+          code: "EMBED_AUTHORITY_UNAVAILABLE",
+          message: "The referral authority is temporarily unavailable.",
+          retryable: true,
+        },
+      });
+      return;
+    }
+
+    writeJson(response, 200, { data: buildEntry(entrySlug) });
     return;
   }
 
-  const entrySlug = decodeURIComponent(url.pathname.slice(prefix.length));
-  if (entrySlug === "missing-entry") {
-    writeJson(response, 404, {
-      error: {
-        code: "PARTNER_ENTRY_NOT_FOUND",
-        message: "The partner entry could not be found.",
-        retryable: false,
+  if (
+    request.method === "POST" &&
+    url.pathname === "/partner/referral/passenger/bookings"
+  ) {
+    const body = await jsonBody(request);
+    const orders = getPassengerOrders(request);
+    const now = new Date().toISOString();
+    const sequence = String(orderCounter++).padStart(4, "0");
+    const order = {
+      orderId: `ord_ref_${sequence}`,
+      orderNo: `RF-${sequence}`,
+      bookingId: `booking-ref-${sequence}`,
+      status: "enroute",
+      statusCode: "enroute",
+      pickupAddress: body.pickupAddress,
+      dropoffAddress: body.dropoffAddress,
+      vehicleType: body.vehicleType || "comfort",
+      passengerName: body.passengerName || "李采縈",
+      passengerPhone: body.passengerPhone || "0912345820",
+      createdAt: now,
+      updatedAt: now,
+    };
+    orders.unshift(order);
+    writeJson(response, 200, {
+      data: {
+        orderId: order.orderId,
+        bookingId: order.bookingId,
+        serviceBucket: "business_dispatch",
+        businessDispatchSubtype: order.vehicleType,
+        dispatchSemantics: "reservation",
+        status: order.status,
+        replayed: false,
       },
     });
     return;
   }
 
-  if (entrySlug === "authority-down") {
-    writeJson(response, 503, {
-      error: {
-        code: "EMBED_AUTHORITY_UNAVAILABLE",
-        message: "The referral authority is temporarily unavailable.",
-        retryable: true,
-      },
+  if (
+    request.method === "GET" &&
+    url.pathname === "/partner/referral/passenger/active"
+  ) {
+    const active = getPassengerOrders(request)[0] ?? null;
+    writeJson(response, 200, {
+      data: active
+        ? {
+            active: true,
+            trip: {
+              orderId: active.orderId,
+              orderNo: active.orderNo,
+              status: active.status,
+              statusCode: active.statusCode,
+              etaMin: 6,
+              cancelWindowMin: 2,
+              pickupAddress: active.pickupAddress,
+              dropoffAddress: active.dropoffAddress,
+              driverName: "吳明翰",
+              driverPhoneMasked: "0912-***-888",
+              plateNumber: "BKR-2208",
+              vehicleType: active.vehicleType,
+              estimatedFare: 290,
+              createdAt: active.createdAt,
+              updatedAt: active.updatedAt,
+              rated: false,
+            },
+          }
+        : { active: false, trip: null },
     });
     return;
   }
 
-  writeJson(response, 200, { data: buildEntry(entrySlug) });
+  if (
+    request.method === "GET" &&
+    url.pathname === "/partner/referral/passenger/history"
+  ) {
+    const items = getPassengerOrders(request).map((order) => ({
+      orderId: order.orderId,
+      orderNo: order.orderNo,
+      status: order.status,
+      pickupAddress: order.pickupAddress,
+      dropoffAddress: order.dropoffAddress,
+      fareTotal: 290,
+      formattedFare: "NT$ 290",
+      completedAt: order.createdAt,
+      createdAt: order.createdAt,
+    }));
+    writeJson(response, 200, { data: { items } });
+    return;
+  }
+
+  const receiptMatch = url.pathname.match(
+    /^\/partner\/referral\/passenger\/orders\/([^/]+)\/receipt$/,
+  );
+  if (request.method === "GET" && receiptMatch) {
+    const orderId = decodeURIComponent(receiptMatch[1]);
+    const order = getPassengerOrders(request).find((item) => item.orderId === orderId);
+    if (!order) {
+      writeJson(response, 404, {
+        error: {
+          code: "ORDER_NOT_FOUND",
+          message: "Order not found.",
+        },
+      });
+      return;
+    }
+    writeJson(response, 200, { data: buildReceipt(order) });
+    return;
+  }
+
+  writeJson(response, 404, {
+    error: { code: "FIXTURE_ROUTE_NOT_FOUND", message: "Not found." },
+  });
 });
 
 server.listen(port, host);
