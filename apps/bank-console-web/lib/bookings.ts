@@ -510,14 +510,21 @@ function toBookingDetail(item: RawBookingRecord): BookingDetailRecord {
 export const bookingDetails: BookingDetailRecord[] =
   RAW_BOOKINGS.map(toBookingDetail);
 
-export const bookingPeriods = Array.from(
-  new Set(bookingList.map((item) => item.scheduledAt.slice(0, 7))),
-).sort((left, right) => right.localeCompare(left));
+export function deriveBookingPeriods(bookings: readonly BookingListItem[]) {
+  return Array.from(
+    new Set(bookings.map((item) => item.scheduledAt.slice(0, 7))),
+  ).sort((left, right) => right.localeCompare(left));
+}
 
-export function filterBookings(filters: BookingFilters) {
+export const bookingPeriods = deriveBookingPeriods(bookingList);
+
+export function filterBookingItems(
+  bookings: readonly BookingListItem[],
+  filters: BookingFilters,
+) {
   const cardholderNeedle = filters.cardholder?.trim().toLowerCase();
 
-  return bookingList.filter((item) => {
+  return bookings.filter((item) => {
     if (filters.programCode && item.programCode !== filters.programCode) {
       return false;
     }
@@ -538,6 +545,10 @@ export function filterBookings(filters: BookingFilters) {
     }
     return true;
   });
+}
+
+export function filterBookings(filters: BookingFilters) {
+  return filterBookingItems(bookingList, filters);
 }
 
 export function getBookingDetail(orderId: string) {
