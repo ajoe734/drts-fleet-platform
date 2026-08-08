@@ -3,14 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IamStepUpProof } from "@drts/contracts";
 
 import {
-  DECLARED_STEP_UP_POLICY_RULES,
   evaluateMfaStepUpPolicy,
-  hasTrustedMfaAmr,
   isPrivilegedAction,
   lookupStepUpPolicyRule,
 } from "../../apps/api/src/common/auth/mfa-step-up.policy";
 import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
-import type { AuthenticatedRequestLike, BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
+import type {
+  AuthenticatedRequestLike,
+  BootstrapRequestIdentity,
+} from "../../apps/api/src/common/auth";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -74,8 +75,12 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
     });
 
     it("correctly identifies privileged mutation routes as requiring step-up", () => {
-      expect(isPrivilegedAction("POST", "/api/platform-admin/tenants")).toBe(true);
-      expect(isPrivilegedAction("POST", "/api/tenant/users/u1/role")).toBe(true);
+      expect(isPrivilegedAction("POST", "/api/platform-admin/tenants")).toBe(
+        true,
+      );
+      expect(isPrivilegedAction("POST", "/api/tenant/users/u1/role")).toBe(
+        true,
+      );
       expect(isPrivilegedAction("POST", "/api/tenant/api-keys")).toBe(true);
       expect(isPrivilegedAction("POST", "/api/driver/sos-events")).toBe(true);
       expect(isPrivilegedAction("GET", "/api/identity/context")).toBe(false);
@@ -102,7 +107,11 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
         },
       };
 
-      const result = evaluateMfaStepUpPolicy(identity, "updateTenantUserRole", reqWithClientBooleans);
+      const result = evaluateMfaStepUpPolicy(
+        identity,
+        "updateTenantUserRole",
+        reqWithClientBooleans,
+      );
       expect(result.allowed).toBe(false);
       expect(result.errorCode).toBe("AUTH_STEP_UP_REQUIRED");
       expect(result.reason).toBe("CLIENT_BOOLEAN_DISALLOWED");
@@ -129,7 +138,12 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
         stepUpProof: wrongSessionProof,
       };
 
-      const result = evaluateMfaStepUpPolicy(identity, "updateTenantUserRole", dummyRequest, nowSeconds);
+      const result = evaluateMfaStepUpPolicy(
+        identity,
+        "updateTenantUserRole",
+        dummyRequest,
+        nowSeconds,
+      );
       expect(result.allowed).toBe(false);
       expect(result.errorCode).toBe("AUTH_STEP_UP_REQUIRED");
       expect(result.reason).toBe("STALE_WRONG_SESSION");
@@ -154,7 +168,12 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
         stepUpProof: wrongActionProof,
       };
 
-      const result = evaluateMfaStepUpPolicy(identity, "updateTenantUserRole", dummyRequest, nowSeconds);
+      const result = evaluateMfaStepUpPolicy(
+        identity,
+        "updateTenantUserRole",
+        dummyRequest,
+        nowSeconds,
+      );
       expect(result.allowed).toBe(false);
       expect(result.errorCode).toBe("AUTH_STEP_UP_REQUIRED");
       expect(result.reason).toBe("STALE_WRONG_ACTION");
@@ -178,7 +197,12 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
         stepUpProof: wrongPrincipalProof,
       };
 
-      const result = evaluateMfaStepUpPolicy(identity, "updateTenantUserRole", dummyRequest, nowSeconds);
+      const result = evaluateMfaStepUpPolicy(
+        identity,
+        "updateTenantUserRole",
+        dummyRequest,
+        nowSeconds,
+      );
       expect(result.allowed).toBe(false);
       expect(result.errorCode).toBe("AUTH_STEP_UP_REQUIRED");
       expect(result.reason).toBe("STALE_WRONG_PRINCIPAL");
@@ -204,7 +228,12 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
         stepUpProof: expiredProof,
       };
 
-      const result = evaluateMfaStepUpPolicy(identity, "updateTenantUserRole", dummyRequest, nowSeconds);
+      const result = evaluateMfaStepUpPolicy(
+        identity,
+        "updateTenantUserRole",
+        dummyRequest,
+        nowSeconds,
+      );
       expect(result.allowed).toBe(false);
       expect(result.errorCode).toBe("AUTH_STEP_UP_REQUIRED");
       expect(result.reason).toBe("EXPIRED_FRESHNESS_WINDOW");
@@ -229,7 +258,12 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
         stepUpProof: freshProof,
       };
 
-      const result = evaluateMfaStepUpPolicy(identity, "updateTenantUserRole", dummyRequest, nowSeconds);
+      const result = evaluateMfaStepUpPolicy(
+        identity,
+        "updateTenantUserRole",
+        dummyRequest,
+        nowSeconds,
+      );
       expect(result.allowed).toBe(true);
       expect(result.reason).toBe("PASSED");
     });
@@ -242,7 +276,12 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
         authTime: nowSeconds - 120, // 2 minutes ago
       };
 
-      const result = evaluateMfaStepUpPolicy(identity, "updateTenantUserRole", dummyRequest, nowSeconds);
+      const result = evaluateMfaStepUpPolicy(
+        identity,
+        "updateTenantUserRole",
+        dummyRequest,
+        nowSeconds,
+      );
       expect(result.allowed).toBe(true);
       expect(result.reason).toBe("PASSED");
     });
@@ -301,6 +340,120 @@ describe("IAM-MFA-001: MFA and Step-Up Policy Enforcement", () => {
           }),
         }),
       );
+    });
+
+    it("denies raw IAP-authenticated platform request on privileged route without step-up proof and calls StepUpProofService.assertRequestSatisfied", async () => {
+      const mockAuditService = {
+        recordAuditLog: vi.fn(),
+      };
+      const mockIapSubjectAdapter = {
+        resolveSubject: vi.fn().mockResolvedValue({
+          principal: { principalId: "iap-user-001", subject: "iap-sub-1" },
+          membership: { membershipId: "mem-1", realm: "platform" },
+          effectiveRoles: ["platform_admin"],
+          effectiveScopes: ["foundation:write", "platform:write"],
+          payload: { amr: ["pwd"] },
+        }),
+      };
+      const mockStepUpProofService = {
+        assertRequestSatisfied: vi.fn().mockImplementation(() => {
+          throw new ApiRequestError(
+            403,
+            "AUTH_STEP_UP_REQUIRED",
+            "Step-up proof reference is required",
+          );
+        }),
+      };
+
+      const reflector = {
+        getAllAndOverride: vi.fn((key: string) => {
+          if (key === "AUTH_OPEN_ROUTE") return false;
+          return undefined;
+        }),
+      } as any;
+
+      const guard = new BootstrapAuthGuard(
+        reflector,
+        undefined,
+        undefined,
+        mockAuditService as any,
+        mockIapSubjectAdapter as any,
+        mockStepUpProofService as any,
+      );
+
+      const request: AuthenticatedRequestLike = {
+        headers: {
+          "x-goog-iap-jwt-assertion": "mock-iap-token",
+        },
+        method: "POST",
+        url: "/api/platform-admin/tenants",
+        originalUrl: "/api/platform-admin/tenants",
+      };
+
+      const context = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => ({}),
+        getClass: () => ({}),
+      } as any;
+
+      await expect(guard.canActivate(context)).rejects.toThrow(ApiRequestError);
+      expect(
+        mockStepUpProofService.assertRequestSatisfied,
+      ).toHaveBeenCalledTimes(1);
+      expect(mockAuditService.recordAuditLog).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows IAP-authenticated request when step-up proof and fresh MFA are satisfied", async () => {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const mockIapSubjectAdapter = {
+        resolveSubject: vi.fn().mockResolvedValue({
+          principal: { principalId: "iap-user-002", subject: "iap-sub-2" },
+          membership: { membershipId: "mem-2", realm: "platform" },
+          effectiveRoles: ["platform_admin"],
+          effectiveScopes: ["foundation:write", "platform:write"],
+          payload: { amr: ["mfa", "totp"], auth_time: nowSeconds - 10 },
+        }),
+      };
+      const mockStepUpProofService = {
+        assertRequestSatisfied: vi.fn(),
+      };
+
+      const reflector = {
+        getAllAndOverride: vi.fn((key: string) => {
+          if (key === "AUTH_OPEN_ROUTE") return false;
+          return undefined;
+        }),
+      } as any;
+
+      const guard = new BootstrapAuthGuard(
+        reflector,
+        undefined,
+        undefined,
+        undefined,
+        mockIapSubjectAdapter as any,
+        mockStepUpProofService as any,
+      );
+
+      const request: AuthenticatedRequestLike = {
+        headers: {
+          "x-goog-iap-jwt-assertion": "mock-iap-token",
+        },
+        method: "POST",
+        url: "/api/platform-admin/tenants",
+        originalUrl: "/api/platform-admin/tenants",
+      };
+
+      const context = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => ({}),
+        getClass: () => ({}),
+      } as any;
+
+      const result = await guard.canActivate(context);
+      expect(result).toBe(true);
+      expect(
+        mockStepUpProofService.assertRequestSatisfied,
+      ).toHaveBeenCalledTimes(1);
     });
   });
 });

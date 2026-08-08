@@ -368,6 +368,7 @@ export class BootstrapAuthGuard implements CanActivate {
       try {
         this.assertRealmAllowed(identity, policy.allowedRealms, request);
         this.assertScopesAllowed(identity, policy.requiredScopes, request);
+        this.stepUpProofService?.assertRequestSatisfied(identity, request);
         this.assertMfaStepUpAllowed(identity, request, policy.routeKey);
       } catch (error) {
         this.recordAuthorizationDenialAudit(identity, request, error);
@@ -375,6 +376,7 @@ export class BootstrapAuthGuard implements CanActivate {
       }
     } else {
       try {
+        this.stepUpProofService?.assertRequestSatisfied(identity, request);
         this.assertMfaStepUpAllowed(identity, request);
       } catch (error) {
         this.recordAuthorizationDenialAudit(identity, request, error);
