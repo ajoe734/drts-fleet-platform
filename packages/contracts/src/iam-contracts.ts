@@ -19,6 +19,10 @@ export const IAM_STAGE15_ERROR_CODES = [
   "IAM_ACCESS_REVIEW_OVERDUE",
   "IAM_ACCESS_REVIEW_CROSS_TENANT_DENIED",
   "IAM_BREAK_GLASS_NOT_FOUND",
+  "IAM_SOD_VIOLATION",
+  "IAM_LAST_ADMIN_PROTECTION",
+  "IAM_PRIVILEGED_APPROVAL_REQUIRED",
+  "IAM_GRANT_EXPIRED",
 ] as const;
 
 export type IamStage15ErrorCode = (typeof IAM_STAGE15_ERROR_CODES)[number];
@@ -321,6 +325,79 @@ export interface IamCredentialMutationCommand {
   mutation: IamMutationMetadata;
 }
 
+export interface PrivilegedRoleApprovalRequestRecord {
+  requestId: string;
+  tenantId: string | null;
+  realm: "platform" | "tenant" | "ops";
+  targetUserId: string;
+  targetMembershipId?: string | null;
+  targetEmail?: string | null;
+  requestedRoleCode: string;
+  previousRoleCode?: string | null;
+  requesterPrincipalId: string;
+  requesterActorType: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | "expired" | "removed";
+  approverPrincipalId?: string | null;
+  approvalDecision?: "approve" | "reject" | null;
+  decidedAt?: string | null;
+  validFrom: string;
+  validTo?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrivilegedRoleGrantRecord {
+  grantId: string;
+  requestId: string | null;
+  tenantId: string | null;
+  realm: "platform" | "tenant" | "ops";
+  targetUserId: string;
+  targetMembershipId?: string | null;
+  roleCode: string;
+  grantedByPrincipalId: string | null;
+  approvalId: string | null;
+  validFrom: string;
+  validTo: string | null;
+  status: "active" | "expired" | "removed";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePrivilegedRoleRequestCommand {
+  targetUserId: string;
+  targetMembershipId?: string | null;
+  targetEmail?: string | null;
+  roleCode: string;
+  tenantId?: string | null;
+  realm?: "platform" | "tenant" | "ops";
+  validFrom?: string | null;
+  validTo?: string | null;
+  reason: string;
+  mutation?: IamMutationMetadata;
+}
+
+export interface ApprovePrivilegedRoleRequestCommand {
+  approvalRequestId: string;
+  stepUpReference?: string | null;
+  mutation?: IamMutationMetadata;
+}
+
+export interface RejectPrivilegedRoleRequestCommand {
+  approvalRequestId: string;
+  reason?: string | null;
+  mutation?: IamMutationMetadata;
+}
+
+export interface RemovePrivilegedRoleGrantCommand {
+  targetUserId: string;
+  roleCode: string;
+  tenantId?: string | null;
+  reason?: string | null;
+  mutation?: IamMutationMetadata;
+}
+
 export const IAM_STAGE15_OPERATION_CATALOG = [
   {
     operationId: "exchangeTenantCallbackSession",
@@ -573,6 +650,48 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     method: "post",
     path: "/api/platform-admin/break-glass/requests/{requestId}/close",
     domain: "break_glass",
+  },
+  {
+    operationId: "createPrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests",
+    domain: "approval",
+  },
+  {
+    operationId: "listPrivilegedRoleRequests",
+    method: "get",
+    path: "/api/identity/privileged-role-requests",
+    domain: "approval",
+  },
+  {
+    operationId: "getPrivilegedRoleRequest",
+    method: "get",
+    path: "/api/identity/privileged-role-requests/{requestId}",
+    domain: "approval",
+  },
+  {
+    operationId: "approvePrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/approve",
+    domain: "approval",
+  },
+  {
+    operationId: "rejectPrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/reject",
+    domain: "approval",
+  },
+  {
+    operationId: "removePrivilegedRoleGrant",
+    method: "post",
+    path: "/api/identity/privileged-role-grants/remove",
+    domain: "approval",
+  },
+  {
+    operationId: "processExpiredPrivilegedRoleGrants",
+    method: "post",
+    path: "/api/identity/privileged-role-grants/process-expiries",
+    domain: "approval",
   },
 ] as const;
 

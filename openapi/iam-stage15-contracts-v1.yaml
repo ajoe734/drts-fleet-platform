@@ -542,6 +542,40 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CloseBreakGlassGrantCommand"
+  /api/identity/privileged-role-requests:
+    post:
+      summary: Request a privileged role assignment.
+      operationId: createPrivilegedRoleRequest
+      tags: [Approval]
+    get:
+      summary: List privileged role requests.
+      operationId: listPrivilegedRoleRequests
+      tags: [Approval]
+  /api/identity/privileged-role-requests/{requestId}:
+    get:
+      summary: Get details of a privileged role request.
+      operationId: getPrivilegedRoleRequest
+      tags: [Approval]
+  /api/identity/privileged-role-requests/{requestId}/approve:
+    post:
+      summary: Approve a privileged role request.
+      operationId: approvePrivilegedRoleRequest
+      tags: [Approval]
+  /api/identity/privileged-role-requests/{requestId}/reject:
+    post:
+      summary: Reject a privileged role request.
+      operationId: rejectPrivilegedRoleRequest
+      tags: [Approval]
+  /api/identity/privileged-role-grants/remove:
+    post:
+      summary: Remove or demote a privileged role grant.
+      operationId: removePrivilegedRoleGrant
+      tags: [Approval]
+  /api/identity/privileged-role-grants/process-expiries:
+    post:
+      summary: Process expired privileged role grants.
+      operationId: processExpiredPrivilegedRoleGrants
+      tags: [Approval]
 components:
   responses:
     IamPublicAuthDenied:
@@ -900,6 +934,10 @@ components:
                 - IAM_ACCESS_REVIEW_OVERDUE
                 - IAM_ACCESS_REVIEW_CROSS_TENANT_DENIED
                 - IAM_BREAK_GLASS_NOT_FOUND
+                - IAM_SOD_VIOLATION
+                - IAM_LAST_ADMIN_PROTECTION
+                - IAM_PRIVILEGED_APPROVAL_REQUIRED
+                - IAM_GRANT_EXPIRED
             message:
               type: string
             retryable:

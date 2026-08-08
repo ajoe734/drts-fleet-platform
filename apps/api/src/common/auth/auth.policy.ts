@@ -750,5 +750,14 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("identity/") || routePath === "identity") {
+    return {
+      routeKey: `identity:${upperMethod}`,
+      requiredScopes: methodScope("identity:read", "identity:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "tenant", "ops"),
+      description: "Identity and privileged role governance access",
+    };
+  }
+
   return null;
 }

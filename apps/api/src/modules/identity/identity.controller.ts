@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Optional,
   Param,
   Post,
@@ -17,9 +18,17 @@ import type {
   IamSessionRevokeCommand,
   IdentityContext,
   StepUpProof,
+  CreatePrivilegedRoleRequestCommand,
+  ApprovePrivilegedRoleRequestCommand,
+  RejectPrivilegedRoleRequestCommand,
+  RemovePrivilegedRoleGrantCommand,
 } from "@drts/contracts";
 
-import { ApiRequestError, toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import {
   CurrentIdentity,
   OpenRoute,
@@ -27,8 +36,12 @@ import {
   StepUpProofService,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
-import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import {
+  OPEN_ROUTE_RATE_LIMIT,
+  READ_HEAVY_RATE_LIMIT,
+} from "../../common/throttling/rate-limit.constants";
 import { IdentityRepository } from "./identity.repository";
+import { PrivilegedRoleGovernanceService } from "./privileged-role-governance.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import {
   maskSessionRecord,
@@ -45,6 +58,7 @@ export class IdentityController {
     @Optional() private readonly identityRepository?: IdentityRepository,
     @Optional() private readonly securityEventsService?: SecurityEventsService,
     @Optional() private readonly stepUpProofService?: StepUpProofService,
+    @Optional() private readonly privilegedRoleGovernanceService?: PrivilegedRoleGovernanceService,
   ) {}
 
   @OpenRoute()
@@ -93,6 +107,7 @@ export class IdentityController {
     );
     return toApiSuccessEnvelope(proof, requestId);
   }
+
   @Get("sessions")
   async listAdminSessions(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -260,6 +275,168 @@ export class IdentityController {
       },
       requestId,
     );
+  }
+
+  @Post("privileged-role-requests")
+  createPrivilegedRoleRequest(
+    @Body() command: CreatePrivilegedRoleRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_CREDENTIALS_INVALID",
+        "Authenticated identity is required to request privileged role.",
+      );
+    }
+    if (!this.privilegedRoleGovernanceService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Privileged role governance service is not configured.",
+      );
+    }
+    const result = this.privilegedRoleGovernanceService.createRequest(command, identity);
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("privileged-role-requests")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listPrivilegedRoleRequests(
+    @Query("tenantId") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!this.privilegedRoleGovernanceService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Privileged role governance service is not configured.",
+      );
+    }
+    const items = this.privilegedRoleGovernanceService.listRequests(tenantId);
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("privileged-role-requests/:requestId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPrivilegedRoleRequest(
+    @Param("requestId") requestIdParam: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!this.privilegedRoleGovernanceService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Privileged role governance service is not configured.",
+      );
+    }
+    const result = this.privilegedRoleGovernanceService.getRequest(requestIdParam);
+    if (!result) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "IAM_APPROVAL_NOT_FOUND",
+        `Privileged role request '${requestIdParam}' not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("privileged-role-requests/:requestId/approve")
+  async approvePrivilegedRoleRequest(
+    @Param("requestId") requestIdParam: string,
+    @Body() command: ApprovePrivilegedRoleRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_CREDENTIALS_INVALID",
+        "Authenticated identity is required to approve privileged role request.",
+      );
+    }
+    if (!this.privilegedRoleGovernanceService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Privileged role governance service is not configured.",
+      );
+    }
+    const result = await this.privilegedRoleGovernanceService.approveRequest(
+      requestIdParam,
+      identity,
+      command,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("privileged-role-requests/:requestId/reject")
+  rejectPrivilegedRoleRequest(
+    @Param("requestId") requestIdParam: string,
+    @Body() command: RejectPrivilegedRoleRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_CREDENTIALS_INVALID",
+        "Authenticated identity is required to reject privileged role request.",
+      );
+    }
+    if (!this.privilegedRoleGovernanceService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Privileged role governance service is not configured.",
+      );
+    }
+    const result = this.privilegedRoleGovernanceService.rejectRequest(
+      requestIdParam,
+      identity,
+      command,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("privileged-role-grants/remove")
+  async removePrivilegedRoleGrant(
+    @Body() command: RemovePrivilegedRoleGrantCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_CREDENTIALS_INVALID",
+        "Authenticated identity is required to remove privileged role grant.",
+      );
+    }
+    if (!this.privilegedRoleGovernanceService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Privileged role governance service is not configured.",
+      );
+    }
+    const result = await this.privilegedRoleGovernanceService.removeGrant(command, identity);
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("privileged-role-grants/process-expiries")
+  async processExpiredPrivilegedRoleGrants(
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!this.privilegedRoleGovernanceService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Privileged role governance service is not configured.",
+      );
+    }
+    const expired = await this.privilegedRoleGovernanceService.expireStaleGrants();
+    return toApiSuccessEnvelope(toApiListData(expired), requestId);
   }
 
   private assertAdminReadAuthority(identity: BootstrapRequestIdentity): void {

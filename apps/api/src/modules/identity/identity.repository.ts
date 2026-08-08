@@ -1016,8 +1016,15 @@ export class IdentityRepository implements OnModuleInit {
     session: CanonicalIdentitySessionRecord,
   ): Promise<CanonicalIdentitySessionRecord> {
     if (!this.isEnabled()) {
-      this.fallbackSessions.set(session.sessionId, { ...session });
-      return { ...session };
+      const record: CanonicalIdentitySessionRecord = {
+        ...session,
+        status: session.status ?? "active",
+        tokenVersion: session.tokenVersion ?? 1,
+        createdAt: session.createdAt ?? new Date().toISOString(),
+        updatedAt: session.updatedAt ?? new Date().toISOString(),
+      };
+      this.fallbackSessions.set(session.sessionId, record);
+      return { ...record };
     }
 
     const client = await this.databaseService!.connect();
@@ -1360,11 +1367,6 @@ export class IdentityRepository implements OnModuleInit {
       [tenantId],
     );
 
-    return result.rows.map((row) =>
-      this.hydrateSessionRecord(row, "iam.identity_sessions"),
-    );
-  }
-
   async listSessions(
     query?: IamSessionInventoryQuery,
   ): Promise<CanonicalIdentitySessionRecord[]> {
@@ -1448,6 +1450,101 @@ export class IdentityRepository implements OnModuleInit {
     return result.rows.map((row) =>
       this.hydrateSessionRecord(row, "iam.identity_sessions"),
     );
+  }
+
+  async revokeSessionsByPrincipal(
+    principalId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ): Promise<number> {
+    const revokedAt = new Date().toISOString();
+    let count = 0;
+    if (!this.isEnabled()) {
+      for (const [id, session] of this.fallbackSessions.entries()) {
+        if (
+          (session.principalId === principalId || session.actorId === principalId) &&
+          session.status === "active"
+        ) {
+          const updated: CanonicalIdentitySessionRecord = {
+            ...session,
+            status: "revoked",
+            revokedAt,
+            revokedByPrincipalId: revokedByPrincipalId || null,
+            revokeReason: reason,
+            updatedAt: revokedAt,
+          };
+          this.fallbackSessions.set(id, updated);
+          count++;
+
+          for (const [familyId, family] of this.fallbackRefreshFamilies.entries()) {
+            if (family.sessionId === id && family.status === "active") {
+              this.fallbackRefreshFamilies.set(familyId, {
+                ...family,
+                status: "revoked",
+                updatedAt: revokedAt,
+              });
+            }
+          }
+        }
+      }
+      return count;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{ session_id: string }>(
+        `
+          UPDATE iam.identity_sessions
+          SET status = 'revoked',
+              revoked_at = $2::timestamptz,
+              revoked_by_principal_id = $3::text,
+              revoke_reason = $4::text,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                      '{revokedAt}', to_jsonb($2::text)
+                    ),
+                    '{revokedByPrincipalId}', to_jsonb($3::text)
+                  ),
+                  '{revokeReason}', to_jsonb($4::text)
+                ),
+                '{updatedAt}', to_jsonb($2::text)
+              )
+          WHERE (principal_id = $1::text OR actor_id = $1::text)
+            AND status = 'active'
+          RETURNING session_id
+        `,
+        [principalId, revokedAt, revokedByPrincipalId || null, reason],
+      );
+
+      const sessionIds = result.rows.map((r) => r.session_id);
+      if (sessionIds.length > 0) {
+        await client.query(
+          `
+            UPDATE iam.identity_refresh_families
+            SET status = 'revoked',
+                updated_at = $2::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                  '{updatedAt}', to_jsonb($2::text)
+                )
+            WHERE session_id = ANY($1::text[]) AND status = 'active'
+          `,
+          [sessionIds, revokedAt],
+        );
+      }
+      await client.query("COMMIT");
+      return sessionIds.length;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async findActiveSessionByDevice(
