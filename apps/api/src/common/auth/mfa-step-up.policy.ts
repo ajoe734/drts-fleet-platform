@@ -16,6 +16,7 @@ export const TRUSTED_MFA_AMR_METHODS = new Set([
   "hwk",
   "webauthn",
   "duo",
+  "verified_iap_workforce",
 ]);
 
 export const DEFAULT_MFA_MAX_AGE_SECONDS = 300; // 5 minutes

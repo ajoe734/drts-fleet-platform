@@ -199,6 +199,63 @@ export class AuthController {
         },
       );
 
+      const rawAuthTime = request.headers["x-auth-time"];
+      const authTimeStr = Array.isArray(rawAuthTime)
+        ? rawAuthTime[0]
+        : rawAuthTime;
+      const headerAuthTime = authTimeStr
+        ? !isNaN(Number(authTimeStr))
+          ? Number(authTimeStr)
+          : !isNaN(Date.parse(authTimeStr))
+            ? Math.floor(Date.parse(authTimeStr) / 1000)
+            : null
+        : null;
+
+      const resolvedAuthTimeSeconds =
+        headerAuthTime ??
+        (typeof resolved.payload?.auth_time === "number"
+          ? resolved.payload.auth_time
+          : typeof resolved.payload?.iat === "number"
+            ? resolved.payload.iat
+            : null);
+
+      const authTimeIso =
+        resolvedAuthTimeSeconds !== null
+          ? new Date(resolvedAuthTimeSeconds * 1000).toISOString()
+          : new Date().toISOString();
+
+      const rawAmr = request.headers["x-amr"];
+      const amrList = Array.isArray(rawAmr)
+        ? rawAmr
+        : typeof rawAmr === "string"
+          ? rawAmr.split(/[,|;\s]+/).filter(Boolean)
+          : [];
+      const resolvedAmr =
+        amrList.length > 0
+          ? amrList
+          : Array.isArray(resolved.payload?.amr)
+            ? (resolved.payload!.amr as string[])
+            : typeof resolved.payload?.amr === "string"
+              ? (resolved.payload!.amr as string)
+                  .split(/[,|;\s]+/)
+                  .filter(Boolean)
+              : ["verified_iap_workforce"];
+
+      const acrHeader =
+        (request.headers["x-acr"] as string | undefined) ?? null;
+      const resolvedAcr =
+        acrHeader ??
+        (typeof resolved.payload?.acr === "string"
+          ? resolved.payload!.acr
+          : "aal2");
+
+      const sid =
+        (request.headers["x-sid"] as string | undefined) ??
+        (request.headers["x-session-id"] as string | undefined) ??
+        null;
+      const sessionIdentifier =
+        sid ?? `session_iap_${resolved.principal.principalId}`;
+
       const identity: BootstrapRequestIdentity = {
         authMode: "jwt_bearer",
         actorType:
@@ -217,6 +274,11 @@ export class AuthController {
         scopes: resolved.effectiveScopes,
         requestId:
           (request.headers["x-request-id"] as string | undefined) ?? null,
+        sid: sessionIdentifier,
+        sessionId: sessionIdentifier,
+        authTime: authTimeIso,
+        amr: resolvedAmr,
+        acr: resolvedAcr,
       };
 
       const expiresIn: JwtExpiresIn = "8h";
@@ -226,10 +288,11 @@ export class AuthController {
         membershipId: resolved.membership.membershipId,
         subject: resolved.principal.subject,
         ensurePrincipal: false,
-        authTime: new Date().toISOString(),
-        amr: ["verified_iap_workforce"],
-        acr: "aal2",
+        authTime: authTimeIso,
+        amr: resolvedAmr,
+        acr: resolvedAcr,
         tokenVersion: resolved.tokenVersion,
+        sessionId: sessionIdentifier,
       });
       return { token: issued.token, expiresIn };
     }

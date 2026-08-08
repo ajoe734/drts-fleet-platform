@@ -1276,5 +1276,104 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       delete process.env.IAP_EXPECTED_AUDIENCE;
       delete process.env.IAP_JWT_SECRET;
     });
+
+    it("verifies AuthController /auth/token preserves upstream auth_time and rejects privileged route when exchanged bearer token auth_time is stale", async () => {
+      process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+      process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+      process.env.JWT_SECRET = INTEGRATION_TEST_SECRET;
+      process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+
+      const identityRepo = new IdentityRepository();
+      const securityEventsService = new SecurityEventsService();
+      const adapter = new IAPSubjectAdapter(
+        identityRepo,
+        securityEventsService,
+      );
+      const jwtAuthService = new JwtAuthService();
+      const tenantPartnerService = new TenantPartnerService(
+        securityEventsService as any,
+      );
+      const driverDeviceSessionService = new DriverDeviceSessionService(
+        jwtAuthService,
+        null as any,
+        null as any,
+      );
+      const authController = new AuthController(
+        jwtAuthService,
+        tenantPartnerService,
+        driverDeviceSessionService,
+        securityEventsService,
+        adapter,
+      );
+
+      const staleAuthTimeSeconds = Math.floor(Date.now() / 1000) - 600; // 10 minutes old (> 300s)
+      const token = signAssertion({
+        sub: "iap_stale_auth_sub_001",
+        email: "stale-admin@platform.drts",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
+        auth_time: staleAuthTimeSeconds,
+      });
+
+      const issueResult = await authController.issueToken({
+        headers: {
+          "x-drts-internal-key": "test_internal_key_123",
+          "x-goog-iap-jwt-assertion": token,
+        },
+      });
+
+      expect(issueResult.token).toBeTruthy();
+      const payload = jwtAuthService.verify(issueResult.token);
+      expect(payload?.auth_time).toBe(staleAuthTimeSeconds);
+
+      // Now verify that BootstrapAuthGuard rejects privileged action using this bearer token
+      const reflector = {
+        getAllAndOverride: (key: string) => {
+          if (key === "auth:allowed_realms") return ["platform"];
+          if (key === "auth:required_scopes") return ["tenant:write"];
+          return undefined;
+        },
+      } as any;
+
+      const guard = new BootstrapAuthGuard(
+        reflector,
+        jwtAuthService,
+        undefined,
+        securityEventsService as any,
+        adapter,
+      );
+
+      const mockRequest: any = {
+        headers: {
+          authorization: `Bearer ${issueResult.token}`,
+        },
+        method: "POST",
+        url: "/api/tenant/users/user-1/role",
+        originalUrl: "/api/tenant/users/user-1/role",
+      };
+
+      const context: any = {
+        switchToHttp: () => ({ getRequest: () => mockRequest }),
+        getHandler: () => () => {},
+        getClass: () => class {},
+      };
+
+      let error: ApiRequestError | null = null;
+      try {
+        await guard.canActivate(context);
+      } catch (err: any) {
+        if (err instanceof ApiRequestError) {
+          error = err;
+        }
+      }
+
+      expect(error).not.toBeNull();
+      expect(error?.getStatus()).toBe(403);
+      expect(error?.code).toBe("AUTH_STEP_UP_REQUIRED");
+
+      delete process.env.IAP_EXPECTED_AUDIENCE;
+      delete process.env.IAP_JWT_SECRET;
+      delete process.env.JWT_SECRET;
+      delete process.env.DRTS_INTERNAL_KEY;
+    });
   });
 });
