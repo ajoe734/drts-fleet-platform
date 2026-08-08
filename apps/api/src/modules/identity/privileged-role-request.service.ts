@@ -39,8 +39,6 @@ const MFA_METHOD_HINTS = ["mfa", "otp", "totp", "webauthn", "hardware_key"];
 
 @Injectable()
 export class PrivilegedRoleRequestService {
-  private readonly requests = new Map<string, PrivilegedRoleRequestRecord>();
-
   constructor(
     private readonly identityRepository: IdentityRepository,
     @Optional()
@@ -50,7 +48,7 @@ export class PrivilegedRoleRequestService {
   async listRequests(query: ListPrivilegedRoleRequestsQuery = {}) {
     await this.reconcileRequests();
 
-    return Array.from(this.requests.values())
+    return (await this.identityRepository.listPrivilegedRoleRequests())
       .filter((request) => {
         if (query.membershipId && request.membershipId !== query.membershipId) {
           return false;
@@ -69,7 +67,7 @@ export class PrivilegedRoleRequestService {
 
   async getRequest(requestId: string) {
     await this.reconcileRequests();
-    const request = this.requests.get(requestId);
+    const request = await this.identityRepository.findPrivilegedRoleRequestById(requestId);
     if (!request) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -129,7 +127,7 @@ export class PrivilegedRoleRequestService {
       updatedAt: now,
     };
 
-    this.requests.set(request.requestId, request);
+    await this.identityRepository.createPrivilegedRoleRequest(request);
     this.recordEvent({
       actorId: actorPrincipalId,
       actorType: identity?.actorType ?? "system",
@@ -199,18 +197,24 @@ export class PrivilegedRoleRequestService {
     }
 
     const now = new Date().toISOString();
-    request.approvalId = `approval_${request.requestId}`;
-    request.approvedByPrincipalId = actorPrincipalId;
-    request.approvedAt = now;
-    request.updatedAt = now;
-    request.version += 1;
-    request.status =
-      Date.parse(request.activateAt) <= Date.parse(now) ? "active" : "approved";
+    const updatedRequest: PrivilegedRoleRequestRecord = {
+      ...request,
+      approvalId: `approval_${request.requestId}`,
+      approvedByPrincipalId: actorPrincipalId,
+      approvedAt: now,
+      updatedAt: now,
+      version: request.version + 1,
+      status:
+        Date.parse(request.activateAt) <= Date.parse(now)
+          ? "active"
+          : "approved",
+    };
+    const persistedRequest = await this.persistRequest(updatedRequest, request.version);
 
-    await this.ensureRoleBinding(request);
-    if (request.status === "active") {
+    await this.ensureRoleBinding(persistedRequest);
+    if (persistedRequest.status === "active") {
       await this.invalidateTargetSessions(
-        request,
+        persistedRequest,
         "PRIVILEGED_ROLE_GRANT_ACTIVATED",
         actorPrincipalId,
       );
@@ -219,8 +223,8 @@ export class PrivilegedRoleRequestService {
     this.recordEvent({
       actorId: actorPrincipalId,
       actorType: identity?.actorType ?? "system",
-      subjectId: request.principalId,
-      realm: request.realm as IdentityContext["realm"],
+      subjectId: persistedRequest.principalId,
+      realm: persistedRequest.realm as IdentityContext["realm"],
       tenantId: null,
       partnerId: null,
       eventType: "privileged_role_request.approved",
@@ -237,13 +241,13 @@ export class PrivilegedRoleRequestService {
       requestId: null,
       traceId: null,
       reasonCode: null,
-      approvalId: request.approvalId,
+      approvalId: persistedRequest.approvalId,
       beforeSummary: null,
-      afterSummary: { ...request },
+      afterSummary: { ...persistedRequest },
       maskedContext: { note: command.note ?? null },
     });
 
-    return { ...request };
+    return { ...persistedRequest };
   }
 
   async rejectRequest(
@@ -266,17 +270,20 @@ export class PrivilegedRoleRequestService {
     }
 
     const now = new Date().toISOString();
-    request.status = "rejected";
-    request.rejectedByPrincipalId = actorPrincipalId;
-    request.rejectedAt = now;
-    request.updatedAt = now;
-    request.version += 1;
+    const persistedRequest = await this.persistRequest({
+      ...request,
+      status: "rejected",
+      rejectedByPrincipalId: actorPrincipalId,
+      rejectedAt: now,
+      updatedAt: now,
+      version: request.version + 1,
+    }, request.version);
 
     this.recordEvent({
       actorId: actorPrincipalId,
       actorType: identity?.actorType ?? "system",
-      subjectId: request.principalId,
-      realm: request.realm as IdentityContext["realm"],
+      subjectId: persistedRequest.principalId,
+      realm: persistedRequest.realm as IdentityContext["realm"],
       tenantId: null,
       partnerId: null,
       eventType: "privileged_role_request.rejected",
@@ -295,11 +302,11 @@ export class PrivilegedRoleRequestService {
       reasonCode: null,
       approvalId: null,
       beforeSummary: null,
-      afterSummary: { ...request },
+      afterSummary: { ...persistedRequest },
       maskedContext: { note: command.note ?? null },
     });
 
-    return { ...request };
+    return { ...persistedRequest };
   }
 
   async removeGrant(
@@ -323,19 +330,22 @@ export class PrivilegedRoleRequestService {
     await this.assertNotLastAdmin(request);
 
     const now = new Date().toISOString();
-    request.status = "removed";
-    request.removedByPrincipalId = actorPrincipalId;
-    request.removedAt = now;
-    request.updatedAt = now;
-    request.version += 1;
+    const persistedRequest = await this.persistRequest({
+      ...request,
+      status: "removed",
+      removedByPrincipalId: actorPrincipalId,
+      removedAt: now,
+      updatedAt: now,
+      version: request.version + 1,
+    }, request.version);
 
     await this.identityRepository.ensureRoleBinding({
-      ...this.toRoleBindingRecord(request),
+      ...this.toRoleBindingRecord(persistedRequest),
       validTo: now,
       updatedAt: now,
     });
     await this.invalidateTargetSessions(
-      request,
+      persistedRequest,
       "PRIVILEGED_ROLE_GRANT_REMOVED",
       actorPrincipalId,
     );
@@ -343,8 +353,8 @@ export class PrivilegedRoleRequestService {
     this.recordEvent({
       actorId: actorPrincipalId,
       actorType: identity?.actorType ?? "system",
-      subjectId: request.principalId,
-      realm: request.realm as IdentityContext["realm"],
+      subjectId: persistedRequest.principalId,
+      realm: persistedRequest.realm as IdentityContext["realm"],
       tenantId: null,
       partnerId: null,
       eventType: "privileged_role_request.removed",
@@ -361,61 +371,61 @@ export class PrivilegedRoleRequestService {
       requestId: null,
       traceId: null,
       reasonCode: command.reasonCode,
-      approvalId: request.approvalId,
+      approvalId: persistedRequest.approvalId,
       beforeSummary: null,
-      afterSummary: { ...request },
+      afterSummary: { ...persistedRequest },
       maskedContext: { note: command.note ?? null },
     });
 
-    return { ...request };
+    return { ...persistedRequest };
   }
 
   async reconcileRequests(now = new Date().toISOString()) {
-    for (const request of this.requests.values()) {
+    for (const request of await this.identityRepository.listPrivilegedRoleRequests()) {
       if (request.status === "approved") {
         const expiresAtMs = request.expiresAt ? Date.parse(request.expiresAt) : Number.NaN;
         if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.parse(now)) {
-          request.status = "expired";
-          request.updatedAt = now;
-          request.version += 1;
+          const persistedRequest = await this.persistRequest({
+            ...request, status: "expired", updatedAt: now, version: request.version + 1,
+          }, request.version);
           await this.identityRepository.ensureRoleBinding({
-            ...this.toRoleBindingRecord(request),
-            validTo: request.expiresAt,
+            ...this.toRoleBindingRecord(persistedRequest),
+            validTo: persistedRequest.expiresAt,
             updatedAt: now,
           });
           continue;
         }
 
         if (Date.parse(request.activateAt) <= Date.parse(now)) {
-          request.status = "active";
-          request.updatedAt = now;
-          request.version += 1;
-          await this.ensureRoleBinding(request);
+          const persistedRequest = await this.persistRequest({
+            ...request, status: "active", updatedAt: now, version: request.version + 1,
+          }, request.version);
+          await this.ensureRoleBinding(persistedRequest);
           await this.invalidateTargetSessions(
-            request,
+            persistedRequest,
             "PRIVILEGED_ROLE_GRANT_ACTIVATED",
             request.approvedByPrincipalId ?? undefined,
           );
-          this.recordLifecycleEvent("privileged_role_request.activated", request);
+          this.recordLifecycleEvent("privileged_role_request.activated", persistedRequest);
         }
       }
 
       if (request.status === "active" && request.expiresAt) {
         if (Date.parse(request.expiresAt) <= Date.parse(now)) {
-          request.status = "expired";
-          request.updatedAt = now;
-          request.version += 1;
+          const persistedRequest = await this.persistRequest({
+            ...request, status: "expired", updatedAt: now, version: request.version + 1,
+          }, request.version);
           await this.identityRepository.ensureRoleBinding({
-            ...this.toRoleBindingRecord(request),
-            validTo: request.expiresAt,
+            ...this.toRoleBindingRecord(persistedRequest),
+            validTo: persistedRequest.expiresAt,
             updatedAt: now,
           });
           await this.invalidateTargetSessions(
-            request,
+            persistedRequest,
             "PRIVILEGED_ROLE_GRANT_EXPIRED",
             request.approvedByPrincipalId ?? undefined,
           );
-          this.recordLifecycleEvent("privileged_role_request.expired", request);
+          this.recordLifecycleEvent("privileged_role_request.expired", persistedRequest);
         }
       }
     }
@@ -425,7 +435,7 @@ export class PrivilegedRoleRequestService {
     requestId: string,
     expectedVersion: number,
   ) {
-    const request = this.requests.get(requestId);
+    const request = await this.identityRepository.findPrivilegedRoleRequestById(requestId);
     if (!request) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -447,6 +457,30 @@ export class PrivilegedRoleRequestService {
       );
     }
     return request;
+  }
+
+  private async persistRequest(
+    request: PrivilegedRoleRequestRecord,
+    expectedVersion: number,
+  ): Promise<PrivilegedRoleRequestRecord> {
+    const persisted = await this.identityRepository.compareAndSwapPrivilegedRoleRequest(
+      request,
+      expectedVersion,
+    );
+    if (persisted) return persisted;
+    const latest = await this.identityRepository.findPrivilegedRoleRequestById(
+      request.requestId,
+    );
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "IAM_CONCURRENCY_CONFLICT",
+      "The privileged role request version no longer matches the expected version.",
+      {
+        requestId: request.requestId,
+        expectedVersion,
+        actualVersion: latest?.version ?? null,
+      },
+    );
   }
 
   private async requireMembership(membershipId: string) {
@@ -524,7 +558,9 @@ export class PrivilegedRoleRequestService {
     const now = Date.now();
     const amr = identity?.amr ?? [];
     const hasFreshAuth =
-      Number.isFinite(authTime) && now - authTime <= STEP_UP_MAX_AGE_MS;
+      Number.isFinite(authTime) &&
+      authTime <= now &&
+      now - authTime <= STEP_UP_MAX_AGE_MS;
     const hasMfaMethod = amr.some((method) =>
       MFA_METHOD_HINTS.some((hint) => method.toLowerCase().includes(hint)),
     );

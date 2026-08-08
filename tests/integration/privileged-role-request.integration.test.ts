@@ -93,7 +93,7 @@ async function seedMembership(params: {
 }
 
 describe("PrivilegedRoleRequestService integration", () => {
-  it("blocks requester self-approval and enforces approval versioning", async () => {
+  it("blocks requester self-approval and atomically permits only one concurrent approval", async () => {
     const repo = new IdentityRepository();
     const events = new SecurityEventsService();
     const service = new PrivilegedRoleRequestService(repo, events);
@@ -129,20 +129,29 @@ describe("PrivilegedRoleRequestService integration", () => {
     });
 
     const approver = buildIdentity("approver_principal");
-    const approved = await service.approveRequest(
-      request.requestId,
-      { expectedVersion: request.version },
-      approver,
-    );
-    expect(approved.status).toBe("active");
-
-    await expect(
+    const approvalAttempts = await Promise.allSettled([
+      service.approveRequest(
+        request.requestId,
+        { expectedVersion: request.version },
+        approver,
+      ),
       service.approveRequest(
         request.requestId,
         { expectedVersion: request.version },
         buildIdentity("second_approver"),
       ),
-    ).rejects.toMatchObject<ApiRequestError>({
+    ]);
+    const successfulApprovals = approvalAttempts.filter(
+      (attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<typeof service.approveRequest>>> =>
+        attempt.status === "fulfilled",
+    );
+    const failedApprovals = approvalAttempts.filter(
+      (attempt): attempt is PromiseRejectedResult => attempt.status === "rejected",
+    );
+    expect(successfulApprovals).toHaveLength(1);
+    expect(successfulApprovals[0]?.value.status).toBe("active");
+    expect(failedApprovals).toHaveLength(1);
+    expect(failedApprovals[0]?.reason).toMatchObject<ApiRequestError>({
       code: "IAM_CONCURRENCY_CONFLICT",
     });
 
@@ -150,9 +159,38 @@ describe("PrivilegedRoleRequestService integration", () => {
       eventType: "privileged_role_request.approved",
     });
     expect(eventList).toHaveLength(1);
-    expect(new Date(approved.updatedAt).getTime()).toBeGreaterThanOrEqual(
+    expect(new Date(successfulApprovals[0]!.value.updatedAt).getTime()).toBeGreaterThanOrEqual(
       Date.parse(now),
     );
+  });
+
+  it("persists request lifecycle records across service instances", async () => {
+    const repo = new IdentityRepository();
+    await seedMembership({
+      repo,
+      principalId: "target_principal",
+      membershipId: "membership_target",
+      sourceRef: "target",
+      realm: "platform",
+      roleBindings: [],
+    });
+    const firstService = new PrivilegedRoleRequestService(repo);
+    const request = await firstService.createRequest(
+      {
+        membershipId: "membership_target",
+        roleCode: "platform_admin",
+        justification: "Persist this governance request.",
+      },
+      buildIdentity("requester_principal"),
+    );
+
+    const secondService = new PrivilegedRoleRequestService(repo);
+    const reloaded = await secondService.getRequest(request.requestId);
+    expect(reloaded).toMatchObject({
+      requestId: request.requestId,
+      status: "pending_approval",
+      version: 1,
+    });
   });
 
   it("requires fresh MFA for privileged governance mutations", async () => {
@@ -185,6 +223,23 @@ describe("PrivilegedRoleRequestService integration", () => {
           justification: "Need elevated incident response access.",
         },
         staleIdentity,
+      ),
+    ).rejects.toMatchObject<ApiRequestError>({
+      code: "IAM_STEP_UP_REQUIRED",
+    });
+
+    await expect(
+      service.createRequest(
+        {
+          membershipId: "membership_target",
+          roleCode: "platform_admin",
+          justification: "Future assertions cannot satisfy a step-up check.",
+        },
+        buildIdentity(
+          "requester_principal",
+          "platform_admin",
+          new Date(Date.now() + 60_000).toISOString(),
+        ),
       ),
     ).rejects.toMatchObject<ApiRequestError>({
       code: "IAM_STEP_UP_REQUIRED",

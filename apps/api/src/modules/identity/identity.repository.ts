@@ -15,6 +15,7 @@ import type {
   ConsumeAndRotateRefreshTokenCommand,
   ConsumeAndRotateRefreshTokenResult,
   TenantUserRoleRecord,
+  PrivilegedRoleRequestRecord,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -93,6 +94,11 @@ export class IdentityRepository {
   private readonly fallbackRoleBindings = new Map<
     string,
     CanonicalIdentityRoleBindingRecord
+  >();
+
+  private readonly fallbackPrivilegedRoleRequests = new Map<
+    string,
+    PrivilegedRoleRequestRecord
   >();
 
   private readonly fallbackInvitations = new Map<
@@ -563,6 +569,94 @@ export class IdentityRepository {
     } finally {
       client.release();
     }
+  }
+
+  async listPrivilegedRoleRequests(): Promise<PrivilegedRoleRequestRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackPrivilegedRoleRequests.values(), (record) => ({
+        ...record,
+      }));
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.privileged_role_requests ORDER BY updated_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<PrivilegedRoleRequestRecord>(row.record, "iam.privileged_role_requests"),
+    );
+  }
+
+  async findPrivilegedRoleRequestById(
+    requestId: string,
+  ): Promise<PrivilegedRoleRequestRecord | null> {
+    if (!this.isEnabled()) {
+      const record = this.fallbackPrivilegedRoleRequests.get(requestId);
+      return record ? { ...record } : null;
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.privileged_role_requests WHERE request_id = $1 LIMIT 1`,
+      [requestId],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<PrivilegedRoleRequestRecord>(
+          result.rows[0].record,
+          "iam.privileged_role_requests",
+        )
+      : null;
+  }
+
+  async createPrivilegedRoleRequest(
+    record: PrivilegedRoleRequestRecord,
+  ): Promise<PrivilegedRoleRequestRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackPrivilegedRoleRequests.set(record.requestId, { ...record });
+      return { ...record };
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `INSERT INTO iam.privileged_role_requests (
+        request_id, membership_id, principal_id, realm, role_code,
+        request_status, version, activate_at, expires_at, created_at, updated_at, record
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+      RETURNING record`,
+      [
+        record.requestId, record.membershipId, record.principalId, record.realm,
+        record.roleCode, record.status, record.version, record.activateAt,
+        record.expiresAt, record.createdAt, record.updatedAt, JSON.stringify(record),
+      ],
+    );
+    return this.parseRecord<PrivilegedRoleRequestRecord>(
+      result.rows[0]?.record,
+      "iam.privileged_role_requests",
+    );
+  }
+
+  /** Atomically persists a lifecycle transition only when the supplied version is current. */
+  async compareAndSwapPrivilegedRoleRequest(
+    record: PrivilegedRoleRequestRecord,
+    expectedVersion: number,
+  ): Promise<PrivilegedRoleRequestRecord | null> {
+    if (!this.isEnabled()) {
+      const current = this.fallbackPrivilegedRoleRequests.get(record.requestId);
+      if (!current || current.version !== expectedVersion) return null;
+      this.fallbackPrivilegedRoleRequests.set(record.requestId, { ...record });
+      return { ...record };
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `UPDATE iam.privileged_role_requests SET
+        request_status = $2, version = $3, activate_at = $4, expires_at = $5,
+        updated_at = $6, record = $7::jsonb
+       WHERE request_id = $1 AND version = $8
+       RETURNING record`,
+      [
+        record.requestId, record.status, record.version, record.activateAt,
+        record.expiresAt, record.updatedAt, JSON.stringify(record), expectedVersion,
+      ],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<PrivilegedRoleRequestRecord>(
+          result.rows[0].record,
+          "iam.privileged_role_requests",
+        )
+      : null;
   }
 
   async upsertWorkforceIdentity(

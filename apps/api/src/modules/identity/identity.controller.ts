@@ -10,7 +10,12 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
-import { CurrentIdentity, OpenRoute } from "../../common/auth";
+import {
+  CurrentIdentity,
+  OpenRoute,
+  RequireRealms,
+  RequireScopes,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { PrivilegedRoleRequestService } from "./privileged-role-request.service";
@@ -47,6 +52,8 @@ export class IdentityController {
   }
 
   @Get("privileged-role-requests")
+  @RequireRealms("platform", "ops", "tenant")
+  @RequireScopes("identity:read")
   async listPrivilegedRoleRequests(
     @Query() query: ListPrivilegedRoleRequestsQuery,
     @Headers("x-request-id") requestId?: string,
@@ -60,6 +67,8 @@ export class IdentityController {
   }
 
   @Post("privileged-role-requests")
+  @RequireRealms("platform", "ops", "tenant")
+  @RequireScopes("identity:write")
   async createPrivilegedRoleRequest(
     @Body() command: CreatePrivilegedRoleRequestCommand,
     @CurrentIdentity() identity: IdentityContext | null,
@@ -72,6 +81,8 @@ export class IdentityController {
   }
 
   @Get("privileged-role-requests/:requestId")
+  @RequireRealms("platform", "ops", "tenant")
+  @RequireScopes("identity:read")
   async getPrivilegedRoleRequest(
     @Param("requestId") requestId: string,
     @Headers("x-request-id") requestIdHeader?: string,
@@ -83,6 +94,8 @@ export class IdentityController {
   }
 
   @Post("privileged-role-requests/:requestId/approve")
+  @RequireRealms("platform", "ops", "tenant")
+  @RequireScopes("identity:write")
   async approvePrivilegedRoleRequest(
     @Param("requestId") requestId: string,
     @Body() command: PrivilegedRoleRequestDecisionCommand,
@@ -100,6 +113,8 @@ export class IdentityController {
   }
 
   @Post("privileged-role-requests/:requestId/reject")
+  @RequireRealms("platform", "ops", "tenant")
+  @RequireScopes("identity:write")
   async rejectPrivilegedRoleRequest(
     @Param("requestId") requestId: string,
     @Body() command: PrivilegedRoleRequestDecisionCommand,
@@ -117,6 +132,8 @@ export class IdentityController {
   }
 
   @Post("privileged-role-requests/:requestId/remove")
+  @RequireRealms("platform", "ops", "tenant")
+  @RequireScopes("identity:write")
   async removePrivilegedRoleRequest(
     @Param("requestId") requestId: string,
     @Body() command: PrivilegedRoleRequestRemovalCommand,

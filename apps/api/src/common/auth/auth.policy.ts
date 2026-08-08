@@ -54,6 +54,20 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "identity/privileged-role-requests" ||
+    /^identity\/privileged-role-requests\/[^/]+(?:\/(approve|reject|remove))?$/.test(
+      routePath,
+    )
+  ) {
+    return {
+      routeKey: `identity:privileged-role-requests:${upperMethod}`,
+      requiredScopes: methodScope("identity:read", "identity:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Privileged role request governance",
+    };
+  }
+
   if (routePath === "notifications") {
     return {
       routeKey: `notifications:${upperMethod}`,
