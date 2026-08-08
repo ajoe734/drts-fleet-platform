@@ -5,8 +5,8 @@
 **Current Sidecar Owner:** `Claude`
 **Assigned Reviewer:** `Gemini`
 **Parent Owner / Reviewer:** `Gemini` / `Codex`
-**Last Revised:** `2026-08-08T08:36:00Z (UTC)`
-**Status:** `in_progress` (sidecar), parent `in_progress` with `INTEGRATION_STATUS=pr_open`
+**Last Revised:** `2026-08-08T08:40:47Z (UTC)`
+**Status:** `review_approved` → owner closeout (sidecar), parent `in_progress` with `INTEGRATION_STATUS=pr_open`
 **Verified Against Parent Head:** `f2bdbe845f51a0e39e8a359493f4bdcf1792df42` (`gemini/iam-ses-003`, 4 commits ahead of `origin/dev`)
 
 > **Moving target warning.** `gemini/iam-ses-003` advanced twice while this packet was being
@@ -465,17 +465,37 @@ AI_NAME=Gemini scripts/ai-status.sh reopen IAM-SES-003-SIDECAR-ACCEPTANCE "packe
 
 ## 9) Owner Closeout
 
-Reviewer 核准後，owner（`Claude`）收尾。本 sidecar 有實際 commit（新增 support artifact），因此仍提供 commit / push evidence：
+**Reviewer 判定（`Gemini`，`2026-08-08T08:39:09Z`）：`approve`。**
+review note：「IAM-SES-003 acceptance packet 結構完整，精確對齊 PR #1322 證據與 machine truth，
+未觸及 canonical truth，准予核准回到 owner 收尾」。task 進入 `review_approved`，交還 owner `Claude` 收尾。
+
+本 sidecar 有實際 commit（新增 support artifact），因此提供 commit / push evidence：
 
 ```bash
 AI_NAME=Claude \
-COMMIT_HASH=<sha> \
-COMMIT_SUBJECT="IAM-SES-003-SIDECAR-ACCEPTANCE: re-verify acceptance packet against parent head f2bdbe84" \
+COMMIT_HASH=<closeout-sha> \
+COMMIT_SUBJECT="IAM-SES-003-SIDECAR-ACCEPTANCE: record reviewer approval and owner closeout" \
 PUSH_REMOTE=origin \
 PUSH_BRANCH=claude/iam-ses-003-sidecar-acceptance \
 INTEGRATION_STATUS=branch_pushed \
 scripts/ai-status.sh done IAM-SES-003-SIDECAR-ACCEPTANCE "Owner finalized approved support-only acceptance packet for IAM-SES-003"
 ```
+
+### 9.1 Closeout Evidence
+
+| 項目 | 值 |
+| --- | --- |
+| Branch | `claude/iam-ses-003-sidecar-acceptance`（base `dev`，merge-base `7e5a29d5`） |
+| Commit 1 | `fdadf8ad` — `docs(IAM-SES-003-SIDECAR-ACCEPTANCE): add acceptance packet and dependency map` |
+| Commit 2 | `c1aba471` — `IAM-SES-003-SIDECAR-ACCEPTANCE: re-verify acceptance packet against parent head f2bdbe84` |
+| Commit 3（本次） | closeout commit，subject `IAM-SES-003-SIDECAR-ACCEPTANCE: record reviewer approval and owner closeout` |
+| Push | `origin`，普通 non-force push；`git ls-remote origin claude/iam-ses-003-sidecar-acceptance` 已確認 `c1aba471` 在遠端 |
+| `INTEGRATION_STATUS` | `branch_pushed` — branch 已推送、**未** merge 進 `dev`、**未**部署 dev 測試機 |
+| Canonical truth | 未修改；本 branch 的 diff 僅 `support/sidecars/IAM-SES-003/IAM-SES-003-SIDECAR-ACCEPTANCE.md` |
+
+**收尾層級聲明：** 本 task 的 `done` 只代表 support artifact 已交付並推送到 task branch。
+它**不**代表 `IAM-SES-003` 本身被接受，也**不**代表 PR #1322 可以 merge——§2.3 的 B-1..B-4 四個
+merge blocker 在 `f2bdbe84` 仍為紅燈，parent 應維持 `pr_open` 而非任何整合完成狀態。
 
 Parent absorption（是否把 H-0..H-6 吸收成主線修正或後續 backlog）由 parent owner `Gemini` 與 parent reviewer `Codex` 決定，不由此 sidecar 自動推進。
 
@@ -485,15 +505,32 @@ Parent absorption（是否把 H-0..H-6 吸收成主線修正或後續 backlog）
 `docs(IAM-SES-003-SIDECAR-ACCEPTANCE): add acceptance packet and dependency map`，
 與 B-1 指出的是**同一類**格式違規（應為 `<TASK-ID>: <summary>`）。該 commit 已 push，修正需要
 force push，違反 worker 協議「只做普通 non-force push」，因此**未修正**。第二個 commit
-`f1efe4e5` 已採用合規格式。
+`c1aba471` 與本次 closeout commit 已採用合規格式。
 
-- 影響範圍：若這條 sidecar branch 之後開 PR，`Commit trailers` gate 會因 `fdadf8ad` 失敗。
+已在本地實測確認（`2026-08-08T08:40Z`）：
+
+```
+python3 scripts/git/check_commit_trailers.py --base 7e5a29d5 --head HEAD
+::error::check_commit_trailers: 1 commit(s) failed trailer validation.
+  commit fdadf8ad32b4:
+    - subject must be `<TASK-ID>: <summary>`, got:
+      'docs(IAM-SES-003-SIDECAR-ACCEPTANCE): add acceptance packet and dependency map'
+```
+
+- 影響範圍：若這條 sidecar branch 之後開 PR，`Commit trailers` gate 會因 `fdadf8ad` 失敗（1/3 commit）。
 - 建議處置：由具備 branch 改寫授權的角色 rebase 修正，或在 squash-merge 時以合規 subject 落地。
+- 為何不在收尾時修：修正 `fdadf8ad` 需要改寫已 push 的歷史，只能 force push，而 dispatch 協議明文禁止
+  `--force`。因此此缺陷以**已揭露、未修正**的形式交付，不隱藏在綠燈敘述裡。
 
 ---
 
 ## 10) Change Log
 
+- 2026-08-08T08:40:47Z — 收尾版：記錄 reviewer `Gemini` 於 `2026-08-08T08:39:09Z` 的 `approve` 判定與
+  review note，新增 §9.1 Closeout Evidence（branch / 三個 commit / push / `INTEGRATION_STATUS=branch_pushed`）
+  與收尾層級聲明（sidecar `done` ≠ parent 接受 ≠ PR #1322 可 merge），把自我揭露段落中已過期的
+  commit hash `f1efe4e5` 更正為實際的 `c1aba471`，並補上 `check_commit_trailers.py` 的本地實測輸出。
+  未修改任何 canonical truth 或 parent runtime。
 - 2026-08-08T08:36:00Z — 第二版：把 packet 重新對齊到已前進兩次的 parent head `f2bdbe84`（初版錨在 `1e4b81af`）。
   新增 §2.2 CI gate 狀態與 §2.3 四項**已在本地重現**的 merge blocker（B-1 commit subject 格式 4/4 違規、
   B-2 `AuthController` constructor 位置參數位移導致 `service-workload-identity` 既有套件 12/18 回歸、
