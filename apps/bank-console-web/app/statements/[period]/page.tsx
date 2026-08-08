@@ -7,9 +7,10 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
-import { getStatementByPeriod, type StatementStatus } from "@/lib/statements";
+import { type StatementStatus } from "@/lib/statements";
 import { t, type Locale } from "@/lib/translations";
 
 const statementStatusTone: Record<
@@ -69,7 +70,9 @@ export default async function StatementDetailPage({
     resolvedSearchParams.role,
   );
   const issuerBrand = tenant.template;
-  const statement = getStatementByPeriod(period);
+  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
+  const statement =
+    statementData.data.statements.find((item) => item.period === period) ?? null;
 
   if (!statement) {
     notFound();
@@ -101,6 +104,13 @@ export default async function StatementDetailPage({
         }
         description={t("statements.detail.purpose", locale)}
       />
+      {statementData.degradedMessage ? (
+        <CalloutPanel
+          title="API degraded"
+          description={statementData.degradedMessage}
+          tone="warning"
+        />
+      ) : null}
 
       <section className="statement-detail-topline">
         <a
