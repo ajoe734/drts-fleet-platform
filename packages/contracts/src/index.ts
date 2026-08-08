@@ -2572,6 +2572,63 @@ export interface ConsumeAndRotateRefreshTokenResult {
     | "CONCURRENCY_CONFLICT";
 }
 
+export interface MaskedDeviceSummary {
+  browser?: string;
+  os?: string;
+  deviceType?: string;
+  ipPrefix?: string;
+  userAgentHash?: string;
+  deviceIdPreview?: string;
+  [key: string]: unknown;
+}
+
+export interface MaskedIdentitySessionRecord {
+  sessionId: string;
+  sourceRef: string | null;
+  principalId: string;
+  membershipId: string | null;
+  realm: string;
+  actorType?: IdentityContext["actorType"] | null;
+  actorId?: string | null;
+  tenantId?: string | null;
+  partnerId?: string | null;
+  status: SessionStatus;
+  authTime: string;
+  authMethods: string[];
+  tokenVersion: number;
+  idleExpiresAt: string | null;
+  absoluteExpiresAt: string;
+  revokedAt: string | null;
+  revokedByPrincipalId: string | null;
+  revokeReason: string | null;
+  deviceSummary: MaskedDeviceSummary;
+  riskSummary: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  isCurrentSession?: boolean;
+}
+
+export interface RevokeSessionCommand {
+  reason?: string;
+}
+
+export interface LogoutAllSessionsCommand {
+  reason?: string;
+  keepCurrentSession?: boolean;
+}
+
+export interface LogoutAllSessionsResult {
+  revokedCount: number;
+  message: string;
+}
+
+export interface AdminSessionInventoryQuery {
+  tenantId?: string | null;
+  principalId?: string | null;
+  status?: string | null;
+  limit?: number | null;
+}
+
 // --- Tenant User & Roles ---
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 

@@ -4,6 +4,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient } from "pg";
 
 import type {
+  AdminSessionInventoryQuery,
   CanonicalAccountStatus,
   CanonicalIdentityInvitationRecord,
   CanonicalIdentityMembershipRecord,
@@ -749,6 +750,176 @@ export class IdentityRepository {
     );
   }
 
+  async listSessionsForAdmin(
+    query: AdminSessionInventoryQuery = {},
+  ): Promise<CanonicalIdentitySessionRecord[]> {
+    const limit = Math.min(Math.max(query.limit ?? 50, 1), 500);
+
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackSessions.values())
+        .filter((s) => {
+          if (query.tenantId && s.tenantId !== query.tenantId) return false;
+          if (query.principalId && s.principalId !== query.principalId)
+            return false;
+          if (query.status && s.status !== query.status) return false;
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        )
+        .slice(0, limit);
+    }
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (query.tenantId) {
+      params.push(query.tenantId);
+      conditions.push(`tenant_id = $${params.length}`);
+    }
+    if (query.principalId) {
+      params.push(query.principalId);
+      conditions.push(`principal_id = $${params.length}`);
+    }
+    if (query.status) {
+      params.push(query.status);
+      conditions.push(`status = $${params.length}`);
+    }
+
+    params.push(limit);
+    const limitParamIndex = params.length;
+
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const sql = `SELECT * FROM iam.identity_sessions ${whereClause} ORDER BY updated_at DESC LIMIT $${limitParamIndex}`;
+
+    const result = await this.databaseService!.query<PersistedSessionRow>(
+      sql,
+      params,
+    );
+    return result.rows.map((row) =>
+      this.hydrateSessionRecord(row, "iam.identity_sessions"),
+    );
+  }
+
+  async revokeAllSessionsForPrincipal(
+    principalId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+    keepSessionId?: string,
+  ): Promise<number> {
+    const revokedAt = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      let count = 0;
+      for (const [sid, session] of this.fallbackSessions.entries()) {
+        if (
+          session.principalId === principalId &&
+          session.status === "active" &&
+          sid !== keepSessionId
+        ) {
+          this.fallbackSessions.set(sid, {
+            ...session,
+            status: "revoked",
+            revokedAt,
+            revokedByPrincipalId: revokedByPrincipalId || null,
+            revokeReason: reason,
+            updatedAt: revokedAt,
+          });
+          count++;
+
+          for (const [
+            familyId,
+            family,
+          ] of this.fallbackRefreshFamilies.entries()) {
+            if (family.sessionId === sid && family.status === "active") {
+              this.fallbackRefreshFamilies.set(familyId, {
+                ...family,
+                status: "revoked",
+                updatedAt: revokedAt,
+              });
+            }
+          }
+        }
+      }
+      return count;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const params: unknown[] = [
+        principalId,
+        revokedAt,
+        revokedByPrincipalId || null,
+        reason,
+      ];
+      let excludeCondition = "";
+      if (keepSessionId) {
+        params.push(keepSessionId);
+        excludeCondition = ` AND session_id != $5::text`;
+      }
+
+      const sessionResult = await client.query<PersistedSessionRow>(
+        `
+          UPDATE iam.identity_sessions
+          SET status = 'revoked',
+              revoked_at = $2::timestamptz,
+              revoked_by_principal_id = $3::text,
+              revoke_reason = $4::text,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(
+                        jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                        '{revokedAt}', to_jsonb($2::text)
+                      ),
+                      '{revokedByPrincipalId}', to_jsonb($3::text)
+                    ),
+                    '{revokeReason}', to_jsonb($4::text)
+                  ),
+                  '{updatedAt}', to_jsonb($2::text)
+                ),
+                '{status}', '"revoked"'::jsonb
+              )
+          WHERE principal_id = $1::text AND status = 'active'${excludeCondition}
+          RETURNING session_id
+        `,
+        params,
+      );
+
+      const revokedSessionIds = sessionResult.rows.map(
+        (row) => row.session_id,
+      );
+      if (revokedSessionIds.length > 0) {
+        await client.query(
+          `
+            UPDATE iam.identity_refresh_families
+            SET status = 'revoked',
+                updated_at = $2::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                  '{updatedAt}', to_jsonb($2::text)
+                )
+            WHERE session_id = ANY($1::text[]) AND status = 'active'
+          `,
+          [revokedSessionIds, revokedAt],
+        );
+      }
+
+      await client.query("COMMIT");
+      return revokedSessionIds.length;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async findActiveSessionByDevice(
     deviceId: string,
   ): Promise<CanonicalIdentitySessionRecord | null> {
@@ -1449,7 +1620,8 @@ export class IdentityRepository {
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb
         )
-        ON CONFLICT (source_ref) DO UPDATE SET
+        ON CONFLICT (principal_id) DO UPDATE SET
+          source_ref = EXCLUDED.source_ref,
           issuer = EXCLUDED.issuer,
           subject = EXCLUDED.subject,
           principal_type = EXCLUDED.principal_type,

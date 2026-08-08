@@ -127,6 +127,42 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     domain: "device",
   },
   {
+    operationId: "logoutSession",
+    method: "post",
+    path: "/api/auth/logout",
+    domain: "session",
+  },
+  {
+    operationId: "logoutAllSessions",
+    method: "post",
+    path: "/api/auth/logout-all",
+    domain: "session",
+  },
+  {
+    operationId: "listSelfSessions",
+    method: "get",
+    path: "/api/auth/sessions",
+    domain: "session",
+  },
+  {
+    operationId: "revokeSelfSession",
+    method: "post",
+    path: "/api/auth/sessions/{sid}/revoke",
+    domain: "session",
+  },
+  {
+    operationId: "listAdminSessions",
+    method: "get",
+    path: "/api/identity/sessions",
+    domain: "session",
+  },
+  {
+    operationId: "revokeAdminSession",
+    method: "post",
+    path: "/api/identity/sessions/{sid}/revoke",
+    domain: "session",
+  },
+  {
     operationId: "getIdentityContext",
     method: "get",
     path: "/api/identity/context",

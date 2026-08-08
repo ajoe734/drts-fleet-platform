@@ -1,15 +1,20 @@
-import { Body, Controller, Headers, Optional, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Optional, Param, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  CanonicalIdentitySessionRecord,
   CreatePartnerBootstrapSessionCommand,
   DriverDeviceProvisioningSession,
   CreateTenantBootstrapSessionCommand,
   IdentityContext,
+  LogoutAllSessionsCommand,
+  LogoutAllSessionsResult,
+  MaskedIdentitySessionRecord,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
   RegisterDriverDeviceCommand,
   RevokeDriverDeviceBindingCommand,
+  RevokeSessionCommand,
   TenantBootstrapSession,
   TenantPortalProfile,
   TenantRoleCatalogRecord,
@@ -38,8 +43,10 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
+import { maskSessionRecord } from "../../common/auth/session-masking.util";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
+import { IdentityRepository } from "../identity/identity.repository";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import {
@@ -50,10 +57,41 @@ import {
 } from "./service-workload-identity.adapter";
 
 interface TokenRequest {
-  headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
+  headers: AuthBootstrapHeaders & {
+    "x-drts-internal-key"?: string;
+    "x-csrf-token"?: string;
+    "x-xsrf-token"?: string;
+    cookie?: string;
+  };
   method?: string;
   originalUrl?: string;
   url?: string;
+}
+
+function checkCsrfProtection(
+  identity: BootstrapRequestIdentity,
+  req: TokenRequest,
+  csrfHeader?: string,
+  xsrfHeader?: string,
+) {
+  const isCookieAuth =
+    (identity.authMode as string) === "cookie" ||
+    Boolean(
+      req.headers &&
+        req.headers.cookie &&
+        !(req.headers as Record<string, string | undefined>).authorization,
+    );
+
+  if (isCookieAuth) {
+    const token = csrfHeader || xsrfHeader;
+    if (!token || !token.trim()) {
+      throw new ApiRequestError(
+        403,
+        "CSRF_TOKEN_INVALID",
+        "CSRF token missing or invalid for browser cookie session mutation",
+      );
+    }
+  }
 }
 
 type JwtExpiresIn = NonNullable<
@@ -84,6 +122,8 @@ export class AuthController {
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional()
     private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
   ) {}
 
   @OpenRoute()
@@ -779,4 +819,269 @@ export class AuthController {
       throw error;
     }
   }
+
+  @Post("logout")
+  async logout(
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
+    @Body() body: RevokeSessionCommand,
+    @Req() req: TokenRequest,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-csrf-token") csrfHeader?: string,
+    @Headers("x-xsrf-token") xsrfHeader?: string,
+  ) {
+    checkCsrfProtection(identity, req, csrfHeader, xsrfHeader);
+
+    const principalId = identity.principalId || identity.actorId;
+    const sid = identity.sessionId;
+    const reason = body?.reason?.trim() || "User self logout";
+
+    if (sid && this.identityRepository) {
+      await this.identityRepository.revokeSession(
+        sid,
+        reason,
+        principalId || undefined,
+      );
+    }
+
+    if (this.securityEventsService) {
+      this.securityEventsService.recordEvent({
+        eventType: "AUTH_LOGOUT_SUCCESS",
+        eventFamily: "session",
+        outcome: "success",
+        severity: "low",
+        actorId: identity.actorId ?? null,
+        actorType: identity.actorType,
+        realm: identity.realm,
+        tenantId: identity.tenantId ?? null,
+        partnerId: identity.partnerId ?? null,
+        targetType: "session",
+        targetId: sid ?? identity.actorId ?? null,
+        sessionId: sid ?? null,
+        authMethods: ["bearer"],
+        reasonCode: "USER_LOGOUT",
+        requestId: requestId ?? null,
+        traceId: null,
+        approvalId: null,
+      });
+    }
+
+    return toApiSuccessEnvelope(
+      { success: true, message: "Logged out successfully" },
+      requestId,
+    );
+  }
+
+  @Post("logout-all")
+  async logoutAll(
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
+    @Body() body: LogoutAllSessionsCommand,
+    @Req() req: TokenRequest,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-csrf-token") csrfHeader?: string,
+    @Headers("x-xsrf-token") xsrfHeader?: string,
+  ) {
+    checkCsrfProtection(identity, req, csrfHeader, xsrfHeader);
+
+    const principalId = identity.principalId || identity.actorId;
+    if (!principalId) {
+      throw new ApiRequestError(
+        400,
+        "IAM_PRINCIPAL_REQUIRED",
+        "Principal ID required for logout-all",
+      );
+    }
+
+    const reason = body?.reason?.trim() || "User self logout-all";
+    const keepCurrent = body?.keepCurrentSession === true;
+    const currentSid = keepCurrent
+      ? identity.sessionId || undefined
+      : undefined;
+
+    let revokedCount = 0;
+    if (this.identityRepository) {
+      revokedCount =
+        await this.identityRepository.revokeAllSessionsForPrincipal(
+          principalId,
+          reason,
+          principalId,
+          currentSid,
+        );
+    }
+
+    if (this.securityEventsService) {
+      this.securityEventsService.recordEvent({
+        eventType: "AUTH_LOGOUT_ALL_SUCCESS",
+        eventFamily: "session",
+        outcome: "success",
+        severity: "low",
+        actorId: identity.actorId ?? null,
+        actorType: identity.actorType,
+        realm: identity.realm,
+        tenantId: identity.tenantId ?? null,
+        partnerId: identity.partnerId ?? null,
+        targetType: "principal_sessions",
+        targetId: principalId,
+        sessionId: identity.sessionId ?? null,
+        authMethods: ["bearer"],
+        reasonCode: "USER_LOGOUT_ALL",
+        maskedContext: { revokedCount, keepCurrentSession: keepCurrent },
+        requestId: requestId ?? null,
+        traceId: null,
+        approvalId: null,
+      });
+    }
+
+    return toApiSuccessEnvelope(
+      { count: revokedCount, message: `Logged out ${revokedCount} sessions` },
+      requestId,
+    );
+  }
+
+  @Get("sessions")
+  async listSelfSessions(
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const principalId = identity.principalId || identity.actorId;
+    if (!principalId) {
+      return toApiSuccessEnvelope({ items: [] }, requestId);
+    }
+
+    let sessions: CanonicalIdentitySessionRecord[] = [];
+    if (this.identityRepository) {
+      sessions =
+        await this.identityRepository.listSessionsByPrincipal(principalId);
+    }
+
+    const items: MaskedIdentitySessionRecord[] = sessions.map((s) =>
+      maskSessionRecord(s, identity.sessionId),
+    );
+
+    return toApiSuccessEnvelope({ items }, requestId);
+  }
+
+  @Post("sessions/:sid/revoke")
+  async revokeSelfSession(
+    @Param("sid") sid: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
+    @Body() body: RevokeSessionCommand,
+    @Req() req: TokenRequest,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-csrf-token") csrfHeader?: string,
+    @Headers("x-xsrf-token") xsrfHeader?: string,
+  ) {
+    checkCsrfProtection(identity, req, csrfHeader, xsrfHeader);
+
+    if (!sid) {
+      throw new ApiRequestError(
+        400,
+        "IAM_SESSION_ID_REQUIRED",
+        "Session ID required",
+      );
+    }
+
+    const targetSession = this.identityRepository
+      ? await this.identityRepository.getSession(sid)
+      : null;
+
+    if (!targetSession) {
+      throw new ApiRequestError(
+        404,
+        "IAM_CREDENTIAL_NOT_FOUND",
+        `Session ${sid} not found`,
+      );
+    }
+
+    const principalId = identity.principalId || identity.actorId;
+    const isSelf =
+      targetSession.principalId === principalId ||
+      targetSession.principalId === identity.actorId;
+
+    if (!isSelf) {
+      const isAdmin =
+        identity.roles?.includes("platform_superadmin") ||
+        identity.roles?.includes("platform_user_admin") ||
+        identity.roles?.includes("tenant_admin") ||
+        identity.actorType === "platform_admin" ||
+        identity.actorType === "tenant_admin";
+
+      if (!isAdmin) {
+        throw new ApiRequestError(
+          403,
+          "AUTHZ_SCOPE_DENIED",
+          "Cannot revoke sessions belonging to another principal",
+        );
+      }
+
+      if (
+        (identity.actorType === "tenant_admin" ||
+          identity.realm === "tenant") &&
+        identity.tenantId &&
+        targetSession.tenantId !== identity.tenantId
+      ) {
+        throw new ApiRequestError(
+          403,
+          "AUTHZ_REALM_DENIED",
+          "Tenant admins cannot revoke sessions outside their tenant",
+        );
+      }
+
+      if (!body?.reason || !body.reason.trim()) {
+        throw new ApiRequestError(
+          400,
+          "IAM_REASON_REQUIRED",
+          "Revoke reason is required for administrator session revocation",
+        );
+      }
+    }
+
+    const reason =
+      body?.reason?.trim() ||
+      (isSelf ? "Self session revoke" : "Admin remote revoke");
+
+    let updatedSession: CanonicalIdentitySessionRecord | null = null;
+    if (this.identityRepository) {
+      updatedSession = await this.identityRepository.revokeSession(
+        sid,
+        reason,
+        principalId || undefined,
+      );
+    }
+
+    if (this.securityEventsService) {
+      this.securityEventsService.recordEvent({
+        eventType: "AUTH_SESSION_REVOKED",
+        eventFamily: "session",
+        outcome: "success",
+        severity: isSelf ? "low" : "medium",
+        actorId: identity.actorId ?? null,
+        actorType: identity.actorType,
+        realm: identity.realm,
+        tenantId: targetSession.tenantId || identity.tenantId || null,
+        partnerId: identity.partnerId ?? null,
+        targetType: "session",
+        targetId: sid,
+        sessionId: identity.sessionId ?? null,
+        authMethods: ["bearer"],
+        reasonCode: isSelf ? "SELF_SESSION_REVOKED" : "ADMIN_SESSION_REVOKED",
+        maskedContext: { reason, isSelf },
+        requestId: requestId ?? null,
+        traceId: null,
+        approvalId: null,
+      });
+    }
+
+    return toApiSuccessEnvelope(
+      {
+        success: true,
+        sessionId: sid,
+        status: "revoked",
+        session: updatedSession
+          ? maskSessionRecord(updatedSession, identity.sessionId)
+          : null,
+      },
+      requestId,
+    );
+  }
 }
+
