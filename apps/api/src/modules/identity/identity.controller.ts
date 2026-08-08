@@ -149,7 +149,7 @@ export class IdentityController {
       command.expectedVersion !== null
     ) {
       if (
-        targetSession.status === "revoked" ||
+        targetSession.status !== "active" ||
         targetSession.tokenVersion !== command.expectedVersion
       ) {
         throw new ApiRequestError(
@@ -164,6 +164,17 @@ export class IdentityController {
           },
         );
       }
+    } else if (targetSession.status !== "active") {
+      throw new ApiRequestError(
+        409,
+        "IAM_CONCURRENCY_CONFLICT",
+        "Session is already revoked or not active.",
+        {
+          sid,
+          currentVersion: targetSession.tokenVersion,
+          status: targetSession.status,
+        },
+      );
     }
 
     if (
@@ -238,9 +249,7 @@ export class IdentityController {
     const hasReadScope =
       identity.scopes.includes("platform:superadmin") ||
       identity.scopes.includes("identity:sessions:read") ||
-      identity.scopes.includes("identity:sessions:write") ||
-      identity.scopes.includes("identity:users:read") ||
-      identity.scopes.includes("identity:users:write");
+      identity.scopes.includes("identity:sessions:write");
 
     if (!hasReadScope) {
       throw new ApiRequestError(
@@ -275,8 +284,7 @@ export class IdentityController {
   private assertAdminRevokeAuthority(identity: BootstrapRequestIdentity): void {
     const hasRevokeScope =
       identity.scopes.includes("platform:superadmin") ||
-      identity.scopes.includes("identity:sessions:write") ||
-      identity.scopes.includes("identity:users:write");
+      identity.scopes.includes("identity:sessions:write");
 
     if (!hasRevokeScope) {
       throw new ApiRequestError(

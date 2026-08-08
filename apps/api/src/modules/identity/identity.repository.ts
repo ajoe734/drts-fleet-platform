@@ -645,11 +645,7 @@ export class IdentityRepository {
       if (!session) {
         return null;
       }
-      if (
-        expectedVersion !== undefined &&
-        expectedVersion !== null &&
-        (session.status === "revoked" || session.tokenVersion !== expectedVersion)
-      ) {
+      if (session.status !== "active") {
         throw new ApiRequestError(
           409,
           "IAM_CONCURRENCY_CONFLICT",
@@ -663,13 +659,19 @@ export class IdentityRepository {
         );
       }
 
-      if (session.status === "revoked") {
+      if (
+        expectedVersion !== undefined &&
+        expectedVersion !== null &&
+        BigInt(session.tokenVersion) !== BigInt(expectedVersion)
+      ) {
         throw new ApiRequestError(
           409,
           "IAM_CONCURRENCY_CONFLICT",
-          "Session is already revoked.",
+          "Session token version mismatch or session already revoked.",
           {
             sid: sessionId,
+            expectedVersion,
+            currentVersion: session.tokenVersion,
             status: session.status,
           },
         );
@@ -727,8 +729,8 @@ export class IdentityRepository {
                   '{status}', '"revoked"'::jsonb
                 )
             WHERE session_id = $1::text
-              AND status != 'revoked'
-              AND token_version = $5::integer
+              AND status = 'active'
+              AND token_version = $5::bigint
             RETURNING *
           `,
           [sessionId, revokedAt, revokedByPrincipalId || null, reason, expectedVersion],
@@ -759,7 +761,7 @@ export class IdentityRepository {
                   '{status}', '"revoked"'::jsonb
                 )
             WHERE session_id = $1::text
-              AND status != 'revoked'
+              AND status = 'active'
             RETURNING *
           `,
           [sessionId, revokedAt, revokedByPrincipalId || null, reason],

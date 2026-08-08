@@ -35,7 +35,7 @@ describe("Session Management (IAM-SES-003)", () => {
     tenantId: "tenant_alpha",
     roleFamilies: ["tenant"],
     roles: ["tenant_admin"],
-    scopes: ["identity:users:write", "identity:sessions:read"],
+    scopes: ["identity:sessions:write", "identity:sessions:read"],
     sessionId: "sid_admin_session_1",
     tokenId: "jti_admin_token_1",
     tokenVersion: 1000,
@@ -821,6 +821,54 @@ describe("Session Management (IAM-SES-003)", () => {
           { reason: "revoke_attempt_without_scope" },
           { headers: {} },
           "req_scope_lacking_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("should reject admin with identity:users:write scope if identity:sessions:write scope is missing (403 AUTHZ_SCOPE_DENIED)", async () => {
+      const usersOnlyAdmin: BootstrapRequestIdentity = {
+        ...tenantAdminIdentity,
+        scopes: ["identity:users:write"],
+      };
+
+      const targetSession: CanonicalIdentitySessionRecord = {
+        sessionId: "sid_users_only_test",
+        sourceRef: "jwt_session:sid_users_only_test",
+        principalId: "prn_target_users_only",
+        membershipId: "mem_target_users_only",
+        realm: "tenant",
+        tenantId: "tenant_alpha",
+        status: "active",
+        authTime: new Date().toISOString(),
+        authMethods: ["tenant_bootstrap_fixture"],
+        tokenVersion: 777,
+        idleExpiresAt: null,
+        absoluteExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        revokedAt: null,
+        revokedByPrincipalId: null,
+        revokeReason: null,
+        deviceSummary: {},
+        riskSummary: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await identityRepository.createSession(targetSession);
+
+      await expect(
+        identityController.listAdminSessions(
+          usersOnlyAdmin,
+          {},
+          "req_users_only_list_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      await expect(
+        identityController.revokeAdminSession(
+          usersOnlyAdmin,
+          "sid_users_only_test",
+          { reason: "revoke_attempt_with_users_scope_only" },
+          { headers: {} },
+          "req_users_only_revoke_denied",
         ),
       ).rejects.toThrow(ApiRequestError);
     });

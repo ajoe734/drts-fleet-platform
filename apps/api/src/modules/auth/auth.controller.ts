@@ -838,7 +838,7 @@ export class AuthController {
       command.expectedVersion !== null
     ) {
       if (
-        targetSession.status === "revoked" ||
+        targetSession.status !== "active" ||
         targetSession.tokenVersion !== command.expectedVersion
       ) {
         throw new ApiRequestError(
@@ -853,6 +853,17 @@ export class AuthController {
           },
         );
       }
+    } else if (targetSession.status !== "active") {
+      throw new ApiRequestError(
+        409,
+        "IAM_CONCURRENCY_CONFLICT",
+        "Session is already revoked or not active.",
+        {
+          sid,
+          currentVersion: targetSession.tokenVersion,
+          status: targetSession.status,
+        },
+      );
     }
 
     const callerPrincipalId = identity.principalId ?? identity.actorId;
