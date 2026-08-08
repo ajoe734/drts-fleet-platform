@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 
 import {
+  formatDriverError,
   getDriverClient,
   getDriverDeviceId,
   getDriverId,
@@ -103,11 +104,7 @@ function isRetryableApiError(error: unknown): boolean {
 }
 
 function formatQueueError(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return "Unknown driver location queue error.";
+  return formatDriverError(error, "Unknown driver location queue error.");
 }
 
 function buildBackoffMs(retryCount: number): number {

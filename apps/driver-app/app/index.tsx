@@ -45,6 +45,7 @@ import {
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
 import {
+  formatDriverError,
   getDriverClient,
   getDriverId,
   initializeDriverIdentity,
@@ -207,11 +208,7 @@ const INITIAL_WORKSPACE: WorkspaceLoadResult = {
 };
 
 function toErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return fallback;
+  return formatDriverError(error, fallback);
 }
 
 function createWorkspaceAction(
@@ -1532,9 +1529,7 @@ export default function WorkspaceIndex() {
         }
 
         setIdentityIssue(
-          error instanceof Error
-            ? error.message
-            : "裝置初始化失敗，請稍後再試。",
+          formatDriverError(error, "裝置初始化失敗，請稍後再試。"),
         );
       })
       .finally(() => {

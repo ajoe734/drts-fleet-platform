@@ -5,6 +5,7 @@ import type {
   DriverSosAttachmentRecord,
 } from "@drts/contracts";
 
+import { formatDriverError } from "@/lib/api-client";
 import type { DriverSosAttachmentDraft } from "./driver-sos-outbox";
 
 export interface PreparedDriverSosAttachment {
@@ -86,10 +87,7 @@ async function syncOne(
     } catch (error) {
       return {
         ...draft,
-        lastError:
-          error instanceof Error
-            ? error.message
-            : "Attachment scan retry failed.",
+        lastError: formatDriverError(error, "Attachment scan retry failed."),
       };
     }
   }
@@ -127,8 +125,7 @@ async function syncOne(
     return {
       ...draft,
       uploadState: "failed_retryable",
-      lastError:
-        error instanceof Error ? error.message : "Attachment upload failed.",
+      lastError: formatDriverError(error, "Attachment upload failed."),
     };
   }
 }

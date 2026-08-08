@@ -31,7 +31,7 @@ import {
   isUnifiedTaskPlatformClosed,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
-import { getDriverClient } from "@/lib/api-client";
+import { formatDriverError, getDriverClient } from "@/lib/api-client";
 import {
   driverForwardedTaskStatusLabels,
   driverIncidentSituations,
@@ -118,11 +118,7 @@ const EMPTY_STATE_COPY: Record<EmptyReason, EmptyStateConfig> = {
 };
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return "SOS 送出失敗，請稍後再試。";
+  return formatDriverError(error, "SOS 送出失敗，請稍後再試。");
 }
 
 function getSituationLabel(situationId: SosSituationId | null): string | null {

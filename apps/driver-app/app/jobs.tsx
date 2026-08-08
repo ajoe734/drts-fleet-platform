@@ -32,6 +32,7 @@ import {
 import { AuthorityBanner, PlatformBadge } from "@/components/ui";
 import {
   acceptForwardedDriverOffer,
+  formatDriverError,
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
@@ -393,23 +394,7 @@ function getAllowedActionsFromTask(
 }
 
 function getErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message.trim()) {
-    const apiMatch = /^API error \d+:\s*(.*)$/s.exec(error.message);
-    if (!apiMatch) {
-      return error.message.trim();
-    }
-
-    try {
-      const payload = JSON.parse(apiMatch[1]) as {
-        error?: { message?: string };
-      };
-      return payload.error?.message?.trim() || error.message.trim();
-    } catch {
-      return error.message.trim();
-    }
-  }
-
-  return driverStrings.common.requestFailed;
+  return formatDriverError(error, driverStrings.common.requestFailed);
 }
 
 function getTaskPillTone(task: UnifiedDriverTaskView) {

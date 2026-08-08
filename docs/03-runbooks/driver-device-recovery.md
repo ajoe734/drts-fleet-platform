@@ -1,8 +1,8 @@
 # Driver Mobile Secure Storage, Remote Logout, and Device Recovery Runbook
 
-Last Updated: 2026-08-08  
-Task Reference: `IAM-DRV-002`  
-Architecture Ref: `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`  
+Last Updated: 2026-08-08
+Task Reference: `IAM-DRV-002`
+Architecture Ref: `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
 Execution Task Ref: `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
 
 ---
