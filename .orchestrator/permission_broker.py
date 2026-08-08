@@ -683,7 +683,68 @@ def command_hard_boundary_reason(shell_command: str) -> str | None:
     return None
 
 
+# Branches other people's work is built on. `dev` and `main` are additionally
+# protected on the remote (`allow_force_pushes: false`), so a force push there
+# is already refused by the server; `publish/*` and `release/*` are not, and a
+# publish snapshot is exactly what `deploy-dev.yml` deploys.
+_SHARED_BRANCH_NAMES = frozenset({"dev", "main", "master", "design"})
+_SHARED_BRANCH_PREFIXES = ("publish/", "release/")
+_FORCE_PUSH_FLAGS = ("--force", "-f", "--force-with-lease")
+
+
+def _push_destination_branch(tokens: list[str]) -> str | None:
+    """The branch a `git push` writes to, or None when it cannot be read."""
+    positional = [
+        token
+        for token in tokens[2:]
+        if not token.startswith("-")
+    ]
+    if len(positional) < 2:
+        # No refspec: git pushes the current branch, which is not visible here.
+        return None
+    refspec = positional[1]
+    destination = refspec.rsplit(":", 1)[-1]
+    for prefix in ("refs/heads/", "refs/remotes/origin/"):
+        if destination.startswith(prefix):
+            destination = destination[len(prefix) :]
+    return destination or None
+
+
+def _force_pushes_a_shared_branch(shell_command: str) -> bool:
+    """True when this rewrites history on a branch other people build on."""
+    for segment in _split_shell_segments(shell_command, opaque_substitution=True) or []:
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue
+        if len(tokens) < 2 or tokens[0] != "git" or tokens[1] != "push":
+            continue
+        forced = any(
+            token == flag or token.startswith(f"{flag}=")
+            for token in tokens
+            for flag in _FORCE_PUSH_FLAGS
+        )
+        if not forced:
+            continue
+        destination = _push_destination_branch(tokens)
+        if destination is None:
+            # Cannot tell which branch this lands on, and a forced push is not
+            # something to guess about.
+            return True
+        if destination in _SHARED_BRANCH_NAMES or destination.startswith(
+            _SHARED_BRANCH_PREFIXES
+        ):
+            return True
+    return False
+
+
 def classify_command(shell_command: str) -> str:
+    # Checked before the allow-list: `^git push` covers every push, including a
+    # forced one onto a shared branch. Rewriting a worker's own branch is
+    # routine and stays allowed; rewriting the branch everyone else builds on
+    # is a person's decision.
+    if _force_pushes_a_shared_branch(shell_command):
+        return "defer"
     # Checked before every allow-list below: whatever the rest of the line looks
     # like, if a program arrives through a pipe then nothing here has seen it.
     if _pipes_program_into_interpreter(shell_command):
