@@ -203,7 +203,7 @@ export default async function BookingDetailPage({
         />
         {bookingData.degradedMessage ? (
           <CalloutPanel
-            title="API degraded"
+            title={t("common.apiDegraded", locale)}
             description={bookingData.degradedMessage}
             tone="warning"
           />

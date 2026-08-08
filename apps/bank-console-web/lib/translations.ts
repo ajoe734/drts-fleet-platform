@@ -671,6 +671,7 @@ const en = {
   "audit.reason.ACCESS_DENIED": "Access denied",
 
   "common.all": "All",
+  "common.apiDegraded": "API degraded",
 
   "login.eyebrow": "Demo identity",
   "login.title": "Bank console sign-in",
@@ -1334,6 +1335,7 @@ const zh: Record<keyof typeof en, string> = {
   "audit.reason.ACCESS_DENIED": "拒絕存取",
 
   "common.all": "全部",
+  "common.apiDegraded": "API 異常降級",
 
   "login.eyebrow": "Demo 身分",
   "login.title": "銀行後台登入",

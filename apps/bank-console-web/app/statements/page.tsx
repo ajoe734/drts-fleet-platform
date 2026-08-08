@@ -149,7 +149,7 @@ export default async function StatementsPage({
       />
       {statementData.degradedMessage ? (
         <CalloutPanel
-          title="API degraded"
+          title={t("common.apiDegraded", locale)}
           description={statementData.degradedMessage}
           tone="warning"
         />
