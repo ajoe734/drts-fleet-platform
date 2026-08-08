@@ -17,10 +17,10 @@ This sidecar is support-only.
 
 - **In scope:** Review packet preparation, evidence inventory, reviewer hotspots, and reviewer handoff for `IAM-ACC-003`.
 - **Out of scope:** Canonical truth modifications, contract schema edits, or altering L1 product specifications.
-- **Slice restriction:** Strictly limited to `support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md`. No unrelated evidence JSON or schema changes are included.
+- **Slice restriction:** Strictly limited to single file `support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md`. No unrelated support artifacts or schema changes are included.
 
 The machine truth referenced for this packet comes from:
-- `ai-status.json` (single-task query via `scripts/ai-status.sh show IAM-ACC-003`)
+- `ai-status.json` (single-task query via `scripts/ai-status.sh show IAM-ACC-003` as of `2026-08-08T07:07:23Z`)
 - `current-work.md` (derived human summary)
 - `apps/api/src/modules/tenant-partner/` & `apps/api/src/modules/identity/`
 - `tests/unit/tenant-invitation-lifecycle.test.ts`
@@ -36,7 +36,7 @@ The machine truth referenced for this packet comes from:
 - **Phase:** `stage1.5-identity-access-account-security-20260801`
 - **Parent Owner:** `Codex`
 - **Parent Reviewer:** `Gemini2`
-- **Machine Truth Status:** `review` (Reviewer `Gemini2` provided `"審查通過"` review notes; owner `Codex` prepared task-scoped closeout commit `94afc51d025eb3801273a88700495ed2d55bb35d`, `integration_status: ci_pending`)
+- **Machine Truth Status:** `in_progress` (Owner Closeout phase as of `2026-08-08T07:07:23Z`; reviewer `Gemini2` provided `"審查通過"` review notes; owner `Codex` is verifying closeout prerequisites for commit `2a9a5c5c1bda8e3a226ca24c0ac7f872915254b0`, `pr_url: https://github.com/ajoe734/drts-fleet-platform/pull/1279`, `ci_status: in_progress`, `integration_status: ci_pending`)
 - **PR URL:** `https://github.com/ajoe734/drts-fleet-platform/pull/1279`
 - **Branch / Commit:** `origin/codex/iam-acc-003-secure` (`2a9a5c5c1bda8e3a226ca24c0ac7f872915254b0`)
 
@@ -76,7 +76,7 @@ The machine truth referenced for this packet comes from:
 
 | ID | Item | Location / Anchor |
 |---|---|---|
-| E-1 | Machine Truth Status | `ai-status.json` (`IAM-ACC-003` state: `review`; reviewer `Gemini2` notes: "審查通過") |
+| E-1 | Machine Truth Status | `ai-status.json` (`IAM-ACC-003` state: `in_progress` Owner Closeout phase; reviewer `Gemini2` notes: "審查通過") |
 | E-2 | Tenant Partner Logic & Guardrails | [`apps/api/src/modules/tenant-partner/tenant-partner.service.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/tenant-partner/tenant-partner.service.ts) |
 | E-3 | Canonical Identity Repository | [`apps/api/src/modules/identity/identity.repository.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/apps/api/src/modules/identity/identity.repository.ts) |
 | E-4 | Unit Tests (Identity Canonical Repo) | [`tests/unit/identity-canonical-repository.test.ts`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-acc-003-sidecar-review/tests/unit/identity-canonical-repository.test.ts) |
@@ -93,7 +93,7 @@ Reviewer `Codex` should confirm:
 3. **Last-Admin Protection:** The system correctly blocks demotion of the final active tenant admin even if invited replacement admins exist.
 4. **Self-Escalation Denial:** Users cannot modify their own tenant roles (`TENANT_SELF_ROLE_CHANGE_DENIED`).
 5. **Immediate Session Revocation:** Tenant role and status updates trigger synchronous session invalidation and refresh token family revocation.
-6. **Support Scope Boundaries:** This packet is support-only (`mutates_canonical: false`), limited to `support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md`, and does not alter canonical contracts or specs.
+6. **Support Scope Boundaries:** This packet is support-only (`mutates_canonical: false`), limited strictly to `support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md`, and does not alter canonical contracts or specs.
 
 ---
 
@@ -103,7 +103,7 @@ Reviewer `Codex` should confirm:
 
 ```bash
 AI_NAME=Gemini scripts/ai-status.sh handoff IAM-ACC-003-SIDECAR-REVIEW Codex \
-  "IAM-ACC-003 review packet updated at support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md. Refreshed parent task machine truth status (state: review, Gemini2 approved), verified 5 acceptance criteria, code anchors, and clean support artifact scope boundary without modifying canonical truth."
+  "IAM-ACC-003 review packet updated at support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md. Refreshed parent task machine truth status (state: in_progress Owner Closeout phase as of 2026-08-08T07:07:23Z following Gemini2 review approval), verified 5 acceptance criteria, code anchors, and clean single-file support artifact boundary without modifying canonical truth."
 ```
 
 ### Reviewer Approval (Codex)
@@ -111,9 +111,9 @@ AI_NAME=Gemini scripts/ai-status.sh handoff IAM-ACC-003-SIDECAR-REVIEW Codex \
 ```bash
 AI_NAME=Codex \
 REVIEW_FILE=support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md \
-REVIEW_NOTES_ZH="審查通過：IAM-ACC-003 review packet 已完整彙整 Parent Task 驗證結果與代碼錨點（Hash-only 邀請、單次使用與過期機制、Last-admin 與 Self-escalation 防護、Session 立即撤銷），確認 Parent Status 為 review (Gemini2 已審查通過)，且檔邊界嚴格限定於 support artifact，未修改 canonical truth。" \
+REVIEW_NOTES_ZH="審查通過：IAM-ACC-003 review packet 已完整彙整 Parent Task 驗證結果與代碼錨點（Hash-only 邀請、單次使用與過期機制、Last-admin 與 Self-escalation 防護、Session 立即撤銷），正確對齊 Parent Status 為 in_progress (Owner Closeout 階段，Gemini2 已審查通過)，且檔邊界嚴格限定於 support artifact，未修改 canonical truth。" \
 scripts/ai-status.sh approve IAM-ACC-003-SIDECAR-REVIEW \
-  "Review approved: IAM-ACC-003 sidecar review packet accurately summarizes parent implementation evidence, guardrails, machine truth status, and verification results."
+  "Review approved: IAM-ACC-003 sidecar review packet accurately summarizes parent implementation evidence, guardrails, machine truth status (in_progress owner closeout post Gemini2 approval), and verification results."
 ```
 
 ### Owner Finalize Closeout (Gemini)
@@ -128,5 +128,4 @@ AI_NAME=Gemini NO_COMMIT_REQUIRED=1 scripts/ai-status.sh done IAM-ACC-003-SIDECA
 ## 7. Change Log
 
 - **2026-08-08:** Initial review packet created for `IAM-ACC-003-SIDECAR-REVIEW` by Gemini.
-- **2026-08-08 (Revision 2):** Refreshed packet against machine truth to reflect parent task `IAM-ACC-003` status as `review` (with reviewer `Gemini2` notes `"審查通過"`), removed unrelated evidence JSON files, and enforced support artifact slice boundary.
-
+- **2026-08-08 (Revision 2):** Refreshed packet against machine truth to reflect parent task `IAM-ACC-003` status as `in_progress` (Owner Closeout phase following `Gemini2` review approval as of `2026-08-08T07:07:23Z`), enforced single-file packet hygiene under `support/sidecars/IAM-ACC-003/IAM-ACC-003-SIDECAR-REVIEW.md`, and updated reviewer handoff instructions.
