@@ -40,7 +40,7 @@ export class SecurityEventsService {
   }
 
   async listEvents(
-    identity: IdentityContext | null,
+    identity: IdentityContext | { realm?: string | null; tenantId?: string | null } | null,
     query: SecurityEventQuery = {},
   ) {
     const scopedQuery =

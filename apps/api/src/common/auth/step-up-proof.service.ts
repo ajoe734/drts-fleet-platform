@@ -46,14 +46,17 @@ interface StoredStepUpProof {
   tenantId: string | null;
   issuedAt: string;
   expiresAt: string;
-  authTime: string;
+  authTime: string | number;
   amr: string[];
   acr: string | null;
 }
 
-function parseTimestamp(value: string | null | undefined): number | null {
-  if (!value) {
+function parseTimestamp(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) {
     return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
   }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -142,7 +145,7 @@ export class StepUpProofService {
         outcome: "denied",
         reasonCode:
           authTimeMs === null ? "missing_trusted_auth_time" : "mfa_not_trusted",
-        requestId,
+        requestId: requestId ?? null,
       });
       throw new ApiRequestError(
         403,
@@ -161,7 +164,7 @@ export class StepUpProofService {
         actionId: policy.actionId,
         outcome: "denied",
         reasonCode: "missing_session",
-        requestId,
+        requestId: requestId ?? null,
       });
       throw new ApiRequestError(
         403,
@@ -180,7 +183,7 @@ export class StepUpProofService {
         actionId: policy.actionId,
         outcome: "denied",
         reasonCode: "stale_auth_time",
-        requestId,
+        requestId: requestId ?? null,
       });
       throw new ApiRequestError(
         403,
@@ -214,7 +217,7 @@ export class StepUpProofService {
     this.recordEvent("step_up.proof_issued", identity, {
       actionId: proof.actionId,
       outcome: "success",
-      requestId,
+      requestId: requestId ?? null,
       tokenId: proof.stepUpReference,
       afterSummary: {
         expiresAt: proof.expiresAt,

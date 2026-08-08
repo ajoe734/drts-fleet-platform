@@ -36,14 +36,23 @@ function makeRequest(
   reference?: string | null,
   body?: Record<string, unknown>,
 ) {
-  return {
-    headers: reference
-      ? { "x-drts-step-up-reference": reference }
-      : {},
+  const headers: Record<string, string> = reference
+    ? { "x-drts-step-up-reference": reference }
+    : {};
+  const req: {
+    headers: Record<string, string>;
+    method: string;
+    url: string;
+    body?: Record<string, unknown>;
+  } = {
+    headers,
     method: "POST",
     url: path,
-    body,
   };
+  if (body !== undefined) {
+    req.body = body;
+  }
+  return req;
 }
 
 function getErrorCode(error: unknown) {
