@@ -18,6 +18,7 @@ import type {
   TenantUserRoleRecord,
 } from "@drts/contracts";
 
+import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
@@ -635,6 +636,7 @@ export class IdentityRepository {
     sessionId: string,
     reason: string,
     revokedByPrincipalId?: string,
+    expectedVersion?: number,
   ): Promise<CanonicalIdentitySessionRecord | null> {
     const revokedAt = new Date().toISOString();
 
@@ -643,6 +645,36 @@ export class IdentityRepository {
       if (!session) {
         return null;
       }
+      if (
+        expectedVersion !== undefined &&
+        expectedVersion !== null &&
+        (session.status === "revoked" || session.tokenVersion !== expectedVersion)
+      ) {
+        throw new ApiRequestError(
+          409,
+          "IAM_CONCURRENCY_CONFLICT",
+          "Session token version mismatch or session already revoked.",
+          {
+            sid: sessionId,
+            expectedVersion,
+            currentVersion: session.tokenVersion,
+            status: session.status,
+          },
+        );
+      }
+
+      if (session.status === "revoked") {
+        throw new ApiRequestError(
+          409,
+          "IAM_CONCURRENCY_CONFLICT",
+          "Session is already revoked.",
+          {
+            sid: sessionId,
+            status: session.status,
+          },
+        );
+      }
+
       const updated: CanonicalIdentitySessionRecord = {
         ...session,
         status: "revoked",
@@ -668,39 +700,95 @@ export class IdentityRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const sessionResult = await client.query<PersistedSessionRow>(
-        `
-          UPDATE iam.identity_sessions
-          SET status = 'revoked',
-              revoked_at = $2::timestamptz,
-              revoked_by_principal_id = $3::text,
-              revoke_reason = $4::text,
-              updated_at = $2::timestamptz,
-              record = jsonb_set(
-                jsonb_set(
+      let sessionResult;
+      if (expectedVersion !== undefined && expectedVersion !== null) {
+        sessionResult = await client.query<PersistedSessionRow>(
+          `
+            UPDATE iam.identity_sessions
+            SET status = 'revoked',
+                revoked_at = $2::timestamptz,
+                revoked_by_principal_id = $3::text,
+                revoke_reason = $4::text,
+                updated_at = $2::timestamptz,
+                record = jsonb_set(
                   jsonb_set(
                     jsonb_set(
                       jsonb_set(
-                        jsonb_set(record, '{status}', '"revoked"'::jsonb),
-                        '{revokedAt}', to_jsonb($2::text)
+                        jsonb_set(
+                          jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                          '{revokedAt}', to_jsonb($2::text)
+                        ),
+                        '{revokedByPrincipalId}', to_jsonb($3::text)
                       ),
-                      '{revokedByPrincipalId}', to_jsonb($3::text)
+                      '{revokeReason}', to_jsonb($4::text)
                     ),
-                    '{revokeReason}', to_jsonb($4::text)
+                    '{updatedAt}', to_jsonb($2::text)
                   ),
-                  '{updatedAt}', to_jsonb($2::text)
-                ),
-                '{status}', '"revoked"'::jsonb
-              )
-          WHERE session_id = $1::text
-          RETURNING *
-        `,
-        [sessionId, revokedAt, revokedByPrincipalId || null, reason],
-      );
+                  '{status}', '"revoked"'::jsonb
+                )
+            WHERE session_id = $1::text
+              AND status != 'revoked'
+              AND token_version = $5::integer
+            RETURNING *
+          `,
+          [sessionId, revokedAt, revokedByPrincipalId || null, reason, expectedVersion],
+        );
+      } else {
+        sessionResult = await client.query<PersistedSessionRow>(
+          `
+            UPDATE iam.identity_sessions
+            SET status = 'revoked',
+                revoked_at = $2::timestamptz,
+                revoked_by_principal_id = $3::text,
+                revoke_reason = $4::text,
+                updated_at = $2::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(
+                        jsonb_set(
+                          jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                          '{revokedAt}', to_jsonb($2::text)
+                        ),
+                        '{revokedByPrincipalId}', to_jsonb($3::text)
+                      ),
+                      '{revokeReason}', to_jsonb($4::text)
+                    ),
+                    '{updatedAt}', to_jsonb($2::text)
+                  ),
+                  '{status}', '"revoked"'::jsonb
+                )
+            WHERE session_id = $1::text
+              AND status != 'revoked'
+            RETURNING *
+          `,
+          [sessionId, revokedAt, revokedByPrincipalId || null, reason],
+        );
+      }
 
       if (sessionResult.rows.length === 0) {
+        const checkResult = await client.query<PersistedSessionRow>(
+          `SELECT session_id, status, token_version FROM iam.identity_sessions WHERE session_id = $1::text`,
+          [sessionId],
+        );
         await client.query("ROLLBACK");
-        return null;
+
+        if (checkResult.rows.length === 0) {
+          return null;
+        }
+
+        const existingRow = checkResult.rows[0]!;
+        throw new ApiRequestError(
+          409,
+          "IAM_CONCURRENCY_CONFLICT",
+          "Session token version mismatch or session already revoked.",
+          {
+            sid: sessionId,
+            expectedVersion,
+            currentVersion: existingRow.token_version,
+            status: existingRow.status,
+          },
+        );
       }
 
       await client.query(

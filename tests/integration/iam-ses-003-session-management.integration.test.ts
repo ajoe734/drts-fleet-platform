@@ -740,5 +740,89 @@ describe("Session Management (IAM-SES-003)", () => {
         ),
       ).rejects.toThrow(ApiRequestError);
     });
+
+    it("should reject concurrent or second revoke on already revoked session with 409 IAM_CONCURRENCY_CONFLICT at repository level", async () => {
+      const sessionRecord: CanonicalIdentitySessionRecord = {
+        sessionId: "sid_concurrent_repo_test",
+        sourceRef: "jwt_session:sid_concurrent_repo_test",
+        principalId: "prn_conc_user",
+        membershipId: "mem_conc",
+        realm: "tenant",
+        tenantId: "tenant_alpha",
+        status: "active",
+        authTime: new Date().toISOString(),
+        authMethods: ["tenant_bootstrap_fixture"],
+        tokenVersion: 1234,
+        idleExpiresAt: null,
+        absoluteExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        revokedAt: null,
+        revokedByPrincipalId: null,
+        revokeReason: null,
+        deviceSummary: {},
+        riskSummary: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await identityRepository.createSession(sessionRecord);
+
+      // First revoke succeeds
+      const firstResult = await identityRepository.revokeSession(
+        "sid_concurrent_repo_test",
+        "first_revoke",
+        "prn_admin",
+        1234,
+      );
+      expect(firstResult?.status).toBe("revoked");
+
+      // Concurrent / second revoke must fail with 409 IAM_CONCURRENCY_CONFLICT
+      await expect(
+        identityRepository.revokeSession(
+          "sid_concurrent_repo_test",
+          "second_revoke_attempt",
+          "prn_admin",
+          1234,
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("should reject tenant admin with tenant_admin role but missing write scope (403 AUTHZ_SCOPE_DENIED)", async () => {
+      const scopeLackingTenantAdmin: BootstrapRequestIdentity = {
+        ...tenantAdminIdentity,
+        scopes: ["identity:read"], // lacks identity:sessions:write and identity:users:write
+      };
+
+      const targetSession: CanonicalIdentitySessionRecord = {
+        sessionId: "sid_scope_lacking_test",
+        sourceRef: "jwt_session:sid_scope_lacking_test",
+        principalId: "prn_target_scope_test",
+        membershipId: "mem_target_scope",
+        realm: "tenant",
+        tenantId: "tenant_alpha",
+        status: "active",
+        authTime: new Date().toISOString(),
+        authMethods: ["tenant_bootstrap_fixture"],
+        tokenVersion: 555,
+        idleExpiresAt: null,
+        absoluteExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        revokedAt: null,
+        revokedByPrincipalId: null,
+        revokeReason: null,
+        deviceSummary: {},
+        riskSummary: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await identityRepository.createSession(targetSession);
+
+      await expect(
+        identityController.revokeAdminSession(
+          scopeLackingTenantAdmin,
+          "sid_scope_lacking_test",
+          { reason: "revoke_attempt_without_scope" },
+          { headers: {} },
+          "req_scope_lacking_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
   });
 });

@@ -874,6 +874,7 @@ export class AuthController {
       sid,
       reason,
       callerPrincipalId ?? undefined,
+      command.expectedVersion,
     );
 
     const sourceIp = this.resolveSourceIp(

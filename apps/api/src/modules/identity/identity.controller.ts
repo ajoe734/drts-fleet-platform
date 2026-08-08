@@ -184,6 +184,7 @@ export class IdentityController {
       sid,
       reason,
       callerPrincipalId,
+      command.expectedVersion,
     );
 
     const sourceIp = this.resolveSourceIp(
@@ -234,25 +235,33 @@ export class IdentityController {
   }
 
   private assertAdminReadAuthority(identity: BootstrapRequestIdentity): void {
+    const hasReadScope =
+      identity.scopes.includes("platform:superadmin") ||
+      identity.scopes.includes("identity:sessions:read") ||
+      identity.scopes.includes("identity:sessions:write") ||
+      identity.scopes.includes("identity:users:read") ||
+      identity.scopes.includes("identity:users:write");
+
+    if (!hasReadScope) {
+      throw new ApiRequestError(
+        403,
+        "AUTHZ_SCOPE_DENIED",
+        "Administrative read privileges are required for session inventory operations.",
+      );
+    }
+
     const isPlatformOrOpsAdmin =
       (identity.realm === "platform" || identity.realm === "ops") &&
       (identity.actorType === "platform_admin" ||
         identity.roles.includes("platform_superadmin") ||
         identity.roles.includes("platform_user_admin") ||
-        identity.roles.includes("ops_admin") ||
-        identity.scopes.includes("platform:superadmin") ||
-        identity.scopes.includes("identity:sessions:read") ||
-        identity.scopes.includes("identity:sessions:write") ||
-        identity.scopes.includes("identity:users:read") ||
-        identity.scopes.includes("identity:users:write"));
+        identity.roles.includes("ops_admin"));
 
     const isTenantAdmin =
       identity.realm === "tenant" &&
+      Boolean(identity.tenantId?.trim()) &&
       (identity.actorType === "tenant_admin" ||
-        identity.roles.includes("tenant_admin") ||
-        identity.scopes.includes("identity:users:write") ||
-        identity.scopes.includes("identity:sessions:read") ||
-        identity.scopes.includes("identity:sessions:write"));
+        identity.roles.includes("tenant_admin"));
 
     if (!isPlatformOrOpsAdmin && !isTenantAdmin) {
       throw new ApiRequestError(
@@ -264,22 +273,31 @@ export class IdentityController {
   }
 
   private assertAdminRevokeAuthority(identity: BootstrapRequestIdentity): void {
+    const hasRevokeScope =
+      identity.scopes.includes("platform:superadmin") ||
+      identity.scopes.includes("identity:sessions:write") ||
+      identity.scopes.includes("identity:users:write");
+
+    if (!hasRevokeScope) {
+      throw new ApiRequestError(
+        403,
+        "AUTHZ_SCOPE_DENIED",
+        "Administrative write privileges are required for session revocation.",
+      );
+    }
+
     const isPlatformOrOpsAdmin =
       (identity.realm === "platform" || identity.realm === "ops") &&
       (identity.actorType === "platform_admin" ||
         identity.roles.includes("platform_superadmin") ||
         identity.roles.includes("platform_user_admin") ||
-        identity.roles.includes("ops_admin") ||
-        identity.scopes.includes("platform:superadmin") ||
-        identity.scopes.includes("identity:sessions:write") ||
-        identity.scopes.includes("identity:users:write"));
+        identity.roles.includes("ops_admin"));
 
     const isTenantAdmin =
       identity.realm === "tenant" &&
+      Boolean(identity.tenantId?.trim()) &&
       (identity.actorType === "tenant_admin" ||
-        identity.roles.includes("tenant_admin") ||
-        identity.scopes.includes("identity:users:write") ||
-        identity.scopes.includes("identity:sessions:write"));
+        identity.roles.includes("tenant_admin"));
 
     if (!isPlatformOrOpsAdmin && !isTenantAdmin) {
       throw new ApiRequestError(
