@@ -25,6 +25,7 @@ import {
   getDriverClient,
   getDriverId,
   clearDriverProvisioning,
+  revokeDriverDeviceBinding,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import {
@@ -406,7 +407,7 @@ export default function SettingsScreen() {
         text: "登出",
         style: "destructive",
         onPress: async () => {
-          await clearDriverProvisioning();
+          await revokeDriverDeviceBinding();
           router.replace("/onboarding");
         },
       },

@@ -16,6 +16,7 @@ import {
   resetDriverAppToOnboarding,
 } from "@/lib/driver-identity-routing";
 import {
+  formatDriverError,
   getDriverClient,
   getDriverIdentityIssue,
   initializeDriverIdentity,
@@ -56,7 +57,10 @@ function DriverHeartbeatBootstrap() {
         isDriverIdentityProvisioned,
         listDriverTasks: () => getDriverClient().listDriverTasks(),
         onWarning: (error) => {
-          console.warn("Driver heartbeat bootstrap sync failed", error);
+          console.warn(
+            "Driver heartbeat bootstrap sync failed",
+            formatDriverError(error, "裝置同步失敗"),
+          );
         },
         resetDriverAppToOnboarding,
         router,
