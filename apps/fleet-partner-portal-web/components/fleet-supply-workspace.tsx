@@ -29,6 +29,7 @@ import {
   CanvasPill,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
+import { useTranslation } from "@/lib/i18n";
 import type {
   SupplyDashboardView,
   SupplyDocumentsView,
@@ -58,40 +59,40 @@ const VEHICLE_DOC_TYPES = [
 ] as const;
 
 const PRODUCT_OPTIONS = [
-  { code: "taxi_realtime", label: "即時叫車" },
-  { code: "business_dispatch", label: "商務" },
-  { code: "airport_transfer", label: "機場接送" },
-  { code: "insurance_replacement", label: "保險代步" },
-  { code: "travel_partner", label: "旅行社" },
+  { code: "taxi_realtime", key: "service.realtime" },
+  { code: "business_dispatch", key: "service.business" },
+  { code: "airport_transfer", key: "service.airport" },
+  { code: "insurance_replacement", key: "service.insurance" },
+  { code: "travel_partner", key: "service.travel" },
 ] as const;
 
-const DOCUMENT_LABELS: Record<string, string> = {
-  professional_driver_license: "職業駕駛執照",
-  taxi_driver_registration: "計程車登記證",
-  vehicle_registration: "行照",
-  insurance_policy: "保險保單",
-  fleet_participation_contract: "車隊參與契約",
-  driver_management_contract: "司機管理契約",
-  vehicle_management_contract: "車輛管理契約",
-  other: "其他",
+const DOCUMENT_LABEL_KEYS: Record<string, string> = {
+  professional_driver_license: "supply.document.professional_driver_license",
+  taxi_driver_registration: "supply.document.taxi_driver_registration",
+  vehicle_registration: "supply.document.vehicle_registration",
+  insurance_policy: "supply.document.insurance_policy",
+  fleet_participation_contract: "supply.document.fleet_participation_contract",
+  driver_management_contract: "supply.document.driver_management_contract",
+  vehicle_management_contract: "supply.document.vehicle_management_contract",
+  other: "supply.document.other",
 };
 
-const REASON_LABELS: Record<SupplyReadinessReasonCode, string> = {
-  DRIVER_LICENSE_MISSING: "缺職業駕照",
-  DRIVER_LICENSE_EXPIRED: "職業駕照過期",
-  DRIVER_REGISTRATION_MISSING: "缺計程車登記證",
-  DRIVER_REGISTRATION_EXPIRED: "登記證過期",
-  VEHICLE_DOCUMENT_MISSING: "缺車輛文件",
-  INSURANCE_MISSING: "缺保險",
-  INSURANCE_EXPIRED: "保險過期",
-  CONTRACT_MISSING: "缺契約",
-  CONTRACT_INACTIVE: "契約未生效",
-  DRIVER_AFFILIATION_MISSING: "司機未掛靠",
-  VEHICLE_AFFILIATION_MISSING: "車輛未掛靠",
-  SERVICE_PRODUCT_NOT_SUPPORTED: "服務產品不支援",
-  TRAINING_REQUIRED: "需完成訓練",
-  FLEET_PARTNER_INACTIVE: "車行未啟用",
-  MANUALLY_SUSPENDED: "人工停權",
+const REASON_LABEL_KEYS: Record<SupplyReadinessReasonCode, string> = {
+  DRIVER_LICENSE_MISSING: "supply.reason.driver_license_missing",
+  DRIVER_LICENSE_EXPIRED: "supply.reason.driver_license_expired",
+  DRIVER_REGISTRATION_MISSING: "supply.reason.driver_registration_missing",
+  DRIVER_REGISTRATION_EXPIRED: "supply.reason.driver_registration_expired",
+  VEHICLE_DOCUMENT_MISSING: "supply.reason.vehicle_document_missing",
+  INSURANCE_MISSING: "supply.reason.insurance_missing",
+  INSURANCE_EXPIRED: "supply.reason.insurance_expired",
+  CONTRACT_MISSING: "supply.reason.contract_missing",
+  CONTRACT_INACTIVE: "supply.reason.contract_inactive",
+  DRIVER_AFFILIATION_MISSING: "supply.reason.driver_affiliation_missing",
+  VEHICLE_AFFILIATION_MISSING: "supply.reason.vehicle_affiliation_missing",
+  SERVICE_PRODUCT_NOT_SUPPORTED: "supply.reason.service_product_not_supported",
+  TRAINING_REQUIRED: "supply.reason.training_required",
+  FLEET_PARTNER_INACTIVE: "supply.reason.fleet_partner_inactive",
+  MANUALLY_SUSPENDED: "supply.reason.manually_suspended",
 };
 
 function sectionGrid() {
@@ -245,6 +246,7 @@ function ProductChecklist({
   onChange: (value: string[]) => void;
 }) {
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {PRODUCT_OPTIONS.map((option) => {
@@ -276,7 +278,7 @@ function ProductChecklist({
                 )
               }
             />
-            {option.label}
+            {t(option.key)}
           </label>
         );
       })}
@@ -286,31 +288,32 @@ function ProductChecklist({
 
 export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   const groups = [
-    ["draft", "草稿"],
-    ["review", "待審"],
-    ["revision", "附件補正"],
-    ["approved", "已核可"],
-    ["expiring", "即將到期"],
-    ["not_ready", "不可派原因"],
+    ["draft", t("supply.dashboard.group.draft")],
+    ["review", t("supply.dashboard.group.review")],
+    ["revision", t("supply.dashboard.group.revision")],
+    ["approved", t("supply.dashboard.group.approved")],
+    ["expiring", t("supply.dashboard.group.expiring")],
+    ["not_ready", t("supply.dashboard.group.not_ready")],
   ] as const;
 
   return (
     <>
       <CanvasPageHeader
         theme={theme}
-        title="供給送件總覽"
-        subtitle="自主建檔 → 送審 → 核可寫入 canonical registry"
+        title={t("supply.dashboard.title")}
+        subtitle={t("supply.dashboard.subtitle")}
         actions={
           <>
             <Link href="/documents" style={cardLinkStyle(theme)}>
-              文件總覽
+              {t("supply.dashboard.documents")}
             </Link>
             <Link href="/supply/drivers/new" style={cardLinkStyle(theme)}>
-              新增司機
+              {t("supply.dashboard.addDriver")}
             </Link>
             <Link href="/supply/vehicles/new" style={cardLinkStyle(theme)}>
-              新增車輛
+              {t("supply.dashboard.addVehicle")}
             </Link>
           </>
         }
@@ -321,7 +324,7 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
             theme={theme}
             tone="info"
             icon="info"
-            body="目前顯示設計 fallback 資料；fleet-partner supply API 可用時會切換成 live data。"
+            body={t("supply.dashboard.fallback")}
           />
         ) : null}
         <div style={sectionGrid()}>
@@ -331,7 +334,7 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
               <CanvasCard
                 key={key}
                 theme={theme}
-                title={
+                    title={
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                     {label}
                     <CanvasPill theme={theme} tone="neutral">
@@ -343,8 +346,8 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
                 {items.length === 0 ? (
                   <CanvasEmptyState
                     theme={theme}
-                    title="目前沒有項目"
-                    body="此群組目前沒有待處理送件。"
+                    title={t("supply.empty.none")}
+                    body={t("supply.dashboard.empty")}
                   />
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -373,14 +376,14 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                             {item.reasons.map((reason) => (
                               <CanvasPill key={reason} theme={theme} tone="warn">
-                                {REASON_LABELS[reason]}
+                                {t(REASON_LABEL_KEYS[reason])}
                               </CanvasPill>
                             ))}
                           </div>
                         ) : null}
                         <div style={{ marginTop: 10 }}>
                           <Link href={item.href} style={cardLinkStyle(theme)}>
-                            開啟
+                            {t("supply.action.open")}
                           </Link>
                         </div>
                       </div>
@@ -404,33 +407,34 @@ export function SupplySubmissionList({
   source: "live" | "fallback";
 }) {
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   return (
     <>
       <CanvasPageHeader
         theme={theme}
-        title="送件清單"
-        subtitle="status / submissionType / revisionNo / reviewer note"
+        title={t("supply.submissions.title")}
+        subtitle={t("supply.submissions.subtitle")}
         actions={
           <Link href="/supply" style={cardLinkStyle(theme)}>
-            回供給總覽
+            {t("supply.action.backDashboard")}
           </Link>
         }
       />
       <div style={{ padding: 24 }}>
         {source === "fallback" ? (
-          <CanvasBanner theme={theme} tone="info" icon="info" body="目前顯示 fallback 送件資料。" />
+          <CanvasBanner theme={theme} tone="info" icon="info" body={t("supply.submissions.fallback")} />
         ) : null}
-        <CanvasCard theme={theme} title="所有 submissions">
+        <CanvasCard theme={theme} title={t("supply.submissions.all")}>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ textAlign: "left", color: theme.textMuted }}>
-                  <th style={{ padding: "0 0 10px" }}>Subject</th>
-                  <th style={{ padding: "0 0 10px" }}>Type</th>
-                  <th style={{ padding: "0 0 10px" }}>Status</th>
-                  <th style={{ padding: "0 0 10px" }}>Revision</th>
-                  <th style={{ padding: "0 0 10px" }}>Reviewer note</th>
-                  <th style={{ padding: "0 0 10px" }}>Action</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.subject")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.type")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("table.status")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.revision")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.reviewerNote")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("table.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -451,7 +455,7 @@ export function SupplySubmissionList({
                         </CanvasPill>
                       </td>
                       <td style={{ padding: "12px 0", fontFamily: theme.monoFamily }}>
-                        rev {detail.submission.revisionNo}
+                        {t("supply.revision", { value: detail.submission.revisionNo })}
                       </td>
                       <td style={{ padding: "12px 0" }}>
                         {detail.submission.reviewComment || "—"}
@@ -461,7 +465,7 @@ export function SupplySubmissionList({
                           href={`/supply/submissions/${detail.submission.submissionId}`}
                           style={cardLinkStyle(theme)}
                         >
-                          詳情
+                          {t("supply.action.detail")}
                         </Link>
                       </td>
                     </tr>
@@ -478,41 +482,42 @@ export function SupplySubmissionList({
 
 export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   return (
     <>
       <CanvasPageHeader
         theme={theme}
-        title="文件"
-        subtitle="pre-signed upload · 到期追蹤 · submission 入口"
+        title={t("documents.title")}
+        subtitle={t("supply.documents.subtitle")}
       />
       <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
         <CanvasBanner
           theme={theme}
           tone="info"
           icon="info"
-          title="pre-signed 上傳流程"
-          body="前端先取得 upload URL，再以 objectKey + checksum 確認文件；實際補件入口在各 submission detail。"
+          title={t("supply.documents.uploadFlowTitle")}
+          body={t("supply.documents.uploadFlowBody")}
         />
         {data.source === "fallback" ? (
-          <CanvasBanner theme={theme} tone="warn" icon="warn" body="目前顯示 fallback 文件資料。" />
+          <CanvasBanner theme={theme} tone="warn" icon="warn" body={t("supply.documents.fallback")} />
         ) : null}
-        <CanvasCard theme={theme} title="文件清單">
+        <CanvasCard theme={theme} title={t("supply.documents.list")}>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ textAlign: "left", color: theme.textMuted }}>
-                  <th style={{ padding: "0 0 10px" }}>文件類型</th>
-                  <th style={{ padding: "0 0 10px" }}>檔名</th>
-                  <th style={{ padding: "0 0 10px" }}>主體</th>
-                  <th style={{ padding: "0 0 10px" }}>效期</th>
-                  <th style={{ padding: "0 0 10px" }}>審核狀態</th>
-                  <th style={{ padding: "0 0 10px" }}>送件</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.documentType")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.fileName")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.subject")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.effectiveWindow")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.reviewStatus")}</th>
+                  <th style={{ padding: "0 0 10px" }}>{t("nav.supplySubmissions")}</th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.map((row) => (
                   <tr key={row.documentId} style={{ borderTop: `1px solid ${theme.border}` }}>
-                    <td style={{ padding: "12px 0" }}>{DOCUMENT_LABELS[row.documentType]}</td>
+                    <td style={{ padding: "12px 0" }}>{t(DOCUMENT_LABEL_KEYS[row.documentType] ?? row.documentType)}</td>
                     <td style={{ padding: "12px 0", fontFamily: theme.monoFamily }}>
                       {row.originalFileName}
                     </td>
@@ -530,7 +535,7 @@ export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
                     </td>
                     <td style={{ padding: "12px 0" }}>
                       <Link href={`/supply/submissions/${row.submissionId}`} style={cardLinkStyle(theme)}>
-                        開啟送件
+                        {t("supply.action.openSubmission")}
                       </Link>
                     </td>
                   </tr>
@@ -547,6 +552,7 @@ export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
 export function NewDriverSubmissionForm() {
   const router = useRouter();
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<DriverDraftInput>({
@@ -580,14 +586,14 @@ export function NewDriverSubmissionForm() {
 
   return (
     <>
-      <CanvasPageHeader theme={theme} title="新增司機" subtitle="Driver draft · create → upload docs → submit" />
+      <CanvasPageHeader theme={theme} title={t("supply.driverNew.title")} subtitle={t("supply.driverNew.subtitle")} />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
-          title="DriverSupplyDraft"
+          title={t("supply.driverNew.cardTitle")}
           error={error}
           saving={saving}
           onSave={onCreate}
-          saveLabel="建立草稿"
+          saveLabel={t("supply.action.createDraft")}
         >
           <DriverDraftFields form={form} setForm={setForm} />
         </DraftFormFrame>
@@ -599,6 +605,7 @@ export function NewDriverSubmissionForm() {
 export function NewVehicleSubmissionForm() {
   const router = useRouter();
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<VehicleDraftInput>({
@@ -637,14 +644,14 @@ export function NewVehicleSubmissionForm() {
 
   return (
     <>
-      <CanvasPageHeader theme={theme} title="新增車輛" subtitle="Vehicle draft · create → upload docs → submit" />
+      <CanvasPageHeader theme={theme} title={t("supply.vehicleNew.title")} subtitle={t("supply.vehicleNew.subtitle")} />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
-          title="VehicleSupplyDraft"
+          title={t("supply.vehicleNew.cardTitle")}
           error={error}
           saving={saving}
           onSave={onCreate}
-          saveLabel="建立草稿"
+          saveLabel={t("supply.action.createDraft")}
         >
           <VehicleDraftFields form={form} setForm={setForm} />
         </DraftFormFrame>
@@ -669,15 +676,16 @@ function DraftFormFrame({
   children: ReactNode;
 }) {
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) 320px", gap: 16 }}>
       <CanvasCard theme={theme} title={title}>
         {children}
       </CanvasCard>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <CanvasCard theme={theme} title="送件提示">
+        <CanvasCard theme={theme} title={t("supply.draft.tipTitle")}>
           <div style={{ fontSize: 12, lineHeight: 1.5, color: theme.textMuted }}>
-            建立草稿後，請到 detail 頁補上文件，再以 revision-aware submit 送審。
+            {t("supply.draft.tipBody")}
           </div>
         </CanvasCard>
         {error ? (
@@ -686,7 +694,7 @@ function DraftFormFrame({
         <ActionButton
           theme={theme}
           label={saveLabel}
-          helper="建立後會帶你到 submission detail。"
+          helper={t("supply.draft.saveHelper")}
           variant="primary"
           busy={saving}
           onClick={onSave}
@@ -703,35 +711,36 @@ function DriverDraftFields({
   form: DriverDraftInput;
   setForm: Dispatch<SetStateAction<DriverDraftInput>>;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div style={sectionGrid()}>
-        <CanvasField label="姓名" required>
+        <CanvasField label={t("supply.driverField.name")} required>
           <FieldInput value={form.name} onChange={(e) => setForm((current) => ({ ...current, name: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="手機" required>
+        <CanvasField label={t("supply.driverField.mobile")} required>
           <FieldInput value={form.mobile} onChange={(e) => setForm((current) => ({ ...current, mobile: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="職業駕照號" required>
+        <CanvasField label={t("supply.driverField.licenseNo")} required>
           <FieldInput value={form.professionalDriverLicenseNo} onChange={(e) => setForm((current) => ({ ...current, professionalDriverLicenseNo: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="駕照到期" required>
+        <CanvasField label={t("supply.driverField.licenseExpiry")} required>
           <FieldInput type="date" value={form.professionalDriverLicenseExpiry} onChange={(e) => setForm((current) => ({ ...current, professionalDriverLicenseExpiry: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="計程車登記證號" required>
+        <CanvasField label={t("supply.driverField.registrationNo")} required>
           <FieldInput value={form.taxiDriverRegistrationNo} onChange={(e) => setForm((current) => ({ ...current, taxiDriverRegistrationNo: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="登記區域" required>
+        <CanvasField label={t("supply.driverField.registrationArea")} required>
           <FieldInput value={form.taxiDriverRegistrationArea} onChange={(e) => setForm((current) => ({ ...current, taxiDriverRegistrationArea: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="登記證到期" required>
+        <CanvasField label={t("supply.driverField.registrationExpiry")} required>
           <FieldInput type="date" value={form.taxiDriverRegistrationExpiry} onChange={(e) => setForm((current) => ({ ...current, taxiDriverRegistrationExpiry: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="偏好車輛 submissionId">
+        <CanvasField label={t("supply.driverField.preferredVehicleSubmissionId")}>
           <FieldInput value={form.preferredVehicleSubmissionId ?? ""} onChange={(e) => setForm((current) => ({ ...current, preferredVehicleSubmissionId: e.currentTarget.value || null }))} />
         </CanvasField>
       </div>
-      <CanvasField label="支援服務產品" required>
+      <CanvasField label={t("supply.field.supportedProducts")} required>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
           onChange={(value) => setForm((current) => ({ ...current, supportedServiceProductCodes: value }))}
@@ -748,51 +757,52 @@ function VehicleDraftFields({
   form: VehicleDraftInput;
   setForm: Dispatch<SetStateAction<VehicleDraftInput>>;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div style={sectionGrid()}>
-        <CanvasField label="車牌" required>
+        <CanvasField label={t("supply.vehicleField.plateNo")} required>
           <FieldInput value={form.plateNo} onChange={(e) => setForm((current) => ({ ...current, plateNo: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="牌照類型" required>
+        <CanvasField label={t("supply.vehicleField.licenseType")} required>
           <FieldSelect
             value={form.licenseType}
             onChange={(e) => setForm((current) => ({ ...current, licenseType: e.currentTarget.value }))}
             options={[
-              { value: "taxi", label: "計程車牌照" },
-              { value: "rental", label: "租賃車牌照" },
+              { value: "taxi", label: t("supply.vehicleField.licenseTypeTaxi") },
+              { value: "rental", label: t("supply.vehicleField.licenseTypeRental") },
             ]}
           />
         </CanvasField>
-        <CanvasField label="廠牌">
+        <CanvasField label={t("supply.vehicleField.brand")}>
           <FieldInput value={form.brand ?? ""} onChange={(e) => setForm((current) => ({ ...current, brand: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="車型">
+        <CanvasField label={t("supply.vehicleField.model")}>
           <FieldInput value={form.model ?? ""} onChange={(e) => setForm((current) => ({ ...current, model: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="年份">
+        <CanvasField label={t("supply.vehicleField.modelYear")}>
           <FieldInput type="number" value={String(form.modelYear ?? "")} onChange={(e) => setForm((current) => ({ ...current, modelYear: e.currentTarget.value ? Number(e.currentTarget.value) : null }))} />
         </CanvasField>
-        <CanvasField label="座位數" required>
+        <CanvasField label={t("supply.vehicleField.seatCount")} required>
           <FieldInput type="number" value={String(form.seatCount)} onChange={(e) => setForm((current) => ({ ...current, seatCount: Number(e.currentTarget.value) }))} />
         </CanvasField>
-        <CanvasField label="行李容量" required>
+        <CanvasField label={t("supply.vehicleField.luggageCapacity")} required>
           <FieldInput type="number" value={String(form.luggageCapacity)} onChange={(e) => setForm((current) => ({ ...current, luggageCapacity: Number(e.currentTarget.value) }))} />
         </CanvasField>
-        <CanvasField label="營業區" required>
+        <CanvasField label={t("supply.vehicleField.businessArea")} required>
           <FieldInput value={form.businessArea} onChange={(e) => setForm((current) => ({ ...current, businessArea: e.currentTarget.value }))} />
         </CanvasField>
-        <CanvasField label="目前司機 submissionId">
+        <CanvasField label={t("supply.vehicleField.currentDriverSubmissionId")}>
           <FieldInput value={form.currentDriverSubmissionId ?? ""} onChange={(e) => setForm((current) => ({ ...current, currentDriverSubmissionId: e.currentTarget.value || null }))} />
         </CanvasField>
-        <CanvasField label="車門數">
+        <CanvasField label={t("supply.vehicleField.doorCount")}>
           <FieldInput type="number" value={String(form.doorCount ?? "")} onChange={(e) => setForm((current) => ({ ...current, doorCount: e.currentTarget.value ? Number(e.currentTarget.value) : null }))} />
         </CanvasField>
-        <CanvasField label="顏色">
+        <CanvasField label={t("supply.vehicleField.color")}>
           <FieldInput value={form.color ?? ""} onChange={(e) => setForm((current) => ({ ...current, color: e.currentTarget.value }))} />
         </CanvasField>
       </div>
-      <CanvasField label="支援服務產品" required>
+      <CanvasField label={t("supply.field.supportedProducts")} required>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
           onChange={(value) => setForm((current) => ({ ...current, supportedServiceProductCodes: value }))}
@@ -800,10 +810,10 @@ function VehicleDraftFields({
       </CanvasField>
       <div style={{ display: "flex", gap: 24 }}>
         <label>
-          <input type="checkbox" checked={form.airportTransferEligible} onChange={(e) => setForm((current) => ({ ...current, airportTransferEligible: e.currentTarget.checked }))} /> 機場接送資格
+          <input type="checkbox" checked={form.airportTransferEligible} onChange={(e) => setForm((current) => ({ ...current, airportTransferEligible: e.currentTarget.checked }))} /> {t("supply.vehicleField.airportTransferEligible")}
         </label>
         <label>
-          <input type="checkbox" checked={form.fixedFareAllowed} onChange={(e) => setForm((current) => ({ ...current, fixedFareAllowed: e.currentTarget.checked }))} /> 固定價可行
+          <input type="checkbox" checked={form.fixedFareAllowed} onChange={(e) => setForm((current) => ({ ...current, fixedFareAllowed: e.currentTarget.checked }))} /> {t("supply.vehicleField.fixedFareAllowed")}
         </label>
       </div>
     </>
@@ -819,6 +829,7 @@ export function SupplySubmissionDetailView({
 }) {
   const router = useRouter();
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   const [detail, setDetail] = useState(initialDetail);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -944,7 +955,7 @@ export function SupplySubmissionDetailView({
 
   async function uploadDocument() {
     if (!docFile) {
-      throw new Error("請先選擇檔案。");
+      throw new Error(t("supply.error.selectFile"));
     }
     const uploadIntent = await apiRequest<{
       submissionId: string;
@@ -1005,7 +1016,7 @@ export function SupplySubmissionDetailView({
     <>
       <CanvasPageHeader
         theme={theme}
-        title={`${subject.title} · Submission detail`}
+        title={`${subject.title} · ${t("supply.detail.titleSuffix")}`}
         subtitle={`${detail.submission.submissionType} · ${detail.submission.submissionId}`}
         actions={
           <>
@@ -1013,47 +1024,47 @@ export function SupplySubmissionDetailView({
               {formatStatus(detail.submission.status)}
             </CanvasPill>
             <Link href="/supply/submissions" style={cardLinkStyle(theme)}>
-              回送件清單
+              {t("supply.action.backSubmissions")}
             </Link>
           </>
         }
       />
       <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
         {source === "fallback" ? (
-          <CanvasBanner theme={theme} tone="warn" icon="warn" body="目前顯示 fallback submission detail。" />
+          <CanvasBanner theme={theme} tone="warn" icon="warn" body={t("supply.detail.fallback")} />
         ) : null}
         {error ? <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} /> : null}
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) 340px", gap: 16 }}>
-          <CanvasCard theme={theme} title="Draft fields">
+          <CanvasCard theme={theme} title={t("supply.detail.draftFields")}>
             {driverForm ? (
               <DriverDraftFields form={driverForm} setForm={setDriverDraftSafe} />
             ) : vehicleForm ? (
               <VehicleDraftFields form={vehicleForm} setForm={setVehicleDraftSafe} />
             ) : (
-              <CanvasEmptyState theme={theme} title="No draft body" body="This submission has no draft payload." />
+              <CanvasEmptyState theme={theme} title={t("supply.detail.noDraftTitle")} body={t("supply.detail.noDraftBody")} />
             )}
           </CanvasCard>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <CanvasCard theme={theme} title="Submission state">
+            <CanvasCard theme={theme} title={t("supply.detail.stateTitle")}>
               <dl style={{ display: "grid", gridTemplateColumns: "120px 1fr", rowGap: 8, fontSize: 12.5, margin: 0 }}>
-                <dt style={{ color: theme.textMuted }}>Revision</dt>
+                <dt style={{ color: theme.textMuted }}>{t("supply.table.revision")}</dt>
                 <dd style={{ margin: 0, fontFamily: theme.monoFamily }}>{detail.submission.revisionNo}</dd>
-                <dt style={{ color: theme.textMuted }}>Submitted</dt>
+                <dt style={{ color: theme.textMuted }}>{t("supply.detail.submittedAt")}</dt>
                 <dd style={{ margin: 0 }}>{detail.submission.submittedAt || "—"}</dd>
-                <dt style={{ color: theme.textMuted }}>Review note</dt>
+                <dt style={{ color: theme.textMuted }}>{t("supply.table.reviewerNote")}</dt>
                 <dd style={{ margin: 0 }}>{detail.submission.reviewComment || "—"}</dd>
-                <dt style={{ color: theme.textMuted }}>Canonical IDs</dt>
+                <dt style={{ color: theme.textMuted }}>{t("supply.detail.canonicalIds")}</dt>
                 <dd style={{ margin: 0 }}>
                   {[detail.submission.canonicalDriverId, detail.submission.canonicalVehicleId, detail.submission.canonicalContractId, detail.submission.canonicalPolicyId]
                     .filter(Boolean)
-                    .join(" · ") || "Pre-approval: not yet canonical"}
+                    .join(" · ") || t("supply.detail.preApproval")}
                 </dd>
               </dl>
             </CanvasCard>
             <ActionButton
               theme={theme}
-              label="儲存草稿"
-              helper="僅限 draft / needs_revision。每次更新都會走 expectedRevisionNo。"
+              label={t("supply.action.saveDraft")}
+              helper={t("supply.detail.saveHelper")}
               variant="secondary"
               busy={busy === "save"}
               disabled={!editable}
@@ -1061,8 +1072,8 @@ export function SupplySubmissionDetailView({
             />
             <ActionButton
               theme={theme}
-              label={detail.submission.status === "needs_revision" ? "重新送審" : "送審"}
-              helper="draft 或補正完成後送審。"
+              label={detail.submission.status === "needs_revision" ? t("supply.action.resubmit") : t("supply.action.submit")}
+              helper={t("supply.detail.submitHelper")}
               variant="primary"
               busy={busy === "submit"}
               disabled={!editable}
@@ -1070,8 +1081,8 @@ export function SupplySubmissionDetailView({
             />
             <ActionButton
               theme={theme}
-              label="撤回送件"
-              helper="只有 submitted 可撤回，會轉成 withdrawn。"
+              label={t("supply.action.withdraw")}
+              helper={t("supply.detail.withdrawHelper")}
               variant="secondary"
               busy={busy === "withdraw"}
               disabled={detail.submission.status !== "submitted"}
@@ -1080,7 +1091,7 @@ export function SupplySubmissionDetailView({
           </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) 340px", gap: 16 }}>
-          <CanvasCard theme={theme} title="文件附件">
+          <CanvasCard theme={theme} title={t("supply.detail.attachments")}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {detail.documents.map((document) => (
                 <div
@@ -1094,7 +1105,7 @@ export function SupplySubmissionDetailView({
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div>
-                      <div style={{ fontWeight: 600 }}>{DOCUMENT_LABELS[document.documentType]}</div>
+                      <div style={{ fontWeight: 600 }}>{t(DOCUMENT_LABEL_KEYS[document.documentType] ?? document.documentType)}</div>
                       <div style={{ fontSize: 11, color: theme.textMuted, fontFamily: theme.monoFamily }}>
                         {document.originalFileName}
                       </div>
@@ -1120,41 +1131,41 @@ export function SupplySubmissionDetailView({
                           cursor: "pointer",
                         }}
                       >
-                        刪除
+                        {t("supply.action.delete")}
                       </button>
                     </div>
                   ) : null}
                 </div>
               ))}
               {detail.documents.length === 0 ? (
-                <CanvasEmptyState theme={theme} title="尚無文件" body="送審前需補齊對應文件。" />
+                <CanvasEmptyState theme={theme} title={t("supply.detail.noDocumentsTitle")} body={t("supply.detail.noDocumentsBody")} />
               ) : null}
             </div>
           </CanvasCard>
-          <CanvasCard theme={theme} title="上傳文件">
-            <CanvasField label="文件類型" required>
+          <CanvasCard theme={theme} title={t("supply.detail.uploadTitle")}>
+            <CanvasField label={t("supply.table.documentType")} required>
               <FieldSelect
                 value={docType}
                 onChange={(e) => setDocType(e.currentTarget.value)}
                 options={documentOptions.map((value) => ({
                   value,
-                  label: DOCUMENT_LABELS[value] ?? value,
+                  label: t(DOCUMENT_LABEL_KEYS[value] ?? value),
                 }))}
               />
             </CanvasField>
-            <CanvasField label="檔案" required>
+            <CanvasField label={t("supply.table.fileName")} required>
               <input type="file" onChange={(e) => setDocFile(e.currentTarget.files?.[0] ?? null)} />
             </CanvasField>
-            <CanvasField label="生效起">
+            <CanvasField label={t("supply.detail.effectiveFrom")}>
               <FieldInput type="date" value={docFrom} onChange={(e) => setDocFrom(e.currentTarget.value)} />
             </CanvasField>
-            <CanvasField label="到期">
+            <CanvasField label={t("supply.detail.effectiveUntil")}>
               <FieldInput type="date" value={docUntil} onChange={(e) => setDocUntil(e.currentTarget.value)} />
             </CanvasField>
             <ActionButton
               theme={theme}
-              label="建立 upload intent 並確認"
-              helper="前端會算 checksum 後呼叫 confirm。"
+              label={t("supply.action.uploadConfirm")}
+              helper={t("supply.detail.uploadHelper")}
               variant="primary"
               busy={busy === "upload"}
               disabled={!editable}
@@ -1162,7 +1173,7 @@ export function SupplySubmissionDetailView({
             />
           </CanvasCard>
         </div>
-        <CanvasCard theme={theme} title="Revision history">
+        <CanvasCard theme={theme} title={t("supply.detail.revisionHistory")}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {detail.reviewEvents.map((event) => (
               <div key={event.eventId} style={{ borderLeft: `2px solid ${theme.border}`, paddingLeft: 12 }}>
