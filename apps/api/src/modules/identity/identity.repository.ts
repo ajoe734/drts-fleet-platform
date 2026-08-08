@@ -14,6 +14,7 @@ import type {
   CanonicalTenantUserIdentitySnapshot,
   ConsumeAndRotateRefreshTokenCommand,
   ConsumeAndRotateRefreshTokenResult,
+  IamSessionInventoryQuery,
   TenantUserRoleRecord,
 } from "@drts/contracts";
 
@@ -744,6 +745,91 @@ export class IdentityRepository {
       [principalId],
     );
 
+    return result.rows.map((row) =>
+      this.hydrateSessionRecord(row, "iam.identity_sessions"),
+    );
+  }
+
+  async listSessions(
+    query?: IamSessionInventoryQuery,
+  ): Promise<CanonicalIdentitySessionRecord[]> {
+    const actorId = query?.actorId?.trim() || null;
+    const principalId = query?.principalId?.trim() || null;
+    const realm = query?.realm?.trim() || null;
+    const tenantId = query?.tenantId?.trim() || null;
+    const status = query?.status?.trim() || null;
+    const includeRevoked = query?.includeRevoked === true;
+    const limit =
+      typeof query?.limit === "number" && query.limit > 0 ? query.limit : null;
+
+    if (!this.isEnabled()) {
+      let sessions = Array.from(this.fallbackSessions.values());
+      if (principalId) {
+        sessions = sessions.filter((s) => s.principalId === principalId);
+      }
+      if (actorId) {
+        sessions = sessions.filter((s) => s.actorId === actorId);
+      }
+      if (realm) {
+        sessions = sessions.filter((s) => s.realm === realm);
+      }
+      if (tenantId) {
+        sessions = sessions.filter((s) => s.tenantId === tenantId);
+      }
+      if (status) {
+        sessions = sessions.filter((s) => s.status === status);
+      } else if (!includeRevoked) {
+        sessions = sessions.filter((s) => s.status === "active");
+      }
+      sessions.sort(
+        (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+      );
+      if (limit) {
+        sessions = sessions.slice(0, limit);
+      }
+      return sessions.map((session) => ({ ...session }));
+    }
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (principalId) {
+      params.push(principalId);
+      conditions.push(`principal_id = $${params.length}`);
+    }
+
+    if (realm) {
+      params.push(realm);
+      conditions.push(`realm = $${params.length}`);
+    }
+
+    if (status) {
+      params.push(status);
+      conditions.push(`status = $${params.length}`);
+    } else if (!includeRevoked) {
+      conditions.push(`status = 'active'`);
+    }
+
+    if (actorId) {
+      params.push(actorId);
+      conditions.push(`record->>'actorId' = $${params.length}`);
+    }
+
+    if (tenantId) {
+      params.push(tenantId);
+      conditions.push(`record->>'tenantId' = $${params.length}`);
+    }
+
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    let sql = `SELECT * FROM iam.identity_sessions ${whereClause} ORDER BY updated_at DESC`;
+    if (limit) {
+      params.push(limit);
+      sql += ` LIMIT $${params.length}`;
+    }
+
+    const result =
+      await this.databaseService!.query<PersistedSessionRow>(sql, params);
     return result.rows.map((row) =>
       this.hydrateSessionRecord(row, "iam.identity_sessions"),
     );
