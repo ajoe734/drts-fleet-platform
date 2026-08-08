@@ -133,8 +133,6 @@ const auditReasonLabelKeys: Record<AuditReasonCode, TranslationKey> = {
   ACCESS_DENIED: "audit.reason.ACCESS_DENIED",
 };
 
-const sampleAuditRecords: AuditRecord[] = [];
-
 function getSingleQueryValue(value: SearchParamValue) {
   return Array.isArray(value) ? (value.find(Boolean) ?? "") : (value ?? "");
 }

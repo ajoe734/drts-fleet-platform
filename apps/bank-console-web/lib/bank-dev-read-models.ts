@@ -123,6 +123,14 @@ export type BankAuditRow = {
   };
 };
 
+export type BankHomeOrderTallies = {
+  total: number;
+  reserved: number;
+  live: number;
+  completed: number;
+  cancelled: number;
+};
+
 function moneyToNumber(value?: { amountMinor: number } | null) {
   return (value?.amountMinor ?? 0) / 100;
 }
@@ -189,10 +197,6 @@ function mapDirection(order: OwnedOrderRecord): BookingDirection {
   return "outbound";
 }
 
-function buildRouteLabel(order: OwnedOrderRecord) {
-  return `${order.pickup.maskedAddress ?? order.pickup.address} → ${order.dropoff.maskedAddress ?? order.dropoff.address}`;
-}
-
 function mapBookingPrograms(
   programs: TenantServiceProgramRecord[],
 ): BookingProgram[] {
@@ -200,6 +204,25 @@ function mapBookingPrograms(
     code: program.programId,
     label: program.displayName,
   }));
+}
+
+function mapHomeOrderBucket(
+  status: OwnedOrderRecord["status"],
+): keyof BankHomeOrderTallies {
+  switch (status) {
+    case "completed":
+      return "completed";
+    case "cancelled":
+      return "cancelled";
+    case "driver_accepted":
+    case "enroute_pickup":
+    case "arrived_pickup":
+    case "on_trip":
+    case "proof_pending":
+      return "live";
+    default:
+      return "reserved";
+  }
 }
 
 function buildProgramNameMap(
@@ -646,6 +669,7 @@ export async function loadBankHomeSnapshot(
     period: string;
     todayLabel: string;
     orders: BookingListItem[];
+    tallies: BankHomeOrderTallies;
     usage: TenantProgramUsageRecord[];
     contracts: IssuerContractStatusRecord[];
     statements: BankStatement[];
@@ -665,6 +689,20 @@ export async function loadBankHomeSnapshot(
         period: core.usage[0]?.period ?? now.toISOString().slice(0, 7),
         todayLabel: now.toISOString().slice(0, 10),
         orders: bookingData.bookings,
+        tallies: core.orders.reduce<BankHomeOrderTallies>(
+          (sum, order) => {
+            sum.total += 1;
+            sum[mapHomeOrderBucket(order.status)] += 1;
+            return sum;
+          },
+          {
+            total: 0,
+            reserved: 0,
+            live: 0,
+            completed: 0,
+            cancelled: 0,
+          },
+        ),
         usage: core.usage,
         contracts: contractData.contracts,
         statements: statementData.statements,
@@ -678,6 +716,13 @@ export async function loadBankHomeSnapshot(
         period: now.toISOString().slice(0, 7),
         todayLabel: now.toISOString().slice(0, 10),
         orders: [],
+        tallies: {
+          total: 0,
+          reserved: 0,
+          live: 0,
+          completed: 0,
+          cancelled: 0,
+        },
         usage: [],
         contracts: [],
         statements: [],
