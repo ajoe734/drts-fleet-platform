@@ -14,6 +14,12 @@ export const IAM_STAGE15_ERROR_CODES = [
   "IAM_CREDENTIAL_NOT_FOUND",
   "IAM_ACCESS_REVIEW_NOT_FOUND",
   "IAM_BREAK_GLASS_NOT_FOUND",
+  "IAM_SELF_APPROVAL_DENIED",
+  "IAM_SELF_ESCALATION_DENIED",
+  "IAM_LAST_ADMIN_INVARIANT_VIOLATED",
+  "IAM_INVALID_EFFECTIVE_WINDOW",
+  "IAM_PRIVILEGED_ROLE_EXPIRED",
+  "IAM_PRIVILEGED_ROLE_NOT_FOUND",
 ] as const;
 
 export type IamStage15ErrorCode = (typeof IAM_STAGE15_ERROR_CODES)[number];
@@ -25,6 +31,87 @@ export interface IamMutationMetadata {
   approvalRequestId?: string | null;
   stepUpReference?: string | null;
   note?: string | null;
+}
+
+export type PrivilegedRoleRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "active"
+  | "expired"
+  | "removed"
+  | "cancelled";
+
+export interface PrivilegedRoleRequestRecord {
+  requestId: string;
+  tenantId?: string | null;
+  realm: "platform" | "tenant";
+  targetUserId: string;
+  targetUserEmail: string;
+  roleCode: string;
+  previousRoleCode?: string | null;
+  requestedByUserId: string;
+  requestedByUserEmail: string;
+  approvedByUserId?: string | null;
+  rejectedByUserId?: string | null;
+  removedByUserId?: string | null;
+  status: PrivilegedRoleRequestStatus;
+  validFrom: string;
+  validTo: string | null;
+  reasonCode: string;
+  note?: string | null;
+  version: number;
+  activatedAt?: string | null;
+  expiredAt?: string | null;
+  removedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePrivilegedRoleRequestCommand {
+  tenantId?: string | null;
+  realm?: "platform" | "tenant";
+  targetUserId: string;
+  roleCode: string;
+  validFrom: string;
+  validTo?: string | null;
+  reasonCode: string;
+  note?: string | null;
+}
+
+export interface ApprovePrivilegedRoleRequestCommand {
+  requestId: string;
+  reasonCode: string;
+  expectedVersion: number;
+  freshMfaProof?: {
+    amr?: string[];
+    authTime?: number | string;
+    mfaToken?: string;
+  } | null;
+  note?: string | null;
+}
+
+export interface RejectPrivilegedRoleRequestCommand {
+  requestId: string;
+  reasonCode: string;
+  expectedVersion: number;
+  note?: string | null;
+}
+
+export interface RemovePrivilegedRoleGrantCommand {
+  requestId: string;
+  reasonCode: string;
+  expectedVersion: number;
+  note?: string | null;
+}
+
+export interface ListPrivilegedRoleRequestsQuery {
+  tenantId?: string | null;
+  targetUserId?: string | null;
+  roleCode?: string | null;
+  status?: PrivilegedRoleRequestStatus | null;
+  realm?: "platform" | "tenant" | null;
+  limit?: number | null;
 }
 
 export interface IamCallbackSessionExchangeCommand {
@@ -258,7 +345,50 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     path: "/api/platform-admin/break-glass/requests/{requestId}/approve",
     domain: "break_glass",
   },
+  {
+    operationId: "createPrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests",
+    domain: "role",
+  },
+  {
+    operationId: "listPrivilegedRoleRequests",
+    method: "get",
+    path: "/api/identity/privileged-role-requests",
+    domain: "role",
+  },
+  {
+    operationId: "getPrivilegedRoleRequest",
+    method: "get",
+    path: "/api/identity/privileged-role-requests/{requestId}",
+    domain: "role",
+  },
+  {
+    operationId: "approvePrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/approve",
+    domain: "role",
+  },
+  {
+    operationId: "rejectPrivilegedRoleRequest",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/reject",
+    domain: "role",
+  },
+  {
+    operationId: "removePrivilegedRoleGrant",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/{requestId}/remove",
+    domain: "role",
+  },
+  {
+    operationId: "processPrivilegedRoleExpiries",
+    method: "post",
+    path: "/api/identity/privileged-role-requests/process-expiries",
+    domain: "role",
+  },
 ] as const;
 
 export type IamStage15Operation =
   (typeof IAM_STAGE15_OPERATION_CATALOG)[number];
+

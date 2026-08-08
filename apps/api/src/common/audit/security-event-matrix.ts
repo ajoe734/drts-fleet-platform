@@ -168,4 +168,59 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     tenantScoped: false,
     requiredOutcomes: ["denied", "failure", "expired", "revoked"],
   },
+  {
+    eventType: "privileged_role.requested",
+    eventFamily: "role",
+    description:
+      "Privileged role request created requiring independent approval.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "privileged_role.approved",
+    eventFamily: "role",
+    description:
+      "Privileged role request approved by independent approver with fresh MFA.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "privileged_role.rejected",
+    eventFamily: "role",
+    description:
+      "Privileged role request rejected by approver or governance policy.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["denied", "failure"],
+  },
+  {
+    eventType: "privileged_role.activated",
+    eventFamily: "role",
+    description:
+      "Privileged role grant activated during effective window.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "privileged_role.expired",
+    eventFamily: "role",
+    description:
+      "Privileged role grant expired after effective time window passed.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["expired", "success"],
+  },
+  {
+    eventType: "privileged_role.removed",
+    eventFamily: "role",
+    description:
+      "Privileged role grant removed by authorized administrator.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["revoked", "success"],
+  },
 ] as const;
+
