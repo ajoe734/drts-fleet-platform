@@ -15,6 +15,8 @@ import type {
   ConsumeAndRotateRefreshTokenCommand,
   ConsumeAndRotateRefreshTokenResult,
   IamSessionInventoryQuery,
+  PrivilegedRoleApprovalRequestRecord,
+  PrivilegedRoleGrantRecord,
   TenantUserRoleRecord,
 } from "@drts/contracts";
 
@@ -119,6 +121,16 @@ export class IdentityRepository implements OnModuleInit {
   private readonly fallbackConsumedWorkloadAssertions = new Map<
     string,
     ConsumeWorkloadIdentityAssertionInput & { consumedAt: string }
+  >();
+
+  private readonly fallbackPrivilegedRoleRequests = new Map<
+    string,
+    PrivilegedRoleApprovalRequestRecord
+  >();
+
+  private readonly fallbackPrivilegedRoleGrants = new Map<
+    string,
+    PrivilegedRoleGrantRecord
   >();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {
@@ -2720,5 +2732,196 @@ export class IdentityRepository implements OnModuleInit {
     }
 
     return parsed;
+  }
+
+  async savePrivilegedRoleRequest(
+    request: PrivilegedRoleApprovalRequestRecord,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleApprovalRequestRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackPrivilegedRoleRequests.set(request.requestId, { ...request });
+      return { ...request };
+    }
+
+    const runner = client || this.databaseService!;
+    const result = await runner.query<JsonRecordRow>(
+      `
+        INSERT INTO iam.privileged_role_approval_requests (
+          request_id, tenant_id, realm, target_user_id, target_membership_id,
+          target_email, requested_role_code, requester_principal_id, requester_actor_type,
+          reason, status, approver_principal_id, approval_decision, decided_at,
+          valid_from, valid_to, version, created_at, updated_at, record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
+        )
+        ON CONFLICT (request_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          approver_principal_id = EXCLUDED.approver_principal_id,
+          approval_decision = EXCLUDED.approval_decision,
+          decided_at = EXCLUDED.decided_at,
+          version = EXCLUDED.version,
+          updated_at = EXCLUDED.updated_at,
+          record = EXCLUDED.record
+        RETURNING record
+      `,
+      [
+        request.requestId,
+        request.tenantId,
+        request.realm,
+        request.targetUserId,
+        request.targetMembershipId || null,
+        request.targetEmail || null,
+        request.requestedRoleCode,
+        request.requesterPrincipalId,
+        request.requesterActorType,
+        request.reason,
+        request.status,
+        request.approverPrincipalId || null,
+        request.approvalDecision || null,
+        request.decidedAt || null,
+        request.validFrom,
+        request.validTo || null,
+        request.version,
+        request.createdAt,
+        request.updatedAt,
+        JSON.stringify(request),
+      ],
+    );
+
+    return this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
+      result.rows[0].record,
+      "iam.privileged_role_approval_requests",
+    );
+  }
+
+  async getPrivilegedRoleRequest(
+    requestId: string,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleApprovalRequestRecord | null> {
+    if (!this.isEnabled()) {
+      const found = this.fallbackPrivilegedRoleRequests.get(requestId);
+      return found ? { ...found } : null;
+    }
+
+    const runner = client || this.databaseService!;
+    const result = await runner.query<JsonRecordRow>(
+      `SELECT record FROM iam.privileged_role_approval_requests WHERE request_id = $1 LIMIT 1`,
+      [requestId],
+    );
+
+    if (!result.rows[0]?.record) {
+      return null;
+    }
+
+    return this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
+      result.rows[0].record,
+      "iam.privileged_role_approval_requests",
+    );
+  }
+
+  async listPrivilegedRoleRequests(
+    tenantId?: string | null,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleApprovalRequestRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackPrivilegedRoleRequests.values())
+        .filter((r) => !tenantId || r.tenantId === tenantId)
+        .map((r) => ({ ...r }));
+    }
+
+    const runner = client || this.databaseService!;
+    const result = await runner.query<JsonRecordRow>(
+      `
+        SELECT record FROM iam.privileged_role_approval_requests
+        WHERE ($1::text IS NULL OR tenant_id = $1::text)
+        ORDER BY updated_at DESC
+      `,
+      [tenantId || null],
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
+        row.record,
+        "iam.privileged_role_approval_requests",
+      ),
+    );
+  }
+
+  async savePrivilegedRoleGrant(
+    grant: PrivilegedRoleGrantRecord,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleGrantRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackPrivilegedRoleGrants.set(grant.grantId, { ...grant });
+      return { ...grant };
+    }
+
+    const runner = client || this.databaseService!;
+    const result = await runner.query<JsonRecordRow>(
+      `
+        INSERT INTO iam.privileged_role_grants (
+          grant_id, request_id, tenant_id, realm, target_user_id, target_membership_id,
+          role_code, granted_by_principal_id, approval_id, valid_from, valid_to, status,
+          created_at, updated_at, record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb
+        )
+        ON CONFLICT (grant_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          updated_at = EXCLUDED.updated_at,
+          record = EXCLUDED.record
+        RETURNING record
+      `,
+      [
+        grant.grantId,
+        grant.requestId || null,
+        grant.tenantId || null,
+        grant.realm,
+        grant.targetUserId,
+        grant.targetMembershipId || null,
+        grant.roleCode,
+        grant.grantedByPrincipalId || null,
+        grant.approvalId || null,
+        grant.validFrom,
+        grant.validTo || null,
+        grant.status,
+        grant.createdAt,
+        grant.updatedAt,
+        JSON.stringify(grant),
+      ],
+    );
+
+    return this.parseRecord<PrivilegedRoleGrantRecord>(
+      result.rows[0].record,
+      "iam.privileged_role_grants",
+    );
+  }
+
+  async listPrivilegedRoleGrants(
+    tenantId?: string | null,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleGrantRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackPrivilegedRoleGrants.values())
+        .filter((g) => !tenantId || g.tenantId === tenantId)
+        .map((g) => ({ ...g }));
+    }
+
+    const runner = client || this.databaseService!;
+    const result = await runner.query<JsonRecordRow>(
+      `
+        SELECT record FROM iam.privileged_role_grants
+        WHERE ($1::text IS NULL OR tenant_id = $1::text)
+        ORDER BY updated_at DESC
+      `,
+      [tenantId || null],
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<PrivilegedRoleGrantRecord>(
+        row.record,
+        "iam.privileged_role_grants",
+      ),
+    );
   }
 }

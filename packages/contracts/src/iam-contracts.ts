@@ -360,7 +360,7 @@ export interface PrivilegedRoleGrantRecord {
   approvalId: string | null;
   validFrom: string;
   validTo: string | null;
-  status: "active" | "expired" | "removed";
+  status: "pending_activation" | "active" | "expired" | "removed";
   createdAt: string;
   updatedAt: string;
 }

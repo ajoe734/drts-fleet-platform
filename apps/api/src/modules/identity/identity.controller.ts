@@ -278,7 +278,7 @@ export class IdentityController {
   }
 
   @Post("privileged-role-requests")
-  createPrivilegedRoleRequest(
+  async createPrivilegedRoleRequest(
     @Body() command: CreatePrivilegedRoleRequestCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
@@ -297,16 +297,24 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const result = this.privilegedRoleGovernanceService.createRequest(command, identity);
+    const result = await this.privilegedRoleGovernanceService.createRequest(command, identity);
     return toApiSuccessEnvelope(result, requestId);
   }
 
   @Get("privileged-role-requests")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listPrivilegedRoleRequests(
+  async listPrivilegedRoleRequests(
     @Query("tenantId") tenantId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_CREDENTIALS_INVALID",
+        "Authenticated identity is required to list privileged role requests.",
+      );
+    }
     if (!this.privilegedRoleGovernanceService) {
       throw new ApiRequestError(
         HttpStatus.SERVICE_UNAVAILABLE,
@@ -314,16 +322,24 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const items = this.privilegedRoleGovernanceService.listRequests(tenantId);
+    const items = await this.privilegedRoleGovernanceService.listRequests(identity, tenantId);
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("privileged-role-requests/:requestId")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPrivilegedRoleRequest(
+  async getPrivilegedRoleRequest(
     @Param("requestId") requestIdParam: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_CREDENTIALS_INVALID",
+        "Authenticated identity is required to view privileged role request.",
+      );
+    }
     if (!this.privilegedRoleGovernanceService) {
       throw new ApiRequestError(
         HttpStatus.SERVICE_UNAVAILABLE,
@@ -331,7 +347,7 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const result = this.privilegedRoleGovernanceService.getRequest(requestIdParam);
+    const result = await this.privilegedRoleGovernanceService.getRequest(requestIdParam, identity);
     if (!result) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -372,7 +388,7 @@ export class IdentityController {
   }
 
   @Post("privileged-role-requests/:requestId/reject")
-  rejectPrivilegedRoleRequest(
+  async rejectPrivilegedRoleRequest(
     @Param("requestId") requestIdParam: string,
     @Body() command: RejectPrivilegedRoleRequestCommand,
     @CurrentIdentity() identity: IdentityContext | null,
@@ -392,7 +408,7 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const result = this.privilegedRoleGovernanceService.rejectRequest(
+    const result = await this.privilegedRoleGovernanceService.rejectRequest(
       requestIdParam,
       identity,
       command,

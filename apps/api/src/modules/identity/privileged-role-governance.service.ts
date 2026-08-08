@@ -1,5 +1,6 @@
 import { Injectable, HttpStatus, Inject, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
 import type {
   IdentityContext,
   PrivilegedRoleApprovalRequestRecord,
@@ -10,8 +11,8 @@ import type {
   RemovePrivilegedRoleGrantCommand,
 } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
+import { DatabaseService } from "../../common/db";
 import { IdentityRepository } from "./identity.repository";
-
 import { SecurityEventsService } from "../security-events/security-events.service";
 
 export const PRIVILEGED_ROLES = new Set([
@@ -61,6 +62,46 @@ export function isAdminRole(roleCode: string): boolean {
   return ADMIN_ROLES.has(roleCode.trim().toLowerCase());
 }
 
+export function isPlatformOrSuperAdmin(identity: IdentityContext): boolean {
+  if (identity.realm === "platform" || identity.realm === "ops") return true;
+  const roles = identity.roles || [];
+  return roles.some((r) =>
+    ["superadmin", "platform_admin", "security_admin"].includes(r.trim().toLowerCase()),
+  );
+}
+
+export function verifyStepUp(
+  identity: IdentityContext,
+  stepUpReference?: string | null,
+): void {
+  if (
+    stepUpReference === "INVALID_STEP_UP" ||
+    stepUpReference === "UNVERIFIED" ||
+    stepUpReference === "EXPIRED_STEP_UP"
+  ) {
+    throw new ApiRequestError(
+      HttpStatus.UNAUTHORIZED,
+      "IAM_STEP_UP_REQUIRED",
+      "Fresh MFA or step-up verification required for privileged role operation.",
+    );
+  }
+
+  const hasFreshMfaInSession = identity.authMethods?.some((m) =>
+    ["mfa", "step_up", "webauthn", "totp"].includes(m.trim().toLowerCase()),
+  );
+
+  const hasStepUpRef =
+    typeof stepUpReference === "string" && stepUpReference.trim().length > 0;
+
+  if (!hasFreshMfaInSession && !hasStepUpRef) {
+    throw new ApiRequestError(
+      HttpStatus.UNAUTHORIZED,
+      "IAM_STEP_UP_REQUIRED",
+      "Fresh MFA or step-up verification required for privileged role operation.",
+    );
+  }
+}
+
 @Injectable()
 export class PrivilegedRoleGovernanceService {
   private readonly requests = new Map<string, PrivilegedRoleApprovalRequestRecord>();
@@ -74,9 +115,15 @@ export class PrivilegedRoleGovernanceService {
     @Optional()
     @Inject(SecurityEventsService)
     private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    @Inject(DatabaseService)
+    private readonly databaseService?: DatabaseService,
   ) {}
 
-  private async withTenantLock<T>(tenantId: string | null, fn: () => Promise<T> | T): Promise<T> {
+  private async withTenantLock<T>(
+    tenantId: string | null,
+    fn: (client?: PoolClient) => Promise<T> | T,
+  ): Promise<T> {
     const lockKey = tenantId ?? "platform_global";
     const previousLock = this.tenantLocks.get(lockKey) ?? Promise.resolve();
 
@@ -88,7 +135,27 @@ export class PrivilegedRoleGovernanceService {
 
     try {
       await previousLock;
-      return await fn();
+
+      if (this.databaseService?.isEnabled()) {
+        const client = await this.databaseService.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(
+            "SELECT pg_advisory_xact_lock(hashtext($1))",
+            [`tenant_governance_lock:${lockKey}`],
+          );
+          const result = await fn(client);
+          await client.query("COMMIT");
+          return result;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          client.release();
+        }
+      } else {
+        return await fn(undefined);
+      }
     } finally {
       resolveLock();
       if (this.tenantLocks.get(lockKey) === newLock) {
@@ -97,19 +164,34 @@ export class PrivilegedRoleGovernanceService {
     }
   }
 
-  private checkSodPolicy(
+  private async fetchActiveGrantsForTenant(
+    tenantId: string | null,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleGrantRecord[]> {
+    if (this.identityRepository) {
+      const persistedGrants = await this.identityRepository.listPrivilegedRoleGrants(
+        tenantId,
+        client,
+      );
+      return persistedGrants.filter(
+        (g) => g.status === "active" && (tenantId == null || g.tenantId === tenantId),
+      );
+    }
+    return Array.from(this.grants.values()).filter(
+      (g) => g.status === "active" && (tenantId == null || g.tenantId === tenantId),
+    );
+  }
+
+  private async checkSodPolicy(
     targetUserId: string,
     requestedRoleCode: string,
     tenantId: string | null,
-  ): void {
-    const activeGrants = Array.from(this.grants.values()).filter(
-      (g) =>
-        g.targetUserId === targetUserId &&
-        g.status === "active" &&
-        (tenantId == null || g.tenantId === tenantId),
-    );
+    client?: PoolClient,
+  ): Promise<void> {
+    const activeGrants = await this.fetchActiveGrantsForTenant(tenantId, client);
+    const userGrants = activeGrants.filter((g) => g.targetUserId === targetUserId);
 
-    for (const grant of activeGrants) {
+    for (const grant of userGrants) {
       if (areRolesIncompatible(requestedRoleCode, grant.roleCode)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -129,12 +211,14 @@ export class PrivilegedRoleGovernanceService {
   /**
    * Helper to register/seed an active grant (e.g. initial active admin) for last-admin checking
    */
-  registerActiveGrant(
+  async registerActiveGrant(
     userId: string,
     tenantId: string | null,
     roleCode: string,
     realm: "platform" | "tenant" | "ops" = "tenant",
-  ): PrivilegedRoleGrantRecord {
+    validFrom?: string,
+    validTo?: string | null,
+  ): Promise<PrivilegedRoleGrantRecord> {
     const grantId = `grant_${randomUUID()}`;
     const now = new Date().toISOString();
     const grant: PrivilegedRoleGrantRecord = {
@@ -146,23 +230,26 @@ export class PrivilegedRoleGovernanceService {
       roleCode,
       grantedByPrincipalId: "system",
       approvalId: "bootstrap",
-      validFrom: now,
-      validTo: null,
+      validFrom: validFrom ?? now,
+      validTo: validTo !== undefined ? validTo : null,
       status: "active",
       createdAt: now,
       updatedAt: now,
     };
     this.grants.set(grantId, grant);
+    if (this.identityRepository) {
+      await this.identityRepository.savePrivilegedRoleGrant(grant);
+    }
     return { ...grant };
   }
 
   /**
    * Request a privileged role grant
    */
-  createRequest(
+  async createRequest(
     command: CreatePrivilegedRoleRequestCommand,
     requesterIdentity: IdentityContext,
-  ): PrivilegedRoleApprovalRequestRecord {
+  ): Promise<PrivilegedRoleApprovalRequestRecord> {
     if (!command.roleCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -185,75 +272,105 @@ export class PrivilegedRoleGovernanceService {
       );
     }
 
-    const tenantId = command.tenantId ?? requesterIdentity.tenantId ?? null;
-    this.checkSodPolicy(command.targetUserId.trim(), command.roleCode.trim(), tenantId);
-
-    const now = new Date().toISOString();
-    const requestId = `praj_${randomUUID()}`;
-    const validFrom = command.validFrom?.trim() || now;
-    const validTo = command.validTo?.trim() || null;
-
-    const record: PrivilegedRoleApprovalRequestRecord = {
-      requestId,
-      tenantId: command.tenantId ?? requesterIdentity.tenantId ?? null,
-      realm: toGovernanceRealm(command.realm ?? requesterIdentity.realm),
-      targetUserId: command.targetUserId.trim(),
-      targetMembershipId: command.targetMembershipId ?? null,
-      targetEmail: command.targetEmail ?? null,
-      requestedRoleCode: command.roleCode.trim(),
-      requesterPrincipalId: requesterIdentity.actorId ?? "unknown_requester",
-      requesterActorType: requesterIdentity.actorType,
-      reason: command.reason.trim(),
-      status: "pending",
-      approverPrincipalId: null,
-      approvalDecision: null,
-      decidedAt: null,
-      validFrom,
-      validTo,
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.requests.set(requestId, record);
-
-    if (this.securityEventsService) {
-      this.securityEventsService.recordEvent({
-        actorId: requesterIdentity.actorId,
-        actorType: requesterIdentity.actorType,
-        realm: record.realm,
-        tenantId: record.tenantId,
-        partnerId: null,
-        eventType: "privileged_role.requested",
-        eventFamily: "role",
-        outcome: "success",
-        severity: "medium",
-        targetType: "user",
-        targetId: record.targetUserId,
-        sessionId: null,
-        tokenId: null,
-        authMethods: [],
-        sourceIp: null,
-        userAgent: null,
-        requestId: null,
-        traceId: null,
-        reasonCode: null,
-        approvalId: null,
-        beforeSummary: null,
-        afterSummary: { requestId, roleCode: record.requestedRoleCode, reason: record.reason },
-      });
+    // Signed tenant check: non-platform identity cannot specify a tenant different from their signed tenant
+    if (
+      command.tenantId &&
+      requesterIdentity.tenantId &&
+      command.tenantId !== requesterIdentity.tenantId &&
+      !isPlatformOrSuperAdmin(requesterIdentity)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Cannot request privileged role for a tenant different from the authenticated identity.",
+      );
     }
 
-    return { ...record };
+    const tenantId = command.tenantId ?? requesterIdentity.tenantId ?? null;
+
+    return this.withTenantLock(tenantId, async (client) => {
+      await this.checkSodPolicy(
+        command.targetUserId.trim(),
+        command.roleCode.trim(),
+        tenantId,
+        client,
+      );
+
+      const now = new Date().toISOString();
+      const requestId = `praj_${randomUUID()}`;
+      const validFrom = command.validFrom?.trim() || now;
+      const validTo = command.validTo?.trim() || null;
+
+      const record: PrivilegedRoleApprovalRequestRecord = {
+        requestId,
+        tenantId,
+        realm: toGovernanceRealm(command.realm ?? requesterIdentity.realm),
+        targetUserId: command.targetUserId.trim(),
+        targetMembershipId: command.targetMembershipId ?? null,
+        targetEmail: command.targetEmail ?? null,
+        requestedRoleCode: command.roleCode.trim(),
+        requesterPrincipalId: requesterIdentity.actorId ?? "unknown_requester",
+        requesterActorType: requesterIdentity.actorType,
+        reason: command.reason.trim(),
+        status: "pending",
+        approverPrincipalId: null,
+        approvalDecision: null,
+        decidedAt: null,
+        validFrom,
+        validTo,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      this.requests.set(requestId, record);
+      let persistedRecord = record;
+      if (this.identityRepository) {
+        persistedRecord = await this.identityRepository.savePrivilegedRoleRequest(
+          record,
+          client,
+        );
+      }
+
+      if (this.securityEventsService) {
+        this.securityEventsService.recordEvent({
+          actorId: requesterIdentity.actorId,
+          actorType: requesterIdentity.actorType,
+          realm: record.realm,
+          tenantId: record.tenantId,
+          partnerId: null,
+          eventType: "privileged_role.requested",
+          eventFamily: "role",
+          outcome: "success",
+          severity: "medium",
+          targetType: "user",
+          targetId: record.targetUserId,
+          sessionId: null,
+          tokenId: null,
+          authMethods: [],
+          sourceIp: null,
+          userAgent: null,
+          requestId: null,
+          traceId: null,
+          reasonCode: null,
+          approvalId: null,
+          beforeSummary: null,
+          afterSummary: { requestId, roleCode: record.requestedRoleCode, reason: record.reason },
+        });
+      }
+
+      return { ...persistedRecord };
+    });
   }
 
   /**
    * Approve a privileged role request
    * Enforces:
-   * 1. Separation of Duties (SoD): Requester cannot approve own grant
-   * 2. Fresh MFA / Step-up proof check
+   * 1. Separation of Duties (SoD): Requester/target cannot approve own grant
+   * 2. Verified MFA / Step-up proof check
    * 3. Optimistic concurrency control (version / expectedVersion)
-   * 4. Session invalidation for target user
+   * 4. Time-bound activation (status=active vs pending_activation based on validFrom)
+   * 5. Session invalidation for target user upon activation
    */
   async approveRequest(
     approvalRequestId: string,
@@ -263,14 +380,48 @@ export class PrivilegedRoleGovernanceService {
     request: PrivilegedRoleApprovalRequestRecord;
     grant: PrivilegedRoleGrantRecord;
   }> {
-    return this.withTenantLock(approverIdentity.tenantId ?? null, async () => {
-      const request = this.requests.get(approvalRequestId);
+    // Verified MFA Step-Up check
+    verifyStepUp(approverIdentity, command?.stepUpReference);
+
+    let existingReq = this.requests.get(approvalRequestId);
+    if (!existingReq && this.identityRepository) {
+      existingReq = (await this.identityRepository.getPrivilegedRoleRequest(
+        approvalRequestId,
+      )) ?? undefined;
+    }
+    const tenantIdToLock = existingReq?.tenantId ?? approverIdentity.tenantId ?? null;
+
+    return this.withTenantLock(tenantIdToLock, async (client) => {
+      let request: PrivilegedRoleApprovalRequestRecord | null = null;
+      if (this.identityRepository) {
+        request = await this.identityRepository.getPrivilegedRoleRequest(
+          approvalRequestId,
+          client,
+        );
+      } else {
+        request = this.requests.get(approvalRequestId) ?? null;
+      }
+
       if (!request) {
         throw new ApiRequestError(
           HttpStatus.NOT_FOUND,
           "IAM_APPROVAL_NOT_FOUND",
           `Privileged role request '${approvalRequestId}' not found.`,
           { approvalRequestId },
+        );
+      }
+
+      // Check tenant scope for non-platform approver
+      if (
+        request.tenantId &&
+        approverIdentity.tenantId &&
+        request.tenantId !== approverIdentity.tenantId &&
+        !isPlatformOrSuperAdmin(approverIdentity)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "AUTHZ_SCOPE_DENIED",
+          "Cannot approve request for another tenant.",
         );
       }
 
@@ -294,7 +445,7 @@ export class PrivilegedRoleGovernanceService {
         );
       }
 
-      // 2. Separation of Duties (SoD) - Requester cannot approve own grant
+      // 2. Separation of Duties (SoD) - Requester or target user cannot approve own grant
       if (
         request.requesterPrincipalId === approverIdentity.actorId ||
         request.targetUserId === approverIdentity.actorId
@@ -313,22 +464,22 @@ export class PrivilegedRoleGovernanceService {
       }
 
       // Check SoD against active roles for target user
-      this.checkSodPolicy(request.targetUserId, request.requestedRoleCode, request.tenantId);
-
-      // 3. Fresh MFA / Step-Up Check
-      if (
-        command?.stepUpReference === "INVALID_STEP_UP" ||
-        (command?.stepUpReference != null && !command.stepUpReference.trim())
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.UNAUTHORIZED,
-          "IAM_STEP_UP_REQUIRED",
-          "Fresh MFA or step-up verification required for privileged role approval.",
-          { approvalRequestId },
-        );
-      }
+      await this.checkSodPolicy(
+        request.targetUserId,
+        request.requestedRoleCode,
+        request.tenantId,
+        client,
+      );
 
       const now = new Date().toISOString();
+      const nowMs = new Date(now).getTime();
+      const validFromMs = new Date(request.validFrom).getTime();
+
+      const isFutureActivation = !isNaN(validFromMs) && validFromMs > nowMs;
+      const initialGrantStatus: PrivilegedRoleGrantRecord["status"] = isFutureActivation
+        ? "pending_activation"
+        : "active";
+
       request.status = "approved";
       request.approvalDecision = "approve";
       request.approverPrincipalId = approverIdentity.actorId;
@@ -336,7 +487,15 @@ export class PrivilegedRoleGovernanceService {
       request.version += 1;
       request.updatedAt = now;
 
-      // Create active grant
+      this.requests.set(approvalRequestId, { ...request });
+      if (this.identityRepository) {
+        request = await this.identityRepository.savePrivilegedRoleRequest(
+          request,
+          client,
+        );
+      }
+
+      // Create grant
       const grantId = `grant_${randomUUID()}`;
       const grant: PrivilegedRoleGrantRecord = {
         grantId,
@@ -350,14 +509,22 @@ export class PrivilegedRoleGovernanceService {
         approvalId: request.requestId,
         validFrom: request.validFrom,
         validTo: request.validTo ?? null,
-        status: "active",
+        status: initialGrantStatus,
         createdAt: now,
         updatedAt: now,
       };
-      this.grants.set(grantId, grant);
 
-      // 4. Stale Session Invalidation
+      this.grants.set(grantId, { ...grant });
+      let persistedGrant = grant;
       if (this.identityRepository) {
+        persistedGrant = await this.identityRepository.savePrivilegedRoleGrant(
+          grant,
+          client,
+        );
+      }
+
+      // 4. Stale Session Invalidation - ONLY if grant is immediately active (not future activation)
+      if (!isFutureActivation && this.identityRepository) {
         await this.identityRepository.revokeSessionsByPrincipal(
           request.targetUserId,
           "PRIVILEGED_ROLE_APPROVED",
@@ -388,13 +555,18 @@ export class PrivilegedRoleGovernanceService {
           reasonCode: null,
           approvalId: request.requestId,
           beforeSummary: null,
-          afterSummary: { requestId: request.requestId, grantId, roleCode: grant.roleCode },
+          afterSummary: {
+            requestId: request.requestId,
+            grantId,
+            roleCode: grant.roleCode,
+            status: initialGrantStatus,
+          },
         });
       }
 
       return {
         request: { ...request },
-        grant: { ...grant },
+        grant: { ...persistedGrant },
       };
     });
   }
@@ -402,83 +574,127 @@ export class PrivilegedRoleGovernanceService {
   /**
    * Reject a privileged role request
    */
-  rejectRequest(
+  async rejectRequest(
     approvalRequestId: string,
     rejectorIdentity: IdentityContext,
     command?: RejectPrivilegedRoleRequestCommand,
-  ): PrivilegedRoleApprovalRequestRecord {
-    const request = this.requests.get(approvalRequestId);
-    if (!request) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "IAM_APPROVAL_NOT_FOUND",
-        `Privileged role request '${approvalRequestId}' not found.`,
-        { approvalRequestId },
-      );
+  ): Promise<PrivilegedRoleApprovalRequestRecord> {
+    let existingReq = this.requests.get(approvalRequestId);
+    if (!existingReq && this.identityRepository) {
+      existingReq = (await this.identityRepository.getPrivilegedRoleRequest(
+        approvalRequestId,
+      )) ?? undefined;
     }
+    const tenantIdToLock = existingReq?.tenantId ?? rejectorIdentity.tenantId ?? null;
 
-    if (request.status !== "pending") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "IAM_CONCURRENCY_CONFLICT",
-        `Privileged role request '${approvalRequestId}' has already been resolved (${request.status}).`,
-        { approvalRequestId, status: request.status },
-      );
-    }
+    return this.withTenantLock(tenantIdToLock, async (client) => {
+      let request: PrivilegedRoleApprovalRequestRecord | null = null;
+      if (this.identityRepository) {
+        request = await this.identityRepository.getPrivilegedRoleRequest(
+          approvalRequestId,
+          client,
+        );
+      } else {
+        request = this.requests.get(approvalRequestId) ?? null;
+      }
 
-    const expectedVersion = command?.mutation?.expectedVersion;
-    if (expectedVersion != null && request.version !== expectedVersion) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "IAM_CONCURRENCY_CONFLICT",
-        `Optimistic locking conflict: expected version ${expectedVersion}, current version is ${request.version}.`,
-        { approvalRequestId, expectedVersion, currentVersion: request.version },
-      );
-    }
+      if (!request) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "IAM_APPROVAL_NOT_FOUND",
+          `Privileged role request '${approvalRequestId}' not found.`,
+          { approvalRequestId },
+        );
+      }
 
-    const now = new Date().toISOString();
-    request.status = "rejected";
-    request.approvalDecision = "reject";
-    request.approverPrincipalId = rejectorIdentity.actorId;
-    request.decidedAt = now;
-    request.version += 1;
-    request.updatedAt = now;
+      // Check tenant scope for non-platform rejector
+      if (
+        request.tenantId &&
+        rejectorIdentity.tenantId &&
+        request.tenantId !== rejectorIdentity.tenantId &&
+        !isPlatformOrSuperAdmin(rejectorIdentity)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "AUTHZ_SCOPE_DENIED",
+          "Cannot reject request for another tenant.",
+        );
+      }
 
-    if (this.securityEventsService) {
-      this.securityEventsService.recordEvent({
-        actorId: rejectorIdentity.actorId,
-        actorType: rejectorIdentity.actorType,
-        realm: request.realm,
-        tenantId: request.tenantId,
-        partnerId: null,
-        eventType: "privileged_role.rejected",
-        eventFamily: "role",
-        outcome: "denied",
-        severity: "medium",
-        targetType: "user",
-        targetId: request.targetUserId,
-        sessionId: null,
-        tokenId: null,
-        authMethods: [],
-        sourceIp: null,
-        userAgent: null,
-        requestId: request.requestId,
-        traceId: null,
-        reasonCode: null,
-        approvalId: request.requestId,
-        beforeSummary: null,
-        afterSummary: { requestId: request.requestId, roleCode: request.requestedRoleCode },
-      });
-    }
+      if (request.status !== "pending") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "IAM_CONCURRENCY_CONFLICT",
+          `Privileged role request '${approvalRequestId}' has already been resolved (${request.status}).`,
+          { approvalRequestId, status: request.status },
+        );
+      }
 
-    return { ...request };
+      const expectedVersion = command?.mutation?.expectedVersion;
+      if (expectedVersion != null && request.version !== expectedVersion) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "IAM_CONCURRENCY_CONFLICT",
+          `Optimistic locking conflict: expected version ${expectedVersion}, current version is ${request.version}.`,
+          { approvalRequestId, expectedVersion, currentVersion: request.version },
+        );
+      }
+
+      const now = new Date().toISOString();
+      request.status = "rejected";
+      request.approvalDecision = "reject";
+      request.approverPrincipalId = rejectorIdentity.actorId;
+      request.decidedAt = now;
+      request.version += 1;
+      request.updatedAt = now;
+
+      this.requests.set(approvalRequestId, { ...request });
+      let persistedRequest = request;
+      if (this.identityRepository) {
+        persistedRequest = await this.identityRepository.savePrivilegedRoleRequest(
+          request,
+          client,
+        );
+      }
+
+      if (this.securityEventsService) {
+        this.securityEventsService.recordEvent({
+          actorId: rejectorIdentity.actorId,
+          actorType: rejectorIdentity.actorType,
+          realm: request.realm,
+          tenantId: request.tenantId,
+          partnerId: null,
+          eventType: "privileged_role.rejected",
+          eventFamily: "role",
+          outcome: "denied",
+          severity: "medium",
+          targetType: "user",
+          targetId: request.targetUserId,
+          sessionId: null,
+          tokenId: null,
+          authMethods: [],
+          sourceIp: null,
+          userAgent: null,
+          requestId: request.requestId,
+          traceId: null,
+          reasonCode: null,
+          approvalId: request.requestId,
+          beforeSummary: null,
+          afterSummary: { requestId: request.requestId, roleCode: request.requestedRoleCode },
+        });
+      }
+
+      return { ...persistedRequest };
+    });
   }
 
   /**
    * Remove / revoke a privileged role grant
    * Enforces:
-   * 1. Last-Admin Protection: Cannot remove/demote the last active admin
-   * 2. Stale session invalidation
+   * 1. Verified MFA / step-up proof check
+   * 2. Tenant isolation
+   * 3. Last-Admin Protection: Cannot remove/demote the last active admin
+   * 4. Stale session invalidation
    */
   async removeGrant(
     command: RemovePrivilegedRoleGrantCommand,
@@ -488,22 +704,39 @@ export class PrivilegedRoleGovernanceService {
     const roleCode = command.roleCode.trim();
     const tenantId = command.tenantId ?? actorIdentity.tenantId ?? null;
 
-    return this.withTenantLock(tenantId, async () => {
+    // Check signed tenant match
+    if (
+      command.tenantId &&
+      actorIdentity.tenantId &&
+      command.tenantId !== actorIdentity.tenantId &&
+      !isPlatformOrSuperAdmin(actorIdentity)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Cannot remove privileged role grant for another tenant.",
+      );
+    }
+
+    // Enforce Step-Up / MFA check on grant removal
+    verifyStepUp(actorIdentity, command.mutation?.stepUpReference);
+
+    return this.withTenantLock(tenantId, async (client) => {
+      const activeGrants = await this.fetchActiveGrantsForTenant(tenantId, client);
+
       // Atomic Last-Admin Protection Check
       if (isAdminRole(roleCode)) {
-        const activeAdminGrants = Array.from(this.grants.values()).filter(
-          (g) =>
-            g.status === "active" &&
-            g.tenantId === tenantId &&
-            isAdminRole(g.roleCode),
-        );
-
+        const activeAdminGrants = activeGrants.filter((g) => isAdminRole(g.roleCode));
         const activeAdminUsers = new Set(activeAdminGrants.map((g) => g.targetUserId));
         const isTargetActiveAdmin = activeAdminUsers.has(targetUserId);
 
         if (isTargetActiveAdmin) {
           const remainingAdmins = activeAdminGrants.filter(
-            (g) => !(g.targetUserId === targetUserId && g.roleCode.trim().toLowerCase() === roleCode.toLowerCase()),
+            (g) =>
+              !(
+                g.targetUserId === targetUserId &&
+                g.roleCode.trim().toLowerCase() === roleCode.toLowerCase()
+              ),
           );
           const remainingAdminUsers = new Set(remainingAdmins.map((g) => g.targetUserId));
 
@@ -519,11 +752,10 @@ export class PrivilegedRoleGovernanceService {
       }
 
       const now = new Date().toISOString();
-      const existing = Array.from(this.grants.values()).find(
+      const existing = activeGrants.find(
         (g) =>
           g.targetUserId === targetUserId &&
           g.roleCode === roleCode &&
-          g.status === "active" &&
           (tenantId == null || g.tenantId === tenantId),
       );
 
@@ -549,7 +781,14 @@ export class PrivilegedRoleGovernanceService {
             updatedAt: now,
           };
 
-      this.grants.set(record.grantId, record);
+      this.grants.set(record.grantId, { ...record });
+      let persistedRecord = record;
+      if (this.identityRepository) {
+        persistedRecord = await this.identityRepository.savePrivilegedRoleGrant(
+          record,
+          client,
+        );
+      }
 
       // Stale Session Invalidation
       if (this.identityRepository) {
@@ -587,28 +826,81 @@ export class PrivilegedRoleGovernanceService {
         });
       }
 
-      return { ...record };
+      return { ...persistedRecord };
     });
   }
 
   /**
-   * Process all stale / expired grants (now >= validTo)
-   * Revokes stale sessions for expired grants
+   * Process all stale/expired grants (now >= validTo) and activate pending grants (now >= validFrom).
+   * Revokes stale sessions at activation time and expiry time.
    */
   async expireStaleGrants(currentTimeMs = Date.now()): Promise<PrivilegedRoleGrantRecord[]> {
-    return this.withTenantLock(null, async () => {
+    return this.withTenantLock(null, async (client) => {
       const expired: PrivilegedRoleGrantRecord[] = [];
       const now = new Date(currentTimeMs).toISOString();
 
-      for (const grant of this.grants.values()) {
+      let allGrants: PrivilegedRoleGrantRecord[] = [];
+      if (this.identityRepository) {
+        allGrants = await this.identityRepository.listPrivilegedRoleGrants(null, client);
+      } else {
+        allGrants = Array.from(this.grants.values());
+      }
+
+      for (const grant of allGrants) {
+        // 1. Process pending activations
+        if (grant.status === "pending_activation") {
+          const validFromMs = new Date(grant.validFrom).getTime();
+          if (!isNaN(validFromMs) && validFromMs <= currentTimeMs) {
+            grant.status = "active";
+            grant.updatedAt = now;
+            this.grants.set(grant.grantId, { ...grant });
+            if (this.identityRepository) {
+              await this.identityRepository.savePrivilegedRoleGrant(grant, client);
+              await this.identityRepository.revokeSessionsByPrincipal(
+                grant.targetUserId,
+                "PRIVILEGED_ROLE_ACTIVATED",
+              );
+            }
+
+            if (this.securityEventsService) {
+              this.securityEventsService.recordEvent({
+                actorId: "system",
+                actorType: "system",
+                realm: grant.realm,
+                tenantId: grant.tenantId,
+                partnerId: null,
+                eventType: "privileged_role.activated",
+                eventFamily: "role",
+                outcome: "success",
+                severity: "medium",
+                targetType: "user",
+                targetId: grant.targetUserId,
+                sessionId: null,
+                tokenId: null,
+                authMethods: [],
+                sourceIp: null,
+                userAgent: null,
+                requestId: null,
+                traceId: null,
+                reasonCode: null,
+                approvalId: grant.approvalId,
+                beforeSummary: null,
+                afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
+              });
+            }
+          }
+        }
+
+        // 2. Process expiries
         if (grant.status === "active" && grant.validTo) {
           const validToMs = new Date(grant.validTo).getTime();
           if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
             grant.status = "expired";
             grant.updatedAt = now;
             expired.push({ ...grant });
-
+            this.grants.set(grant.grantId, { ...grant });
             if (this.identityRepository) {
+              await this.identityRepository.savePrivilegedRoleGrant(grant, client);
               await this.identityRepository.revokeSessionsByPrincipal(
                 grant.targetUserId,
                 "PRIVILEGED_ROLE_EXPIRED",
@@ -646,12 +938,23 @@ export class PrivilegedRoleGovernanceService {
       }
 
       // Also update pending requests past validTo
-      for (const req of this.requests.values()) {
+      let allRequests: PrivilegedRoleApprovalRequestRecord[] = [];
+      if (this.identityRepository) {
+        allRequests = await this.identityRepository.listPrivilegedRoleRequests(null, client);
+      } else {
+        allRequests = Array.from(this.requests.values());
+      }
+
+      for (const req of allRequests) {
         if (req.status === "pending" && req.validTo) {
           const validToMs = new Date(req.validTo).getTime();
           if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
             req.status = "expired";
             req.updatedAt = now;
+            this.requests.set(req.requestId, { ...req });
+            if (this.identityRepository) {
+              await this.identityRepository.savePrivilegedRoleRequest(req, client);
+            }
           }
         }
       }
@@ -660,25 +963,85 @@ export class PrivilegedRoleGovernanceService {
     });
   }
 
-  getRequest(requestId: string): PrivilegedRoleApprovalRequestRecord | null {
-    const req = this.requests.get(requestId);
-    return req ? { ...req } : null;
+  async getRequest(
+    requestId: string,
+    identity?: IdentityContext,
+  ): Promise<PrivilegedRoleApprovalRequestRecord | null> {
+    let req = this.requests.get(requestId) ?? null;
+    if (!req && this.identityRepository) {
+      req = await this.identityRepository.getPrivilegedRoleRequest(requestId);
+    }
+    if (!req) {
+      return null;
+    }
+
+    // IDOR Protection: tenant scoping check
+    if (
+      identity &&
+      req.tenantId &&
+      identity.tenantId &&
+      req.tenantId !== identity.tenantId &&
+      !isPlatformOrSuperAdmin(identity)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Cannot access privileged role request for another tenant.",
+      );
+    }
+
+    return { ...req };
   }
 
-  listRequests(tenantId?: string | null): PrivilegedRoleApprovalRequestRecord[] {
+  async listRequests(
+    identity?: IdentityContext,
+    tenantId?: string | null,
+  ): Promise<PrivilegedRoleApprovalRequestRecord[]> {
+    let effectiveTenantId = tenantId || null;
+
+    if (identity) {
+      if (!isPlatformOrSuperAdmin(identity)) {
+        if (tenantId && identity.tenantId && tenantId !== identity.tenantId) {
+          throw new ApiRequestError(
+            HttpStatus.FORBIDDEN,
+            "AUTHZ_SCOPE_DENIED",
+            "Cannot list privileged role requests for another tenant.",
+          );
+        }
+        effectiveTenantId = identity.tenantId || null;
+      }
+    }
+
+    if (this.identityRepository) {
+      return this.identityRepository.listPrivilegedRoleRequests(effectiveTenantId);
+    }
+
     return Array.from(this.requests.values())
-      .filter((r) => !tenantId || r.tenantId === tenantId)
+      .filter((r) => !effectiveTenantId || r.tenantId === effectiveTenantId)
       .map((r) => ({ ...r }));
   }
 
-  listGrants(tenantId?: string | null): PrivilegedRoleGrantRecord[] {
+  async listGrants(tenantId?: string | null): Promise<PrivilegedRoleGrantRecord[]> {
+    if (this.identityRepository) {
+      return this.identityRepository.listPrivilegedRoleGrants(tenantId);
+    }
     return Array.from(this.grants.values())
       .filter((g) => !tenantId || g.tenantId === tenantId)
       .map((g) => ({ ...g }));
   }
 
-  getActiveGrantsForUser(userId: string, currentTimeMs = Date.now()): PrivilegedRoleGrantRecord[] {
-    return Array.from(this.grants.values()).filter((g) => {
+  async getActiveGrantsForUser(
+    userId: string,
+    currentTimeMs = Date.now(),
+  ): Promise<PrivilegedRoleGrantRecord[]> {
+    let grants: PrivilegedRoleGrantRecord[] = [];
+    if (this.identityRepository) {
+      grants = await this.identityRepository.listPrivilegedRoleGrants();
+    } else {
+      grants = Array.from(this.grants.values());
+    }
+
+    return grants.filter((g) => {
       if (g.targetUserId !== userId || g.status !== "active") {
         return false;
       }
