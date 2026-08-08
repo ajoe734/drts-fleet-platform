@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "summary", "task_status_written", "blocker", "verification"],
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["advanced", "progress", "blocked", "failed"]
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "task_status_written": { "type": ["string", "null"] },
+    "blocker": { "type": ["string", "null"], "maxLength": 2000 },
+    "verification": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 1000 },
+      "maxItems": 20
+    }
+  }
+}

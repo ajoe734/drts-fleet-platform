@@ -11,6 +11,8 @@ from common import (
     new_runtime_id,
     runtime_log_path,
     spawn_background_process,
+    worker_result_path,
+    worker_result_schema_path,
 )
 
 
@@ -52,6 +54,8 @@ class CodexAdapter(BaseAdapter):
         codex_settings = provider.get("codex", {})
         cli = codex_settings.get("cli") or "codex"
         workspace_root = delivery_workspace_root(self.config, request.metadata)
+        run_id = new_runtime_id("codex")
+        result_path = worker_result_path(self.config, run_id)
         command = [
             cli,
             "exec",
@@ -62,6 +66,11 @@ class CodexAdapter(BaseAdapter):
             "-s",
             codex_settings.get("sandbox_mode", "workspace-write"),
             "--skip-git-repo-check",
+            "--json",
+            "--output-schema",
+            str(worker_result_schema_path()),
+            "--output-last-message",
+            str(result_path),
         ]
         codex_model = str(request.metadata.get("model_preference") or codex_settings.get("model") or "").strip()
         if codex_model:
@@ -76,7 +85,6 @@ class CodexAdapter(BaseAdapter):
             env["CODEX_HOME"] = os.path.expanduser(config_home)
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
 
-        run_id = new_runtime_id("codex")
         log_path = runtime_log_path("codex", request.agent_id)
         process, _ = spawn_background_process(
             command,
@@ -97,4 +105,5 @@ class CodexAdapter(BaseAdapter):
             log_path=str(log_path),
             pid=process.pid,
             run_id=run_id,
+            metadata={"result_path": str(result_path)},
         )
