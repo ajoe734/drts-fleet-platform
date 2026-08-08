@@ -10,6 +10,45 @@ from unittest import mock
 import permission_broker
 
 
+class PreToolUseDeferResponseTests(unittest.TestCase):
+    """A deferral must be spelled in a way the harness can act on.
+
+    PreToolUse accepts allow, deny or ask. Emitting "defer" handed it a value
+    it could not read, so the tool call stalled until it was torn down as an
+    internal error instead of prompting — taking the worker with it.
+    """
+
+    def _run_pretooluse(self, payload: dict) -> dict:
+        config = permission_broker.load_config()
+        buffer = io.StringIO()
+        with mock.patch.object(permission_broker, "create_approval"), \
+                mock.patch.object(permission_broker, "log_event"), \
+                mock.patch.object(
+                    permission_broker, "_maybe_apply_chatbox_tree_guard", return_value=False
+                ), \
+                mock.patch.object(permission_broker, "find_resume_override", return_value=None), \
+                mock.patch.object(permission_broker, "_matching_approval", return_value=(None, None)), \
+                redirect_stdout(buffer):
+            permission_broker.hook_mode(config, "PreToolUse", payload)
+        return json.loads(buffer.getvalue() or "{}")
+
+    def test_deferral_is_emitted_as_ask(self) -> None:
+        response = self._run_pretooluse(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "docker ps"},
+                "session_id": "session-under-test",
+            }
+        )
+        decision = response["hookSpecificOutput"]["permissionDecision"]
+        self.assertEqual(decision, "ask")
+        self.assertIn(
+            decision,
+            {"allow", "deny", "ask"},
+            "PreToolUse accepts no other spelling; anything else stalls the call",
+        )
+
+
 class PermissionBrokerLoggingTests(unittest.TestCase):
     def test_sanitize_hook_payload_summarizes_large_edit_and_stdout(self) -> None:
         payload = {

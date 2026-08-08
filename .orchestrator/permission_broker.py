@@ -1877,7 +1877,12 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
                 "effective_reason": effective_reason,
             },
         )
-        emit_hook_response(_decision_response(event_name, "defer", decision["reason"]))
+        # PreToolUse accepts allow, deny or ask. "defer" is not one of them:
+        # the harness cannot read it, so instead of prompting, the tool call
+        # stalls until it is torn down as an internal error. Every deferred
+        # command a worker issues dies that way, and the worker with it —
+        # which is what the queued approval was supposed to prevent.
+        emit_hook_response(_decision_response(event_name, "ask", decision["reason"]))
         return 0
 
     log_event(config, event_name, payload)
