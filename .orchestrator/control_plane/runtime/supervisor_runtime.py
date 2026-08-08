@@ -3947,14 +3947,23 @@ def proactive_claim_plan_for_idle_agent(
         }
 
     reviewer_candidates: list[str] = []
-    if reviewer and reviewer != idle_agent_name:
+    if reviewer:
         reviewer_candidates.append(reviewer)
-    if owner and owner != idle_agent_name and owner != reviewer:
+    if owner and owner != reviewer:
         reviewer_candidates.append(owner)
     reviewer_candidates.extend(normalized_mapping_values(reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent))
     if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
         reviewer_candidates.extend(ordered_idle)
-    new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={idle_agent_name}, state=state)
+
+    # Normally keep reviewer separate from the claim agent so active owner/reviewer
+    # separation is preserved. When only one idle lane exists, excluding it can
+    # create a hard deadlock (single healthy lane) where owner is reclaimable
+    # but reviewer cannot be reassigned. In that case allow temporary self-review
+    # on the claim lane to keep dispatch flowing.
+    if len(idle_agent_names) <= 1:
+        new_reviewer = first_viable_agent(config, reviewer_candidates, exclude=set(), state=state)
+    else:
+        new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={idle_agent_name}, state=state)
     if not new_reviewer:
         return None
     return {
@@ -7141,17 +7150,34 @@ def choose_chair_reviewer(
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
+    active_agent_counts = active_worker_agent_counts(state, active_statuses)
+    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     task_map = task_index_from_status(config, status)
     failing_agents = failing_agents_in_reassignment_loops(state, status)
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
+    active_recovery_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         display_name = task_agent_display_name(config, status, agent_id)
         if not display_name or display_name_is_legacy_alias(display_name) or display_name_is_legacy_alias(configured_display_name):
             continue
         normalized = normalize_agent_id(agent_id)
-        if normalized in active_agents or normalized in pending_agents:
+        if normalized in pending_agents:
+            continue
+        if normalized in active_agents:
+            if not allow_primary_work_fallback:
+                continue
+            if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+                continue
+            if not agent_supports_auto_delivery(config, provider_report, agent_id):
+                continue
+            if display_name in failing_agents:
+                continue
+            lane_capacity = max_tasks_per_agent_for_lane(settings, normalized)
+            lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
+            if lane_load < lane_capacity:
+                active_recovery_candidates.append((normalized, display_name))
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
@@ -7165,7 +7191,7 @@ def choose_chair_reviewer(
             continue
         candidates.append((normalized, display_name))
     if not candidates and allow_primary_work_fallback:
-        candidates = primary_work_candidates
+        candidates = primary_work_candidates or active_recovery_candidates
     if not candidates:
         return None
     rotation_index = int(state.setdefault("chair_review", {}).get("rotation_index", 0) or 0)
@@ -9311,19 +9337,44 @@ def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
     return False
 
 
+
+def _has_any_dispatchable_lane(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
+    settings = ready_dispatch_settings(config)
+    report = provider_report or load_provider_report(config)
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        if not configured_display_name or display_name_is_legacy_alias(configured_display_name):
+            continue
+        normalized = normalize_agent_id(agent_id)
+        if is_agent_dispatch_paused(config, state, normalized, provider_report=report):
+            continue
+        if not agent_supports_auto_delivery(config, report, normalized):
+            continue
+        if max_tasks_per_agent_for_lane(settings, normalized) <= 0:
+            continue
+        return True
+    return False
+
+
 def break_full_deadlock(
     config: dict[str, Any],
     state: dict[str, Any],
     status: dict[str, Any],
 ) -> bool:
-    """Last-resort recovery when the orchestrator is fully wedged: zero active
-    workers, an empty queue, the chairman review blocked for lack of a
-    dispatch-capable lane, yet dispatchable backlog remains. Forces a fresh
-    capability probe and clears any paused lane the probe now reports healthy
-    (auth OR an indefinite quota hold whose underlying probe has recovered). If
-    nothing recovers, raises a loud operator-attention escalation instead of
-    sitting silently at zero workers. Rate-limited by a cooldown so genuinely
-    dead lanes are not thrashed."""
+    """Last-resort recovery when the orchestrator is fully wedged, with zero active
+    workers, an empty queue, dispatchable backlog remains, and either
+    - chairman review is blocked for lack of a dispatch-capable lane
+    - provider pauses are present while no dispatch-capable lane is available.
+
+    Forces a fresh recovery probe and clears any paused lane the probe now
+    reports healthy (auth OR an indefinite quota hold whose underlying probe has
+    recovered). If nothing recovers, raises a loud operator-attention
+    escalation instead of sitting silently at zero workers. Rate-limited by a
+    cooldown so genuinely dead lanes are not thrashed."""
     settings = config.get("supervisor", {})
     if not settings.get("deadlock_breaker_enabled", True):
         return False
@@ -9333,8 +9384,15 @@ def break_full_deadlock(
         return False
     if state.get("queue", {}).get("events", {}):
         return False
-    if not state.get("chair_review", {}).get("blocked"):
-        return False
+
+    chair_blocked = bool(state.get("chair_review", {}).get("blocked"))
+    if not chair_blocked:
+        if not active_provider_pause_records(state):
+            return False
+        provider_report = load_provider_report(config)
+        if _has_any_dispatchable_lane(config, state, provider_report=provider_report):
+            return False
+
     if not _has_dispatchable_backlog(status):
         return False
     rec = state.setdefault("deadlock_recovery", {})
@@ -9344,11 +9402,18 @@ def break_full_deadlock(
     if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
         return False
     rec["last_attempt_at"] = utc_now()
-    console_log(
-        "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
-        "blocked, backlog pending) - forcing recovery probe",
-        quiet=False,
-    )
+    if chair_blocked:
+        console_log(
+            "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
+            "blocked, backlog pending) - forcing recovery probe",
+            quiet=False,
+        )
+    else:
+        console_log(
+            "FULL DEADLOCK detected (0 active workers, queue empty, paused lanes present, "
+            "no chair review blocked marker, backlog pending) - forcing recovery probe",
+            quiet=False,
+        )
     fresh_report = _force_recovery_probe(config)
     paused = list(provider_pause_registry(state).keys())
     recovered = [a for a in paused if _lane_probe_healthy(config, fresh_report, a) is True]
@@ -9381,8 +9446,6 @@ def break_full_deadlock(
         "paused": paused,
     })
     return True
-
-
 def supervisor_tick_ports() -> SupervisorTickPorts:
     optional_automation = OptionalAutomation(
         materialize_workspace_baseline_task=materialize_workspace_baseline_task_from_last_decision,
