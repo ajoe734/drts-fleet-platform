@@ -4393,6 +4393,68 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole ? this.cloneUserRole(userRole) : null;
   }
 
+  findTenantUserBySubject(subjectId: string) {
+    const trimmed = subjectId.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        (candidate as any).subjectId === trimmed ||
+        (candidate as any).subject === trimmed,
+    );
+    return userRole ? this.cloneUserRole(userRole) : null;
+  }
+
+  bindTenantUserSubject(
+    tenantId: string | null | undefined,
+    userId: string,
+    subjectId: string,
+  ) {
+    const targetUser = userId?.trim();
+    const trimmedSubject = subjectId?.trim();
+    if (!targetUser || !trimmedSubject) {
+      return null;
+    }
+
+    const targetTenant = tenantId?.trim();
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        (!targetTenant || candidate.tenantId === targetTenant) &&
+        candidate.userId === targetUser,
+    );
+    if (!userRole) {
+      return null;
+    }
+
+    const previousUserRoles = this.userRoles.map((entry) =>
+      this.cloneUserRole(entry),
+    );
+
+    (userRole as any).subjectId = trimmedSubject;
+    (userRole as any).subject = trimmedSubject;
+
+    try {
+      this.persistChanges(
+        {
+          userRoles: this.userRoles.map((entry) => this.cloneUserRole(entry)),
+        },
+        `bind subject ${trimmedSubject} to user ${targetUser}`,
+      );
+    } catch {
+      this.userRoles = previousUserRoles;
+      throw new ApiRequestError(
+        500,
+        "PERSISTENCE_FAILED",
+        "Failed to persist subject binding.",
+      );
+    }
+
+    this.syncIdentityTenantUserRoles(`bind subject ${trimmedSubject}`);
+    return this.cloneUserRole(userRole);
+  }
+
   findTenantUser(tenantId: string, userId: string) {
     const userRole = this.userRoles.find(
       (candidate) =>
@@ -4401,9 +4463,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole ? this.cloneUserRole(userRole) : null;
   }
 
-  listPartnerEntries() {
+  listPartnerEntries(entrySlug?: string) {
+    const slug = entrySlug?.trim();
     return this.partnerEntries
-      .filter((entry) => entry.activeFlag && entry.status === "active")
+      .filter(
+        (entry) =>
+          entry.activeFlag &&
+          entry.status === "active" &&
+          (!slug || entry.entrySlug === slug || entry.partnerId === slug),
+      )
       .map((entry) => this.clonePartnerEntry(entry));
   }
 
@@ -5847,6 +5915,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actorId: identity?.actorId ?? null,
         actorType:
           identity?.actorType === "partner_api_key" ||
+          identity?.actorType === "partner_user" ||
           identity?.actorType === "referral_passenger"
             ? identity.actorType
             : "system",
@@ -10931,7 +11000,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           identity.partnerId !== entry.partnerId ||
           identity.partnerProgramId !== entry.programId ||
           identity.partnerEntrySlug !== entry.entrySlug
-        : identity.actorType !== "partner_api_key" ||
+        : (identity.actorType !== "partner_api_key" && identity.actorType !== "partner_user") ||
           (identity.tenantId !== null &&
             identity.tenantId !== undefined &&
             identity.tenantId !== entry.tenantId) ||
@@ -10984,7 +11053,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           identity.partnerId !== verification.partnerId ||
           identity.partnerProgramId !== verification.partnerProgramId ||
           identity.partnerEntrySlug !== verification.partnerEntrySlug
-        : identity.actorType !== "partner_api_key" ||
+        : (identity.actorType !== "partner_api_key" &&
+            identity.actorType !== "partner_user") ||
           (identity.tenantId !== null &&
             identity.tenantId !== undefined &&
             identity.tenantId !== verification.tenantId) ||
@@ -11039,7 +11109,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     if (
       !identity ||
-      identity.actorType !== "partner_api_key" ||
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "partner_user") ||
       identity.realm !== "partner" ||
       !identity.partnerEntrySlug
     ) {

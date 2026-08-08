@@ -45,6 +45,22 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/session" && upperMethod === "GET") {
+    return {
+      routeKey: "auth:session:read",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description:
+        "Caller reads its own session; the route returns 401 when there is no identity and discloses nothing about any other",
+    };
+  }
+
   if (routePath === "auth/token" && upperMethod === "POST") {
     return {
       routeKey: "auth:token:exchange",

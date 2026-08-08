@@ -35,7 +35,9 @@ export interface IamCallbackSessionExchangeCommand {
   callbackUrl: string;
   code: string;
   state: string;
-  pkceVerifier: string;
+  pkceVerifier?: string | null;
+  tenantId?: string | null;
+  partnerId?: string | null;
 }
 
 /**
@@ -223,6 +225,30 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     operationId: "exchangeTenantOidcSession",
     method: "post",
     path: "/api/auth/tenant/oidc-session",
+    domain: "session",
+  },
+  {
+    operationId: "exchangePartnerCallbackSession",
+    method: "post",
+    path: "/api/auth/partner/callback-session",
+    domain: "session",
+  },
+  {
+    operationId: "getOidcLoginUrl",
+    method: "get",
+    path: "/api/auth/{realm}/login",
+    domain: "session",
+  },
+  {
+    operationId: "getAuthSession",
+    method: "get",
+    path: "/api/auth/session",
+    domain: "session",
+  },
+  {
+    operationId: "revokeAuthSession",
+    method: "post",
+    path: "/api/auth/logout",
     domain: "session",
   },
   {

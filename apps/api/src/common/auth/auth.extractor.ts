@@ -84,6 +84,7 @@ function normalizeRealm(actorType: AuthActorType, rawRealm: string): AuthRealm {
     case "driver_user":
       return "driver";
     case "partner_api_key":
+    case "partner_user":
     case "referral_passenger":
       return "partner";
     default:

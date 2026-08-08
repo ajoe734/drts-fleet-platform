@@ -59,6 +59,72 @@ paths:
           description: Tenant OIDC session exchanged.
         "403":
           $ref: "#/components/responses/IamPublicAuthDenied"
+  /api/auth/partner/callback-session:
+    post:
+      summary: Exchange a partner identity-provider callback for an authenticated session.
+      operationId: exchangePartnerCallbackSession
+      tags: [Session]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamCallbackSessionExchangeCommand"
+      responses:
+        "201":
+          description: Partner callback session exchanged.
+        "403":
+          $ref: "#/components/responses/IamPublicAuthDenied"
+  /api/auth/{realm}/login:
+    get:
+      summary: Initiate OIDC authorization code flow with PKCE for tenant or partner realm.
+      operationId: getOidcLoginUrl
+      tags: [Session]
+      security: []
+      parameters:
+        - name: realm
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [tenant, partner]
+      responses:
+        "200":
+          description: Authorization URL returned.
+  /api/auth/{realm}/callback:
+    get:
+      summary: Handle OIDC authorization code callback redirect.
+      operationId: processOidcCallback
+      tags: [Session]
+      security: []
+      parameters:
+        - name: realm
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [tenant, partner]
+      responses:
+        "200":
+          description: Callback processed.
+  /api/auth/session:
+    get:
+      summary: Retrieve current authenticated session status and profile identity.
+      operationId: getAuthSession
+      tags: [Session]
+      responses:
+        "200":
+          description: Active session returned.
+  /api/auth/logout:
+    post:
+      summary: Revoke active HttpOnly session and clear authentication cookies.
+      operationId: revokeAuthSession
+      tags: [Session]
+      responses:
+        "200":
+          description: Session revoked and cookies cleared.
+>>>>>>> 7b504b2d6 (IAM-IDP-001: tenant and partner OIDC PKCE BFF login)
   /api/auth/tenant/bootstrap-session:
     post:
       summary: Bootstrap a tenant-authenticated browser session.
@@ -457,7 +523,6 @@ components:
         - callbackUrl
         - code
         - state
-        - pkceVerifier
       properties:
         provider:
           type: string
@@ -468,8 +533,11 @@ components:
           type: string
         state:
           type: string
-        pkceVerifier:
-          type: string
+          type: [string, "null"]
+        tenantId:
+          type: [string, "null"]
+        partnerId:
+          type: [string, "null"]
     TenantOidcSessionExchangeCommand:
       type: object
       required:

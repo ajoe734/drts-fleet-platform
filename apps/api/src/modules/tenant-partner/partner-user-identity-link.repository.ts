@@ -188,7 +188,7 @@ export class PartnerUserIdentityLinkRepository {
     return record?.status ?? null;
   }
 
-  private async find(
+  async find(
     entrySlugInput: string,
     partnerUserRefInput: string,
   ): Promise<PartnerUserIdentityLinkRecord | null> {
