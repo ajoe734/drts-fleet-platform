@@ -109,6 +109,49 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         }),
       );
     });
+
+    it("rejects request or approval for toxic/incompatible role combinations (SoD policy)", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+
+      // Seed active grant tenant_finance_admin for usr_target_sod
+      service.registerActiveGrant("usr_target_sod", "ten_alpha", "tenant_finance_admin");
+
+      // Attempt to create request for toxic role tenant_security_admin for usr_target_sod
+      expect(() =>
+        service.createRequest(
+          {
+            targetUserId: "usr_target_sod",
+            roleCode: "tenant_security_admin",
+            reason: "Adding security admin powers",
+            tenantId: "ten_alpha",
+          },
+          requester,
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "IAM_SOD_VIOLATION",
+        }),
+      );
+
+      // Attempt to create request for toxic role tenant_admin for usr_target_sod
+      expect(() =>
+        service.createRequest(
+          {
+            targetUserId: "usr_target_sod",
+            roleCode: "tenant_admin",
+            reason: "Adding admin powers to finance admin",
+            tenantId: "ten_alpha",
+          },
+          requester,
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "IAM_SOD_VIOLATION",
+        }),
+      );
+    });
   });
 
   describe("2. Independent Approval & Stale Session Invalidation", () => {
@@ -252,6 +295,57 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       expect(removed.status).toBe("removed");
+    });
+
+    it("prevents concurrent-removal race when removing last 2 admins simultaneously", async () => {
+      const actor = createMockIdentity({ actorId: "usr_actor", tenantId: "ten_concurrent_admin" });
+
+      // Seed exactly 2 active admins for tenant ten_concurrent_admin
+      service.registerActiveGrant("usr_admin_race_1", "ten_concurrent_admin", "tenant_admin");
+      service.registerActiveGrant("usr_admin_race_2", "ten_concurrent_admin", "tenant_admin");
+
+      // Concurrent removal attempts for both admins
+      const remove1 = service.removeGrant(
+        {
+          targetUserId: "usr_admin_race_1",
+          roleCode: "tenant_admin",
+          tenantId: "ten_concurrent_admin",
+          reason: "Simultaneous removal attempt 1",
+        },
+        actor,
+      );
+
+      const remove2 = service.removeGrant(
+        {
+          targetUserId: "usr_admin_race_2",
+          roleCode: "tenant_admin",
+          tenantId: "ten_concurrent_admin",
+          reason: "Simultaneous removal attempt 2",
+        },
+        actor,
+      );
+
+      const results = await Promise.allSettled([remove1, remove2]);
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+
+      // Exactly one removal succeeds and one is rejected due to atomic last-admin protection
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+
+      if (rejected[0]?.status === "rejected") {
+        expect(rejected[0].reason).toEqual(
+          expect.objectContaining({
+            status: HttpStatus.CONFLICT,
+            code: "IAM_LAST_ADMIN_PROTECTION",
+          }),
+        );
+      }
+
+      // Verify that at least 1 active admin remains
+      const remainingGrants = service.listGrants("ten_concurrent_admin").filter((g) => g.status === "active");
+      expect(remainingGrants).toHaveLength(1);
     });
   });
 

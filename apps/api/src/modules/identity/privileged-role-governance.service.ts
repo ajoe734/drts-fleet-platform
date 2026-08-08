@@ -29,6 +29,23 @@ export const ADMIN_ROLES = new Set([
   "tenant_admin",
 ]);
 
+export const INCOMPATIBLE_ROLE_PAIRS: ReadonlyArray<[string, string]> = [
+  ["tenant_finance_admin", "tenant_security_admin"],
+  ["tenant_finance_admin", "tenant_admin"],
+  ["security_admin", "platform_admin"],
+  ["superadmin", "security_admin"],
+];
+
+export function areRolesIncompatible(roleA: string, roleB: string): boolean {
+  const normA = roleA.trim().toLowerCase();
+  const normB = roleB.trim().toLowerCase();
+  if (normA === normB) return false;
+  return INCOMPATIBLE_ROLE_PAIRS.some(
+    ([r1, r2]) =>
+      (r1 === normA && r2 === normB) || (r1 === normB && r2 === normA),
+  );
+}
+
 export function toGovernanceRealm(realm?: string | null): "platform" | "tenant" | "ops" {
   if (realm === "platform" || realm === "ops") {
     return realm;
@@ -48,6 +65,7 @@ export function isAdminRole(roleCode: string): boolean {
 export class PrivilegedRoleGovernanceService {
   private readonly requests = new Map<string, PrivilegedRoleApprovalRequestRecord>();
   private readonly grants = new Map<string, PrivilegedRoleGrantRecord>();
+  private readonly tenantLocks = new Map<string, Promise<void>>();
 
   constructor(
     @Optional()
@@ -57,6 +75,56 @@ export class PrivilegedRoleGovernanceService {
     @Inject(SecurityEventsService)
     private readonly securityEventsService?: SecurityEventsService,
   ) {}
+
+  private async withTenantLock<T>(tenantId: string | null, fn: () => Promise<T> | T): Promise<T> {
+    const lockKey = tenantId ?? "platform_global";
+    const previousLock = this.tenantLocks.get(lockKey) ?? Promise.resolve();
+
+    let resolveLock!: () => void;
+    const newLock = new Promise<void>((resolve) => {
+      resolveLock = resolve;
+    });
+    this.tenantLocks.set(lockKey, newLock);
+
+    try {
+      await previousLock;
+      return await fn();
+    } finally {
+      resolveLock();
+      if (this.tenantLocks.get(lockKey) === newLock) {
+        this.tenantLocks.delete(lockKey);
+      }
+    }
+  }
+
+  private checkSodPolicy(
+    targetUserId: string,
+    requestedRoleCode: string,
+    tenantId: string | null,
+  ): void {
+    const activeGrants = Array.from(this.grants.values()).filter(
+      (g) =>
+        g.targetUserId === targetUserId &&
+        g.status === "active" &&
+        (tenantId == null || g.tenantId === tenantId),
+    );
+
+    for (const grant of activeGrants) {
+      if (areRolesIncompatible(requestedRoleCode, grant.roleCode)) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "IAM_SOD_VIOLATION",
+          `Separation of Duties violation: Role '${requestedRoleCode}' conflicts with existing active role '${grant.roleCode}' for user '${targetUserId}'.`,
+          {
+            targetUserId,
+            requestedRoleCode,
+            conflictingRoleCode: grant.roleCode,
+            tenantId,
+          },
+        );
+      }
+    }
+  }
 
   /**
    * Helper to register/seed an active grant (e.g. initial active admin) for last-admin checking
@@ -116,6 +184,9 @@ export class PrivilegedRoleGovernanceService {
         "Target user ID is required.",
       );
     }
+
+    const tenantId = command.tenantId ?? requesterIdentity.tenantId ?? null;
+    this.checkSodPolicy(command.targetUserId.trim(), command.roleCode.trim(), tenantId);
 
     const now = new Date().toISOString();
     const requestId = `praj_${randomUUID()}`;
@@ -192,135 +263,140 @@ export class PrivilegedRoleGovernanceService {
     request: PrivilegedRoleApprovalRequestRecord;
     grant: PrivilegedRoleGrantRecord;
   }> {
-    const request = this.requests.get(approvalRequestId);
-    if (!request) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "IAM_APPROVAL_NOT_FOUND",
-        `Privileged role request '${approvalRequestId}' not found.`,
-        { approvalRequestId },
-      );
-    }
+    return this.withTenantLock(approverIdentity.tenantId ?? null, async () => {
+      const request = this.requests.get(approvalRequestId);
+      if (!request) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "IAM_APPROVAL_NOT_FOUND",
+          `Privileged role request '${approvalRequestId}' not found.`,
+          { approvalRequestId },
+        );
+      }
 
-    // 1. Status & Concurrency Control
-    if (request.status !== "pending") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "IAM_CONCURRENCY_CONFLICT",
-        `Privileged role request '${approvalRequestId}' has already been resolved (${request.status}).`,
-        { approvalRequestId, status: request.status },
-      );
-    }
+      // 1. Status & Concurrency Control
+      if (request.status !== "pending") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "IAM_CONCURRENCY_CONFLICT",
+          `Privileged role request '${approvalRequestId}' has already been resolved (${request.status}).`,
+          { approvalRequestId, status: request.status },
+        );
+      }
 
-    const expectedVersion = command?.mutation?.expectedVersion;
-    if (expectedVersion != null && request.version !== expectedVersion) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "IAM_CONCURRENCY_CONFLICT",
-        `Optimistic locking conflict: expected version ${expectedVersion}, current version is ${request.version}.`,
-        { approvalRequestId, expectedVersion, currentVersion: request.version },
-      );
-    }
+      const expectedVersion = command?.mutation?.expectedVersion;
+      if (expectedVersion != null && request.version !== expectedVersion) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "IAM_CONCURRENCY_CONFLICT",
+          `Optimistic locking conflict: expected version ${expectedVersion}, current version is ${request.version}.`,
+          { approvalRequestId, expectedVersion, currentVersion: request.version },
+        );
+      }
 
-    // 2. Separation of Duties (SoD) - Requester cannot approve own grant
-    if (
-      request.requesterPrincipalId === approverIdentity.actorId ||
-      request.targetUserId === approverIdentity.actorId
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "IAM_SOD_VIOLATION",
-        "Requester cannot approve their own privileged role grant (Separation of Duties violation).",
-        {
-          approvalRequestId,
-          requesterId: request.requesterPrincipalId,
-          targetUserId: request.targetUserId,
-          approverId: approverIdentity.actorId,
-        },
-      );
-    }
+      // 2. Separation of Duties (SoD) - Requester cannot approve own grant
+      if (
+        request.requesterPrincipalId === approverIdentity.actorId ||
+        request.targetUserId === approverIdentity.actorId
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "IAM_SOD_VIOLATION",
+          "Requester cannot approve their own privileged role grant (Separation of Duties violation).",
+          {
+            approvalRequestId,
+            requesterId: request.requesterPrincipalId,
+            targetUserId: request.targetUserId,
+            approverId: approverIdentity.actorId,
+          },
+        );
+      }
 
-    // 3. Fresh MFA / Step-Up Check
-    if (
-      command?.stepUpReference === "INVALID_STEP_UP" ||
-      (command?.stepUpReference != null && !command.stepUpReference.trim())
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.UNAUTHORIZED,
-        "IAM_STEP_UP_REQUIRED",
-        "Fresh MFA or step-up verification required for privileged role approval.",
-        { approvalRequestId },
-      );
-    }
+      // Check SoD against active roles for target user
+      this.checkSodPolicy(request.targetUserId, request.requestedRoleCode, request.tenantId);
 
-    const now = new Date().toISOString();
-    request.status = "approved";
-    request.approvalDecision = "approve";
-    request.approverPrincipalId = approverIdentity.actorId;
-    request.decidedAt = now;
-    request.version += 1;
-    request.updatedAt = now;
+      // 3. Fresh MFA / Step-Up Check
+      if (
+        command?.stepUpReference === "INVALID_STEP_UP" ||
+        (command?.stepUpReference != null && !command.stepUpReference.trim())
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "IAM_STEP_UP_REQUIRED",
+          "Fresh MFA or step-up verification required for privileged role approval.",
+          { approvalRequestId },
+        );
+      }
 
-    // Create active grant
-    const grantId = `grant_${randomUUID()}`;
-    const grant: PrivilegedRoleGrantRecord = {
-      grantId,
-      requestId: request.requestId,
-      tenantId: request.tenantId,
-      realm: request.realm,
-      targetUserId: request.targetUserId,
-      targetMembershipId: request.targetMembershipId ?? null,
-      roleCode: request.requestedRoleCode,
-      grantedByPrincipalId: approverIdentity.actorId,
-      approvalId: request.requestId,
-      validFrom: request.validFrom,
-      validTo: request.validTo ?? null,
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.grants.set(grantId, grant);
+      const now = new Date().toISOString();
+      request.status = "approved";
+      request.approvalDecision = "approve";
+      request.approverPrincipalId = approverIdentity.actorId;
+      request.decidedAt = now;
+      request.version += 1;
+      request.updatedAt = now;
 
-    // 4. Stale Session Invalidation
-    if (this.identityRepository) {
-      await this.identityRepository.revokeSessionsByPrincipal(
-        request.targetUserId,
-        "PRIVILEGED_ROLE_APPROVED",
-        approverIdentity.actorId ?? undefined,
-      );
-    }
-
-    if (this.securityEventsService) {
-      this.securityEventsService.recordEvent({
-        actorId: approverIdentity.actorId,
-        actorType: approverIdentity.actorType,
-        realm: request.realm,
-        tenantId: request.tenantId,
-        partnerId: null,
-        eventType: "privileged_role.approved",
-        eventFamily: "role",
-        outcome: "success",
-        severity: "medium",
-        targetType: "user",
-        targetId: request.targetUserId,
-        sessionId: null,
-        tokenId: null,
-        authMethods: [],
-        sourceIp: null,
-        userAgent: null,
+      // Create active grant
+      const grantId = `grant_${randomUUID()}`;
+      const grant: PrivilegedRoleGrantRecord = {
+        grantId,
         requestId: request.requestId,
-        traceId: null,
-        reasonCode: null,
+        tenantId: request.tenantId,
+        realm: request.realm,
+        targetUserId: request.targetUserId,
+        targetMembershipId: request.targetMembershipId ?? null,
+        roleCode: request.requestedRoleCode,
+        grantedByPrincipalId: approverIdentity.actorId,
         approvalId: request.requestId,
-        beforeSummary: null,
-        afterSummary: { requestId: request.requestId, grantId, roleCode: grant.roleCode },
-      });
-    }
+        validFrom: request.validFrom,
+        validTo: request.validTo ?? null,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.grants.set(grantId, grant);
 
-    return {
-      request: { ...request },
-      grant: { ...grant },
-    };
+      // 4. Stale Session Invalidation
+      if (this.identityRepository) {
+        await this.identityRepository.revokeSessionsByPrincipal(
+          request.targetUserId,
+          "PRIVILEGED_ROLE_APPROVED",
+          approverIdentity.actorId ?? undefined,
+        );
+      }
+
+      if (this.securityEventsService) {
+        this.securityEventsService.recordEvent({
+          actorId: approverIdentity.actorId,
+          actorType: approverIdentity.actorType,
+          realm: request.realm,
+          tenantId: request.tenantId,
+          partnerId: null,
+          eventType: "privileged_role.approved",
+          eventFamily: "role",
+          outcome: "success",
+          severity: "medium",
+          targetType: "user",
+          targetId: request.targetUserId,
+          sessionId: null,
+          tokenId: null,
+          authMethods: [],
+          sourceIp: null,
+          userAgent: null,
+          requestId: request.requestId,
+          traceId: null,
+          reasonCode: null,
+          approvalId: request.requestId,
+          beforeSummary: null,
+          afterSummary: { requestId: request.requestId, grantId, roleCode: grant.roleCode },
+        });
+      }
+
+      return {
+        request: { ...request },
+        grant: { ...grant },
+      };
+    });
   }
 
   /**
@@ -412,96 +488,107 @@ export class PrivilegedRoleGovernanceService {
     const roleCode = command.roleCode.trim();
     const tenantId = command.tenantId ?? actorIdentity.tenantId ?? null;
 
-    // Last-Admin Protection Check
-    if (isAdminRole(roleCode)) {
-      const activeAdmins = Array.from(this.grants.values()).filter(
+    return this.withTenantLock(tenantId, async () => {
+      // Atomic Last-Admin Protection Check
+      if (isAdminRole(roleCode)) {
+        const activeAdminGrants = Array.from(this.grants.values()).filter(
+          (g) =>
+            g.status === "active" &&
+            g.tenantId === tenantId &&
+            isAdminRole(g.roleCode),
+        );
+
+        const activeAdminUsers = new Set(activeAdminGrants.map((g) => g.targetUserId));
+        const isTargetActiveAdmin = activeAdminUsers.has(targetUserId);
+
+        if (isTargetActiveAdmin) {
+          const remainingAdmins = activeAdminGrants.filter(
+            (g) => !(g.targetUserId === targetUserId && g.roleCode.trim().toLowerCase() === roleCode.toLowerCase()),
+          );
+          const remainingAdminUsers = new Set(remainingAdmins.map((g) => g.targetUserId));
+
+          if (remainingAdminUsers.size === 0) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "IAM_LAST_ADMIN_PROTECTION",
+              "Cannot remove or demote the last active admin for the organization/tenant.",
+              { tenantId, targetUserId, roleCode },
+            );
+          }
+        }
+      }
+
+      const now = new Date().toISOString();
+      const existing = Array.from(this.grants.values()).find(
         (g) =>
+          g.targetUserId === targetUserId &&
+          g.roleCode === roleCode &&
           g.status === "active" &&
-          g.tenantId === tenantId &&
-          isAdminRole(g.roleCode),
+          (tenantId == null || g.tenantId === tenantId),
       );
-      const isTargetActiveAdmin = activeAdmins.some(
-        (g) => g.targetUserId === targetUserId,
-      );
-      if (isTargetActiveAdmin && activeAdmins.length <= 1) {
-        throw new ApiRequestError(
-          HttpStatus.CONFLICT,
-          "IAM_LAST_ADMIN_PROTECTION",
-          "Cannot remove or demote the last active admin for the organization/tenant.",
-          { tenantId, targetUserId, roleCode },
+
+      const record: PrivilegedRoleGrantRecord = existing
+        ? {
+            ...existing,
+            status: "removed",
+            updatedAt: now,
+          }
+        : {
+            grantId: `grant_${randomUUID()}`,
+            requestId: null,
+            tenantId,
+            realm: toGovernanceRealm(actorIdentity.realm),
+            targetUserId,
+            roleCode,
+            grantedByPrincipalId: actorIdentity.actorId ?? null,
+            approvalId: null,
+            validFrom: now,
+            validTo: now,
+            status: "removed",
+            createdAt: now,
+            updatedAt: now,
+          };
+
+      this.grants.set(record.grantId, record);
+
+      // Stale Session Invalidation
+      if (this.identityRepository) {
+        await this.identityRepository.revokeSessionsByPrincipal(
+          targetUserId,
+          "PRIVILEGED_ROLE_REMOVED",
+          actorIdentity.actorId ?? undefined,
         );
       }
-    }
 
-    const now = new Date().toISOString();
-    const existing = Array.from(this.grants.values()).find(
-      (g) =>
-        g.targetUserId === targetUserId &&
-        g.roleCode === roleCode &&
-        g.status === "active",
-    );
-
-    const record: PrivilegedRoleGrantRecord = existing
-      ? {
-          ...existing,
-          status: "removed",
-          updatedAt: now,
-        }
-      : {
-          grantId: `grant_${randomUUID()}`,
-          requestId: null,
+      if (this.securityEventsService) {
+        this.securityEventsService.recordEvent({
+          actorId: actorIdentity.actorId,
+          actorType: actorIdentity.actorType,
+          realm: record.realm,
           tenantId,
-          realm: toGovernanceRealm(actorIdentity.realm),
-          targetUserId,
-          roleCode,
-          grantedByPrincipalId: actorIdentity.actorId ?? null,
-          approvalId: null,
-          validFrom: now,
-          validTo: now,
-          status: "removed",
-          createdAt: now,
-          updatedAt: now,
-        };
+          partnerId: null,
+          eventType: "privileged_role.removed",
+          eventFamily: "role",
+          outcome: "revoked",
+          severity: "medium",
+          targetType: "user",
+          targetId: targetUserId,
+          sessionId: null,
+          tokenId: null,
+          authMethods: [],
+          sourceIp: null,
+          userAgent: null,
+          requestId: null,
+          traceId: null,
+          reasonCode: null,
+          approvalId: record.approvalId,
+          beforeSummary: null,
+          afterSummary: { grantId: record.grantId, roleCode },
+        });
+      }
 
-    this.grants.set(record.grantId, record);
-
-    // Stale Session Invalidation
-    if (this.identityRepository) {
-      await this.identityRepository.revokeSessionsByPrincipal(
-        targetUserId,
-        "PRIVILEGED_ROLE_REMOVED",
-        actorIdentity.actorId ?? undefined,
-      );
-    }
-
-    if (this.securityEventsService) {
-      this.securityEventsService.recordEvent({
-        actorId: actorIdentity.actorId,
-        actorType: actorIdentity.actorType,
-        realm: record.realm,
-        tenantId,
-        partnerId: null,
-        eventType: "privileged_role.removed",
-        eventFamily: "role",
-        outcome: "revoked",
-        severity: "medium",
-        targetType: "user",
-        targetId: targetUserId,
-        sessionId: null,
-        tokenId: null,
-        authMethods: [],
-        sourceIp: null,
-        userAgent: null,
-        requestId: null,
-        traceId: null,
-        reasonCode: null,
-        approvalId: record.approvalId,
-        beforeSummary: null,
-        afterSummary: { grantId: record.grantId, roleCode },
-      });
-    }
-
-    return { ...record };
+      return { ...record };
+    });
   }
 
   /**
@@ -509,66 +596,68 @@ export class PrivilegedRoleGovernanceService {
    * Revokes stale sessions for expired grants
    */
   async expireStaleGrants(currentTimeMs = Date.now()): Promise<PrivilegedRoleGrantRecord[]> {
-    const expired: PrivilegedRoleGrantRecord[] = [];
-    const now = new Date(currentTimeMs).toISOString();
+    return this.withTenantLock(null, async () => {
+      const expired: PrivilegedRoleGrantRecord[] = [];
+      const now = new Date(currentTimeMs).toISOString();
 
-    for (const grant of this.grants.values()) {
-      if (grant.status === "active" && grant.validTo) {
-        const validToMs = new Date(grant.validTo).getTime();
-        if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
-          grant.status = "expired";
-          grant.updatedAt = now;
-          expired.push({ ...grant });
+      for (const grant of this.grants.values()) {
+        if (grant.status === "active" && grant.validTo) {
+          const validToMs = new Date(grant.validTo).getTime();
+          if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
+            grant.status = "expired";
+            grant.updatedAt = now;
+            expired.push({ ...grant });
 
-          if (this.identityRepository) {
-            await this.identityRepository.revokeSessionsByPrincipal(
-              grant.targetUserId,
-              "PRIVILEGED_ROLE_EXPIRED",
-            );
-          }
+            if (this.identityRepository) {
+              await this.identityRepository.revokeSessionsByPrincipal(
+                grant.targetUserId,
+                "PRIVILEGED_ROLE_EXPIRED",
+              );
+            }
 
-          if (this.securityEventsService) {
-            this.securityEventsService.recordEvent({
-              actorId: "system",
-              actorType: "system",
-              realm: grant.realm,
-              tenantId: grant.tenantId,
-              partnerId: null,
-              eventType: "privileged_role.expired",
-              eventFamily: "role",
-              outcome: "expired",
-              severity: "medium",
-              targetType: "user",
-              targetId: grant.targetUserId,
-              sessionId: null,
-              tokenId: null,
-              authMethods: [],
-              sourceIp: null,
-              userAgent: null,
-              requestId: null,
-              traceId: null,
-              reasonCode: null,
-              approvalId: grant.approvalId,
-              beforeSummary: null,
-              afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
-            });
+            if (this.securityEventsService) {
+              this.securityEventsService.recordEvent({
+                actorId: "system",
+                actorType: "system",
+                realm: grant.realm,
+                tenantId: grant.tenantId,
+                partnerId: null,
+                eventType: "privileged_role.expired",
+                eventFamily: "role",
+                outcome: "expired",
+                severity: "medium",
+                targetType: "user",
+                targetId: grant.targetUserId,
+                sessionId: null,
+                tokenId: null,
+                authMethods: [],
+                sourceIp: null,
+                userAgent: null,
+                requestId: null,
+                traceId: null,
+                reasonCode: null,
+                approvalId: grant.approvalId,
+                beforeSummary: null,
+                afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
+              });
+            }
           }
         }
       }
-    }
 
-    // Also update pending requests past validTo
-    for (const req of this.requests.values()) {
-      if (req.status === "pending" && req.validTo) {
-        const validToMs = new Date(req.validTo).getTime();
-        if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
-          req.status = "expired";
-          req.updatedAt = now;
+      // Also update pending requests past validTo
+      for (const req of this.requests.values()) {
+        if (req.status === "pending" && req.validTo) {
+          const validToMs = new Date(req.validTo).getTime();
+          if (!isNaN(validToMs) && validToMs <= currentTimeMs) {
+            req.status = "expired";
+            req.updatedAt = now;
+          }
         }
       }
-    }
 
-    return expired;
+      return expired;
+    });
   }
 
   getRequest(requestId: string): PrivilegedRoleApprovalRequestRecord | null {
