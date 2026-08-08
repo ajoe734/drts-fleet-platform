@@ -51,15 +51,27 @@ interface StoredStepUpProof {
   acr: string | null;
 }
 
-function parseTimestamp(value: string | number | null | undefined): number | null {
+function parseTimestamp(
+  value: string | number | null | undefined,
+): number | null {
   if (value === null || value === undefined) {
     return null;
   }
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return value < 100000000000 ? value * 1000 : value;
   }
   const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+  const num = Number(value);
+  if (Number.isFinite(num)) {
+    return num < 100000000000 ? num * 1000 : num;
+  }
+  return null;
 }
 
 function normalizeReference(value: unknown): string | null {
