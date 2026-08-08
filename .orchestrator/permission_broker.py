@@ -1169,13 +1169,37 @@ def _paths_within_workspace(paths: list[Path]) -> bool:
     # Task worktrees usually live under the canonical root, but a worker may be
     # dispatched into one elsewhere, so honour every root we were handed.
     allowed_roots = [*workspace_roots(), root.parent / "pantheon", root.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
+    allowed_roots = [candidate.expanduser().resolve(strict=False) for candidate in allowed_roots]
     for path in paths:
-        resolved = path if path.is_absolute() else root / path
+        resolved = _resolve_candidate_path(path, root)
+        if resolved is None:
+            return False
         if not any(
-            _is_relative_to(resolved, root) for root in allowed_roots
+            _is_relative_to(resolved, allowed) for allowed in allowed_roots
         ):
             return False
     return True
+
+
+def _resolve_candidate_path(path: Path, root: Path) -> Path | None:
+    """Absolute, normalised form of `path`, or None when it cannot be judged.
+
+    `~/.ssh` and `../../etc` are not absolute, so joining them onto the root
+    without expanding or normalising produced `<root>/~/.ssh`, which is inside
+    the workspace by inspection and outside it in fact — every escape hatch
+    read as safe. A path still carrying `$VAR` is not resolvable by static
+    inspection at all, so it is never inside.
+    """
+    text = str(path)
+    if "$" in text:
+        return None
+    expanded = Path(text).expanduser()
+    if not expanded.is_absolute():
+        expanded = root / expanded
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return None
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:

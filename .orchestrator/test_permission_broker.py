@@ -5,6 +5,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 import permission_broker
@@ -312,3 +313,59 @@ class ForcePushSharedBranchTests(unittest.TestCase):
         self.assertEqual(
             permission_broker.classify_command("git push origin dev"), "allow"
         )
+
+
+class WorkspaceBoundaryTests(unittest.TestCase):
+    """A path that leaves the workspace must not read as being inside it.
+
+    `~/.ssh` and `../../etc` are not absolute, and the boundary check joined
+    them onto the root without expanding or normalising: `<root>/~/.ssh` is
+    inside the workspace by inspection and outside it in fact. Write went to
+    `~/.ssh/authorized_keys` with no approval on that basis.
+    """
+
+    ROOT = str(permission_broker.workspace_root())
+
+    def assert_outside(self, path: str) -> None:
+        self.assertFalse(
+            permission_broker._paths_within_workspace([Path(path)]), path
+        )
+
+    def assert_inside(self, path: str) -> None:
+        self.assertTrue(
+            permission_broker._paths_within_workspace([Path(path)]), path
+        )
+
+    def test_home_relative_escapes_are_outside(self) -> None:
+        for path in ("~/.ssh/authorized_keys", "~/.bashrc", "~"):
+            with self.subTest(path=path):
+                self.assert_outside(path)
+
+    def test_parent_traversal_is_outside(self) -> None:
+        for path in ("../../etc/passwd", "../.ssh/id_rsa", "apps/../../../etc/hosts"):
+            with self.subTest(path=path):
+                self.assert_outside(path)
+
+    def test_an_unexpanded_variable_is_never_inside(self) -> None:
+        # Static inspection cannot know where `$HOME` points.
+        for path in ("$HOME/.ssh/id_rsa", "${HOME}/.bashrc", "$WORKSPACE/x"):
+            with self.subTest(path=path):
+                self.assert_outside(path)
+
+    def test_ordinary_workspace_paths_are_still_inside(self) -> None:
+        for path in (
+            "apps/api/src/main.ts",
+            ".orchestrator/config.json",
+            f"{self.ROOT}/apps/api/src/main.ts",
+            f"{self.ROOT}/.artifacts/worktrees/auto/claude-task/apps/api/x.ts",
+        ):
+            with self.subTest(path=path):
+                self.assert_inside(path)
+
+    def test_edit_tools_refuse_the_escapes(self) -> None:
+        for path in ("~/.ssh/authorized_keys", "../../etc/passwd", "$HOME/.bashrc"):
+            with self.subTest(path=path):
+                decision = permission_broker.evaluate_tool_request(
+                    "Write", {"file_path": path, "content": "x"}, {}
+                )
+                self.assertEqual(decision["decision"], "deny", path)
