@@ -23,8 +23,10 @@ vi.mock("expo-secure-store", () => ({
 
 import {
   clearDriverProvisioning,
+  getDriverClient,
   getDriverIdentityAuthState,
   getDriverIdentityIssue,
+  initializeDriverIdentity,
   isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
@@ -236,5 +238,133 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
 
     expect(secureStoreMap.has("drts.driver.session")).toBe(false);
     expect(secureStoreMap.get("drts.driver.pendingTaskCompletion")).toBe("proof-data-rebound");
+  });
+
+  it("automatically recovers session and clears SecureStore on general Bearer API requests receiving 401 DRIVER_AUTH_REVOKED", async () => {
+    secureStoreMap.set(
+      "drts.driver.session",
+      JSON.stringify({
+        accessToken: "active-access-token",
+        refreshToken: "active-refresh-token",
+        deviceId: "device-test-01",
+        bindingId: "binding-test-01",
+        driverId: "driver-test-01",
+      }),
+    );
+
+    // Mock fetch for initializeDriverIdentity (refresh session) and listDriverTasks
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("/refresh")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              accessToken: "new-access-token",
+              refreshToken: "new-refresh-token",
+              deviceId: "device-test-01",
+              bindingId: "binding-test-01",
+              driverId: "driver-test-01",
+              issuedAt: new Date().toISOString(),
+              expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            },
+          }),
+          { status: 200 },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "DRIVER_AUTH_REVOKED",
+            message: "此司機帳號已退役或撤銷，請聯絡平台管理員。",
+            retryable: false,
+            traceId: "trace-revoked-001",
+          },
+        }),
+        { status: 401 },
+      );
+    }) as typeof fetch;
+
+    try {
+      await initializeDriverIdentity();
+      expect(isDriverIdentityProvisioned()).toBe(true);
+
+      const client = getDriverClient();
+      await expect(client.listDriverTasks()).rejects.toThrow("DRIVER_AUTH_REVOKED");
+
+      // Verify that credentials in SecureStore have been completely erased
+      expect(secureStoreMap.has("drts.driver.session")).toBe(false);
+      expect(isDriverIdentityProvisioned()).toBe(false);
+      expect(getDriverIdentityAuthState()).toBe("revoked");
+      expect(getDriverIdentityIssue()).toBe("此司機帳號已退役或撤銷，請聯絡平台管理員。");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("automatically recovers session and clears SecureStore on general Bearer API requests receiving 401 DRIVER_REFRESH_REUSE_DETECTED", async () => {
+    secureStoreMap.set(
+      "drts.driver.session",
+      JSON.stringify({
+        accessToken: "active-access-token",
+        refreshToken: "active-refresh-token",
+        deviceId: "device-test-02",
+        bindingId: "binding-test-02",
+        driverId: "driver-test-02",
+      }),
+    );
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("/refresh")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              accessToken: "new-access-token",
+              refreshToken: "new-refresh-token",
+              deviceId: "device-test-02",
+              bindingId: "binding-test-02",
+              driverId: "driver-test-02",
+              issuedAt: new Date().toISOString(),
+              expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            },
+          }),
+          { status: 200 },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "DRIVER_REFRESH_REUSE_DETECTED",
+            message: "偵測到 Session 重複使用",
+            retryable: false,
+            traceId: "trace-reuse-001",
+          },
+        }),
+        { status: 401 },
+      );
+    }) as typeof fetch;
+
+    try {
+      await initializeDriverIdentity();
+      expect(isDriverIdentityProvisioned()).toBe(true);
+
+      const client = getDriverClient();
+      await expect(client.getDriverProfile()).rejects.toThrow(
+        "DRIVER_REFRESH_REUSE_DETECTED",
+      );
+
+      expect(secureStoreMap.has("drts.driver.session")).toBe(false);
+      expect(isDriverIdentityProvisioned()).toBe(false);
+      expect(getDriverIdentityAuthState()).toBe("reuse");
+      expect(getDriverIdentityIssue()).toBe(
+        "偵測到安全性例外（Session 重複使用），金鑰已自動清除，請重新登入綁定。",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

@@ -68,13 +68,33 @@ function createLocalId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function createSessionRecoveringApiClient(target: ApiClient): ApiClient {
+  return new Proxy(target, {
+    get(targetObj, prop, receiver) {
+      const orig = Reflect.get(targetObj, prop, receiver);
+      if (typeof orig === "function") {
+        return async function (this: unknown, ...args: unknown[]) {
+          try {
+            return await orig.apply(targetObj, args);
+          } catch (error) {
+            await recoverDriverSessionFromApiError(error);
+            throw error;
+          }
+        };
+      }
+      return orig;
+    },
+  });
+}
+
 function applySession(session: DriverDeviceProvisioningSession | null) {
   provisionedSession = session;
-  client = session
+  const rawClient = session
     ? createDriverBearerClient(API_URL, session.accessToken)
     : DEV_DRIVER_ID
       ? createDriverClient(API_URL, DEV_DRIVER_ID)
       : null;
+  client = rawClient ? createSessionRecoveringApiClient(rawClient) : null;
 }
 
 function setDriverIdentityIssue(message: string | null) {
