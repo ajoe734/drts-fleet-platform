@@ -79,6 +79,7 @@ export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
   "multi-taxi-authorizations": { href: "/multi-taxi-authorizations" },
   "vehicle-eligibility": { href: "/vehicle-eligibility" },
   "fleet-partners": { href: "/fleet-partners" },
+  "supply-review": { href: "/supply-review" },
   sandbox: { href: "/sandbox" },
   "service-area-governance": { href: "/service-area-governance" },
   "sandbox-suspend": { href: "/sandbox/suspend" },
