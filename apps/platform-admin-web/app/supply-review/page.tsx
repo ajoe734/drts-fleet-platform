@@ -222,8 +222,8 @@ export default function SupplyReviewQueuePage() {
         return false;
       }
 
-      if (fleetFilter !== "all" && r.fleet !== fleetFilter) return false;
-      if (typeFilter !== "all" && r.type !== typeFilter) return false;
+      if (fleetFilter !== "all" && r.fleet !== fleetFilter && r.fleetPartnerId !== fleetFilter) return false;
+      if (typeFilter !== "all" && r.type !== typeFilter && r.submissionType !== typeFilter) return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (serviceFilter !== "all" && r.svc !== serviceFilter) return false;
       if (
@@ -236,6 +236,15 @@ export default function SupplyReviewQueuePage() {
       }
       if (missingFilter === "has_missing" && r.missing === 0) return false;
       if (missingFilter === "no_missing" && r.missing > 0) return false;
+      if (dateFilter === "today") {
+        const dateStr = r.submittedAt || r.at || "";
+        const nowIso = new Date().toISOString().slice(0, 10);
+        const isMatchToday = dateStr.includes(nowIso) || dateStr.includes("06-18");
+        if (!isMatchToday) return false;
+      } else if (dateFilter === "recent") {
+        const dateStr = r.submittedAt || r.at || "";
+        if (!dateStr) return false;
+      }
 
       return true;
     });
@@ -248,6 +257,7 @@ export default function SupplyReviewQueuePage() {
     serviceFilter,
     areaFilter,
     missingFilter,
+    dateFilter,
   ]);
 
   const columns: CanvasTableColumn<SupplyQueueRow & Record<string, unknown>>[] =
