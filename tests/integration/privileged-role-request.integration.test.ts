@@ -12,6 +12,7 @@ function buildIdentity(
   principalId: string,
   actorType: IdentityContext["actorType"] = "platform_admin",
   authTime = new Date().toISOString(),
+  tenantId = "tenant_001",
 ): IdentityContext {
   return {
     actorType,
@@ -22,7 +23,7 @@ function buildIdentity(
     roleFamilies: actorType === "tenant_admin" ? ["tenant"] : ["platform"],
     roles: actorType === "tenant_admin" ? ["tenant_admin"] : ["platform_admin"],
     scopes: ["identity:read"],
-    tenantId: actorType === "tenant_admin" ? "tenant_001" : null,
+    tenantId: actorType === "tenant_admin" ? tenantId : null,
     authTime,
     amr: ["pwd", "mfa"],
     acr: "aal2",
@@ -142,11 +143,15 @@ describe("PrivilegedRoleRequestService integration", () => {
       ),
     ]);
     const successfulApprovals = approvalAttempts.filter(
-      (attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<typeof service.approveRequest>>> =>
-        attempt.status === "fulfilled",
+      (
+        attempt,
+      ): attempt is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof service.approveRequest>>
+      > => attempt.status === "fulfilled",
     );
     const failedApprovals = approvalAttempts.filter(
-      (attempt): attempt is PromiseRejectedResult => attempt.status === "rejected",
+      (attempt): attempt is PromiseRejectedResult =>
+        attempt.status === "rejected",
     );
     expect(successfulApprovals).toHaveLength(1);
     expect(successfulApprovals[0]?.value.status).toBe("active");
@@ -159,9 +164,9 @@ describe("PrivilegedRoleRequestService integration", () => {
       eventType: "privileged_role_request.approved",
     });
     expect(eventList).toHaveLength(1);
-    expect(new Date(successfulApprovals[0]!.value.updatedAt).getTime()).toBeGreaterThanOrEqual(
-      Date.parse(now),
-    );
+    expect(
+      new Date(successfulApprovals[0]!.value.updatedAt).getTime(),
+    ).toBeGreaterThanOrEqual(Date.parse(now));
   });
 
   it("persists request lifecycle records across service instances", async () => {
@@ -185,7 +190,10 @@ describe("PrivilegedRoleRequestService integration", () => {
     );
 
     const secondService = new PrivilegedRoleRequestService(repo);
-    const reloaded = await secondService.getRequest(request.requestId);
+    const reloaded = await secondService.getRequest(
+      request.requestId,
+      buildIdentity("reader_principal"),
+    );
     expect(reloaded).toMatchObject({
       requestId: request.requestId,
       status: "pending_approval",
@@ -305,17 +313,21 @@ describe("PrivilegedRoleRequestService integration", () => {
     );
     expect(approved.status).toBe("approved");
 
-    const beforeActivation = await adapter.resolveSubject(
-      {
-        "x-goog-iap-jwt-assertion":
-          "unused",
-      } as never,
-      {},
-    ).catch(() => null);
+    const beforeActivation = await adapter
+      .resolveSubject(
+        {
+          "x-goog-iap-jwt-assertion": "unused",
+        } as never,
+        {},
+      )
+      .catch(() => null);
     expect(beforeActivation).toBeNull();
 
     await service.reconcileRequests(new Date(now + 61_000).toISOString());
-    const activeRequest = await service.getRequest(request.requestId);
+    const activeRequest = await service.getRequest(
+      request.requestId,
+      buildIdentity("reader_principal"),
+    );
     expect(activeRequest.status).toBe("active");
 
     const sessionAfterActivation = await repo.getSession("session_target");
@@ -325,12 +337,17 @@ describe("PrivilegedRoleRequestService integration", () => {
     );
 
     await service.reconcileRequests(new Date(now + 121_000).toISOString());
-    const expiredRequest = await service.getRequest(request.requestId);
+    const expiredRequest = await service.getRequest(
+      request.requestId,
+      buildIdentity("reader_principal"),
+    );
     expect(expiredRequest.status).toBe("expired");
 
-    const bindings = await repo.findRoleBindingsByMembershipId("membership_target");
+    const bindings =
+      await repo.findRoleBindingsByMembershipId("membership_target");
     const requestBinding = bindings.find(
-      (binding) => binding.sourceRef === `privileged_role_request:${request.requestId}`,
+      (binding) =>
+        binding.sourceRef === `privileged_role_request:${request.requestId}`,
     );
     expect(requestBinding?.validFrom).toBe(activateAt);
     expect(requestBinding?.validTo).toBe(expiresAt);
@@ -378,5 +395,120 @@ describe("PrivilegedRoleRequestService integration", () => {
     });
 
     expect(Date.parse(now)).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("confines tenant privileged role requests and last-admin protection to one tenant", async () => {
+    const repo = new IdentityRepository();
+    const service = new PrivilegedRoleRequestService(
+      repo,
+      new SecurityEventsService(),
+    );
+    const now = new Date().toISOString();
+
+    await seedMembership({
+      repo,
+      principalId: "tenant_a_target",
+      membershipId: "tenant_a_membership",
+      sourceRef: "tenant-a-target",
+      realm: "tenant",
+      tenantId: "tenant_a",
+      roleBindings: [],
+    });
+    await seedMembership({
+      repo,
+      principalId: "tenant_b_admin",
+      membershipId: "tenant_b_membership",
+      sourceRef: "tenant-b-admin",
+      realm: "tenant",
+      tenantId: "tenant_b",
+      roleBindings: [
+        {
+          roleBindingId: "tenant_b_admin_binding",
+          sourceRef: "tenant-b-admin-binding",
+          roleCode: "tenant_admin",
+          validFrom: now,
+          validTo: null,
+        },
+      ],
+    });
+
+    const tenantARequester = buildIdentity(
+      "tenant_a_requester",
+      "tenant_admin",
+      now,
+      "tenant_a",
+    );
+    const tenantAApprover = buildIdentity(
+      "tenant_a_approver",
+      "tenant_admin",
+      now,
+      "tenant_a",
+    );
+    const tenantBActor = buildIdentity(
+      "tenant_b_actor",
+      "tenant_admin",
+      now,
+      "tenant_b",
+    );
+    const request = await service.createRequest(
+      {
+        membershipId: "tenant_a_membership",
+        roleCode: "tenant_admin",
+        justification: "Tenant A continuity coverage.",
+      },
+      tenantARequester,
+    );
+    expect(request.tenantId).toBe("tenant_a");
+
+    await expect(
+      service.createRequest(
+        {
+          membershipId: "tenant_a_membership",
+          roleCode: "tenant_admin",
+          justification: "Cross-tenant escalation must fail.",
+        },
+        tenantBActor,
+      ),
+    ).rejects.toMatchObject<ApiRequestError>({ code: "AUTHZ_SCOPE_DENIED" });
+    await expect(
+      service.getRequest(request.requestId, tenantBActor),
+    ).rejects.toMatchObject<ApiRequestError>({ code: "AUTHZ_SCOPE_DENIED" });
+    await expect(
+      service.approveRequest(
+        request.requestId,
+        { expectedVersion: 1 },
+        tenantBActor,
+      ),
+    ).rejects.toMatchObject<ApiRequestError>({ code: "AUTHZ_SCOPE_DENIED" });
+    await expect(
+      service.rejectRequest(
+        request.requestId,
+        { expectedVersion: 1 },
+        tenantBActor,
+      ),
+    ).rejects.toMatchObject<ApiRequestError>({ code: "AUTHZ_SCOPE_DENIED" });
+    await expect(
+      service.removeGrant(
+        request.requestId,
+        { expectedVersion: 1, reasonCode: "cross_tenant" },
+        tenantBActor,
+      ),
+    ).rejects.toMatchObject<ApiRequestError>({ code: "AUTHZ_SCOPE_DENIED" });
+    await expect(service.listRequests({}, tenantBActor)).resolves.toEqual([]);
+
+    await service.approveRequest(
+      request.requestId,
+      { expectedVersion: 1 },
+      tenantAApprover,
+    );
+    await expect(
+      service.removeGrant(
+        request.requestId,
+        { expectedVersion: 2, reasonCode: "role_removed" },
+        tenantAApprover,
+      ),
+    ).rejects.toMatchObject<ApiRequestError>({
+      code: "IAM_LAST_ADMIN_CONFLICT",
+    });
   });
 });

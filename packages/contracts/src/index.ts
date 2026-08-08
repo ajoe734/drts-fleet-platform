@@ -2488,6 +2488,8 @@ export interface PrivilegedRoleRequestRecord {
   membershipId: string;
   principalId: string;
   realm: "platform" | "ops" | "tenant";
+  /** Tenant boundary for tenant-realm grants; null for platform and ops grants. */
+  tenantId: string | null;
   roleCode: string;
   requestedByPrincipalId: string;
   approvedByPrincipalId: string | null;
@@ -2527,6 +2529,7 @@ export interface PrivilegedRoleRequestRemovalCommand {
 export interface ListPrivilegedRoleRequestsQuery {
   membershipId?: string | null;
   principalId?: string | null;
+  tenantId?: string | null;
   status?: PrivilegedRoleRequestStatus | null;
 }
 

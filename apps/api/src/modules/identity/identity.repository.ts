@@ -571,17 +571,29 @@ export class IdentityRepository {
     }
   }
 
-  async listPrivilegedRoleRequests(): Promise<PrivilegedRoleRequestRecord[]> {
+  async listPrivilegedRoleRequests(
+    tenantId?: string | null,
+  ): Promise<PrivilegedRoleRequestRecord[]> {
     if (!this.isEnabled()) {
-      return Array.from(this.fallbackPrivilegedRoleRequests.values(), (record) => ({
-        ...record,
-      }));
+      return Array.from(
+        this.fallbackPrivilegedRoleRequests.values(),
+        (record) => ({
+          ...record,
+        }),
+      ).filter((record) => !tenantId || record.tenantId === tenantId);
     }
     const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT record FROM iam.privileged_role_requests ORDER BY updated_at DESC`,
+      tenantId
+        ? `SELECT record FROM iam.privileged_role_requests
+             WHERE tenant_id = $1 ORDER BY updated_at DESC`
+        : `SELECT record FROM iam.privileged_role_requests ORDER BY updated_at DESC`,
+      tenantId ? [tenantId] : [],
     );
     return result.rows.map((row) =>
-      this.parseRecord<PrivilegedRoleRequestRecord>(row.record, "iam.privileged_role_requests"),
+      this.parseRecord<PrivilegedRoleRequestRecord>(
+        row.record,
+        "iam.privileged_role_requests",
+      ),
     );
   }
 
@@ -613,14 +625,24 @@ export class IdentityRepository {
     }
     const result = await this.databaseService!.query<JsonRecordRow>(
       `INSERT INTO iam.privileged_role_requests (
-        request_id, membership_id, principal_id, realm, role_code,
+        request_id, membership_id, principal_id, realm, tenant_id, role_code,
         request_status, version, activate_at, expires_at, created_at, updated_at, record
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
       RETURNING record`,
       [
-        record.requestId, record.membershipId, record.principalId, record.realm,
-        record.roleCode, record.status, record.version, record.activateAt,
-        record.expiresAt, record.createdAt, record.updatedAt, JSON.stringify(record),
+        record.requestId,
+        record.membershipId,
+        record.principalId,
+        record.realm,
+        record.tenantId,
+        record.roleCode,
+        record.status,
+        record.version,
+        record.activateAt,
+        record.expiresAt,
+        record.createdAt,
+        record.updatedAt,
+        JSON.stringify(record),
       ],
     );
     return this.parseRecord<PrivilegedRoleRequestRecord>(
@@ -647,8 +669,14 @@ export class IdentityRepository {
        WHERE request_id = $1 AND version = $8
        RETURNING record`,
       [
-        record.requestId, record.status, record.version, record.activateAt,
-        record.expiresAt, record.updatedAt, JSON.stringify(record), expectedVersion,
+        record.requestId,
+        record.status,
+        record.version,
+        record.activateAt,
+        record.expiresAt,
+        record.updatedAt,
+        JSON.stringify(record),
+        expectedVersion,
       ],
     );
     return result.rows[0]?.record

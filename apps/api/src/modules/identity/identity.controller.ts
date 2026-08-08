@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
@@ -56,11 +64,15 @@ export class IdentityController {
   @RequireScopes("identity:read")
   async listPrivilegedRoleRequests(
     @Query() query: ListPrivilegedRoleRequestsQuery,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: await this.privilegedRoleRequestService.listRequests(query),
+        items: await this.privilegedRoleRequestService.listRequests(
+          query,
+          identity,
+        ),
       },
       requestId,
     );
@@ -85,10 +97,11 @@ export class IdentityController {
   @RequireScopes("identity:read")
   async getPrivilegedRoleRequest(
     @Param("requestId") requestId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestIdHeader?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.privilegedRoleRequestService.getRequest(requestId),
+      await this.privilegedRoleRequestService.getRequest(requestId, identity),
       requestIdHeader,
     );
   }
