@@ -85,6 +85,7 @@ function buildAuthController(identityRepository: IdentityRepository) {
     jwtAuthService,
     {} as never,
     {} as never,
+    identityRepository,
     undefined,
     undefined,
     workloadIdentityAdapter,
