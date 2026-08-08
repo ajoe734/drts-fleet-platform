@@ -78,7 +78,7 @@ export class IdentityController {
       );
     }
 
-    this.assertAdminAuthority(identity);
+    this.assertAdminReadAuthority(identity);
 
     const effectiveQuery: IamSessionInventoryQuery = { ...query };
 
@@ -123,7 +123,7 @@ export class IdentityController {
       );
     }
 
-    this.assertAdminAuthority(identity);
+    this.assertAdminRevokeAuthority(identity);
     validateCsrfHeader(request.headers);
 
     if (!this.identityRepository) {
@@ -233,21 +233,59 @@ export class IdentityController {
     );
   }
 
-  private assertAdminAuthority(identity: BootstrapRequestIdentity): void {
-    const isPlatformOrOps =
-      identity.realm === "platform" || identity.realm === "ops";
+  private assertAdminReadAuthority(identity: BootstrapRequestIdentity): void {
+    const isPlatformOrOpsAdmin =
+      (identity.realm === "platform" || identity.realm === "ops") &&
+      (identity.actorType === "platform_admin" ||
+        identity.roles.includes("platform_superadmin") ||
+        identity.roles.includes("platform_user_admin") ||
+        identity.roles.includes("ops_admin") ||
+        identity.scopes.includes("platform:superadmin") ||
+        identity.scopes.includes("identity:sessions:read") ||
+        identity.scopes.includes("identity:sessions:write") ||
+        identity.scopes.includes("identity:users:read") ||
+        identity.scopes.includes("identity:users:write"));
+
     const isTenantAdmin =
       identity.realm === "tenant" &&
       (identity.actorType === "tenant_admin" ||
         identity.roles.includes("tenant_admin") ||
         identity.scopes.includes("identity:users:write") ||
-        identity.scopes.includes("identity:sessions:read"));
+        identity.scopes.includes("identity:sessions:read") ||
+        identity.scopes.includes("identity:sessions:write"));
 
-    if (!isPlatformOrOps && !isTenantAdmin) {
+    if (!isPlatformOrOpsAdmin && !isTenantAdmin) {
       throw new ApiRequestError(
         403,
         "AUTHZ_SCOPE_DENIED",
-        "Administrative privileges are required for session inventory operations.",
+        "Administrative read privileges are required for session inventory operations.",
+      );
+    }
+  }
+
+  private assertAdminRevokeAuthority(identity: BootstrapRequestIdentity): void {
+    const isPlatformOrOpsAdmin =
+      (identity.realm === "platform" || identity.realm === "ops") &&
+      (identity.actorType === "platform_admin" ||
+        identity.roles.includes("platform_superadmin") ||
+        identity.roles.includes("platform_user_admin") ||
+        identity.roles.includes("ops_admin") ||
+        identity.scopes.includes("platform:superadmin") ||
+        identity.scopes.includes("identity:sessions:write") ||
+        identity.scopes.includes("identity:users:write"));
+
+    const isTenantAdmin =
+      identity.realm === "tenant" &&
+      (identity.actorType === "tenant_admin" ||
+        identity.roles.includes("tenant_admin") ||
+        identity.scopes.includes("identity:users:write") ||
+        identity.scopes.includes("identity:sessions:write"));
+
+    if (!isPlatformOrOpsAdmin && !isTenantAdmin) {
+      throw new ApiRequestError(
+        403,
+        "AUTHZ_SCOPE_DENIED",
+        "Administrative write privileges are required for session revocation.",
       );
     }
   }

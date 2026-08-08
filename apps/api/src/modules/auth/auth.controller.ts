@@ -859,14 +859,24 @@ export class AuthController {
     const isSelf = targetSession.principalId === callerPrincipalId;
 
     if (!isSelf) {
-      const isPlatformAdmin =
-        identity.realm === "platform" || identity.realm === "ops";
+      const isPlatformOrOpsAdmin =
+        (identity.realm === "platform" || identity.realm === "ops") &&
+        (identity.actorType === "platform_admin" ||
+          identity.roles.includes("platform_superadmin") ||
+          identity.roles.includes("platform_user_admin") ||
+          identity.roles.includes("ops_admin") ||
+          identity.scopes.includes("platform:superadmin") ||
+          identity.scopes.includes("identity:sessions:write") ||
+          identity.scopes.includes("identity:users:write"));
+
       const isTenantAdmin =
         identity.realm === "tenant" &&
         (identity.actorType === "tenant_admin" ||
-          identity.roles.includes("tenant_admin"));
+          identity.roles.includes("tenant_admin") ||
+          identity.scopes.includes("identity:users:write") ||
+          identity.scopes.includes("identity:sessions:write"));
 
-      if (!isPlatformAdmin && !isTenantAdmin) {
+      if (!isPlatformOrOpsAdmin && !isTenantAdmin) {
         throw new ApiRequestError(
           403,
           "AUTHZ_SCOPE_DENIED",
@@ -874,7 +884,10 @@ export class AuthController {
         );
       }
 
-      if (isTenantAdmin && targetSession.tenantId !== identity.tenantId) {
+      if (
+        identity.realm === "tenant" &&
+        targetSession.tenantId !== identity.tenantId
+      ) {
         throw new ApiRequestError(
           403,
           "RESOURCE_SCOPE_DENIED",
