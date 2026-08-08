@@ -161,6 +161,62 @@ describe("Session Management (IAM-SES-003)", () => {
         }),
       ).toThrow(ApiRequestError);
     });
+
+    it("should enforce controller-level CSRF denial on logout, logoutAll, revokeSelfSession, and revokeAdminSession", async () => {
+      const cookieHeader = { cookie: "session_id=sid_user_session_1", "x-auth-mode": "cookie" };
+
+      // authController.logout with missing CSRF
+      await expect(
+        authController.logout(
+          regularUserIdentity,
+          { reason: "logout_test" },
+          { headers: cookieHeader },
+          "req_csrf_1",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      // authController.logout with invalid CSRF token
+      await expect(
+        authController.logout(
+          regularUserIdentity,
+          { reason: "logout_test" },
+          { headers: { ...cookieHeader, "x-csrf-token": "invalid" } },
+          "req_csrf_2",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      // authController.logoutAll with missing CSRF
+      await expect(
+        authController.logoutAll(
+          regularUserIdentity,
+          { reason: "logout_all_test" },
+          { headers: cookieHeader },
+          "req_csrf_3",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      // authController.revokeSelfSession with missing CSRF
+      await expect(
+        authController.revokeSelfSession(
+          regularUserIdentity,
+          "sid_user_session_1",
+          { reason: "revoke_test" },
+          { headers: cookieHeader },
+          "req_csrf_4",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      // identityController.revokeAdminSession with missing CSRF
+      await expect(
+        identityController.revokeAdminSession(
+          tenantAdminIdentity,
+          "sid_user_session_1",
+          { reason: "admin_revoke_test" },
+          { headers: cookieHeader },
+          "req_csrf_5",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
   });
 
   describe("Self Session Operations", () => {
@@ -515,6 +571,122 @@ describe("Session Management (IAM-SES-003)", () => {
       expect(res.data.revoked).toBe(true);
       const fetched = await identityRepository.getSession("sid_beta_session");
       expect(fetched?.status).toBe("revoked");
+    });
+
+    it("should reject identity:sessions:read callers from revoking admin sessions (403 AUTHZ_SCOPE_DENIED)", async () => {
+      const readOnlyIdentity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "ops_user",
+        actorId: "usr_read_only",
+        principalId: "prn_read_only",
+        membershipId: "mem_ops_read",
+        subject: "usr_read_only",
+        realm: "ops",
+        tenantId: null,
+        roleFamilies: ["ops"],
+        roles: ["ops_viewer"],
+        scopes: ["identity:sessions:read"],
+        sessionId: "sid_ops_viewer_session",
+        tokenId: "jti_ops_viewer_token",
+        tokenVersion: 4000,
+      };
+
+      const targetSession: CanonicalIdentitySessionRecord = {
+        sessionId: "sid_target_read_only_revoke",
+        sourceRef: "jwt_session:sid_target_read_only_revoke",
+        principalId: "prn_target_2",
+        membershipId: "mem_target_2",
+        realm: "tenant",
+        tenantId: "tenant_alpha",
+        status: "active",
+        authTime: new Date().toISOString(),
+        authMethods: ["tenant_bootstrap_fixture"],
+        tokenVersion: 800,
+        idleExpiresAt: null,
+        absoluteExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        revokedAt: null,
+        revokedByPrincipalId: null,
+        revokeReason: null,
+        deviceSummary: {},
+        riskSummary: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await identityRepository.createSession(targetSession);
+
+      // Call identityController.revokeAdminSession -> must be rejected because scopes only has identity:sessions:read
+      await expect(
+        identityController.revokeAdminSession(
+          readOnlyIdentity,
+          "sid_target_read_only_revoke",
+          { reason: "read_only_revoke_attempt" },
+          { headers: {} },
+          "req_read_only_revoke_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      // Call authController.revokeSelfSession for non-self session -> must be rejected
+      await expect(
+        authController.revokeSelfSession(
+          readOnlyIdentity,
+          "sid_target_read_only_revoke",
+          { reason: "read_only_remote_revoke_attempt" },
+          { headers: {} },
+          "req_read_only_remote_revoke_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("should reject non-admin ops/platform callers from remote-revoking another user's session in authController (403 AUTHZ_SCOPE_DENIED)", async () => {
+      const opsUserWithoutAdmin: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "ops_user",
+        actorId: "usr_ops_user_plain",
+        principalId: "prn_ops_user_plain",
+        membershipId: "mem_ops_plain",
+        subject: "usr_ops_user_plain",
+        realm: "ops",
+        tenantId: null,
+        roleFamilies: ["ops"],
+        roles: ["ops_user"],
+        scopes: ["ops:read"],
+        sessionId: "sid_plain_ops_session",
+        tokenId: "jti_plain_ops_token",
+        tokenVersion: 5000,
+      };
+
+      const targetSession: CanonicalIdentitySessionRecord = {
+        sessionId: "sid_target_remote_revoke",
+        sourceRef: "jwt_session:sid_target_remote_revoke",
+        principalId: "prn_victim_user",
+        membershipId: "mem_victim",
+        realm: "tenant",
+        tenantId: "tenant_alpha",
+        status: "active",
+        authTime: new Date().toISOString(),
+        authMethods: ["tenant_bootstrap_fixture"],
+        tokenVersion: 900,
+        idleExpiresAt: null,
+        absoluteExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        revokedAt: null,
+        revokedByPrincipalId: null,
+        revokeReason: null,
+        deviceSummary: {},
+        riskSummary: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await identityRepository.createSession(targetSession);
+
+      await expect(
+        authController.revokeSelfSession(
+          opsUserWithoutAdmin,
+          "sid_target_remote_revoke",
+          { reason: "unauthorized_remote_revoke" },
+          { headers: {} },
+          "req_ops_plain_remote_revoke_denied",
+        ),
+      ).rejects.toThrow(ApiRequestError);
     });
   });
 });
