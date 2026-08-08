@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 import { assessPlatformHealth } from "@/components/platform-status-card";
 import {
+  formatDriverError,
   getDriverClient,
   getDriverId,
   getDriverIdentityIssue,
@@ -35,6 +36,7 @@ import {
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   registerDriverDevice,
+  sanitizeLogMessage,
 } from "@/lib/api-client";
 import {
   buildFallbackUnifiedDriverTaskView,
@@ -426,11 +428,7 @@ function QuickTile({
 type StatusTone = "success" | "warning" | "danger" | "neutral";
 
 function toErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return fallback;
+  return formatDriverError(error, fallback);
 }
 
 function formatCompactDateTime(value: string | null) {
@@ -520,9 +518,7 @@ export default function OnboardingScreen() {
         }
 
         setProvisioningError(
-          error instanceof Error
-            ? error.message
-            : "裝置初始化失敗，請稍後再試。",
+          formatDriverError(error, "裝置初始化失敗，請稍後再試。"),
         );
       })
       .finally(() => {
@@ -664,7 +660,10 @@ export default function OnboardingScreen() {
             }
 
             setShiftLoadError(true);
-            console.error("Failed to load shifts:", error);
+            console.error(
+              "Failed to load shifts:",
+              formatDriverError(error, "Failed to load shifts"),
+            );
           } finally {
             if (!cancelled) {
               setLoadingShiftData(false);
@@ -682,7 +681,10 @@ export default function OnboardingScreen() {
         setWorkspaceIssue(resolveWorkspaceIssue(false, false));
         setShiftFeatureEnabled(false);
         setLoadingShiftData(false);
-        console.error("Error during onboarding data fetch:", error);
+        console.error(
+          "Error during onboarding data fetch:",
+          formatDriverError(error, "Error during onboarding data fetch"),
+        );
       });
 
     return () => {
@@ -1001,7 +1003,7 @@ export default function OnboardingScreen() {
       setWorkspaceIssue(null);
     } catch (error) {
       setProvisioningError(
-        error instanceof Error ? error.message : "裝置配置失敗，請稍後再試。",
+        formatDriverError(error, "裝置配置失敗，請稍後再試。"),
       );
     } finally {
       setSubmitting(false);
@@ -1016,7 +1018,7 @@ export default function OnboardingScreen() {
       void initializeDriverIdentity()
         .catch((error: unknown) => {
           setProvisioningError(
-            error instanceof Error ? error.message : "無法重新初始化裝置身份。",
+            formatDriverError(error, "無法重新初始化裝置身份。"),
           );
         })
         .finally(() => setReady(true));

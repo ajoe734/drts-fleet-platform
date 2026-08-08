@@ -40,6 +40,20 @@ vi.mock("@/lib/driver-location-offline-queue", () => ({
   initializeDriverLocationOfflineQueue,
 }));
 
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: vi.fn(async () => null),
+  setItemAsync: vi.fn(async () => {}),
+  deleteItemAsync: vi.fn(async () => {}),
+}));
+
+vi.mock("expo-constants", () => ({
+  default: {
+    expoConfig: {
+      extra: {},
+    },
+  },
+}));
+
 vi.mock("expo-location", () => ({
   Accuracy: {
     Balanced: "balanced",

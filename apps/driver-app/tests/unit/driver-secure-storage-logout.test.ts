@@ -92,6 +92,31 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
       expect(sanitizeLogMessage(undefined)).toBeNull();
       expect(sanitizeLogMessage("")).toBeNull();
     });
+
+    it("sanitizes error payloads for onboarding, trip reload, and location heartbeat logging paths", () => {
+      const rawApiPayload = new Error(
+        'API error 401: {"error":{"code":"UNAUTHORIZED","message":"Invalid token eyJhbGciOiJIUzI1NiJ9.test with Bearer secret_token_abc"}}',
+      );
+
+      // Onboarding / trip reload error path
+      const formattedDriverError = formatDriverError(rawApiPayload, "操作失敗");
+      expect(formattedDriverError).not.toContain("secret_token_abc");
+      expect(formattedDriverError).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+      expect(formattedDriverError).toContain("[REDACTED_JWT]");
+      expect(formattedDriverError).toContain("Bearer [REDACTED]");
+
+      // Location heartbeat task & queueing error path
+      const sanitizedLog = sanitizeLogMessage(rawApiPayload);
+      expect(sanitizedLog).not.toContain("secret_token_abc");
+      expect(sanitizedLog).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+      expect(sanitizedLog).toContain("Bearer [REDACTED]");
+
+      // Location permission blocked reason path
+      const rawReason = "Permission blocked with token=secret_token_123";
+      const sanitizedReason = sanitizeLogMessage(rawReason);
+      expect(sanitizedReason).not.toContain("secret_token_123");
+      expect(sanitizedReason).toContain("token=[REDACTED]");
+    });
   });
 
   describe("Deterministic Auth States & Recovery", () => {

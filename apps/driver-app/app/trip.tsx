@@ -51,11 +51,13 @@ import {
 } from "@/lib/completion-proof";
 import {
   acceptForwardedDriverOffer,
+  formatDriverError,
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
   rejectForwardedDriverOffer,
   replayPendingDriverTaskCompletion,
+  sanitizeLogMessage,
   submitDriverTaskCompletion,
 } from "@/lib/api-client";
 import {
@@ -244,25 +246,7 @@ function formatTripActionSuccessLabel(action: TripPrimaryActionKey): string {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    const apiMatch = /^API error \d+:\s*(.*)$/s.exec(error.message);
-    if (apiMatch) {
-      try {
-        const payload = JSON.parse(apiMatch[1]) as {
-          error?: { message?: string };
-        };
-        return payload.error?.message?.trim() || error.message;
-      } catch {
-        return error.message;
-      }
-    }
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Unknown error";
+  return formatDriverError(error, "發生未知錯誤。");
 }
 
 function getCanvasToneSet(tone: CanvasTone) {
@@ -1556,7 +1540,7 @@ export default function TripScreen() {
         } catch (reloadError) {
           console.warn(
             "Failed to refresh trip after a completion error.",
-            reloadError,
+            formatDriverError(reloadError, "重新載入行程失敗"),
           );
         }
       }
