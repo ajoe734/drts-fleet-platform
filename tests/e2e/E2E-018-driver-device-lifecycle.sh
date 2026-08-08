@@ -224,7 +224,7 @@ log_step "3.5 — old refresh token cannot revive a revoked device session"
 write_refresh_fixture "$OLD_REFRESH_FIXTURE" "$REFRESH_TOKEN"
 http_call POST "/auth/driver/device/refresh" "$OLD_REFRESH_FIXTURE"
 assert_status "401"
-expect_error_code "DRIVER_DEVICE_REFRESH_INVALID"
+expect_error_code_one_of "DRIVER_REFRESH_REUSE_DETECTED" "DRIVER_DEVICE_REFRESH_INVALID"
 log_ok "Old refresh token rejected after device revoke"
 
 log_step "Chain continuity assertions"

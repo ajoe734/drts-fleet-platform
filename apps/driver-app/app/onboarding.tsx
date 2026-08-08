@@ -9,6 +9,7 @@ import {
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  DriverMobileAuthState,
   PLATFORM_CODE_REGISTRY,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
@@ -30,6 +31,7 @@ import { assessPlatformHealth } from "@/components/platform-status-card";
 import {
   getDriverClient,
   getDriverId,
+  getDriverIdentityAuthState,
   getDriverIdentityIssue,
   hasDriverDevOverride,
   initializeDriverIdentity,
@@ -464,15 +466,136 @@ function toneToStatusVariant(tone: StatusTone) {
   }
 }
 
+function getAuthStateLabel(state: DriverMobileAuthState): string {
+  switch (state) {
+    case "not_provisioned":
+      return "未配置裝置";
+    case "register":
+      return "配置中";
+    case "expired":
+      return "Session 已過期";
+    case "revoked":
+      return "綁定已撤銷";
+    case "suspended":
+      return "帳號停權";
+    case "reuse":
+      return "Session 例外";
+    case "rebind":
+      return "裝置已重綁";
+    default:
+      return "狀態未知";
+  }
+}
+
+function getAuthStateVariant(
+  state: DriverMobileAuthState,
+): "neutral" | "info" | "warning" | "danger" | "success" {
+  switch (state) {
+    case "not_provisioned":
+      return "neutral";
+    case "register":
+      return "info";
+    case "expired":
+    case "rebind":
+      return "warning";
+    case "revoked":
+    case "suspended":
+    case "reuse":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+function DriverAuthStateBanner({
+  state,
+  errorMessage,
+}: {
+  state: DriverMobileAuthState;
+  errorMessage?: string | null;
+}) {
+  switch (state) {
+    case "expired":
+      return (
+        <AuthorityBanner
+          authorityLabel="身份狀態：Session 已過期"
+          description={
+            errorMessage ?? "裝置登入 Session 已過期，請重新輸入註冊碼綁定。"
+          }
+          icon="time-outline"
+          title="Session 已過期"
+          tone="warning"
+        />
+      );
+    case "revoked":
+      return (
+        <AuthorityBanner
+          authorityLabel="身份狀態：綁定已被撤銷"
+          description={
+            errorMessage ??
+            "此司機帳號或裝置綁定已被撤銷，請聯絡平台管理員。"
+          }
+          icon="alert-circle-outline"
+          title="裝置綁定已被撤銷"
+          tone="danger"
+        />
+      );
+    case "suspended":
+      return (
+        <AuthorityBanner
+          authorityLabel="身份狀態：司機帳號已被停權"
+          description={
+            errorMessage ??
+            "此司機帳號已被停權，暫時無法刷新裝置登入與接收任務。"
+          }
+          icon="ban-outline"
+          title="司機帳號已停權"
+          tone="danger"
+        />
+      );
+    case "reuse":
+      return (
+        <AuthorityBanner
+          authorityLabel="身份狀態：安全性例外"
+          description={
+            errorMessage ??
+            "偵測到安全性例外（Session 重複使用），金鑰已自動清除，請重新登入綁定。"
+          }
+          icon="shield-outline"
+          title="安全性例外（Session 重複使用）"
+          tone="danger"
+        />
+      );
+    case "rebind":
+      return (
+        <AuthorityBanner
+          authorityLabel="身份狀態：裝置已被重新綁定"
+          description={
+            errorMessage ??
+            "此裝置已被重新綁定至其他帳號，請重新輸入註冊碼。"
+          }
+          icon="swap-horizontal-outline"
+          title="裝置已被重新綁定"
+          tone="warning"
+        />
+      );
+    case "register":
+    case "not_provisioned":
+    default:
+      return null;
+  }
+}
+
 function resolveWorkspaceIssue(flagsOk: boolean, identityOk: boolean): string {
   if (!identityOk && !flagsOk) {
     return "目前無法驗證司機身份，也無法取得工作台功能設定。請確認網路與登入狀態後重新檢查。";
   }
 
   if (!identityOk) {
+    const authState = getDriverIdentityAuthState();
     return (
       getDriverIdentityIssue() ??
-      "目前無法驗證司機身份。請確認裝置綁定仍有效，或重新回到配置流程。"
+      `目前無法驗證司機身份（目前狀態：${getAuthStateLabel(authState)}）。請確認裝置綁定仍有效，或重新回到配置流程。`
     );
   }
 
@@ -664,7 +787,8 @@ export default function OnboardingScreen() {
             }
 
             setShiftLoadError(true);
-            console.error("Failed to load shifts:", error);
+            const shiftMsg = error instanceof Error ? error.message : String(error);
+            console.error("Failed to load shifts:", shiftMsg);
           } finally {
             if (!cancelled) {
               setLoadingShiftData(false);
@@ -682,7 +806,8 @@ export default function OnboardingScreen() {
         setWorkspaceIssue(resolveWorkspaceIssue(false, false));
         setShiftFeatureEnabled(false);
         setLoadingShiftData(false);
-        console.error("Error during onboarding data fetch:", error);
+        const fetchMsg = error instanceof Error ? error.message : String(error);
+        console.error("Error during onboarding data fetch:", fetchMsg);
       });
 
     return () => {
@@ -1183,6 +1308,8 @@ export default function OnboardingScreen() {
   }
 
   if (!provisioned) {
+    const currentAuthState = getDriverIdentityAuthState(provisioningError);
+
     return (
       <AppScreen contentContainerStyle={styles.provisionContent}>
         <View style={styles.provisionHero}>
@@ -1190,6 +1317,12 @@ export default function OnboardingScreen() {
           <View style={styles.provisionHeader}>
             <BrandTile />
             <Text style={styles.provisionTitle}>裝置啟用</Text>
+            <View style={{ marginTop: 4 }}>
+              <StatusChip
+                label={getAuthStateLabel(currentAuthState)}
+                variant={getAuthStateVariant(currentAuthState)}
+              />
+            </View>
             <Text style={styles.provisionLead}>
               連線車隊管理系統，啟用後此裝置可接收派單與平台訂單。
             </Text>
@@ -1206,7 +1339,13 @@ export default function OnboardingScreen() {
         </View>
 
         <View style={styles.formCard}>
-          {provisioningError ? (
+          <DriverAuthStateBanner
+            state={currentAuthState}
+            errorMessage={provisioningError}
+          />
+          {provisioningError &&
+          (currentAuthState === "not_provisioned" ||
+            currentAuthState === "register") ? (
             <ErrorBanner message={provisioningError} />
           ) : null}
           <FormField

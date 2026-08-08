@@ -56,7 +56,8 @@ function DriverHeartbeatBootstrap() {
         isDriverIdentityProvisioned,
         listDriverTasks: () => getDriverClient().listDriverTasks(),
         onWarning: (error) => {
-          console.warn("Driver heartbeat bootstrap sync failed", error);
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn("Driver heartbeat bootstrap sync failed:", message);
         },
         resetDriverAppToOnboarding,
         router,

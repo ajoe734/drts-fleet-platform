@@ -1,0 +1,213 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock expo-constants & expo-secure-store before importing api-client
+const secureStoreMap = new Map<string, string>();
+
+vi.mock("expo-constants", () => ({
+  default: {
+    expoConfig: {
+      extra: {},
+    },
+  },
+}));
+
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: vi.fn(async (key: string) => secureStoreMap.get(key) ?? null),
+  setItemAsync: vi.fn(async (key: string, value: string) => {
+    secureStoreMap.set(key, value);
+  }),
+  deleteItemAsync: vi.fn(async (key: string) => {
+    secureStoreMap.delete(key);
+  }),
+}));
+
+import {
+  clearDriverProvisioning,
+  getDriverIdentityAuthState,
+  getDriverIdentityIssue,
+  isDriverIdentityHydrated,
+  isDriverIdentityProvisioned,
+  recoverDriverSessionFromApiError,
+} from "../../lib/api-client";
+import { DRIVER_MOBILE_AUTH_STATES } from "@drts/contracts";
+
+describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
+  beforeEach(async () => {
+    secureStoreMap.clear();
+    await clearDriverProvisioning();
+  });
+
+  it("exports and recognizes all declared mobile auth states", () => {
+    expect(DRIVER_MOBILE_AUTH_STATES).toEqual([
+      "not_provisioned",
+      "register",
+      "expired",
+      "revoked",
+      "suspended",
+      "reuse",
+      "rebind",
+    ]);
+  });
+
+  it("resolves to not_provisioned when no device binding or session issue exists", () => {
+    const authState = getDriverIdentityAuthState();
+    expect(authState).toBe("not_provisioned");
+    expect(isDriverIdentityProvisioned()).toBe(false);
+  });
+
+  it("handles remote revoke error and maps to deterministic revoked auth state", async () => {
+    const error = new Error(
+      'API error 401: {"error":{"code":"DRIVER_AUTH_REVOKED","message":"此司機帳號已退役或撤銷，請聯絡平台管理員。"}}',
+    );
+
+    const recovered = await recoverDriverSessionFromApiError(error);
+
+    expect(recovered).toBe(true);
+    expect(getDriverIdentityIssue()).toBe(
+      "此司機帳號已退役或撤銷，請聯絡平台管理員。",
+    );
+    expect(getDriverIdentityAuthState(error)).toBe("revoked");
+    expect(getDriverIdentityAuthState()).toBe("revoked");
+  });
+
+  it("handles driver suspension error and maps to deterministic suspended auth state", async () => {
+    const error = new Error(
+      'API error 401: {"error":{"code":"DRIVER_AUTH_SUSPENDED","message":"此司機帳號已被停權，暫時無法刷新裝置登入。"}}',
+    );
+
+    const recovered = await recoverDriverSessionFromApiError(error);
+
+    expect(recovered).toBe(true);
+    expect(getDriverIdentityIssue()).toBe(
+      "此司機帳號已被停權，暫時無法刷新裝置登入。",
+    );
+    expect(getDriverIdentityAuthState(error)).toBe("suspended");
+    expect(getDriverIdentityAuthState()).toBe("suspended");
+  });
+
+  it("handles token reuse detection error and maps to deterministic reuse auth state", async () => {
+    const error = new Error(
+      'API error 401: {"error":{"code":"DRIVER_REFRESH_REUSE_DETECTED","message":"偵測到 Session 重複使用"}}',
+    );
+
+    const recovered = await recoverDriverSessionFromApiError(error);
+
+    expect(recovered).toBe(true);
+    expect(getDriverIdentityIssue()).toBe(
+      "偵測到安全性例外（Session 重複使用），金鑰已自動清除，請重新登入綁定。",
+    );
+    expect(getDriverIdentityAuthState(error)).toBe("reuse");
+    expect(getDriverIdentityAuthState()).toBe("reuse");
+  });
+
+  it("handles device rebound error and maps to deterministic rebind auth state", async () => {
+    const error = new Error(
+      'API error 401: {"error":{"code":"DRIVER_DEVICE_REBOUND","message":"裝置已重新綁定"}}',
+    );
+
+    const recovered = await recoverDriverSessionFromApiError(error);
+
+    expect(recovered).toBe(true);
+    expect(getDriverIdentityIssue()).toBe(
+      "此裝置已被重新綁定至其他帳號，請重新輸入註冊碼。",
+    );
+    expect(getDriverIdentityAuthState(error)).toBe("rebind");
+    expect(getDriverIdentityAuthState()).toBe("rebind");
+  });
+
+  it("handles expired session error and maps to deterministic expired auth state", async () => {
+    const error = new Error(
+      'API error 401: {"error":{"code":"DRIVER_SESSION_EXPIRED","message":"Session expired"}}',
+    );
+
+    const recovered = await recoverDriverSessionFromApiError(error);
+
+    expect(recovered).toBe(true);
+    expect(getDriverIdentityIssue()).toBe(
+      "裝置登入 Session 已過期，請重新登入。",
+    );
+    expect(getDriverIdentityAuthState(error)).toBe("expired");
+    expect(getDriverIdentityAuthState()).toBe("expired");
+  });
+
+  it("preserves offline unsynchronized proof when session authentication recovery clears credentials", async () => {
+    // Seed secure store with session key AND offline pending task completion key
+    secureStoreMap.set(
+      "drts.driver.session",
+      JSON.stringify({
+        accessToken: "stale-access-token",
+        refreshToken: "stale-refresh-token",
+        deviceId: "device-001",
+        bindingId: "binding-001",
+      }),
+    );
+    secureStoreMap.set(
+      "drts.driver.pendingTaskCompletion",
+      JSON.stringify({
+        taskId: "task-offline-999",
+        requestId: "req-proof-123",
+        command: {
+          completedAt: "2026-08-08T22:00:00Z",
+          proof: {
+            photos: [
+              {
+                uri: "file:///local/photo.jpg",
+                base64: "aW1hZ2UtZGF0YQ==",
+                width: 800,
+                height: 600,
+                estimatedBytes: 1024,
+              },
+            ],
+            notes: "Delivered offline during signal drop",
+          },
+        },
+        createdAt: "2026-08-08T22:00:00Z",
+        updatedAt: "2026-08-08T22:00:00Z",
+      }),
+    );
+
+    const remoteRevokeError = new Error(
+      'API error 401: {"error":{"code":"DRIVER_AUTH_REVOKED"}}',
+    );
+
+    // Trigger recovery due to remote revocation
+    await recoverDriverSessionFromApiError(remoteRevokeError);
+
+    // Session key MUST be deleted from SecureStore
+    expect(secureStoreMap.has("drts.driver.session")).toBe(false);
+
+    // Crucial requirement: Pending offline completion proof MUST NOT be deleted!
+    expect(secureStoreMap.has("drts.driver.pendingTaskCompletion")).toBe(true);
+    const pendingRaw = secureStoreMap.get("drts.driver.pendingTaskCompletion");
+    expect(pendingRaw).toContain("task-offline-999");
+    expect(pendingRaw).toContain("Delivered offline during signal drop");
+  });
+
+  it("preserves offline unsynchronized proof on token reuse exception recovery", async () => {
+    secureStoreMap.set("drts.driver.session", "stale-session");
+    secureStoreMap.set("drts.driver.pendingTaskCompletion", "proof-data-reuse");
+
+    const reuseError = new Error(
+      'API error 401: {"error":{"code":"DRIVER_REFRESH_REUSE_DETECTED"}}',
+    );
+
+    await recoverDriverSessionFromApiError(reuseError);
+
+    expect(secureStoreMap.has("drts.driver.session")).toBe(false);
+    expect(secureStoreMap.get("drts.driver.pendingTaskCompletion")).toBe("proof-data-reuse");
+  });
+
+  it("preserves offline unsynchronized proof on device rebound recovery", async () => {
+    secureStoreMap.set("drts.driver.session", "stale-session");
+    secureStoreMap.set("drts.driver.pendingTaskCompletion", "proof-data-rebound");
+
+    const reboundError = new Error(
+      'API error 401: {"error":{"code":"DRIVER_DEVICE_REBOUND"}}',
+    );
+
+    await recoverDriverSessionFromApiError(reboundError);
+
+    expect(secureStoreMap.has("drts.driver.session")).toBe(false);
+    expect(secureStoreMap.get("drts.driver.pendingTaskCompletion")).toBe("proof-data-rebound");
+  });
+});

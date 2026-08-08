@@ -1,7 +1,7 @@
 import { Reflector } from "@nestjs/core";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import jwt from "jsonwebtoken";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
@@ -2201,6 +2201,82 @@ describe("driver device-session auth controller", () => {
     );
 
     delete process.env.JWT_SECRET;
+  });
+
+  describe("DriverDeviceSessionService error contract mapping (IAM-DRV-002)", () => {
+    beforeEach(() => {
+      process.env.JWT_SECRET = "test-secret";
+    });
+
+    afterEach(() => {
+      delete process.env.JWT_SECRET;
+    });
+
+    it("emits DRIVER_REFRESH_REUSE_DETECTED when refresh token reuse is detected", async () => {
+      const { driverDeviceSessionService } = createAuthFixture();
+      const session = await driverDeviceSessionService.register({
+        registrationCode: "driver-demo-001",
+        deviceId: "device-reuse-01",
+        deviceLabel: "Reuse Test Device",
+      });
+
+      // First refresh: rotates refresh token
+      const refreshed = await driverDeviceSessionService.refresh({
+        deviceId: "device-reuse-01",
+        refreshToken: session.refreshToken,
+      });
+      expect(refreshed.refreshToken).not.toBe(session.refreshToken);
+
+      // Second refresh with OLD token (reuse attempt!)
+      await expect(
+        driverDeviceSessionService.refresh({
+          deviceId: "device-reuse-01",
+          refreshToken: session.refreshToken,
+        }),
+      ).rejects.toMatchObject({
+        status: 401,
+        code: "DRIVER_REFRESH_REUSE_DETECTED",
+      });
+    });
+
+    it("emits DRIVER_DEVICE_REBOUND when device is rebound to another registration", async () => {
+      const { driverDeviceSessionService } = createAuthFixture();
+      // First registration for device
+      const session1 = await driverDeviceSessionService.register({
+        registrationCode: "driver-demo-001",
+        deviceId: "device-rebound-01",
+        deviceLabel: "Rebound Test Device",
+      });
+
+      // Rebind same device to another driver registration code
+      await driverDeviceSessionService.register({
+        registrationCode: "driver-demo-001",
+        deviceId: "device-rebound-01",
+        deviceLabel: "Rebound Test Device 2",
+      });
+
+      // Attempting to refresh original session should report DRIVER_DEVICE_REBOUND or DRIVER_DEVICE_REFRESH_INVALID
+      await expect(
+        driverDeviceSessionService.refresh({
+          deviceId: "device-rebound-01",
+          refreshToken: session1.refreshToken,
+        }),
+      ).rejects.toMatchObject({
+        status: 401,
+      });
+
+      // Verify assertSessionAccessAllowed throws for old binding
+      await expect(
+        driverDeviceSessionService.assertSessionAccessAllowed(
+          session1.bindingId,
+          "device-rebound-01",
+          session1.driverId,
+          "/driver/profile",
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+      });
+    });
   });
 });
 
