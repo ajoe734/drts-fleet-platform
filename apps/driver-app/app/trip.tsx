@@ -58,6 +58,7 @@ import {
   replayPendingDriverTaskCompletion,
   submitDriverTaskCompletion,
 } from "@/lib/api-client";
+import { sanitizeLogMessage } from "@/lib/log-sanitizer";
 import {
   accumulateTripDistanceKm,
   calculateTripDurationSec,
@@ -1556,7 +1557,7 @@ export default function TripScreen() {
         } catch (reloadError) {
           console.warn(
             "Failed to refresh trip after a completion error.",
-            reloadError,
+            sanitizeLogMessage(reloadError),
           );
         }
       }

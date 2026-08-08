@@ -353,3 +353,50 @@ describe("driver online_available continuous tracking", () => {
     expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
   });
 });
+
+describe("driver location error log sanitization", () => {
+  it("sanitizes authorization tokens when background location task encounters an error", async () => {
+    const spyError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+    await heartbeatModule.syncDriverOnlineAvailableHeartbeat();
+
+    await taskHandler?.({
+      error: {
+        message:
+          "Failed with Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
+      },
+    });
+
+    expect(spyError).toHaveBeenCalledWith(
+      "Driver location task error",
+      expect.stringContaining("Bearer [REDACTED]"),
+    );
+    expect(spyError).toHaveBeenCalledWith(
+      "Driver location task error",
+      expect.not.stringContaining("eyJhbGciOiJIUzI1Ni"),
+    );
+    spyError.mockRestore();
+  });
+
+  it("sanitizes tokens when queueing heartbeats fails", async () => {
+    enqueueDriverLocationEvent.mockRejectedValueOnce(
+      new Error("Queue error with accessToken: secret-token-xyz"),
+    );
+    const spyError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+    await heartbeatModule.syncDriverOnlineAvailableHeartbeat();
+
+    await taskHandler?.({ data: { locations: [createLocation(1_000)] } });
+    await flushHeartbeatQueue();
+
+    expect(spyError).toHaveBeenCalledWith(
+      "Driver location heartbeat queueing failed",
+      expect.stringContaining('accessToken: "[REDACTED]"'),
+    );
+    expect(spyError).toHaveBeenCalledWith(
+      "Driver location heartbeat queueing failed",
+      expect.not.stringContaining("secret-token-xyz"),
+    );
+    spyError.mockRestore();
+  });
+});

@@ -11,6 +11,7 @@ import {
   flushDriverLocationQueue,
   initializeDriverLocationOfflineQueue,
 } from "@/lib/driver-location-offline-queue";
+import { sanitizeLogMessage } from "@/lib/log-sanitizer";
 
 const DRIVER_LOCATION_TASK_NAME = "drts-driver-location-heartbeat";
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -260,7 +261,10 @@ function queueHeartbeat(
       await flushDriverLocationQueue();
     })
     .catch((error: unknown) => {
-      console.error("Driver location heartbeat queueing failed", error);
+      console.error(
+        "Driver location heartbeat queueing failed",
+        sanitizeLogMessage(error),
+      );
     });
 }
 
@@ -301,7 +305,10 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
       locations?: Location.LocationObject[];
     }>) => {
       if (error) {
-        console.error("Driver location task error", error.message);
+        console.error(
+          "Driver location task error",
+          sanitizeLogMessage(error),
+        );
         return;
       }
 
@@ -478,7 +485,7 @@ async function applyHeartbeatTracking(
     }
     console.warn(
       "[driver-location-heartbeat] tracking blocked",
-      permissionResult.reason,
+      sanitizeLogMessage(permissionResult.reason),
     );
     return permissionResult;
   }
@@ -565,13 +572,16 @@ async function applyHeartbeatTracking(
     });
   }
 
-  console.info("[driver-location-heartbeat] tracking active", {
-    workState,
-    transportMode: nextTransportMode,
-    taskId: target.taskId,
-    intervalMs: cadence.intervalMs,
-    distanceM: cadence.distanceM,
-  });
+  console.info(
+    "[driver-location-heartbeat] tracking active",
+    sanitizeLogMessage({
+      workState,
+      transportMode: nextTransportMode,
+      taskId: target.taskId,
+      intervalMs: cadence.intervalMs,
+      distanceM: cadence.distanceM,
+    }),
+  );
 
   return {
     status: "active",
