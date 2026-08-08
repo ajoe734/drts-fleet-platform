@@ -63,7 +63,7 @@ export function FleetActionButton({
       </span>
       {descriptor.requiresReason && descriptor.enabled ? (
         <span
-          title="requires reason"
+          aria-hidden="true"
           style={{
             width: 5,
             height: 5,
