@@ -102,4 +102,39 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
     expect(detailSource).toContain("VQ-4");
     expect(detailSource).toContain("VQ-6");
   });
+
+  it("implements all seven required queue filters in queue page (SA §4.11)", () => {
+    const queuePageSource = readFileSync(
+      resolve(__dirname, "../../app/supply-review/page.tsx"),
+      "utf-8",
+    );
+
+    // 1. Fleet partner filter
+    expect(queuePageSource).toContain("fleetFilter");
+    expect(queuePageSource).toContain("車行：全部");
+
+    // 2. Submission type filter
+    expect(queuePageSource).toContain("typeFilter");
+    expect(queuePageSource).toContain("類型：全部");
+
+    // 3. Submitted date filter
+    expect(queuePageSource).toContain("dateFilter");
+    expect(queuePageSource).toContain("送審日期：全部");
+
+    // 4. Status filter
+    expect(queuePageSource).toContain("statusFilter");
+    expect(queuePageSource).toContain("狀態：全部");
+
+    // 5. Missing items filter
+    expect(queuePageSource).toContain("missingFilter");
+    expect(queuePageSource).toContain("缺件狀態：全部");
+
+    // 6. Service product filter
+    expect(queuePageSource).toContain("serviceFilter");
+    expect(queuePageSource).toContain("服務產品：全部");
+
+    // 7. Business area filter
+    expect(queuePageSource).toContain("areaFilter");
+    expect(queuePageSource).toContain("營業區：全部");
+  });
 });

@@ -158,12 +158,13 @@ export default function SupplyReviewDetailPage() {
     try {
       const data = await client.getAdminSupplyReviewSubmission(submissionId);
       if (data) {
+        const rawData = data as any;
         setRecord(data.submission || data);
         if (data.driverDraft) setDriverDraft(data.driverDraft);
         if (data.vehicleDraft) setVehicleDraft(data.vehicleDraft);
         if (data.documents) setDocuments(data.documents);
-        if (data.canonicalDriver) setCanonicalDriver(data.canonicalDriver);
-        if (data.canonicalVehicle) setCanonicalVehicle(data.canonicalVehicle);
+        if (rawData.canonicalDriver) setCanonicalDriver(rawData.canonicalDriver);
+        if (rawData.canonicalVehicle) setCanonicalVehicle(rawData.canonicalVehicle);
       }
     } catch (e: any) {
       console.warn(
@@ -597,11 +598,11 @@ export default function SupplyReviewDetailPage() {
                       icon="eye"
                       onClick={() =>
                         setPreviewDoc(
-                          (r as DocumentRow).rawDoc || {
+                          (r as unknown as DocumentRow).rawDoc || ({
                             documentId: "doc-preview",
                             fleetPartnerId: record.fleetPartnerId || "fleet-001",
                             submissionId,
-                            documentType: String(r.zh),
+                            documentType: "registration",
                             fileObjectKey: `files/${r.file}`,
                             originalFileName: String(r.file),
                             contentType: "application/pdf",
@@ -613,7 +614,7 @@ export default function SupplyReviewDetailPage() {
                             reviewComment: null,
                             uploadedBy: "fleet-user",
                             uploadedAt: "2026-06-18T14:02:00.000Z",
-                          },
+                          } as SupplyDocumentRecord),
                         )
                       }
                     >
