@@ -1,4 +1,8 @@
-import type { CreateTenantBookingCommand } from "@drts/contracts";
+import type {
+  BookingRecord,
+  CreateTenantBookingCommand,
+  UpdateTenantBookingCommand,
+} from "@drts/contracts";
 import {
   enterpriseBookingDraft,
   getEnterpriseBookingDraft,
@@ -352,6 +356,13 @@ export function buildEnterpriseBookingCommand(
       name: passengerName,
       phone: onsiteContactPhone,
     },
+    bookedBy: {
+      name: draft.bookedBy.trim(),
+      // The enterprise UI only collects the coordinator display name. The
+      // authenticated actor remains authoritative; this address is a stable
+      // command contact required by the tenant contract, not user-entered data.
+      email: "enterprise-dispatch-web@drts.local",
+    },
     onsiteContact: {
       name: passengerName,
       phone: onsiteContactPhone,
@@ -364,6 +375,45 @@ export function buildEnterpriseBookingCommand(
     ...(draft.terminal.trim() ? { terminal: draft.terminal.trim() } : {}),
     ...(!Number.isNaN(luggageCount) ? { luggageCount } : {}),
     ...(draft.notes.trim() ? { notes: draft.notes.trim() } : {}),
+  };
+}
+
+export function buildEnterpriseBookingUpdateCommand(
+  draft: EnterpriseBookingDraftForm,
+  now = new Date(),
+): UpdateTenantBookingCommand {
+  return buildEnterpriseBookingCommand(draft, now);
+}
+
+export function createEnterpriseBookingDraftFromRecord(
+  record: BookingRecord,
+): EnterpriseBookingDraftForm {
+  const reservationStart = new Date(record.reservationWindowStart);
+  const date = Number.isNaN(reservationStart.getTime())
+    ? ""
+    : reservationStart.toISOString().slice(0, 10);
+  const time = Number.isNaN(reservationStart.getTime())
+    ? ""
+    : reservationStart.toISOString().slice(11, 16);
+
+  return {
+    passengerMode:
+      record.bookedBy?.name === record.passenger.name ? "self" : "other",
+    passenger: record.passenger.name,
+    bookedBy: record.bookedBy?.name ?? record.passenger.name,
+    pickup: record.pickup.address,
+    dropoff: record.dropoff.address,
+    reservationDate: date,
+    reservationTime: time,
+    onsiteContactPhone: record.onsiteContact?.phone ?? record.passenger.phone,
+    costCenterCode: record.costCenter ?? "",
+    costCenterLabel: record.costCenter ?? "",
+    vehicle: normalizeVehicle(record.vehiclePreference ?? undefined, "business"),
+    notes: record.notes ?? "",
+    airportDirection: record.direction === "dropoff" ? "dropoff" : "pickup",
+    terminal: record.terminal ?? "",
+    flight: record.flightNo ?? "",
+    luggageCount: record.luggageCount?.toString() ?? "",
   };
 }
 
