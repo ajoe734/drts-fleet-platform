@@ -36,7 +36,6 @@ import {
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   registerDriverDevice,
-  sanitizeLogMessage,
 } from "@/lib/api-client";
 import {
   buildFallbackUnifiedDriverTaskView,

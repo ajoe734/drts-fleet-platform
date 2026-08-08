@@ -4,16 +4,13 @@ import * as SecureStore from "expo-secure-store";
 import {
   clearDriverProvisioning,
   formatDriverError,
-  getDriverDeviceId,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
-  registerDriverDevice,
   revokeDriverDeviceBinding,
   sanitizeLogMessage,
-  submitDriverTaskCompletion,
 } from "../../lib/api-client";
 
 // Mock expo-secure-store in-memory store

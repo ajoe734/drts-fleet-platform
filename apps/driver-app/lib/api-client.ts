@@ -454,7 +454,7 @@ export async function revokeDriverDeviceBinding(): Promise<void> {
       bindingId: session.bindingId,
       deviceId: session.deviceId,
     });
-  } catch (error) {
+  } catch {
     // If remote revoke fails (e.g. offline or server error), local credentials
     // are still safely wiped in finally block to ensure local logout posture.
   } finally {

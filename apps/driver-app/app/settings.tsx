@@ -25,7 +25,6 @@ import {
   formatDriverError,
   getDriverClient,
   getDriverId,
-  clearDriverProvisioning,
   recoverDriverSessionFromApiError,
   revokeDriverDeviceBinding,
   isDriverIdentityProvisioned,
@@ -237,7 +236,7 @@ export default function SettingsScreen() {
         return;
       }
 
-      const failures: string[] = [];
+      if (!isActive) return;
 
       if (settingsResult.status === "fulfilled") {
         const next = settingsValuesFromRecord(

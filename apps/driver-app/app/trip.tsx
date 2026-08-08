@@ -57,7 +57,6 @@ import {
   getPendingDriverTaskCompletion,
   rejectForwardedDriverOffer,
   replayPendingDriverTaskCompletion,
-  sanitizeLogMessage,
   submitDriverTaskCompletion,
 } from "@/lib/api-client";
 import {
