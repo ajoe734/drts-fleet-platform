@@ -164,6 +164,12 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.fleetPartners",
   },
   {
+    key: "supply-review",
+    icon: ClipboardList,
+    section: "fleet",
+    labelKey: "adminShell.route.supplyReview",
+  },
+  {
     key: "sandbox",
     icon: FlaskConical,
     section: "sandbox",
