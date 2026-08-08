@@ -743,6 +743,8 @@ export interface CanvasActionButtonProps {
   size?: "xs" | "sm" | "md";
   variant?: "primary" | "secondary" | "ghost";
   style?: CSSProperties;
+  /** Handler invoked when an enabled action button is clicked. */
+  onClick?: () => void;
 }
 
 export function Btn({
@@ -827,6 +829,7 @@ export function CanvasActionButton({
   size = "sm",
   variant,
   style,
+  onClick,
 }: CanvasActionButtonProps) {
   const theme = resolveTheme(providedTheme);
   if (!descriptor) {
@@ -850,6 +853,7 @@ export function CanvasActionButton({
       danger={isHigh}
       variant={resolvedVariant}
       disabled={!descriptor.enabled}
+      {...(descriptor.enabled && onClick ? { onClick } : {})}
       {...(icon ? { icon } : {})}
       {...(style ? { style } : {})}
     >

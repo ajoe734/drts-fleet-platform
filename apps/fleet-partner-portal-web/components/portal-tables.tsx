@@ -388,23 +388,34 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
     { h: t("table.issued"), k: "issued", w: 130, mono: true },
     {
       h: t("table.actions"),
-      w: 180,
+      w: 220,
       r: (r) => (
         <div style={{ display: "flex", gap: 4 }}>
+          {/* Download: BFF route returns a JSON artifact of the statement record.
+              Stage 1 has no PDF/signed-URL endpoint; this route is the wire point
+              for upgrading to a real PDF when that endpoint ships. */}
           <CanvasActionButton
             theme={theme}
             size="xs"
             descriptor={{ action: "download", enabled: true, riskLevel: "low" }}
             label={t("actions.download")}
             en={locale === "zh" ? "download" : undefined}
+            onClick={() => {
+              window.open(
+                `/api/fleet/statements/${encodeURIComponent(r.id)}/download`,
+                "_blank",
+                "noopener,noreferrer",
+              );
+            }}
           />
+          {/* Confirm: disabled — no Stage 1 fleet-partner confirm endpoint. */}
           <CanvasActionButton
             theme={theme}
             size="xs"
             descriptor={{
               action: "confirm",
-              enabled: r.status !== "paid",
-              disabledReasonCode: "already_paid",
+              enabled: false,
+              disabledReasonCode: "no_endpoint",
               riskLevel: "high",
               requiresReason: true,
             }}
@@ -487,22 +498,29 @@ export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
     {
       h: t("table.actions"),
       w: 200,
-      r: (r) => (
+      r: (_r) => (
         <div style={{ display: "flex", gap: 4 }}>
+          {/* Remind driver: disabled — no Stage 1 fleet-partner remind endpoint. */}
           <CanvasActionButton
             theme={theme}
             size="xs"
-            descriptor={{ action: "remind", enabled: true, riskLevel: "low" }}
+            descriptor={{
+              action: "remind",
+              enabled: false,
+              disabledReasonCode: "no_endpoint",
+              riskLevel: "low",
+            }}
             label={t("actions.remindDriver")}
             en={locale === "zh" ? "remind" : undefined}
           />
+          {/* Upload: disabled — no Stage 1 fleet-partner document upload endpoint. */}
           <CanvasActionButton
             theme={theme}
             size="xs"
             descriptor={{
               action: "upload",
-              enabled: r.owner === "fleet",
-              disabledReasonCode: "driver_owned",
+              enabled: false,
+              disabledReasonCode: "no_endpoint",
               riskLevel: "medium",
             }}
             label={t("actions.upload")}
@@ -618,14 +636,15 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
     {
       h: t("table.actions"),
       w: 160,
-      r: (r) => (
+      r: (_r) => (
+        // Respond: disabled — no Stage 1 fleet-partner cases endpoint.
         <CanvasActionButton
           theme={theme}
           size="xs"
           descriptor={{
             action: "respond",
-            enabled: r.responsibility !== "platform",
-            disabledReasonCode: "platform_owned",
+            enabled: false,
+            disabledReasonCode: "no_endpoint",
             riskLevel: "medium",
           }}
           label={t("cases.action.respond")}
