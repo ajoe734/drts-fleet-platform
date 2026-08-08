@@ -174,7 +174,7 @@ export default async function FleetRevenuePage() {
               tone="warn"
               icon="warn"
               title={t("revenue.pendingTitle", locale)}
-              body={t("revenue.pendingBody", locale)}
+              body={t("revenue.pendingBody", locale, { period: s.period })}
             />
             <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
               <CanvasActionButton
