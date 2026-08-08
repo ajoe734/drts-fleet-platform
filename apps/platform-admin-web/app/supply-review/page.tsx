@@ -73,13 +73,16 @@ export default function SupplyReviewQueuePage() {
   const [activeTab, setActiveTab] = useState<"pending" | "mine" | "history">(
     "pending",
   );
-  const [submissions, setSubmissions] =
-    useState<SupplyQueueRow[]>(FX_PSR_QUEUE);
+  const [submissions, setSubmissions] = useState<SupplyQueueRow[]>(FX_PSR_QUEUE);
   const [error, setError] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
 
+  // 7 required filters
   const [fleetFilter, setFleetFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [missingFilter, setMissingFilter] = useState("all");
   const [serviceFilter, setServiceFilter] = useState("all");
   const [areaFilter, setAreaFilter] = useState("all");
 
@@ -88,38 +91,63 @@ export default function SupplyReviewQueuePage() {
     try {
       const remoteList = await client.listAdminSupplyReviewSubmissions();
       if (remoteList && remoteList.length > 0) {
-        const mapped: SupplyQueueRow[] = remoteList.map(
-          (sub: SupplySubmissionRecord) => {
-            const matchedSeed = FX_PSR_QUEUE.find(
-              (item) => item.submissionId === sub.submissionId,
-            );
-            return {
-              id: sub.submissionId,
-              submissionId: sub.submissionId,
-              type: mapSubmissionToTypeZh(sub.submissionType),
-              submissionType: sub.submissionType,
-              fleet: matchedSeed?.fleet || `車行 (${sub.fleetPartnerId})`,
-              fleetPartnerId: sub.fleetPartnerId,
-              subject:
-                matchedSeed?.subject ||
-                `Submission #${sub.submissionId.slice(-6)}`,
-              rev: sub.revisionNo,
-              revisionNo: sub.revisionNo,
-              status: sub.status,
-              at: sub.submittedAt
-                ? sub.submittedAt.slice(5, 16).replace("T", " ")
-                : matchedSeed?.at || "06-18 10:00",
-              submittedAt: sub.submittedAt,
-              missing: 0,
-              lockedBy:
-                sub.reviewStartedBy === PSR_REVIEWER.name
-                  ? PSR_REVIEWER.display
-                  : sub.reviewStartedBy,
-              area: matchedSeed?.area || "台北市",
-              svc: matchedSeed?.svc || "realtime",
-            };
-          },
-        );
+        const mapped: SupplyQueueRow[] = remoteList.map((sub: any) => {
+          const matchedSeed = FX_PSR_QUEUE.find(
+            (item) => item.submissionId === sub.submissionId,
+          );
+          const fleetName =
+            sub.fleetPartnerName ||
+            matchedSeed?.fleet ||
+            `車行 (${sub.fleetPartnerId})`;
+          const subject =
+            sub.subject ||
+            matchedSeed?.subject ||
+            `Submission #${sub.submissionId}`;
+          const area =
+            sub.businessArea === "yilan"
+              ? "宜蘭縣"
+              : sub.businessArea === "taichung"
+                ? "台中市"
+                : matchedSeed?.area || "台北市";
+          const svc =
+            Array.isArray(sub.supportedServiceProductCodes) &&
+            sub.supportedServiceProductCodes.includes("airport")
+              ? "airport"
+              : Array.isArray(sub.supportedServiceProductCodes) &&
+                  sub.supportedServiceProductCodes.includes("business")
+                ? "business"
+                : matchedSeed?.svc || "realtime";
+          const missing =
+            typeof sub.missingItemsCount === "number"
+              ? sub.missingItemsCount
+              : matchedSeed?.missing || 0;
+          const lockedBy =
+            sub.lockedBy ||
+            (sub.reviewStartedBy === PSR_REVIEWER.name
+              ? PSR_REVIEWER.display
+              : matchedSeed?.lockedBy || null);
+
+          return {
+            id: sub.submissionId,
+            submissionId: sub.submissionId,
+            type: mapSubmissionToTypeZh(sub.submissionType),
+            submissionType: sub.submissionType,
+            fleet: fleetName,
+            fleetPartnerId: sub.fleetPartnerId,
+            subject,
+            rev: sub.revisionNo || 1,
+            revisionNo: sub.revisionNo || 1,
+            status: sub.status,
+            at: sub.submittedAt
+              ? sub.submittedAt.slice(5, 16).replace("T", " ")
+              : matchedSeed?.at || "06-18 10:00",
+            submittedAt: sub.submittedAt || null,
+            missing,
+            lockedBy,
+            area,
+            svc,
+          };
+        });
         setSubmissions(mapped);
       } else {
         setSubmissions(FX_PSR_QUEUE);
@@ -196,10 +224,31 @@ export default function SupplyReviewQueuePage() {
 
       if (fleetFilter !== "all" && r.fleet !== fleetFilter) return false;
       if (typeFilter !== "all" && r.type !== typeFilter) return false;
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (serviceFilter !== "all" && r.svc !== serviceFilter) return false;
+      if (
+        areaFilter !== "all" &&
+        ((areaFilter === "taipei" && !r.area.includes("台北")) ||
+          (areaFilter === "yilan" && !r.area.includes("宜蘭")) ||
+          (areaFilter === "taichung" && !r.area.includes("台中")))
+      ) {
+        return false;
+      }
+      if (missingFilter === "has_missing" && r.missing === 0) return false;
+      if (missingFilter === "no_missing" && r.missing > 0) return false;
 
       return true;
     });
-  }, [submissions, activeTab, fleetFilter, typeFilter]);
+  }, [
+    submissions,
+    activeTab,
+    fleetFilter,
+    typeFilter,
+    statusFilter,
+    serviceFilter,
+    areaFilter,
+    missingFilter,
+  ]);
 
   const columns: CanvasTableColumn<SupplyQueueRow & Record<string, unknown>>[] =
     [
@@ -395,6 +444,7 @@ export default function SupplyReviewQueuePage() {
             }}
           >
             <div style={metaRowStyle}>
+              {/* Filter 1: Fleet */}
               <select
                 style={selectStyle}
                 value={fleetFilter}
@@ -407,6 +457,8 @@ export default function SupplyReviewQueuePage() {
                 <option value="蘭陽小客車">蘭陽小客車</option>
                 <option value="海線車隊">海線車隊</option>
               </select>
+
+              {/* Filter 2: Type */}
               <select
                 style={selectStyle}
                 value={typeFilter}
@@ -419,6 +471,8 @@ export default function SupplyReviewQueuePage() {
                 <option value="司機">司機</option>
                 <option value="保險">保險</option>
               </select>
+
+              {/* Filter 3: Service product */}
               <select
                 style={selectStyle}
                 value={serviceFilter}
@@ -431,6 +485,8 @@ export default function SupplyReviewQueuePage() {
                 <option value="airport">機場接送</option>
                 <option value="business">商務包車</option>
               </select>
+
+              {/* Filter 4: Business Area */}
               <select
                 style={selectStyle}
                 value={areaFilter}
@@ -442,6 +498,48 @@ export default function SupplyReviewQueuePage() {
                 <option value="taipei">台北市</option>
                 <option value="yilan">宜蘭縣</option>
                 <option value="taichung">台中市</option>
+              </select>
+
+              {/* Filter 5: Status */}
+              <select
+                style={selectStyle}
+                value={statusFilter}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                  setStatusFilter(e.target.value)
+                }
+              >
+                <option value="all">狀態：全部</option>
+                <option value="submitted">待受理 submitted</option>
+                <option value="in_review">審核中 in_review</option>
+                <option value="needs_revision">已退補正 needs_revision</option>
+                <option value="approved">已核可 approved</option>
+                <option value="rejected">已駁回 rejected</option>
+              </select>
+
+              {/* Filter 6: Missing items */}
+              <select
+                style={selectStyle}
+                value={missingFilter}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                  setMissingFilter(e.target.value)
+                }
+              >
+                <option value="all">缺件狀態：全部</option>
+                <option value="has_missing">有缺件</option>
+                <option value="no_missing">無缺件</option>
+              </select>
+
+              {/* Filter 7: Date */}
+              <select
+                style={selectStyle}
+                value={dateFilter}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                  setDateFilter(e.target.value)
+                }
+              >
+                <option value="all">送審日期：全部</option>
+                <option value="today">今日送審</option>
+                <option value="recent">近 7 日</option>
               </select>
             </div>
           </div>
