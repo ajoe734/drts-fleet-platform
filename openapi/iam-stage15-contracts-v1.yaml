@@ -88,6 +88,66 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/IamCredentialMutationCommand"
+  /api/auth/logout:
+    post:
+      summary: Revoke current session.
+      operationId: logoutSession
+      tags: [Session]
+      responses:
+        "200":
+          description: Current session revoked.
+  /api/auth/logout-all:
+    post:
+      summary: Revoke all principal sessions.
+      operationId: logoutAllSessions
+      tags: [Session]
+      responses:
+        "200":
+          description: All sessions for principal revoked.
+  /api/auth/sessions:
+    get:
+      summary: List user self sessions inventory with masked device and IP summaries.
+      operationId: listSelfSessions
+      tags: [Session]
+      responses:
+        "200":
+          description: Self session inventory list returned.
+  /api/auth/sessions/{sid}/revoke:
+    post:
+      summary: Revoke a specific self session by ID.
+      operationId: revokeSelfSession
+      tags: [Session]
+      parameters:
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Target self session revoked.
+  /api/identity/sessions:
+    get:
+      summary: List admin-scoped session inventory within tenant boundary.
+      operationId: listAdminSessions
+      tags: [Session, IAM]
+      responses:
+        "200":
+          description: Admin-scoped session inventory list returned.
+  /api/identity/sessions/{sid}/revoke:
+    post:
+      summary: Revoke an admin-scoped session within tenant boundary.
+      operationId: revokeAdminSession
+      tags: [Session, IAM]
+      parameters:
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Target admin-scoped session revoked.
   /api/identity/context:
     get:
       summary: Return the caller identity context and active IAM authority.
