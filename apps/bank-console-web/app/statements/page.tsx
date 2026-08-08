@@ -12,11 +12,8 @@ import {
 } from "@/lib/demo-tenants";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
-import {
-  filterStatements,
-  settlementStatements,
-  type StatementStatus,
-} from "@/lib/statements";
+import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+import { type StatementStatus } from "@/lib/statements";
 import { t, type Locale } from "@/lib/translations";
 
 const statementStatusTone: Record<
@@ -76,6 +73,7 @@ export default async function StatementsPage({
     locale,
     resolvedSearchParams.role,
   );
+  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
   const issuerBrand = tenant.template;
   const baseQuery = {
     bank: tenant.code,
@@ -85,11 +83,13 @@ export default async function StatementsPage({
   const status = one(resolvedSearchParams.status) as
     | StatementStatus
     | undefined;
-  const statements = filterStatements({ ...(status ? { status } : {}) });
-  const publishedCount = settlementStatements.filter(
+  const statements = statementData.data.statements.filter((item) =>
+    status ? item.status === status : true,
+  );
+  const publishedCount = statementData.data.statements.filter(
     (item) => item.status === "published",
   ).length;
-  const dueCount = settlementStatements.filter(
+  const dueCount = statementData.data.statements.filter(
     (item) => item.status === "due",
   ).length;
   const totalIssuerPaid = statements.reduce(
@@ -147,6 +147,13 @@ export default async function StatementsPage({
         description={t("statements.callout.body", locale)}
         tone="warning"
       />
+      {statementData.degradedMessage ? (
+        <CalloutPanel
+          title={t("common.apiDegraded", locale)}
+          description={statementData.degradedMessage}
+          tone="warning"
+        />
+      ) : null}
 
       <section className="surface-card bookings-filter-card">
         <div className="bank-section-head">
