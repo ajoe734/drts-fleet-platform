@@ -227,3 +227,49 @@ class PipeIntoInterpreterTests(unittest.TestCase):
         # the pipe only carries data and the command keeps its old verdict.
         self.assert_allowed('echo hi | python3 -c "import sys; print(sys.stdin.read())"')
         self.assert_allowed("cat fixture.json | python3 scripts/summarize.py")
+
+
+class ForcePushSharedBranchTests(unittest.TestCase):
+    """Rewriting a branch other people build on is a person's decision.
+
+    `^git push` matched every push, forced or not, so `git push --force origin
+    dev` classified as allow. `dev` and `main` are additionally protected on the
+    remote, but `publish/*` is not, and a publish snapshot is exactly what
+    deploy-dev.yml deploys.
+    """
+
+    def test_forcing_a_shared_branch_is_not_auto_allowed(self) -> None:
+        for command in (
+            "git push --force origin dev",
+            "git push -f origin main",
+            "git push --force origin publish/v2026.08.08.0",
+            "git push --force origin release/v1",
+            "git push --force origin HEAD:refs/heads/dev",
+            "git push --force-with-lease=dev:abc123 origin HEAD:refs/heads/dev",
+        ):
+            self.assertNotEqual(
+                permission_broker.classify_command(command), "allow", command
+            )
+
+    def test_a_push_with_no_refspec_is_not_guessed_at(self) -> None:
+        # git would push the current branch, which this command line does not
+        # name. A forced push is not something to assume about.
+        self.assertNotEqual(
+            permission_broker.classify_command("git push --force origin"), "allow"
+        )
+
+    def test_forcing_a_worker_branch_stays_routine(self) -> None:
+        for command in (
+            "git push --force origin codex/my-task",
+            "git push --force origin claude/iam-001",
+            "git push --force-with-lease=fix/x:abc123 origin HEAD:refs/heads/fix/x",
+        ):
+            self.assertEqual(
+                permission_broker.classify_command(command), "allow", command
+            )
+
+    def test_an_ordinary_push_to_a_shared_branch_is_unaffected(self) -> None:
+        # Only history rewriting is at issue here; a fast-forward is not.
+        self.assertEqual(
+            permission_broker.classify_command("git push origin dev"), "allow"
+        )
