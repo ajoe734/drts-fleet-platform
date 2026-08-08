@@ -82,9 +82,12 @@ describe("Session Management (IAM-SES-003)", () => {
     identityRepository = new IdentityRepository(undefined);
     securityEventsService = new SecurityEventsService();
     jwtAuthService = new JwtAuthService(identityRepository);
-    const tenantPartnerService = new TenantPartnerService();
+    const tenantPartnerService = new TenantPartnerService(undefined as any);
     const driverDeviceSessionService = new DriverDeviceSessionService(
       jwtAuthService,
+      undefined as any,
+      undefined,
+      undefined,
       identityRepository,
     );
 
@@ -363,7 +366,7 @@ describe("Session Management (IAM-SES-003)", () => {
       );
 
       expect(res.data.length).toBe(1);
-      const s = res.data[0];
+      const s = res.data[0]!;
       expect(s.sessionId).toBe("sid_user_session_1");
       expect(s.isCurrent).toBe(true);
       expect(s.deviceSummary.ipAddress).toBe("172.16.***.***");
@@ -438,8 +441,8 @@ describe("Session Management (IAM-SES-003)", () => {
       );
 
       expect(res.data.length).toBe(1);
-      expect(res.data[0].sessionId).toBe("sid_in_alpha");
-      expect(res.data[0].deviceSummary.ipAddress).toBe("10.0.***.***");
+      expect(res.data[0]!.sessionId).toBe("sid_in_alpha");
+      expect(res.data[0]!.deviceSummary.ipAddress).toBe("10.0.***.***");
     });
 
     it("should reject tenant admin querying sessions for a different tenant with 403 RESOURCE_SCOPE_DENIED", async () => {
@@ -589,6 +592,7 @@ describe("Session Management (IAM-SES-003)", () => {
         sessionId: "sid_ops_viewer_session",
         tokenId: "jti_ops_viewer_token",
         tokenVersion: 4000,
+        requestId: "req_test_read_only",
       };
 
       const targetSession: CanonicalIdentitySessionRecord = {
@@ -653,6 +657,7 @@ describe("Session Management (IAM-SES-003)", () => {
         sessionId: "sid_plain_ops_session",
         tokenId: "jti_plain_ops_token",
         tokenVersion: 5000,
+        requestId: "req_test_ops_plain",
       };
 
       const targetSession: CanonicalIdentitySessionRecord = {
