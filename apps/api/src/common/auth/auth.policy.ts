@@ -54,6 +54,68 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/logout" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      description: "Authenticated self session logout",
+    };
+  }
+
+  if (routePath === "auth/logout-all" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout-all",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      description: "Authenticated self session logout-all",
+    };
+  }
+
+  if (routePath === "auth/sessions" && upperMethod === "GET") {
+    return {
+      routeKey: "auth:sessions:list",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      description: "Authenticated self session inventory listing",
+    };
+  }
+
+  if (
+    upperMethod === "POST" &&
+    routePath.startsWith("auth/sessions/") &&
+    routePath.endsWith("/revoke")
+  ) {
+    return {
+      routeKey: "auth:sessions:revoke",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      description: "Authenticated self session revocation",
+    };
+  }
+
+  if (routePath === "identity/sessions" && upperMethod === "GET") {
+    return {
+      routeKey: "identity:sessions:list",
+      requiredScopes: methodScope("identity:sessions:read", "identity:sessions:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Administrative session inventory query",
+    };
+  }
+
+  if (
+    upperMethod === "POST" &&
+    routePath.startsWith("identity/sessions/") &&
+    routePath.endsWith("/revoke")
+  ) {
+    return {
+      routeKey: "identity:sessions:revoke",
+      requiredScopes: ["identity:sessions:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Administrative session revocation",
+    };
+  }
+
   if (routePath === "notifications") {
     return {
       routeKey: `notifications:${upperMethod}`,
