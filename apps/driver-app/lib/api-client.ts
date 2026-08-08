@@ -187,6 +187,8 @@ export function getDriverIdentityAuthState(
         return "suspended";
       case "DRIVER_AUTH_REVOKED":
       case "DRIVER_CERT_INVALID":
+      case "DRIVER_DEVICE_SESSION_INVALID":
+      case "DRIVER_DEVICE_REFRESH_INVALID":
         return "revoked";
       case "DRIVER_REFRESH_REUSE_DETECTED":
         return "reuse";
@@ -194,8 +196,6 @@ export function getDriverIdentityAuthState(
         return "rebind";
       case "DRIVER_SESSION_EXPIRED":
       case "JWT_INVALID":
-      case "DRIVER_DEVICE_SESSION_INVALID":
-      case "DRIVER_DEVICE_REFRESH_INVALID":
         return "expired";
     }
   }

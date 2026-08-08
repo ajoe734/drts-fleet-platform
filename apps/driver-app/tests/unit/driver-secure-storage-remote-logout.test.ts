@@ -75,6 +75,28 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
     expect(getDriverIdentityAuthState()).toBe("revoked");
   });
 
+  it("handles DRIVER_DEVICE_SESSION_INVALID and DRIVER_DEVICE_REFRESH_INVALID errors and maps to revoked auth state", async () => {
+    const sessionInvalidError = new Error(
+      'API error 401: {"error":{"code":"DRIVER_DEVICE_SESSION_INVALID","message":"此裝置的司機綁定已失效或被撤銷，請重新輸入註冊碼綁定。"}}',
+    );
+
+    const recoveredSession = await recoverDriverSessionFromApiError(sessionInvalidError);
+    expect(recoveredSession).toBe(true);
+    expect(getDriverIdentityAuthState(sessionInvalidError)).toBe("revoked");
+    expect(getDriverIdentityAuthState()).toBe("revoked");
+
+    await clearDriverProvisioning();
+
+    const refreshInvalidError = new Error(
+      'API error 401: {"error":{"code":"DRIVER_DEVICE_REFRESH_INVALID","message":"此裝置的司機綁定已失效或被撤銷，請重新輸入註冊碼綁定。"}}',
+    );
+
+    const recoveredRefresh = await recoverDriverSessionFromApiError(refreshInvalidError);
+    expect(recoveredRefresh).toBe(true);
+    expect(getDriverIdentityAuthState(refreshInvalidError)).toBe("revoked");
+    expect(getDriverIdentityAuthState()).toBe("revoked");
+  });
+
   it("handles driver suspension error and maps to deterministic suspended auth state", async () => {
     const error = new Error(
       'API error 401: {"error":{"code":"DRIVER_AUTH_SUSPENDED","message":"此司機帳號已被停權，暫時無法刷新裝置登入。"}}',

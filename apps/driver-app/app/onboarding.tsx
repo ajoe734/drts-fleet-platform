@@ -45,6 +45,7 @@ import {
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
 import { driverActivationSteps, driverStrings } from "@/lib/strings";
+import { sanitizeLogMessage } from "@/lib/log-sanitizer";
 
 type WorkspaceRoute =
   | "/jobs"
@@ -787,8 +788,10 @@ export default function OnboardingScreen() {
             }
 
             setShiftLoadError(true);
-            const shiftMsg = error instanceof Error ? error.message : String(error);
-            console.error("Failed to load shifts:", shiftMsg);
+            console.error(
+              "Failed to load shifts:",
+              sanitizeLogMessage(error),
+            );
           } finally {
             if (!cancelled) {
               setLoadingShiftData(false);
@@ -806,8 +809,10 @@ export default function OnboardingScreen() {
         setWorkspaceIssue(resolveWorkspaceIssue(false, false));
         setShiftFeatureEnabled(false);
         setLoadingShiftData(false);
-        const fetchMsg = error instanceof Error ? error.message : String(error);
-        console.error("Error during onboarding data fetch:", fetchMsg);
+        console.error(
+          "Error during onboarding data fetch:",
+          sanitizeLogMessage(error),
+        );
       });
 
     return () => {

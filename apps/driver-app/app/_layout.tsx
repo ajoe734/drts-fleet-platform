@@ -25,6 +25,8 @@ import {
 import { driverNavigationTheme, driverTheme } from "@/lib/theme";
 import { driverRouteTitles } from "@/lib/strings";
 
+import { sanitizeLogMessage } from "@/lib/log-sanitizer";
+
 const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 
 export const unstable_settings = {
@@ -56,8 +58,10 @@ function DriverHeartbeatBootstrap() {
         isDriverIdentityProvisioned,
         listDriverTasks: () => getDriverClient().listDriverTasks(),
         onWarning: (error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.warn("Driver heartbeat bootstrap sync failed:", message);
+          console.warn(
+            "Driver heartbeat bootstrap sync failed:",
+            sanitizeLogMessage(error),
+          );
         },
         resetDriverAppToOnboarding,
         router,
