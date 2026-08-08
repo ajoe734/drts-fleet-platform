@@ -148,6 +148,13 @@ function mapDriver(record: FleetPartnerPortalDriverRecord): FleetDriver {
   };
 }
 
+function isConfigError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    err.message.includes("Missing fleet scope configuration")
+  );
+}
+
 export async function loadDrivers(): Promise<DriversView> {
   try {
     const { client } = await getServerFleetPartnerClient();
@@ -155,7 +162,10 @@ export async function loadDrivers(): Promise<DriversView> {
     // An empty list from a reachable endpoint is legitimate zero data, not a
     // failure — render the live (empty) result rather than demo fixtures.
     return { rows: records.map(mapDriver), source: "live" };
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     return { rows: FX_FLEET_DRIVERS, source: "fallback" };
   }
 }
@@ -187,7 +197,10 @@ export async function loadVehicles(): Promise<VehiclesView> {
     const records = await client.listFleetPortalVehicles();
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapVehicle), source: "live" };
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     return { rows: FX_FLEET_VEHICLES, source: "fallback" };
   }
 }
@@ -248,7 +261,10 @@ export async function loadTrips(periodMonth?: string): Promise<TripsView> {
     const records = await client.listFleetPortalTrips(periodMonth);
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapTrip), source: "live" };
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     return { rows: FX_FLEET_TRIPS, source: "fallback" };
   }
 }
@@ -318,7 +334,10 @@ export async function loadQuality(periodMonth?: string): Promise<QualityView> {
     const { client } = await getServerFleetPartnerClient();
     const record = await client.getFleetPortalQualityMetrics(periodMonth);
     return { metrics: mapQualityMetrics(record), source: "live" };
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     return { metrics: FX_FLEET_QUALITY, source: "fallback" };
   }
 }
@@ -350,7 +369,10 @@ export async function loadStatements(): Promise<StatementsView> {
     const records = await client.listFleetPortalStatements();
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapStatement), source: "live" };
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     return { rows: FX_FLEET_STATEMENTS, source: "fallback" };
   }
 }
@@ -405,9 +427,17 @@ function mapStatementLines(
   });
 }
 
+function getCurrentPeriodMonth(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
 export async function loadRevenue(): Promise<RevenueView> {
+  const currentPeriod = getCurrentPeriodMonth();
   const fallback: RevenueView = {
-    period: FX_FLEET_STATEMENT.period,
+    period: currentPeriod,
     status: FX_FLEET_STATEMENT.status,
     payable: FX_FLEET_STATEMENT.payable,
     lines: FX_FLEET_STATEMENT.lines,
@@ -421,7 +451,7 @@ export async function loadRevenue(): Promise<RevenueView> {
       // Endpoint is reachable but the partner has no statements yet — this is
       // legitimate zero data, so show an empty live revenue, not the demo one.
       return {
-        period: "—",
+        period: currentPeriod,
         status: "—",
         payable: formatMoney(null),
         lines: [],
@@ -435,7 +465,10 @@ export async function loadRevenue(): Promise<RevenueView> {
       lines: mapStatementLines(latest),
       source: "live",
     };
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     return fallback;
   }
 }
@@ -508,7 +541,10 @@ export async function loadDashboard(): Promise<DashboardView> {
       recentTrips = FX_FLEET_TRIPS.slice(0, 5);
       recentTripsSource = "fallback";
     }
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     recentTrips = FX_FLEET_TRIPS.slice(0, 5);
     recentTripsSource = "fallback";
   }
@@ -538,7 +574,10 @@ export async function loadDashboard(): Promise<DashboardView> {
       attention,
       supplementalSource,
     };
-  } catch {
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
     return {
       ...DASHBOARD_FALLBACK,
       supply: FX_DASHBOARD_SUPPLY,
