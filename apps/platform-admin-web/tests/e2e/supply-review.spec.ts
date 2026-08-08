@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const baseSubmission = {
+const baseSubmission: Record<string, any> = {
   submissionId: "sub_s39",
   fleetPartnerId: "fleet-demo-001",
   fleetPartnerName: "大都會車隊",
