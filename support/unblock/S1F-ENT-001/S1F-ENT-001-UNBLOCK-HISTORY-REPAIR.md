@@ -5,7 +5,7 @@
 - Helper task: `S1F-ENT-001-UNBLOCK-HISTORY-REPAIR`
 - Parent task: `S1F-ENT-001`
 - Owner: `Codex`
-- Reviewer: `Claude`
+- Reviewer: `Gemini2`
 - Audit timestamp: `2026-08-08`
 
 ## Exact Contamination
@@ -70,6 +70,15 @@ Keep `S1F-ENT-001` blocked on integration, with this precise resume route:
 > commit/PR evidence.
 
 ## Evidence and Verification
+
+## Closeout Metadata Correction
+
+The task's assigned and approving reviewer is `Gemini2`. An earlier evidence
+commit recorded `Claude` in its reviewer trailer and in the scope header. That
+metadata discrepancy did not alter the preserved parent branch, replay branch,
+or PR route; this additive correction supplies the task-scoped closeout record
+with the reviewer that approved the repair. No existing shared commit is
+rewritten.
 
 - Remote parent ref: `git ls-remote --heads origin refs/heads/codex/s1f-ent-001`
   returned `867ce93126c65a21c868dc32068c2925dc1f5996`.
