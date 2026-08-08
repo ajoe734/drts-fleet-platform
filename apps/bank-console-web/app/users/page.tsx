@@ -5,56 +5,13 @@ import {
   resolveLocale,
   type BankDemoTenant,
 } from "@/lib/demo-tenants";
+import { loadBankUsersData } from "@/lib/bank-dev-read-models";
 import { getBankConsoleSession, type BankConsoleRole } from "@/lib/session";
 import { t, type Locale } from "@/lib/translations";
 
 type BankRole = BankConsoleRole;
 type UserStatus = "active" | "invited" | "suspended";
 type UserFilter = "all" | UserStatus;
-
-const USERS: Array<{
-  name: string;
-  email: string;
-  role: BankRole;
-  status: UserStatus;
-  lastActivity: string;
-}> = [
-  {
-    name: "周敬文",
-    email: "cw.chou@ctbcbank.com",
-    role: "bank_program_admin",
-    status: "active",
-    lastActivity: "2 分鐘前",
-  },
-  {
-    name: "黃怡安",
-    email: "hy.huang@ctbcbank.com",
-    role: "bank_ops_viewer",
-    status: "active",
-    lastActivity: "14 分鐘前",
-  },
-  {
-    name: "湯立群",
-    email: "tl.tang@ctbcbank.com",
-    role: "bank_finance",
-    status: "active",
-    lastActivity: "1 小時前",
-  },
-  {
-    name: "郭旻潔",
-    email: "mj.kuo@ctbcbank.com",
-    role: "bank_ops_viewer",
-    status: "invited",
-    lastActivity: "— 待接受邀請",
-  },
-  {
-    name: "葉承勳",
-    email: "cs.yeh@ctbcbank.com",
-    role: "bank_finance",
-    status: "suspended",
-    lastActivity: "2026-05-20",
-  },
-];
 
 const ROLE_CARDS: BankRole[] = [
   "bank_program_admin",
@@ -80,12 +37,15 @@ function filterLabel(filter: UserFilter, locale: Locale) {
   return t(`users.filter.${filter}`, locale);
 }
 
-function getCount(filter: UserFilter) {
+function getCount(
+  filter: UserFilter,
+  users: Array<{ status: UserStatus }>,
+) {
   if (filter === "all") {
-    return USERS.length;
+    return users.length;
   }
 
-  return USERS.filter((user) => user.status === filter).length;
+  return users.filter((user) => user.status === filter).length;
 }
 
 function getActionLabel(status: UserStatus, locale: Locale) {
@@ -130,6 +90,7 @@ export default async function UsersPage({
   const locale = resolveLocale(params?.locale);
   const tenant = resolveBankDemoTenant(params?.bank);
   const session = getBankConsoleSession(tenant, locale, params?.role);
+  const userData = await loadBankUsersData(tenant.tenantId, session.role);
   const issuerTokens = tenant.template.tokens.dark;
   const activeFilter = FILTERS.includes(params?.status as UserFilter)
     ? (params?.status as UserFilter)
@@ -137,8 +98,8 @@ export default async function UsersPage({
   const canManageUsers = session.role === "bank_program_admin";
   const visibleUsers =
     activeFilter === "all"
-      ? USERS
-      : USERS.filter((user) => user.status === activeFilter);
+      ? userData.data.users
+      : userData.data.users.filter((user) => user.status === activeFilter);
 
   const issuerVars = {
     "--issuer-primary": issuerTokens.primary,
@@ -168,6 +129,12 @@ export default async function UsersPage({
         </button>
       </section>
 
+      {userData.degradedMessage ? (
+        <section className="surface-card">
+          <p>{userData.degradedMessage}</p>
+        </section>
+      ) : null}
+
       <nav
         aria-label={t("users.filterNav", locale)}
         className="users-filter-tabs"
@@ -183,7 +150,9 @@ export default async function UsersPage({
               key={filter}
             >
               <span>{filterLabel(filter, locale)}</span>
-              <span className="users-filter-badge">{getCount(filter)}</span>
+              <span className="users-filter-badge">
+                {getCount(filter, userData.data.users)}
+              </span>
             </Link>
           );
         })}
@@ -258,19 +227,13 @@ export default async function UsersPage({
                             : t("users.action.locked", locale)}
                         </button>
                         <button
-                          className="table-action-button is-danger"
+                          className="table-action-button is-ghost"
                           disabled={disableLifecycleAction}
                           type="button"
                         >
                           {canManageUsers
                             ? getActionLabel(user.status, locale)
                             : t("users.action.locked", locale)}
-                          {canManageUsers && !disableLifecycleAction ? (
-                            <span
-                              aria-hidden="true"
-                              className="needs-reason-dot"
-                            />
-                          ) : null}
                         </button>
                       </div>
                     </td>

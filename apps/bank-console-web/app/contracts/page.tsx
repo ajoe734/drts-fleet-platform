@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PageHero, SurfaceCard } from "@/components/page-primitives";
+import { loadBankContractsData } from "@/lib/bank-dev-read-models";
 import {
   ContractHealthBadge,
   IssuerBrandPill,
@@ -12,7 +13,6 @@ import {
   countOpenExceptions,
   formatPercent,
   formatPeriod,
-  listContractRecords,
 } from "@/lib/contracts-data";
 import { t } from "@/lib/translations";
 
@@ -29,15 +29,16 @@ export default async function ContractsPage({
     locale,
     resolvedSearchParams.role,
   );
-  const contracts = listContractRecords();
+  const contractData = await loadBankContractsData(tenant.tenantId, session.role);
+  const contracts = contractData.data.contracts;
   const healthyCount = contracts.filter(
-    (record) => record.health === "healthy",
+    (record) => record.status === "active",
   ).length;
   const atRiskCount = contracts.filter(
-    (record) => record.health === "at_risk",
+    (record) => record.status === "at_risk",
   ).length;
   const breachedCount = contracts.filter(
-    (record) => record.health === "breached",
+    (record) => record.status === "breached",
   ).length;
 
   return (
@@ -58,6 +59,11 @@ export default async function ContractsPage({
         description={t("contracts.summaryLead", locale)}
         locale={locale}
       />
+      {contractData.degradedMessage ? (
+        <section className="surface-card">
+          <p>{contractData.degradedMessage}</p>
+        </section>
+      ) : null}
 
       <section className="surface-grid">
         <SurfaceCard
@@ -127,7 +133,13 @@ export default async function ContractsPage({
                     </td>
                     <td>
                       <ContractHealthBadge
-                        health={record.health}
+                        health={
+                          record.status === "active"
+                            ? "healthy"
+                            : record.status === "at_risk"
+                              ? "at_risk"
+                              : "breached"
+                        }
                         locale={locale}
                       />
                     </td>
@@ -171,7 +183,10 @@ export default async function ContractsPage({
                       </div>
                     </td>
                     <td className="contracts-summary-cell">
-                      {tenantDisplayText(record.attainmentSummary, tenant)}
+                      {tenantDisplayText(
+                        `${openExceptions} open exceptions · ${record.periodAttainment.completedTrips}/${record.periodAttainment.totalTrips} trips completed`,
+                        tenant,
+                      )}
                     </td>
                     <td>
                       <Link
