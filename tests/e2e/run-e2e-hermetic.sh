@@ -32,8 +32,10 @@ cd "$ROOT_DIR"
 # shellcheck source=../../scripts/db-common.sh
 source "$ROOT_DIR/scripts/db-common.sh"
 
-export E2E_API_URL="${E2E_API_URL:-http://localhost:3001}"
+export API_PORT="${API_PORT:-3810}"
+export E2E_API_URL="${E2E_API_URL:-http://localhost:${API_PORT}}"
 export API_HOST="${API_HOST:-0.0.0.0}"
+export AUTH_MODE="${AUTH_MODE:-local}"
 export JWT_SECRET="${JWT_SECRET:-ci-e2e-secret}"
 export JWT_ISSUER="${JWT_ISSUER:-drts-local}"
 export JWT_AUDIENCE="${JWT_AUDIENCE:-drts-api}"

@@ -121,6 +121,34 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git tag -l(\s|$)"),
     re.compile(r"^git config --get(\s|$)"),
     re.compile(r"^git push(\s|$)"),
+    # Read-only observability. A worker that operates a service and a cloud
+    # project cannot see either of them: every `systemctl show`, `journalctl`
+    # and `gcloud … list/describe` became an approval request and a chairman
+    # review, for commands that change nothing. Only the query verbs are listed;
+    # `systemctl start/stop/restart`, `gcloud … create/update/deploy/delete` and
+    # `journalctl --vacuum*`/`--rotate` are not, and still need review.
+    re.compile(
+        r"^systemctl( --user)? (list-units|list-unit-files|list-timers|list-sockets"
+        r"|status|show|show-environment|cat|is-active|is-enabled|is-failed)(\s|$)"
+    ),
+    re.compile(r"^journalctl(\s|$)(?!.*--(vacuum|rotate|flush|relinquish))"),
+    re.compile(
+        r"^gcloud\s+(?!.*\s(create|update|delete|deploy|add|remove|set|apply|import|replace)(\s|$))"
+        r"[a-z0-9-]+(\s+[a-z0-9-]+)*\s+(list|describe|get-iam-policy|get-value|versions list)(\s|$)"
+    ),
+    # Rebasing is ordinary work here — every branch is expected to land on a
+    # current `dev` — and it stays inside the repository. Deferring it turned a
+    # routine step into a chairman review, which approved it every time.
+    #
+    # This does not widen what git can destroy. `reset --hard` is denied
+    # elsewhere, and `push --force` is already allowed by the `^git push` entry
+    # above, including to shared branches — a separate gap, not one this entry
+    # opens.
+    #
+    # `-i` is allowed too. Without an editor configured it blocks rather than
+    # damages anything, which is a worker-liveness matter, not a permission one.
+    re.compile(r"^git rebase(\s|$)"),
+    re.compile(r"^git -C .+ rebase(\s|$)"),
     re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
     re.compile(r"^gh issue comment(\s|$)"),
     re.compile(r"^gh pr create(\s|$)"),
@@ -683,7 +711,68 @@ def command_hard_boundary_reason(shell_command: str) -> str | None:
     return None
 
 
+# Branches other people's work is built on. `dev` and `main` are additionally
+# protected on the remote (`allow_force_pushes: false`), so a force push there
+# is already refused by the server; `publish/*` and `release/*` are not, and a
+# publish snapshot is exactly what `deploy-dev.yml` deploys.
+_SHARED_BRANCH_NAMES = frozenset({"dev", "main", "master", "design"})
+_SHARED_BRANCH_PREFIXES = ("publish/", "release/")
+_FORCE_PUSH_FLAGS = ("--force", "-f", "--force-with-lease")
+
+
+def _push_destination_branch(tokens: list[str]) -> str | None:
+    """The branch a `git push` writes to, or None when it cannot be read."""
+    positional = [
+        token
+        for token in tokens[2:]
+        if not token.startswith("-")
+    ]
+    if len(positional) < 2:
+        # No refspec: git pushes the current branch, which is not visible here.
+        return None
+    refspec = positional[1]
+    destination = refspec.rsplit(":", 1)[-1]
+    for prefix in ("refs/heads/", "refs/remotes/origin/"):
+        if destination.startswith(prefix):
+            destination = destination[len(prefix) :]
+    return destination or None
+
+
+def _force_pushes_a_shared_branch(shell_command: str) -> bool:
+    """True when this rewrites history on a branch other people build on."""
+    for segment in _split_shell_segments(shell_command, opaque_substitution=True) or []:
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue
+        if len(tokens) < 2 or tokens[0] != "git" or tokens[1] != "push":
+            continue
+        forced = any(
+            token == flag or token.startswith(f"{flag}=")
+            for token in tokens
+            for flag in _FORCE_PUSH_FLAGS
+        )
+        if not forced:
+            continue
+        destination = _push_destination_branch(tokens)
+        if destination is None:
+            # Cannot tell which branch this lands on, and a forced push is not
+            # something to guess about.
+            return True
+        if destination in _SHARED_BRANCH_NAMES or destination.startswith(
+            _SHARED_BRANCH_PREFIXES
+        ):
+            return True
+    return False
+
+
 def classify_command(shell_command: str) -> str:
+    # Checked before the allow-list: `^git push` covers every push, including a
+    # forced one onto a shared branch. Rewriting a worker's own branch is
+    # routine and stays allowed; rewriting the branch everyone else builds on
+    # is a person's decision.
+    if _force_pushes_a_shared_branch(shell_command):
+        return "defer"
     # Checked before every allow-list below: whatever the rest of the line looks
     # like, if a program arrives through a pipe then nothing here has seen it.
     if _pipes_program_into_interpreter(shell_command):

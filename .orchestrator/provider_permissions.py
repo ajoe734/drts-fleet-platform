@@ -658,7 +658,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     codex_home = _codex_home(codex_profile)
     codex_applied = (
         codex_profile.get("ask_for_approval", "never") == "never"
-        and codex_profile.get("sandbox_mode", "workspace-write") == "workspace-write"
+        and codex_profile.get("sandbox_mode", "workspace-write") in {"workspace-write", "danger-full-access"}
     )
     copilot_applied = (
         _workspace_setting(workspace_settings, "github.copilot.chat.backgroundAgent.enabled")

@@ -282,13 +282,20 @@ export type StatementLine = {
   reimbursement?: string | null;
 };
 
+function getCurrentPeriodMonth(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
 export const FX_FLEET_STATEMENT: {
   period: string;
   status: string;
   payable: string;
   lines: StatementLine[];
 } = {
-  period: "2026-05",
+  period: getCurrentPeriodMonth(),
   status: "pending_confirm",
   payable: "NT$ 642,000",
   lines: [
@@ -313,12 +320,12 @@ export type FleetStatement = {
 
 export const FX_FLEET_STATEMENTS: FleetStatement[] = [
   {
-    id: "fst_2026_05",
-    period: "2026-05",
+    id: `fst_${getCurrentPeriodMonth().replace("-", "_")}`,
+    period: getCurrentPeriodMonth(),
     trips: 14280,
     payable: "NT$ 642,000",
     status: "pending_confirm",
-    issued: "2026-06-01",
+    issued: `${getCurrentPeriodMonth()}-01`,
   },
   {
     id: "fst_2026_04",

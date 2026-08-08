@@ -63,6 +63,9 @@ class CodexAdapter(BaseAdapter):
             codex_settings.get("sandbox_mode", "workspace-write"),
             "--skip-git-repo-check",
         ]
+        codex_model = str(request.metadata.get("model_preference") or codex_settings.get("model") or "").strip()
+        if codex_model:
+            command.extend(["--model", codex_model])
         if codex_settings.get("dangerously_bypass"):
             command.append("--dangerously-bypass-approvals-and-sandbox")
         command.append(request.message)

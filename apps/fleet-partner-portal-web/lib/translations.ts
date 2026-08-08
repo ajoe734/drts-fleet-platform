@@ -108,7 +108,7 @@ const en: Dict = {
   "revenue.actions": "Actions",
   "revenue.pendingTitle": "Current statement pending confirmation",
   "revenue.pendingBody":
-    "The 2026-05 revenue-share statement is ready. Please confirm before 6/10.",
+    "The {period} revenue-share statement is ready. Please confirm before cutoff.",
   "revenue.dispute": "Raise dispute",
   "revenue.confirm": "Confirm statement",
   "revenue.currentPeriod": "Current share · {period}",
@@ -246,6 +246,7 @@ const en: Dict = {
   "actions.confirm": "Confirm",
   "actions.remindDriver": "Remind driver",
   "actions.upload": "Upload",
+  "actions.retry": "Try again",
   "referral.dashboard.title": "Channel Dashboard",
   "referral.dashboard.subtitle":
     "Referral channel · partner-scoped usage / GMV / receivable share",
@@ -459,7 +460,7 @@ const zh: Dict = {
   "revenue.rules": "分潤規則",
   "revenue.actions": "動作",
   "revenue.pendingTitle": "當期對帳單待確認",
-  "revenue.pendingBody": "2026-05 分潤對帳單已產生，請於 6/10 前確認。",
+  "revenue.pendingBody": "{period} 分潤對帳單已產生，請於截止日前確認。",
   "revenue.dispute": "提出異議",
   "revenue.confirm": "確認對帳單",
   "revenue.currentPeriod": "當期分潤 · {period}",
@@ -584,6 +585,7 @@ const zh: Dict = {
   "actions.confirm": "確認",
   "actions.remindDriver": "提醒司機",
   "actions.upload": "上傳",
+  "actions.retry": "重試",
   "referral.dashboard.title": "渠道總覽",
   "referral.dashboard.subtitle":
     "Referral 渠道夥伴自家數字 · 用量 / GMV / 應收分潤",
