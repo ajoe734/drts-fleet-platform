@@ -352,7 +352,20 @@ export class IdentityRepository {
     if (!this.isEnabled()) {
       const invitations = Array.from(this.fallbackInvitations.values())
         .filter((invitation) => invitation.membershipId === membershipId)
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+        .sort((left, right) => {
+          const updatedComparison = right.updatedAt.localeCompare(left.updatedAt);
+          if (updatedComparison !== 0) {
+            return updatedComparison;
+          }
+
+          const leftPending = !left.acceptedAt && !left.revokedAt ? 1 : 0;
+          const rightPending = !right.acceptedAt && !right.revokedAt ? 1 : 0;
+          if (rightPending !== leftPending) {
+            return rightPending - leftPending;
+          }
+
+          return right.createdAt.localeCompare(left.createdAt);
+        });
       return invitations[0] ? { ...invitations[0] } : null;
     }
 
