@@ -153,11 +153,15 @@ export class SupplyReviewService implements OnModuleInit {
     ...submission,
   }));
   private reviewEvents: SupplyReviewEventRecord[] = [];
-  private driverDrafts = REVIEW_DRIVER_DRAFTS_SEED.map((draft) => ({ ...draft }));
+  private driverDrafts = REVIEW_DRIVER_DRAFTS_SEED.map((draft) => ({
+    ...draft,
+  }));
   private vehicleDrafts = REVIEW_VEHICLE_DRAFTS_SEED.map((draft) => ({
     ...draft,
   }));
-  private documents = REVIEW_DOCUMENTS_SEED.map((document) => ({ ...document }));
+  private documents = REVIEW_DOCUMENTS_SEED.map((document) => ({
+    ...document,
+  }));
   private vehicleAffiliations: VehicleFleetAffiliationRecord[] = [];
 
   constructor(
@@ -205,7 +209,25 @@ export class SupplyReviewService implements OnModuleInit {
 
   async getSubmission(submissionId: string) {
     const submission = await this.findSubmission(submissionId);
-    return { ...submission };
+    let artifacts: SubmissionApprovalArtifacts;
+    if (this.supplySubmissionRepository?.isEnabled()) {
+      artifacts = await this.supplySubmissionRepository.loadApprovalArtifacts(
+        null,
+        submissionId,
+      );
+    } else if (this.supplySubmissionRepository) {
+      const state = await this.supplySubmissionRepository.loadState();
+      artifacts = this.loadApprovalArtifactsFromState(state, submissionId);
+    } else {
+      artifacts = this.loadInMemoryApprovalArtifacts(submissionId);
+    }
+    return {
+      submission: { ...submission },
+      ...submission,
+      driverDraft: artifacts.driverDraft,
+      vehicleDraft: artifacts.vehicleDraft,
+      documents: artifacts.documents,
+    };
   }
 
   async listVehicleAffiliations() {
@@ -405,7 +427,10 @@ export class SupplyReviewService implements OnModuleInit {
         );
       }
 
-      this.assertExpectedRevision(current, normalizedCommand.expectedRevisionNo);
+      this.assertExpectedRevision(
+        current,
+        normalizedCommand.expectedRevisionNo,
+      );
       this.assertAllowedStatus(current, config);
       if (config.nextStatus === "approved") {
         this.assertReviewerNotSubmitter(current, reviewerId);
@@ -466,7 +491,9 @@ export class SupplyReviewService implements OnModuleInit {
       await this.supplySubmissionRepository.persistChanges({
         submissions: [updated],
         reviewEvents: [reviewEvent],
-        ...(approvedDocuments.length > 0 ? { documents: approvedDocuments } : {}),
+        ...(approvedDocuments.length > 0
+          ? { documents: approvedDocuments }
+          : {}),
         ...(canonical?.vehicleAffiliation
           ? { vehicleAffiliations: [canonical.vehicleAffiliation] }
           : {}),
@@ -575,11 +602,13 @@ export class SupplyReviewService implements OnModuleInit {
   ): SubmissionApprovalArtifacts {
     return {
       driverDraft:
-        this.driverDrafts.find((draft) => draft.submissionId === submissionId) ??
-        null,
+        this.driverDrafts.find(
+          (draft) => draft.submissionId === submissionId,
+        ) ?? null,
       vehicleDraft:
-        this.vehicleDrafts.find((draft) => draft.submissionId === submissionId) ??
-        null,
+        this.vehicleDrafts.find(
+          (draft) => draft.submissionId === submissionId,
+        ) ?? null,
       documents: this.documents.filter(
         (document) => document.submissionId === submissionId,
       ),
@@ -596,11 +625,13 @@ export class SupplyReviewService implements OnModuleInit {
   ): SubmissionApprovalArtifacts {
     return {
       driverDraft:
-        state.driverDrafts.find((draft) => draft.submissionId === submissionId) ??
-        null,
+        state.driverDrafts.find(
+          (draft) => draft.submissionId === submissionId,
+        ) ?? null,
       vehicleDraft:
-        state.vehicleDrafts.find((draft) => draft.submissionId === submissionId) ??
-        null,
+        state.vehicleDrafts.find(
+          (draft) => draft.submissionId === submissionId,
+        ) ?? null,
       documents: state.documents.filter(
         (document) => document.submissionId === submissionId,
       ),
@@ -615,7 +646,9 @@ export class SupplyReviewService implements OnModuleInit {
   }
 
   private async provisionCanonicalRecords(
-    executor: { query<T>(text: string, values?: readonly unknown[]): Promise<T> } | null,
+    executor: {
+      query<T>(text: string, values?: readonly unknown[]): Promise<T>;
+    } | null,
     submission: SupplySubmissionRecord,
     artifacts: SubmissionApprovalArtifacts | null,
     reviewerId: string,
