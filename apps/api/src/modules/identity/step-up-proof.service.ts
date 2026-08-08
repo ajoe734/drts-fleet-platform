@@ -17,6 +17,7 @@ import {
   findIamPrivilegedActionRule,
   findIamTrustedAuthMethod,
   rankIamAuthAssurance,
+  toIamStepUpChallenge,
   type IamAuthAssuranceLevel,
   type IamAuthEvidenceSource,
   type IamStepUpProofRecord,
@@ -24,8 +25,10 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import {
+  evaluateStepUpPolicy,
   selectAcceptedAuthMethods,
   stepUpAssuranceForMethods,
+  type StepUpIdentityEvidence,
 } from "../../common/auth/mfa-step-up.policy";
 
 export interface RecordStepUpProofInput {
@@ -40,6 +43,31 @@ export interface RecordStepUpProofInput {
 }
 
 const MAX_TRACKED_PROOFS = 5000;
+
+/**
+ * Where the strongest accepted method came from, so the audit trail records how
+ * the evidence was obtained rather than assuming an IdP claim.
+ */
+function resolveEvidenceSource(
+  methods: readonly string[],
+): IamAuthEvidenceSource {
+  let best: IamAuthEvidenceSource = "idp_claim";
+  let bestRank = -1;
+
+  for (const method of methods) {
+    const trusted = findIamTrustedAuthMethod(method);
+    if (!trusted) {
+      continue;
+    }
+    const rank = rankIamAuthAssurance(trusted.assurance);
+    if (rank > bestRank) {
+      bestRank = rank;
+      best = trusted.evidenceSource;
+    }
+  }
+
+  return best;
+}
 
 @Injectable()
 export class StepUpProofService {
@@ -138,6 +166,76 @@ export class StepUpProofService {
     this.pruneExpired();
     this.proofs.set(record.proofId, record);
     return { ...record };
+  }
+
+  /**
+   * Raise a proof for one action from the caller's own session evidence.
+   *
+   * This is the only way a proof reaches a client, and it grants nothing the
+   * session did not already prove: the same trusted `amr`, the same `acr`
+   * minimum, the same phishing-resistance requirement and the same freshness
+   * window are re-checked here. What the proof adds is the binding the rules
+   * ask for — one principal, one session, one action, single use, and an expiry
+   * anchored to the original `auth_time` so a proof can never outlive the login
+   * window it was derived from.
+   *
+   * When the session cannot clear the rule the caller gets the same stable
+   * `MFA_REQUIRED` / `STEP_UP_REQUIRED` error the privileged route would have
+   * returned, which tells the client to re-authenticate at the IdP instead.
+   */
+  issueSessionBackedProof(input: {
+    identity: StepUpIdentityEvidence | null;
+    actionId: string;
+    now?: Date;
+  }): IamStepUpProofRecord {
+    const rule = findIamPrivilegedActionRule(input.actionId);
+    if (!rule) {
+      throw new ApiRequestError(
+        400,
+        "IAM_STEP_UP_ACTION_UNKNOWN",
+        "Step-up proof references an action with no declared policy.",
+        { actionId: input.actionId },
+      );
+    }
+
+    const now = input.now ?? new Date();
+    // `requiresBoundProof: false` asks exactly one question — is the session's
+    // own evidence trusted, strong and fresh enough for this action? — without
+    // demanding the proof we are about to create.
+    const decision = evaluateStepUpPolicy({
+      rule: { ...rule, requiresBoundProof: false },
+      identity: input.identity,
+      proof: null,
+      proofReferencePresented: false,
+      now,
+    });
+
+    if (decision.outcome !== "allow") {
+      throw new ApiRequestError(
+        403,
+        decision.errorCode ?? "STEP_UP_REQUIRED",
+        decision.errorCode === "MFA_REQUIRED"
+          ? "A trusted multi-factor authentication proof is required before this action can be stepped up."
+          : "The current session authentication is too old to raise a step-up proof; re-authenticate first.",
+        {
+          ...toIamStepUpChallenge(rule),
+          acceptedAuthMethods: [...rule.acceptedAuthMethods],
+          reasonCode: decision.reasonCode,
+        },
+      );
+    }
+
+    const identity = input.identity!;
+    return this.recordVerifiedProof({
+      principalId: identity.principalId ?? "",
+      sessionId: identity.sessionId ?? "",
+      actionId: rule.actionId,
+      authMethods: [...decision.satisfiedByAuthMethods],
+      evidenceSource: resolveEvidenceSource(decision.satisfiedByAuthMethods),
+      // Anchor the proof to the verified login, not to "now": stepping up must
+      // not silently restart the freshness clock.
+      verifiedAt: identity.authTime ?? now.toISOString(),
+    });
   }
 
   findProof(proofId: string | null | undefined): IamStepUpProofRecord | null {

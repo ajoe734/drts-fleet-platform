@@ -830,3 +830,34 @@ export function toIamStepUpChallenge(
     riskTier: rule.riskTier,
   };
 }
+
+/**
+ * Raise a step-up proof for one action. The action id is the only thing the
+ * caller supplies; the evidence is read from the server-owned claim envelope of
+ * the current session, never from this payload.
+ */
+export interface IamStepUpProofIssueRequest {
+  actionId: string;
+}
+
+/**
+ * What the caller gets back. `proofReference` is the opaque handle to replay on
+ * the privileged request; the evidence behind it stays server-side.
+ */
+export interface IamStepUpProofIssueResponse {
+  proofReference: string;
+  actionId: string;
+  verifiedAt: string;
+  expiresAt: string;
+}
+
+export function toIamStepUpProofIssueResponse(
+  proof: IamStepUpProofRecord,
+): IamStepUpProofIssueResponse {
+  return {
+    proofReference: proof.proofId,
+    actionId: proof.actionId,
+    verifiedAt: proof.verifiedAt,
+    expiresAt: proof.expiresAt,
+  };
+}
