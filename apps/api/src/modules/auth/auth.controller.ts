@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Optional, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Optional, Param, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
@@ -86,13 +86,13 @@ export class AuthController {
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly driverDeviceSessionService: DriverDeviceSessionService,
     @Optional()
-    private readonly identityRepository?: IdentityRepository,
-    @Optional()
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional()
     private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
   ) {}
 
   @OpenRoute()
