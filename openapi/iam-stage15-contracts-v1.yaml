@@ -93,6 +93,18 @@ paths:
       summary: Return the caller identity context and active IAM authority.
       operationId: getIdentityContext
       tags: [IAM]
+  /api/identity/step-up-proofs:
+    post:
+      summary: Issue a signed step-up proof bound to caller principal, session, and requested action.
+      operationId: createStepUpProof
+      tags: [IAM]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStepUpProofCommand"
+
   /api/tenant/users:
     get:
       summary: List tenant users and membership states for the active tenant.
@@ -398,6 +410,15 @@ components:
         stepUpReference:
           type: [string, "null"]
         note:
+          type: [string, "null"]
+    CreateStepUpProofCommand:
+      type: object
+      properties:
+        actionId:
+          type: [string, "null"]
+        method:
+          type: [string, "null"]
+        path:
           type: [string, "null"]
     IamCallbackSessionExchangeCommand:
       type: object
