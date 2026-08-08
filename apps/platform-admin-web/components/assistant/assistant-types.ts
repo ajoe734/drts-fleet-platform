@@ -229,6 +229,8 @@ export type PlatformAdminRouteKey =
   | "vehicle-eligibility"
   | "fleet-partners"
   | "fleet-partner-detail"
+  | "supply-review"
+  | "supply-review-detail"
   | "switchboard"
   | "pricing"
   | "payments"
@@ -272,7 +274,8 @@ export type AssistantEntityKind =
   | "audit-record"
   | "notice"
   | "public-info-version"
-  | "placard";
+  | "placard"
+  | "supply-submission";
 
 /** Provenance of an entity reference, for assistant transparency/audit. */
 export type EntityRefSource = "route-param" | "query" | "page-selection";
