@@ -69,6 +69,7 @@ const DISPLAY_BUDGET_TOTAL = 60_000;
 const DISPLAY_BUDGET_AVAILABLE = 31_000;
 const APPROVAL_THRESHOLD = 1_500;
 const DEFAULT_TIMEZONE_OFFSET = "+08:00";
+const DEFAULT_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -144,6 +145,26 @@ function getReservationStart(date: string, time: string, now = new Date()) {
   );
 
   return Number.isNaN(parsed.getTime()) ? now : parsed;
+}
+
+function getReservationWallClockFields(reservationWindowStart: string) {
+  const reservationStart = new Date(reservationWindowStart);
+
+  if (Number.isNaN(reservationStart.getTime())) {
+    return { date: "", time: "" };
+  }
+
+  // Booking commands interpret the form's date/time as +08:00 wall-clock
+  // values. Shift the UTC instant before ISO formatting so an Edit → Update
+  // cycle preserves the original instant rather than applying the offset twice.
+  const localWallClock = new Date(
+    reservationStart.getTime() + DEFAULT_TIMEZONE_OFFSET_MS,
+  ).toISOString();
+
+  return {
+    date: localWallClock.slice(0, 10),
+    time: localWallClock.slice(11, 16),
+  };
 }
 
 export function formatReservationWindowLabel(
@@ -388,13 +409,9 @@ export function buildEnterpriseBookingUpdateCommand(
 export function createEnterpriseBookingDraftFromRecord(
   record: BookingRecord,
 ): EnterpriseBookingDraftForm {
-  const reservationStart = new Date(record.reservationWindowStart);
-  const date = Number.isNaN(reservationStart.getTime())
-    ? ""
-    : reservationStart.toISOString().slice(0, 10);
-  const time = Number.isNaN(reservationStart.getTime())
-    ? ""
-    : reservationStart.toISOString().slice(11, 16);
+  const { date, time } = getReservationWallClockFields(
+    record.reservationWindowStart,
+  );
 
   return {
     passengerMode:
