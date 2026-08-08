@@ -23,6 +23,7 @@ import type {
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { evaluateMfaStepUpPolicy } from "./mfa-step-up.policy";
+import { resolveRouteStepUpPolicy } from "./step-up.policy";
 import { JwtAuthService } from "./jwt-auth.service";
 import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
@@ -294,7 +295,7 @@ export class BootstrapAuthGuard implements CanActivate {
             ? (resolved.payload!.amr as string)
                 .split(/[,|;\s]+/)
                 .filter(Boolean)
-            : undefined;
+            : ["verified_iap_workforce"];
 
     const acrHeader = (baseHeaders["x-acr"] as string | undefined) ?? null;
     const resolvedAcr =
@@ -589,7 +590,12 @@ export class BootstrapAuthGuard implements CanActivate {
       .replace(/^\/+/, "")
       .replace(/^api\/+/, "")
       .replace(/\/+$/, "");
-    const actionId = routeKey || routePath;
+    const routeStepUpPolicy = resolveRouteStepUpPolicy(
+      request.method ?? "GET",
+      request.originalUrl ?? request.url ?? "",
+      identity.realm,
+    );
+    const actionId = routeKey || routeStepUpPolicy?.routeKey || routePath;
     const result = evaluateMfaStepUpPolicy(identity, actionId, request);
     if (!result.allowed) {
       throw new ApiRequestError(
@@ -631,7 +637,8 @@ export class BootstrapAuthGuard implements CanActivate {
       code !== "AUTH_STEP_UP_REQUIRED" &&
       code !== "AUTH_MFA_REQUIRED" &&
       code !== "IAM_STEP_UP_REQUIRED" &&
-      code !== "MFA_REQUIRED"
+      code !== "MFA_REQUIRED" &&
+      code !== "STEP_UP_REQUIRED"
     ) {
       return;
     }

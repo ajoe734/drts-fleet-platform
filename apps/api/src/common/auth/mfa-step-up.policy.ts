@@ -7,6 +7,10 @@ import type {
   AuthenticatedRequestLike,
   BootstrapRequestIdentity,
 } from "./auth.types";
+import {
+  resolveRouteStepUpPolicy,
+  resolveStepUpActionPolicy,
+} from "./step-up.policy";
 
 export const TRUSTED_MFA_AMR_METHODS = new Set([
   "mfa",
@@ -154,6 +158,15 @@ export function lookupStepUpPolicyRule(
   if (routeKey && DECLARED_STEP_UP_POLICY_RULES[routeKey]) {
     return DECLARED_STEP_UP_POLICY_RULES[routeKey];
   }
+  const routePolicy = resolveStepUpActionPolicy(actionId as never);
+  if (routePolicy) {
+    return {
+      actionId: routePolicy.actionId,
+      description: routePolicy.description,
+      requiresMfa: true,
+      maxAgeSeconds: Math.floor(routePolicy.freshnessWindowMs / 1000),
+    };
+  }
 
   return null;
 }
@@ -176,23 +189,23 @@ export function isPrivilegedAction(
   const path = rawPath.replace(/^\/+/, "").replace(/^api\/+/, "");
 
   if (
-    path === "platform-admin/break-glass/requests" ||
-    path.startsWith("platform-admin/break-glass/requests/") ||
-    path.startsWith("platform-admin/tenants") ||
+    path.startsWith("platform-admin/") ||
+    path.startsWith("ops/") ||
+    path.startsWith("admin/") ||
+    path.startsWith("tenant/") ||
+    path.startsWith("regulatory-registry/") ||
+    path.startsWith("reimbursements/") ||
+    path.startsWith("orders/") ||
     path.includes("access-reviews") ||
-    path.includes("credentials/issue") ||
-    (path.includes("credentials") && path.includes("revoke")) ||
-    path.startsWith("platform-admin/multi-taxi/export") ||
-    path.startsWith("tenant/users") ||
-    path.startsWith("tenant/api-keys") ||
-    path.startsWith("tenant/billing") ||
-    path.startsWith("tenant/approval-requests") ||
-    path.startsWith("ops/partner/eligibility") ||
-    path.startsWith("admin/fleet-partners/billing") ||
+    path.includes("credentials") ||
     path === "partner/eligibility/verify" ||
     path === "auth/driver/device/revoke" ||
     path === "driver/sos-events"
   ) {
+    return true;
+  }
+
+  if (resolveRouteStepUpPolicy(method, url)) {
     return true;
   }
 
