@@ -593,4 +593,142 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(repoGrants.some((g) => g.grantId === grant.grantId)).toBe(true);
     });
   });
+
+  describe("9. DB-Backed Concurrency & Advisory Locking Isolation", () => {
+    it("enforces transaction-scoped advisory locking and last-admin invariant across concurrent DB sessions", async () => {
+      const lockMap = new Map<string, Promise<void>>();
+      const dbTables = {
+        grants: new Map<string, any>(),
+        requests: new Map<string, any>(),
+        sessions: new Map<string, any>(),
+      };
+
+      const createMockClient = () => {
+        let releaseLock: (() => void) | null = null;
+        let heldLockKey: string | null = null;
+
+        return {
+          query: async (queryText: string, values?: any[]) => {
+            const sql = queryText.trim();
+            if (sql.startsWith("BEGIN")) {
+              return { rows: [] };
+            }
+            if (sql.startsWith("COMMIT") || sql.startsWith("ROLLBACK")) {
+              if (releaseLock && heldLockKey) {
+                releaseLock();
+                lockMap.delete(heldLockKey);
+                heldLockKey = null;
+                releaseLock = null;
+              }
+              return { rows: [] };
+            }
+            if (sql.includes("pg_advisory_xact_lock")) {
+              const lockKey = (values?.[0] as string) || "global";
+              while (lockMap.has(lockKey)) {
+                await lockMap.get(lockKey);
+              }
+              let resolveFn!: () => void;
+              const lockPromise = new Promise<void>((res) => {
+                resolveFn = res;
+              });
+              lockMap.set(lockKey, lockPromise);
+              heldLockKey = lockKey;
+              releaseLock = resolveFn;
+              return { rows: [] };
+            }
+            if (sql.includes("INSERT INTO iam.privileged_role_grants")) {
+              const grantId = values?.[0];
+              const recordJson = values?.[14];
+              const record = typeof recordJson === "string" ? JSON.parse(recordJson) : recordJson;
+              dbTables.grants.set(grantId, record);
+              return { rows: [{ record }] };
+            }
+            if (sql.includes("SELECT record FROM iam.privileged_role_grants")) {
+              const tenantId = values?.[0];
+              const rows = Array.from(dbTables.grants.values())
+                .filter((g) => !tenantId || g.tenantId === tenantId)
+                .map((g) => ({ record: g }));
+              return { rows };
+            }
+            if (sql.includes("UPDATE iam.identity_sessions")) {
+              return { rows: [] };
+            }
+            return { rows: [] };
+          },
+          release: () => {
+            if (releaseLock && heldLockKey) {
+              releaseLock();
+              lockMap.delete(heldLockKey);
+              heldLockKey = null;
+              releaseLock = null;
+            }
+          },
+        };
+      };
+
+      const mockDbService: any = {
+        isEnabled: () => true,
+        connect: async () => createMockClient(),
+        query: async (queryText: string, values?: any[]) => {
+          const client = createMockClient();
+          try {
+            return await client.query(queryText, values);
+          } finally {
+            client.release();
+          }
+        },
+      };
+
+      const dbRepo = new IdentityRepository(mockDbService);
+      const dbGovService = new PrivilegedRoleGovernanceService(dbRepo, undefined, mockDbService);
+
+      const actor = createMockIdentity({ actorId: "usr_db_actor", tenantId: "ten_db_concurrent" });
+
+      // Seed 2 active admins in DB repo
+      await dbGovService.registerActiveGrant("usr_admin_db_1", "ten_db_concurrent", "tenant_admin");
+      await dbGovService.registerActiveGrant("usr_admin_db_2", "ten_db_concurrent", "tenant_admin");
+
+      // Concurrent removal attempts via DB service
+      const remove1 = dbGovService.removeGrant(
+        {
+          targetUserId: "usr_admin_db_1",
+          roleCode: "tenant_admin",
+          tenantId: "ten_db_concurrent",
+          reason: "DB concurrent remove 1",
+        },
+        actor,
+      );
+
+      const remove2 = dbGovService.removeGrant(
+        {
+          targetUserId: "usr_admin_db_2",
+          roleCode: "tenant_admin",
+          tenantId: "ten_db_concurrent",
+          reason: "DB concurrent remove 2",
+        },
+        actor,
+      );
+
+      const results = await Promise.allSettled([remove1, remove2]);
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      if (rejected[0]?.status === "rejected") {
+        expect(rejected[0].reason).toEqual(
+          expect.objectContaining({
+            status: HttpStatus.CONFLICT,
+            code: "IAM_LAST_ADMIN_PROTECTION",
+          }),
+        );
+      }
+
+      // Verify DB table still retains exactly 1 active admin
+      const remainingGrants = await dbRepo.listPrivilegedRoleGrants("ten_db_concurrent");
+      const activeAdmins = remainingGrants.filter((g) => g.status === "active");
+      expect(activeAdmins).toHaveLength(1);
+    });
+  });
 });

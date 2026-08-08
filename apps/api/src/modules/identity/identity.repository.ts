@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
-import type { PoolClient } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 
 import type {
   CanonicalAccountStatus,
@@ -1468,6 +1468,7 @@ export class IdentityRepository implements OnModuleInit {
     principalId: string,
     reason: string,
     revokedByPrincipalId?: string,
+    client?: PoolClient,
   ): Promise<number> {
     const revokedAt = new Date().toISOString();
     let count = 0;
@@ -1502,10 +1503,11 @@ export class IdentityRepository implements OnModuleInit {
       return count;
     }
 
-    const client = await this.databaseService!.connect();
+    const runner = client || (await this.databaseService!.connect());
+    const isOwnClient = !client;
     try {
-      await client.query("BEGIN");
-      const result = await client.query<{ session_id: string }>(
+      if (isOwnClient) await runner.query("BEGIN");
+      const result = await runner.query<{ session_id: string }>(
         `
           UPDATE iam.identity_sessions
           SET status = 'revoked',
@@ -1535,7 +1537,7 @@ export class IdentityRepository implements OnModuleInit {
 
       const sessionIds = result.rows.map((r) => r.session_id);
       if (sessionIds.length > 0) {
-        await client.query(
+        await runner.query(
           `
             UPDATE iam.identity_refresh_families
             SET status = 'revoked',
@@ -1549,13 +1551,13 @@ export class IdentityRepository implements OnModuleInit {
           [sessionIds, revokedAt],
         );
       }
-      await client.query("COMMIT");
+      if (isOwnClient) await runner.query("COMMIT");
       return sessionIds.length;
     } catch (err) {
-      await client.query("ROLLBACK");
+      if (isOwnClient) await runner.query("ROLLBACK");
       throw err;
     } finally {
-      client.release();
+      if (isOwnClient) runner.release();
     }
   }
 
@@ -2734,6 +2736,17 @@ export class IdentityRepository implements OnModuleInit {
     return parsed;
   }
 
+  private async executeSql<R extends QueryResultRow = JsonRecordRow>(
+    sql: string,
+    params: unknown[],
+    client?: PoolClient,
+  ) {
+    if (client) {
+      return client.query<R>(sql, params as unknown[]);
+    }
+    return this.databaseService!.query<R>(sql, params);
+  }
+
   async savePrivilegedRoleRequest(
     request: PrivilegedRoleApprovalRequestRecord,
     client?: PoolClient,
@@ -2743,8 +2756,7 @@ export class IdentityRepository implements OnModuleInit {
       return { ...request };
     }
 
-    const runner = client || this.databaseService!;
-    const result = await runner.query<JsonRecordRow>(
+    const result = await this.executeSql(
       `
         INSERT INTO iam.privileged_role_approval_requests (
           request_id, tenant_id, realm, target_user_id, target_membership_id,
@@ -2786,7 +2798,12 @@ export class IdentityRepository implements OnModuleInit {
         request.updatedAt,
         JSON.stringify(request),
       ],
+      client,
     );
+
+    if (!result.rows[0]?.record) {
+      throw new Error("Failed to persist privileged role request: no row returned");
+    }
 
     return this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
       result.rows[0].record,
@@ -2803,10 +2820,10 @@ export class IdentityRepository implements OnModuleInit {
       return found ? { ...found } : null;
     }
 
-    const runner = client || this.databaseService!;
-    const result = await runner.query<JsonRecordRow>(
+    const result = await this.executeSql(
       `SELECT record FROM iam.privileged_role_approval_requests WHERE request_id = $1 LIMIT 1`,
       [requestId],
+      client,
     );
 
     if (!result.rows[0]?.record) {
@@ -2829,14 +2846,14 @@ export class IdentityRepository implements OnModuleInit {
         .map((r) => ({ ...r }));
     }
 
-    const runner = client || this.databaseService!;
-    const result = await runner.query<JsonRecordRow>(
+    const result = await this.executeSql(
       `
         SELECT record FROM iam.privileged_role_approval_requests
         WHERE ($1::text IS NULL OR tenant_id = $1::text)
         ORDER BY updated_at DESC
       `,
       [tenantId || null],
+      client,
     );
 
     return result.rows.map((row) =>
@@ -2856,8 +2873,7 @@ export class IdentityRepository implements OnModuleInit {
       return { ...grant };
     }
 
-    const runner = client || this.databaseService!;
-    const result = await runner.query<JsonRecordRow>(
+    const result = await this.executeSql(
       `
         INSERT INTO iam.privileged_role_grants (
           grant_id, request_id, tenant_id, realm, target_user_id, target_membership_id,
@@ -2889,7 +2905,12 @@ export class IdentityRepository implements OnModuleInit {
         grant.updatedAt,
         JSON.stringify(grant),
       ],
+      client,
     );
+
+    if (!result.rows[0]?.record) {
+      throw new Error("Failed to persist privileged role grant: no row returned");
+    }
 
     return this.parseRecord<PrivilegedRoleGrantRecord>(
       result.rows[0].record,
@@ -2907,14 +2928,14 @@ export class IdentityRepository implements OnModuleInit {
         .map((g) => ({ ...g }));
     }
 
-    const runner = client || this.databaseService!;
-    const result = await runner.query<JsonRecordRow>(
+    const result = await this.executeSql(
       `
         SELECT record FROM iam.privileged_role_grants
         WHERE ($1::text IS NULL OR tenant_id = $1::text)
         ORDER BY updated_at DESC
       `,
       [tenantId || null],
+      client,
     );
 
     return result.rows.map((row) =>

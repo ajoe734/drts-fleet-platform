@@ -813,6 +813,7 @@ export interface IdentityContext {
   tokenVersion?: number | null;
   authTime?: string | null;
   amr?: string[];
+  authMethods?: string[];
   acr?: string | null;
   policyVersion?: string | null;
   issuer?: string | null;

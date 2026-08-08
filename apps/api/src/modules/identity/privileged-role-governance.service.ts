@@ -86,7 +86,8 @@ export function verifyStepUp(
     );
   }
 
-  const hasFreshMfaInSession = identity.authMethods?.some((m) =>
+  const authMethods = identity.authMethods || identity.amr || [];
+  const hasFreshMfaInSession = authMethods.some((m: string) =>
     ["mfa", "step_up", "webauthn", "totp"].includes(m.trim().toLowerCase()),
   );
 
