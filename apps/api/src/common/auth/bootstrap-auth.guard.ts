@@ -242,7 +242,11 @@ export class BootstrapAuthGuard implements CanActivate {
   private async resolveIapAssertionAndActivate(
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
-    policy: { requiredScopes: string[]; allowedRealms: string[]; routeKey?: string } | null,
+    policy: {
+      requiredScopes: string[];
+      allowedRealms: string[];
+      routeKey?: string;
+    } | null,
   ): Promise<boolean> {
     const authEnvironment = detectAuthEnvironment(process.env);
     const isStrictIap =
@@ -265,6 +269,42 @@ export class BootstrapAuthGuard implements CanActivate {
       autoProvision: !isStrictIap,
     });
 
+    const sid = (baseHeaders["x-sid"] as string | undefined) ?? null;
+    const rawAmr = baseHeaders["x-amr"];
+    const amrList = Array.isArray(rawAmr)
+      ? rawAmr
+      : typeof rawAmr === "string"
+        ? rawAmr.split(/[,|;\s]+/).filter(Boolean)
+        : [];
+    const acr = (baseHeaders["x-acr"] as string | undefined) ?? null;
+    const rawAuthTime = baseHeaders["x-auth-time"];
+    const authTimeStr = Array.isArray(rawAuthTime)
+      ? rawAuthTime[0]
+      : rawAuthTime;
+    const authTime = authTimeStr
+      ? !isNaN(Number(authTimeStr))
+        ? Number(authTimeStr)
+        : !isNaN(Date.parse(authTimeStr))
+          ? Math.floor(Date.parse(authTimeStr) / 1000)
+          : null
+      : null;
+
+    let stepUpProof: any = null;
+    const rawProofHeader =
+      baseHeaders["x-step-up-proof"] ??
+      baseHeaders["x-mfa-proof"] ??
+      baseHeaders["x-drts-step-up-proof"];
+    const rawProof = Array.isArray(rawProofHeader)
+      ? rawProofHeader[0]
+      : rawProofHeader;
+    if (rawProof) {
+      try {
+        stepUpProof = JSON.parse(rawProof);
+      } catch {
+        stepUpProof = null;
+      }
+    }
+
     const identity: BootstrapRequestIdentity = {
       authMode: "jwt_bearer",
       actorType:
@@ -279,6 +319,11 @@ export class BootstrapAuthGuard implements CanActivate {
       roles: resolved.effectiveRoles,
       scopes: resolved.effectiveScopes,
       requestId: (baseHeaders["x-request-id"] as string | undefined) ?? null,
+      sid,
+      amr: amrList.length > 0 ? amrList : undefined,
+      acr,
+      authTime,
+      stepUpProof,
     };
 
     request.identity = identity;
@@ -306,7 +351,11 @@ export class BootstrapAuthGuard implements CanActivate {
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
-    policy: { requiredScopes: string[]; allowedRealms: string[]; routeKey?: string } | null,
+    policy: {
+      requiredScopes: string[];
+      allowedRealms: string[];
+      routeKey?: string;
+    } | null,
   ): boolean | Promise<boolean> {
     const strictEnvironment = isStrictAuthEnvironment();
     // JWT fast-path: verify Bearer token if present
@@ -398,7 +447,11 @@ export class BootstrapAuthGuard implements CanActivate {
         try {
           this.assertMfaStepUpAllowed(anonymousIdentity, request);
         } catch (error) {
-          this.recordAuthorizationDenialAudit(anonymousIdentity, request, error);
+          this.recordAuthorizationDenialAudit(
+            anonymousIdentity,
+            request,
+            error,
+          );
           throw error;
         }
       }

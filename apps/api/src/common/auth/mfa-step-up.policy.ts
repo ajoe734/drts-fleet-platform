@@ -211,6 +211,102 @@ export function hasTrustedMfaAmr(amr?: string[] | null): boolean {
   );
 }
 
+function matchesActionId(
+  proofActionId: string,
+  targetActionId: string,
+  ruleActionId?: string,
+  rawUrl?: string,
+): boolean {
+  if (
+    proofActionId === "*" ||
+    proofActionId === targetActionId ||
+    proofActionId === ruleActionId
+  ) {
+    return true;
+  }
+  const rawPath =
+    (rawUrl || "")
+      .split("?")[0]
+      ?.replace(/^\/+/, "")
+      .replace(/^api\/+/, "") ?? "";
+
+  if (
+    (proofActionId === "updateTenantUserRole" ||
+      proofActionId === "createTenantUser") &&
+    rawPath.startsWith("tenant/users")
+  ) {
+    return true;
+  }
+  if (
+    (proofActionId === "issueTenantApiKey" ||
+      proofActionId === "revokeTenantApiKey" ||
+      proofActionId === "rotateTenantApiKey") &&
+    rawPath.startsWith("tenant/api-keys")
+  ) {
+    return true;
+  }
+  if (
+    (proofActionId === "createBreakGlassRequest" ||
+      proofActionId === "approveBreakGlassRequest") &&
+    rawPath.startsWith("platform-admin/break-glass/requests")
+  ) {
+    return true;
+  }
+  if (
+    proofActionId === "decideAccessReview" &&
+    rawPath.includes("access-reviews")
+  ) {
+    return true;
+  }
+  if (
+    (proofActionId === "issuePartnerIngressCredential" ||
+      proofActionId === "revokePartnerIngressCredential") &&
+    rawPath.includes("credentials")
+  ) {
+    return true;
+  }
+  if (
+    proofActionId === "exportMultiTaxiRecords" &&
+    rawPath.startsWith("platform-admin/multi-taxi")
+  ) {
+    return true;
+  }
+  if (
+    (proofActionId === "approveTenantApprovalRequest" ||
+      proofActionId === "rejectTenantApprovalRequest" ||
+      proofActionId === "escalateTenantApprovalRequest") &&
+    rawPath.startsWith("tenant/approval-requests")
+  ) {
+    return true;
+  }
+  if (
+    proofActionId === "resolvePartnerEligibilityReview" &&
+    rawPath.startsWith("ops/partner/eligibility")
+  ) {
+    return true;
+  }
+  if (
+    proofActionId === "partner:eligibility:verify" &&
+    rawPath === "partner/eligibility/verify"
+  ) {
+    return true;
+  }
+  if (
+    proofActionId === "auth:driver-device:revoke" &&
+    rawPath === "auth/driver/device/revoke"
+  ) {
+    return true;
+  }
+  if (
+    proofActionId === "driver:sos-events:create" &&
+    rawPath === "driver/sos-events"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function evaluateMfaStepUpPolicy(
   identity: BootstrapRequestIdentity,
   actionId: string,
@@ -273,8 +369,11 @@ export function evaluateMfaStepUpPolicy(
     const proof = identity.stepUpProof;
 
     // Check wrong-principal proof
-    const expectedActorId = identity.actorId || identity.subject;
-    if (proof.actorId && expectedActorId && proof.actorId !== expectedActorId) {
+    if (
+      proof.actorId &&
+      proof.actorId !== identity.actorId &&
+      proof.actorId !== identity.subject
+    ) {
       return {
         allowed: false,
         actionId,
@@ -298,8 +397,12 @@ export function evaluateMfaStepUpPolicy(
     // Check wrong-action proof
     if (
       proof.actionId &&
-      proof.actionId !== "*" &&
-      proof.actionId !== actionId
+      !matchesActionId(
+        proof.actionId,
+        actionId,
+        rule.actionId,
+        request.originalUrl ?? request.url,
+      )
     ) {
       return {
         allowed: false,

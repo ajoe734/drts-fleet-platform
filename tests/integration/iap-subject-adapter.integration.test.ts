@@ -999,4 +999,282 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.IAP_EXPECTED_AUDIENCE;
     delete process.env.IAP_JWT_SECRET;
   });
+
+  describe("IAP MFA Step-Up Policy Enforcement in BootstrapAuthGuard", () => {
+    it("rejects privileged route authenticated via IAP assertion when MFA step-up proof is missing", async () => {
+      process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+      process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+      const identityRepo = new IdentityRepository();
+      const securityEventsService = new SecurityEventsService();
+      const adapter = new IAPSubjectAdapter(
+        identityRepo,
+        securityEventsService,
+      );
+
+      const reflector = {
+        getAllAndOverride: (key: string) => {
+          if (key === "auth:allowed_realms") return ["platform"];
+          if (key === "auth:required_scopes") return ["tenant:write"];
+          return undefined;
+        },
+      } as any;
+
+      const guard = new BootstrapAuthGuard(
+        reflector,
+        new JwtAuthService(),
+        undefined,
+        securityEventsService as any,
+        adapter,
+      );
+
+      const token = signAssertion({
+        sub: "iap_mfa_sub_001",
+        email: "mfa-test-admin@platform.drts",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
+      });
+
+      // Privileged route: POST /api/platform-admin/tenants
+      const mockRequest: any = {
+        headers: {
+          "x-goog-iap-jwt-assertion": token,
+        },
+        method: "POST",
+        url: "/api/platform-admin/tenants",
+        originalUrl: "/api/platform-admin/tenants",
+      };
+
+      const context: any = {
+        switchToHttp: () => ({ getRequest: () => mockRequest }),
+        getHandler: () => () => {},
+        getClass: () => class {},
+      };
+
+      let error: ApiRequestError | null = null;
+      try {
+        await guard.canActivate(context);
+      } catch (err: any) {
+        if (err instanceof ApiRequestError) {
+          error = err;
+        }
+      }
+
+      expect(error).not.toBeNull();
+      expect(error?.getStatus()).toBe(403);
+      expect(error?.code).toBe("AUTH_STEP_UP_REQUIRED");
+
+      delete process.env.IAP_EXPECTED_AUDIENCE;
+      delete process.env.IAP_JWT_SECRET;
+    });
+
+    it("rejects privileged route authenticated via IAP assertion when step-up proof is bound to wrong session", async () => {
+      process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+      process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+      const identityRepo = new IdentityRepository();
+      const securityEventsService = new SecurityEventsService();
+      const adapter = new IAPSubjectAdapter(
+        identityRepo,
+        securityEventsService,
+      );
+
+      const reflector = {
+        getAllAndOverride: (key: string) => {
+          if (key === "auth:allowed_realms") return ["platform"];
+          if (key === "auth:required_scopes") return ["tenant:write"];
+          return undefined;
+        },
+      } as any;
+
+      const guard = new BootstrapAuthGuard(
+        reflector,
+        new JwtAuthService(),
+        undefined,
+        securityEventsService as any,
+        adapter,
+      );
+
+      const token = signAssertion({
+        sub: "iap_mfa_sub_002",
+        email: "mfa-test-admin2@platform.drts",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
+      });
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const wrongSessionProof = {
+        proofId: "proof-iap-wrong-sess",
+        actorId: "actor-123",
+        sessionId: "session-DIFFERENT-999",
+        actionId: "updateTenantUserRole",
+        amr: ["mfa", "totp"],
+        authTime: nowSeconds - 10,
+        issuedAt: nowSeconds - 10,
+        expiresAt: nowSeconds + 290,
+      };
+
+      const mockRequest: any = {
+        headers: {
+          "x-goog-iap-jwt-assertion": token,
+          "x-sid": "session-CURRENT-111",
+          "x-step-up-proof": JSON.stringify(wrongSessionProof),
+        },
+        method: "POST",
+        url: "/api/tenant/users/user-1/role",
+        originalUrl: "/api/tenant/users/user-1/role",
+      };
+
+      const context: any = {
+        switchToHttp: () => ({ getRequest: () => mockRequest }),
+        getHandler: () => () => {},
+        getClass: () => class {},
+      };
+
+      let error: ApiRequestError | null = null;
+      try {
+        await guard.canActivate(context);
+      } catch (err: any) {
+        if (err instanceof ApiRequestError) {
+          error = err;
+        }
+      }
+
+      expect(error).not.toBeNull();
+      expect(error?.getStatus()).toBe(403);
+      expect(error?.code).toBe("AUTH_STEP_UP_REQUIRED");
+
+      delete process.env.IAP_EXPECTED_AUDIENCE;
+      delete process.env.IAP_JWT_SECRET;
+    });
+
+    it("allows privileged route authenticated via IAP assertion when valid fresh step-up proof is provided", async () => {
+      process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+      process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+      const identityRepo = new IdentityRepository();
+      const securityEventsService = new SecurityEventsService();
+      const adapter = new IAPSubjectAdapter(
+        identityRepo,
+        securityEventsService,
+      );
+
+      const reflector = {
+        getAllAndOverride: (key: string) => {
+          if (key === "auth:allowed_realms") return ["platform"];
+          if (key === "auth:required_scopes") return ["tenant:write"];
+          return undefined;
+        },
+      } as any;
+
+      const guard = new BootstrapAuthGuard(
+        reflector,
+        new JwtAuthService(),
+        undefined,
+        securityEventsService as any,
+        adapter,
+      );
+
+      const token = signAssertion({
+        sub: "iap_mfa_sub_003",
+        email: "mfa-test-admin3@platform.drts",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
+      });
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const validProof = {
+        proofId: "proof-iap-valid-001",
+        actorId: "iap_mfa_sub_003",
+        sessionId: "session-CURRENT-111",
+        actionId: "updateTenantUserRole",
+        amr: ["mfa", "totp"],
+        authTime: nowSeconds - 30,
+        issuedAt: nowSeconds - 30,
+        expiresAt: nowSeconds + 270,
+      };
+
+      const mockRequest: any = {
+        headers: {
+          "x-goog-iap-jwt-assertion": token,
+          "x-sid": "session-CURRENT-111",
+          "x-step-up-proof": JSON.stringify(validProof),
+        },
+        method: "POST",
+        url: "/api/tenant/users/user-1/role",
+        originalUrl: "/api/tenant/users/user-1/role",
+      };
+
+      const context: any = {
+        switchToHttp: () => ({ getRequest: () => mockRequest }),
+        getHandler: () => () => {},
+        getClass: () => class {},
+      };
+
+      const result = await guard.canActivate(context);
+      expect(result).toBe(true);
+      expect(mockRequest.identity).toBeDefined();
+      expect(mockRequest.identity.stepUpProof).toEqual(validProof);
+
+      delete process.env.IAP_EXPECTED_AUDIENCE;
+      delete process.env.IAP_JWT_SECRET;
+    });
+
+    it("allows privileged route authenticated via IAP assertion when trusted MFA AMR and fresh auth_time headers are present", async () => {
+      process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
+      process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
+
+      const identityRepo = new IdentityRepository();
+      const securityEventsService = new SecurityEventsService();
+      const adapter = new IAPSubjectAdapter(
+        identityRepo,
+        securityEventsService,
+      );
+
+      const reflector = {
+        getAllAndOverride: (key: string) => {
+          if (key === "auth:allowed_realms") return ["platform"];
+          if (key === "auth:required_scopes") return ["tenant:write"];
+          return undefined;
+        },
+      } as any;
+
+      const guard = new BootstrapAuthGuard(
+        reflector,
+        new JwtAuthService(),
+        undefined,
+        securityEventsService as any,
+        adapter,
+      );
+
+      const token = signAssertion({
+        sub: "iap_mfa_sub_004",
+        email: "mfa-test-admin4@platform.drts",
+        gcp_ia_groups: ["platform-admins@platform.drts"],
+      });
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const mockRequest: any = {
+        headers: {
+          "x-goog-iap-jwt-assertion": token,
+          "x-amr": "mfa,fido2",
+          "x-auth-time": String(nowSeconds - 40),
+        },
+        method: "POST",
+        url: "/api/tenant/users/user-1/role",
+        originalUrl: "/api/tenant/users/user-1/role",
+      };
+
+      const context: any = {
+        switchToHttp: () => ({ getRequest: () => mockRequest }),
+        getHandler: () => () => {},
+        getClass: () => class {},
+      };
+
+      const result = await guard.canActivate(context);
+      expect(result).toBe(true);
+      expect(mockRequest.identity).toBeDefined();
+      expect(mockRequest.identity.amr).toEqual(["mfa", "fido2"]);
+
+      delete process.env.IAP_EXPECTED_AUDIENCE;
+      delete process.env.IAP_JWT_SECRET;
+    });
+  });
 });
