@@ -25,13 +25,12 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
       issuer: "test_idp",
       subject: "sub_target_01",
       principalType: "human",
-      emailNormalized: "target01@example.com",
+      email: "target01@example.com",
       emailVerified: true,
       displayName: "Target User 01",
-      accountStatus: "active",
+      status: "active",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      record: {},
     });
 
     identityRepo.ensureMembershipRecord({
@@ -41,10 +40,12 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
       realm: "tenant",
       scopeRef: "tenant_alpha",
       tenantId: "tenant_alpha",
-      membershipStatus: "active",
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      record: {},
     });
   });
 
@@ -117,7 +118,7 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
         actor as any,
       );
 
-      const item = items[0];
+      const item = items[0]!;
 
       // Certify decision
       const certifyResult = await service.decideReviewItem(
@@ -195,7 +196,7 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
         actorTenantA as any,
       );
 
-      const targetReviewId = items[0].reviewId;
+      const targetReviewId = items[0]!.reviewId;
 
       await expect(
         service.decideReviewItem(
@@ -205,7 +206,7 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
             decision: "certify",
             mutation: {
               reasonCode: "ILLEGAL_CROSS_TENANT_ATTEMPT",
-              expectedVersion: items[0].version,
+              expectedVersion: items[0]!.version,
             },
           },
           actorTenantB as any,
@@ -241,8 +242,8 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
 
       const detail = await service.getCampaign(campaign.campaignId, actor as any);
       expect(detail.campaign.status).toBe("overdue");
-      expect(detail.items[0].status).toBe("removed");
-      expect(detail.items[0].sessionRevoked).toBe(true);
+      expect(detail.items[0]!.status).toBe("removed");
+      expect(detail.items[0]!.sessionRevoked).toBe(true);
 
       // Verify security event was recorded
       const events = await securityEventsService.listEvents(null, {});
@@ -272,8 +273,8 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
         revokedAt: null,
         revokedByPrincipalId: null,
         revokeReason: null,
-        deviceSummary: null,
-        riskSummary: null,
+        deviceSummary: {},
+        riskSummary: {},
         createdAt: now,
         updatedAt: now,
       });
@@ -338,7 +339,7 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
         actor as any,
       );
 
-      const item = items[0];
+      const item = items[0]!;
 
       await service.decideReviewItem(
         item.reviewId,
@@ -360,7 +361,7 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
       );
 
       expect(evidenceList.length).toBeGreaterThanOrEqual(1);
-      const record = evidenceList[0];
+      const record = evidenceList[0]!;
       expect(record.campaignId).toBe(item.campaignId);
       expect(record.reviewId).toBe(item.reviewId);
       expect(record.decision).toBe("certify");
