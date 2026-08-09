@@ -14,7 +14,7 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
-import { CurrentIdentity, OpenRoute } from "../../common/auth";
+import { CurrentIdentity } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
   AccessReviewCampaignQuery,
@@ -32,7 +32,6 @@ function cleanQuery<T extends Record<string, unknown>>(obj: T): T {
 export class AccessReviewController {
   constructor(private readonly accessReviewService: AccessReviewService) {}
 
-  @OpenRoute()
   @Get("platform-admin/access-reviews")
   async listPlatformAccessReviews(
     @Query("realm") realm?: string,
@@ -54,7 +53,6 @@ export class AccessReviewController {
     return toApiSuccessEnvelope({ campaigns }, requestId);
   }
 
-  @OpenRoute()
   @Post("platform-admin/access-reviews/campaigns")
   async createPlatformCampaign(
     @Body() command: CreateAccessReviewCampaignCommand,
@@ -68,7 +66,6 @@ export class AccessReviewController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
-  @OpenRoute()
   @Get("platform-admin/access-reviews/campaigns/:id")
   async getPlatformCampaignDetail(
     @Param("id") campaignId: string,
@@ -82,7 +79,6 @@ export class AccessReviewController {
     return toApiSuccessEnvelope(detail, requestId);
   }
 
-  @OpenRoute()
   @Post("platform-admin/access-reviews/:reviewId/decision")
   async decidePlatformReview(
     @Param("reviewId") reviewId: string,
@@ -98,16 +94,12 @@ export class AccessReviewController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
-  @OpenRoute()
   @Post("platform-admin/access-reviews/overdue-sweep")
-  async triggerOverdueSweep(
-    @Headers("x-request-id") requestId?: string,
-  ) {
+  async triggerOverdueSweep(@Headers("x-request-id") requestId?: string) {
     const summary = await this.accessReviewService.evaluateOverdueCampaigns();
     return toApiSuccessEnvelope(summary, requestId);
   }
 
-  @OpenRoute()
   @Get("platform-admin/access-reviews/evidence")
   async queryPlatformEvidence(
     @Query("campaignId") campaignId?: string,
@@ -135,7 +127,6 @@ export class AccessReviewController {
     return toApiSuccessEnvelope({ evidence }, requestId);
   }
 
-  @OpenRoute()
   @Get("identity/access-reviews")
   async listTenantAccessReviews(
     @Query("realm") realm?: string,
@@ -155,7 +146,6 @@ export class AccessReviewController {
     return toApiSuccessEnvelope({ campaigns }, requestId);
   }
 
-  @OpenRoute()
   @Post("identity/access-reviews")
   async createTenantCampaign(
     @Body() command: CreateAccessReviewCampaignCommand,
@@ -169,7 +159,6 @@ export class AccessReviewController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
-  @OpenRoute()
   @Post("identity/access-reviews/:reviewId/decision")
   async decideTenantReview(
     @Param("reviewId") reviewId: string,
@@ -185,7 +174,6 @@ export class AccessReviewController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
-  @OpenRoute()
   @Get("identity/access-reviews/evidence")
   async queryTenantEvidence(
     @Query("campaignId") campaignId?: string,

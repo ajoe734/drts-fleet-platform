@@ -147,6 +147,12 @@ export class AccessReviewService {
     const tenantId = command.tenantId || (actor?.tenantId ?? null);
     this.checkTenantBoundary(actor, tenantId);
 
+    if (command.realm === "tenant" && !tenantId) {
+      throw new ConflictException(
+        "Tenant access review campaigns require a tenant boundary.",
+      );
+    }
+
     const now = new Date().toISOString();
     const campaignId = `arc_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
@@ -173,6 +179,9 @@ export class AccessReviewService {
 
     // Filter memberships/role bindings within scope
     const scopedMemberships = memberships.filter((m) => {
+      if (m.realm !== command.realm) {
+        return false;
+      }
       if (tenantId && m.tenantId !== tenantId) {
         return false;
       }
@@ -562,6 +571,12 @@ export class AccessReviewService {
     // Tenant Boundary check
     this.checkTenantBoundary(actor, item.tenantId);
 
+    if (actor?.actorId !== campaign?.reviewerPrincipalId) {
+      throw new ForbiddenException(
+        "Only the campaign's assigned reviewer may certify or remediate an access review item.",
+      );
+    }
+
     // Concurrency version check
     if (command.mutation.expectedVersion !== item.version) {
       throw new ConflictException(
@@ -593,11 +608,12 @@ export class AccessReviewService {
     } else if (decisionKey === "remove" || decisionKey === "revoke") {
       newStatus = "removed";
       // Perform session revocation authority call
-      const revokedCount = await this.identityRepository.revokeSessionsForPrincipal(
-        item.targetPrincipalId,
-        `ACCESS_REVIEW_REVOCATION:${command.mutation.reasonCode}`,
-        actorId,
-      );
+      const revokedCount =
+        await this.identityRepository.revokeSessionsForPrincipal(
+          item.targetPrincipalId,
+          `ACCESS_REVIEW_REVOCATION:${command.mutation.reasonCode}`,
+          actorId,
+        );
       sessionRevoked = true;
       this.logger.log(
         `Revoked ${revokedCount} active sessions for target principal ${item.targetPrincipalId} upon access review removal decision.`,
@@ -613,7 +629,12 @@ export class AccessReviewService {
       reducedRoleCode: reducedRoleCode || item.reducedRoleCode || null,
       decisionByPrincipalId: actorId,
       decidedAt: now,
-      remediatedAt: (decisionKey === "remove" || decisionKey === "revoke" || decisionKey === "reduce" ? now : item.remediatedAt) ?? null,
+      remediatedAt:
+        (decisionKey === "remove" ||
+        decisionKey === "revoke" ||
+        decisionKey === "reduce"
+          ? now
+          : item.remediatedAt) ?? null,
       sessionRevoked: item.sessionRevoked || sessionRevoked,
       version: item.version + 1,
       updatedAt: now,
@@ -788,20 +809,18 @@ export class AccessReviewService {
           this.fallbackCampaigns.set(campaignId, campaign);
 
           for (const [reviewId, item] of this.fallbackItems.entries()) {
-            if (
-              item.campaignId === campaignId &&
-              item.status === "pending"
-            ) {
+            if (item.campaignId === campaignId && item.status === "pending") {
               overdueItemCount++;
               item.status = "overdue";
               item.updatedAt = nowIso;
 
               if (campaign.overduePolicy === "auto_revoke") {
-                const revoked = await this.identityRepository.revokeSessionsForPrincipal(
-                  item.targetPrincipalId,
-                  "ACCESS_REVIEW_OVERDUE_AUTO_REVOKE",
-                  "system_overdue_sweep",
-                );
+                const revoked =
+                  await this.identityRepository.revokeSessionsForPrincipal(
+                    item.targetPrincipalId,
+                    "ACCESS_REVIEW_OVERDUE_AUTO_REVOKE",
+                    "system_overdue_sweep",
+                  );
                 item.sessionRevoked = true;
                 item.status = "removed";
                 item.decision = "remove";
@@ -1018,7 +1037,9 @@ export class AccessReviewService {
         list = list.filter((e) => e.reviewId === query.reviewId);
       }
       if (query.actorPrincipalId) {
-        list = list.filter((e) => e.actorPrincipalId === query.actorPrincipalId);
+        list = list.filter(
+          (e) => e.actorPrincipalId === query.actorPrincipalId,
+        );
       }
       if (query.targetPrincipalId) {
         list = list.filter(

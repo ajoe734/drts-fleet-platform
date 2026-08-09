@@ -75,3 +75,22 @@ CREATE INDEX IF NOT EXISTS idx_iam_access_review_items_campaign ON iam.access_re
 CREATE INDEX IF NOT EXISTS idx_iam_access_review_items_principal ON iam.access_review_items(target_principal_id);
 CREATE INDEX IF NOT EXISTS idx_iam_access_review_evidence_campaign ON iam.access_review_evidence(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_iam_access_review_evidence_tenant ON iam.access_review_evidence(tenant_id);
+
+CREATE OR REPLACE FUNCTION iam.raise_access_review_evidence_append_only()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'iam.access_review_evidence is append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_access_review_evidence_append_only
+  ON iam.access_review_evidence;
+
+CREATE TRIGGER trg_access_review_evidence_append_only
+BEFORE UPDATE OR DELETE ON iam.access_review_evidence
+FOR EACH ROW
+EXECUTE FUNCTION iam.raise_access_review_evidence_append_only();
+
+REVOKE UPDATE, DELETE ON iam.access_review_evidence FROM PUBLIC;
