@@ -40,6 +40,7 @@ export default defineConfig({
             url: localReferralEmbedBaseURL,
             env: {
               DRTS_API_URL: localReferralAuthorityBaseURL,
+              REFERRAL_EMBED_SESSION_SECRET: "referral-embed-e2e-secret",
               REFERRAL_EMBED_ALLOWED_HOSTS:
                 "127.0.0.1:3199 app.yuhe-living.com.tw app-stg.yuhe-living.com.tw",
               REFERRAL_EMBED_DEMO: "true",

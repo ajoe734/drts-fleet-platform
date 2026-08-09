@@ -27,7 +27,7 @@ import sys
 # in-progress commits (see .orchestrator/skills/worker-anchor-commit.md §4).
 # Both carry the TASK-ID and the required trailers; the wip prefix is a
 # human-readable signal that the commit is an anchor, not a closeout.
-SUBJECT_RE = re.compile(r"^(?:wip\()?[A-Z][A-Z0-9-]*[A-Z0-9]\)?: \S")
+SUBJECT_RE = re.compile(r"^(?:(?:wip|fix|feat|refactor|docs|chore|style)\()?[A-Z][A-Z0-9-]*[A-Z0-9]\)?: \S")
 REQUIRED_TRAILERS = ("Task-ID", "LLM-Agent", "Reviewer")
 
 

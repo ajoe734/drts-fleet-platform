@@ -106,6 +106,7 @@ export function buildEmbedSecurityDecision(input: {
     input.headers,
   );
   const sourceOrigin = extractSourceOrigin(input.headers);
+  const requestOrigin = input.requestUrl.origin.toLowerCase();
   const scopedEntryHosts = requestedEntryHost
     ? [requestedEntryHost]
     : allowedEntryHosts;
@@ -131,7 +132,11 @@ export function buildEmbedSecurityDecision(input: {
     });
   }
 
-  if (sourceOrigin && !allowedPostMessageOrigins.includes(sourceOrigin)) {
+  if (
+    sourceOrigin &&
+    sourceOrigin !== requestOrigin &&
+    !allowedPostMessageOrigins.includes(sourceOrigin)
+  ) {
     return buildBlockedDecision({
       allowedEntryHosts,
       blockReason: "origin_not_authorized",
