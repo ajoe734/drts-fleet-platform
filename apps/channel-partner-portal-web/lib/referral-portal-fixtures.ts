@@ -57,7 +57,7 @@ export const FX_REFERRAL_DASHBOARD: ReferralDashboardFixture = {
   trips: "884",
   gmv: "NT$ 264,300",
   estimatedShare: "NT$ 26,430",
-  statementId: "referral-statement-referral-demo-community-2026-05",
+  statementId: "referral-statement-yuhe-residence-2026-05",
   statementStatus: "due",
   latestStatementPeriod: "2026-05",
   pendingStatementCount: "1",
@@ -154,7 +154,7 @@ export const FX_REFERRAL_STATEMENT_LINES: ReferralStatementLineView[] = [
 
 export const FX_REFERRAL_STATEMENTS: ReferralStatementView[] = [
   {
-    id: "referral-statement-referral-demo-community-2026-05",
+    id: "referral-statement-yuhe-residence-2026-05",
     period: "2026-05",
     trips: "884",
     activeUsers: "268",
@@ -162,13 +162,13 @@ export const FX_REFERRAL_STATEMENTS: ReferralStatementView[] = [
     share: "NT$ 26,430",
     status: "due",
     issued: "2026-06-01",
-    artifactId: "referral-statement-referral-demo-community-2026-05",
+    artifactId: "referral-statement-yuhe-residence-2026-05",
     artifactHash: "9f2a…7c41",
     direction: "DRTS → 御和物業",
     lines: FX_REFERRAL_STATEMENT_LINES,
   },
   {
-    id: "referral-statement-referral-demo-community-2026-04",
+    id: "referral-statement-yuhe-residence-2026-04",
     period: "2026-04",
     trips: "742",
     activeUsers: "236",
@@ -176,7 +176,7 @@ export const FX_REFERRAL_STATEMENTS: ReferralStatementView[] = [
     share: "NT$ 22,180",
     status: "paid",
     issued: "2026-05-01",
-    artifactId: "referral-statement-referral-demo-community-2026-04",
+    artifactId: "referral-statement-yuhe-residence-2026-04",
     artifactHash: "7ac1…4ef8",
     direction: "DRTS → 御和物業",
     lines: FX_REFERRAL_STATEMENT_LINES,

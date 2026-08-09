@@ -245,7 +245,7 @@ const currentDevHostSuffix = "4t7rg6fmeq-uc.a.run.app";
 const channelPartnerEvidenceMarkers = [
   /drts-data-source:live/i,
   /drts-e2e-actor-type:partner_api_key/i,
-  /drts-e2e-entry-slug:referral-demo-community/i,
+  /drts-e2e-entry-slug:yuhe-residence/i,
   /drts-e2e-scopes:billing:read/i,
 ] as const;
 
@@ -1084,7 +1084,7 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
           ? {
               "X-DRTS-E2E-Entry-Slug":
                 testCase.actor.partnerEntrySlug ?? referralEmbedEntrySlug,
-              "X-DRTS-E2E-Partner-Id": "partner-referral-demo-001",
+              "X-DRTS-E2E-Partner-Id": "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
               "X-DRTS-E2E-Tenant-Id": "tenant-demo-001",
               "X-DRTS-E2E-Partner-Program-Id": "program-referral-community",
             }
