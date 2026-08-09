@@ -55,6 +55,7 @@ import { SecurityEventsModule } from "./modules/security-events/security-events.
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-eligibility.module";
+import { IamObservabilityModule } from "./observability/iam-observability.module";
 // Phase 2 — Tesla / FSD / AV sandbox scaffolds (phase2-tesla-fsd-sandbox-202606)
 import { TeslaIntegrationModule } from "./modules/tesla-integration/tesla-integration.module";
 import { TeslaTelemetryModule } from "./modules/tesla-telemetry/tesla-telemetry.module";
@@ -108,6 +109,7 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     PlatformPresenceModule,
     PlatformEarningsModule,
     VehicleEligibilityModule,
+    IamObservabilityModule,
     // Phase 2 — Tesla / FSD / AV sandbox scaffolds
     TeslaIntegrationModule,
     TeslaTelemetryModule,

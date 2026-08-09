@@ -1,0 +1,184 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "title": "IAM Security Operations & Threat Observability",
+  "uid": "iam-security-obs-001",
+  "tags": ["iam", "security", "threat-detection", "audit", "observability"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "type": "stat",
+      "title": "Refresh Token Reuse Spikes",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(increase(drts_iam_refresh_token_reuse_total[1h]))",
+          "legendFormat": "Reuse Attempts"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "type": "stat",
+      "title": "Audit Pipeline Failures (Blocked Writes)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(increase(drts_iam_audit_pipeline_failures_total{outcome=\"write_blocked\"}[1h]))",
+          "legendFormat": "Blocked Writes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "type": "stat",
+      "title": "Active Break-Glass Activations",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(increase(drts_iam_break_glass_total{action=\"activated\"}[1h]))",
+          "legendFormat": "Break-Glass Sessions"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "type": "stat",
+      "title": "Cross-Tenant Attempts",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(increase(drts_iam_cross_tenant_attempts_total[1h]))",
+          "legendFormat": "Cross-Tenant Denials"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "type": "timeseries",
+      "title": "Authentication & Invitation Abuse Rate",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(drts_iam_auth_abuse_total[5m])) by (event_type, realm)",
+          "legendFormat": "{{event_type}} ({{realm}})"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "type": "timeseries",
+      "title": "Privileged Roles & API Key Mutations",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(increase(drts_iam_privileged_changes_total[5m])) by (change_type, outcome)",
+          "legendFormat": "{{change_type}} - {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "type": "gauge",
+      "title": "Credential Expiration Warning Radar",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "drts_iam_credential_expiry_warnings_total",
+          "legendFormat": "{{credential_type}} ({{days_remaining}}d left - {{owner_team}})"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "type": "timeseries",
+      "title": "IdP Group Drift & Subject Unresolved Events",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(drts_iam_idp_drift_total[5m])) by (drift_type, outcome)",
+          "legendFormat": "{{drift_type}} - {{outcome}}"
+        }
+      ]
+    }
+  ]
+}
