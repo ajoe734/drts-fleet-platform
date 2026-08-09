@@ -13,6 +13,9 @@ export const IAM_STAGE15_ERROR_CODES = [
   "IAM_INVITATION_INVALID",
   "IAM_CREDENTIAL_NOT_FOUND",
   "IAM_ACCESS_REVIEW_NOT_FOUND",
+  "IAM_ACCESS_REVIEW_CAMPAIGN_NOT_FOUND",
+  "IAM_ACCESS_REVIEW_OVERDUE",
+  "IAM_ACCESS_REVIEW_CROSS_TENANT_DENIED",
   "IAM_BREAK_GLASS_NOT_FOUND",
 ] as const;
 
@@ -68,9 +71,70 @@ export interface IamApprovalDecisionCommand {
   mutation: IamMutationMetadata;
 }
 
+export interface AccessReviewCampaignRecord {
+  campaignId: string;
+  title: string;
+  realm: "platform" | "tenant" | "partner" | "operations";
+  tenantId?: string | null;
+  targetRoleFamily?: string | null;
+  reviewerPrincipalId: string;
+  status: "draft" | "active" | "completed" | "overdue" | "cancelled";
+  deadlineAt: string;
+  overduePolicy: "alert_only" | "auto_revoke";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccessReviewItemRecord {
+  reviewId: string;
+  campaignId: string;
+  targetPrincipalId: string;
+  membershipId?: string | null;
+  roleBindingId?: string | null;
+  tenantId?: string | null;
+  roleCode: string;
+  status: "pending" | "certified" | "reduced" | "removed" | "overdue";
+  decision?: "certify" | "reduce" | "remove" | "revoke" | "defer" | null;
+  reducedRoleCode?: string | null;
+  decisionByPrincipalId?: string | null;
+  decidedAt?: string | null;
+  remediatedAt?: string | null;
+  sessionRevoked: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccessReviewEvidenceRecord {
+  evidenceId: string;
+  campaignId: string;
+  reviewId: string;
+  actorPrincipalId: string;
+  targetPrincipalId: string;
+  tenantId?: string | null;
+  decision: string;
+  beforeState: Record<string, unknown>;
+  afterState: Record<string, unknown>;
+  sessionRevoked: boolean;
+  reasonCode: string;
+  reasonText?: string | null;
+  createdAt: string;
+}
+
+export interface CreateAccessReviewCampaignCommand {
+  title: string;
+  realm: "platform" | "tenant" | "partner" | "operations";
+  tenantId?: string | null;
+  targetRoleFamily?: string | null;
+  reviewerPrincipalId: string;
+  deadlineAt: string;
+  overduePolicy?: "alert_only" | "auto_revoke" | null;
+}
+
 export interface IamAccessReviewDecisionCommand {
   reviewId: string;
-  decision: "certify" | "revoke" | "defer";
+  decision: "certify" | "reduce" | "remove" | "revoke" | "defer";
+  reducedRoleCode?: string | null;
   mutation: IamMutationMetadata;
 }
 
