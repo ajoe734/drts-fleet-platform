@@ -81,6 +81,56 @@ export interface IamBreakGlassActivationCommand {
   mutation: IamMutationMetadata;
 }
 
+export const BREAK_GLASS_GRANT_STATUSES = [
+  "requested",
+  "approved",
+  "active",
+  "closed",
+  "expired",
+  "revoked",
+] as const;
+
+export type BreakGlassGrantStatus = (typeof BREAK_GLASS_GRANT_STATUSES)[number];
+
+export interface BreakGlassGrantRecord {
+  grantId: string;
+  requesterId: string;
+  approverId: string | null;
+  requestedScopes: string[];
+  grantedScopes: string[];
+  reasonCode: string;
+  reasonText: string;
+  proofReference: string;
+  status: BreakGlassGrantStatus;
+  requestedAt: string;
+  approvedAt: string | null;
+  activatedAt: string | null;
+  expiresAt: string | null;
+  closedAt: string | null;
+  closedById: string | null;
+  closeReason: string | null;
+  sessionId: string | null;
+  postUseReviewRequired: boolean;
+  postUseReviewedAt: string | null;
+  version: number;
+}
+
+export interface CreateBreakGlassRequestCommand {
+  requestedScopes: string[];
+  reasonCode: string;
+  reasonText: string;
+  proofReference: string;
+  mutation: IamMutationMetadata;
+}
+
+export interface ApproveBreakGlassRequestCommand {
+  mutation: IamMutationMetadata;
+}
+
+export interface CloseBreakGlassGrantCommand {
+  mutation: IamMutationMetadata;
+}
+
 export interface IamCredentialMutationCommand {
   credentialId?: string | null;
   keyName?: string | null;
@@ -256,6 +306,18 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     operationId: "approveBreakGlassRequest",
     method: "post",
     path: "/api/platform-admin/break-glass/requests/{requestId}/approve",
+    domain: "break_glass",
+  },
+  {
+    operationId: "activateBreakGlassRequest",
+    method: "post",
+    path: "/api/platform-admin/break-glass/requests/{requestId}/activate",
+    domain: "break_glass",
+  },
+  {
+    operationId: "closeBreakGlassGrant",
+    method: "post",
+    path: "/api/platform-admin/break-glass/requests/{requestId}/close",
     domain: "break_glass",
   },
 ] as const;

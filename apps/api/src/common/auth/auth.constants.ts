@@ -54,6 +54,9 @@ const MULTI_TAXI_RATING_GOVERNANCE_SCOPES = [
 
 export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   system: [
+    "identity:break-glass:request",
+    "identity:break-glass:approve",
+    "identity:break-glass:activate",
     "identity:read",
     "foundation:read",
     "foundation:write",
@@ -94,6 +97,9 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
   ],
   platform_admin: [
+    "identity:break-glass:request",
+    "identity:break-glass:approve",
+    "identity:break-glass:activate",
     "identity:read",
     "foundation:read",
     "foundation:write",
