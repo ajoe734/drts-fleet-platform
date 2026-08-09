@@ -8,7 +8,7 @@ const HttpStatus = {
 };
 import type { IdentityContext, CanonicalIdentitySessionRecord } from "@drts/contracts";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
-import { PrivilegedRoleGovernanceService } from "../../apps/api/src/modules/identity/privileged-role-governance.service";
+import { PrivilegedRoleGovernanceService, issueServerStepUpProof } from "../../apps/api/src/modules/identity/privileged-role-governance.service";
 import { IdentityController } from "../../apps/api/src/modules/identity/identity.controller";
 
 function createMockIdentity(overrides: Partial<IdentityContext> = {}): IdentityContext {
@@ -1594,7 +1594,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           targetUserId: targetUser,
           roleCode: "tenant_admin",
           tenantId: "ten_proj",
-          mutation: { stepUpReference: "proof_mfa_verified", expectedVersion: 1, reasonCode: "DEMOTE" },
+          mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
         },
         approver,
       );
@@ -1670,7 +1670,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
     });
 
-    it("accepts server-validated step-up proof (e.g. proof_valid_mfa) even if identity lacks MFA in session", async () => {
+    it("accepts server-validated step-up proof (e.g. signed srv_stepup token) even if identity lacks MFA in session", async () => {
       const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_proof" });
       const noMfaApprover = createMockIdentity({
         actorId: "usr_approver_proof",
@@ -1688,13 +1688,150 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
+      const validProof = issueServerStepUpProof({
+        actorId: noMfaApprover.actorId,
+        action: "approve",
+        targetId: request.requestId,
+      });
+
       const { request: approved } = await service.approveRequest(request.requestId, noMfaApprover, {
         approvalRequestId: request.requestId,
-        stepUpReference: "proof_valid_mfa_token_123",
+        stepUpReference: validProof,
         mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
       });
 
       expect(approved.status).toBe("approved");
+    });
+
+    it("rejects proof_attacker heuristic forgery when identity lacks MFA claims", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_neg2" });
+      const noMfaApprover = createMockIdentity({
+        actorId: "usr_approver_nomfa2",
+        tenantId: "ten_neg2",
+        authMethods: ["jwt"],
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_forge2",
+          roleCode: "tenant_admin",
+          reason: "StepUp proof_attacker forgery test",
+          tenantId: "ten_neg2",
+        },
+        requester,
+      );
+
+      await expect(
+        service.approveRequest(request.requestId, noMfaApprover, {
+          approvalRequestId: request.requestId,
+          stepUpReference: "proof_attacker",
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("rejects replayed server step-up proof tokens", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_replay" });
+      const noMfaApprover = createMockIdentity({
+        actorId: "usr_approver_replay",
+        tenantId: "ten_replay",
+        authMethods: ["jwt"],
+      });
+
+      const req1 = await service.createRequest(
+        { targetUserId: "usr_target_replay1", roleCode: "tenant_admin", reason: "Replay test 1", tenantId: "ten_replay" },
+        requester,
+      );
+      const req2 = await service.createRequest(
+        { targetUserId: "usr_target_replay2", roleCode: "tenant_admin", reason: "Replay test 2", tenantId: "ten_replay" },
+        requester,
+      );
+
+      const validProof = issueServerStepUpProof({
+        actorId: noMfaApprover.actorId,
+        action: "approve",
+        targetId: req1.requestId,
+      });
+
+      // First use succeeds
+      await service.approveRequest(req1.requestId, noMfaApprover, {
+        approvalRequestId: req1.requestId,
+        stepUpReference: validProof,
+        mutation: { expectedVersion: req1.version, reasonCode: "APPROVE" },
+      });
+
+      // Second use of same proof token is rejected as replay
+      await expect(
+        service.approveRequest(req2.requestId, noMfaApprover, {
+          approvalRequestId: req2.requestId,
+          stepUpReference: validProof,
+          mutation: { expectedVersion: req2.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("rejects server step-up proof with mismatched principal or mismatched operation/target", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_mismatch" });
+      const noMfaApprover = createMockIdentity({
+        actorId: "usr_approver_mismatch",
+        tenantId: "ten_mismatch",
+        authMethods: ["jwt"],
+      });
+
+      const request = await service.createRequest(
+        { targetUserId: "usr_target_mismatch", roleCode: "tenant_admin", reason: "Mismatch test", tenantId: "ten_mismatch" },
+        requester,
+      );
+
+      // Proof issued for wrong actor
+      const wrongActorProof = issueServerStepUpProof({
+        actorId: "usr_other_actor",
+        action: "approve",
+        targetId: request.requestId,
+      });
+
+      await expect(
+        service.approveRequest(request.requestId, noMfaApprover, {
+          approvalRequestId: request.requestId,
+          stepUpReference: wrongActorProof,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+
+      // Proof issued for wrong operation target
+      const wrongTargetProof = issueServerStepUpProof({
+        actorId: noMfaApprover.actorId,
+        action: "approve",
+        targetId: "req_other_request_id",
+      });
+
+      await expect(
+        service.approveRequest(request.requestId, noMfaApprover, {
+          approvalRequestId: request.requestId,
+          stepUpReference: wrongTargetProof,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
     });
 
     it("rejects approveRequest, rejectRequest, and removeGrant when expectedVersion is missing", async () => {
@@ -1715,7 +1852,6 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await expect(
         service.approveRequest(request.requestId, approver, {
           approvalRequestId: request.requestId,
-          stepUpReference: "proof_valid_123",
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -1728,7 +1864,6 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await expect(
         service.rejectRequest(request.requestId, approver, {
           approvalRequestId: request.requestId,
-          stepUpReference: "proof_valid_123",
         }),
       ).rejects.toThrowError(
         expect.objectContaining({

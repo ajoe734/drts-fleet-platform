@@ -1,5 +1,5 @@
 import { Injectable, HttpStatus, Inject, Optional } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import type {
   IdentityContext,
@@ -116,26 +116,124 @@ const REJECTED_STEP_UP_SENTINELS = new Set([
   "FALSE",
 ]);
 
-export function isValidServerStepUpProof(stepUpRef?: string | null): boolean {
+const STEP_UP_PROOF_SECRET =
+  process.env.STEP_UP_PROOF_SECRET || "drts_step_up_proof_signing_key_secret_2026";
+
+const consumedStepUpNonces = new Set<string>();
+
+export interface StepUpProofPayload {
+  actorId: string;
+  action: string;
+  targetId: string;
+  expiresAt: number;
+  nonce: string;
+}
+
+export interface VerifyStepUpOptions {
+  actorId: string;
+  action?: string;
+  targetId?: string;
+}
+
+export function issueServerStepUpProof(payload: {
+  actorId: string;
+  action: string;
+  targetId: string;
+  ttlSeconds?: number;
+}): string {
+  const ttl = payload.ttlSeconds ?? 300;
+  const fullPayload: StepUpProofPayload = {
+    actorId: payload.actorId,
+    action: payload.action,
+    targetId: payload.targetId,
+    expiresAt: Date.now() + ttl * 1000,
+    nonce: randomBytes(12).toString("hex"),
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(fullPayload)).toString("base64url");
+  const hmac = createHmac("sha256", STEP_UP_PROOF_SECRET)
+    .update(payloadB64)
+    .digest("hex");
+  return `srv_stepup.${payloadB64}.${hmac}`;
+}
+
+export function verifyServerStepUpProof(
+  stepUpRef: string | null | undefined,
+  context: VerifyStepUpOptions,
+): boolean {
   if (!stepUpRef || typeof stepUpRef !== "string") return false;
   const trimmed = stepUpRef.trim();
   if (trimmed.length === 0) return false;
   if (REJECTED_STEP_UP_SENTINELS.has(trimmed.toUpperCase())) return false;
 
-  const norm = trimmed.toLowerCase();
-  return (
-    norm.startsWith("proof_") ||
-    norm.startsWith("stepup_proof_") ||
-    norm.startsWith("valid_proof_") ||
-    norm.startsWith("srv_proof_") ||
-    norm.startsWith("session_proof_") ||
-    norm.startsWith("proof:")
-  );
+  if (!trimmed.startsWith("srv_stepup.")) {
+    return false;
+  }
+
+  const parts = trimmed.split(".");
+  if (parts.length !== 3) return false;
+
+  const [, payloadB64, hmacHex] = parts;
+
+  const expectedHmac = createHmac("sha256", STEP_UP_PROOF_SECRET)
+    .update(payloadB64)
+    .digest("hex");
+
+  if (
+    hmacHex.length !== expectedHmac.length ||
+    !timingSafeEqual(Buffer.from(hmacHex), Buffer.from(expectedHmac))
+  ) {
+    return false;
+  }
+
+  let payload: StepUpProofPayload;
+  try {
+    payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+  } catch {
+    return false;
+  }
+
+  if (
+    !payload.expiresAt ||
+    typeof payload.expiresAt !== "number" ||
+    Date.now() > payload.expiresAt
+  ) {
+    return false;
+  }
+
+  if (!payload.actorId || payload.actorId !== context.actorId) {
+    return false;
+  }
+
+  if (context.action && payload.action !== context.action) {
+    return false;
+  }
+
+  if (context.targetId && payload.targetId !== context.targetId) {
+    return false;
+  }
+
+  if (!payload.nonce || consumedStepUpNonces.has(payload.nonce)) {
+    return false;
+  }
+
+  consumedStepUpNonces.add(payload.nonce);
+  return true;
+}
+
+export function isValidServerStepUpProof(
+  stepUpRef?: string | null,
+  context?: VerifyStepUpOptions,
+): boolean {
+  if (!context?.actorId) {
+    return false;
+  }
+  return verifyServerStepUpProof(stepUpRef, context);
 }
 
 export function verifyStepUp(
   identity: IdentityContext,
   stepUpReference?: string | null,
+  operationContext?: { action?: string; targetId?: string },
 ): void {
   if (typeof stepUpReference === "string" && stepUpReference.trim().length > 0) {
     const trimmed = stepUpReference.trim();
@@ -147,8 +245,6 @@ export function verifyStepUp(
       );
     }
   }
-
-  const hasValidServerProof = isValidServerStepUpProof(stepUpReference);
 
   const authMethods = identity.authMethods || identity.amr || [];
   const hasMfaMethod = authMethods.some((m: string) =>
@@ -169,6 +265,12 @@ export function verifyStepUp(
   }
 
   const hasFreshIdentityMfa = hasMfaMethod && isAuthTimeFresh;
+
+  const hasValidServerProof = verifyServerStepUpProof(stepUpReference, {
+    actorId: identity.actorId,
+    action: operationContext?.action,
+    targetId: operationContext?.targetId,
+  });
 
   if (!hasValidServerProof && !hasFreshIdentityMfa) {
     throw new ApiRequestError(
@@ -511,6 +613,7 @@ export class PrivilegedRoleGovernanceService {
     verifyStepUp(
       approverIdentity,
       command?.stepUpReference ?? command?.mutation?.stepUpReference,
+      { action: "approve", targetId: approvalRequestId },
     );
 
     // Administrative approver authorization check
@@ -790,6 +893,7 @@ export class PrivilegedRoleGovernanceService {
     verifyStepUp(
       rejectorIdentity,
       command?.stepUpReference ?? command?.mutation?.stepUpReference,
+      { action: "reject", targetId: approvalRequestId },
     );
 
     // Administrative approver authorization check
@@ -972,7 +1076,10 @@ export class PrivilegedRoleGovernanceService {
     }
 
     // Enforce Step-Up / MFA check on grant removal
-    verifyStepUp(actorIdentity, command.mutation?.stepUpReference);
+    verifyStepUp(actorIdentity, command.mutation?.stepUpReference, {
+      action: "remove",
+      targetId: `${command.targetUserId}:${command.roleCode}`,
+    });
 
     const expectedVersion =
       command.mutation?.expectedVersion ?? (command as any)?.expectedVersion;
