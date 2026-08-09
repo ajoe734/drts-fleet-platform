@@ -386,6 +386,7 @@ export interface ApprovePrivilegedRoleRequestCommand {
 
 export interface RejectPrivilegedRoleRequestCommand {
   approvalRequestId: string;
+  stepUpReference?: string | null;
   reason?: string | null;
   mutation?: IamMutationMetadata;
 }

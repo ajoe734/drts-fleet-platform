@@ -691,6 +691,12 @@ export class PrivilegedRoleGovernanceService {
     rejectorIdentity: IdentityContext,
     command?: RejectPrivilegedRoleRequestCommand,
   ): Promise<PrivilegedRoleApprovalRequestRecord> {
+    // Verified MFA Step-Up check
+    verifyStepUp(
+      rejectorIdentity,
+      command?.stepUpReference ?? command?.mutation?.stepUpReference,
+    );
+
     // Administrative approver authorization check
     verifyApproverAuthorization(rejectorIdentity);
     let existingReq = this.requests.get(approvalRequestId);
@@ -751,6 +757,24 @@ export class PrivilegedRoleGovernanceService {
           "IAM_CONCURRENCY_CONFLICT",
           `Optimistic locking conflict: expected version ${expectedVersion}, current version is ${request.version}.`,
           { approvalRequestId, expectedVersion, currentVersion: request.version },
+        );
+      }
+
+      // Separation of Duties (SoD) - Requester or target user cannot reject own request
+      if (
+        request.requesterPrincipalId === rejectorIdentity.actorId ||
+        request.targetUserId === rejectorIdentity.actorId
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "IAM_SOD_VIOLATION",
+          "Requester or target user cannot reject their own privileged role request (Separation of Duties violation).",
+          {
+            approvalRequestId,
+            requesterId: request.requesterPrincipalId,
+            targetUserId: request.targetUserId,
+            rejectorId: rejectorIdentity.actorId,
+          },
         );
       }
 

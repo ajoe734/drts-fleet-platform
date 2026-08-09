@@ -553,6 +553,103 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(rejected.approvalDecision).toBe("reject");
       expect(rejected.approverPrincipalId).toBe("usr_manager");
     });
+
+    it("rejects rejection when requester attempts to reject their own request (IAM_SOD_VIOLATION)", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_delta" });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_eve",
+          roleCode: "tenant_admin",
+          reason: "Requester self-rejection test",
+          tenantId: "ten_delta",
+        },
+        requester,
+      );
+
+      await expect(
+        service.rejectRequest(request.requestId, requester, {
+          approvalRequestId: request.requestId,
+          reason: "Self rejection attempt",
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "IAM_SOD_VIOLATION",
+        }),
+      );
+    });
+
+    it("rejects rejection when target user attempts to reject request created for them (IAM_SOD_VIOLATION)", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_delta" });
+      const targetUser = createMockIdentity({ actorId: "usr_eve", tenantId: "ten_delta" });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_eve",
+          roleCode: "tenant_admin",
+          reason: "Target user self-rejection test",
+          tenantId: "ten_delta",
+        },
+        requester,
+      );
+
+      await expect(
+        service.rejectRequest(request.requestId, targetUser, {
+          approvalRequestId: request.requestId,
+          reason: "Target rejection attempt",
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "IAM_SOD_VIOLATION",
+        }),
+      );
+    });
+
+    it("rejects rejection when MFA step-up is missing or invalid (IAM_STEP_UP_REQUIRED)", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_delta" });
+      const noMfaRejector = createMockIdentity({
+        actorId: "usr_manager",
+        tenantId: "ten_delta",
+        authMethods: ["jwt"], // Missing mfa
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_eve",
+          roleCode: "tenant_admin",
+          reason: "Step-up rejection test",
+          tenantId: "ten_delta",
+        },
+        requester,
+      );
+
+      // Rejection without MFA or stepUpReference
+      await expect(
+        service.rejectRequest(request.requestId, noMfaRejector, {
+          approvalRequestId: request.requestId,
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+
+      // Rejection with INVALID_STEP_UP
+      await expect(
+        service.rejectRequest(request.requestId, noMfaRejector, {
+          approvalRequestId: request.requestId,
+          stepUpReference: "INVALID_STEP_UP",
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
   });
 
   describe("7. Tenant Scoping, IDOR Protection & Verified MFA Step-Up", () => {
