@@ -18,12 +18,10 @@ import type { EmbedContext } from "@/lib/embed-context";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
-  embedReceipt,
   embedResident,
   embedSavedPlaces,
   embedTrip,
   embedTripFallbackStates,
-  embedTripHistory,
   embedVehicles,
   type EmbedTripFallbackScreen,
 } from "@/lib/embed-fixtures";
@@ -33,6 +31,7 @@ export type PassengerEmbedLiveData = {
   activeTrip: ReferralPassengerActiveTripResult | null;
   history: { items: ReferralPassengerHistoryItem[] } | null;
   receipt: ReferralPassengerReceipt | null;
+  selectedOrderId: string | null;
 } | null;
 
 type BookingFormState = {
@@ -113,6 +112,13 @@ function buildBookingCommand(
     command.scheduledAt = scheduledAt;
   }
   return command;
+}
+
+function createIdempotencyKey(prefix: string) {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  );
 }
 
 function buildHref(context: EmbedContext, next: Record<string, string>) {
@@ -1687,6 +1693,8 @@ function TripScreen({
   liveData: PassengerEmbedLiveData;
 }) {
   const theme = buildEmbedTheme(context.accent);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
   const activeTrip = liveData?.activeTrip?.trip;
   const trip = activeTrip
     ? {
@@ -1705,11 +1713,40 @@ function TripScreen({
         driverPhoneMasked: activeTrip.driverPhoneMasked,
         estimatedFare: activeTrip.estimatedFare,
       }
-    : {
-        ...embedTrip,
-        driverPhoneMasked: "0912-***-888",
-        estimatedFare: 290,
-      };
+    : null;
+
+  function handleCancel() {
+    if (!trip) return;
+    startTransition(async () => {
+      try {
+        setError(null);
+        const response = await fetch(`/api/referral/cancel/${encodeURIComponent(trip.orderId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idempotencyKey: createIdempotencyKey("referral-cancel"),
+          }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.ok) {
+          throw new Error(payload?.error?.message || "取消行程失敗");
+        }
+        window.location.assign(
+          buildHref(context, {
+            screen: "cancelled",
+            state: "handoff",
+            orderId: trip.orderId,
+          }),
+        );
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "取消行程失敗");
+      }
+    });
+  }
+
+  if (!trip) {
+    return <BookScreen context={context} />;
+  }
   const state = tripStateLabel[trip.state] || {
     zh: "媒合中",
     tone: "warn" as const,
@@ -1728,10 +1765,11 @@ function TripScreen({
             icon="phone"
           />
           <ActionButton
-            href={buildHref(context, { screen: "cancelled", state: "handoff" })}
-            label={`取消行程 · 剩 ${trip.cancelWindowMin ?? embedTrip.cancelWindowMin} 分鐘可免費取消`}
+            label={isPending ? "取消中…" : `取消行程 · 剩 ${trip.cancelWindowMin} 分鐘可免費取消`}
             theme={theme}
             variant="danger"
+            onClick={handleCancel}
+            disabled={isPending}
           />
         </>
       }
@@ -1819,6 +1857,8 @@ function TripScreen({
         </div>
       </Card>
 
+      {error ? <Banner theme={theme} tone="danger" icon="alert">{error}</Banner> : null}
+
       <Card theme={theme}>
         <div style={{ display: "flex", gap: 11 }}>
           <div
@@ -1901,17 +1941,15 @@ function TripsScreen({
   liveData: PassengerEmbedLiveData;
 }) {
   const theme = buildEmbedTheme(context.accent);
-  const historyItems =
-    liveData?.history?.items?.length
-      ? liveData.history.items.map((trip) => ({
+  const historyItems = liveData?.history?.items.map((trip) => ({
           id: trip.orderNo,
+          orderId: trip.orderId,
           date: formatShortDateTime(trip.completedAt || trip.createdAt),
           from: trip.pickupAddress,
           to: trip.dropoffAddress,
           state: normalizeTripState(trip.status),
           fare: trip.formattedFare || formatFare(trip.fareTotal),
-        }))
-      : embedTripHistory;
+        })) ?? [];
   return (
     <AppShell context={context} badgeTone="live">
       <div
@@ -1939,6 +1977,13 @@ function TripsScreen({
         <Icon name="shield" size={13} style={{ color: theme.primary }} />
         重開 App 後行程與收據仍可找回
       </div>
+      {historyItems.length === 0 ? (
+        <Card theme={theme}>
+          <div style={{ fontSize: 13, color: theme.ink2, lineHeight: 1.65 }}>
+            尚無可顯示的行程紀錄。
+          </div>
+        </Card>
+      ) : null}
       {historyItems.map((trip) => {
         const tripState = tripStateLabel[trip.state] || {
           zh: trip.state,
@@ -1951,7 +1996,16 @@ function TripsScreen({
               ? "neutral"
               : "info";
         return (
-          <Card theme={theme} key={trip.id}>
+          <Link
+            href={buildHref(context, {
+              screen: trip.state === "completed" ? "completed" : "cancelled",
+              state: "handoff",
+              orderId: trip.orderId,
+            })}
+            key={trip.id}
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+          <Card theme={theme}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span
                 style={{
@@ -2018,6 +2072,7 @@ function TripsScreen({
               </div>
             </div>
           </Card>
+          </Link>
         );
       })}
     </AppShell>
@@ -2052,15 +2107,19 @@ function ReceiptScreen({
         total: liveData.receipt.formattedTotal,
         payment: "社區月結 · 綁定住戶帳號",
         channel: context.strings.appName,
+        downloadUrl: liveData.receipt.downloadUrl,
       }
-    : embedReceipt;
+    : null;
+  if (!receipt) {
+    return <TripsScreen context={context} liveData={liveData} />;
+  }
   return (
     <AppShell
       context={context}
       badgeTone="live"
       footer={
         <ActionButton
-          href={buildHref(context, { screen: "receipt", state: "handoff" })}
+          href={receipt.downloadUrl || buildHref(context, { screen: "receipt", state: "handoff" })}
           label="下載收據"
           theme={theme}
           icon="download"
@@ -2185,12 +2244,48 @@ function ReceiptScreen({
 function OutcomeScreen({
   context,
   kind,
+  liveData,
 }: {
   context: EmbedContext;
   kind: "completed" | "cancelled";
+  liveData: PassengerEmbedLiveData;
 }) {
   const theme = buildEmbedTheme(context.accent);
   const completed = kind === "completed";
+  const [score, setScore] = useState<number | null>(null);
+  const [ratingMessage, setRatingMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const trip = liveData?.history?.items.find(
+    (item) =>
+      (!liveData.selectedOrderId || item.orderId === liveData.selectedOrderId) &&
+      (completed ? item.status === "completed" : item.status === "cancelled"),
+  );
+
+  function submitRating(nextScore: number) {
+    if (!trip) return;
+    startTransition(async () => {
+      try {
+        setError(null);
+        const response = await fetch(`/api/referral/rating/${encodeURIComponent(trip.orderId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            score: nextScore,
+            idempotencyKey: createIdempotencyKey("referral-rating"),
+          }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.ok) {
+          throw new Error(payload?.error?.message || "送出評分失敗");
+        }
+        setScore(nextScore);
+        setRatingMessage("已收到您的評分。感謝回饋！");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "送出評分失敗");
+      }
+    });
+  }
   return (
     <AppShell
       context={context}
@@ -2199,7 +2294,11 @@ function OutcomeScreen({
         completed ? (
           <>
             <ActionButton
-              href={buildHref(context, { screen: "receipt", state: "handoff" })}
+              href={buildHref(context, {
+                screen: "receipt",
+                state: "handoff",
+                ...(trip ? { orderId: trip.orderId } : {}),
+              })}
               label="查看收據"
               theme={theme}
               icon="receipt"
@@ -2231,8 +2330,8 @@ function OutcomeScreen({
       {completed ? (
         <>
           <Card theme={theme}>
-            <DetailRow theme={theme} label="行程" value="台北車站 → 社區大廳" />
-            <DetailRow theme={theme} label="車資" value="NT$ 285" strong />
+            <DetailRow theme={theme} label="行程" value={trip ? `${trip.pickupAddress} → ${trip.dropoffAddress}` : "行程資料讀取中"} />
+            <DetailRow theme={theme} label="車資" value={trip?.formattedFare ?? "—"} strong />
             <DetailRow theme={theme} label="付款" value="社區月結" last />
           </Card>
           <Card theme={theme} title="為這趟行程評分">
@@ -2245,14 +2344,13 @@ function OutcomeScreen({
               }}
             >
               {[1, 2, 3, 4, 5].map((n) => (
-                <Icon
-                  key={n}
-                  name="spark"
-                  size={30}
-                  style={{ color: theme.warnFg }}
-                />
+                <button key={n} type="button" onClick={() => submitRating(n)} disabled={!trip || isPending || score !== null} aria-label={`評分 ${n} 星`} style={{ border: 0, padding: 0, background: "transparent", color: score !== null && n > score ? theme.line : theme.warnFg, cursor: !trip || isPending || score !== null ? "default" : "pointer" }}>
+                  <Icon name="spark" size={30} />
+                </button>
               ))}
             </div>
+            {ratingMessage ? <Banner theme={theme} tone="success" icon="check">{ratingMessage}</Banner> : null}
+            {error ? <Banner theme={theme} tone="danger" icon="alert">{error}</Banner> : null}
           </Card>
         </>
       ) : (
@@ -2267,8 +2365,8 @@ function OutcomeScreen({
           >
             此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。
           </div>
-          <DetailRow theme={theme} label="取消時間" value="06-05 19:42" mono />
-          <DetailRow theme={theme} label="費用" value="NT$ 0" strong last />
+          <DetailRow theme={theme} label="取消時間" value={formatShortDateTime(trip?.completedAt || trip?.createdAt)} mono />
+          <DetailRow theme={theme} label="費用" value={trip?.formattedFare ?? "—"} strong last />
         </Card>
       )}
     </AppShell>
@@ -2658,9 +2756,9 @@ export function PassengerEmbed({
     case "receipt":
       return <ReceiptScreen context={context} liveData={liveData} />;
     case "completed":
-      return <OutcomeScreen context={context} kind="completed" />;
+      return <OutcomeScreen context={context} kind="completed" liveData={liveData} />;
     case "cancelled":
-      return <OutcomeScreen context={context} kind="cancelled" />;
+      return <OutcomeScreen context={context} kind="cancelled" liveData={liveData} />;
     case "nosupply":
     case "ineligible":
     case "denied":

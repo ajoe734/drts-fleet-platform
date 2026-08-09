@@ -62,14 +62,16 @@ export default async function PassengerEmbedPage({
     const history = shouldLoadHistory
       ? await getReferralTripHistoryServer().catch(() => null)
       : null;
+    const selectedOrderId =
+      typeof query.orderId === "string" ? query.orderId : null;
     const receiptOrderId =
-      activeTrip?.trip?.orderId ?? history?.items?.[0]?.orderId ?? null;
+      selectedOrderId ?? activeTrip?.trip?.orderId ?? history?.items?.[0]?.orderId ?? null;
     const receipt =
       screen === "receipt" && receiptOrderId
         ? await getReferralTripReceiptServer(receiptOrderId).catch(() => null)
         : null;
 
-    liveData = { activeTrip, history, receipt };
+    liveData = { activeTrip, history, receipt, selectedOrderId };
   }
 
   return <PassengerEmbed context={context} liveData={liveData} />;
