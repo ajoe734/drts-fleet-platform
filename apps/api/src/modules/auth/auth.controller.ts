@@ -334,9 +334,11 @@ export class AuthController {
       const oidcIdentity = this.verifyTenantOidcIdToken(command.idToken);
       const resolvedEmail = oidcIdentity.email;
       email = resolvedEmail;
-      tenantId = command.tenantId?.trim() || this.tenantPartnerService.getDefaultTenantId();
+      const resolvedTenantId =
+        command.tenantId?.trim() || this.tenantPartnerService.getDefaultTenantId();
+      tenantId = resolvedTenantId;
       const existingUser = this.tenantPartnerService
-        .listTenantUsers(tenantId)
+        .listTenantUsers(resolvedTenantId)
         .find((user) => user.email === resolvedEmail) ?? null;
 
       if (!existingUser || !this.isTenantBootstrapEligibleStatus(existingUser.status)) {
@@ -355,7 +357,12 @@ export class AuthController {
         );
       }
 
-      const profile = this.buildTenantPortalProfile(tenantId, resolvedEmail, existingUser, roleCode);
+      const profile = this.buildTenantPortalProfile(
+        resolvedTenantId,
+        resolvedEmail,
+        existingUser,
+        roleCode,
+      );
       const identity = this.buildIdentityContext(profile);
       const issued = await this.issueJwtSession(
         {
