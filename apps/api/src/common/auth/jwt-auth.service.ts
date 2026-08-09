@@ -14,6 +14,7 @@ import * as jwt from "jsonwebtoken";
 import { IdentityRepository } from "../../modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../modules/tenant-partner/tenant-partner.service";
+import { ApiRequestError } from "../api-envelope";
 import { getTenantRoleScopes } from "./auth.constants";
 import {
   JwtKeyRetiredError,
@@ -736,6 +737,81 @@ export class JwtAuthService {
       policyVersion,
       expiresIn,
       expiresAt,
+    };
+  }
+
+  async revokeCurrentSession(
+    sessionId: string,
+    reason = "user_logout",
+    revokedByPrincipalId?: string,
+  ): Promise<CanonicalIdentitySessionRecord | null> {
+    if (!this.identityRepository || !sessionId) {
+      return null;
+    }
+    return this.identityRepository.revokeSession(
+      sessionId,
+      reason,
+      revokedByPrincipalId,
+    );
+  }
+
+  async revokeAllSessionsForPrincipal(
+    principalId: string,
+    reason = "user_logout_all",
+    revokedByPrincipalId?: string,
+  ): Promise<number> {
+    if (!this.identityRepository || !principalId) {
+      return 0;
+    }
+    return this.identityRepository.revokeAllSessionsForPrincipal(
+      principalId,
+      reason,
+      revokedByPrincipalId,
+    );
+  }
+
+  async revokeSessionSelf(
+    sessionId: string,
+    callerPrincipalId: string,
+    reason = "user_self_revocation",
+  ): Promise<{ revoked: boolean; sessionId: string; status: string }> {
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "IDENTITY_REPOSITORY_UNAVAILABLE",
+        "Identity repository is not available.",
+      );
+    }
+    const session = await this.identityRepository.getSession(sessionId);
+    if (!session) {
+      throw new ApiRequestError(404, "SESSION_NOT_FOUND", "Session not found.");
+    }
+
+    const sessionActorId =
+      session.principalId ||
+      ((session.deviceSummary as { bindingId?: string } | undefined)?.bindingId ?? null);
+
+    if (
+      session.principalId !== callerPrincipalId &&
+      sessionActorId !== callerPrincipalId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "SESSION_REVOCATION_FORBIDDEN",
+        "Self-service session revocation endpoint cannot revoke another user's session.",
+        { sessionId, callerPrincipalId, sessionPrincipalId: session.principalId },
+      );
+    }
+
+    const revoked = await this.identityRepository.revokeSession(
+      sessionId,
+      reason,
+      callerPrincipalId,
+    );
+    return {
+      revoked: true,
+      sessionId,
+      status: revoked?.status ?? "revoked",
     };
   }
 
