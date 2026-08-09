@@ -225,13 +225,13 @@ function buttonPalette(
     case "danger":
       return {
         background: theme.dangerFg,
-        color: "#fff",
+        color: theme.surface,
         border: `1px solid ${theme.dangerFg}`,
       };
     default:
       return {
         background: theme.primary,
-        color: "#fff",
+        color: theme.surface,
         border: `1px solid ${theme.primary}`,
       };
   }
@@ -244,13 +244,19 @@ function ActionButton({
   variant = "primary",
   icon,
   iconRight,
+  onClick,
+  disabled = false,
+  type = "button",
 }: {
-  href: string;
+  href?: string;
   label: string;
   theme: ReturnType<typeof buildEmbedTheme>;
   variant?: "primary" | "ghost" | "default" | "danger";
   icon?: string;
   iconRight?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  type?: "button" | "submit" | "reset";
 }) {
   const palette = buttonPalette(theme, variant);
   const content = (
@@ -273,8 +279,25 @@ function ActionButton({
     fontSize: 14,
     fontWeight: 700,
     textDecoration: "none",
+    opacity: disabled ? 0.75 : 1,
     ...palette,
   } as const;
+
+  if (onClick || disabled || !href) {
+    return (
+      <button
+        type={type}
+        onClick={onClick}
+        disabled={disabled}
+        style={{
+          ...style,
+          cursor: disabled ? "progress" : "pointer",
+        }}
+      >
+        {content}
+      </button>
+    );
+  }
 
   return href.startsWith("tel:") ? (
     <a href={href} style={style}>
@@ -658,7 +681,7 @@ function BrandMark({
         height: size,
         borderRadius: size / 3.2,
         background: `linear-gradient(150deg, ${theme.primary}, ${theme.primaryHi})`,
-        color: "#fff",
+        color: theme.surface,
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -814,7 +837,7 @@ function AppShell({
           style={{
             height: 44,
             background: theme.primaryHi,
-            color: "#fff",
+            color: theme.surface,
             display: "flex",
             alignItems: "flex-end",
             justifyContent: "space-between",
@@ -841,7 +864,7 @@ function AppShell({
         <div
           style={{
             background: theme.primaryHi,
-            color: "#fff",
+            color: theme.surface,
             padding: "4px 12px 12px",
             display: "flex",
             alignItems: "center",
@@ -1187,7 +1210,7 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
                 height: 20,
                 borderRadius: 5,
                 background: theme.primary,
-                color: "#fff",
+                color: theme.surface,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1405,32 +1428,14 @@ function BookScreen({ context }: { context: EmbedContext }) {
               約 NT$ 290
             </span>
           </div>
-          <button
-            type="button"
+          <ActionButton
+            label={isPending ? "送出中…" : "確認叫車"}
+            theme={theme}
+            variant="primary"
+            iconRight="arrow"
             onClick={handleSubmit}
             disabled={isPending}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              width: "100%",
-              minHeight: 44,
-              borderRadius: 12,
-              padding: "11px 14px",
-              border: `1px solid ${theme.primary}`,
-              background: theme.primary,
-              color: "#fff",
-              fontFamily: theme.sans,
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: isPending ? "progress" : "pointer",
-              opacity: isPending ? 0.75 : 1,
-            }}
-          >
-            <span>{isPending ? "送出中…" : "確認叫車"}</span>
-            <Icon name="arrow" size={14} />
-          </button>
+          />
         </>
       }
     >
@@ -2420,7 +2425,7 @@ function FallbackProgressRail({
                 zIndex: 1,
                 background: done ? theme.primary : theme.surface,
                 border: `2px solid ${done ? theme.primary : theme.line}`,
-                color: done ? "#fff" : theme.faint,
+                color: done ? theme.surface : theme.faint,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
