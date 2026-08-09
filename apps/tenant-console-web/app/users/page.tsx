@@ -23,11 +23,9 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import type { CanonicalIdentitySessionRecord } from "@drts/contracts";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import { getServerLocale } from "@/lib/server-locale";
 import { type Locale, t } from "@/lib/translations";
-import { UserManagementClient } from "./user-management-client";
 
 export const dynamic = "force-dynamic";
 
@@ -1513,67 +1511,26 @@ export default async function UsersPage({
           </CanvasCard>
         </div>
 
-        {/* Interactive User, Role, Session & Credential Management Client */}
-        <UserManagementClient
-          initialUsers={users}
-          roles={roles}
-          identity={identity}
-          availableActions={availableActions}
-          initialSessions={(users.length > 0
-            ? users
-            : [
-                {
-                  userId: "usr-demo-001",
-                  tenantId,
-                  email: "admin@yamato.com",
-                  displayName: "Yamato Admin",
-                  roleCode: "tc_admin",
-                  status: "active",
-                  approvalNotificationOptOut: false,
-                  invitedAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                },
-                {
-                  userId: "usr-demo-002",
-                  tenantId,
-                  email: "operator@yamato.com",
-                  displayName: "Yamato Operator",
-                  roleCode: "tc_operator",
-                  status: "active",
-                  approvalNotificationOptOut: false,
-                  invitedAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                },
-              ]
-          ).map((u, i) => ({
-            sessionId: `ses_live_${u.userId.slice(-6)}_${i + 1}`,
-            sourceRef: `src_web_${i + 1}`,
-            principalId: u.userId,
-            membershipId: `mem_${u.userId}`,
-            realm: "tenant",
-            actorType: u.roleCode === "tc_admin" || u.roleCode === "tenant_admin" ? "tenant_admin" : "ops_user",
-            actorId: u.userId,
-            tenantId: tenantId,
-            roles: [u.roleCode],
-            status: u.status === "active" ? "active" : "expired",
-            authTime: new Date(Date.now() - 3600000 * (i + 1)).toISOString(),
-            authMethods: ["password", "mfa_totp"],
-            tokenVersion: 1,
-            idleExpiresAt: new Date(Date.now() + 3600000 * 2).toISOString(),
-            absoluteExpiresAt: new Date(Date.now() + 3600000 * 8).toISOString(),
-            revokedAt: null,
-            revokedByPrincipalId: null,
-            revokeReason: null,
-            deviceSummary: {
-              browser: i === 0 ? "Chrome 128 / macOS" : "Firefox 129 / Windows 11",
-              ip: `192.168.1.${10 + i}`,
-            },
-            riskSummary: { riskLevel: "low" },
-            createdAt: new Date(Date.now() - 3600000 * (i + 1)).toISOString(),
-            updatedAt: new Date(Date.now() - 3600000 * i).toISOString(),
-          }))}
-          refreshMetadata={backendRefreshMetadata}
-        />
+        <CanvasCard
+          theme={th}
+          title={t("users.tableCard.title", locale)}
+          subtitle={t("users.tableCard.subtitle", locale)}
+          padding={0}
+        >
+          {emptyReason && emptyConfig ? (
+            <EmptyStateBlock
+              reason={emptyReason}
+              config={emptyConfig}
+              locale={locale}
+            />
+          ) : (
+            <CanvasTable<UserRow>
+              theme={th}
+              columns={columns}
+              rows={userRows}
+            />
+          )}
+        </CanvasCard>
 
         <div style={supportingGridStyle}>
           <CanvasCard
