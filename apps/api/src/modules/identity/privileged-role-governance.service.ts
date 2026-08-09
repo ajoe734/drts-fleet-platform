@@ -70,8 +70,13 @@ export const GOVERNANCE_APPROVER_ROLES = new Set([
   "tenant_security_admin",
 ]);
 
+export const PLATFORM_SUPER_ADMIN_ROLES = new Set([
+  "superadmin",
+  "platform_admin",
+  "security_admin",
+]);
+
 export function isAuthorizedGovernanceApprover(identity: IdentityContext): boolean {
-  if (isPlatformOrSuperAdmin(identity)) return true;
   const actorTypeNorm = identity.actorType?.trim().toLowerCase();
   if (actorTypeNorm && GOVERNANCE_APPROVER_ROLES.has(actorTypeNorm)) {
     return true;
@@ -91,11 +96,12 @@ export function verifyApproverAuthorization(identity: IdentityContext): void {
 }
 
 export function isPlatformOrSuperAdmin(identity: IdentityContext): boolean {
-  if (identity.realm === "platform" || identity.realm === "ops") return true;
+  const actorTypeNorm = identity.actorType?.trim().toLowerCase();
+  if (actorTypeNorm && PLATFORM_SUPER_ADMIN_ROLES.has(actorTypeNorm)) {
+    return true;
+  }
   const roles = identity.roles || [];
-  return roles.some((r) =>
-    ["superadmin", "platform_admin", "security_admin"].includes(r.trim().toLowerCase()),
-  );
+  return roles.some((r) => PLATFORM_SUPER_ADMIN_ROLES.has(r.trim().toLowerCase()));
 }
 
 export function verifyStepUp(
@@ -328,9 +334,44 @@ export class PrivilegedRoleGovernanceService {
       );
 
       const now = new Date().toISOString();
+      const nowMs = new Date(now).getTime();
       const requestId = `praj_${randomUUID()}`;
       const validFrom = command.validFrom?.trim() || now;
       const validTo = command.validTo?.trim() || null;
+
+      const validFromMs = new Date(validFrom).getTime();
+      if (isNaN(validFromMs)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "IAM_INVALID_TIME_RANGE",
+          "validFrom must be a valid ISO date string.",
+        );
+      }
+
+      if (validTo) {
+        const validToMs = new Date(validTo).getTime();
+        if (isNaN(validToMs)) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "IAM_INVALID_TIME_RANGE",
+            "validTo must be a valid ISO date string.",
+          );
+        }
+        if (validFromMs >= validToMs) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "IAM_INVALID_TIME_RANGE",
+            `validFrom ('${validFrom}') must be strictly earlier than validTo ('${validTo}').`,
+          );
+        }
+        if (validToMs <= nowMs) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "IAM_REQUEST_EXPIRED",
+            `validTo ('${validTo}') is already in the past. Cannot create an expired request.`,
+          );
+        }
+      }
 
       const record: PrivilegedRoleApprovalRequestRecord = {
         requestId,
@@ -516,8 +557,28 @@ export class PrivilegedRoleGovernanceService {
 
       const now = new Date().toISOString();
       const nowMs = new Date(now).getTime();
-      const validFromMs = new Date(request.validFrom).getTime();
 
+      // Check if validTo is already reached at approval time (request expired before approval)
+      if (request.validTo) {
+        const validToMs = new Date(request.validTo).getTime();
+        if (!isNaN(validToMs) && validToMs <= nowMs) {
+          const previousRequestState = { ...request };
+          request.status = "expired";
+          request.updatedAt = now;
+          this.requests.set(approvalRequestId, { ...request });
+          if (this.identityRepository) {
+            await this.identityRepository.savePrivilegedRoleRequest(request, client);
+          }
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "IAM_REQUEST_EXPIRED",
+            `Privileged role request '${approvalRequestId}' has expired (validTo '${request.validTo}' reached) and cannot be approved.`,
+            { approvalRequestId, validTo: request.validTo },
+          );
+        }
+      }
+
+      const validFromMs = new Date(request.validFrom).getTime();
       const isFutureActivation = !isNaN(validFromMs) && validFromMs > nowMs;
       const initialGrantStatus: PrivilegedRoleGrantRecord["status"] = isFutureActivation
         ? "pending_activation"

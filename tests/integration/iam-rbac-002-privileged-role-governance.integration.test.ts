@@ -291,6 +291,97 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(activeGrantsAfter).toHaveLength(1);
       expect(activeGrantsAfter[0]?.roleCode).toBe("tenant_admin");
     });
+
+    it("rejects createRequest when validFrom >= validTo or validTo is in the past", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+      const nowMs = Date.now();
+
+      // validFrom >= validTo
+      await expect(
+        service.createRequest(
+          {
+            targetUserId: "usr_target_time",
+            roleCode: "tenant_admin",
+            reason: "Invalid time window test",
+            tenantId: "ten_alpha",
+            validFrom: new Date(nowMs + 7200000).toISOString(),
+            validTo: new Date(nowMs + 3600000).toISOString(),
+          },
+          requester,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.BAD_REQUEST,
+          code: "IAM_INVALID_TIME_RANGE",
+        }),
+      );
+
+      // validTo in the past (with validFrom earlier than validTo)
+      await expect(
+        service.createRequest(
+          {
+            targetUserId: "usr_target_time",
+            roleCode: "tenant_admin",
+            reason: "Past validTo test",
+            tenantId: "ten_alpha",
+            validFrom: new Date(nowMs - 5000).toISOString(),
+            validTo: new Date(nowMs - 1000).toISOString(),
+          },
+          requester,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.BAD_REQUEST,
+          code: "IAM_REQUEST_EXPIRED",
+        }),
+      );
+    });
+
+    it("rejects approveRequest when validTo has passed before approval and marks request expired", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+      const approver = createMockIdentity({ actorId: "usr_charlie_admin", tenantId: "ten_alpha" });
+      const nowMs = Date.now();
+
+      // Seed a request whose validTo was in the future when created, but is now in the past
+      const pastTo = new Date(nowMs - 1000).toISOString();
+      const futureFrom = new Date(nowMs - 5000).toISOString();
+
+      // We bypass createRequest time check by directly inserting into repo/map to simulate time progression past validTo before approval
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_expired_before_approve",
+          roleCode: "tenant_admin",
+          reason: "Approval boundary test",
+          tenantId: "ten_alpha",
+          validFrom: futureFrom,
+          validTo: new Date(nowMs + 5000).toISOString(),
+        },
+        requester,
+      );
+
+      // Mutate request validTo to be past nowMs to simulate time passing before approval
+      (request as any).validTo = pastTo;
+      if (identityRepo) {
+        await identityRepo.savePrivilegedRoleRequest(request);
+      }
+
+      await expect(
+        service.approveRequest(request.requestId, approver),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.CONFLICT,
+          code: "IAM_REQUEST_EXPIRED",
+        }),
+      );
+
+      // Request status should now be updated to expired
+      const updatedReq = await service.getRequest(request.requestId, approver);
+      expect(updatedReq?.status).toBe("expired");
+
+      // No grant should have been created
+      const grants = await service.listGrants("ten_alpha");
+      expect(grants.some((g) => g.requestId === request.requestId)).toBe(false);
+    });
   });
 
   describe("4. Last-Admin Invariant Protection", () => {
@@ -863,6 +954,83 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
             reason: "Revoke grant attempt",
           },
           nonAdminUser,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+    });
+
+    it("rejects governance actions when non-admin platform/ops identity with MFA attempts approval, rejection, or removal", async () => {
+      const adminRequester = createMockIdentity({ actorId: "usr_admin_req", roles: ["tenant_admin"], tenantId: "ten_authz_ops" });
+      const opsNonAdmin = createMockIdentity({
+        actorId: "usr_ops_viewer",
+        actorType: "ops_user",
+        realm: "ops",
+        roles: ["ops_viewer"],
+        authMethods: ["jwt", "mfa"],
+      });
+      const platformNonAdmin = createMockIdentity({
+        actorId: "usr_plat_operator",
+        actorType: "ops_user",
+        realm: "platform",
+        roles: ["platform_operator"],
+        authMethods: ["jwt", "mfa"],
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_ops_authz",
+          roleCode: "tenant_admin",
+          reason: "Testing ops non-admin governance rejection",
+          tenantId: "ten_authz_ops",
+        },
+        adminRequester,
+      );
+
+      // Ops non-admin user attempts approve -> 403
+      await expect(
+        service.approveRequest(request.requestId, opsNonAdmin),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      // Platform non-admin user attempts approve -> 403
+      await expect(
+        service.approveRequest(request.requestId, platformNonAdmin),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      // Ops non-admin user attempts reject -> 403
+      await expect(
+        service.rejectRequest(request.requestId, opsNonAdmin),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      // Platform non-admin user attempts remove -> 403
+      await service.registerActiveGrant("usr_target_grant_ops", "ten_authz_ops", "tenant_admin");
+      await expect(
+        service.removeGrant(
+          {
+            targetUserId: "usr_target_grant_ops",
+            roleCode: "tenant_admin",
+            tenantId: "ten_authz_ops",
+            reason: "Unauthorized remove attempt",
+          },
+          platformNonAdmin,
         ),
       ).rejects.toThrowError(
         expect.objectContaining({
