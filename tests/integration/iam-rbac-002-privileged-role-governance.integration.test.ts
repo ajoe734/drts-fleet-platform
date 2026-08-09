@@ -1000,6 +1000,58 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         }
       },
     );
+
+    it.runIf(Boolean(process.env.DATABASE_URL))(
+      "verifies that approveRequest marks request expired and persists the expired status in PostgreSQL database when validTo has passed",
+      async () => {
+        const { DatabaseService } = await import("../../apps/api/src/common/db");
+        const realDb = new DatabaseService();
+        try {
+          const repo = new IdentityRepository(realDb);
+          const govService = new PrivilegedRoleGovernanceService(repo, undefined, realDb);
+          const tenantId = `ten_real_pg_exp_${Date.now()}`;
+          const requester = createMockIdentity({ actorId: "usr_alice", tenantId });
+          const approver = createMockIdentity({ actorId: "usr_charlie_admin", tenantId });
+          const nowMs = Date.now();
+          const pastTo = new Date(nowMs - 1000).toISOString();
+          const futureFrom = new Date(nowMs - 5000).toISOString();
+
+          // Seed a request whose validTo was in the future when created, but is now in the past
+          const request = await govService.createRequest(
+            {
+              targetUserId: "usr_expired_pg_target",
+              roleCode: "tenant_admin",
+              reason: "PostgreSQL approval boundary test",
+              tenantId,
+              validFrom: futureFrom,
+              validTo: new Date(nowMs + 5000).toISOString(),
+            },
+            requester,
+          );
+
+          // Mutate request validTo to be past nowMs to simulate time passing before approval
+          (request as any).validTo = pastTo;
+          await repo.savePrivilegedRoleRequest(request);
+
+          // approveRequest should throw IAM_REQUEST_EXPIRED
+          await expect(
+            govService.approveRequest(request.requestId, approver),
+          ).rejects.toThrowError(
+            expect.objectContaining({
+              status: HttpStatus.CONFLICT,
+              code: "IAM_REQUEST_EXPIRED",
+            }),
+          );
+
+          // Verify status stored in PostgreSQL database is 'expired'
+          const storedReq = await repo.getPrivilegedRoleRequest(request.requestId);
+          expect(storedReq).toBeDefined();
+          expect(storedReq?.status).toBe("expired");
+        } finally {
+          await realDb.onModuleDestroy();
+        }
+      },
+    );
   });
 
   describe("12. Server-side Approver Authorization Policy", () => {

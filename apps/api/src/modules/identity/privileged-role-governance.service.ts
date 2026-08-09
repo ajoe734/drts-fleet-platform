@@ -183,7 +183,11 @@ export class PrivilegedRoleGovernanceService {
           await client.query("COMMIT");
           return result;
         } catch (error) {
-          await client.query("ROLLBACK");
+          try {
+            await client.query("ROLLBACK");
+          } catch {
+            // Ignore rollback errors if transaction was already committed or closed
+          }
           throw error;
         } finally {
           client.release();
@@ -568,6 +572,9 @@ export class PrivilegedRoleGovernanceService {
           this.requests.set(approvalRequestId, { ...request });
           if (this.identityRepository) {
             await this.identityRepository.savePrivilegedRoleRequest(request, client);
+          }
+          if (client) {
+            await client.query("COMMIT");
           }
           throw new ApiRequestError(
             HttpStatus.CONFLICT,

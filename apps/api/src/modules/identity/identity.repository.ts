@@ -1528,7 +1528,7 @@ export class IdentityRepository implements OnModuleInit {
                 ),
                 '{updatedAt}', to_jsonb($2::text)
               )
-          WHERE (principal_id = $1::text OR actor_id = $1::text)
+          WHERE (principal_id = $1::text OR record->>'actorId' = $1::text)
             AND status = 'active'
           RETURNING session_id
         `,
