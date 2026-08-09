@@ -815,12 +815,11 @@ export class AccessReviewService {
               item.updatedAt = nowIso;
 
               if (campaign.overduePolicy === "auto_revoke") {
-                const revoked =
-                  await this.identityRepository.revokeSessionsForPrincipal(
-                    item.targetPrincipalId,
-                    "ACCESS_REVIEW_OVERDUE_AUTO_REVOKE",
-                    "system_overdue_sweep",
-                  );
+                await this.identityRepository.revokeSessionsForPrincipal(
+                  item.targetPrincipalId,
+                  "ACCESS_REVIEW_OVERDUE_AUTO_REVOKE",
+                  "system_overdue_sweep",
+                );
                 item.sessionRevoked = true;
                 item.status = "removed";
                 item.decision = "remove";

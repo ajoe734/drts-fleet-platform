@@ -16,15 +16,11 @@ import type {
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { CurrentIdentity } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
-import {
-  AccessReviewCampaignQuery,
-  AccessReviewEvidenceQuery,
-  AccessReviewService,
-} from "./access-review.service";
+import { AccessReviewService } from "./access-review.service";
 
 function cleanQuery<T extends Record<string, unknown>>(obj: T): T {
   return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) => v !== undefined),
+    Object.entries(obj).filter(([, v]) => v !== undefined),
   ) as T;
 }
 
