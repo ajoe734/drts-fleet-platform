@@ -943,35 +943,127 @@ export class IdentityRepository implements OnModuleInit {
 
   async findRoleBindingsByMembershipId(
     membershipId: string,
+    client?: PoolClient,
   ): Promise<CanonicalIdentityRoleBindingRecord[]> {
+    let directBindings: CanonicalIdentityRoleBindingRecord[] = [];
     if (!this.isEnabled()) {
-      const results: CanonicalIdentityRoleBindingRecord[] = [];
       for (const binding of this.fallbackRoleBindings.values()) {
         if (binding.membershipId === membershipId) {
-          results.push({ ...binding });
+          directBindings.push({ ...binding });
         }
       }
-      return results;
+    } else {
+      const dbClient = client ?? (await this.databaseService!.connect());
+      try {
+        const result = await dbClient.query<JsonRecordRow>(
+          `
+            SELECT record FROM iam.identity_role_bindings
+            WHERE membership_id = $1
+          `,
+          [membershipId],
+        );
+        directBindings = result.rows.map((row) =>
+          this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+            row.record,
+            "iam.identity_role_bindings",
+          ),
+        );
+      } finally {
+        if (!client) {
+          dbClient.release();
+        }
+      }
     }
 
-    const client = await this.databaseService!.connect();
-    try {
-      const result = await client.query<JsonRecordRow>(
-        `
-          SELECT record FROM iam.identity_role_bindings
-          WHERE membership_id = $1
-        `,
-        [membershipId],
-      );
-      return result.rows.map((row) =>
-        this.parseRecord<CanonicalIdentityRoleBindingRecord>(
-          row.record,
-          "iam.identity_role_bindings",
-        ),
-      );
-    } finally {
-      client.release();
+    const activeGrants = await this.findActivePrivilegedGrantsForMembership(
+      membershipId,
+      Date.now(),
+      client,
+    );
+
+    const projectedBindings: CanonicalIdentityRoleBindingRecord[] = activeGrants.map((grant) => ({
+      roleBindingId: `grant_binding_${grant.grantId}`,
+      sourceRef: grant.requestId ? `privileged_request:${grant.requestId}` : `privileged_grant:${grant.grantId}`,
+      membershipId: grant.targetMembershipId || membershipId,
+      roleCode: grant.roleCode,
+      grantedByPrincipalId: grant.grantedByPrincipalId,
+      approvalId: grant.approvalId,
+      validFrom: grant.validFrom,
+      validTo: grant.validTo ?? null,
+      createdAt: grant.createdAt,
+      updatedAt: grant.updatedAt,
+    }));
+
+    const existingRoles = new Set(directBindings.map((b) => b.roleCode));
+    const merged = [...directBindings];
+    for (const pb of projectedBindings) {
+      if (!existingRoles.has(pb.roleCode)) {
+        merged.push(pb);
+        existingRoles.add(pb.roleCode);
+      }
     }
+
+    return merged;
+  }
+
+  async findActivePrivilegedGrantsForMembership(
+    membershipId: string,
+    currentTimeMs = Date.now(),
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleGrantRecord[]> {
+    let membership: CanonicalIdentityMembershipRecord | undefined;
+    if (!this.isEnabled()) {
+      membership = this.fallbackMemberships.get(membershipId);
+    } else {
+      const dbClient = client ?? (await this.databaseService!.connect());
+      try {
+        const result = await dbClient.query<JsonRecordRow>(
+          `SELECT record FROM iam.identity_memberships WHERE membership_id = $1`,
+          [membershipId],
+        );
+        if (result.rows[0]?.record) {
+          membership = this.parseRecord<CanonicalIdentityMembershipRecord>(
+            result.rows[0].record,
+            "iam.identity_memberships",
+          );
+        }
+      } finally {
+        if (!client) {
+          dbClient.release();
+        }
+      }
+    }
+
+    let allGrants: PrivilegedRoleGrantRecord[] = [];
+    if (!this.isEnabled()) {
+      allGrants = Array.from(this.fallbackPrivilegedRoleGrants.values());
+    } else {
+      allGrants = await this.listPrivilegedRoleGrants(membership?.tenantId ?? null, client);
+    }
+
+    return allGrants.filter((grant) => {
+      if (grant.status !== "active") return false;
+
+      const validFromMs = new Date(grant.validFrom).getTime();
+      if (isNaN(validFromMs) || validFromMs > currentTimeMs) return false;
+
+      if (grant.validTo) {
+        const validToMs = new Date(grant.validTo).getTime();
+        if (isNaN(validToMs) || validToMs <= currentTimeMs) return false;
+      }
+
+      const matchesTarget =
+        grant.targetMembershipId === membershipId ||
+        (membership && grant.targetUserId === membership.principalId);
+
+      if (!matchesTarget) return false;
+
+      if (grant.tenantId && membership?.tenantId && grant.tenantId !== membership.tenantId) {
+        return false;
+      }
+
+      return true;
+    });
   }
 
   async upsertWorkforceIdentity(

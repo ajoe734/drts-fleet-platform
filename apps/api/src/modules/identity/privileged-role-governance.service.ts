@@ -1054,47 +1054,106 @@ export class PrivilegedRoleGovernanceService {
         if (grant.status === "pending_activation") {
           const validFromMs = new Date(grant.validFrom).getTime();
           if (!isNaN(validFromMs) && validFromMs <= currentTimeMs) {
-            grant.status = "active";
-            grant.updatedAt = now;
-            this.grants.set(grant.grantId, { ...grant });
-            if (this.identityRepository) {
-              await this.identityRepository.savePrivilegedRoleGrant(grant, client);
-              await this.identityRepository.revokeSessionsByPrincipal(
+            try {
+              // Re-check Separation of Duties before activation
+              await this.checkSodPolicy(
                 grant.targetUserId,
-                "PRIVILEGED_ROLE_ACTIVATED",
-                undefined,
+                grant.roleCode,
+                grant.tenantId,
                 client,
               );
-            }
 
-            if (this.securityEventsService) {
-              await this.securityEventsService.recordEventRequired(
-                {
-                  actorId: "system",
-                  actorType: "system",
-                  realm: grant.realm,
-                  tenantId: grant.tenantId,
-                  partnerId: null,
-                  eventType: "privileged_role.activated",
-                  eventFamily: "role",
-                  outcome: "success",
-                  severity: "medium",
-                  targetType: "user",
-                  targetId: grant.targetUserId,
-                  sessionId: null,
-                  tokenId: null,
-                  authMethods: [],
-                  sourceIp: null,
-                  userAgent: null,
-                  requestId: null,
-                  traceId: null,
-                  reasonCode: null,
-                  approvalId: grant.approvalId,
-                  beforeSummary: null,
-                  afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
-                },
-                client,
-              );
+              grant.status = "active";
+              grant.updatedAt = now;
+              this.grants.set(grant.grantId, { ...grant });
+              if (this.identityRepository) {
+                await this.identityRepository.savePrivilegedRoleGrant(grant, client);
+                await this.identityRepository.revokeSessionsByPrincipal(
+                  grant.targetUserId,
+                  "PRIVILEGED_ROLE_ACTIVATED",
+                  undefined,
+                  client,
+                );
+              }
+
+              if (this.securityEventsService) {
+                await this.securityEventsService.recordEventRequired(
+                  {
+                    actorId: "system",
+                    actorType: "system",
+                    realm: grant.realm,
+                    tenantId: grant.tenantId,
+                    partnerId: null,
+                    eventType: "privileged_role.activated",
+                    eventFamily: "role",
+                    outcome: "success",
+                    severity: "medium",
+                    targetType: "user",
+                    targetId: grant.targetUserId,
+                    sessionId: null,
+                    tokenId: null,
+                    authMethods: [],
+                    sourceIp: null,
+                    userAgent: null,
+                    requestId: null,
+                    traceId: null,
+                    reasonCode: null,
+                    approvalId: grant.approvalId,
+                    beforeSummary: null,
+                    afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
+                  },
+                  client,
+                );
+              }
+            } catch (sodError) {
+              // Fail-closed handling for SoD recheck failure at activation time
+              grant.status = "removed";
+              grant.updatedAt = now;
+              this.grants.set(grant.grantId, { ...grant });
+              if (this.identityRepository) {
+                await this.identityRepository.savePrivilegedRoleGrant(grant, client);
+                await this.identityRepository.revokeSessionsByPrincipal(
+                  grant.targetUserId,
+                  "PRIVILEGED_ROLE_ACTIVATION_FAILED",
+                  undefined,
+                  client,
+                );
+              }
+
+              if (this.securityEventsService) {
+                await this.securityEventsService.recordEventRequired(
+                  {
+                    actorId: "system",
+                    actorType: "system",
+                    realm: grant.realm,
+                    tenantId: grant.tenantId,
+                    partnerId: null,
+                    eventType: "privileged_role.activation_failed",
+                    eventFamily: "role",
+                    outcome: "denied",
+                    severity: "high",
+                    targetType: "user",
+                    targetId: grant.targetUserId,
+                    sessionId: null,
+                    tokenId: null,
+                    authMethods: [],
+                    sourceIp: null,
+                    userAgent: null,
+                    requestId: null,
+                    traceId: null,
+                    reasonCode: "IAM_SOD_VIOLATION",
+                    approvalId: grant.approvalId,
+                    beforeSummary: null,
+                    afterSummary: {
+                      grantId: grant.grantId,
+                      roleCode: grant.roleCode,
+                      status: "removed",
+                      reason: sodError instanceof Error ? sodError.message : "SoD violation on activation",
+                    },
+                  },
+                  client,
+                );
+              }
             }
           }
         }

@@ -454,13 +454,14 @@ export class IAPSubjectAdapter {
             r === "superadmin" ||
             r === "platform_admin" ||
             r === "admin" ||
-            r === "viewer"
+            r === "viewer" ||
+            r === "security_admin"
           );
         }
         if (m.realm === "ops") {
           return r === "operator" || r === "ops_user";
         }
-        return false;
+        return true;
       });
 
       const missingGroupsForM: string[] = [];
@@ -845,11 +846,15 @@ export class IAPSubjectAdapter {
     }
     if (roles && roles.length > 0) {
       const hasPlatformRole = roles.some(
+<<<<<<< HEAD
         (r) =>
           r === "superadmin" ||
           r === "platform_admin" ||
           r === "admin" ||
           r === "viewer",
+=======
+        (r) => r === "superadmin" || r === "platform_admin" || r === "security_admin",
+>>>>>>> 0d95b522e (fix(IAM-RBAC-002): enforce activation SoD recheck with fail-closed state and project canonical claims)
       );
       const hasOpsRole = roles.some(
         (r) => r === "operator" || r === "ops_user",

@@ -1358,5 +1358,185 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(expiredEvent.outcome).toBe("expired");
     });
   });
+
+  describe("15. Activation SoD Recheck & Canonical Identity/Role Claim Projection Authority Path", () => {
+    it("re-checks SoD on pending_activation grant during expireStaleGrants and fails-closed when toxic role is assigned before activation", async () => {
+      const recordedEvents: any[] = [];
+      const mockSecurityEventsService = {
+        recordEventRequired: async (event: any) => {
+          recordedEvents.push(event);
+          return event;
+        },
+      } as any;
+
+      const testService = new PrivilegedRoleGovernanceService(
+        identityRepo,
+        mockSecurityEventsService,
+      );
+
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_sod_recheck" });
+      const approver = createMockIdentity({ actorId: "usr_approver", tenantId: "ten_sod_recheck" });
+      const targetUser = "usr_target_sod_recheck";
+
+      const nowMs = Date.now();
+      const futureFrom = new Date(nowMs + 60000).toISOString();
+      const futureTo = new Date(nowMs + 3600000).toISOString();
+
+      // Create & approve request with future validFrom -> pending_activation
+      const req = await testService.createRequest(
+        {
+          targetUserId: targetUser,
+          roleCode: "tenant_security_admin",
+          reason: "Scheduled security admin grant",
+          tenantId: "ten_sod_recheck",
+          validFrom: futureFrom,
+          validTo: futureTo,
+        },
+        requester,
+      );
+
+      const { grant } = await testService.approveRequest(req.requestId, approver);
+      expect(grant.status).toBe("pending_activation");
+
+      // Before activation time arrives, assign a conflicting role (tenant_finance_admin) to target user
+      await testService.registerActiveGrant(
+        targetUser,
+        "ten_sod_recheck",
+        "tenant_finance_admin",
+      );
+
+      // Now process activation at validFrom time
+      const activationTimeMs = nowMs + 65000;
+      await testService.expireStaleGrants(activationTimeMs);
+
+      // Verify that pending_activation grant failed SoD recheck and went to fail-closed state ("removed")
+      const updatedGrants = await identityRepo.listPrivilegedRoleGrants("ten_sod_recheck");
+      const targetGrant = updatedGrants.find((g) => g.grantId === grant.grantId);
+
+      expect(targetGrant).toBeDefined();
+      expect(targetGrant!.status).toBe("removed");
+
+      // Verify high severity security audit event for activation failure
+      const failureEvent = recordedEvents.find(
+        (e) => e.eventType === "privileged_role.activation_failed" && e.targetId === targetUser,
+      );
+      expect(failureEvent).toBeDefined();
+      expect(failureEvent.outcome).toBe("denied");
+      expect(failureEvent.severity).toBe("high");
+      expect(failureEvent.reasonCode).toBe("IAM_SOD_VIOLATION");
+    });
+
+    it("activates pending_activation grant when SoD recheck passes at activation time", async () => {
+      const testService = new PrivilegedRoleGovernanceService(identityRepo);
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_sod_pass" });
+      const approver = createMockIdentity({ actorId: "usr_approver", tenantId: "ten_sod_pass" });
+      const targetUser = "usr_target_sod_pass";
+
+      const nowMs = Date.now();
+      const futureFrom = new Date(nowMs + 60000).toISOString();
+      const futureTo = new Date(nowMs + 3600000).toISOString();
+
+      const req = await testService.createRequest(
+        {
+          targetUserId: targetUser,
+          roleCode: "tenant_admin",
+          reason: "Scheduled admin grant",
+          tenantId: "ten_sod_pass",
+          validFrom: futureFrom,
+          validTo: futureTo,
+        },
+        requester,
+      );
+
+      const { grant } = await testService.approveRequest(req.requestId, approver);
+      expect(grant.status).toBe("pending_activation");
+
+      // Process activation at validFrom time without conflicting role
+      await testService.expireStaleGrants(nowMs + 65000);
+
+      const updatedGrants = await identityRepo.listPrivilegedRoleGrants("ten_sod_pass");
+      const targetGrant = updatedGrants.find((g) => g.grantId === grant.grantId);
+
+      expect(targetGrant).toBeDefined();
+      expect(targetGrant!.status).toBe("active");
+    });
+
+    it("projects active privileged role grants into identityRepo.findRoleBindingsByMembershipId authority path", async () => {
+      const testService = new PrivilegedRoleGovernanceService(identityRepo);
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_proj" });
+      const approver = createMockIdentity({ actorId: "usr_approver", tenantId: "ten_proj" });
+      const targetUser = "usr_target_proj";
+      const membershipId = "mem_target_proj";
+
+      // Seed membership for targetUser
+      await identityRepo.upsertWorkforceIdentity(
+        {
+          principalId: targetUser,
+          subject: targetUser,
+          email: "target@test.com",
+          status: "active",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          membershipId,
+          principalId: targetUser,
+          realm: "tenant",
+          tenantId: "ten_proj",
+          partnerId: null,
+          status: "active",
+          invitedByPrincipalId: null,
+          invitationId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        [],
+      );
+
+      // Verify initially no role bindings
+      const initialBindings = await identityRepo.findRoleBindingsByMembershipId(membershipId);
+      expect(initialBindings.some((b) => b.roleCode === "tenant_admin")).toBe(false);
+
+      // Create and approve request for tenant_admin
+      const req = await testService.createRequest(
+        {
+          targetUserId: targetUser,
+          targetMembershipId: membershipId,
+          roleCode: "tenant_admin",
+          reason: "Grant tenant admin role for claim projection",
+          tenantId: "ten_proj",
+        },
+        requester,
+      );
+
+      await testService.approveRequest(req.requestId, approver);
+
+      // Now query findRoleBindingsByMembershipId
+      const projectedBindings = await identityRepo.findRoleBindingsByMembershipId(membershipId);
+      const projectedAdminBinding = projectedBindings.find((b) => b.roleCode === "tenant_admin");
+
+      expect(projectedAdminBinding).toBeDefined();
+      expect(projectedAdminBinding!.membershipId).toBe(membershipId);
+      expect(projectedAdminBinding!.sourceRef).toContain(req.requestId);
+
+      // Seed second active admin so last-admin protection allows removal of targetUser grant
+      await testService.registerActiveGrant("usr_other_admin", "ten_proj", "tenant_admin");
+
+      // Remove grant
+      await testService.removeGrant(
+        {
+          targetUserId: targetUser,
+          roleCode: "tenant_admin",
+          tenantId: "ten_proj",
+          mutation: { stepUpReference: "mfa_verified" },
+        },
+        approver,
+      );
+
+      // Verify projected claim is revoked
+      const revokedBindings = await identityRepo.findRoleBindingsByMembershipId(membershipId);
+      expect(revokedBindings.some((b) => b.roleCode === "tenant_admin")).toBe(false);
+    });
+  });
 });
 
