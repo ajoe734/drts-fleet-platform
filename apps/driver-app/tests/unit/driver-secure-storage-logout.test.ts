@@ -168,6 +168,31 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
       );
       expect(isDriverIdentityProvisioned()).toBe(false);
     });
+
+    it("treats an invalid device session as a revoked binding and directs the driver to rebind", async () => {
+      const authError = new Error(
+        'API error 401: {"error":{"code":"DRIVER_DEVICE_SESSION_INVALID","message":"Session revoked for device binding."}}',
+      );
+
+      const recovered = await recoverDriverSessionFromApiError(authError);
+
+      expect(recovered).toBe(true);
+      expect(getDriverIdentityIssue()).toBe(
+        "此裝置的司機綁定已失效或被撤銷，請重新輸入註冊碼綁定。",
+      );
+      expect(isDriverIdentityProvisioned()).toBe(false);
+    });
+
+    it("does not recover unrelated failures as an auth state", async () => {
+      const recovered = await recoverDriverSessionFromApiError(
+        new Error(
+          'API error 503: {"error":{"code":"SERVICE_UNAVAILABLE","message":"Retry later."}}',
+        ),
+      );
+
+      expect(recovered).toBe(false);
+      expect(getDriverIdentityIssue()).toBeNull();
+    });
   });
 
   describe("Offline Unsynchronized Proof Preservation", () => {

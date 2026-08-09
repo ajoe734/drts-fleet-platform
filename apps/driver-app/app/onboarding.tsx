@@ -65,8 +65,9 @@ type ActivationStep = {
 
 const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = driverActivationSteps;
 
-const DEFAULT_TEST_REGISTRATION_CODE =
-  process.env.EXPO_PUBLIC_DRIVER_TEST_REGISTRATION_CODE ?? "driver-demo-001";
+// Registration codes are one-time credentials. Do not prefill one from a
+// build-time environment value: Expo bundles public values into the client.
+const DEFAULT_TEST_REGISTRATION_CODE = "";
 const DEFAULT_TEST_DEVICE_LABEL =
   process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "Driver Pixel 01";
 
@@ -1211,12 +1212,15 @@ export default function OnboardingScreen() {
             <ErrorBanner message={provisioningError} />
           ) : null}
           <FormField
+            accessibilityLabel="裝置註冊碼"
+            autoComplete="one-time-code"
             autoCapitalize="none"
             autoCorrect={false}
             editable={!submitting}
             label="註冊代碼"
             onChangeText={setRegistrationCode}
             placeholder="請輸入註冊代碼"
+            secureTextEntry
             style={styles.monoInput}
             value={registrationCode}
           />
