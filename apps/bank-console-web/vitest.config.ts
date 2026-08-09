@@ -9,6 +9,10 @@ export default defineConfig({
         __dirname,
         "../../packages/contracts/src/index.ts",
       ),
+      "@drts/control-plane-auth": path.resolve(
+        __dirname,
+        "../../packages/control-plane-auth/src/index.ts",
+      ),
       "@drts/ui-tokens": path.resolve(
         __dirname,
         "../../packages/ui-tokens/src/index.ts",

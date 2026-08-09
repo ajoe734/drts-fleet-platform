@@ -77,6 +77,7 @@ export async function bankApiGet<T>(
   const response = await fetch(new URL(path, `${resolveServerApiBaseUrl()}/`), {
     cache: "no-store",
     headers,
+    signal: AbortSignal.timeout(1000),
   });
   return unwrap<T>(response);
 }

@@ -1,19 +1,21 @@
 import { defineConfig } from "@playwright/test";
 
-const localBankConsoleBaseURL = "http://127.0.0.1:3008";
+const testPort = process.env.TEST_PORT ?? "3098";
+const localBankConsoleBaseURL = `http://127.0.0.1:${testPort}`;
 const bankConsoleBaseURL =
   process.env.DRTS_DEV_BANK_CONSOLE_BASE_URL ??
   process.env.BANK_CONSOLE_BASE_URL ??
   localBankConsoleBaseURL;
 const shouldStartLocalBankConsole =
   bankConsoleBaseURL === localBankConsoleBaseURL ||
-  bankConsoleBaseURL === "http://localhost:3008";
+  bankConsoleBaseURL === `http://localhost:${testPort}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
   testMatch: /bank-console-auth-boundary\.spec\.ts/,
   fullyParallel: false,
   retries: 0,
+  timeout: 60_000,
   use: {
     baseURL: bankConsoleBaseURL,
     viewport: {
@@ -26,7 +28,7 @@ export default defineConfig({
     ? {
         webServer: {
           command:
-            "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/bank-console-web && pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3008",
+            `cd apps/bank-console-web && pnpm exec next dev --webpack --hostname 127.0.0.1 --port ${testPort}`,
           url: `${localBankConsoleBaseURL}/login`,
           reuseExistingServer: !process.env.CI,
           timeout: 300_000,

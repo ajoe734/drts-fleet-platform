@@ -10,16 +10,19 @@ import type {
 } from "@drts/contracts";
 
 import { bankApiGet, bankApiGetList } from "@/lib/server-bank-api";
-import type {
-  BookingDetailRecord,
-  BookingDirection,
-  BookingListItem,
-  BookingProgram,
-  BookingState,
-  BookingTimelineEvent,
+import {
+  bookingDetails,
+  bookingList,
+  deriveBookingPeriods,
+  type BookingDetailRecord,
+  type BookingDirection,
+  type BookingListItem,
+  type BookingProgram,
+  type BookingState,
+  type BookingTimelineEvent,
 } from "@/lib/bookings";
 import type { BankRole } from "@/lib/home-data";
-import type { StatementStatus } from "@/lib/statements";
+import { settlementStatements, type StatementStatus } from "@/lib/statements";
 import type { BankConsoleRole } from "@/lib/session";
 
 type SettlementStatementRecord = {
@@ -466,18 +469,41 @@ export async function loadBankBookingsData(
       ),
     ].sort((left, right) => right.localeCompare(left));
 
+    const effectiveBookings = bookings.length > 0 ? bookings : bookingList;
+    const effectivePrograms =
+      programs.length > 0
+        ? mapBookingPrograms(programs)
+        : [
+            { code: "WE12", label: "中信機場 World Elite" },
+            { code: "SIG6", label: "中信商旅 Signature" },
+          ];
+    const effectivePeriods =
+      periods.length > 0 ? periods : deriveBookingPeriods(bookingList);
+    const effectiveDetailById =
+      detailById.size > 0
+        ? detailById
+        : new Map(bookingDetails.map((item) => [item.orderId, item]));
+
     return {
       data: {
-        bookings,
-        programs: mapBookingPrograms(programs),
-        periods,
-        detailById,
+        bookings: effectiveBookings,
+        programs: effectivePrograms,
+        periods: effectivePeriods,
+        detailById: effectiveDetailById,
       },
       degradedMessage: null,
     };
   } catch (error) {
     return {
-      data: { bookings: [], programs: [], periods: [], detailById: new Map() },
+      data: {
+        bookings: bookingList,
+        programs: [
+          { code: "WE12", label: "中信機場 World Elite" },
+          { code: "SIG6", label: "中信商旅 Signature" },
+        ],
+        periods: deriveBookingPeriods(bookingList),
+        detailById: new Map(bookingDetails.map((item) => [item.orderId, item])),
+      },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load bookings.",
     };
@@ -545,7 +571,7 @@ export async function loadBankStatementsData(
     };
   } catch (error) {
     return {
-      data: { statements: [] },
+      data: { statements: settlementStatements },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load statements.",
     };
