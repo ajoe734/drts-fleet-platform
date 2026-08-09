@@ -110,7 +110,7 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
         scopes: ["identity:access-reviews:certify"],
       };
 
-      const { campaign, items } = await service.createCampaign(
+      const { items } = await service.createCampaign(
         {
           title: "Tenant Alpha Security Review",
           realm: "tenant",
@@ -227,7 +227,7 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
       };
 
       const pastDeadline = new Date(Date.now() - 3600000).toISOString(); // 1 hour ago
-      const { campaign, items } = await service.createCampaign(
+      const { campaign } = await service.createCampaign(
         {
           title: "Urgent Expired Campaign",
           realm: "platform",
