@@ -27,7 +27,6 @@ import {
   getDriverIdentityAuthState,
   getDriverIdentityIssue,
   initializeDriverIdentity,
-  isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
 } from "../../lib/api-client";
