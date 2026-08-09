@@ -22,6 +22,12 @@ import {
   AccessReviewService,
 } from "./access-review.service";
 
+function cleanQuery<T extends Record<string, unknown>>(obj: T): T {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) => v !== undefined),
+  ) as T;
+}
+
 @Controller()
 export class AccessReviewController {
   constructor(private readonly accessReviewService: AccessReviewService) {}
@@ -37,12 +43,12 @@ export class AccessReviewController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const campaigns = await this.accessReviewService.listCampaigns(
-      {
+      cleanQuery({
         realm,
         tenantId,
         status,
         limit: limit ? parseInt(limit, 10) : undefined,
-      },
+      }),
       identity as any,
     );
     return toApiSuccessEnvelope({ campaigns }, requestId);
@@ -115,7 +121,7 @@ export class AccessReviewController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const evidence = await this.accessReviewService.listEvidence(
-      {
+      cleanQuery({
         campaignId,
         reviewId,
         actorPrincipalId,
@@ -123,7 +129,7 @@ export class AccessReviewController {
         tenantId,
         decision,
         limit: limit ? parseInt(limit, 10) : undefined,
-      },
+      }),
       identity as any,
     );
     return toApiSuccessEnvelope({ evidence }, requestId);
@@ -139,11 +145,11 @@ export class AccessReviewController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const campaigns = await this.accessReviewService.listCampaigns(
-      {
+      cleanQuery({
         realm,
         status,
         limit: limit ? parseInt(limit, 10) : undefined,
-      },
+      }),
       identity as any,
     );
     return toApiSuccessEnvelope({ campaigns }, requestId);
@@ -190,12 +196,12 @@ export class AccessReviewController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const evidence = await this.accessReviewService.listEvidence(
-      {
+      cleanQuery({
         campaignId,
         reviewId,
         decision,
         limit: limit ? parseInt(limit, 10) : undefined,
-      },
+      }),
       identity as any,
     );
     return toApiSuccessEnvelope({ evidence }, requestId);
