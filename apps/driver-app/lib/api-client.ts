@@ -264,6 +264,46 @@ function getReplayHeaders(requestId: string): Record<string, string> {
   };
 }
 
+export type DriverAuthState =
+  | "not_provisioned"
+  | "provisioned"
+  | "session_expired"
+  | "device_revoked"
+  | "driver_suspended";
+
+export function getDriverAuthState(): DriverAuthState {
+  if (!isDriverIdentityProvisioned()) {
+    if (!driverIdentityIssue) {
+      return "not_provisioned";
+    }
+    if (
+      driverIdentityIssue.includes("停權") ||
+      driverIdentityIssue.includes("證件")
+    ) {
+      return "driver_suspended";
+    }
+    if (
+      driverIdentityIssue.includes("失效") ||
+      driverIdentityIssue.includes("過期")
+    ) {
+      return "session_expired";
+    }
+    if (
+      driverIdentityIssue.includes("撤銷") ||
+      driverIdentityIssue.includes("退役") ||
+      driverIdentityIssue.includes("重複使用")
+    ) {
+      return "device_revoked";
+    }
+    return "not_provisioned";
+  }
+  return "provisioned";
+}
+
+export function getProvisionedSession(): DriverDeviceProvisioningSession | null {
+  return provisionedSession;
+}
+
 export function getDriverIdentityIssue(): string | null {
   return driverIdentityIssue;
 }
@@ -431,6 +471,13 @@ export async function registerDriverDevice(
   await persistSession(session);
   hydrated = true;
   return session;
+}
+
+export async function rebindDriverDevice(
+  registrationCode: string,
+  deviceLabel?: string,
+): Promise<DriverDeviceProvisioningSession> {
+  return registerDriverDevice(registrationCode, deviceLabel);
 }
 
 export async function clearDriverProvisioning(): Promise<void> {
