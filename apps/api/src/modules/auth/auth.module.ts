@@ -6,6 +6,7 @@ import { IdentityModule } from "../identity/identity.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { AuthController } from "./auth.controller";
+import { BreakGlassController } from "./break-glass.controller";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adapter";
@@ -17,7 +18,7 @@ import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adap
     RegulatoryRegistryModule,
     IdentityModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, BreakGlassController],
   providers: [
     JwtAuthService,
     DriverDeviceSessionService,
