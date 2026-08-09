@@ -170,7 +170,7 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
   },
   {
     eventType: "access_review.campaign_created",
-    eventFamily: "governance",
+    eventFamily: "policy",
     description: "New privileged access review campaign created.",
     privileged: true,
     tenantScoped: true,
@@ -178,7 +178,7 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
   },
   {
     eventType: "access_review.decision_made",
-    eventFamily: "governance",
+    eventFamily: "policy",
     description:
       "Privileged access review decision (certify, reduce, remove, defer) executed with evidence.",
     privileged: true,
@@ -187,7 +187,7 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
   },
   {
     eventType: "access_review.overdue_alert",
-    eventFamily: "governance",
+    eventFamily: "policy",
     description:
       "Access review campaign overdue alert triggered and policy remediation applied.",
     privileged: true,

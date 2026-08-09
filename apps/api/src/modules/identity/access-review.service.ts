@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -24,20 +23,20 @@ import { SecurityEventsService } from "../security-events/security-events.servic
 import { IdentityRepository } from "./identity.repository";
 
 export interface AccessReviewCampaignQuery {
-  realm?: string;
-  tenantId?: string;
-  status?: string;
-  limit?: number;
+  realm?: string | undefined;
+  tenantId?: string | undefined;
+  status?: string | undefined;
+  limit?: number | undefined;
 }
 
 export interface AccessReviewEvidenceQuery {
-  campaignId?: string;
-  reviewId?: string;
-  actorPrincipalId?: string;
-  targetPrincipalId?: string;
-  tenantId?: string;
-  decision?: string;
-  limit?: number;
+  campaignId?: string | undefined;
+  reviewId?: string | undefined;
+  actorPrincipalId?: string | undefined;
+  targetPrincipalId?: string | undefined;
+  tenantId?: string | undefined;
+  decision?: string | undefined;
+  limit?: number | undefined;
 }
 
 type PersistedCampaignRow = {
@@ -114,7 +113,7 @@ export class AccessReviewService {
   ) {}
 
   private isEnabled(): boolean {
-    return this.databaseService?.isConnected() ?? false;
+    return this.databaseService?.isEnabled() ?? false;
   }
 
   /**
@@ -177,7 +176,7 @@ export class AccessReviewService {
       if (tenantId && m.tenantId !== tenantId) {
         return false;
       }
-      if (m.membershipStatus !== "active") {
+      if (m.status !== "active") {
         return false;
       }
       return true;
@@ -296,24 +295,14 @@ export class AccessReviewService {
     if (this.securityEventsService) {
       this.securityEventsService.recordEvent({
         eventType: "access_review.campaign_created",
-        eventFamily: "governance",
+        eventFamily: "policy",
         outcome: "success",
-        actor: actor
-          ? {
-              actorType: actor.actorType || "user",
-              actorId: actor.actorId || "system",
-              tenantId: actor.tenantId,
-            }
-          : undefined,
-        resource: {
-          resourceType: "access_review_campaign",
-          resourceId: campaignId,
-        },
-        payload: {
-          title: campaign.title,
-          deadlineAt: campaign.deadlineAt,
-          itemCount: items.length,
-        },
+        actorId: actor?.actorId || "system",
+        actorType: actor?.actorType || "user",
+        tenantId: actor?.tenantId ?? null,
+        targetType: "access_review_campaign",
+        targetId: campaignId,
+        reasonCode: "CAMPAIGN_CREATION",
       });
     }
 
@@ -344,8 +333,8 @@ export class AccessReviewService {
           `SELECT * FROM iam.access_review_campaigns WHERE campaign_id = $1`,
           [campaignId],
         );
-        if (campRes.rows.length > 0) {
-          const row = campRes.rows[0];
+        const row = campRes.rows[0];
+        if (row) {
           campaign = (row.record as AccessReviewCampaignRecord) || {
             campaignId: row.campaign_id,
             title: row.title,
@@ -364,28 +353,32 @@ export class AccessReviewService {
             `SELECT * FROM iam.access_review_items WHERE campaign_id = $1`,
             [campaignId],
           );
-          items = itemsRes.rows.map(
-            (r) =>
-              (r.record as AccessReviewItemRecord) || {
-                reviewId: r.review_id,
-                campaignId: r.campaign_id,
-                targetPrincipalId: r.target_principal_id,
-                membershipId: r.membership_id,
-                roleBindingId: r.role_binding_id,
-                tenantId: r.tenant_id,
-                roleCode: r.role_code,
-                status: r.status as any,
-                decision: r.decision as any,
-                reducedRoleCode: r.reduced_role_code,
-                decisionByPrincipalId: r.decision_by_principal_id,
-                decidedAt: r.decided_at,
-                remediatedAt: r.remediated_at,
-                sessionRevoked: r.session_revoked,
-                version: Number(r.version),
-                createdAt: r.created_at,
-                updatedAt: r.updated_at,
-              },
-          );
+          items = itemsRes.rows
+            .map((r) => {
+              if (!r) return null;
+              return (
+                (r.record as AccessReviewItemRecord) || {
+                  reviewId: r.review_id,
+                  campaignId: r.campaign_id,
+                  targetPrincipalId: r.target_principal_id,
+                  membershipId: r.membership_id,
+                  roleBindingId: r.role_binding_id,
+                  tenantId: r.tenant_id,
+                  roleCode: r.role_code,
+                  status: r.status as any,
+                  decision: r.decision as any,
+                  reducedRoleCode: r.reduced_role_code,
+                  decisionByPrincipalId: r.decision_by_principal_id,
+                  decidedAt: r.decided_at,
+                  remediatedAt: r.remediated_at,
+                  sessionRevoked: r.session_revoked,
+                  version: Number(r.version),
+                  createdAt: r.created_at,
+                  updatedAt: r.updated_at,
+                }
+              );
+            })
+            .filter((i): i is AccessReviewItemRecord => i !== null);
         }
       } finally {
         client.release();
@@ -501,8 +494,8 @@ export class AccessReviewService {
           `SELECT * FROM iam.access_review_items WHERE review_id = $1`,
           [reviewId],
         );
-        if (itemRes.rows.length > 0) {
-          const r = itemRes.rows[0];
+        const r = itemRes.rows[0];
+        if (r) {
           item = (r.record as AccessReviewItemRecord) || {
             reviewId: r.review_id,
             campaignId: r.campaign_id,
@@ -526,8 +519,8 @@ export class AccessReviewService {
             `SELECT * FROM iam.access_review_campaigns WHERE campaign_id = $1`,
             [item.campaignId],
           );
-          if (campRes.rows.length > 0) {
-            const cr = campRes.rows[0];
+          const cr = campRes.rows[0];
+          if (cr) {
             campaign = (cr.record as AccessReviewCampaignRecord) || {
               campaignId: cr.campaign_id,
               title: cr.title,
@@ -608,7 +601,7 @@ export class AccessReviewService {
       reducedRoleCode: reducedRoleCode || item.reducedRoleCode || null,
       decisionByPrincipalId: actorId,
       decidedAt: now,
-      remediatedAt: decisionKey === "remove" || decisionKey === "revoke" || decisionKey === "reduce" ? now : item.remediatedAt,
+      remediatedAt: (decisionKey === "remove" || decisionKey === "revoke" || decisionKey === "reduce" ? now : item.remediatedAt) ?? null,
       sessionRevoked: item.sessionRevoked || sessionRevoked,
       version: item.version + 1,
       updatedAt: now,
@@ -629,13 +622,13 @@ export class AccessReviewService {
       reviewId: item.reviewId,
       actorPrincipalId: actorId,
       targetPrincipalId: item.targetPrincipalId,
-      tenantId: item.tenantId,
+      tenantId: item.tenantId ?? null,
       decision: decisionKey,
       beforeState,
       afterState,
       sessionRevoked: updatedItem.sessionRevoked,
       reasonCode: command.mutation.reasonCode,
-      reasonText: command.mutation.note || null,
+      reasonText: command.mutation.note ?? null,
       createdAt: now,
     };
 
@@ -733,25 +726,14 @@ export class AccessReviewService {
     if (this.securityEventsService) {
       this.securityEventsService.recordEvent({
         eventType: "access_review.decision_made",
-        eventFamily: "governance",
+        eventFamily: "policy",
         outcome: "success",
-        actor: actor
-          ? {
-              actorType: actor.actorType || "user",
-              actorId: actor.actorId || "reviewer",
-              tenantId: actor.tenantId,
-            }
-          : undefined,
-        resource: {
-          resourceType: "access_review_item",
-          resourceId: reviewId,
-        },
-        payload: {
-          campaignId: item.campaignId,
-          targetPrincipalId: item.targetPrincipalId,
-          decision: decisionKey,
-          sessionRevoked: updatedItem.sessionRevoked,
-        },
+        actorId: actor?.actorId || "reviewer",
+        actorType: actor?.actorType || "user",
+        tenantId: actor?.tenantId ?? null,
+        targetType: "access_review_item",
+        targetId: reviewId,
+        reasonCode: command.mutation.reasonCode,
       });
     }
 
@@ -809,7 +791,7 @@ export class AccessReviewService {
                   reviewId,
                   actorPrincipalId: "system_overdue_sweep",
                   targetPrincipalId: item.targetPrincipalId,
-                  tenantId: item.tenantId,
+                  tenantId: item.tenantId ?? null,
                   decision: "auto_revoke_overdue",
                   beforeState: { status: "pending" },
                   afterState: { status: "removed", sessionRevoked: true },
@@ -827,17 +809,13 @@ export class AccessReviewService {
           if (this.securityEventsService) {
             this.securityEventsService.recordEvent({
               eventType: "access_review.overdue_alert",
-              eventFamily: "governance",
+              eventFamily: "policy",
               outcome: "success",
-              resource: {
-                resourceType: "access_review_campaign",
-                resourceId: campaignId,
-              },
-              payload: {
-                title: campaign.title,
-                deadlineAt: campaign.deadlineAt,
-                overduePolicy: campaign.overduePolicy,
-              },
+              actorId: "system_overdue_sweep",
+              actorType: "system",
+              targetType: "access_review_campaign",
+              targetId: campaignId,
+              reasonCode: "CAMPAIGN_OVERDUE",
             });
           }
         }
@@ -948,17 +926,13 @@ export class AccessReviewService {
         if (this.securityEventsService) {
           this.securityEventsService.recordEvent({
             eventType: "access_review.overdue_alert",
-            eventFamily: "governance",
+            eventFamily: "policy",
             outcome: "success",
-            resource: {
-              resourceType: "access_review_campaign",
-              resourceId: campaignId,
-            },
-            payload: {
-              title: row.title,
-              deadlineAt: row.deadline_at,
-              overduePolicy: row.overdue_policy,
-            },
+            actorId: "system_overdue_sweep",
+            actorType: "system",
+            targetType: "access_review_campaign",
+            targetId: campaignId,
+            reasonCode: "CAMPAIGN_OVERDUE",
           });
         }
       }
