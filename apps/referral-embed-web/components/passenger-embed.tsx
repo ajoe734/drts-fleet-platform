@@ -565,42 +565,6 @@ function DetailRow({
   );
 }
 
-function Field({
-  theme,
-  label,
-  icon,
-  value,
-}: {
-  theme: ReturnType<typeof buildEmbedTheme>;
-  label: string;
-  icon: string;
-  value: string;
-}) {
-  return (
-    <div style={{ display: "grid", gap: 6 }}>
-      <div style={{ fontSize: 11.5, color: theme.muted, fontWeight: 600 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          minHeight: 42,
-          borderRadius: 12,
-          padding: "0 12px",
-          background: theme.surface,
-          border: `1px solid ${theme.line}`,
-          color: theme.ink2,
-        }}
-      >
-        <Icon name={icon} size={15} />
-        <span style={{ fontSize: 14, color: theme.ink }}>{value}</span>
-      </div>
-    </div>
-  );
-}
-
 function EditableField({
   theme,
   label,
