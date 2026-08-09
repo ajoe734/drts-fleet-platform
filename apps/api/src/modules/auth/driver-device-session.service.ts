@@ -244,6 +244,30 @@ export class DriverDeviceSessionService {
     });
 
     if (!rotated.success || !rotated.session || !rotated.family) {
+      if (rotated.reason === "REUSE_DETECTED" || rotated.reason === "COMPROMISED") {
+        throw new ApiRequestError(
+          401,
+          "DRIVER_REFRESH_REUSE_DETECTED",
+          "Security exception: refresh token reuse detected for driver device.",
+          { deviceId },
+        );
+      }
+      if (rotated.reason === "EXPIRED") {
+        throw new ApiRequestError(
+          401,
+          "DRIVER_SESSION_EXPIRED",
+          "Driver device session has expired.",
+          { deviceId },
+        );
+      }
+      if (rotated.session?.revokeReason === "DEVICE_REBOUND") {
+        throw new ApiRequestError(
+          401,
+          "DRIVER_DEVICE_REBOUND",
+          "Driver device has been rebound to another account.",
+          { deviceId },
+        );
+      }
       throw new ApiRequestError(
         401,
         "DRIVER_DEVICE_REFRESH_INVALID",
@@ -257,6 +281,33 @@ export class DriverDeviceSessionService {
       (sessionRecord.deviceSummary as { deviceId?: string | null } | undefined)
         ?.deviceId ?? null;
     if (sessionDeviceId !== deviceId || sessionRecord.status !== "active") {
+      if (sessionRecord.revokeReason === "DEVICE_REBOUND") {
+        throw new ApiRequestError(
+          401,
+          "DRIVER_DEVICE_REBOUND",
+          "Driver device has been rebound to another account.",
+          { deviceId },
+        );
+      }
+      if (
+        sessionRecord.revokeReason === "REFRESH_TOKEN_REUSE_DETECTED" ||
+        sessionRecord.status === "compromised"
+      ) {
+        throw new ApiRequestError(
+          401,
+          "DRIVER_REFRESH_REUSE_DETECTED",
+          "Security exception: refresh token reuse detected for driver device.",
+          { deviceId },
+        );
+      }
+      if (sessionRecord.status === "expired") {
+        throw new ApiRequestError(
+          401,
+          "DRIVER_SESSION_EXPIRED",
+          "Driver device session has expired.",
+          { deviceId },
+        );
+      }
       throw new ApiRequestError(
         401,
         "DRIVER_DEVICE_REFRESH_INVALID",
@@ -483,6 +534,48 @@ export class DriverDeviceSessionService {
     driverId: string | null | undefined,
     route: string,
   ) {
+    const resolvedBindingId = bindingId?.trim();
+    if (resolvedBindingId) {
+      const session = await this.identityRepo.getSession(resolvedBindingId);
+      if (session && session.status !== "active") {
+        if (session.revokeReason === "DEVICE_REBOUND") {
+          throw new ApiRequestError(
+            401,
+            "DRIVER_DEVICE_REBOUND",
+            "Driver device has been rebound to another account.",
+            { route, bindingId: resolvedBindingId, deviceId: deviceId ?? null },
+          );
+        }
+        if (
+          session.revokeReason === "REFRESH_TOKEN_REUSE_DETECTED" ||
+          session.status === "compromised"
+        ) {
+          throw new ApiRequestError(
+            401,
+            "DRIVER_REFRESH_REUSE_DETECTED",
+            "Security exception: refresh token reuse detected for driver device.",
+            { route, bindingId: resolvedBindingId, deviceId: deviceId ?? null },
+          );
+        }
+        if (session.status === "expired") {
+          throw new ApiRequestError(
+            401,
+            "DRIVER_SESSION_EXPIRED",
+            "Driver device session has expired.",
+            { route, bindingId: resolvedBindingId, deviceId: deviceId ?? null },
+          );
+        }
+        if (session.status === "revoked") {
+          throw new ApiRequestError(
+            401,
+            "DRIVER_AUTH_REVOKED",
+            "Driver device session has been revoked.",
+            { route, bindingId: resolvedBindingId, deviceId: deviceId ?? null },
+          );
+        }
+      }
+    }
+
     if (!(await this.isBindingActive(bindingId, deviceId, driverId))) {
       throw new ApiRequestError(
         401,

@@ -880,6 +880,19 @@ export interface PartnerBootstrapSession {
   identity: IdentityContext;
 }
 
+export const DRIVER_MOBILE_AUTH_STATES = [
+  "not_provisioned",
+  "register",
+  "expired",
+  "revoked",
+  "suspended",
+  "reuse",
+  "rebind",
+] as const;
+
+export type DriverMobileAuthState =
+  (typeof DRIVER_MOBILE_AUTH_STATES)[number];
+
 export interface RegisterDriverDeviceCommand {
   registrationCode: string;
   deviceId: string;

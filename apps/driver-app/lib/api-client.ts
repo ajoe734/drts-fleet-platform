@@ -16,6 +16,7 @@ import {
 import type {
   DriverCompleteTaskCommand,
   DriverDeviceProvisioningSession,
+  DriverMobileAuthState,
   DriverTaskRecord,
   ForwardedDriverActionResponse,
 } from "@drts/contracts";
@@ -67,13 +68,33 @@ function createLocalId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function createSessionRecoveringApiClient(target: ApiClient): ApiClient {
+  return new Proxy(target, {
+    get(targetObj, prop, receiver) {
+      const orig = Reflect.get(targetObj, prop, receiver);
+      if (typeof orig === "function") {
+        return async function (this: unknown, ...args: unknown[]) {
+          try {
+            return await orig.apply(targetObj, args);
+          } catch (error) {
+            await recoverDriverSessionFromApiError(error);
+            throw error;
+          }
+        };
+      }
+      return orig;
+    },
+  });
+}
+
 function applySession(session: DriverDeviceProvisioningSession | null) {
   provisionedSession = session;
-  client = session
+  const rawClient = session
     ? createDriverBearerClient(API_URL, session.accessToken)
     : DEV_DRIVER_ID
       ? createDriverClient(API_URL, DEV_DRIVER_ID)
       : null;
+  client = rawClient ? createSessionRecoveringApiClient(rawClient) : null;
 }
 
 function setDriverIdentityIssue(message: string | null) {
@@ -136,6 +157,9 @@ function isDriverSessionAuthFailure(error: unknown): boolean {
       parsed.code === "DRIVER_AUTH_REVOKED" ||
       parsed.code === "DRIVER_CERT_INVALID" ||
       parsed.code === "DRIVER_DEVICE_SESSION_INVALID" ||
+      parsed.code === "DRIVER_REFRESH_REUSE_DETECTED" ||
+      parsed.code === "DRIVER_DEVICE_REBOUND" ||
+      parsed.code === "DRIVER_SESSION_EXPIRED" ||
       parsed.code === "JWT_INVALID"
     );
   }
@@ -155,9 +179,70 @@ function getDriverIdentityIssueMessage(error: unknown): string {
       return "此司機帳號已退役或撤銷，請聯絡平台管理員。";
     case "DRIVER_CERT_INVALID":
       return "司機證件狀態無效，請聯絡平台管理員重新啟用。";
+    case "DRIVER_REFRESH_REUSE_DETECTED":
+      return "偵測到安全性例外（Session 重複使用），金鑰已自動清除，請重新登入綁定。";
+    case "DRIVER_DEVICE_REBOUND":
+      return "此裝置已被重新綁定至其他帳號，請重新輸入註冊碼。";
+    case "DRIVER_SESSION_EXPIRED":
+      return "裝置登入 Session 已過期，請重新登入。";
+    case "JWT_INVALID":
+      return "登入憑證無效，請重新登入。";
     default:
       return parsed.message ?? "裝置登入已失效，請重新註冊。";
   }
+}
+
+export function getDriverIdentityAuthState(
+  error?: unknown,
+  submitting?: boolean,
+): DriverMobileAuthState {
+  if (submitting) {
+    return "register";
+  }
+
+  if (error) {
+    const parsed = parseApiError(error);
+    switch (parsed.code) {
+      case "DRIVER_AUTH_SUSPENDED":
+        return "suspended";
+      case "DRIVER_AUTH_REVOKED":
+      case "DRIVER_CERT_INVALID":
+      case "DRIVER_DEVICE_SESSION_INVALID":
+      case "DRIVER_DEVICE_REFRESH_INVALID":
+        return "revoked";
+      case "DRIVER_REFRESH_REUSE_DETECTED":
+        return "reuse";
+      case "DRIVER_DEVICE_REBOUND":
+        return "rebind";
+      case "DRIVER_SESSION_EXPIRED":
+      case "JWT_INVALID":
+        return "expired";
+    }
+  }
+
+  if (driverIdentityIssue) {
+    if (driverIdentityIssue.includes("停權")) return "suspended";
+    if (
+      driverIdentityIssue.includes("撤銷") ||
+      driverIdentityIssue.includes("退役")
+    ) {
+      return "revoked";
+    }
+    if (
+      driverIdentityIssue.includes("重複使用") ||
+      driverIdentityIssue.includes("安全性例外")
+    ) {
+      return "reuse";
+    }
+    if (driverIdentityIssue.includes("重新綁定")) return "rebind";
+    return "expired";
+  }
+
+  if (!isDriverIdentityProvisioned()) {
+    return "not_provisioned";
+  }
+
+  return "register";
 }
 
 function isTerminalDriverCompletionError(error: unknown): boolean {

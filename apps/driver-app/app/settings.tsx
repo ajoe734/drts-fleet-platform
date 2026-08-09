@@ -25,6 +25,7 @@ import {
   getDriverClient,
   getDriverId,
   clearDriverProvisioning,
+  revokeDriverDeviceBinding,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import {
@@ -400,13 +401,17 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert("登出裝置", "登出後需要重新完成裝置配置，確定要繼續嗎？", [
+    Alert.alert("登出裝置", "登出後將撤銷此裝置綁定並清除金鑰，確定要繼續嗎？", [
       { text: "取消", style: "cancel" },
       {
         text: "登出",
         style: "destructive",
         onPress: async () => {
-          await clearDriverProvisioning();
+          try {
+            await revokeDriverDeviceBinding();
+          } catch {
+            await clearDriverProvisioning();
+          }
           router.replace("/onboarding");
         },
       },
