@@ -1850,6 +1850,8 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           status: "active",
           invitedByPrincipalId: null,
           invitationId: null,
+          sourceRef: "test",
+          scopeRef: "ten_proj",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         },
