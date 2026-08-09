@@ -112,3 +112,14 @@ a PR.  Do not resume on `codex/iam-ui-ten-001`, `gemini2/iam-ui-ten-001`, or
 No application code was changed or certified in this helper task.  This commit
 documents the safe replay boundary and preserves the blocked parent until its
 missing canonical inputs exist.
+
+## Helper Delivery Evidence
+
+- Commit: `e79e2f3b34e7cc30b8e14ab7014314854c4ab1b3`
+  (`IAM-UI-TEN-001-UNBLOCK-HISTORY-REPAIR: document clean replay path`)
+- Push: normal non-force push to
+  `origin/codex/iam-ui-ten-001-unblock-history-repair`
+- PR: [#1353](https://github.com/ajoe734/drts-fleet-platform/pull/1353), open
+  against `dev`, with head `e79e2f3b34e7cc30b8e14ab7014314854c4ab1b3` at audit
+  time.  This is branch-pushed evidence only; it does not claim a merge or a
+  dev deployment.
