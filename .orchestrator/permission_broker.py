@@ -121,6 +121,15 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git tag -l(\s|$)"),
     re.compile(r"^git config --get(\s|$)"),
     re.compile(r"^git push(\s|$)"),
+    # Read-only agent-CLI queries. Asking which account a lane is logged in as,
+    # or which version it runs, changes nothing — but every such check used to
+    # become an approval request that no one drains, so the call hung until the
+    # harness dropped it. Only the query verbs are listed; `codex login`,
+    # `codex logout` and `claude setup-token` mutate credentials and still need
+    # review. `CODEX_HOME=… ` is allowed as a prefix because that is how the
+    # codex2 lane is addressed.
+    re.compile(r"^(CODEX_HOME=\S+\s+)?codex (login (status|--help)|logout --help|--version|--help)(\s|$)"),
+    re.compile(r"^(claude|agy|copilot) --version(\s|$)"),
     # Read-only observability. A worker that operates a service and a cloud
     # project cannot see either of them: every `systemctl show`, `journalctl`
     # and `gcloud … list/describe` became an approval request and a chairman
