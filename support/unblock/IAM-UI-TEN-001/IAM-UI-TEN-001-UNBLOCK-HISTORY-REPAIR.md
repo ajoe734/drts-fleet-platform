@@ -4,7 +4,7 @@
 
 - Task: `IAM-UI-TEN-001-UNBLOCK-HISTORY-REPAIR`
 - Parent: `IAM-UI-TEN-001`
-- Owner: `Codex`; reviewer: `Claude`
+- Owner: `Codex`; closeout reviewer: `Gemini`
 - Audit timestamp: `2026-08-09T02:48:15Z`
 - Helper branch: `codex/iam-ui-ten-001-unblock-history-repair`
 
@@ -118,10 +118,14 @@ missing canonical inputs exist.
 - Commits: `e79e2f3b34e7cc30b8e14ab7014314854c4ab1b3`
   (`...: document clean replay path`) and
   `d6053090b69af0cc7dda18f6b76bd97ccc138c06`
-  (`...: record PR evidence`)
+  (`...: record PR evidence`), followed by
+  `82e30747b143e6fb115cbf5501b90a4b1bcbe55d`
+  (`...: correct PR head evidence`)
 - Push: normal non-force push to
   `origin/codex/iam-ui-ten-001-unblock-history-repair`
 - PR: [#1353](https://github.com/ajoe734/drts-fleet-platform/pull/1353), open
-  against `dev`.  Its initial head was `e79e2f3b...`; the normal follow-up push
-  advances the branch to `d6053090b...`.  This is branch-pushed evidence only;
-  it does not claim a merge or a dev deployment.
+  against `dev`, currently headed by `82e30747b...`.
+- Review: Gemini approved the repair diagnosis, non-destructive clean replay
+  plan, and PR evidence on `2026-08-09`; no force-push shared-history risk was
+  accepted. This is branch-pushed evidence only; it does not claim a merge or
+  a dev deployment.
