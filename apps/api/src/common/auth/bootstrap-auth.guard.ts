@@ -24,6 +24,7 @@ import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { JwtAuthService } from "./jwt-auth.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import { SecurityEventsService } from "../../modules/security-events/security-events.service";
 
 function asHeaderRecord(
   headers: unknown,
@@ -158,6 +159,7 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
+    @Optional() private readonly securityEventsService?: SecurityEventsService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -321,6 +323,34 @@ export class BootstrapAuthGuard implements CanActivate {
 
             const identity = this.jwtAuthService!.toRequestIdentity(payload);
             request.identity = identity;
+            if (identity.breakGlassGrantId) {
+              this.securityEventsService?.recordEvent({
+                actorId: identity.actorId,
+                actorType: identity.actorType,
+                subjectId: identity.principalId ?? identity.actorId,
+                realm: identity.realm,
+                tenantId: identity.tenantId,
+                partnerId: identity.partnerId ?? null,
+                eventType: "break_glass.used",
+                eventFamily: "break_glass",
+                outcome: "success",
+                severity: "critical",
+                targetType: "break_glass_grant",
+                targetId: identity.breakGlassGrantId,
+                sessionId: identity.sessionId ?? null,
+                tokenId: identity.tokenId ?? null,
+                authMethods: identity.amr ?? [],
+                sourceIp: null,
+                userAgent: null,
+                requestId: identity.requestId,
+                traceId: null,
+                reasonCode: "BREAK_GLASS_USE",
+                approvalId: null,
+                beforeSummary: null,
+                afterSummary: null,
+                maskedContext: { grantId: identity.breakGlassGrantId },
+              });
+            }
             if (policy) {
               try {
                 this.assertRealmAllowed(

@@ -82,6 +82,7 @@ export class BreakGlassController {
         authTime: identity.authTime ?? new Date().toISOString(),
         amr: [...(identity.amr ?? []), "break_glass"],
         acr: identity.acr ?? "aal2",
+        breakGlassGrantId: grant.grantId,
       },
     );
     await this.breakGlassService.bindSession(grant.grantId, issued.sessionId);
