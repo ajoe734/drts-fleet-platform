@@ -50,10 +50,12 @@ import {
   type SafetyOperatorTakeoverDraftAudit,
 } from "@/lib/safety-operator-takeover-draft";
 import {
+  formatDriverError,
   getDriverClient,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
 } from "@/lib/api-client";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 
 type SafetyOperatorView =
   | "provisioning"
@@ -116,11 +118,7 @@ function formatAt(value: string | null) {
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return fallback;
+  return formatDriverError(error, fallback);
 }
 
 function formatQueueKindLabel(kind: SafetyOperatorQueueEntry["kind"]): string {
@@ -755,7 +753,10 @@ export default function SafetyOperatorScreen() {
           : "接管回報已送出並取得伺服器 receipt。",
       );
     } catch (error) {
-      await recoverDriverSessionFromApiError(error);
+      if (await recoverDriverSessionFromApiError(error)) {
+        resetDriverAppToOnboarding(router);
+        return;
+      }
       await markSafetyOperatorQueueFailed(
         queuedReport.command.clientGeneratedReportId,
         getErrorMessage(error, "接管回報同步失敗，已保留在離線佇列。"),
@@ -778,7 +779,10 @@ export default function SafetyOperatorScreen() {
       });
       setSubmissionState("行前檢查已同步。");
     } catch (error) {
-      await recoverDriverSessionFromApiError(error);
+      if (await recoverDriverSessionFromApiError(error)) {
+        resetDriverAppToOnboarding(router);
+        return;
+      }
       await markSafetyOperatorQueueFailed(
         clientGeneratedId,
         getErrorMessage(error, "行前檢查同步失敗，已保留於佇列。"),
@@ -814,7 +818,10 @@ export default function SafetyOperatorScreen() {
       });
       setSubmissionState("交班紀錄已同步。");
     } catch (error) {
-      await recoverDriverSessionFromApiError(error);
+      if (await recoverDriverSessionFromApiError(error)) {
+        resetDriverAppToOnboarding(router);
+        return;
+      }
       await markSafetyOperatorQueueFailed(
         clientGeneratedId,
         getErrorMessage(error, "交班同步失敗，已保留於佇列。"),

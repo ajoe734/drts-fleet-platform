@@ -6,14 +6,32 @@ import type {
   DriverLocationHeartbeatEnvelope,
 } from "@drts/contracts";
 
-const recordDriverLocationBatch = vi.fn<
-  (request: DriverLocationHeartbeatBatchRequest) => Promise<DriverLocationHeartbeatBatchResponse>
->();
-const getDriverDeviceId = vi.fn<() => Promise<string>>();
-const getDriverId = vi.fn<() => string>();
-const recoverDriverSessionFromApiError = vi.fn<
-  (error: unknown) => Promise<boolean>
->();
+const {
+  recordDriverLocationBatch,
+  getDriverDeviceId,
+  getDriverId,
+  recoverDriverSessionFromApiError,
+  formatDriverError,
+} = vi.hoisted(() => ({
+  recordDriverLocationBatch: vi.fn<
+    (request: DriverLocationHeartbeatBatchRequest) => Promise<DriverLocationHeartbeatBatchResponse>
+  >(),
+  getDriverDeviceId: vi.fn<() => Promise<string>>(),
+  getDriverId: vi.fn<() => string>(),
+  recoverDriverSessionFromApiError: vi.fn<
+    (error: unknown) => Promise<boolean>
+  >(),
+  formatDriverError: vi.fn((err: unknown, fallback: string) => {
+    if (err instanceof Error && err.message) {
+      return err.message
+        .replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
+        .replace(/eyJ[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.?[A-Za-z0-9\-_=]*/g, "[REDACTED_JWT]")
+        .replace(/(["']?accessToken["']?\s*:\s*["'])([^"']+)(["'])/gi, "$1[REDACTED]$3")
+        .replace(/(accessToken=)([^&\s"']+)/gi, "$1[REDACTED]");
+    }
+    return fallback;
+  }),
+}));
 
 vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
@@ -22,6 +40,7 @@ vi.mock("@/lib/api-client", () => ({
   getDriverDeviceId,
   getDriverId,
   recoverDriverSessionFromApiError,
+  formatDriverError,
 }));
 
 vi.mock("expo-sqlite", () => ({
@@ -330,6 +349,42 @@ describe("driver location offline queue", () => {
     await queueModule.flushDriverLocationQueue();
     expect(recordDriverLocationBatch).toHaveBeenCalledTimes(2);
     expect(store.snapshot()).toHaveLength(0);
+  });
+
+  it("sanitizes sensitive tokens in last_error when location batch fails", async () => {
+    const queueModule = await import("../../lib/driver-location-offline-queue");
+    getDriverDeviceId.mockResolvedValue("device-001");
+    getDriverId.mockReturnValue("DRV-001");
+
+    const store = new MemoryQueueStore();
+    const now = new Date("2026-06-20T08:00:00.000Z");
+
+    await queueModule.__resetDriverLocationOfflineQueueForTests();
+    queueModule.__setDriverLocationQueueStoreFactoryForTests(() => store);
+    queueModule.__setDriverLocationQueueNowProviderForTests(() => now);
+
+    await queueModule.enqueueDriverLocationEvent({
+      taskId: "task-001",
+      recordedAt: now.toISOString(),
+      lat: 25.03,
+      lng: 121.56,
+      accuracyM: 5,
+      workState: "on_trip",
+      appState: "foreground",
+      transportMode: "foreground",
+      networkType: "cellular",
+    });
+
+    recordDriverLocationBatch.mockRejectedValueOnce(
+      new Error("Batch failed Bearer eyJhbGciOiJIUzI1NiJ9.test and accessToken=secret-token-123"),
+    );
+
+    await queueModule.flushDriverLocationQueue();
+    const lastErr = store.snapshot()[0]?.lastError;
+    expect(lastErr).toBeTypeOf("string");
+    expect(lastErr ?? "").not.toContain("secret-token-123");
+    expect(lastErr ?? "").not.toContain("eyJhbGciOiJIUzI1NiJ9");
+    expect(lastErr ?? "").toContain("[REDACTED]");
   });
 
   it("compresses oversized queues while preserving key state changes and minute samples", async () => {

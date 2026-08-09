@@ -22,11 +22,14 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
 import {
+  formatDriverError,
   getDriverClient,
   getDriverId,
-  clearDriverProvisioning,
+  recoverDriverSessionFromApiError,
+  revokeDriverDeviceBinding,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
   DEFAULT_PROFILE_VALUES,
   DEFAULT_SETTINGS_VALUES,
@@ -47,10 +50,7 @@ import {
 import { driverSaveStatusLabels, driverStrings } from "@/lib/strings";
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return "要求失敗";
+  return formatDriverError(error, "要求失敗");
 }
 
 function formatSectionList(labels: string[]): string {
@@ -221,9 +221,22 @@ export default function SettingsScreen() {
         client.getDriverProfile(),
       ]);
 
-      if (!isActive) {
+      if (
+        settingsResult.status === "rejected" &&
+        (await recoverDriverSessionFromApiError(settingsResult.reason))
+      ) {
+        resetDriverAppToOnboarding(router);
         return;
       }
+      if (
+        profileResult.status === "rejected" &&
+        (await recoverDriverSessionFromApiError(profileResult.reason))
+      ) {
+        resetDriverAppToOnboarding(router);
+        return;
+      }
+
+      if (!isActive) return;
 
       const failures: string[] = [];
 
@@ -353,6 +366,16 @@ export default function SettingsScreen() {
 
     try {
       const results = await Promise.allSettled(tasks);
+      for (const entry of results) {
+        if (
+          entry.status === "rejected" &&
+          (await recoverDriverSessionFromApiError(entry.reason))
+        ) {
+          resetDriverAppToOnboarding(router);
+          return;
+        }
+      }
+
       const saved: string[] = [];
       const failed: string[] = [];
 
@@ -406,7 +429,7 @@ export default function SettingsScreen() {
         text: "登出",
         style: "destructive",
         onPress: async () => {
-          await clearDriverProvisioning();
+          await revokeDriverDeviceBinding();
           router.replace("/onboarding");
         },
       },

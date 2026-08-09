@@ -30,7 +30,11 @@ import {
   Shell,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
-import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
+import {
+  formatDriverError,
+  getDriverClient,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
 import {
   canReceiveOrders,
   deriveBlockingReasons,
@@ -70,10 +74,7 @@ type ManualReauthState = {
 };
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return driverStrings.common.requestFailed;
+  return formatDriverError(error, driverStrings.common.requestFailed);
 }
 
 function isPermissionDeniedError(error: string | null): boolean {

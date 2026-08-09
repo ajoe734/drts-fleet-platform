@@ -6,6 +6,7 @@ import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import type { TaskManagerTaskBody } from "expo-task-manager";
 
+import { formatDriverError, sanitizeLogMessage } from "@/lib/api-client";
 import {
   enqueueDriverLocationEvent,
   flushDriverLocationQueue,
@@ -260,7 +261,10 @@ function queueHeartbeat(
       await flushDriverLocationQueue();
     })
     .catch((error: unknown) => {
-      console.error("Driver location heartbeat queueing failed", error);
+      console.error(
+        "Driver location heartbeat queueing failed",
+        formatDriverError(error, "Queueing failed"),
+      );
     });
 }
 
@@ -301,7 +305,10 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
       locations?: Location.LocationObject[];
     }>) => {
       if (error) {
-        console.error("Driver location task error", error.message);
+        console.error(
+          "Driver location task error",
+          sanitizeLogMessage(error.message) ?? formatDriverError(error, "Task error"),
+        );
         return;
       }
 
@@ -478,7 +485,7 @@ async function applyHeartbeatTracking(
     }
     console.warn(
       "[driver-location-heartbeat] tracking blocked",
-      permissionResult.reason,
+      sanitizeLogMessage(permissionResult.reason) ?? permissionResult.reason,
     );
     return permissionResult;
   }

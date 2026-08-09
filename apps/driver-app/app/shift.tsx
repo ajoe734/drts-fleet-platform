@@ -20,6 +20,7 @@ import {
   getPlatformHealthSeverity,
 } from "@/components/platform-status-card";
 import {
+  formatDriverError,
   getDriverClient,
   getDriverId,
   isDriverIdentityProvisioned,
@@ -105,11 +106,7 @@ function formatOdometer(value: number | null) {
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return fallback;
+  return formatDriverError(error, fallback);
 }
 
 function getElapsedMinutes(shift: ShiftRecord, now: number) {
