@@ -6,9 +6,18 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
+import {
+  StatementArtifactDownloadButton,
+  StatementCsvExportButton,
+  TripArtifactDownloadButton,
+} from "@/components/statement-actions";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
 import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
-import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import {
+  bankConsoleHref,
+  canExportBankStatements,
+  getBankConsoleSession,
+} from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { type StatementStatus } from "@/lib/statements";
 import { t, type Locale } from "@/lib/translations";
@@ -78,6 +87,10 @@ export default async function StatementDetailPage({
     notFound();
   }
 
+  const canExport = canExportBankStatements(session.role);
+  const lockedLabel = t("statements.actions.locked", locale);
+  const expiredLabel = t("statements.detail.artifactExpired", locale);
+
   return (
     <div
       className="page-shell bank-statements-page"
@@ -119,9 +132,21 @@ export default async function StatementDetailPage({
         >
           {t("statements.detail.back", locale)}
         </a>
-        <a className="statement-link" href={statement.signedArtifactHref}>
-          {t("statements.actions.downloadSigned", locale)}
-        </a>
+        <div className="row-actions">
+          <StatementArtifactDownloadButton
+            disabled={!canExport || statement.artifactExpired}
+            disabledLabel={canExport ? expiredLabel : lockedLabel}
+            label={t("statements.actions.downloadSigned", locale)}
+            statement={statement}
+            tenantIssuerCode={tenant.issuerCode}
+          />
+          <StatementCsvExportButton
+            disabled={!canExport}
+            disabledLabel={lockedLabel}
+            label={t("statements.actions.exportCsv", locale)}
+            statement={statement}
+          />
+        </div>
       </section>
 
       <section className="surface-grid surface-grid-wide">
@@ -289,16 +314,28 @@ export default async function StatementDetailPage({
               <Td mono>{trip.cardReferenceMasked}</Td>
               <Td>{t("statements.direction", locale)}</Td>
               <Td>
-                <a className="statement-link" href={trip.artifactDownloadHref}>
-                  {t("statements.actions.download", locale)}
-                </a>
+                <TripArtifactDownloadButton
+                  disabled={!canExport}
+                  disabledLabel={lockedLabel}
+                  label={t("statements.actions.download", locale)}
+                  statement={statement}
+                  trip={trip}
+                />
               </Td>
               <Td>
-                <a className="statement-link" href={trip.disputeHref}>
-                  {trip.disputed
-                    ? t("statements.actions.disputed", locale)
-                    : t("statements.actions.reportDispute", locale)}
-                </a>
+                {trip.disputed ? (
+                  <span className="table-status status-suspended">
+                    {t("statements.actions.disputed", locale)}
+                  </span>
+                ) : (
+                  <button
+                    className="table-action-button is-ghost"
+                    disabled
+                    type="button"
+                  >
+                    {t("statements.actions.disputeUnavailable", locale)}
+                  </button>
+                )}
               </Td>
             </Tr>
           ))}

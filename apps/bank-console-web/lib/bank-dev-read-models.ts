@@ -69,7 +69,6 @@ export type BankStatement = {
   totalPaidAmount: number;
   totalIssuerPayableAmount: number;
   totalTrips: number;
-  signedArtifactHref: string;
   artifactExpired: boolean;
   trips: Array<{
     tripId: string;
@@ -82,8 +81,6 @@ export type BankStatement = {
     benefitReferenceMasked: string;
     cardholderReferenceMasked: string;
     cardReferenceMasked: string;
-    artifactDownloadHref: string;
-    disputeHref: string;
     disputed: boolean;
   }>;
 };
@@ -522,7 +519,6 @@ export async function loadBankStatementsData(
           totalPaidAmount: moneyToNumber(statement.totals.paidTotal),
           totalIssuerPayableAmount: moneyToNumber(statement.totals.issuerPayable),
           totalTrips: statement.totals.tripCount,
-          signedArtifactHref: `/artifacts/statements/${statement.artifactRef.artifactId}.pdf`,
           artifactExpired: statement.status === "due",
           trips: statement.lines.map((line) => ({
             tripId: line.tripId,
@@ -535,8 +531,6 @@ export async function loadBankStatementsData(
             benefitReferenceMasked: maskSegmented(line.benefitReference),
             cardholderReferenceMasked: maskCompact(line.cardholderRefMasked),
             cardReferenceMasked: "••••",
-            artifactDownloadHref: `/artifacts/trips/${line.tripId}.pdf`,
-            disputeHref: `/statements/${statement.period}?dispute=${line.tripId}`,
             disputed: false,
           })),
         })),

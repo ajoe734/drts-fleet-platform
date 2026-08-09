@@ -5,12 +5,17 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
+import { StatementArtifactDownloadButton } from "@/components/statement-actions";
 import {
   getBankTenantName,
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
-import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import {
+  bankConsoleHref,
+  canExportBankStatements,
+  getBankConsoleSession,
+} from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
 import { type StatementStatus } from "@/lib/statements";
@@ -96,6 +101,7 @@ export default async function StatementsPage({
     (sum, item) => sum + item.totalIssuerPayableAmount,
     0,
   );
+  const canExport = canExportBankStatements(session.role);
 
   return (
     <div
@@ -266,12 +272,17 @@ export default async function StatementsPage({
               <Td mono>{formatDate(statement.issuedAt)}</Td>
               <Td mono>{formatDate(statement.dueAt)}</Td>
               <Td>
-                <a
-                  className="statement-link"
-                  href={statement.signedArtifactHref}
-                >
-                  {t("statements.actions.download", locale)}
-                </a>
+                <StatementArtifactDownloadButton
+                  disabled={!canExport || statement.artifactExpired}
+                  disabledLabel={
+                    canExport
+                      ? t("statements.detail.artifactExpired", locale)
+                      : t("statements.actions.locked", locale)
+                  }
+                  label={t("statements.actions.download", locale)}
+                  statement={statement}
+                  tenantIssuerCode={tenant.issuerCode}
+                />
               </Td>
               <Td>
                 <a

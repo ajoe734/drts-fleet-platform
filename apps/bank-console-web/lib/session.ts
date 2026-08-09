@@ -78,6 +78,12 @@ export function toHomeRole(role: BankConsoleRole): HomeRole {
   return "admin";
 }
 
+// Ops viewer is read-only with "no settlement amount ... access" per
+// users.roleCard.bank_ops_viewer. Program admin and finance may export.
+export function canExportBankStatements(role: BankConsoleRole): boolean {
+  return role !== "bank_ops_viewer";
+}
+
 export function getBankConsoleSession(
   bank: BankDemoTenant,
   locale: Locale,
