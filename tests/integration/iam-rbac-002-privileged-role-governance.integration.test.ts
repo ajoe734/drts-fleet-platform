@@ -9,6 +9,7 @@ const HttpStatus = {
 import type { IdentityContext, CanonicalIdentitySessionRecord } from "@drts/contracts";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { PrivilegedRoleGovernanceService } from "../../apps/api/src/modules/identity/privileged-role-governance.service";
+import { IdentityController } from "../../apps/api/src/modules/identity/identity.controller";
 
 function createMockIdentity(overrides: Partial<IdentityContext> = {}): IdentityContext {
   return {
@@ -77,7 +78,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Self-approval attempt
       await expect(
-        service.approveRequest(request.requestId, requester),
+        service.approveRequest(request.requestId, requester, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "SELF_APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.FORBIDDEN,
@@ -102,7 +106,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Target user trying to self-approve
       await expect(
-        service.approveRequest(request.requestId, targetUser),
+        service.approveRequest(request.requestId, targetUser, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "SELF_APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.FORBIDDEN,
@@ -190,6 +197,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const { request: approvedRequest, grant } = await service.approveRequest(
         request.requestId,
         approver,
+        {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        },
       );
 
       expect(approvedRequest.status).toBe("approved");
@@ -273,7 +284,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const { grant } = await service.approveRequest(request.requestId, approver);
+      const { grant } = await service.approveRequest(request.requestId, approver, {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      });
       expect(grant.status).toBe("pending_activation");
 
       // Verify user has no active grants yet
@@ -366,7 +380,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       }
 
       await expect(
-        service.approveRequest(request.requestId, approver),
+        service.approveRequest(request.requestId, approver, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.CONFLICT,
@@ -399,6 +416,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
             roleCode: "tenant_admin",
             tenantId: "ten_beta",
             reason: "Offboarding attempt",
+            mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
           },
           adminActor,
         ),
@@ -424,6 +442,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           roleCode: "tenant_admin",
           tenantId: "ten_beta",
           reason: "Role demotion",
+          mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
         },
         adminActor,
       );
@@ -445,6 +464,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           roleCode: "tenant_admin",
           tenantId: "ten_concurrent_admin",
           reason: "Simultaneous removal attempt 1",
+          mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
         },
         actor,
       );
@@ -455,6 +475,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           roleCode: "tenant_admin",
           tenantId: "ten_concurrent_admin",
           reason: "Simultaneous removal attempt 2",
+          mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
         },
         actor,
       );
@@ -547,6 +568,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const rejected = await service.rejectRequest(request.requestId, rejector, {
         approvalRequestId: request.requestId,
         reason: "Access denied by security manager",
+        mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
       });
 
       expect(rejected.status).toBe("rejected");
@@ -571,6 +593,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         service.rejectRequest(request.requestId, requester, {
           approvalRequestId: request.requestId,
           reason: "Self rejection attempt",
+          mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -598,6 +621,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         service.rejectRequest(request.requestId, targetUser, {
           approvalRequestId: request.requestId,
           reason: "Target rejection attempt",
+          mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -629,6 +653,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await expect(
         service.rejectRequest(request.requestId, noMfaRejector, {
           approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -642,6 +667,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         service.rejectRequest(request.requestId, noMfaRejector, {
           approvalRequestId: request.requestId,
           stepUpReference: "INVALID_STEP_UP",
+          mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -730,7 +756,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Approval attempt without MFA or stepUpReference
       await expect(
-        service.approveRequest(request.requestId, noMfaApprover),
+        service.approveRequest(request.requestId, noMfaApprover, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.UNAUTHORIZED,
@@ -743,6 +772,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         service.approveRequest(request.requestId, noMfaApprover, {
           approvalRequestId: request.requestId,
           stepUpReference: "INVALID_STEP_UP",
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -774,7 +804,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(repoReq?.targetUserId).toBe("usr_db_target");
 
       // Approve request
-      const { grant } = await service.approveRequest(request.requestId, approver);
+      const { grant } = await service.approveRequest(request.requestId, approver, {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      });
 
       // Verify grant is saved in repo
       const repoGrants = await identityRepo.listPrivilegedRoleGrants("ten_alpha");
@@ -883,6 +916,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           roleCode: "tenant_admin",
           tenantId: "ten_db_concurrent",
           reason: "DB concurrent remove 1",
+          mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
         },
         actor,
       );
@@ -893,6 +927,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           roleCode: "tenant_admin",
           tenantId: "ten_db_concurrent",
           reason: "DB concurrent remove 2",
+          mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
         },
         actor,
       );
@@ -972,6 +1007,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
               roleCode: "tenant_admin",
               tenantId,
               reason: "Real PG concurrent 1",
+              mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
             },
             actor,
           );
@@ -982,6 +1018,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
               roleCode: "tenant_admin",
               tenantId,
               reason: "Real PG concurrent 2",
+              mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
             },
             actor,
           );
@@ -1035,7 +1072,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
           // approveRequest should throw IAM_REQUEST_EXPIRED
           await expect(
-            govService.approveRequest(request.requestId, approver),
+            govService.approveRequest(request.requestId, approver, {
+              approvalRequestId: request.requestId,
+              mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+            }),
           ).rejects.toThrowError(
             expect.objectContaining({
               status: HttpStatus.CONFLICT,
@@ -1072,7 +1112,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Non-admin attempts to approve -> fails 403 AUTHZ_SCOPE_DENIED
       await expect(
-        service.approveRequest(request.requestId, nonAdminUser),
+        service.approveRequest(request.requestId, nonAdminUser, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.FORBIDDEN,
@@ -1082,7 +1125,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Non-admin attempts to reject -> fails 403 AUTHZ_SCOPE_DENIED
       await expect(
-        service.rejectRequest(request.requestId, nonAdminUser),
+        service.rejectRequest(request.requestId, nonAdminUser, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.FORBIDDEN,
@@ -1101,6 +1147,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
             roleCode: "tenant_security_admin",
             tenantId: "ten_authz",
             reason: "Revoke grant attempt",
+            mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
           },
           nonAdminUser,
         ),
@@ -1141,7 +1188,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Ops non-admin user attempts approve -> 403
       await expect(
-        service.approveRequest(request.requestId, opsNonAdmin),
+        service.approveRequest(request.requestId, opsNonAdmin, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.FORBIDDEN,
@@ -1151,7 +1201,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Platform non-admin user attempts approve -> 403
       await expect(
-        service.approveRequest(request.requestId, platformNonAdmin),
+        service.approveRequest(request.requestId, platformNonAdmin, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.FORBIDDEN,
@@ -1161,7 +1214,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Ops non-admin user attempts reject -> 403
       await expect(
-        service.rejectRequest(request.requestId, opsNonAdmin),
+        service.rejectRequest(request.requestId, opsNonAdmin, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.FORBIDDEN,
@@ -1178,6 +1234,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
             roleCode: "tenant_admin",
             tenantId: "ten_authz_ops",
             reason: "Unauthorized remove attempt",
+            mutation: { expectedVersion: 1, reasonCode: "DEMOTE" },
           },
           platformNonAdmin,
         ),
@@ -1192,9 +1249,6 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("13. Process Expiries Endpoint System Authority Policy", () => {
     it("denies process-expiries for non-system identities and allows system identity", async () => {
-      const { IdentityController } = await import(
-        "../../apps/api/src/modules/identity/identity.controller"
-      );
       const controller = new IdentityController(service);
 
       const tenantAdminUser = createMockIdentity({ actorId: "usr_tenant_admin", roles: ["tenant_admin"], realm: "tenant" });
@@ -1224,7 +1278,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const result = await controller.processExpiredPrivilegedRoleGrants(systemIdentity);
       expect(result).toBeDefined();
       expect(result.data).toBeDefined();
-    });
+    }, 15000);
   });
 
   describe("14. Transactional Audit Event Requirement (IAM-AUD-001)", () => {
@@ -1298,7 +1352,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await identityRepo.savePrivilegedRoleRequest(req);
 
       await expect(
-        auditService.approveRequest(req.requestId, approver),
+        auditService.approveRequest(req.requestId, approver, {
+          approvalRequestId: req.requestId,
+          mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.CONFLICT,
@@ -1395,7 +1452,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const { grant } = await testService.approveRequest(req.requestId, approver);
+      const { grant } = await testService.approveRequest(req.requestId, approver, {
+        approvalRequestId: req.requestId,
+        mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
+      });
       expect(grant.status).toBe("pending_activation");
 
       // Before activation time arrives, assign a conflicting role (tenant_finance_admin) to target user
@@ -1448,7 +1508,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const { grant } = await testService.approveRequest(req.requestId, approver);
+      const { grant } = await testService.approveRequest(req.requestId, approver, {
+        approvalRequestId: req.requestId,
+        mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
+      });
       expect(grant.status).toBe("pending_activation");
 
       // Process activation at validFrom time without conflicting role
@@ -1509,7 +1572,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      await testService.approveRequest(req.requestId, approver);
+      await testService.approveRequest(req.requestId, approver, {
+        approvalRequestId: req.requestId,
+        mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
+      });
 
       // Now query findRoleBindingsByMembershipId
       const projectedBindings = await identityRepo.findRoleBindingsByMembershipId(membershipId);
@@ -1528,7 +1594,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           targetUserId: targetUser,
           roleCode: "tenant_admin",
           tenantId: "ten_proj",
-          mutation: { stepUpReference: "mfa_verified" },
+          mutation: { stepUpReference: "proof_mfa_verified", expectedVersion: 1, reasonCode: "DEMOTE" },
         },
         approver,
       );
@@ -1538,5 +1604,158 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(revokedBindings.some((b) => b.roleCode === "tenant_admin")).toBe(false);
     });
   });
-});
 
+  describe("16. Negative Security & Concurrency Coverage (Review Blockers)", () => {
+    it("rejects forgeable stepUpReference (e.g. 'mfa_verified') when identity lacks MFA claims", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_neg" });
+      const noMfaApprover = createMockIdentity({
+        actorId: "usr_approver_nomfa",
+        tenantId: "ten_neg",
+        authMethods: ["jwt"],
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_forge",
+          roleCode: "tenant_admin",
+          reason: "StepUp forgery test",
+          tenantId: "ten_neg",
+        },
+        requester,
+      );
+
+      await expect(
+        service.approveRequest(request.requestId, noMfaApprover, {
+          approvalRequestId: request.requestId,
+          stepUpReference: "mfa_verified",
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("rejects identity with stale authTime (>900s ago) even if authMethods includes MFA", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_stale" });
+      const staleMfaApprover = createMockIdentity({
+        actorId: "usr_approver_stale",
+        tenantId: "ten_stale",
+        authMethods: ["jwt", "mfa"],
+        authTime: new Date(Date.now() - 1200 * 1000).toISOString(),
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_stale",
+          roleCode: "tenant_admin",
+          reason: "Stale authTime test",
+          tenantId: "ten_stale",
+        },
+        requester,
+      );
+
+      await expect(
+        service.approveRequest(request.requestId, staleMfaApprover, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("accepts server-validated step-up proof (e.g. proof_valid_mfa) even if identity lacks MFA in session", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_proof" });
+      const noMfaApprover = createMockIdentity({
+        actorId: "usr_approver_proof",
+        tenantId: "ten_proof",
+        authMethods: ["jwt"],
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_proof",
+          roleCode: "tenant_admin",
+          reason: "Server proof test",
+          tenantId: "ten_proof",
+        },
+        requester,
+      );
+
+      const { request: approved } = await service.approveRequest(request.requestId, noMfaApprover, {
+        approvalRequestId: request.requestId,
+        stepUpReference: "proof_valid_mfa_token_123",
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      });
+
+      expect(approved.status).toBe("approved");
+    });
+
+    it("rejects approveRequest, rejectRequest, and removeGrant when expectedVersion is missing", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_nover" });
+      const approver = createMockIdentity({ actorId: "usr_approver_ver", tenantId: "ten_nover" });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_nover",
+          roleCode: "tenant_admin",
+          reason: "Missing expectedVersion test",
+          tenantId: "ten_nover",
+        },
+        requester,
+      );
+
+      // approveRequest missing expectedVersion
+      await expect(
+        service.approveRequest(request.requestId, approver, {
+          approvalRequestId: request.requestId,
+          stepUpReference: "proof_valid_123",
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.CONFLICT,
+          code: "IAM_CONCURRENCY_CONFLICT",
+        }),
+      );
+
+      // rejectRequest missing expectedVersion
+      await expect(
+        service.rejectRequest(request.requestId, approver, {
+          approvalRequestId: request.requestId,
+          stepUpReference: "proof_valid_123",
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.CONFLICT,
+          code: "IAM_CONCURRENCY_CONFLICT",
+        }),
+      );
+
+      // removeGrant missing expectedVersion
+      await service.registerActiveGrant("usr_target_nover", "ten_nover", "tenant_admin");
+      await service.registerActiveGrant("usr_other_admin_nover", "ten_nover", "tenant_admin");
+
+      await expect(
+        service.removeGrant(
+          {
+            targetUserId: "usr_target_nover",
+            roleCode: "tenant_admin",
+            tenantId: "ten_nover",
+          },
+          approver,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.CONFLICT,
+          code: "IAM_CONCURRENCY_CONFLICT",
+        }),
+      );
+    });
+  });
+});

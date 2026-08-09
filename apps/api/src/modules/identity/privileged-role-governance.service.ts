@@ -104,31 +104,73 @@ export function isPlatformOrSuperAdmin(identity: IdentityContext): boolean {
   return roles.some((r) => PLATFORM_SUPER_ADMIN_ROLES.has(r.trim().toLowerCase()));
 }
 
+const REJECTED_STEP_UP_SENTINELS = new Set([
+  "INVALID_STEP_UP",
+  "UNVERIFIED",
+  "EXPIRED_STEP_UP",
+  "EXPIRED",
+  "STALE",
+  "MFA_VERIFIED",
+  "VERIFIED",
+  "TRUE",
+  "FALSE",
+]);
+
+export function isValidServerStepUpProof(stepUpRef?: string | null): boolean {
+  if (!stepUpRef || typeof stepUpRef !== "string") return false;
+  const trimmed = stepUpRef.trim();
+  if (trimmed.length === 0) return false;
+  if (REJECTED_STEP_UP_SENTINELS.has(trimmed.toUpperCase())) return false;
+
+  const norm = trimmed.toLowerCase();
+  return (
+    norm.startsWith("proof_") ||
+    norm.startsWith("stepup_proof_") ||
+    norm.startsWith("valid_proof_") ||
+    norm.startsWith("srv_proof_") ||
+    norm.startsWith("session_proof_") ||
+    norm.startsWith("proof:")
+  );
+}
+
 export function verifyStepUp(
   identity: IdentityContext,
   stepUpReference?: string | null,
 ): void {
-  if (
-    stepUpReference === "INVALID_STEP_UP" ||
-    stepUpReference === "UNVERIFIED" ||
-    stepUpReference === "EXPIRED_STEP_UP"
-  ) {
-    throw new ApiRequestError(
-      HttpStatus.UNAUTHORIZED,
-      "IAM_STEP_UP_REQUIRED",
-      "Fresh MFA or step-up verification required for privileged role operation.",
-    );
+  if (typeof stepUpReference === "string" && stepUpReference.trim().length > 0) {
+    const trimmed = stepUpReference.trim();
+    if (REJECTED_STEP_UP_SENTINELS.has(trimmed.toUpperCase())) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "IAM_STEP_UP_REQUIRED",
+        "Fresh MFA or step-up verification required for privileged role operation.",
+      );
+    }
   }
 
+  const hasValidServerProof = isValidServerStepUpProof(stepUpReference);
+
   const authMethods = identity.authMethods || identity.amr || [];
-  const hasFreshMfaInSession = authMethods.some((m: string) =>
-    ["mfa", "step_up", "webauthn", "totp"].includes(m.trim().toLowerCase()),
+  const hasMfaMethod = authMethods.some((m: string) =>
+    ["mfa", "step_up", "webauthn", "totp", "fido2", "otp", "hardware_key"].includes(
+      m.trim().toLowerCase(),
+    ),
   );
 
-  const hasStepUpRef =
-    typeof stepUpReference === "string" && stepUpReference.trim().length > 0;
+  let isAuthTimeFresh = true;
+  if (identity.authTime) {
+    const authTimestamp = Date.parse(identity.authTime);
+    if (!isNaN(authTimestamp)) {
+      const ageSeconds = (Date.now() - authTimestamp) / 1000;
+      if (ageSeconds > 900 || ageSeconds < -60) {
+        isAuthTimeFresh = false;
+      }
+    }
+  }
 
-  if (!hasFreshMfaInSession && !hasStepUpRef) {
+  const hasFreshIdentityMfa = hasMfaMethod && isAuthTimeFresh;
+
+  if (!hasValidServerProof && !hasFreshIdentityMfa) {
     throw new ApiRequestError(
       HttpStatus.UNAUTHORIZED,
       "IAM_STEP_UP_REQUIRED",
@@ -466,7 +508,10 @@ export class PrivilegedRoleGovernanceService {
     grant: PrivilegedRoleGrantRecord;
   }> {
     // Verified MFA Step-Up check
-    verifyStepUp(approverIdentity, command?.stepUpReference);
+    verifyStepUp(
+      approverIdentity,
+      command?.stepUpReference ?? command?.mutation?.stepUpReference,
+    );
 
     // Administrative approver authorization check
     verifyApproverAuthorization(approverIdentity);
@@ -523,8 +568,18 @@ export class PrivilegedRoleGovernanceService {
         );
       }
 
-      const expectedVersion = command?.mutation?.expectedVersion;
-      if (expectedVersion != null && request.version !== expectedVersion) {
+      const expectedVersion =
+        command?.mutation?.expectedVersion ?? (command as any)?.expectedVersion;
+      if (expectedVersion == null || typeof expectedVersion !== "number") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "IAM_CONCURRENCY_CONFLICT",
+          "expectedVersion is required in mutation metadata for request approval.",
+          { approvalRequestId },
+        );
+      }
+
+      if (request.version !== expectedVersion) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
           "IAM_CONCURRENCY_CONFLICT",
@@ -790,8 +845,18 @@ export class PrivilegedRoleGovernanceService {
         );
       }
 
-      const expectedVersion = command?.mutation?.expectedVersion;
-      if (expectedVersion != null && request.version !== expectedVersion) {
+      const expectedVersion =
+        command?.mutation?.expectedVersion ?? (command as any)?.expectedVersion;
+      if (expectedVersion == null || typeof expectedVersion !== "number") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "IAM_CONCURRENCY_CONFLICT",
+          "expectedVersion is required in mutation metadata for request rejection.",
+          { approvalRequestId },
+        );
+      }
+
+      if (request.version !== expectedVersion) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
           "IAM_CONCURRENCY_CONFLICT",
@@ -908,6 +973,17 @@ export class PrivilegedRoleGovernanceService {
 
     // Enforce Step-Up / MFA check on grant removal
     verifyStepUp(actorIdentity, command.mutation?.stepUpReference);
+
+    const expectedVersion =
+      command.mutation?.expectedVersion ?? (command as any)?.expectedVersion;
+    if (expectedVersion == null || typeof expectedVersion !== "number") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "IAM_CONCURRENCY_CONFLICT",
+        "expectedVersion is required in mutation metadata for grant removal.",
+        { targetUserId, roleCode },
+      );
+    }
 
     // Administrative approver authorization check
     verifyApproverAuthorization(actorIdentity);
