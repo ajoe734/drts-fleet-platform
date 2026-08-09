@@ -6578,13 +6578,78 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.assertSupportedTenantRoleCode(command.roleCode);
 
     const userRole = this.requireTenantUser(tenantId, userId);
+    const targetRoleCode = command.roleCode.trim();
+    const targetStatus = command.status ?? userRole.status;
+
+    if (identity) {
+      const callerActorId = identity.actorId?.trim();
+      if (
+        callerActorId &&
+        (callerActorId === userId ||
+          callerActorId === userRole.userId ||
+          callerActorId.toLowerCase() === userRole.email.toLowerCase())
+      ) {
+        const getRoleRank = (role: string) => {
+          const normalized = role.trim().toLowerCase();
+          if (normalized === "admin" || normalized === "tenant_admin") return 4;
+          if (normalized === "approver" || normalized === "tenant_approver") return 3;
+          if (normalized === "requester" || normalized === "tenant_requester") return 2;
+          if (normalized === "viewer" || normalized === "tenant_viewer") return 1;
+          return 0;
+        };
+
+        const currentRank = getRoleRank(userRole.roleCode);
+        const targetRank = getRoleRank(targetRoleCode);
+
+        if (targetRank > currentRank) {
+          throw new ApiRequestError(
+            403,
+            "SELF_ELEVATION_FORBIDDEN",
+            "Self-elevation of roles is forbidden.",
+            {
+              tenantId,
+              userId,
+              currentRole: userRole.roleCode,
+              targetRole: targetRoleCode,
+            },
+          );
+        }
+      }
+    }
+
+    const isCurrentlyActiveAdmin =
+      (userRole.roleCode === "admin" || userRole.roleCode === "tenant_admin") &&
+      userRole.status === "active";
+
+    const willBeActiveAdmin =
+      (targetRoleCode === "admin" || targetRoleCode === "tenant_admin") &&
+      targetStatus === "active";
+
+    if (isCurrentlyActiveAdmin && !willBeActiveAdmin) {
+      const activeAdminCount = this.userRoles.filter(
+        (u) =>
+          u.tenantId === tenantId &&
+          (u.roleCode === "admin" || u.roleCode === "tenant_admin") &&
+          u.status === "active",
+      ).length;
+
+      if (activeAdminCount <= 1) {
+        throw new ApiRequestError(
+          400,
+          "CANNOT_REMOVE_LAST_ADMIN",
+          "Cannot remove or demote the last active administrator for this tenant.",
+          { tenantId, userId, activeAdminCount },
+        );
+      }
+    }
+
     const before = this.cloneUserRole(userRole);
     const securityActor = this.requireSecurityEventActor(identity, tenantId);
     const previousUserRoles = this.userRoles.map((entry) =>
       this.cloneUserRole(entry),
     );
-    userRole.roleCode = command.roleCode.trim();
-    userRole.status = command.status ?? userRole.status;
+    userRole.roleCode = targetRoleCode;
+    userRole.status = targetStatus;
     userRole.approvalNotificationOptOut =
       command.approvalNotificationOptOut ?? userRole.approvalNotificationOptOut;
     userRole.updatedAt = new Date().toISOString();
