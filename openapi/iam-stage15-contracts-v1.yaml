@@ -592,6 +592,9 @@ components:
                 - IAM_INVITATION_INVALID
                 - IAM_CREDENTIAL_NOT_FOUND
                 - IAM_ACCESS_REVIEW_NOT_FOUND
+                - IAM_ACCESS_REVIEW_CAMPAIGN_NOT_FOUND
+                - IAM_ACCESS_REVIEW_OVERDUE
+                - IAM_ACCESS_REVIEW_CROSS_TENANT_DENIED
                 - IAM_BREAK_GLASS_NOT_FOUND
             message:
               type: string
