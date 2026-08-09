@@ -29,12 +29,14 @@ import {
 import { assessPlatformHealth } from "@/components/platform-status-card";
 import {
   formatDriverError,
+  getDriverAuthState,
   getDriverClient,
   getDriverId,
   getDriverIdentityIssue,
   hasDriverDevOverride,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
+  rebindDriverDevice,
   registerDriverDevice,
 } from "@/lib/api-client";
 import {
@@ -43,7 +45,7 @@ import {
   isOwnedUnifiedTask,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
-import { driverActivationSteps, driverStrings } from "@/lib/strings";
+import { driverActivationSteps, driverAuthStrings, driverStrings } from "@/lib/strings";
 
 type WorkspaceRoute =
   | "/jobs"
@@ -1185,23 +1187,89 @@ export default function OnboardingScreen() {
   }
 
   if (!provisioned) {
+    const currentAuthState = getDriverAuthState();
+    const isExpired = currentAuthState === "session_expired";
+    const isRevoked = currentAuthState === "device_revoked";
+    const isSuspended = currentAuthState === "driver_suspended";
+
+    const badgeLabel =
+      currentAuthState === "session_expired"
+        ? driverAuthStrings.states.session_expired.badge
+        : currentAuthState === "device_revoked"
+          ? driverAuthStrings.states.device_revoked.badge
+          : currentAuthState === "driver_suspended"
+            ? driverAuthStrings.states.driver_suspended.badge
+            : driverAuthStrings.states.not_provisioned.badge;
+
+    const badgeVariant =
+      isExpired ? "warning" : isRevoked || isSuspended ? "danger" : "info";
+
+    const displayTitle =
+      currentAuthState === "session_expired"
+        ? driverAuthStrings.states.session_expired.title
+        : currentAuthState === "device_revoked"
+          ? driverAuthStrings.states.device_revoked.title
+          : currentAuthState === "driver_suspended"
+            ? driverAuthStrings.states.driver_suspended.title
+            : driverAuthStrings.states.not_provisioned.title;
+
+    const displayLead =
+      currentAuthState === "session_expired"
+        ? driverAuthStrings.states.session_expired.description
+        : currentAuthState === "device_revoked"
+          ? driverAuthStrings.states.device_revoked.description
+          : currentAuthState === "driver_suspended"
+            ? driverAuthStrings.states.driver_suspended.description
+            : driverAuthStrings.states.not_provisioned.description;
+
     return (
       <AppScreen contentContainerStyle={styles.provisionContent}>
         <View style={styles.provisionHero}>
           <View style={styles.provisionHeroGlow} />
           <View style={styles.provisionHeader}>
             <BrandTile />
-            <Text style={styles.provisionTitle}>裝置啟用</Text>
-            <Text style={styles.provisionLead}>
-              連線車隊管理系統，啟用後此裝置可接收派單與平台訂單。
+            <Text style={styles.provisionTitle} accessibilityRole="header">
+              {displayTitle}
             </Text>
-            {hasDriverDevOverride() ? (
-              <View style={styles.devOverrideTag}>
+            <Text style={styles.provisionLead}>{displayLead}</Text>
+            <View style={styles.devOverrideTag}>
+              <StatusChip label={badgeLabel} variant={badgeVariant} />
+              {hasDriverDevOverride() ? (
                 <StatusChip label="開發覆寫" variant="info" />
-              </View>
-            ) : null}
+              ) : null}
+            </View>
           </View>
         </View>
+
+        {isExpired ? (
+          <AuthorityBanner
+            authorityLabel="SessionExpired / TokenRefreshFailed"
+            description="當前連線憑證已失效或被系統撤銷。請輸入車隊發放的新註冊代碼重新綁定此裝置。"
+            icon="key-outline"
+            title="請重新綁定裝置"
+            tone="warning"
+          />
+        ) : null}
+
+        {isRevoked ? (
+          <AuthorityBanner
+            authorityLabel="DeviceRevoked / CompromiseRecovered"
+            description="系統已安全撤銷無效或遭異常重播之憑證。本機已儲存之未同步離線完單佐證不會刪除，請重新註冊綁定。"
+            icon="shield-outline"
+            title="憑證已撤銷並完成安全離線保存"
+            tone="danger"
+          />
+        ) : null}
+
+        {isSuspended ? (
+          <AuthorityBanner
+            authorityLabel="DriverSuspended / CertInvalid"
+            description="您的司機帳號目前處於停權或證件審核無效狀態，無法接單。若有疑問請聯絡車隊營運團隊管理員。"
+            icon="lock-closed-outline"
+            title="帳號暫時無法存取派遣"
+            tone="danger"
+          />
+        ) : null}
 
         <View style={styles.stepPanel}>
           <StepTimeline steps={ACTIVATION_STEPS} />
@@ -1212,6 +1280,7 @@ export default function OnboardingScreen() {
             <ErrorBanner message={provisioningError} />
           ) : null}
           <FormField
+            accessibilityHint="請輸入車隊發放的 6 至 32 位元註冊代碼"
             accessibilityLabel="裝置註冊碼"
             autoComplete="one-time-code"
             autoCapitalize="none"
@@ -1225,6 +1294,8 @@ export default function OnboardingScreen() {
             value={registrationCode}
           />
           <FormField
+            accessibilityHint="方便平台與車隊辨識此行動裝置的名稱"
+            accessibilityLabel="裝置名稱"
             editable={!submitting}
             helpText="選填，方便平台與營運端辨識此裝置。"
             label="裝置名稱"
@@ -1233,16 +1304,35 @@ export default function OnboardingScreen() {
             value={deviceLabel}
           />
           <ActionButton
+            accessibilityHint="送出代碼進行裝置綁定與連線"
+            accessibilityLabel={
+              isExpired || isRevoked
+                ? "重新綁定此裝置"
+                : "註冊此裝置"
+            }
             icon="shield-checkmark-outline"
             loading={submitting}
             onPress={() => {
               void handleRegister();
             }}
-            title={submitting ? "配置中…" : "註冊此裝置"}
+            title={
+              submitting
+                ? "配置中…"
+                : isExpired || isRevoked
+                  ? "重新綁定此裝置"
+                  : "註冊此裝置"
+            }
           />
         </View>
 
-        <WarningCallout message="未啟用裝置無法接收派單。請使用車隊發放的代碼，避免使用個人帳號註冊。" />
+        <WarningCallout
+          message={
+            isRevoked || isExpired
+              ? "提示：撤銷與重新綁定不會刪除未同步的離線完單佐證。"
+              : "未啟用裝置無法接收派單。請使用車隊發放的代碼，避免使用個人帳號註冊。"
+          }
+          tone={isRevoked ? "danger" : isExpired ? "warning" : "info"}
+        />
       </AppScreen>
     );
   }
