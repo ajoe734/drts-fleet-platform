@@ -123,6 +123,11 @@ export class IdentityRepository implements OnModuleInit {
     ConsumeWorkloadIdentityAssertionInput & { consumedAt: string }
   >();
 
+  private readonly fallbackConsumedStepUpNonces = new Map<
+    string,
+    { nonce: string; expiresAt: string; consumedAt: string }
+  >();
+
   private readonly fallbackPrivilegedRoleRequests = new Map<
     string,
     PrivilegedRoleApprovalRequestRecord
@@ -1886,6 +1891,88 @@ export class IdentityRepository implements OnModuleInit {
       );
 
       return result.rows.length > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  async consumeStepUpNonce(input: {
+    nonce: string;
+    expiresAt: string;
+    actorId?: string;
+    action?: string;
+    targetId?: string;
+  }): Promise<boolean> {
+    const consumedAt = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      const now = Date.now();
+      for (const [nonce, record] of this.fallbackConsumedStepUpNonces) {
+        if (Date.parse(record.expiresAt) < now) {
+          this.fallbackConsumedStepUpNonces.delete(nonce);
+        }
+      }
+
+      if (this.fallbackConsumedStepUpNonces.has(input.nonce)) {
+        return false;
+      }
+
+      this.fallbackConsumedStepUpNonces.set(input.nonce, {
+        nonce: input.nonce,
+        expiresAt: input.expiresAt,
+        consumedAt,
+      });
+      return true;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query(
+        `
+          DELETE FROM iam.step_up_nonces
+          WHERE expires_at < NOW()
+        `,
+      );
+
+      const result = await client.query<{ nonce: string }>(
+        `
+          INSERT INTO iam.step_up_nonces (
+            nonce,
+            expires_at,
+            consumed_at,
+            actor_id,
+            action,
+            target_id
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6
+          )
+          ON CONFLICT (nonce) DO NOTHING
+          RETURNING nonce
+        `,
+        [
+          input.nonce,
+          input.expiresAt,
+          consumedAt,
+          input.actorId ?? null,
+          input.action ?? null,
+          input.targetId ?? null,
+        ],
+      );
+
+      return (result.rows?.length ?? 0) > 0;
+    } catch (error: any) {
+      if (error?.code === "42P01") {
+        if (this.fallbackConsumedStepUpNonces.has(input.nonce)) {
+          return false;
+        }
+        this.fallbackConsumedStepUpNonces.set(input.nonce, {
+          nonce: input.nonce,
+          expiresAt: input.expiresAt,
+          consumedAt,
+        });
+        return true;
+      }
+      throw error;
     } finally {
       client.release();
     }

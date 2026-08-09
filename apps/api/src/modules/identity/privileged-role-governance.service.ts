@@ -116,10 +116,22 @@ const REJECTED_STEP_UP_SENTINELS = new Set([
   "FALSE",
 ]);
 
-const STEP_UP_PROOF_SECRET =
-  process.env.STEP_UP_PROOF_SECRET || "drts_step_up_proof_signing_key_secret_2026";
+const sharedFallbackConsumedStepUpNonces = new Map<
+  string,
+  { nonce: string; expiresAt: number }
+>();
 
-const consumedStepUpNonces = new Set<string>();
+export function getStepUpSecret(): string {
+  const secret = process.env.STEP_UP_PROOF_SECRET;
+  if (!secret || typeof secret !== "string" || secret.trim().length < 16) {
+    throw new ApiRequestError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      "IAM_SECURITY_CONFIG_ERROR",
+      "STEP_UP_PROOF_SECRET environment variable must be configured with a high-entropy secret (at least 16 characters).",
+    );
+  }
+  return secret.trim();
+}
 
 export interface StepUpProofPayload {
   actorId: string;
@@ -141,25 +153,27 @@ export function issueServerStepUpProof(payload: {
   targetId: string;
   ttlSeconds?: number;
 }): string {
+  const secret = getStepUpSecret();
   const ttl = payload.ttlSeconds ?? 300;
   const fullPayload: StepUpProofPayload = {
     actorId: payload.actorId,
     action: payload.action,
     targetId: payload.targetId,
     expiresAt: Date.now() + ttl * 1000,
-    nonce: randomBytes(12).toString("hex"),
+    nonce: randomBytes(16).toString("hex"),
   };
   const payloadB64 = Buffer.from(JSON.stringify(fullPayload)).toString("base64url");
-  const hmac = createHmac("sha256", STEP_UP_PROOF_SECRET)
+  const hmac = createHmac("sha256", secret)
     .update(payloadB64)
     .digest("hex");
   return `srv_stepup.${payloadB64}.${hmac}`;
 }
 
-export function verifyServerStepUpProof(
+export async function verifyServerStepUpProof(
   stepUpRef: string | null | undefined,
   context: VerifyStepUpOptions,
-): boolean {
+  identityRepository?: IdentityRepository,
+): Promise<boolean> {
   if (!stepUpRef || typeof stepUpRef !== "string") return false;
   const trimmed = stepUpRef.trim();
   if (trimmed.length === 0) return false;
@@ -174,7 +188,9 @@ export function verifyServerStepUpProof(
 
   const [, payloadB64, hmacHex] = parts;
 
-  const expectedHmac = createHmac("sha256", STEP_UP_PROOF_SECRET)
+  const secret = getStepUpSecret();
+
+  const expectedHmac = createHmac("sha256", secret)
     .update(payloadB64)
     .digest("hex");
 
@@ -212,29 +228,54 @@ export function verifyServerStepUpProof(
     return false;
   }
 
-  if (!payload.nonce || consumedStepUpNonces.has(payload.nonce)) {
+  if (!payload.nonce) {
     return false;
   }
 
-  consumedStepUpNonces.add(payload.nonce);
-  return true;
+  if (identityRepository) {
+    const consumed = await identityRepository.consumeStepUpNonce({
+      nonce: payload.nonce,
+      expiresAt: new Date(payload.expiresAt).toISOString(),
+      actorId: payload.actorId,
+      action: payload.action,
+      targetId: payload.targetId,
+    });
+    return consumed;
+  } else {
+    const now = Date.now();
+    for (const [nonceKey, rec] of sharedFallbackConsumedStepUpNonces) {
+      if (rec.expiresAt < now) {
+        sharedFallbackConsumedStepUpNonces.delete(nonceKey);
+      }
+    }
+    if (sharedFallbackConsumedStepUpNonces.has(payload.nonce)) {
+      return false;
+    }
+    sharedFallbackConsumedStepUpNonces.set(payload.nonce, {
+      nonce: payload.nonce,
+      expiresAt: payload.expiresAt,
+    });
+    return true;
+  }
 }
 
-export function isValidServerStepUpProof(
+export async function isValidServerStepUpProof(
   stepUpRef?: string | null,
   context?: VerifyStepUpOptions,
-): boolean {
+  identityRepository?: IdentityRepository,
+): Promise<boolean> {
   if (!context?.actorId) {
     return false;
   }
-  return verifyServerStepUpProof(stepUpRef, context);
+  return verifyServerStepUpProof(stepUpRef, context, identityRepository);
 }
 
-export function verifyStepUp(
+export async function verifyStepUp(
   identity: IdentityContext,
   stepUpReference?: string | null,
   operationContext?: { action?: string; targetId?: string },
-): void {
+  identityRepository?: IdentityRepository,
+): Promise<void> {
   if (typeof stepUpReference === "string" && stepUpReference.trim().length > 0) {
     const trimmed = stepUpReference.trim();
     if (REJECTED_STEP_UP_SENTINELS.has(trimmed.toUpperCase())) {
@@ -266,11 +307,15 @@ export function verifyStepUp(
 
   const hasFreshIdentityMfa = hasMfaMethod && isAuthTimeFresh;
 
-  const hasValidServerProof = verifyServerStepUpProof(stepUpReference, {
-    actorId: identity.actorId,
-    action: operationContext?.action,
-    targetId: operationContext?.targetId,
-  });
+  const hasValidServerProof = await verifyServerStepUpProof(
+    stepUpReference,
+    {
+      actorId: identity.actorId,
+      action: operationContext?.action,
+      targetId: operationContext?.targetId,
+    },
+    identityRepository,
+  );
 
   if (!hasValidServerProof && !hasFreshIdentityMfa) {
     throw new ApiRequestError(
@@ -610,10 +655,11 @@ export class PrivilegedRoleGovernanceService {
     grant: PrivilegedRoleGrantRecord;
   }> {
     // Verified MFA Step-Up check
-    verifyStepUp(
+    await verifyStepUp(
       approverIdentity,
       command?.stepUpReference ?? command?.mutation?.stepUpReference,
       { action: "approve", targetId: approvalRequestId },
+      this.identityRepository,
     );
 
     // Administrative approver authorization check
@@ -890,10 +936,11 @@ export class PrivilegedRoleGovernanceService {
     command?: RejectPrivilegedRoleRequestCommand,
   ): Promise<PrivilegedRoleApprovalRequestRecord> {
     // Verified MFA Step-Up check
-    verifyStepUp(
+    await verifyStepUp(
       rejectorIdentity,
       command?.stepUpReference ?? command?.mutation?.stepUpReference,
       { action: "reject", targetId: approvalRequestId },
+      this.identityRepository,
     );
 
     // Administrative approver authorization check
@@ -1076,10 +1123,10 @@ export class PrivilegedRoleGovernanceService {
     }
 
     // Enforce Step-Up / MFA check on grant removal
-    verifyStepUp(actorIdentity, command.mutation?.stepUpReference, {
+    await verifyStepUp(actorIdentity, command.mutation?.stepUpReference, {
       action: "remove",
       targetId: `${command.targetUserId}:${command.roleCode}`,
-    });
+    }, this.identityRepository);
 
     const expectedVersion =
       command.mutation?.expectedVersion ?? (command as any)?.expectedVersion;

@@ -56,6 +56,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
   let service: PrivilegedRoleGovernanceService;
 
   beforeEach(() => {
+    process.env.STEP_UP_PROOF_SECRET = "test_configured_high_entropy_secret_key_32bytes_long";
     identityRepo = new IdentityRepository();
     service = new PrivilegedRoleGovernanceService(identityRepo);
   });
@@ -1825,6 +1826,88 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           approvalRequestId: request.requestId,
           stepUpReference: wrongTargetProof,
           mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("fails closed when STEP_UP_PROOF_SECRET environment variable is missing or insecure", async () => {
+      const originalSecret = process.env.STEP_UP_PROOF_SECRET;
+      delete process.env.STEP_UP_PROOF_SECRET;
+
+      try {
+        const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_nosecret" });
+        const noMfaApprover = createMockIdentity({
+          actorId: "usr_approver_nosecret",
+          tenantId: "ten_nosecret",
+          authMethods: ["jwt"],
+        });
+
+        const request = await service.createRequest(
+          { targetUserId: "usr_target_nosecret", roleCode: "tenant_admin", reason: "No secret test", tenantId: "ten_nosecret" },
+          requester,
+        );
+
+        await expect(
+          service.approveRequest(request.requestId, noMfaApprover, {
+            approvalRequestId: request.requestId,
+            stepUpReference: "srv_stepup.dummy.dummy",
+            mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+          }),
+        ).rejects.toThrowError(
+          expect.objectContaining({
+            code: "IAM_SECURITY_CONFIG_ERROR",
+          }),
+        );
+      } finally {
+        process.env.STEP_UP_PROOF_SECRET = originalSecret;
+      }
+    });
+
+    it("prevents cross-instance replay of step-up proof tokens via shared IdentityRepository persistence", async () => {
+      const sharedRepo = new IdentityRepository();
+      const instance1 = new PrivilegedRoleGovernanceService(sharedRepo);
+      const instance2 = new PrivilegedRoleGovernanceService(sharedRepo);
+
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_cross" });
+      const noMfaApprover = createMockIdentity({
+        actorId: "usr_approver_cross",
+        tenantId: "ten_cross",
+        authMethods: ["jwt"],
+      });
+
+      const req1 = await instance1.createRequest(
+        { targetUserId: "usr_target_cross1", roleCode: "tenant_admin", reason: "Cross 1", tenantId: "ten_cross" },
+        requester,
+      );
+      const req2 = await instance2.createRequest(
+        { targetUserId: "usr_target_cross2", roleCode: "tenant_admin", reason: "Cross 2", tenantId: "ten_cross" },
+        requester,
+      );
+
+      const proofToken = issueServerStepUpProof({
+        actorId: noMfaApprover.actorId,
+        action: "approve",
+        targetId: req1.requestId,
+      });
+
+      // Instance 1 consumes the proof token
+      await instance1.approveRequest(req1.requestId, noMfaApprover, {
+        approvalRequestId: req1.requestId,
+        stepUpReference: proofToken,
+        mutation: { expectedVersion: req1.version, reasonCode: "APPROVE" },
+      });
+
+      // Instance 2 attempts to reuse the same proof token -> rejected as replay
+      await expect(
+        instance2.approveRequest(req2.requestId, noMfaApprover, {
+          approvalRequestId: req2.requestId,
+          stepUpReference: proofToken,
+          mutation: { expectedVersion: req2.version, reasonCode: "APPROVE" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
