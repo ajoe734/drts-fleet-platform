@@ -1,11 +1,4 @@
 import { describe, expect, it, beforeEach } from "vitest";
-const HttpStatus = {
-  BAD_REQUEST: 400,
-  UNAUTHORIZED: 401,
-  FORBIDDEN: 403,
-  NOT_FOUND: 404,
-  CONFLICT: 409,
-};
 import type {
   IdentityContext,
   CanonicalIdentitySessionRecord,
@@ -17,6 +10,14 @@ import {
 } from "../../apps/api/src/modules/identity/privileged-role-governance.service";
 import { IdentityController } from "../../apps/api/src/modules/identity/identity.controller";
 import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
+
+const HttpStatus = {
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+};
 
 function createMockIdentity(
   overrides: Partial<IdentityContext> = {},
