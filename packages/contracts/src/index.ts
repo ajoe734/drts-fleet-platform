@@ -823,6 +823,8 @@ export interface IdentityContext {
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
   supportedExecutionModes: SupervisorExecutionMode[];
 }
 

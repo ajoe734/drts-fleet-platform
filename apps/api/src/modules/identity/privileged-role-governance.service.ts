@@ -142,9 +142,9 @@ export interface StepUpProofPayload {
 }
 
 export interface VerifyStepUpOptions {
-  actorId: string;
-  action?: string;
-  targetId?: string;
+  actorId?: string | null | undefined;
+  action?: string | null | undefined;
+  targetId?: string | null | undefined;
 }
 
 export function issueServerStepUpProof(payload: {
@@ -186,7 +186,9 @@ export async function verifyServerStepUpProof(
   const parts = trimmed.split(".");
   if (parts.length !== 3) return false;
 
-  const [, payloadB64, hmacHex] = parts;
+  const payloadB64 = parts[1];
+  const hmacHex = parts[2];
+  if (!payloadB64 || !hmacHex) return false;
 
   const secret = getStepUpSecret();
 

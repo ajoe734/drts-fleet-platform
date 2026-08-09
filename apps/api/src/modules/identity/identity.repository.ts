@@ -1960,19 +1960,6 @@ export class IdentityRepository implements OnModuleInit {
       );
 
       return (result.rows?.length ?? 0) > 0;
-    } catch (error: any) {
-      if (error?.code === "42P01") {
-        if (this.fallbackConsumedStepUpNonces.has(input.nonce)) {
-          return false;
-        }
-        this.fallbackConsumedStepUpNonces.set(input.nonce, {
-          nonce: input.nonce,
-          expiresAt: input.expiresAt,
-          consumedAt,
-        });
-        return true;
-      }
-      throw error;
     } finally {
       client.release();
     }

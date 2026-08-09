@@ -1975,5 +1975,71 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         }),
       );
     });
+
+    it("persists and enforces atomic single-use of step_up_nonces via DB when database is enabled", async () => {
+      const noncesTable = new Set<string>();
+      const mockDbClient = {
+        query: async (queryText: string, values?: any[]) => {
+          const sql = queryText.trim();
+          if (sql.includes("DELETE FROM iam.step_up_nonces")) {
+            return { rows: [] };
+          }
+          if (sql.includes("INSERT INTO iam.step_up_nonces")) {
+            const nonce = values?.[0] as string;
+            if (noncesTable.has(nonce)) {
+              return { rows: [] };
+            }
+            noncesTable.add(nonce);
+            return { rows: [{ nonce }] };
+          }
+          return { rows: [] };
+        },
+        release: () => {},
+      };
+
+      const mockDbService: any = {
+        isEnabled: () => true,
+        connect: async () => mockDbClient,
+      };
+
+      const dbRepo = new IdentityRepository(mockDbService);
+
+      const nonceInput = {
+        nonce: "test_nonce_123",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        actorId: "usr_alice",
+        action: "approve",
+        targetId: "req_001",
+      };
+
+      const firstResult = await dbRepo.consumeStepUpNonce(nonceInput);
+      expect(firstResult).toBe(true);
+
+      const secondResult = await dbRepo.consumeStepUpNonce(nonceInput);
+      expect(secondResult).toBe(false);
+    });
+
+    it("fails closed (throws error) when DB step_up_nonces insert fails in DB mode", async () => {
+      const mockDbClient = {
+        query: async () => {
+          throw new Error("DB Connection Error");
+        },
+        release: () => {},
+      };
+
+      const mockDbService: any = {
+        isEnabled: () => true,
+        connect: async () => mockDbClient,
+      };
+
+      const dbRepo = new IdentityRepository(mockDbService);
+
+      await expect(
+        dbRepo.consumeStepUpNonce({
+          nonce: "test_nonce_fail_closed",
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        }),
+      ).rejects.toThrow("DB Connection Error");
+    });
   });
 });
