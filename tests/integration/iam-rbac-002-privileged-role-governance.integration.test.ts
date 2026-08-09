@@ -1313,7 +1313,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       });
       const nonAdminUser = createMockIdentity({
         actorId: "usr_non_admin",
-        actorType: "user",
+        actorType: "driver_user",
         roles: ["driver"],
         scopes: ["identity:write"],
         tenantId: "ten_authz",
@@ -1835,6 +1835,11 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           status: "active",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          sourceRef: "test",
+          issuer: "test",
+          principalType: "human",
+          emailVerified: true,
+          displayName: "Target User",
         },
         {
           membershipId,
@@ -1958,7 +1963,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         actorId: "usr_approver_no_at",
         tenantId: "ten_missing_at",
         authMethods: ["jwt", "mfa"],
-        authTime: undefined,
+        authTime: null,
       });
 
       const request = await service.createRequest(
@@ -2150,7 +2155,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       const validProof = issueServerStepUpProof({
-        actorId: noMfaApprover.actorId,
+        actorId: noMfaApprover.actorId!,
         action: "approve",
         targetId: request.requestId,
       });
@@ -2234,7 +2239,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       const validProof = issueServerStepUpProof({
-        actorId: noMfaApprover.actorId,
+        actorId: noMfaApprover.actorId!,
         action: "approve",
         targetId: req1.requestId,
       });
@@ -2304,7 +2309,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Proof issued for wrong operation target
       const wrongTargetProof = issueServerStepUpProof({
-        actorId: noMfaApprover.actorId,
+        actorId: noMfaApprover.actorId!,
         action: "approve",
         targetId: "req_other_request_id",
       });
@@ -2402,7 +2407,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       const proofToken = issueServerStepUpProof({
-        actorId: noMfaApprover.actorId,
+        actorId: noMfaApprover.actorId!,
         action: "approve",
         targetId: req1.requestId,
       });
@@ -2632,7 +2637,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await expect(
         service.approveRequest(req.requestId, tenantAdmin, {
           approvalRequestId: req.requestId,
-          mutation: { expectedVersion: req.version },
+          mutation: { expectedVersion: req.version, reasonCode: "TEST_REASON" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -2671,7 +2676,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await expect(
         service.rejectRequest(req.requestId, tenantAdmin, {
           approvalRequestId: req.requestId,
-          mutation: { expectedVersion: req.version },
+          mutation: { expectedVersion: req.version, reasonCode: "TEST_REASON" },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -2685,7 +2690,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           {
             targetUserId: "usr_target_03",
             roleCode: "security_admin",
-            mutation: { expectedVersion: 1 },
+            mutation: { expectedVersion: 1, reasonCode: "TEST_REASON" },
           },
           tenantAdmin,
         ),
@@ -2728,7 +2733,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         platformAdmin2,
         {
           approvalRequestId: req.requestId,
-          mutation: { expectedVersion: req.version },
+          mutation: { expectedVersion: req.version, reasonCode: "TEST_REASON" },
         },
       );
 
@@ -2739,7 +2744,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         {
           targetUserId: "usr_target_04",
           roleCode: "security_admin",
-          mutation: { expectedVersion: 1 },
+          mutation: { expectedVersion: 1, reasonCode: "TEST_REASON" },
         },
         platformAdmin1,
       );
