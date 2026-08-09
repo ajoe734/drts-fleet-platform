@@ -2747,6 +2747,14 @@ export class IdentityRepository implements OnModuleInit {
     return this.databaseService!.query<R>(sql, params);
   }
 
+  deleteFallbackPrivilegedRoleRequest(requestId: string): void {
+    this.fallbackPrivilegedRoleRequests.delete(requestId);
+  }
+
+  deleteFallbackPrivilegedRoleGrant(grantId: string): void {
+    this.fallbackPrivilegedRoleGrants.delete(grantId);
+  }
+
   async savePrivilegedRoleRequest(
     request: PrivilegedRoleApprovalRequestRecord,
     client?: PoolClient,

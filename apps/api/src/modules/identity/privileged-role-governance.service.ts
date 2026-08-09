@@ -62,6 +62,34 @@ export function isAdminRole(roleCode: string): boolean {
   return ADMIN_ROLES.has(roleCode.trim().toLowerCase());
 }
 
+export const GOVERNANCE_APPROVER_ROLES = new Set([
+  "superadmin",
+  "security_admin",
+  "platform_admin",
+  "tenant_admin",
+  "tenant_security_admin",
+]);
+
+export function isAuthorizedGovernanceApprover(identity: IdentityContext): boolean {
+  if (isPlatformOrSuperAdmin(identity)) return true;
+  const actorTypeNorm = identity.actorType?.trim().toLowerCase();
+  if (actorTypeNorm && GOVERNANCE_APPROVER_ROLES.has(actorTypeNorm)) {
+    return true;
+  }
+  const roles = identity.roles || [];
+  return roles.some((r) => GOVERNANCE_APPROVER_ROLES.has(r.trim().toLowerCase()));
+}
+
+export function verifyApproverAuthorization(identity: IdentityContext): void {
+  if (!isAuthorizedGovernanceApprover(identity)) {
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "AUTHZ_SCOPE_DENIED",
+      "Actor does not have administrative role authority to approve, reject, or remove privileged role grants.",
+    );
+  }
+}
+
 export function isPlatformOrSuperAdmin(identity: IdentityContext): boolean {
   if (identity.realm === "platform" || identity.realm === "ops") return true;
   const roles = identity.roles || [];
@@ -328,38 +356,47 @@ export class PrivilegedRoleGovernanceService {
 
       this.requests.set(requestId, record);
       let persistedRecord = record;
-      if (this.identityRepository) {
-        persistedRecord = await this.identityRepository.savePrivilegedRoleRequest(
-          record,
-          client,
-        );
-      }
+      try {
+        if (this.identityRepository) {
+          persistedRecord = await this.identityRepository.savePrivilegedRoleRequest(
+            record,
+            client,
+          );
+        }
 
-      if (this.securityEventsService) {
-        this.securityEventsService.recordEvent({
-          actorId: requesterIdentity.actorId,
-          actorType: requesterIdentity.actorType,
-          realm: record.realm,
-          tenantId: record.tenantId,
-          partnerId: null,
-          eventType: "privileged_role.requested",
-          eventFamily: "role",
-          outcome: "success",
-          severity: "medium",
-          targetType: "user",
-          targetId: record.targetUserId,
-          sessionId: null,
-          tokenId: null,
-          authMethods: [],
-          sourceIp: null,
-          userAgent: null,
-          requestId: null,
-          traceId: null,
-          reasonCode: null,
-          approvalId: null,
-          beforeSummary: null,
-          afterSummary: { requestId, roleCode: record.requestedRoleCode, reason: record.reason },
-        });
+        if (this.securityEventsService) {
+          await this.securityEventsService.recordEventRequired(
+            {
+              actorId: requesterIdentity.actorId,
+              actorType: requesterIdentity.actorType,
+              realm: record.realm,
+              tenantId: record.tenantId,
+              partnerId: null,
+              eventType: "privileged_role.requested",
+              eventFamily: "role",
+              outcome: "success",
+              severity: "medium",
+              targetType: "user",
+              targetId: record.targetUserId,
+              sessionId: null,
+              tokenId: null,
+              authMethods: [],
+              sourceIp: null,
+              userAgent: null,
+              requestId: null,
+              traceId: null,
+              reasonCode: null,
+              approvalId: null,
+              beforeSummary: null,
+              afterSummary: { requestId, roleCode: record.requestedRoleCode, reason: record.reason },
+            },
+            client,
+          );
+        }
+      } catch (error) {
+        this.requests.delete(requestId);
+        this.identityRepository?.deleteFallbackPrivilegedRoleRequest(requestId);
+        throw error;
       }
 
       return { ...persistedRecord };
@@ -385,6 +422,9 @@ export class PrivilegedRoleGovernanceService {
   }> {
     // Verified MFA Step-Up check
     verifyStepUp(approverIdentity, command?.stepUpReference);
+
+    // Administrative approver authorization check
+    verifyApproverAuthorization(approverIdentity);
 
     let existingReq = this.requests.get(approvalRequestId);
     if (!existingReq && this.identityRepository) {
@@ -483,6 +523,7 @@ export class PrivilegedRoleGovernanceService {
         ? "pending_activation"
         : "active";
 
+      const previousRequestState = { ...request };
       request.status = "approved";
       request.approvalDecision = "approve";
       request.approverPrincipalId = approverIdentity.actorId;
@@ -491,12 +532,6 @@ export class PrivilegedRoleGovernanceService {
       request.updatedAt = now;
 
       this.requests.set(approvalRequestId, { ...request });
-      if (this.identityRepository) {
-        request = await this.identityRepository.savePrivilegedRoleRequest(
-          request,
-          client,
-        );
-      }
 
       // Create grant
       const grantId = `grant_${randomUUID()}`;
@@ -519,53 +554,65 @@ export class PrivilegedRoleGovernanceService {
 
       this.grants.set(grantId, { ...grant });
       let persistedGrant = grant;
-      if (this.identityRepository) {
-        persistedGrant = await this.identityRepository.savePrivilegedRoleGrant(
-          grant,
-          client,
-        );
-      }
 
-      // 4. Stale Session Invalidation - ONLY if grant is immediately active (not future activation)
-      if (!isFutureActivation && this.identityRepository) {
-        await this.identityRepository.revokeSessionsByPrincipal(
-          request.targetUserId,
-          "PRIVILEGED_ROLE_APPROVED",
-          approverIdentity.actorId ?? undefined,
-          client,
-        );
-      }
+      try {
+        if (this.identityRepository) {
+          request = await this.identityRepository.savePrivilegedRoleRequest(
+            request,
+            client,
+          );
+          persistedGrant = await this.identityRepository.savePrivilegedRoleGrant(
+            grant,
+            client,
+          );
+          if (!isFutureActivation) {
+            await this.identityRepository.revokeSessionsByPrincipal(
+              request.targetUserId,
+              "PRIVILEGED_ROLE_APPROVED",
+              approverIdentity.actorId ?? undefined,
+              client,
+            );
+          }
+        }
 
-      if (this.securityEventsService) {
-        this.securityEventsService.recordEvent({
-          actorId: approverIdentity.actorId,
-          actorType: approverIdentity.actorType,
-          realm: request.realm,
-          tenantId: request.tenantId,
-          partnerId: null,
-          eventType: "privileged_role.approved",
-          eventFamily: "role",
-          outcome: "success",
-          severity: "medium",
-          targetType: "user",
-          targetId: request.targetUserId,
-          sessionId: null,
-          tokenId: null,
-          authMethods: [],
-          sourceIp: null,
-          userAgent: null,
-          requestId: request.requestId,
-          traceId: null,
-          reasonCode: null,
-          approvalId: request.requestId,
-          beforeSummary: null,
-          afterSummary: {
-            requestId: request.requestId,
-            grantId,
-            roleCode: grant.roleCode,
-            status: initialGrantStatus,
-          },
-        });
+        if (this.securityEventsService) {
+          await this.securityEventsService.recordEventRequired(
+            {
+              actorId: approverIdentity.actorId,
+              actorType: approverIdentity.actorType,
+              realm: request.realm,
+              tenantId: request.tenantId,
+              partnerId: null,
+              eventType: "privileged_role.approved",
+              eventFamily: "role",
+              outcome: "success",
+              severity: "medium",
+              targetType: "user",
+              targetId: request.targetUserId,
+              sessionId: null,
+              tokenId: null,
+              authMethods: [],
+              sourceIp: null,
+              userAgent: null,
+              requestId: request.requestId,
+              traceId: null,
+              reasonCode: null,
+              approvalId: request.requestId,
+              beforeSummary: null,
+              afterSummary: {
+                requestId: request.requestId,
+                grantId,
+                roleCode: grant.roleCode,
+                status: initialGrantStatus,
+              },
+            },
+            client,
+          );
+        }
+      } catch (error) {
+        this.requests.set(approvalRequestId, previousRequestState);
+        this.grants.delete(grantId);
+        throw error;
       }
 
       return {
@@ -583,6 +630,8 @@ export class PrivilegedRoleGovernanceService {
     rejectorIdentity: IdentityContext,
     command?: RejectPrivilegedRoleRequestCommand,
   ): Promise<PrivilegedRoleApprovalRequestRecord> {
+    // Administrative approver authorization check
+    verifyApproverAuthorization(rejectorIdentity);
     let existingReq = this.requests.get(approvalRequestId);
     if (!existingReq && this.identityRepository) {
       existingReq = (await this.identityRepository.getPrivilegedRoleRequest(
@@ -645,6 +694,7 @@ export class PrivilegedRoleGovernanceService {
       }
 
       const now = new Date().toISOString();
+      const previousRequestState = { ...request };
       request.status = "rejected";
       request.approvalDecision = "reject";
       request.approverPrincipalId = rejectorIdentity.actorId;
@@ -654,38 +704,47 @@ export class PrivilegedRoleGovernanceService {
 
       this.requests.set(approvalRequestId, { ...request });
       let persistedRequest = request;
-      if (this.identityRepository) {
-        persistedRequest = await this.identityRepository.savePrivilegedRoleRequest(
-          request,
-          client,
-        );
-      }
 
-      if (this.securityEventsService) {
-        this.securityEventsService.recordEvent({
-          actorId: rejectorIdentity.actorId,
-          actorType: rejectorIdentity.actorType,
-          realm: request.realm,
-          tenantId: request.tenantId,
-          partnerId: null,
-          eventType: "privileged_role.rejected",
-          eventFamily: "role",
-          outcome: "denied",
-          severity: "medium",
-          targetType: "user",
-          targetId: request.targetUserId,
-          sessionId: null,
-          tokenId: null,
-          authMethods: [],
-          sourceIp: null,
-          userAgent: null,
-          requestId: request.requestId,
-          traceId: null,
-          reasonCode: null,
-          approvalId: request.requestId,
-          beforeSummary: null,
-          afterSummary: { requestId: request.requestId, roleCode: request.requestedRoleCode },
-        });
+      try {
+        if (this.identityRepository) {
+          persistedRequest = await this.identityRepository.savePrivilegedRoleRequest(
+            request,
+            client,
+          );
+        }
+
+        if (this.securityEventsService) {
+          await this.securityEventsService.recordEventRequired(
+            {
+              actorId: rejectorIdentity.actorId,
+              actorType: rejectorIdentity.actorType,
+              realm: request.realm,
+              tenantId: request.tenantId,
+              partnerId: null,
+              eventType: "privileged_role.rejected",
+              eventFamily: "role",
+              outcome: "denied",
+              severity: "medium",
+              targetType: "user",
+              targetId: request.targetUserId,
+              sessionId: null,
+              tokenId: null,
+              authMethods: [],
+              sourceIp: null,
+              userAgent: null,
+              requestId: request.requestId,
+              traceId: null,
+              reasonCode: null,
+              approvalId: request.requestId,
+              beforeSummary: null,
+              afterSummary: { requestId: request.requestId, roleCode: request.requestedRoleCode },
+            },
+            client,
+          );
+        }
+      } catch (error) {
+        this.requests.set(approvalRequestId, previousRequestState);
+        throw error;
       }
 
       return { ...persistedRequest };
@@ -724,6 +783,9 @@ export class PrivilegedRoleGovernanceService {
 
     // Enforce Step-Up / MFA check on grant removal
     verifyStepUp(actorIdentity, command.mutation?.stepUpReference);
+
+    // Administrative approver authorization check
+    verifyApproverAuthorization(actorIdentity);
 
     return this.withTenantLock(tenantId, async (client) => {
       const activeGrants = await this.fetchActiveGrantsForTenant(tenantId, client);
@@ -785,50 +847,61 @@ export class PrivilegedRoleGovernanceService {
             updatedAt: now,
           };
 
+      const previousGrantState = existing ? { ...existing } : null;
+
       this.grants.set(record.grantId, { ...record });
       let persistedRecord = record;
-      if (this.identityRepository) {
-        persistedRecord = await this.identityRepository.savePrivilegedRoleGrant(
-          record,
-          client,
-        );
-      }
 
-      // Stale Session Invalidation
-      if (this.identityRepository) {
-        await this.identityRepository.revokeSessionsByPrincipal(
-          targetUserId,
-          "PRIVILEGED_ROLE_REMOVED",
-          actorIdentity.actorId ?? undefined,
-          client,
-        );
-      }
+      try {
+        if (this.identityRepository) {
+          persistedRecord = await this.identityRepository.savePrivilegedRoleGrant(
+            record,
+            client,
+          );
+          await this.identityRepository.revokeSessionsByPrincipal(
+            targetUserId,
+            "PRIVILEGED_ROLE_REMOVED",
+            actorIdentity.actorId ?? undefined,
+            client,
+          );
+        }
 
-      if (this.securityEventsService) {
-        this.securityEventsService.recordEvent({
-          actorId: actorIdentity.actorId,
-          actorType: actorIdentity.actorType,
-          realm: record.realm,
-          tenantId,
-          partnerId: null,
-          eventType: "privileged_role.removed",
-          eventFamily: "role",
-          outcome: "revoked",
-          severity: "medium",
-          targetType: "user",
-          targetId: targetUserId,
-          sessionId: null,
-          tokenId: null,
-          authMethods: [],
-          sourceIp: null,
-          userAgent: null,
-          requestId: null,
-          traceId: null,
-          reasonCode: null,
-          approvalId: record.approvalId,
-          beforeSummary: null,
-          afterSummary: { grantId: record.grantId, roleCode },
-        });
+        if (this.securityEventsService) {
+          await this.securityEventsService.recordEventRequired(
+            {
+              actorId: actorIdentity.actorId,
+              actorType: actorIdentity.actorType,
+              realm: record.realm,
+              tenantId,
+              partnerId: null,
+              eventType: "privileged_role.removed",
+              eventFamily: "role",
+              outcome: "revoked",
+              severity: "medium",
+              targetType: "user",
+              targetId: targetUserId,
+              sessionId: null,
+              tokenId: null,
+              authMethods: [],
+              sourceIp: null,
+              userAgent: null,
+              requestId: null,
+              traceId: null,
+              reasonCode: null,
+              approvalId: record.approvalId,
+              beforeSummary: null,
+              afterSummary: { grantId: record.grantId, roleCode },
+            },
+            client,
+          );
+        }
+      } catch (error) {
+        if (previousGrantState) {
+          this.grants.set(record.grantId, previousGrantState);
+        } else {
+          this.grants.delete(record.grantId);
+        }
+        throw error;
       }
 
       return { ...persistedRecord };
@@ -870,30 +943,33 @@ export class PrivilegedRoleGovernanceService {
             }
 
             if (this.securityEventsService) {
-              this.securityEventsService.recordEvent({
-                actorId: "system",
-                actorType: "system",
-                realm: grant.realm,
-                tenantId: grant.tenantId,
-                partnerId: null,
-                eventType: "privileged_role.activated",
-                eventFamily: "role",
-                outcome: "success",
-                severity: "medium",
-                targetType: "user",
-                targetId: grant.targetUserId,
-                sessionId: null,
-                tokenId: null,
-                authMethods: [],
-                sourceIp: null,
-                userAgent: null,
-                requestId: null,
-                traceId: null,
-                reasonCode: null,
-                approvalId: grant.approvalId,
-                beforeSummary: null,
-                afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
-              });
+              await this.securityEventsService.recordEventRequired(
+                {
+                  actorId: "system",
+                  actorType: "system",
+                  realm: grant.realm,
+                  tenantId: grant.tenantId,
+                  partnerId: null,
+                  eventType: "privileged_role.activated",
+                  eventFamily: "role",
+                  outcome: "success",
+                  severity: "medium",
+                  targetType: "user",
+                  targetId: grant.targetUserId,
+                  sessionId: null,
+                  tokenId: null,
+                  authMethods: [],
+                  sourceIp: null,
+                  userAgent: null,
+                  requestId: null,
+                  traceId: null,
+                  reasonCode: null,
+                  approvalId: grant.approvalId,
+                  beforeSummary: null,
+                  afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
+                },
+                client,
+              );
             }
           }
         }
@@ -917,30 +993,33 @@ export class PrivilegedRoleGovernanceService {
             }
 
             if (this.securityEventsService) {
-              this.securityEventsService.recordEvent({
-                actorId: "system",
-                actorType: "system",
-                realm: grant.realm,
-                tenantId: grant.tenantId,
-                partnerId: null,
-                eventType: "privileged_role.expired",
-                eventFamily: "role",
-                outcome: "expired",
-                severity: "medium",
-                targetType: "user",
-                targetId: grant.targetUserId,
-                sessionId: null,
-                tokenId: null,
-                authMethods: [],
-                sourceIp: null,
-                userAgent: null,
-                requestId: null,
-                traceId: null,
-                reasonCode: null,
-                approvalId: grant.approvalId,
-                beforeSummary: null,
-                afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
-              });
+              await this.securityEventsService.recordEventRequired(
+                {
+                  actorId: "system",
+                  actorType: "system",
+                  realm: grant.realm,
+                  tenantId: grant.tenantId,
+                  partnerId: null,
+                  eventType: "privileged_role.expired",
+                  eventFamily: "role",
+                  outcome: "expired",
+                  severity: "medium",
+                  targetType: "user",
+                  targetId: grant.targetUserId,
+                  sessionId: null,
+                  tokenId: null,
+                  authMethods: [],
+                  sourceIp: null,
+                  userAgent: null,
+                  requestId: null,
+                  traceId: null,
+                  reasonCode: null,
+                  approvalId: grant.approvalId,
+                  beforeSummary: null,
+                  afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
+                },
+                client,
+              );
             }
           }
         }

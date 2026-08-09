@@ -750,6 +750,18 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "identity/privileged-role-grants/process-expiries" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "identity:privileged-role-grants:process-expiries",
+      requiredScopes: ["identity:write"],
+      allowedRealms: ["system"],
+      description: "Internal scheduler execution of privileged role expiries",
+    };
+  }
+
   if (routePath.startsWith("identity/") || routePath === "identity") {
     return {
       routeKey: `identity:${upperMethod}`,

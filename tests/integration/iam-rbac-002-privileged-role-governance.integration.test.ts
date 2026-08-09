@@ -813,5 +813,136 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       },
     );
   });
+
+  describe("12. Server-side Approver Authorization Policy", () => {
+    it("rejects approval, rejection, and removal when non-admin user with MFA attempts governance actions", async () => {
+      const adminRequester = createMockIdentity({ actorId: "usr_admin_req", roles: ["tenant_admin"], tenantId: "ten_authz" });
+      const nonAdminUser = createMockIdentity({ actorId: "usr_non_admin", actorType: "user", roles: ["driver"], scopes: ["identity:write"], tenantId: "ten_authz", authMethods: ["jwt", "mfa"] });
+
+      // Create a pending request
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_authz",
+          roleCode: "tenant_security_admin",
+          reason: "Needs security admin rights",
+          tenantId: "ten_authz",
+        },
+        adminRequester,
+      );
+
+      // Non-admin attempts to approve -> fails 403 AUTHZ_SCOPE_DENIED
+      await expect(
+        service.approveRequest(request.requestId, nonAdminUser),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      // Non-admin attempts to reject -> fails 403 AUTHZ_SCOPE_DENIED
+      await expect(
+        service.rejectRequest(request.requestId, nonAdminUser),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      // Register an active grant for testing removal
+      await service.registerActiveGrant("usr_target_grant", "ten_authz", "tenant_security_admin");
+
+      // Non-admin attempts to remove -> fails 403 AUTHZ_SCOPE_DENIED
+      await expect(
+        service.removeGrant(
+          {
+            targetUserId: "usr_target_grant",
+            roleCode: "tenant_security_admin",
+            tenantId: "ten_authz",
+            reason: "Revoke grant attempt",
+          },
+          nonAdminUser,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+    });
+  });
+
+  describe("13. Process Expiries Endpoint System Authority Policy", () => {
+    it("denies process-expiries for non-system identities and allows system identity", async () => {
+      const { IdentityController } = await import(
+        "../../apps/api/src/modules/identity/identity.controller"
+      );
+      const controller = new IdentityController(service);
+
+      const tenantAdminUser = createMockIdentity({ actorId: "usr_tenant_admin", roles: ["tenant_admin"], realm: "tenant" });
+      const systemIdentity = createMockIdentity({ actorId: "scheduler_system", actorType: "system", realm: "system" });
+
+      // Non-system identity calls controller method -> fails 403
+      await expect(
+        controller.processExpiredPrivilegedRoleGrants(tenantAdminUser),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      // Null identity calls controller method -> fails 403
+      await expect(
+        controller.processExpiredPrivilegedRoleGrants(null),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      // System identity calls controller method -> succeeds
+      const result = await controller.processExpiredPrivilegedRoleGrants(systemIdentity);
+      expect(result).toBeDefined();
+      expect(result.data).toBeDefined();
+    });
+  });
+
+  describe("14. Transactional Audit Event Requirement (IAM-AUD-001)", () => {
+    it("fails privileged mutation when audit event persistence fails via recordEventRequired", async () => {
+      const mockSecurityEventsService = {
+        recordEventRequired: async () => {
+          throw new Error("Audit log database disk full failure");
+        },
+      } as any;
+
+      const failingService = new PrivilegedRoleGovernanceService(
+        identityRepo,
+        mockSecurityEventsService,
+      );
+
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_fail" });
+      const approver = createMockIdentity({ actorId: "usr_bob", roles: ["tenant_admin"], tenantId: "ten_audit_fail" });
+
+      // createRequest fails due to audit event failure
+      await expect(
+        failingService.createRequest(
+          {
+            targetUserId: "usr_charlie",
+            roleCode: "tenant_admin",
+            reason: "Audit failure test",
+            tenantId: "ten_audit_fail",
+          },
+          requester,
+        ),
+      ).rejects.toThrowError("Audit log database disk full failure");
+
+      // Verify no pending request was saved
+      const requests = await failingService.listRequests(requester, "ten_audit_fail");
+      expect(requests).toHaveLength(0);
+    });
+  });
 });
 

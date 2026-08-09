@@ -442,8 +442,19 @@ export class IdentityController {
 
   @Post("privileged-role-grants/process-expiries")
   async processExpiredPrivilegedRoleGrants(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (
+      !identity ||
+      (identity.realm !== "system" && identity.actorType !== "system")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Only internal system/scheduler authority can invoke process-expiries.",
+      );
+    }
     if (!this.privilegedRoleGovernanceService) {
       throw new ApiRequestError(
         HttpStatus.SERVICE_UNAVAILABLE,
