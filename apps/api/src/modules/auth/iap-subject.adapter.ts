@@ -27,6 +27,7 @@ export const DEFAULT_IAP_ROLE_GROUP_MAPPING: Record<string, string> = {
   viewer: "platform-admins@platform.drts",
   operator: "ops-users@platform.drts",
   platform_admin: "platform-admins@platform.drts",
+  security_admin: "platform-admins@platform.drts",
   ops_user: "ops-users@platform.drts",
 };
 
@@ -56,6 +57,7 @@ export const DEFAULT_ROLE_SCOPES: Record<string, readonly string[]> = {
   admin: AUTH_SCOPE_PRESETS.platform_admin,
   viewer: PLATFORM_VIEWER_SCOPES,
   platform_admin: AUTH_SCOPE_PRESETS.platform_admin,
+  security_admin: AUTH_SCOPE_PRESETS.platform_admin,
   operator: AUTH_SCOPE_PRESETS.ops_user,
   ops_user: AUTH_SCOPE_PRESETS.ops_user,
 };
@@ -449,7 +451,6 @@ export class IAPSubjectAdapter {
         new Set(activeBindings.map((b) => b.roleCode)),
       );
       const assignedRoles = allAssignedRoles.filter((r) => {
-        if (m.realm === "platform") {
           return (
             r === "superadmin" ||
             r === "platform_admin" ||
@@ -457,11 +458,10 @@ export class IAPSubjectAdapter {
             r === "viewer" ||
             r === "security_admin"
           );
-        }
         if (m.realm === "ops") {
           return r === "operator" || r === "ops_user";
         }
-        return true;
+        return false;
       });
 
       const missingGroupsForM: string[] = [];
@@ -846,15 +846,12 @@ export class IAPSubjectAdapter {
     }
     if (roles && roles.length > 0) {
       const hasPlatformRole = roles.some(
-<<<<<<< HEAD
         (r) =>
           r === "superadmin" ||
           r === "platform_admin" ||
           r === "admin" ||
-          r === "viewer",
-=======
-        (r) => r === "superadmin" || r === "platform_admin" || r === "security_admin",
->>>>>>> 0d95b522e (fix(IAM-RBAC-002): enforce activation SoD recheck with fail-closed state and project canonical claims)
+          r === "viewer" ||
+          r === "security_admin",
       );
       const hasOpsRole = roles.some(
         (r) => r === "operator" || r === "ops_user",

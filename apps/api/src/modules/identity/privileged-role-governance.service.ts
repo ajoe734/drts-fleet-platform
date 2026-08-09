@@ -1,5 +1,10 @@
 import { Injectable, HttpStatus, Inject, Optional } from "@nestjs/common";
-import { randomUUID, createHmac, timingSafeEqual, randomBytes } from "node:crypto";
+import {
+  randomUUID,
+  createHmac,
+  timingSafeEqual,
+  randomBytes,
+} from "node:crypto";
 import type { PoolClient } from "pg";
 import type {
   IdentityContext,
@@ -47,7 +52,9 @@ export function areRolesIncompatible(roleA: string, roleB: string): boolean {
   );
 }
 
-export function toGovernanceRealm(realm?: string | null): "platform" | "tenant" | "ops" {
+export function toGovernanceRealm(
+  realm?: string | null,
+): "platform" | "tenant" | "ops" {
   if (realm === "platform" || realm === "ops") {
     return realm;
   }
@@ -76,13 +83,17 @@ export const PLATFORM_SUPER_ADMIN_ROLES = new Set([
   "security_admin",
 ]);
 
-export function isAuthorizedGovernanceApprover(identity: IdentityContext): boolean {
+export function isAuthorizedGovernanceApprover(
+  identity: IdentityContext,
+): boolean {
   const actorTypeNorm = identity.actorType?.trim().toLowerCase();
   if (actorTypeNorm && GOVERNANCE_APPROVER_ROLES.has(actorTypeNorm)) {
     return true;
   }
   const roles = identity.roles || [];
-  return roles.some((r) => GOVERNANCE_APPROVER_ROLES.has(r.trim().toLowerCase()));
+  return roles.some((r) =>
+    GOVERNANCE_APPROVER_ROLES.has(r.trim().toLowerCase()),
+  );
 }
 
 export function verifyApproverAuthorization(identity: IdentityContext): void {
@@ -101,7 +112,13 @@ export function isPlatformOrSuperAdmin(identity: IdentityContext): boolean {
     return true;
   }
   const roles = identity.roles || [];
-  return roles.some((r) => PLATFORM_SUPER_ADMIN_ROLES.has(r.trim().toLowerCase()));
+  return roles.some((r) =>
+    PLATFORM_SUPER_ADMIN_ROLES.has(r.trim().toLowerCase()),
+  );
+}
+
+export function isPlatformTierRole(roleCode: string): boolean {
+  return PLATFORM_SUPER_ADMIN_ROLES.has(roleCode.trim().toLowerCase());
 }
 
 const REJECTED_STEP_UP_SENTINELS = new Set([
@@ -162,10 +179,10 @@ export function issueServerStepUpProof(payload: {
     expiresAt: Date.now() + ttl * 1000,
     nonce: randomBytes(16).toString("hex"),
   };
-  const payloadB64 = Buffer.from(JSON.stringify(fullPayload)).toString("base64url");
-  const hmac = createHmac("sha256", secret)
-    .update(payloadB64)
-    .digest("hex");
+  const payloadB64 = Buffer.from(JSON.stringify(fullPayload)).toString(
+    "base64url",
+  );
+  const hmac = createHmac("sha256", secret).update(payloadB64).digest("hex");
   return `srv_stepup.${payloadB64}.${hmac}`;
 }
 
@@ -205,7 +222,9 @@ export async function verifyServerStepUpProof(
 
   let payload: StepUpProofPayload;
   try {
-    payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+    payload = JSON.parse(
+      Buffer.from(payloadB64, "base64url").toString("utf-8"),
+    );
   } catch {
     return false;
   }
@@ -278,7 +297,10 @@ export async function verifyStepUp(
   operationContext?: { action?: string; targetId?: string },
   identityRepository?: IdentityRepository,
 ): Promise<void> {
-  if (typeof stepUpReference === "string" && stepUpReference.trim().length > 0) {
+  if (
+    typeof stepUpReference === "string" &&
+    stepUpReference.trim().length > 0
+  ) {
     const trimmed = stepUpReference.trim();
     if (REJECTED_STEP_UP_SENTINELS.has(trimmed.toUpperCase())) {
       throw new ApiRequestError(
@@ -291,13 +313,22 @@ export async function verifyStepUp(
 
   const authMethods = identity.authMethods || identity.amr || [];
   const hasMfaMethod = authMethods.some((m: string) =>
-    ["mfa", "step_up", "webauthn", "totp", "fido2", "otp", "hardware_key"].includes(
-      m.trim().toLowerCase(),
-    ),
+    [
+      "mfa",
+      "step_up",
+      "webauthn",
+      "totp",
+      "fido2",
+      "otp",
+      "hardware_key",
+    ].includes(m.trim().toLowerCase()),
   );
 
   let isAuthTimeFresh = false;
-  if (typeof identity.authTime === "string" && identity.authTime.trim().length > 0) {
+  if (
+    typeof identity.authTime === "string" &&
+    identity.authTime.trim().length > 0
+  ) {
     const authTimestamp = Date.parse(identity.authTime);
     if (!isNaN(authTimestamp)) {
       const ageSeconds = (Date.now() - authTimestamp) / 1000;
@@ -330,7 +361,10 @@ export async function verifyStepUp(
 
 @Injectable()
 export class PrivilegedRoleGovernanceService {
-  private readonly requests = new Map<string, PrivilegedRoleApprovalRequestRecord>();
+  private readonly requests = new Map<
+    string,
+    PrivilegedRoleApprovalRequestRecord
+  >();
   private readonly grants = new Map<string, PrivilegedRoleGrantRecord>();
   private readonly tenantLocks = new Map<string, Promise<void>>();
 
@@ -366,10 +400,9 @@ export class PrivilegedRoleGovernanceService {
         const client = await this.databaseService.connect();
         try {
           await client.query("BEGIN");
-          await client.query(
-            "SELECT pg_advisory_xact_lock(hashtext($1))",
-            [`tenant_governance_lock:${lockKey}`],
-          );
+          await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+            `tenant_governance_lock:${lockKey}`,
+          ]);
           const result = await fn(client);
           await client.query("COMMIT");
           return result;
@@ -399,16 +432,20 @@ export class PrivilegedRoleGovernanceService {
     client?: PoolClient,
   ): Promise<PrivilegedRoleGrantRecord[]> {
     if (this.identityRepository) {
-      const persistedGrants = await this.identityRepository.listPrivilegedRoleGrants(
-        tenantId,
-        client,
-      );
+      const persistedGrants =
+        await this.identityRepository.listPrivilegedRoleGrants(
+          tenantId,
+          client,
+        );
       return persistedGrants.filter(
-        (g) => g.status === "active" && (tenantId == null || g.tenantId === tenantId),
+        (g) =>
+          g.status === "active" &&
+          (tenantId == null || g.tenantId === tenantId),
       );
     }
     return Array.from(this.grants.values()).filter(
-      (g) => g.status === "active" && (tenantId == null || g.tenantId === tenantId),
+      (g) =>
+        g.status === "active" && (tenantId == null || g.tenantId === tenantId),
     );
   }
 
@@ -418,8 +455,13 @@ export class PrivilegedRoleGovernanceService {
     tenantId: string | null,
     client?: PoolClient,
   ): Promise<void> {
-    const activeGrants = await this.fetchActiveGrantsForTenant(tenantId, client);
-    const userGrants = activeGrants.filter((g) => g.targetUserId === targetUserId);
+    const activeGrants = await this.fetchActiveGrantsForTenant(
+      tenantId,
+      client,
+    );
+    const userGrants = activeGrants.filter(
+      (g) => g.targetUserId === targetUserId,
+    );
 
     for (const grant of userGrants) {
       if (areRolesIncompatible(requestedRoleCode, grant.roleCode)) {
@@ -509,6 +551,18 @@ export class PrivilegedRoleGovernanceService {
         HttpStatus.BAD_REQUEST,
         "IAM_TARGET_REQUIRED",
         "Target user ID is required.",
+      );
+    }
+
+    // Role tier check: platform-tier roles require platform-tier identity
+    if (
+      isPlatformTierRole(roleCode) &&
+      !isPlatformOrSuperAdmin(requesterIdentity)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        `Tenant-level users cannot request platform-tier role '${roleCode}'. Only platform administrators can request platform-tier roles.`,
       );
     }
 
@@ -602,10 +656,11 @@ export class PrivilegedRoleGovernanceService {
       let persistedRecord = record;
       try {
         if (this.identityRepository) {
-          persistedRecord = await this.identityRepository.savePrivilegedRoleRequest(
-            record,
-            client,
-          );
+          persistedRecord =
+            await this.identityRepository.savePrivilegedRoleRequest(
+              record,
+              client,
+            );
         }
 
         if (this.securityEventsService) {
@@ -632,7 +687,11 @@ export class PrivilegedRoleGovernanceService {
               reasonCode: null,
               approvalId: null,
               beforeSummary: null,
-              afterSummary: { requestId, roleCode: record.requestedRoleCode, reason: record.reason },
+              afterSummary: {
+                requestId,
+                roleCode: record.requestedRoleCode,
+                reason: record.reason,
+              },
             },
             client,
           );
@@ -677,11 +736,13 @@ export class PrivilegedRoleGovernanceService {
 
     let existingReq = this.requests.get(approvalRequestId);
     if (!existingReq && this.identityRepository) {
-      existingReq = (await this.identityRepository.getPrivilegedRoleRequest(
-        approvalRequestId,
-      )) ?? undefined;
+      existingReq =
+        (await this.identityRepository.getPrivilegedRoleRequest(
+          approvalRequestId,
+        )) ?? undefined;
     }
-    const tenantIdToLock = existingReq?.tenantId ?? approverIdentity.tenantId ?? null;
+    const tenantIdToLock =
+      existingReq?.tenantId ?? approverIdentity.tenantId ?? null;
 
     return this.withTenantLock(tenantIdToLock, async (client) => {
       let request: PrivilegedRoleApprovalRequestRecord | null = null;
@@ -717,6 +778,18 @@ export class PrivilegedRoleGovernanceService {
         );
       }
 
+      // Check tier authority: approving platform-tier role requires platform-tier identity
+      if (
+        isPlatformTierRole(request.requestedRoleCode) &&
+        !isPlatformOrSuperAdmin(approverIdentity)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "AUTHZ_SCOPE_DENIED",
+          `Tenant-level approvers cannot approve requests for platform-tier role '${request.requestedRoleCode}'. Only platform administrators can approve platform-tier role requests.`,
+        );
+      }
+
       // 1. Status & Concurrency Control
       if (request.status !== "pending") {
         throw new ApiRequestError(
@@ -743,7 +816,11 @@ export class PrivilegedRoleGovernanceService {
           HttpStatus.CONFLICT,
           "IAM_CONCURRENCY_CONFLICT",
           `Optimistic locking conflict: expected version ${expectedVersion}, current version is ${request.version}.`,
-          { approvalRequestId, expectedVersion, currentVersion: request.version },
+          {
+            approvalRequestId,
+            expectedVersion,
+            currentVersion: request.version,
+          },
         );
       }
 
@@ -780,12 +857,14 @@ export class PrivilegedRoleGovernanceService {
       if (request.validTo) {
         const validToMs = new Date(request.validTo).getTime();
         if (!isNaN(validToMs) && validToMs <= nowMs) {
-          const previousRequestState = { ...request };
           request.status = "expired";
           request.updatedAt = now;
           this.requests.set(approvalRequestId, { ...request });
           if (this.identityRepository) {
-            await this.identityRepository.savePrivilegedRoleRequest(request, client);
+            await this.identityRepository.savePrivilegedRoleRequest(
+              request,
+              client,
+            );
           }
           if (this.securityEventsService) {
             await this.securityEventsService.recordEventRequired(
@@ -834,9 +913,8 @@ export class PrivilegedRoleGovernanceService {
 
       const validFromMs = new Date(request.validFrom).getTime();
       const isFutureActivation = !isNaN(validFromMs) && validFromMs > nowMs;
-      const initialGrantStatus: PrivilegedRoleGrantRecord["status"] = isFutureActivation
-        ? "pending_activation"
-        : "active";
+      const initialGrantStatus: PrivilegedRoleGrantRecord["status"] =
+        isFutureActivation ? "pending_activation" : "active";
 
       const previousRequestState = { ...request };
       request.status = "approved";
@@ -876,10 +954,11 @@ export class PrivilegedRoleGovernanceService {
             request,
             client,
           );
-          persistedGrant = await this.identityRepository.savePrivilegedRoleGrant(
-            grant,
-            client,
-          );
+          persistedGrant =
+            await this.identityRepository.savePrivilegedRoleGrant(
+              grant,
+              client,
+            );
           if (!isFutureActivation) {
             await this.identityRepository.revokeSessionsByPrincipal(
               request.targetUserId,
@@ -957,11 +1036,13 @@ export class PrivilegedRoleGovernanceService {
     verifyApproverAuthorization(rejectorIdentity);
     let existingReq = this.requests.get(approvalRequestId);
     if (!existingReq && this.identityRepository) {
-      existingReq = (await this.identityRepository.getPrivilegedRoleRequest(
-        approvalRequestId,
-      )) ?? undefined;
+      existingReq =
+        (await this.identityRepository.getPrivilegedRoleRequest(
+          approvalRequestId,
+        )) ?? undefined;
     }
-    const tenantIdToLock = existingReq?.tenantId ?? rejectorIdentity.tenantId ?? null;
+    const tenantIdToLock =
+      existingReq?.tenantId ?? rejectorIdentity.tenantId ?? null;
 
     return this.withTenantLock(tenantIdToLock, async (client) => {
       let request: PrivilegedRoleApprovalRequestRecord | null = null;
@@ -997,6 +1078,18 @@ export class PrivilegedRoleGovernanceService {
         );
       }
 
+      // Check tier authority: rejecting platform-tier role request requires platform-tier identity
+      if (
+        isPlatformTierRole(request.requestedRoleCode) &&
+        !isPlatformOrSuperAdmin(rejectorIdentity)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "AUTHZ_SCOPE_DENIED",
+          `Tenant-level approvers cannot reject requests for platform-tier role '${request.requestedRoleCode}'. Only platform administrators can reject platform-tier role requests.`,
+        );
+      }
+
       if (request.status !== "pending") {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -1022,7 +1115,11 @@ export class PrivilegedRoleGovernanceService {
           HttpStatus.CONFLICT,
           "IAM_CONCURRENCY_CONFLICT",
           `Optimistic locking conflict: expected version ${expectedVersion}, current version is ${request.version}.`,
-          { approvalRequestId, expectedVersion, currentVersion: request.version },
+          {
+            approvalRequestId,
+            expectedVersion,
+            currentVersion: request.version,
+          },
         );
       }
 
@@ -1058,10 +1155,11 @@ export class PrivilegedRoleGovernanceService {
 
       try {
         if (this.identityRepository) {
-          persistedRequest = await this.identityRepository.savePrivilegedRoleRequest(
-            request,
-            client,
-          );
+          persistedRequest =
+            await this.identityRepository.savePrivilegedRoleRequest(
+              request,
+              client,
+            );
         }
 
         if (this.securityEventsService) {
@@ -1088,7 +1186,10 @@ export class PrivilegedRoleGovernanceService {
               reasonCode: null,
               approvalId: request.requestId,
               beforeSummary: null,
-              afterSummary: { requestId: request.requestId, roleCode: request.requestedRoleCode },
+              afterSummary: {
+                requestId: request.requestId,
+                roleCode: request.requestedRoleCode,
+              },
             },
             client,
           );
@@ -1133,10 +1234,15 @@ export class PrivilegedRoleGovernanceService {
     }
 
     // Enforce Step-Up / MFA check on grant removal
-    await verifyStepUp(actorIdentity, command.mutation?.stepUpReference, {
-      action: "remove",
-      targetId: `${command.targetUserId}:${command.roleCode}`,
-    }, this.identityRepository);
+    await verifyStepUp(
+      actorIdentity,
+      command.mutation?.stepUpReference,
+      {
+        action: "remove",
+        targetId: `${command.targetUserId}:${command.roleCode}`,
+      },
+      this.identityRepository,
+    );
 
     const expectedVersion =
       command.mutation?.expectedVersion ?? (command as any)?.expectedVersion;
@@ -1152,13 +1258,32 @@ export class PrivilegedRoleGovernanceService {
     // Administrative approver authorization check
     verifyApproverAuthorization(actorIdentity);
 
+    // Check tier authority: removing platform-tier role grant requires platform-tier identity
+    if (
+      isPlatformTierRole(roleCode) &&
+      !isPlatformOrSuperAdmin(actorIdentity)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        `Tenant-level users cannot remove platform-tier role grant '${roleCode}'. Only platform administrators can manage platform-tier role grants.`,
+      );
+    }
+
     return this.withTenantLock(tenantId, async (client) => {
-      const activeGrants = await this.fetchActiveGrantsForTenant(tenantId, client);
+      const activeGrants = await this.fetchActiveGrantsForTenant(
+        tenantId,
+        client,
+      );
 
       // Atomic Last-Admin Protection Check
       if (isAdminRole(roleCode)) {
-        const activeAdminGrants = activeGrants.filter((g) => isAdminRole(g.roleCode));
-        const activeAdminUsers = new Set(activeAdminGrants.map((g) => g.targetUserId));
+        const activeAdminGrants = activeGrants.filter((g) =>
+          isAdminRole(g.roleCode),
+        );
+        const activeAdminUsers = new Set(
+          activeAdminGrants.map((g) => g.targetUserId),
+        );
         const isTargetActiveAdmin = activeAdminUsers.has(targetUserId);
 
         if (isTargetActiveAdmin) {
@@ -1169,7 +1294,9 @@ export class PrivilegedRoleGovernanceService {
                 g.roleCode.trim().toLowerCase() === roleCode.toLowerCase()
               ),
           );
-          const remainingAdminUsers = new Set(remainingAdmins.map((g) => g.targetUserId));
+          const remainingAdminUsers = new Set(
+            remainingAdmins.map((g) => g.targetUserId),
+          );
 
           if (remainingAdminUsers.size === 0) {
             throw new ApiRequestError(
@@ -1219,10 +1346,11 @@ export class PrivilegedRoleGovernanceService {
 
       try {
         if (this.identityRepository) {
-          persistedRecord = await this.identityRepository.savePrivilegedRoleGrant(
-            record,
-            client,
-          );
+          persistedRecord =
+            await this.identityRepository.savePrivilegedRoleGrant(
+              record,
+              client,
+            );
           await this.identityRepository.revokeSessionsByPrincipal(
             targetUserId,
             "PRIVILEGED_ROLE_REMOVED",
@@ -1277,14 +1405,19 @@ export class PrivilegedRoleGovernanceService {
    * Process all stale/expired grants (now >= validTo) and activate pending grants (now >= validFrom).
    * Revokes stale sessions at activation time and expiry time.
    */
-  async expireStaleGrants(currentTimeMs = Date.now()): Promise<PrivilegedRoleGrantRecord[]> {
+  async expireStaleGrants(
+    currentTimeMs = Date.now(),
+  ): Promise<PrivilegedRoleGrantRecord[]> {
     return this.withTenantLock(null, async (client) => {
       const expired: PrivilegedRoleGrantRecord[] = [];
       const now = new Date(currentTimeMs).toISOString();
 
       let allGrants: PrivilegedRoleGrantRecord[] = [];
       if (this.identityRepository) {
-        allGrants = await this.identityRepository.listPrivilegedRoleGrants(null, client);
+        allGrants = await this.identityRepository.listPrivilegedRoleGrants(
+          null,
+          client,
+        );
       } else {
         allGrants = Array.from(this.grants.values());
       }
@@ -1307,7 +1440,10 @@ export class PrivilegedRoleGovernanceService {
               grant.updatedAt = now;
               this.grants.set(grant.grantId, { ...grant });
               if (this.identityRepository) {
-                await this.identityRepository.savePrivilegedRoleGrant(grant, client);
+                await this.identityRepository.savePrivilegedRoleGrant(
+                  grant,
+                  client,
+                );
                 await this.identityRepository.revokeSessionsByPrincipal(
                   grant.targetUserId,
                   "PRIVILEGED_ROLE_ACTIVATED",
@@ -1340,7 +1476,10 @@ export class PrivilegedRoleGovernanceService {
                     reasonCode: null,
                     approvalId: grant.approvalId,
                     beforeSummary: null,
-                    afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
+                    afterSummary: {
+                      grantId: grant.grantId,
+                      roleCode: grant.roleCode,
+                    },
                   },
                   client,
                 );
@@ -1351,7 +1490,10 @@ export class PrivilegedRoleGovernanceService {
               grant.updatedAt = now;
               this.grants.set(grant.grantId, { ...grant });
               if (this.identityRepository) {
-                await this.identityRepository.savePrivilegedRoleGrant(grant, client);
+                await this.identityRepository.savePrivilegedRoleGrant(
+                  grant,
+                  client,
+                );
                 await this.identityRepository.revokeSessionsByPrincipal(
                   grant.targetUserId,
                   "PRIVILEGED_ROLE_ACTIVATION_FAILED",
@@ -1388,7 +1530,10 @@ export class PrivilegedRoleGovernanceService {
                       grantId: grant.grantId,
                       roleCode: grant.roleCode,
                       status: "removed",
-                      reason: sodError instanceof Error ? sodError.message : "SoD violation on activation",
+                      reason:
+                        sodError instanceof Error
+                          ? sodError.message
+                          : "SoD violation on activation",
                     },
                   },
                   client,
@@ -1407,7 +1552,10 @@ export class PrivilegedRoleGovernanceService {
             expired.push({ ...grant });
             this.grants.set(grant.grantId, { ...grant });
             if (this.identityRepository) {
-              await this.identityRepository.savePrivilegedRoleGrant(grant, client);
+              await this.identityRepository.savePrivilegedRoleGrant(
+                grant,
+                client,
+              );
               await this.identityRepository.revokeSessionsByPrincipal(
                 grant.targetUserId,
                 "PRIVILEGED_ROLE_EXPIRED",
@@ -1440,7 +1588,10 @@ export class PrivilegedRoleGovernanceService {
                   reasonCode: null,
                   approvalId: grant.approvalId,
                   beforeSummary: null,
-                  afterSummary: { grantId: grant.grantId, roleCode: grant.roleCode },
+                  afterSummary: {
+                    grantId: grant.grantId,
+                    roleCode: grant.roleCode,
+                  },
                 },
                 client,
               );
@@ -1452,7 +1603,10 @@ export class PrivilegedRoleGovernanceService {
       // Also update pending requests past validTo
       let allRequests: PrivilegedRoleApprovalRequestRecord[] = [];
       if (this.identityRepository) {
-        allRequests = await this.identityRepository.listPrivilegedRoleRequests(null, client);
+        allRequests = await this.identityRepository.listPrivilegedRoleRequests(
+          null,
+          client,
+        );
       } else {
         allRequests = Array.from(this.requests.values());
       }
@@ -1465,7 +1619,10 @@ export class PrivilegedRoleGovernanceService {
             req.updatedAt = now;
             this.requests.set(req.requestId, { ...req });
             if (this.identityRepository) {
-              await this.identityRepository.savePrivilegedRoleRequest(req, client);
+              await this.identityRepository.savePrivilegedRoleRequest(
+                req,
+                client,
+              );
             }
             if (this.securityEventsService) {
               await this.securityEventsService.recordEventRequired(
@@ -1558,7 +1715,9 @@ export class PrivilegedRoleGovernanceService {
     }
 
     if (this.identityRepository) {
-      return this.identityRepository.listPrivilegedRoleRequests(effectiveTenantId);
+      return this.identityRepository.listPrivilegedRoleRequests(
+        effectiveTenantId,
+      );
     }
 
     return Array.from(this.requests.values())
@@ -1566,7 +1725,9 @@ export class PrivilegedRoleGovernanceService {
       .map((r) => ({ ...r }));
   }
 
-  async listGrants(tenantId?: string | null): Promise<PrivilegedRoleGrantRecord[]> {
+  async listGrants(
+    tenantId?: string | null,
+  ): Promise<PrivilegedRoleGrantRecord[]> {
     if (this.identityRepository) {
       return this.identityRepository.listPrivilegedRoleGrants(tenantId);
     }

@@ -6,12 +6,21 @@ const HttpStatus = {
   NOT_FOUND: 404,
   CONFLICT: 409,
 };
-import type { IdentityContext, CanonicalIdentitySessionRecord } from "@drts/contracts";
+import type {
+  IdentityContext,
+  CanonicalIdentitySessionRecord,
+} from "@drts/contracts";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
-import { PrivilegedRoleGovernanceService, issueServerStepUpProof } from "../../apps/api/src/modules/identity/privileged-role-governance.service";
+import {
+  PrivilegedRoleGovernanceService,
+  issueServerStepUpProof,
+} from "../../apps/api/src/modules/identity/privileged-role-governance.service";
 import { IdentityController } from "../../apps/api/src/modules/identity/identity.controller";
+import { IAPSubjectAdapter } from "../../apps/api/src/modules/auth/iap-subject.adapter";
 
-function createMockIdentity(overrides: Partial<IdentityContext> = {}): IdentityContext {
+function createMockIdentity(
+  overrides: Partial<IdentityContext> = {},
+): IdentityContext {
   return {
     actorType: "tenant_admin",
     actorId: "usr_requester_001",
@@ -27,7 +36,9 @@ function createMockIdentity(overrides: Partial<IdentityContext> = {}): IdentityC
   } as IdentityContext;
 }
 
-function createTestSession(overrides: Partial<CanonicalIdentitySessionRecord> = {}): CanonicalIdentitySessionRecord {
+function createTestSession(
+  overrides: Partial<CanonicalIdentitySessionRecord> = {},
+): CanonicalIdentitySessionRecord {
   return {
     sessionId: `sess_${Math.random()}`,
     sourceRef: "test",
@@ -57,14 +68,18 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
   let service: PrivilegedRoleGovernanceService;
 
   beforeEach(() => {
-    process.env.STEP_UP_PROOF_SECRET = "test_configured_high_entropy_secret_key_32bytes_long";
+    process.env.STEP_UP_PROOF_SECRET =
+      "test_configured_high_entropy_secret_key_32bytes_long";
     identityRepo = new IdentityRepository();
     service = new PrivilegedRoleGovernanceService(identityRepo);
   });
 
   describe("1. Separation of Duties (SoD) & No Self-Approval", () => {
     it("rejects approval when requester attempts to approve their own privileged role request", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
       const request = await service.createRequest(
         {
           targetUserId: "usr_alice",
@@ -82,7 +97,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await expect(
         service.approveRequest(request.requestId, requester, {
           approvalRequestId: request.requestId,
-          mutation: { expectedVersion: request.version, reasonCode: "SELF_APPROVE" },
+          mutation: {
+            expectedVersion: request.version,
+            reasonCode: "SELF_APPROVE",
+          },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -93,8 +111,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects approval when target user attempts to approve request created for them by another", async () => {
-      const requester = createMockIdentity({ actorId: "usr_bob", tenantId: "ten_alpha" });
-      const targetUser = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_bob",
+        tenantId: "ten_alpha",
+      });
+      const targetUser = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
 
       const request = await service.createRequest(
         {
@@ -110,7 +134,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await expect(
         service.approveRequest(request.requestId, targetUser, {
           approvalRequestId: request.requestId,
-          mutation: { expectedVersion: request.version, reasonCode: "SELF_APPROVE" },
+          mutation: {
+            expectedVersion: request.version,
+            reasonCode: "SELF_APPROVE",
+          },
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -121,10 +148,17 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects request or approval for toxic/incompatible role combinations (SoD policy)", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
 
       // Seed active grant tenant_finance_admin for usr_target_sod
-      await service.registerActiveGrant("usr_target_sod", "ten_alpha", "tenant_finance_admin");
+      await service.registerActiveGrant(
+        "usr_target_sod",
+        "ten_alpha",
+        "tenant_finance_admin",
+      );
 
       // Attempt to create request for toxic role tenant_security_admin for usr_target_sod
       await expect(
@@ -166,8 +200,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("2. Independent Approval & Stale Session Invalidation", () => {
     it("allows an independent approver to approve grant and revokes target user's active sessions", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
-      const approver = createMockIdentity({ actorId: "usr_charlie_admin", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_charlie_admin",
+        tenantId: "ten_alpha",
+      });
 
       // Create an active session for the target user in IdentityRepository
       const targetSession = await identityRepo.createSession(
@@ -212,7 +252,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Verify that active session for usr_bob was revoked upon role change
       const sessions = await identityRepo.listSessionsByPrincipal("usr_bob");
-      const revokedSession = sessions.find((s) => s.sessionId === "sess_target_001");
+      const revokedSession = sessions.find(
+        (s) => s.sessionId === "sess_target_001",
+      );
       expect(revokedSession).toBeDefined();
       expect(revokedSession?.status).toBe("revoked");
       expect(revokedSession?.revokeReason).toBe("PRIVILEGED_ROLE_APPROVED");
@@ -227,7 +269,7 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const pastTo = new Date(nowMs - 1000).toISOString();
 
       // Register an active grant valid now
-      const activeGrant = await service.registerActiveGrant(
+      await service.registerActiveGrant(
         "usr_active",
         "ten_alpha",
         "tenant_admin",
@@ -262,17 +304,26 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       // Run automatic expiry processing
       const expired = await service.expireStaleGrants(nowMs);
 
-      expect(expired.some((g) => g.grantId === expiredGrant.grantId)).toBe(true);
+      expect(expired.some((g) => g.grantId === expiredGrant.grantId)).toBe(
+        true,
+      );
 
       // Verify session for expired grant was revoked
-      const sessions = await identityRepo.listSessionsByPrincipal("usr_expired");
+      const sessions =
+        await identityRepo.listSessionsByPrincipal("usr_expired");
       expect(sessions[0]?.status).toBe("revoked");
       expect(sessions[0]?.revokeReason).toBe("PRIVILEGED_ROLE_EXPIRED");
     });
 
     it("creates pending_activation grant when validFrom is in the future and activates it later", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
-      const approver = createMockIdentity({ actorId: "usr_charlie_admin", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_charlie_admin",
+        tenantId: "ten_alpha",
+      });
       const futureFrom = new Date(Date.now() + 3600000).toISOString();
 
       const request = await service.createRequest(
@@ -286,14 +337,21 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const { grant } = await service.approveRequest(request.requestId, approver, {
-        approvalRequestId: request.requestId,
-        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-      });
+      const { grant } = await service.approveRequest(
+        request.requestId,
+        approver,
+        {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        },
+      );
       expect(grant.status).toBe("pending_activation");
 
       // Verify user has no active grants yet
-      const activeGrantsBefore = await service.getActiveGrantsForUser("usr_future_user", Date.now());
+      const activeGrantsBefore = await service.getActiveGrantsForUser(
+        "usr_future_user",
+        Date.now(),
+      );
       expect(activeGrantsBefore).toHaveLength(0);
 
       // Simulate time passing to validFrom
@@ -309,7 +367,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects createRequest when validFrom >= validTo or validTo is in the past", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
       const nowMs = Date.now();
 
       // validFrom >= validTo
@@ -354,8 +415,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects approveRequest when validTo has passed before approval and marks request expired", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
-      const approver = createMockIdentity({ actorId: "usr_charlie_admin", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_charlie_admin",
+        tenantId: "ten_alpha",
+      });
       const nowMs = Date.now();
 
       // Seed a request whose validTo was in the future when created, but is now in the past
@@ -405,10 +472,17 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("4. Last-Admin Invariant Protection", () => {
     it("blocks removing or demoting the last active admin for a tenant", async () => {
-      const adminActor = createMockIdentity({ actorId: "usr_admin_solo", tenantId: "ten_beta" });
+      const adminActor = createMockIdentity({
+        actorId: "usr_admin_solo",
+        tenantId: "ten_beta",
+      });
 
       // Register sole admin
-      await service.registerActiveGrant("usr_admin_solo", "ten_beta", "tenant_admin");
+      await service.registerActiveGrant(
+        "usr_admin_solo",
+        "ten_beta",
+        "tenant_admin",
+      );
 
       // Attempt to remove sole admin
       await expect(
@@ -431,11 +505,22 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("allows removing an admin when another active admin exists for the tenant", async () => {
-      const adminActor = createMockIdentity({ actorId: "usr_admin_two", tenantId: "ten_beta" });
+      const adminActor = createMockIdentity({
+        actorId: "usr_admin_two",
+        tenantId: "ten_beta",
+      });
 
       // Register two admins
-      await service.registerActiveGrant("usr_admin_one", "ten_beta", "tenant_admin");
-      await service.registerActiveGrant("usr_admin_two", "ten_beta", "tenant_admin");
+      await service.registerActiveGrant(
+        "usr_admin_one",
+        "ten_beta",
+        "tenant_admin",
+      );
+      await service.registerActiveGrant(
+        "usr_admin_two",
+        "ten_beta",
+        "tenant_admin",
+      );
 
       // Remove admin one
       const removed = await service.removeGrant(
@@ -453,11 +538,22 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("prevents concurrent-removal race when removing last 2 admins simultaneously", async () => {
-      const actor = createMockIdentity({ actorId: "usr_actor", tenantId: "ten_concurrent_admin" });
+      const actor = createMockIdentity({
+        actorId: "usr_actor",
+        tenantId: "ten_concurrent_admin",
+      });
 
       // Seed exactly 2 active admins for tenant ten_concurrent_admin
-      await service.registerActiveGrant("usr_admin_race_1", "ten_concurrent_admin", "tenant_admin");
-      await service.registerActiveGrant("usr_admin_race_2", "ten_concurrent_admin", "tenant_admin");
+      await service.registerActiveGrant(
+        "usr_admin_race_1",
+        "ten_concurrent_admin",
+        "tenant_admin",
+      );
+      await service.registerActiveGrant(
+        "usr_admin_race_2",
+        "ten_concurrent_admin",
+        "tenant_admin",
+      );
 
       // Concurrent removal attempts for both admins
       const remove1 = service.removeGrant(
@@ -501,18 +597,27 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       }
 
       // Verify that at least 1 active admin remains
-      const remainingGrants = (await service.listGrants("ten_concurrent_admin")).filter(
-        (g) => g.status === "active",
-      );
+      const remainingGrants = (
+        await service.listGrants("ten_concurrent_admin")
+      ).filter((g) => g.status === "active");
       expect(remainingGrants).toHaveLength(1);
     });
   });
 
   describe("5. Approval Concurrency Isolation & Optimistic Locking", () => {
     it("enforces concurrency isolation and rejects second approval call with IAM_CONCURRENCY_CONFLICT", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_gamma" });
-      const approver1 = createMockIdentity({ actorId: "usr_approver_1", tenantId: "ten_gamma" });
-      const approver2 = createMockIdentity({ actorId: "usr_approver_2", tenantId: "ten_gamma" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_gamma",
+      });
+      const approver1 = createMockIdentity({
+        actorId: "usr_approver_1",
+        tenantId: "ten_gamma",
+      });
+      const approver2 = createMockIdentity({
+        actorId: "usr_approver_2",
+        tenantId: "ten_gamma",
+      });
 
       const request = await service.createRequest(
         {
@@ -530,7 +635,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const { request: app1 } = await service.approveRequest(
         request.requestId,
         approver1,
-        { approvalRequestId: request.requestId, mutation: { reasonCode: "GOV_APPROVE", expectedVersion: 1 } },
+        {
+          approvalRequestId: request.requestId,
+          mutation: { reasonCode: "GOV_APPROVE", expectedVersion: 1 },
+        },
       );
 
       expect(app1.status).toBe("approved");
@@ -538,11 +646,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
       // Second approver attempts to approve the same request
       await expect(
-        service.approveRequest(
-          request.requestId,
-          approver2,
-          { approvalRequestId: request.requestId, mutation: { reasonCode: "GOV_APPROVE", expectedVersion: 1 } },
-        ),
+        service.approveRequest(request.requestId, approver2, {
+          approvalRequestId: request.requestId,
+          mutation: { reasonCode: "GOV_APPROVE", expectedVersion: 1 },
+        }),
       ).rejects.toThrowError(
         expect.objectContaining({
           status: HttpStatus.CONFLICT,
@@ -554,8 +661,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("6. Rejection Workflow", () => {
     it("allows independent actor to reject a request", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_delta" });
-      const rejector = createMockIdentity({ actorId: "usr_manager", tenantId: "ten_delta" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_delta",
+      });
+      const rejector = createMockIdentity({
+        actorId: "usr_manager",
+        tenantId: "ten_delta",
+      });
 
       const request = await service.createRequest(
         {
@@ -567,11 +680,15 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const rejected = await service.rejectRequest(request.requestId, rejector, {
-        approvalRequestId: request.requestId,
-        reason: "Access denied by security manager",
-        mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
-      });
+      const rejected = await service.rejectRequest(
+        request.requestId,
+        rejector,
+        {
+          approvalRequestId: request.requestId,
+          reason: "Access denied by security manager",
+          mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
+        },
+      );
 
       expect(rejected.status).toBe("rejected");
       expect(rejected.approvalDecision).toBe("reject");
@@ -579,7 +696,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects rejection when requester attempts to reject their own request (IAM_SOD_VIOLATION)", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_delta" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_delta",
+      });
 
       const request = await service.createRequest(
         {
@@ -606,8 +726,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects rejection when target user attempts to reject request created for them (IAM_SOD_VIOLATION)", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_delta" });
-      const targetUser = createMockIdentity({ actorId: "usr_eve", tenantId: "ten_delta" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_delta",
+      });
+      const targetUser = createMockIdentity({
+        actorId: "usr_eve",
+        tenantId: "ten_delta",
+      });
 
       const request = await service.createRequest(
         {
@@ -634,7 +760,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects rejection when MFA step-up is missing or invalid (IAM_STEP_UP_REQUIRED)", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_delta" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_delta",
+      });
       const noMfaRejector = createMockIdentity({
         actorId: "usr_manager",
         tenantId: "ten_delta",
@@ -682,8 +811,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("7. Tenant Scoping, IDOR Protection & Verified MFA Step-Up", () => {
     it("prevents IDOR: tenant user cannot get or list requests from another tenant", async () => {
-      const tenantAUser = createMockIdentity({ actorId: "usr_tenant_A", tenantId: "ten_A" });
-      const tenantBUser = createMockIdentity({ actorId: "usr_tenant_B", tenantId: "ten_B" });
+      const tenantAUser = createMockIdentity({
+        actorId: "usr_tenant_A",
+        tenantId: "ten_A",
+      });
+      const tenantBUser = createMockIdentity({
+        actorId: "usr_tenant_B",
+        tenantId: "ten_B",
+      });
 
       const requestA = await service.createRequest(
         {
@@ -717,7 +852,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("enforces signed tenant match when creating request or removing grant", async () => {
-      const tenantAUser = createMockIdentity({ actorId: "usr_tenant_A", tenantId: "ten_A" });
+      const tenantAUser = createMockIdentity({
+        actorId: "usr_tenant_A",
+        tenantId: "ten_A",
+      });
 
       // Attempt to create request for ten_B using ten_A identity
       await expect(
@@ -744,7 +882,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         tenantId: "ten_alpha",
         authMethods: ["jwt"], // Missing mfa
       });
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
 
       const request = await service.createRequest(
         {
@@ -787,8 +928,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("8. DB Persistence via IdentityRepository", () => {
     it("persists requests and grants into IdentityRepository", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_alpha" });
-      const approver = createMockIdentity({ actorId: "usr_charlie", tenantId: "ten_alpha" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_alpha",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_charlie",
+        tenantId: "ten_alpha",
+      });
 
       const request = await service.createRequest(
         {
@@ -801,18 +948,25 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       // Verify request is saved in repo
-      const repoReq = await identityRepo.getPrivilegedRoleRequest(request.requestId);
+      const repoReq = await identityRepo.getPrivilegedRoleRequest(
+        request.requestId,
+      );
       expect(repoReq).toBeDefined();
       expect(repoReq?.targetUserId).toBe("usr_db_target");
 
       // Approve request
-      const { grant } = await service.approveRequest(request.requestId, approver, {
-        approvalRequestId: request.requestId,
-        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-      });
+      const { grant } = await service.approveRequest(
+        request.requestId,
+        approver,
+        {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        },
+      );
 
       // Verify grant is saved in repo
-      const repoGrants = await identityRepo.listPrivilegedRoleGrants("ten_alpha");
+      const repoGrants =
+        await identityRepo.listPrivilegedRoleGrants("ten_alpha");
       expect(repoGrants.some((g) => g.grantId === grant.grantId)).toBe(true);
     });
   });
@@ -862,7 +1016,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
             if (sql.includes("INSERT INTO iam.privileged_role_grants")) {
               const grantId = values?.[0];
               const recordJson = values?.[14];
-              const record = typeof recordJson === "string" ? JSON.parse(recordJson) : recordJson;
+              const record =
+                typeof recordJson === "string"
+                  ? JSON.parse(recordJson)
+                  : recordJson;
               dbTables.grants.set(grantId, record);
               return { rows: [{ record }] };
             }
@@ -903,13 +1060,28 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       };
 
       const dbRepo = new IdentityRepository(mockDbService);
-      const dbGovService = new PrivilegedRoleGovernanceService(dbRepo, undefined, mockDbService);
+      const dbGovService = new PrivilegedRoleGovernanceService(
+        dbRepo,
+        undefined,
+        mockDbService,
+      );
 
-      const actor = createMockIdentity({ actorId: "usr_db_actor", tenantId: "ten_db_concurrent" });
+      const actor = createMockIdentity({
+        actorId: "usr_db_actor",
+        tenantId: "ten_db_concurrent",
+      });
 
       // Seed 2 active admins in DB repo
-      await dbGovService.registerActiveGrant("usr_admin_db_1", "ten_db_concurrent", "tenant_admin");
-      await dbGovService.registerActiveGrant("usr_admin_db_2", "ten_db_concurrent", "tenant_admin");
+      await dbGovService.registerActiveGrant(
+        "usr_admin_db_1",
+        "ten_db_concurrent",
+        "tenant_admin",
+      );
+      await dbGovService.registerActiveGrant(
+        "usr_admin_db_2",
+        "ten_db_concurrent",
+        "tenant_admin",
+      );
 
       // Concurrent removal attempts via DB service
       const remove1 = dbGovService.removeGrant(
@@ -951,7 +1123,8 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       }
 
       // Verify DB table still retains exactly 1 active admin
-      const remainingGrants = await dbRepo.listPrivilegedRoleGrants("ten_db_concurrent");
+      const remainingGrants =
+        await dbRepo.listPrivilegedRoleGrants("ten_db_concurrent");
       const activeAdmins = remainingGrants.filter((g) => g.status === "active");
       expect(activeAdmins).toHaveLength(1);
     });
@@ -959,9 +1132,8 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("10. Durable Scheduler Worker Service", () => {
     it("runs background reconciliation on module init and handles tick cycle", async () => {
-      const { PrivilegedRoleGovernanceSchedulerService } = await import(
-        "../../apps/api/src/modules/identity/privileged-role-governance-scheduler.service"
-      );
+      const { PrivilegedRoleGovernanceSchedulerService } =
+        await import("../../apps/api/src/modules/identity/privileged-role-governance-scheduler.service");
 
       const pastTo = new Date(Date.now() - 1000).toISOString();
       await service.registerActiveGrant(
@@ -981,7 +1153,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       expect(count).toBeGreaterThanOrEqual(1);
 
       const grants = await service.listGrants("ten_worker");
-      const expiredGrant = grants.find((g) => g.targetUserId === "usr_worker_expired");
+      const expiredGrant = grants.find(
+        (g) => g.targetUserId === "usr_worker_expired",
+      );
       expect(expiredGrant?.status).toBe("expired");
 
       scheduler.onModuleDestroy();
@@ -992,16 +1166,32 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     it.runIf(Boolean(process.env.DATABASE_URL))(
       "executes real pg_advisory_xact_lock transaction across concurrent connections when DATABASE_URL is set",
       async () => {
-        const { DatabaseService } = await import("../../apps/api/src/common/db");
+        const { DatabaseService } =
+          await import("../../apps/api/src/common/db");
         const realDb = new DatabaseService();
         try {
           const repo = new IdentityRepository(realDb);
-          const govService = new PrivilegedRoleGovernanceService(repo, undefined, realDb);
+          const govService = new PrivilegedRoleGovernanceService(
+            repo,
+            undefined,
+            realDb,
+          );
           const tenantId = `ten_real_pg_${Date.now()}`;
-          const actor = createMockIdentity({ actorId: "usr_pg_actor", tenantId });
+          const actor = createMockIdentity({
+            actorId: "usr_pg_actor",
+            tenantId,
+          });
 
-          await govService.registerActiveGrant("usr_admin_real_1", tenantId, "tenant_admin");
-          await govService.registerActiveGrant("usr_admin_real_2", tenantId, "tenant_admin");
+          await govService.registerActiveGrant(
+            "usr_admin_real_1",
+            tenantId,
+            "tenant_admin",
+          );
+          await govService.registerActiveGrant(
+            "usr_admin_real_2",
+            tenantId,
+            "tenant_admin",
+          );
 
           const task1 = govService.removeGrant(
             {
@@ -1032,7 +1222,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           expect(fulfilled).toHaveLength(1);
           expect(rejected).toHaveLength(1);
 
-          const remaining = (await govService.listGrants(tenantId)).filter((g) => g.status === "active");
+          const remaining = (await govService.listGrants(tenantId)).filter(
+            (g) => g.status === "active",
+          );
           expect(remaining).toHaveLength(1);
         } finally {
           await realDb.onModuleDestroy();
@@ -1043,14 +1235,25 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     it.runIf(Boolean(process.env.DATABASE_URL))(
       "verifies that approveRequest marks request expired and persists the expired status in PostgreSQL database when validTo has passed",
       async () => {
-        const { DatabaseService } = await import("../../apps/api/src/common/db");
+        const { DatabaseService } =
+          await import("../../apps/api/src/common/db");
         const realDb = new DatabaseService();
         try {
           const repo = new IdentityRepository(realDb);
-          const govService = new PrivilegedRoleGovernanceService(repo, undefined, realDb);
+          const govService = new PrivilegedRoleGovernanceService(
+            repo,
+            undefined,
+            realDb,
+          );
           const tenantId = `ten_real_pg_exp_${Date.now()}`;
-          const requester = createMockIdentity({ actorId: "usr_alice", tenantId });
-          const approver = createMockIdentity({ actorId: "usr_charlie_admin", tenantId });
+          const requester = createMockIdentity({
+            actorId: "usr_alice",
+            tenantId,
+          });
+          const approver = createMockIdentity({
+            actorId: "usr_charlie_admin",
+            tenantId,
+          });
           const nowMs = Date.now();
           const pastTo = new Date(nowMs - 1000).toISOString();
           const futureFrom = new Date(nowMs - 5000).toISOString();
@@ -1076,7 +1279,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           await expect(
             govService.approveRequest(request.requestId, approver, {
               approvalRequestId: request.requestId,
-              mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+              mutation: {
+                expectedVersion: request.version,
+                reasonCode: "APPROVE",
+              },
             }),
           ).rejects.toThrowError(
             expect.objectContaining({
@@ -1086,7 +1292,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           );
 
           // Verify status stored in PostgreSQL database is 'expired'
-          const storedReq = await repo.getPrivilegedRoleRequest(request.requestId);
+          const storedReq = await repo.getPrivilegedRoleRequest(
+            request.requestId,
+          );
           expect(storedReq).toBeDefined();
           expect(storedReq?.status).toBe("expired");
         } finally {
@@ -1098,8 +1306,19 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("12. Server-side Approver Authorization Policy", () => {
     it("rejects approval, rejection, and removal when non-admin user with MFA attempts governance actions", async () => {
-      const adminRequester = createMockIdentity({ actorId: "usr_admin_req", roles: ["tenant_admin"], tenantId: "ten_authz" });
-      const nonAdminUser = createMockIdentity({ actorId: "usr_non_admin", actorType: "user", roles: ["driver"], scopes: ["identity:write"], tenantId: "ten_authz", authMethods: ["jwt", "mfa"] });
+      const adminRequester = createMockIdentity({
+        actorId: "usr_admin_req",
+        roles: ["tenant_admin"],
+        tenantId: "ten_authz",
+      });
+      const nonAdminUser = createMockIdentity({
+        actorId: "usr_non_admin",
+        actorType: "user",
+        roles: ["driver"],
+        scopes: ["identity:write"],
+        tenantId: "ten_authz",
+        authMethods: ["jwt", "mfa"],
+      });
 
       // Create a pending request
       const request = await service.createRequest(
@@ -1139,7 +1358,11 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       // Register an active grant for testing removal
-      await service.registerActiveGrant("usr_target_grant", "ten_authz", "tenant_security_admin");
+      await service.registerActiveGrant(
+        "usr_target_grant",
+        "ten_authz",
+        "tenant_security_admin",
+      );
 
       // Non-admin attempts to remove -> fails 403 AUTHZ_SCOPE_DENIED
       await expect(
@@ -1162,7 +1385,11 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects governance actions when non-admin platform/ops identity with MFA attempts approval, rejection, or removal", async () => {
-      const adminRequester = createMockIdentity({ actorId: "usr_admin_req", roles: ["tenant_admin"], tenantId: "ten_authz_ops" });
+      const adminRequester = createMockIdentity({
+        actorId: "usr_admin_req",
+        roles: ["tenant_admin"],
+        tenantId: "ten_authz_ops",
+      });
       const opsNonAdmin = createMockIdentity({
         actorId: "usr_ops_viewer",
         actorType: "ops_user",
@@ -1228,7 +1455,11 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       // Platform non-admin user attempts remove -> 403
-      await service.registerActiveGrant("usr_target_grant_ops", "ten_authz_ops", "tenant_admin");
+      await service.registerActiveGrant(
+        "usr_target_grant_ops",
+        "ten_authz_ops",
+        "tenant_admin",
+      );
       await expect(
         service.removeGrant(
           {
@@ -1253,8 +1484,16 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     it("denies process-expiries for non-system identities and allows system identity", async () => {
       const controller = new IdentityController(service);
 
-      const tenantAdminUser = createMockIdentity({ actorId: "usr_tenant_admin", roles: ["tenant_admin"], realm: "tenant" });
-      const systemIdentity = createMockIdentity({ actorId: "scheduler_system", actorType: "system", realm: "system" });
+      const tenantAdminUser = createMockIdentity({
+        actorId: "usr_tenant_admin",
+        roles: ["tenant_admin"],
+        realm: "tenant",
+      });
+      const systemIdentity = createMockIdentity({
+        actorId: "scheduler_system",
+        actorType: "system",
+        realm: "system",
+      });
 
       // Non-system identity calls controller method -> fails 403
       await expect(
@@ -1277,7 +1516,8 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       // System identity calls controller method -> succeeds
-      const result = await controller.processExpiredPrivilegedRoleGrants(systemIdentity);
+      const result =
+        await controller.processExpiredPrivilegedRoleGrants(systemIdentity);
       expect(result).toBeDefined();
       expect(result.data).toBeDefined();
     }, 15000);
@@ -1296,8 +1536,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         mockSecurityEventsService,
       );
 
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_fail" });
-      const approver = createMockIdentity({ actorId: "usr_bob", roles: ["tenant_admin"], tenantId: "ten_audit_fail" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_audit_fail",
+      });
 
       // createRequest fails due to audit event failure
       await expect(
@@ -1313,7 +1555,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       ).rejects.toThrowError("Audit log database disk full failure");
 
       // Verify no pending request was saved
-      const requests = await failingService.listRequests(requester, "ten_audit_fail");
+      const requests = await failingService.listRequests(
+        requester,
+        "ten_audit_fail",
+      );
       expect(requests).toHaveLength(0);
     });
 
@@ -1331,8 +1576,15 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         mockSecurityEventsService,
       );
 
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_exp" });
-      const approver = createMockIdentity({ actorId: "usr_bob", roles: ["tenant_admin"], tenantId: "ten_audit_exp" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_audit_exp",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_bob",
+        roles: ["tenant_admin"],
+        tenantId: "ten_audit_exp",
+      });
 
       const nowMs = Date.now();
       const pastTo = new Date(nowMs - 1000).toISOString();
@@ -1366,7 +1618,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       const expiredEvent = recordedEvents.find(
-        (e) => e.eventType === "privileged_role.expired" && e.approvalId === req.requestId,
+        (e) =>
+          e.eventType === "privileged_role.expired" &&
+          e.approvalId === req.requestId,
       );
       expect(expiredEvent).toBeDefined();
       expect(expiredEvent.actorId).toBe("usr_bob");
@@ -1387,7 +1641,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         mockSecurityEventsService,
       );
 
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_stale_req" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_audit_stale_req",
+      });
       const nowMs = Date.now();
       const pastTo = new Date(nowMs - 1000).toISOString();
       const validFrom = new Date(nowMs - 5000).toISOString();
@@ -1410,7 +1667,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await auditService.expireStaleGrants(nowMs);
 
       const expiredEvent = recordedEvents.find(
-        (e) => e.eventType === "privileged_role.expired" && e.approvalId === req.requestId,
+        (e) =>
+          e.eventType === "privileged_role.expired" &&
+          e.approvalId === req.requestId,
       );
       expect(expiredEvent).toBeDefined();
       expect(expiredEvent.actorId).toBe("system");
@@ -1433,8 +1692,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         mockSecurityEventsService,
       );
 
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_sod_recheck" });
-      const approver = createMockIdentity({ actorId: "usr_approver", tenantId: "ten_sod_recheck" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_sod_recheck",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_approver",
+        tenantId: "ten_sod_recheck",
+      });
       const targetUser = "usr_target_sod_recheck";
 
       const nowMs = Date.now();
@@ -1454,10 +1719,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const { grant } = await testService.approveRequest(req.requestId, approver, {
-        approvalRequestId: req.requestId,
-        mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
-      });
+      const { grant } = await testService.approveRequest(
+        req.requestId,
+        approver,
+        {
+          approvalRequestId: req.requestId,
+          mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
+        },
+      );
       expect(grant.status).toBe("pending_activation");
 
       // Before activation time arrives, assign a conflicting role (tenant_finance_admin) to target user
@@ -1472,15 +1741,20 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       await testService.expireStaleGrants(activationTimeMs);
 
       // Verify that pending_activation grant failed SoD recheck and went to fail-closed state ("removed")
-      const updatedGrants = await identityRepo.listPrivilegedRoleGrants("ten_sod_recheck");
-      const targetGrant = updatedGrants.find((g) => g.grantId === grant.grantId);
+      const updatedGrants =
+        await identityRepo.listPrivilegedRoleGrants("ten_sod_recheck");
+      const targetGrant = updatedGrants.find(
+        (g) => g.grantId === grant.grantId,
+      );
 
       expect(targetGrant).toBeDefined();
       expect(targetGrant!.status).toBe("removed");
 
       // Verify high severity security audit event for activation failure
       const failureEvent = recordedEvents.find(
-        (e) => e.eventType === "privileged_role.activation_failed" && e.targetId === targetUser,
+        (e) =>
+          e.eventType === "privileged_role.activation_failed" &&
+          e.targetId === targetUser,
       );
       expect(failureEvent).toBeDefined();
       expect(failureEvent.outcome).toBe("denied");
@@ -1490,8 +1764,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
     it("activates pending_activation grant when SoD recheck passes at activation time", async () => {
       const testService = new PrivilegedRoleGovernanceService(identityRepo);
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_sod_pass" });
-      const approver = createMockIdentity({ actorId: "usr_approver", tenantId: "ten_sod_pass" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_sod_pass",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_approver",
+        tenantId: "ten_sod_pass",
+      });
       const targetUser = "usr_target_sod_pass";
 
       const nowMs = Date.now();
@@ -1510,17 +1790,24 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const { grant } = await testService.approveRequest(req.requestId, approver, {
-        approvalRequestId: req.requestId,
-        mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
-      });
+      const { grant } = await testService.approveRequest(
+        req.requestId,
+        approver,
+        {
+          approvalRequestId: req.requestId,
+          mutation: { expectedVersion: req.version, reasonCode: "APPROVE" },
+        },
+      );
       expect(grant.status).toBe("pending_activation");
 
       // Process activation at validFrom time without conflicting role
       await testService.expireStaleGrants(nowMs + 65000);
 
-      const updatedGrants = await identityRepo.listPrivilegedRoleGrants("ten_sod_pass");
-      const targetGrant = updatedGrants.find((g) => g.grantId === grant.grantId);
+      const updatedGrants =
+        await identityRepo.listPrivilegedRoleGrants("ten_sod_pass");
+      const targetGrant = updatedGrants.find(
+        (g) => g.grantId === grant.grantId,
+      );
 
       expect(targetGrant).toBeDefined();
       expect(targetGrant!.status).toBe("active");
@@ -1528,8 +1815,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
     it("projects active privileged role grants into identityRepo.findRoleBindingsByMembershipId authority path", async () => {
       const testService = new PrivilegedRoleGovernanceService(identityRepo);
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_proj" });
-      const approver = createMockIdentity({ actorId: "usr_approver", tenantId: "ten_proj" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_proj",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_approver",
+        tenantId: "ten_proj",
+      });
       const targetUser = "usr_target_proj";
       const membershipId = "mem_target_proj";
 
@@ -1559,8 +1852,11 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       // Verify initially no role bindings
-      const initialBindings = await identityRepo.findRoleBindingsByMembershipId(membershipId);
-      expect(initialBindings.some((b) => b.roleCode === "tenant_admin")).toBe(false);
+      const initialBindings =
+        await identityRepo.findRoleBindingsByMembershipId(membershipId);
+      expect(initialBindings.some((b) => b.roleCode === "tenant_admin")).toBe(
+        false,
+      );
 
       // Create and approve request for tenant_admin
       const req = await testService.createRequest(
@@ -1580,15 +1876,22 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       });
 
       // Now query findRoleBindingsByMembershipId
-      const projectedBindings = await identityRepo.findRoleBindingsByMembershipId(membershipId);
-      const projectedAdminBinding = projectedBindings.find((b) => b.roleCode === "tenant_admin");
+      const projectedBindings =
+        await identityRepo.findRoleBindingsByMembershipId(membershipId);
+      const projectedAdminBinding = projectedBindings.find(
+        (b) => b.roleCode === "tenant_admin",
+      );
 
       expect(projectedAdminBinding).toBeDefined();
       expect(projectedAdminBinding!.membershipId).toBe(membershipId);
       expect(projectedAdminBinding!.sourceRef).toContain(req.requestId);
 
       // Seed second active admin so last-admin protection allows removal of targetUser grant
-      await testService.registerActiveGrant("usr_other_admin", "ten_proj", "tenant_admin");
+      await testService.registerActiveGrant(
+        "usr_other_admin",
+        "ten_proj",
+        "tenant_admin",
+      );
 
       // Remove grant
       await testService.removeGrant(
@@ -1602,14 +1905,20 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       // Verify projected claim is revoked
-      const revokedBindings = await identityRepo.findRoleBindingsByMembershipId(membershipId);
-      expect(revokedBindings.some((b) => b.roleCode === "tenant_admin")).toBe(false);
+      const revokedBindings =
+        await identityRepo.findRoleBindingsByMembershipId(membershipId);
+      expect(revokedBindings.some((b) => b.roleCode === "tenant_admin")).toBe(
+        false,
+      );
     });
   });
 
   describe("16. Negative Security & Concurrency Coverage (Review Blockers)", () => {
     it("rejects forgeable stepUpReference (e.g. 'mfa_verified') when identity lacks MFA claims", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_neg" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_neg",
+      });
       const noMfaApprover = createMockIdentity({
         actorId: "usr_approver_nomfa",
         tenantId: "ten_neg",
@@ -1641,7 +1950,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects identity with missing authTime even if authMethods includes MFA (fail closed)", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_missing_at" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_missing_at",
+      });
       const missingAuthTimeApprover = createMockIdentity({
         actorId: "usr_approver_no_at",
         tenantId: "ten_missing_at",
@@ -1673,7 +1985,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects identity with malformed authTime even if authMethods includes MFA (fail closed)", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_bad_at" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_bad_at",
+      });
       const malformedAuthTimeApprover = createMockIdentity({
         actorId: "usr_approver_bad_at",
         tenantId: "ten_bad_at",
@@ -1705,7 +2020,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects identity with stale authTime (>600s ago) even if authMethods includes MFA", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_stale" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_stale",
+      });
       const staleMfaApprover = createMockIdentity({
         actorId: "usr_approver_stale",
         tenantId: "ten_stale",
@@ -1737,7 +2055,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("accepts identity with fresh authTime (within 600s) when authMethods includes MFA", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_fresh" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_fresh",
+      });
       const freshMfaApprover = createMockIdentity({
         actorId: "usr_approver_fresh",
         tenantId: "ten_fresh",
@@ -1755,15 +2076,22 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         requester,
       );
 
-      const approved = await service.approveRequest(request.requestId, freshMfaApprover, {
-        approvalRequestId: request.requestId,
-        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-      });
+      const approved = await service.approveRequest(
+        request.requestId,
+        freshMfaApprover,
+        {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        },
+      );
       expect(approved.request.status).toBe("approved");
     });
 
     it("rejects createRequest when roleCode is not a valid privileged role", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_bad_role" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_bad_role",
+      });
 
       await expect(
         service.createRequest(
@@ -1801,7 +2129,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("accepts server-validated step-up proof (e.g. signed srv_stepup token) even if identity lacks MFA in session", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_proof" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_proof",
+      });
       const noMfaApprover = createMockIdentity({
         actorId: "usr_approver_proof",
         tenantId: "ten_proof",
@@ -1824,17 +2155,24 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         targetId: request.requestId,
       });
 
-      const { request: approved } = await service.approveRequest(request.requestId, noMfaApprover, {
-        approvalRequestId: request.requestId,
-        stepUpReference: validProof,
-        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-      });
+      const { request: approved } = await service.approveRequest(
+        request.requestId,
+        noMfaApprover,
+        {
+          approvalRequestId: request.requestId,
+          stepUpReference: validProof,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        },
+      );
 
       expect(approved.status).toBe("approved");
     });
 
     it("rejects proof_attacker heuristic forgery when identity lacks MFA claims", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_neg2" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_neg2",
+      });
       const noMfaApprover = createMockIdentity({
         actorId: "usr_approver_nomfa2",
         tenantId: "ten_neg2",
@@ -1866,7 +2204,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects replayed server step-up proof tokens", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_replay" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_replay",
+      });
       const noMfaApprover = createMockIdentity({
         actorId: "usr_approver_replay",
         tenantId: "ten_replay",
@@ -1874,11 +2215,21 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       });
 
       const req1 = await service.createRequest(
-        { targetUserId: "usr_target_replay1", roleCode: "tenant_admin", reason: "Replay test 1", tenantId: "ten_replay" },
+        {
+          targetUserId: "usr_target_replay1",
+          roleCode: "tenant_admin",
+          reason: "Replay test 1",
+          tenantId: "ten_replay",
+        },
         requester,
       );
       const req2 = await service.createRequest(
-        { targetUserId: "usr_target_replay2", roleCode: "tenant_admin", reason: "Replay test 2", tenantId: "ten_replay" },
+        {
+          targetUserId: "usr_target_replay2",
+          roleCode: "tenant_admin",
+          reason: "Replay test 2",
+          tenantId: "ten_replay",
+        },
         requester,
       );
 
@@ -1911,7 +2262,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects server step-up proof with mismatched principal or mismatched operation/target", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_mismatch" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_mismatch",
+      });
       const noMfaApprover = createMockIdentity({
         actorId: "usr_approver_mismatch",
         tenantId: "ten_mismatch",
@@ -1919,7 +2273,12 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       });
 
       const request = await service.createRequest(
-        { targetUserId: "usr_target_mismatch", roleCode: "tenant_admin", reason: "Mismatch test", tenantId: "ten_mismatch" },
+        {
+          targetUserId: "usr_target_mismatch",
+          roleCode: "tenant_admin",
+          reason: "Mismatch test",
+          tenantId: "ten_mismatch",
+        },
         requester,
       );
 
@@ -1969,7 +2328,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       delete process.env.STEP_UP_PROOF_SECRET;
 
       try {
-        const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_nosecret" });
+        const requester = createMockIdentity({
+          actorId: "usr_alice",
+          tenantId: "ten_nosecret",
+        });
         const noMfaApprover = createMockIdentity({
           actorId: "usr_approver_nosecret",
           tenantId: "ten_nosecret",
@@ -1977,7 +2339,12 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         });
 
         const request = await service.createRequest(
-          { targetUserId: "usr_target_nosecret", roleCode: "tenant_admin", reason: "No secret test", tenantId: "ten_nosecret" },
+          {
+            targetUserId: "usr_target_nosecret",
+            roleCode: "tenant_admin",
+            reason: "No secret test",
+            tenantId: "ten_nosecret",
+          },
           requester,
         );
 
@@ -1985,7 +2352,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           service.approveRequest(request.requestId, noMfaApprover, {
             approvalRequestId: request.requestId,
             stepUpReference: "srv_stepup.dummy.dummy",
-            mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+            mutation: {
+              expectedVersion: request.version,
+              reasonCode: "APPROVE",
+            },
           }),
         ).rejects.toThrowError(
           expect.objectContaining({
@@ -2002,7 +2372,10 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const instance1 = new PrivilegedRoleGovernanceService(sharedRepo);
       const instance2 = new PrivilegedRoleGovernanceService(sharedRepo);
 
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_cross" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_cross",
+      });
       const noMfaApprover = createMockIdentity({
         actorId: "usr_approver_cross",
         tenantId: "ten_cross",
@@ -2010,11 +2383,21 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       });
 
       const req1 = await instance1.createRequest(
-        { targetUserId: "usr_target_cross1", roleCode: "tenant_admin", reason: "Cross 1", tenantId: "ten_cross" },
+        {
+          targetUserId: "usr_target_cross1",
+          roleCode: "tenant_admin",
+          reason: "Cross 1",
+          tenantId: "ten_cross",
+        },
         requester,
       );
       const req2 = await instance2.createRequest(
-        { targetUserId: "usr_target_cross2", roleCode: "tenant_admin", reason: "Cross 2", tenantId: "ten_cross" },
+        {
+          targetUserId: "usr_target_cross2",
+          roleCode: "tenant_admin",
+          reason: "Cross 2",
+          tenantId: "ten_cross",
+        },
         requester,
       );
 
@@ -2047,8 +2430,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
     });
 
     it("rejects approveRequest, rejectRequest, and removeGrant when expectedVersion is missing", async () => {
-      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_nover" });
-      const approver = createMockIdentity({ actorId: "usr_approver_ver", tenantId: "ten_nover" });
+      const requester = createMockIdentity({
+        actorId: "usr_alice",
+        tenantId: "ten_nover",
+      });
+      const approver = createMockIdentity({
+        actorId: "usr_approver_ver",
+        tenantId: "ten_nover",
+      });
 
       const request = await service.createRequest(
         {
@@ -2085,8 +2474,16 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       // removeGrant missing expectedVersion
-      await service.registerActiveGrant("usr_target_nover", "ten_nover", "tenant_admin");
-      await service.registerActiveGrant("usr_other_admin_nover", "ten_nover", "tenant_admin");
+      await service.registerActiveGrant(
+        "usr_target_nover",
+        "ten_nover",
+        "tenant_admin",
+      );
+      await service.registerActiveGrant(
+        "usr_other_admin_nover",
+        "ten_nover",
+        "tenant_admin",
+      );
 
       await expect(
         service.removeGrant(
@@ -2169,6 +2566,223 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           expiresAt: new Date(Date.now() + 60000).toISOString(),
         }),
       ).rejects.toThrow("DB Connection Error");
+    });
+  });
+
+  describe("17. Privilege Escalation Prevention & Platform-Tier Role Governance", () => {
+    it("rejects tenant_admin attempting to create a request for platform-tier roles (security_admin, platform_admin, superadmin)", async () => {
+      const tenantAdmin = createMockIdentity({
+        actorId: "usr_tenant_admin_01",
+        actorType: "tenant_admin",
+        roles: ["tenant_admin"],
+        realm: "tenant",
+        tenantId: "ten_alpha",
+      });
+
+      for (const roleCode of [
+        "security_admin",
+        "platform_admin",
+        "superadmin",
+      ]) {
+        await expect(
+          service.createRequest(
+            {
+              targetUserId: "usr_target_01",
+              roleCode,
+              reason: `Escalation attempt to ${roleCode}`,
+              tenantId: "ten_alpha",
+            },
+            tenantAdmin,
+          ),
+        ).rejects.toThrowError(
+          expect.objectContaining({
+            status: HttpStatus.FORBIDDEN,
+            code: "AUTHZ_SCOPE_DENIED",
+          }),
+        );
+      }
+    });
+
+    it("rejects tenant_admin attempting to approve a request for a platform-tier role", async () => {
+      const platformAdmin = createMockIdentity({
+        actorId: "usr_platform_admin_01",
+        actorType: "platform_admin",
+        roles: ["platform_admin"],
+        realm: "platform",
+        tenantId: null,
+      });
+
+      const tenantAdmin = createMockIdentity({
+        actorId: "usr_tenant_admin_02",
+        actorType: "tenant_admin",
+        roles: ["tenant_admin"],
+        realm: "tenant",
+        tenantId: "ten_alpha",
+      });
+
+      const req = await service.createRequest(
+        {
+          targetUserId: "usr_target_02",
+          roleCode: "security_admin",
+          reason: "Valid platform security admin request",
+        },
+        platformAdmin,
+      );
+
+      await expect(
+        service.approveRequest(req.requestId, tenantAdmin, {
+          approvalRequestId: req.requestId,
+          mutation: { expectedVersion: req.version },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+    });
+
+    it("rejects tenant_admin attempting to reject or remove a platform-tier role grant", async () => {
+      const platformAdmin = createMockIdentity({
+        actorId: "usr_platform_admin_01",
+        actorType: "platform_admin",
+        roles: ["platform_admin"],
+        realm: "platform",
+        tenantId: null,
+      });
+
+      const tenantAdmin = createMockIdentity({
+        actorId: "usr_tenant_admin_03",
+        actorType: "tenant_admin",
+        roles: ["tenant_admin"],
+        realm: "tenant",
+        tenantId: "ten_alpha",
+      });
+
+      const req = await service.createRequest(
+        {
+          targetUserId: "usr_target_03",
+          roleCode: "security_admin",
+          reason: "Valid platform security admin request",
+        },
+        platformAdmin,
+      );
+
+      await expect(
+        service.rejectRequest(req.requestId, tenantAdmin, {
+          approvalRequestId: req.requestId,
+          mutation: { expectedVersion: req.version },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+
+      await expect(
+        service.removeGrant(
+          {
+            targetUserId: "usr_target_03",
+            roleCode: "security_admin",
+            mutation: { expectedVersion: 1 },
+          },
+          tenantAdmin,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.FORBIDDEN,
+          code: "AUTHZ_SCOPE_DENIED",
+        }),
+      );
+    });
+
+    it("allows platform_admin to request, approve, and remove platform-tier roles", async () => {
+      const platformAdmin1 = createMockIdentity({
+        actorId: "usr_platform_admin_01",
+        actorType: "platform_admin",
+        roles: ["platform_admin"],
+        realm: "platform",
+        tenantId: null,
+      });
+
+      const platformAdmin2 = createMockIdentity({
+        actorId: "usr_platform_admin_02",
+        actorType: "platform_admin",
+        roles: ["platform_admin"],
+        realm: "platform",
+        tenantId: null,
+      });
+
+      const req = await service.createRequest(
+        {
+          targetUserId: "usr_target_04",
+          roleCode: "security_admin",
+          reason: "Legitimate platform security admin request",
+        },
+        platformAdmin1,
+      );
+
+      const result = await service.approveRequest(
+        req.requestId,
+        platformAdmin2,
+        {
+          approvalRequestId: req.requestId,
+          mutation: { expectedVersion: req.version },
+        },
+      );
+
+      expect(result.request.status).toBe("approved");
+      expect(result.grant.roleCode).toBe("security_admin");
+
+      const removed = await service.removeGrant(
+        {
+          targetUserId: "usr_target_04",
+          roleCode: "security_admin",
+          mutation: { expectedVersion: 1 },
+        },
+        platformAdmin1,
+      );
+      expect(removed.status).toBe("removed");
+    });
+
+    it("verifies IAPSubjectAdapter maps security_admin to platform-admins group and fails closed for tenant realm", async () => {
+      const mockRepo: any = {
+        findPrincipalBySubject: async () => ({
+          principalId: "usr_sec_admin",
+          status: "active",
+          email: "secadmin@platform.drts",
+          updatedAt: new Date().toISOString(),
+        }),
+        findMembershipsByPrincipalId: async () => [
+          {
+            membershipId: "m_tenant_realm",
+            principalId: "usr_sec_admin",
+            realm: "tenant",
+            status: "active",
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+        findRoleBindingsByMembershipId: async () => [
+          {
+            roleBindingId: "rb_sec_admin",
+            membershipId: "m_tenant_realm",
+            roleCode: "security_admin",
+            validFrom: new Date().toISOString(),
+            validTo: null,
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      };
+
+      const adapter = new IAPSubjectAdapter(mockRepo);
+
+      // Security admin role on tenant-realm membership should fail closed and not pass through
+      await expect(
+        adapter.resolveSubject("mock_jwt", {
+          requestedRealm: "tenant" as any,
+        }),
+      ).rejects.toThrow();
     });
   });
 });
