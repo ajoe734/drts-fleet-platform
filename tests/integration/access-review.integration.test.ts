@@ -1,4 +1,4 @@
-import { ForbiddenException, ConflictException, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, ConflictException, NotFoundException } from "../../apps/api/node_modules/@nestjs/common";
 import { describe, beforeEach, it, expect } from "vitest";
 
 import { AccessReviewService } from "../../apps/api/src/modules/identity/access-review.service";
