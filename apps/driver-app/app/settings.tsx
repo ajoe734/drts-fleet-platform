@@ -17,6 +17,7 @@ import { AppScreen } from "@/components/ui/AppScreen";
 import { BottomActionBar } from "@/components/ui/BottomActionBar";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { AuthorityBanner } from "@/components/ui/AuthorityBanner";
 import { FormField } from "@/components/ui/FormField";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
@@ -24,12 +25,16 @@ import { Tokens } from "@/components/ui/tokens";
 import {
   formatDriverError,
   getDriverClient,
+  getDriverDeviceId,
   getDriverId,
+  getProvisionedSession,
+  isDriverIdentityProvisioned,
+  rebindDriverDevice,
   recoverDriverSessionFromApiError,
   revokeDriverDeviceBinding,
-  isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import { driverAuthStrings, driverSaveStatusLabels, driverStrings } from "@/lib/strings";
 import {
   DEFAULT_PROFILE_VALUES,
   DEFAULT_SETTINGS_VALUES,
@@ -47,7 +52,6 @@ import {
   type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
-import { driverSaveStatusLabels, driverStrings } from "@/lib/strings";
 
 function toErrorMessage(error: unknown): string {
   return formatDriverError(error, "要求失敗");
@@ -616,6 +620,72 @@ export default function SettingsScreen() {
           </FormSection>
 
           <FormSection
+            title={driverAuthStrings.devices.title}
+            description={driverAuthStrings.devices.subtitle}
+          >
+            <View style={styles.deviceCard}>
+              <View style={styles.deviceRowHeader}>
+                <Text style={styles.deviceCardTitle}>
+                  {driverAuthStrings.devices.activeDevice}
+                </Text>
+                <StatusChip label="生效中 · active" variant="success" />
+              </View>
+              <View style={styles.deviceDetailGrid}>
+                <View style={styles.deviceField}>
+                  <Text style={styles.deviceFieldLabel}>
+                    {driverAuthStrings.devices.deviceIdLabel}
+                  </Text>
+                  <Text style={styles.deviceFieldValue}>
+                    {getProvisionedSession()?.deviceId ?? (driverId ? `device-${driverId}` : "unknown-device")}
+                  </Text>
+                </View>
+                <View style={styles.deviceField}>
+                  <Text style={styles.deviceFieldLabel}>
+                    {driverAuthStrings.devices.bindingIdLabel}
+                  </Text>
+                  <Text style={styles.deviceFieldValue}>
+                    {getProvisionedSession()?.bindingId ?? "bnd-active-001"}
+                  </Text>
+                </View>
+                <View style={styles.deviceField}>
+                  <Text style={styles.deviceFieldLabel}>
+                    {driverAuthStrings.devices.driverIdLabel}
+                  </Text>
+                  <Text style={styles.deviceFieldValue}>
+                    {driverId || "Unbound"}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.deviceActionsRow}>
+                <ActionButton
+                  accessibilityHint="進入裝置啟用與重新綁定頁面"
+                  accessibilityLabel="重新綁定裝置"
+                  icon="swap-horizontal-outline"
+                  onPress={() => router.push("/onboarding")}
+                  title={driverAuthStrings.devices.rebindAction}
+                  variant="secondary"
+                />
+                <ActionButton
+                  accessibilityHint="撤銷此裝置的司機綁定並登出"
+                  accessibilityLabel="登出並撤銷裝置"
+                  icon="trash-outline"
+                  onPress={handleLogout}
+                  title={driverAuthStrings.devices.revokeAction}
+                  variant="danger"
+                />
+              </View>
+            </View>
+            <AuthorityBanner
+              authorityLabel="OfflineProofPreserved"
+              description={driverAuthStrings.devices.offlineProofNotice}
+              icon="shield-checkmark-outline"
+              title="安全合規保證"
+              tone="owned"
+            />
+          </FormSection>
+
+          <FormSection
             title="平台帳號綁定"
             description="管理外部平台帳號綁定、重新驗證、平台憑證與接單資格；狀態與「平台健康中心」即時同步。"
           >
@@ -820,5 +890,44 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: Tokens.colors.border,
     marginHorizontal: Tokens.spacing.md,
+  },
+  deviceCard: {
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.surfaceLo,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.md,
+    marginBottom: Tokens.spacing.sm,
+  },
+  deviceRowHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  deviceCardTitle: {
+    ...Tokens.type.label,
+    fontWeight: "700",
+    color: Tokens.colors.textStrong,
+  },
+  deviceDetailGrid: {
+    gap: Tokens.spacing.xs,
+  },
+  deviceField: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  deviceFieldLabel: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  deviceFieldValue: {
+    ...Tokens.type.small,
+    fontWeight: "600",
+    color: Tokens.colors.textStrong,
+    fontFamily: Tokens.fonts.mono,
+  },
+  deviceActionsRow: {
+    gap: Tokens.spacing.sm,
+    marginTop: Tokens.spacing.xs,
   },
 });

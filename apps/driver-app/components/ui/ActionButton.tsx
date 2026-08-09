@@ -20,6 +20,8 @@ interface ActionButtonProps {
   icon?: keyof typeof Ionicons.glyphMap;
   loading?: boolean;
   disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 }
@@ -31,6 +33,8 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
   icon,
   loading = false,
   disabled = false,
+  accessibilityLabel,
+  accessibilityHint,
   style,
   textStyle,
 }) => {
@@ -68,9 +72,12 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
 
   return (
     <TouchableOpacity
-      onPress={onPress}
-      disabled={isDisabled}
+      accessibilityHint={accessibilityHint}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
       activeOpacity={0.7}
+      disabled={isDisabled}
+      onPress={onPress}
       style={[
         styles.baseButton,
         variantStyles.button,
