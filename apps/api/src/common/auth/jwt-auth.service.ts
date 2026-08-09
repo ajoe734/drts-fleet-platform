@@ -56,6 +56,7 @@ export interface JwtIdentityPayload {
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
+  breakGlassGrantId?: string | undefined;
 }
 
 export interface IssuedJwtSessionToken {
@@ -102,6 +103,7 @@ type JwtSignIdentityBase =
       | "roles"
       | "scopes"
       | "requestId"
+      | "breakGlassGrantId"
     >
   | IdentityContext;
 
@@ -124,6 +126,7 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
+  breakGlassGrantId?: string | null;
 };
 
 export interface IssueSessionTokenOptions {
@@ -142,6 +145,7 @@ export interface IssueSessionTokenOptions {
   absoluteExpiresAt?: string;
   audience?: string[] | null;
   workloadExchangeNonceHash?: string | null;
+  breakGlassGrantId?: string | null;
 }
 
 const SIGN_KEY_REQUIRED_ENV = ["JWT_PRIVATE_KEY", "JWT_SECRET"] as const;
@@ -626,6 +630,8 @@ export class JwtAuthService {
       options?.workloadExchangeNonceHash ??
       identity.workloadExchangeNonceHash ??
       null;
+    const breakGlassGrantId =
+      options?.breakGlassGrantId ?? identity.breakGlassGrantId ?? null;
     const subject =
       options?.subject ??
       identity.subject ??
@@ -691,6 +697,7 @@ export class JwtAuthService {
             : {}),
         },
         riskSummary: {
+          ...(breakGlassGrantId ? { breakGlassGrantId } : {}),
           ...(workloadExchangeNonceHash
             ? {
                 workloadExchangeNonceHash,
@@ -721,6 +728,7 @@ export class JwtAuthService {
         issuedAt,
         expiresAt,
         workloadExchangeNonceHash,
+        breakGlassGrantId,
       },
       { expiresIn, jwtId: tokenId },
     );
@@ -764,6 +772,7 @@ export class JwtAuthService {
       policyVersion: identity.policyVersion ?? undefined,
       workloadExchangeNonceHash:
         identity.workloadExchangeNonceHash ?? undefined,
+      breakGlassGrantId: identity.breakGlassGrantId ?? undefined,
       drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
@@ -1003,6 +1012,7 @@ export class JwtAuthService {
         typeof payload.exp === "number"
           ? new Date(payload.exp * 1000).toISOString()
           : null,
+      breakGlassGrantId: payload.breakGlassGrantId ?? null,
       roleFamilies: payload.roleFamilies,
       roles: payload.roles,
       scopes: payload.scopes,
