@@ -35,6 +35,15 @@ export interface IamCallbackSessionExchangeCommand {
   pkceVerifier: string;
 }
 
+/**
+ * Minimum tenant-workforce login exchange. The browser obtains the ID token
+ * from the configured OIDC provider and exchanges it for a DRTS session.
+ */
+export interface TenantOidcSessionExchangeCommand {
+  idToken: string;
+  tenantId?: string | null;
+}
+
 export interface IamSessionInventoryQuery {
   actorId?: string | null;
   realm?: string | null;
@@ -94,6 +103,12 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     operationId: "exchangeTenantCallbackSession",
     method: "post",
     path: "/api/auth/tenant/callback-session",
+    domain: "session",
+  },
+  {
+    operationId: "exchangeTenantOidcSession",
+    method: "post",
+    path: "/api/auth/tenant/oidc-session",
     domain: "session",
   },
   {

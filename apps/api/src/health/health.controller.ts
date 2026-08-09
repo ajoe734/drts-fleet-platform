@@ -1,6 +1,7 @@
 import { Controller, Get } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
 
+import { OpenRoute } from "../common/auth";
 import { buildMapProviderHealthReport } from "../common/map-provider";
 import { RATE_LIMIT_SKIP_DEFAULT } from "../common/throttling/rate-limit.constants";
 
@@ -18,6 +19,7 @@ export function buildHealthPayload(env: NodeJS.ProcessEnv = process.env) {
 @Controller("health")
 @SkipThrottle(RATE_LIMIT_SKIP_DEFAULT)
 export class HealthController {
+  @OpenRoute()
   @Get()
   getHealth() {
     return buildHealthPayload();
