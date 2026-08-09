@@ -310,6 +310,36 @@ export class IdentityRepository {
     }
   }
 
+  async ensureMembershipRecord(
+    membership: CanonicalIdentityMembershipRecord,
+  ): Promise<CanonicalIdentityMembershipRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackMembership(membership);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertMembership(client, membership);
+    } finally {
+      client.release();
+    }
+  }
+
+  async ensureRoleBindingRecord(
+    roleBinding: CanonicalIdentityRoleBindingRecord,
+  ): Promise<CanonicalIdentityRoleBindingRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackRoleBinding(roleBinding);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertRoleBinding(client, roleBinding);
+    } finally {
+      client.release();
+    }
+  }
+
   async findPrincipalBySubject(
     issuer: string,
     subject: string,
@@ -722,6 +752,92 @@ export class IdentityRepository {
         return null;
       }
       return this.hydrateSessionRecord(row, "iam.identity_sessions");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeSessionsForPrincipal(
+    principalId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ): Promise<number> {
+    const revokedAt = new Date().toISOString();
+    let count = 0;
+
+    if (!this.isEnabled()) {
+      for (const [sessionId, session] of this.fallbackSessions.entries()) {
+        if (session.principalId === principalId && session.status === "active") {
+          this.fallbackSessions.set(sessionId, {
+            ...session,
+            status: "revoked",
+            revokedAt,
+            revokedByPrincipalId: revokedByPrincipalId || null,
+            revokeReason: reason,
+            updatedAt: revokedAt,
+          });
+          count++;
+          for (const [familyId, family] of this.fallbackRefreshFamilies.entries()) {
+            if (family.sessionId === sessionId && family.status === "active") {
+              this.fallbackRefreshFamilies.set(familyId, {
+                ...family,
+                status: "revoked",
+                updatedAt: revokedAt,
+              });
+            }
+          }
+        }
+      }
+      return count;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const res = await client.query(
+        `
+          UPDATE iam.identity_sessions
+          SET status = 'revoked',
+              revoked_at = $2::timestamptz,
+              revoked_by_principal_id = $3::text,
+              revoke_reason = $4::text,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(
+                    jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                    '{revokedAt}', to_jsonb($2::text)
+                  ),
+                  '{revokedByPrincipalId}', to_jsonb($3::text)
+                ),
+                '{revokeReason}', to_jsonb($4::text)
+              )
+          WHERE principal_id = $1::text AND status = 'active'
+          RETURNING session_id
+        `,
+        [principalId, revokedAt, revokedByPrincipalId || null, reason],
+      );
+      count = res.rows.length;
+
+      if (count > 0) {
+        const sessionIds = res.rows.map((r: { session_id: string }) => r.session_id);
+        await client.query(
+          `
+            UPDATE iam.identity_refresh_families
+            SET status = 'revoked',
+                updated_at = $2::timestamptz,
+                record = jsonb_set(record, '{status}', '"revoked"'::jsonb)
+            WHERE session_id = ANY($1::text[]) AND status = 'active'
+          `,
+          [sessionIds, revokedAt],
+        );
+      }
+
+      await client.query("COMMIT");
+      return count;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

@@ -192,7 +192,7 @@ export function buildSecurityEventRecord(
     targetId: normalizeText(input.targetId),
     sessionId: normalizeText(input.sessionId),
     tokenIdHash: hashValue(input.tokenId),
-    authMethods: [...new Set(input.authMethods.filter(Boolean))],
+    authMethods: [...new Set((input.authMethods || []).filter(Boolean))],
     sourceIpPrefix: maskIpPrefix(input.sourceIp),
     userAgentHash: hashValue(input.userAgent),
     requestId: normalizeText(input.requestId),

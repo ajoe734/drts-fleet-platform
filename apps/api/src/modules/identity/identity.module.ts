@@ -1,13 +1,15 @@
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { AccessReviewController } from "./access-review.controller";
+import { AccessReviewService } from "./access-review.service";
 import { IdentityController } from "./identity.controller";
 import { IdentityRepository } from "./identity.repository";
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [IdentityController],
-  providers: [IdentityRepository],
-  exports: [IdentityRepository],
+  controllers: [IdentityController, AccessReviewController],
+  providers: [IdentityRepository, AccessReviewService],
+  exports: [IdentityRepository, AccessReviewService],
 })
 export class IdentityModule {}
