@@ -385,6 +385,41 @@ export function buildAuthStartupConfigReport(
     audience = audience ?? "https://api.local.drts.internal";
   }
 
+  // Tenant workforce sessions are exchanged from an external OIDC ID token.
+  // Do not let a strict deployment start with only the legacy fixture login
+  // available (fixture login is separately forbidden outside local/test).
+  if (isStrictEnvironment) {
+    const tenantOidcIssuer = normalizeString(env.TENANT_OIDC_ISSUER);
+    const tenantOidcAudience = normalizeString(env.TENANT_OIDC_AUDIENCE);
+    const tenantOidcKey =
+      normalizeString(env.TENANT_OIDC_JWT_PUBLIC_KEY) ??
+      normalizeString(env.TENANT_OIDC_JWT_SECRET);
+    if (!tenantOidcIssuer || !tenantOidcIssuer.startsWith("https://")) {
+      issues.push({
+        control: "TENANT_OIDC_ISSUER",
+        issue:
+          "Missing or unsafe control: TENANT_OIDC_ISSUER must be an HTTPS issuer in staging/production",
+        code: tenantOidcIssuer ? "UNSAFE_VALUE" : "MISSING_CONTROL",
+      });
+    }
+    if (!tenantOidcAudience || tenantOidcAudience === "*") {
+      issues.push({
+        control: "TENANT_OIDC_AUDIENCE",
+        issue:
+          "Missing or unsafe control: TENANT_OIDC_AUDIENCE must be a concrete audience in staging/production",
+        code: tenantOidcAudience ? "UNSAFE_VALUE" : "MISSING_CONTROL",
+      });
+    }
+    if (!tenantOidcKey) {
+      issues.push({
+        control: "TENANT_OIDC_JWT_PUBLIC_KEY / TENANT_OIDC_JWT_SECRET",
+        issue:
+          "Missing required control: tenant OIDC verification key must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    }
+  }
+
   // 3. Algorithms Validation
   const rawAlgo = env.JWT_ALGORITHMS ?? env.JWT_ALGORITHM;
   const parsedAlgos = parseCsv(rawAlgo);
