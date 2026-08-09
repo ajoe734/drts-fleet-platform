@@ -1278,8 +1278,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_exp" });
       const approver = createMockIdentity({ actorId: "usr_bob", roles: ["tenant_admin"], tenantId: "ten_audit_exp" });
 
-      const pastFrom = new Date(Date.now() - 7200000).toISOString();
-      const pastTo = new Date(Date.now() - 3600000).toISOString();
+      const nowMs = Date.now();
+      const pastTo = new Date(nowMs - 1000).toISOString();
+      const validFrom = new Date(nowMs - 5000).toISOString();
 
       const req = await auditService.createRequest(
         {
@@ -1287,11 +1288,14 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           roleCode: "tenant_admin",
           reason: "Audit expired test",
           tenantId: "ten_audit_exp",
-          validFrom: pastFrom,
-          validTo: pastTo,
+          validFrom,
+          validTo: new Date(nowMs + 5000).toISOString(),
         },
         requester,
       );
+
+      (req as any).validTo = pastTo;
+      await identityRepo.savePrivilegedRoleRequest(req);
 
       await expect(
         auditService.approveRequest(req.requestId, approver),
@@ -1325,8 +1329,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
 
       const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_stale_req" });
-      const pastFrom = new Date(Date.now() - 7200000).toISOString();
-      const pastTo = new Date(Date.now() - 3600000).toISOString();
+      const nowMs = Date.now();
+      const pastTo = new Date(nowMs - 1000).toISOString();
+      const validFrom = new Date(nowMs - 5000).toISOString();
 
       const req = await auditService.createRequest(
         {
@@ -1334,13 +1339,16 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
           roleCode: "tenant_admin",
           reason: "Audit stale request expiry test",
           tenantId: "ten_audit_stale_req",
-          validFrom: pastFrom,
-          validTo: pastTo,
+          validFrom,
+          validTo: new Date(nowMs + 5000).toISOString(),
         },
         requester,
       );
 
-      await auditService.expireStaleGrants(Date.now());
+      (req as any).validTo = pastTo;
+      await identityRepo.savePrivilegedRoleRequest(req);
+
+      await auditService.expireStaleGrants(nowMs);
 
       const expiredEvent = recordedEvents.find(
         (e) => e.eventType === "privileged_role.expired" && e.approvalId === req.requestId,
