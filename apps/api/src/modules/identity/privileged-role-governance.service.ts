@@ -573,6 +573,39 @@ export class PrivilegedRoleGovernanceService {
           if (this.identityRepository) {
             await this.identityRepository.savePrivilegedRoleRequest(request, client);
           }
+          if (this.securityEventsService) {
+            await this.securityEventsService.recordEventRequired(
+              {
+                actorId: approverIdentity.actorId,
+                actorType: approverIdentity.actorType,
+                realm: request.realm,
+                tenantId: request.tenantId,
+                partnerId: null,
+                eventType: "privileged_role.expired",
+                eventFamily: "role",
+                outcome: "expired",
+                severity: "medium",
+                targetType: "user",
+                targetId: request.targetUserId,
+                sessionId: approverIdentity.sessionId ?? null,
+                tokenId: null,
+                authMethods: approverIdentity.authMethods ?? [],
+                sourceIp: approverIdentity.ipAddress ?? null,
+                userAgent: approverIdentity.userAgent ?? null,
+                requestId: request.requestId,
+                traceId: null,
+                reasonCode: "IAM_REQUEST_EXPIRED",
+                approvalId: request.requestId,
+                beforeSummary: null,
+                afterSummary: {
+                  requestId: request.requestId,
+                  roleCode: request.requestedRoleCode,
+                  validTo: request.validTo,
+                },
+              },
+              client,
+            );
+          }
           if (client) {
             await client.query("COMMIT");
           }
@@ -1134,6 +1167,39 @@ export class PrivilegedRoleGovernanceService {
             this.requests.set(req.requestId, { ...req });
             if (this.identityRepository) {
               await this.identityRepository.savePrivilegedRoleRequest(req, client);
+            }
+            if (this.securityEventsService) {
+              await this.securityEventsService.recordEventRequired(
+                {
+                  actorId: "system",
+                  actorType: "system",
+                  realm: req.realm,
+                  tenantId: req.tenantId,
+                  partnerId: null,
+                  eventType: "privileged_role.expired",
+                  eventFamily: "role",
+                  outcome: "expired",
+                  severity: "medium",
+                  targetType: "user",
+                  targetId: req.targetUserId,
+                  sessionId: null,
+                  tokenId: null,
+                  authMethods: [],
+                  sourceIp: null,
+                  userAgent: null,
+                  requestId: req.requestId,
+                  traceId: null,
+                  reasonCode: null,
+                  approvalId: req.requestId,
+                  beforeSummary: null,
+                  afterSummary: {
+                    requestId: req.requestId,
+                    roleCode: req.requestedRoleCode,
+                    validTo: req.validTo,
+                  },
+                },
+                client,
+              );
             }
           }
         }

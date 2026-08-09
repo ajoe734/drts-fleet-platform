@@ -1260,6 +1260,95 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       const requests = await failingService.listRequests(requester, "ten_audit_fail");
       expect(requests).toHaveLength(0);
     });
+
+    it("records privileged_role.expired security audit event when approveRequest encounters expired validTo", async () => {
+      const recordedEvents: any[] = [];
+      const mockSecurityEventsService = {
+        recordEventRequired: async (event: any) => {
+          recordedEvents.push(event);
+          return event;
+        },
+      } as any;
+
+      const auditService = new PrivilegedRoleGovernanceService(
+        identityRepo,
+        mockSecurityEventsService,
+      );
+
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_exp" });
+      const approver = createMockIdentity({ actorId: "usr_bob", roles: ["tenant_admin"], tenantId: "ten_audit_exp" });
+
+      const pastFrom = new Date(Date.now() - 7200000).toISOString();
+      const pastTo = new Date(Date.now() - 3600000).toISOString();
+
+      const req = await auditService.createRequest(
+        {
+          targetUserId: "usr_charlie",
+          roleCode: "tenant_admin",
+          reason: "Audit expired test",
+          tenantId: "ten_audit_exp",
+          validFrom: pastFrom,
+          validTo: pastTo,
+        },
+        requester,
+      );
+
+      await expect(
+        auditService.approveRequest(req.requestId, approver),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.CONFLICT,
+          code: "IAM_REQUEST_EXPIRED",
+        }),
+      );
+
+      const expiredEvent = recordedEvents.find(
+        (e) => e.eventType === "privileged_role.expired" && e.approvalId === req.requestId,
+      );
+      expect(expiredEvent).toBeDefined();
+      expect(expiredEvent.actorId).toBe("usr_bob");
+      expect(expiredEvent.outcome).toBe("expired");
+    });
+
+    it("records privileged_role.expired security audit event when expireStaleGrants encounters expired pending request", async () => {
+      const recordedEvents: any[] = [];
+      const mockSecurityEventsService = {
+        recordEventRequired: async (event: any) => {
+          recordedEvents.push(event);
+          return event;
+        },
+      } as any;
+
+      const auditService = new PrivilegedRoleGovernanceService(
+        identityRepo,
+        mockSecurityEventsService,
+      );
+
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_audit_stale_req" });
+      const pastFrom = new Date(Date.now() - 7200000).toISOString();
+      const pastTo = new Date(Date.now() - 3600000).toISOString();
+
+      const req = await auditService.createRequest(
+        {
+          targetUserId: "usr_charlie",
+          roleCode: "tenant_admin",
+          reason: "Audit stale request expiry test",
+          tenantId: "ten_audit_stale_req",
+          validFrom: pastFrom,
+          validTo: pastTo,
+        },
+        requester,
+      );
+
+      await auditService.expireStaleGrants(Date.now());
+
+      const expiredEvent = recordedEvents.find(
+        (e) => e.eventType === "privileged_role.expired" && e.approvalId === req.requestId,
+      );
+      expect(expiredEvent).toBeDefined();
+      expect(expiredEvent.actorId).toBe("system");
+      expect(expiredEvent.outcome).toBe("expired");
+    });
   });
 });
 
