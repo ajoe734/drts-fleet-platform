@@ -22,6 +22,7 @@ function createMockIdentity(overrides: Partial<IdentityContext> = {}): IdentityC
     scopes: ["tenant:write"],
     tenantId: "ten_test_001",
     authMethods: ["jwt", "mfa"],
+    authTime: new Date().toISOString(),
     ...overrides,
   } as IdentityContext;
 }
@@ -1639,13 +1640,77 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       );
     });
 
-    it("rejects identity with stale authTime (>900s ago) even if authMethods includes MFA", async () => {
+    it("rejects identity with missing authTime even if authMethods includes MFA (fail closed)", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_missing_at" });
+      const missingAuthTimeApprover = createMockIdentity({
+        actorId: "usr_approver_no_at",
+        tenantId: "ten_missing_at",
+        authMethods: ["jwt", "mfa"],
+        authTime: undefined,
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_no_at",
+          roleCode: "tenant_admin",
+          reason: "Missing authTime test",
+          tenantId: "ten_missing_at",
+        },
+        requester,
+      );
+
+      await expect(
+        service.approveRequest(request.requestId, missingAuthTimeApprover, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("rejects identity with malformed authTime even if authMethods includes MFA (fail closed)", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_bad_at" });
+      const malformedAuthTimeApprover = createMockIdentity({
+        actorId: "usr_approver_bad_at",
+        tenantId: "ten_bad_at",
+        authMethods: ["jwt", "mfa"],
+        authTime: "not-a-valid-timestamp",
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_bad_at",
+          roleCode: "tenant_admin",
+          reason: "Malformed authTime test",
+          tenantId: "ten_bad_at",
+        },
+        requester,
+      );
+
+      await expect(
+        service.approveRequest(request.requestId, malformedAuthTimeApprover, {
+          approvalRequestId: request.requestId,
+          mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.UNAUTHORIZED,
+          code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("rejects identity with stale authTime (>600s ago) even if authMethods includes MFA", async () => {
       const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_stale" });
       const staleMfaApprover = createMockIdentity({
         actorId: "usr_approver_stale",
         tenantId: "ten_stale",
         authMethods: ["jwt", "mfa"],
-        authTime: new Date(Date.now() - 1200 * 1000).toISOString(),
+        authTime: new Date(Date.now() - 650 * 1000).toISOString(),
       });
 
       const request = await service.createRequest(
@@ -1667,6 +1732,70 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         expect.objectContaining({
           status: HttpStatus.UNAUTHORIZED,
           code: "IAM_STEP_UP_REQUIRED",
+        }),
+      );
+    });
+
+    it("accepts identity with fresh authTime (within 600s) when authMethods includes MFA", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_fresh" });
+      const freshMfaApprover = createMockIdentity({
+        actorId: "usr_approver_fresh",
+        tenantId: "ten_fresh",
+        authMethods: ["jwt", "mfa"],
+        authTime: new Date(Date.now() - 300 * 1000).toISOString(),
+      });
+
+      const request = await service.createRequest(
+        {
+          targetUserId: "usr_target_fresh",
+          roleCode: "tenant_admin",
+          reason: "Fresh authTime test",
+          tenantId: "ten_fresh",
+        },
+        requester,
+      );
+
+      const approved = await service.approveRequest(request.requestId, freshMfaApprover, {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      });
+      expect(approved.request.status).toBe("approved");
+    });
+
+    it("rejects createRequest when roleCode is not a valid privileged role", async () => {
+      const requester = createMockIdentity({ actorId: "usr_alice", tenantId: "ten_bad_role" });
+
+      await expect(
+        service.createRequest(
+          {
+            targetUserId: "usr_target_driver",
+            roleCode: "driver",
+            reason: "Attempting to request non-privileged role",
+            tenantId: "ten_bad_role",
+          },
+          requester,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.BAD_REQUEST,
+          code: "IAM_INVALID_ROLE",
+        }),
+      );
+
+      await expect(
+        service.createRequest(
+          {
+            targetUserId: "usr_target_viewer",
+            roleCode: "viewer",
+            reason: "Attempting to request arbitrary role",
+            tenantId: "ten_bad_role",
+          },
+          requester,
+        ),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          status: HttpStatus.BAD_REQUEST,
+          code: "IAM_INVALID_ROLE",
         }),
       );
     });

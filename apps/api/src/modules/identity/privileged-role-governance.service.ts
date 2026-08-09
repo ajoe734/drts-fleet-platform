@@ -296,13 +296,13 @@ export async function verifyStepUp(
     ),
   );
 
-  let isAuthTimeFresh = true;
-  if (identity.authTime) {
+  let isAuthTimeFresh = false;
+  if (typeof identity.authTime === "string" && identity.authTime.trim().length > 0) {
     const authTimestamp = Date.parse(identity.authTime);
     if (!isNaN(authTimestamp)) {
       const ageSeconds = (Date.now() - authTimestamp) / 1000;
-      if (ageSeconds > 900 || ageSeconds < -60) {
-        isAuthTimeFresh = false;
+      if (ageSeconds <= 600 && ageSeconds >= -60) {
+        isAuthTimeFresh = true;
       }
     }
   }
@@ -482,11 +482,19 @@ export class PrivilegedRoleGovernanceService {
     command: CreatePrivilegedRoleRequestCommand,
     requesterIdentity: IdentityContext,
   ): Promise<PrivilegedRoleApprovalRequestRecord> {
-    if (!command.roleCode?.trim()) {
+    const roleCode = command.roleCode?.trim();
+    if (!roleCode) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "IAM_REASON_REQUIRED",
         "Role code is required for privileged role request.",
+      );
+    }
+    if (!isPrivilegedRole(roleCode)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "IAM_INVALID_ROLE",
+        `Role code '${command.roleCode}' is not a valid privileged role code.`,
       );
     }
     if (!command.reason?.trim()) {
