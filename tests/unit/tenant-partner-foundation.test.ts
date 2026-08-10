@@ -1445,7 +1445,7 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
         partnerEntrySlug: "yuhe-residence",
         rateType: "percent",
-        value: 10,
+        value: 15,
         currency: "TWD",
         effectiveFrom: "2026-07-01T00:00:00.000Z",
         effectiveUntil: null,

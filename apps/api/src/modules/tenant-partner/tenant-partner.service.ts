@@ -150,7 +150,7 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
       partnerEntrySlug: "yuhe-residence",
       rateType: "percent" as const,
-      value: 10,
+      value: 15,
       currency: "TWD",
       effectiveFrom: "2026-07-01T00:00:00.000Z",
       effectiveUntil: null,
