@@ -69,6 +69,7 @@ const DISPLAY_BUDGET_TOTAL = 60_000;
 const DISPLAY_BUDGET_AVAILABLE = 31_000;
 const APPROVAL_THRESHOLD = 1_500;
 const DEFAULT_TIMEZONE_OFFSET = "+08:00";
+const DEFAULT_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -135,9 +136,7 @@ function estimateFare(draft: EnterpriseBookingDraftForm) {
 }
 
 function getReservationStart(date: string, time: string, now = new Date()) {
-  const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? date
-    : "2026-06-13";
+  const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "2026-06-13";
   const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : "15:20";
   const parsed = new Date(
     `${normalizedDate}T${normalizedTime}:00${DEFAULT_TIMEZONE_OFFSET}`,
@@ -146,8 +145,31 @@ function getReservationStart(date: string, time: string, now = new Date()) {
   return Number.isNaN(parsed.getTime()) ? now : parsed;
 }
 
+function getReservationWallClockFields(reservationWindowStart: string) {
+  const reservationStart = new Date(reservationWindowStart);
+
+  if (Number.isNaN(reservationStart.getTime())) {
+    return { date: "", time: "" };
+  }
+
+  // Booking commands interpret the form's date/time as +08:00 wall-clock
+  // values. Shift the UTC instant before ISO formatting so an Edit → Update
+  // cycle preserves the original instant rather than applying the offset twice.
+  const localWallClock = new Date(
+    reservationStart.getTime() + DEFAULT_TIMEZONE_OFFSET_MS,
+  ).toISOString();
+
+  return {
+    date: localWallClock.slice(0, 10),
+    time: localWallClock.slice(11, 16),
+  };
+}
+
 export function formatReservationWindowLabel(
-  draft: Pick<EnterpriseBookingDraftForm, "reservationDate" | "reservationTime">,
+  draft: Pick<
+    EnterpriseBookingDraftForm,
+    "reservationDate" | "reservationTime"
+  >,
 ) {
   const date = draft.reservationDate;
   const time = draft.reservationTime;
@@ -388,13 +410,9 @@ export function buildEnterpriseBookingUpdateCommand(
 export function createEnterpriseBookingDraftFromRecord(
   record: BookingRecord,
 ): EnterpriseBookingDraftForm {
-  const reservationStart = new Date(record.reservationWindowStart);
-  const date = Number.isNaN(reservationStart.getTime())
-    ? ""
-    : reservationStart.toISOString().slice(0, 10);
-  const time = Number.isNaN(reservationStart.getTime())
-    ? ""
-    : reservationStart.toISOString().slice(11, 16);
+  const { date, time } = getReservationWallClockFields(
+    record.reservationWindowStart,
+  );
 
   return {
     passengerMode:
@@ -408,7 +426,10 @@ export function createEnterpriseBookingDraftFromRecord(
     onsiteContactPhone: record.onsiteContact?.phone ?? record.passenger.phone,
     costCenterCode: record.costCenter ?? "",
     costCenterLabel: record.costCenter ?? "",
-    vehicle: normalizeVehicle(record.vehiclePreference ?? undefined, "business"),
+    vehicle: normalizeVehicle(
+      record.vehiclePreference ?? undefined,
+      "business",
+    ),
     notes: record.notes ?? "",
     airportDirection: record.direction === "dropoff" ? "dropoff" : "pickup",
     terminal: record.terminal ?? "",
