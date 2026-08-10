@@ -118,6 +118,54 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/logout" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+        "concierge",
+      ),
+      description: "Authenticated session logout for current device",
+    };
+  }
+
+  if (routePath === "auth/logout-all" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout-all",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+        "concierge",
+      ),
+      description: "Authenticated session logout for all active devices",
+    };
+  }
+
+  if (routePath === "auth/sessions/revoke" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:sessions:revoke",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+        "concierge",
+      ),
+      description: "Self-service session revocation endpoint",
+    };
+  }
+
   if (routePath.startsWith("partner/eligibility/")) {
     return {
       routeKey: "partner:eligibility:get",

@@ -939,7 +939,6 @@ export class IdentityRepository implements OnModuleInit {
       revokedByPrincipalId,
     );
   }
-  }
 
   async listSessionsByPrincipal(
     principalId: string,
