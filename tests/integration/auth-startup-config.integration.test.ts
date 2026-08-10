@@ -17,6 +17,9 @@ function getValidProdEnv(): Record<string, string> {
     JWT_AUDIENCE: "https://api.drts.internal",
     JWT_ALGORITHMS: "HS256",
     JWT_SECRET: VALID_PROD_SECRET,
+    TENANT_OIDC_ISSUER: "https://tenant-idp.drts.internal",
+    TENANT_OIDC_AUDIENCE: "drts-tenant-workforce",
+    TENANT_OIDC_JWT_SECRET: VALID_PROD_SECRET,
     COOKIE_SECRET: VALID_PROD_SECRET,
     CSRF_SECRET: VALID_PROD_SECRET,
     AUTH_ALLOWED_ORIGINS: "https://app.drts.internal",
@@ -69,6 +72,26 @@ describe("Authentication Startup Configuration Integration Smoke", () => {
 
     expect(() => validateAuthStartupConfig(unsafeEnv)).toThrowError(
       AuthConfigurationError,
+    );
+  });
+
+  it("blocks strict startup when tenant OIDC verification controls are absent", () => {
+    const env = getValidProdEnv();
+    delete env.TENANT_OIDC_ISSUER;
+    delete env.TENANT_OIDC_AUDIENCE;
+    delete env.TENANT_OIDC_JWT_SECRET;
+
+    const report = buildAuthStartupConfigReport(env);
+
+    expect(report.valid).toBe(false);
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ control: "TENANT_OIDC_ISSUER" }),
+        expect.objectContaining({ control: "TENANT_OIDC_AUDIENCE" }),
+        expect.objectContaining({
+          control: "TENANT_OIDC_JWT_PUBLIC_KEY / TENANT_OIDC_JWT_SECRET",
+        }),
+      ]),
     );
   });
 
