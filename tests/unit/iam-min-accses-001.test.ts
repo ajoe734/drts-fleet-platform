@@ -565,4 +565,107 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
     );
     expect(payloadAfterDisable).toBeNull();
   });
+
+  it("criterion 7: enforces tenant-scope isolation on tenant user creation and role updates (rejects cross-tenant mutations for tenant principals but allows platform/system exception)", async () => {
+    const { tenantPartnerService } = createTestHarness();
+    const targetTenant = "tenant-target-001";
+
+    const tenantAIdentity = {
+      actorType: "tenant_admin" as const,
+      actorId: "user_tenant_a",
+      realm: "tenant" as const,
+      authMode: "jwt_bearer" as const,
+      roleFamilies: ["tenant" as const],
+      roles: ["tenant_admin"],
+      scopes: [],
+      tenantId: "tenant-other-999",
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    // 1. Cross-tenant user creation attempt by tenant principal must fail (403 TENANT_SCOPE_MISMATCH)
+    await expectApiError(
+      () =>
+        tenantPartnerService.createTenantUser(
+          targetTenant,
+          {
+            email: "cross.tenant@acme.test",
+            displayName: "Cross Tenant User",
+            roleCode: "tenant_viewer",
+          },
+          "req-cross-create",
+          tenantAIdentity,
+        ),
+      403,
+      "TENANT_SCOPE_MISMATCH",
+    );
+
+    // 2. Setup user under targetTenant as system/platform admin
+    const platformIdentity = {
+      actorType: "platform_admin" as const,
+      actorId: "platform_user_1",
+      realm: "platform" as const,
+      authMode: "jwt_bearer" as const,
+      roleFamilies: ["platform" as const],
+      roles: ["platform_admin"],
+      scopes: [],
+      tenantId: null,
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    const targetUser = await tenantPartnerService.createTenantUser(
+      targetTenant,
+      {
+        email: "target.user@acme.test",
+        displayName: "Target Tenant User",
+        roleCode: "tenant_viewer",
+      },
+      "req-platform-create",
+      platformIdentity,
+    );
+    expect(targetUser.email).toBe("target.user@acme.test");
+
+    // 3. Cross-tenant role update attempt by tenant principal must fail (403 TENANT_SCOPE_MISMATCH)
+    await expectApiError(
+      () =>
+        tenantPartnerService.updateTenantUserRole(
+          targetTenant,
+          targetUser.userId,
+          {
+            roleCode: "tenant_ops_admin",
+            status: "active",
+          },
+          "req-cross-update",
+          tenantAIdentity,
+        ),
+      403,
+      "TENANT_SCOPE_MISMATCH",
+    );
+
+    // 4. System principal exception allows user creation and role updates across tenants
+    const systemIdentity = {
+      actorType: "system" as const,
+      actorId: "system_service_1",
+      realm: "system" as const,
+      authMode: "jwt_bearer" as const,
+      roleFamilies: ["system" as const],
+      roles: ["system_admin"],
+      scopes: [],
+      tenantId: null,
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    const updatedUserBySystem = await tenantPartnerService.updateTenantUserRole(
+      targetTenant,
+      targetUser.userId,
+      {
+        roleCode: "tenant_ops_admin",
+        status: "active",
+      },
+      "req-system-update",
+      systemIdentity,
+    );
+    expect(updatedUserBySystem.roleCode).toBe("tenant_ops_admin");
+    expect(updatedUserBySystem.status).toBe("active");
+  });
 });
+

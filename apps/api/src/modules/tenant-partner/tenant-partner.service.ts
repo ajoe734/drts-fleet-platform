@@ -6465,6 +6465,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ) {
+    this.assertTenantMutationScope(tenantId, identity);
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
     this.assertNonBlank(command.roleCode, "roleCode");
@@ -6574,6 +6575,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ) {
+    this.assertTenantMutationScope(tenantId, identity);
     this.assertNonBlank(command.roleCode, "roleCode");
     this.assertSupportedTenantRoleCode(command.roleCode);
 
@@ -6759,6 +6761,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ): MaybePromise<TenantApiKeyIssued> {
+    this.assertTenantMutationScope(tenantId, identity);
     this.assertNonBlank(command.keyName, "keyName");
 
     const securityActor = this.requireSecurityEventActor(identity, tenantId);
@@ -6855,6 +6858,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ): MaybePromise<TenantApiKeyIssued> {
+    this.assertTenantMutationScope(tenantId, identity);
     const currentApiKey = this.requireApiKey(tenantId, apiKeyId);
     // Rotation reopens a signing window on the outgoing key, so a credential
     // that is already revoked, auto-revoked, or expired must never be rotated
@@ -8447,6 +8451,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ) {
+    this.assertTenantMutationScope(tenantId, identity);
     const apiKey = this.requireApiKey(tenantId, apiKeyId);
     if (!apiKey.revokedAt) {
       const before = this.cloneStoredApiKey(apiKey);
@@ -9008,6 +9013,38 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       invitedAt: userRole.invitedAt,
       updatedAt: userRole.updatedAt,
     };
+  }
+
+  private assertTenantMutationScope(
+    targetTenantId: string,
+    identity?: IdentityContext | null,
+  ) {
+    if (!identity) {
+      return;
+    }
+
+    const isPlatformOrSystem =
+      identity.realm === "platform" ||
+      identity.realm === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "system" ||
+      identity.roleFamilies?.includes("platform");
+
+    if (isPlatformOrSystem) {
+      return;
+    }
+
+    if (!identity.tenantId || identity.tenantId !== targetTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_MISMATCH",
+        "Cross-tenant identity mutation is forbidden. Principal tenantId does not match target tenantId.",
+        {
+          targetTenantId,
+          principalTenantId: identity.tenantId ?? null,
+        },
+      );
+    }
   }
 
   private requireSecurityEventActor(

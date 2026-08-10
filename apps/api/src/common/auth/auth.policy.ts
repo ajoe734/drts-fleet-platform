@@ -128,7 +128,6 @@ export function resolveRouteAuthPolicy(
         "ops",
         "driver",
         "partner",
-        "concierge",
       ),
       description: "Authenticated session logout for current device",
     };
@@ -144,7 +143,6 @@ export function resolveRouteAuthPolicy(
         "ops",
         "driver",
         "partner",
-        "concierge",
       ),
       description: "Authenticated session logout for all active devices",
     };
@@ -160,7 +158,6 @@ export function resolveRouteAuthPolicy(
         "ops",
         "driver",
         "partner",
-        "concierge",
       ),
       description: "Self-service session revocation endpoint",
     };
