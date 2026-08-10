@@ -579,7 +579,7 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
       roles: ["tenant_admin"],
       scopes: [],
       tenantId: "tenant-other-999",
-      supportedExecutionModes: ["supervisor_managed_execution"],
+      supportedExecutionModes: ["supervisor_managed_execution" as const],
     };
 
     // 1. Cross-tenant user creation attempt by tenant principal must fail (403 TENANT_SCOPE_MISMATCH)
@@ -609,7 +609,7 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
       roles: ["platform_admin"],
       scopes: [],
       tenantId: null,
-      supportedExecutionModes: ["supervisor_managed_execution"],
+      supportedExecutionModes: ["supervisor_managed_execution" as const],
     };
 
     const targetUser = await tenantPartnerService.createTenantUser(
@@ -647,11 +647,11 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
       actorId: "system_service_1",
       realm: "system" as const,
       authMode: "jwt_bearer" as const,
-      roleFamilies: ["system" as const],
+      roleFamilies: ["platform" as const],
       roles: ["system_admin"],
       scopes: [],
       tenantId: null,
-      supportedExecutionModes: ["supervisor_managed_execution"],
+      supportedExecutionModes: ["supervisor_managed_execution" as const],
     };
 
     const updatedUserBySystem = await tenantPartnerService.updateTenantUserRole(
@@ -667,5 +667,35 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
     expect(updatedUserBySystem.roleCode).toBe("tenant_ops_admin");
     expect(updatedUserBySystem.status).toBe("active");
   });
-});
 
+  it("criterion 8: default platform account maintains stable updatedAt across re-initialization and module init", async () => {
+    const { identityRepository: repo1 } = createTestHarness();
+    const seeded1 = await repo1.ensureDefaultPlatformAccount();
+    const initialUpdatedAt = seeded1.principal.updatedAt;
+
+    // Create second instance and copy state to simulate persistent backend restart
+    const { identityRepository: repo2 } = createTestHarness();
+    await repo2.onModuleInit();
+
+    for (const principal of repo1.listPrincipals()) {
+      await repo2.ensurePrincipalRecord(principal);
+    }
+    for (const membership of repo1.listMemberships()) {
+      await repo2.ensureMembershipRecord(membership);
+    }
+    for (const binding of repo1.listRoleBindings()) {
+      await repo2.ensureRoleBindingRecord(binding);
+    }
+
+    const reseeded2 = await repo2.ensureDefaultPlatformAccount();
+    await repo2.onModuleInit();
+
+    expect(reseeded2.principal.updatedAt).toBe(initialUpdatedAt);
+    expect(reseeded2.membership.updatedAt).toBe(initialUpdatedAt);
+
+    const reloadedPrincipal = await repo2.findPrincipalById(
+      "principal_platform_admin_default",
+    );
+    expect(reloadedPrincipal?.updatedAt).toBe(initialUpdatedAt);
+  });
+});

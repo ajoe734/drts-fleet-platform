@@ -132,6 +132,26 @@ export class IdentityRepository implements OnModuleInit {
     principal: CanonicalIdentityPrincipalRecord;
     membership: CanonicalIdentityMembershipRecord;
   }> {
+    const existingPrincipal = await this.findPrincipalById(
+      "principal_platform_admin_default",
+    );
+    const existingMemberships = existingPrincipal
+      ? await this.findMembershipsByPrincipalId(
+          "principal_platform_admin_default",
+        )
+      : [];
+    const existingMembership = existingMemberships.find(
+      (m) => m.membershipId === "membership_platform_admin_default",
+    );
+    const existingBindings = existingMembership
+      ? await this.findRoleBindingsByMembershipId(
+          "membership_platform_admin_default",
+        )
+      : [];
+    const existingRoleBinding = existingBindings.find(
+      (b) => b.roleBindingId === "role_binding_platform_admin_default",
+    );
+
     const now = new Date().toISOString();
     const principalDraft: CanonicalIdentityPrincipalRecord = {
       principalId: "principal_platform_admin_default",
@@ -143,8 +163,8 @@ export class IdentityRepository implements OnModuleInit {
       emailVerified: true,
       displayName: "Platform Admin",
       status: "active",
-      createdAt: now,
-      updatedAt: now,
+      createdAt: existingPrincipal?.createdAt ?? now,
+      updatedAt: existingPrincipal?.updatedAt ?? now,
     };
 
     const membershipDraft: CanonicalIdentityMembershipRecord = {
@@ -158,8 +178,8 @@ export class IdentityRepository implements OnModuleInit {
       status: "active",
       invitedByPrincipalId: null,
       invitationId: null,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: existingMembership?.createdAt ?? now,
+      updatedAt: existingMembership?.updatedAt ?? now,
     };
 
     const roleBindingDraft: CanonicalIdentityRoleBindingRecord = {
@@ -169,10 +189,10 @@ export class IdentityRepository implements OnModuleInit {
       roleCode: "platform_admin",
       grantedByPrincipalId: null,
       approvalId: null,
-      validFrom: now,
+      validFrom: existingRoleBinding?.validFrom ?? now,
       validTo: null,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: existingRoleBinding?.createdAt ?? now,
+      updatedAt: existingRoleBinding?.updatedAt ?? now,
     };
 
     if (!this.isEnabled()) {

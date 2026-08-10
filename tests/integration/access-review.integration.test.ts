@@ -264,12 +264,52 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
     it("immediately invalidates active sessions for target principal on removal", async () => {
       const targetPrincipalId = "usr_target_01";
       const now = new Date().toISOString();
+      await identityRepo.ensurePrincipalRecord({
+        principalId: targetPrincipalId,
+        sourceRef: `iap_subject:${targetPrincipalId}`,
+        issuer: "google_iap",
+        subject: targetPrincipalId,
+        principalType: "human",
+        email: "target01@platform.drts",
+        emailVerified: true,
+        displayName: "Target 01",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await identityRepo.ensureMembershipRecord({
+        membershipId: "mem_target_01",
+        sourceRef: `iap_membership:${targetPrincipalId}`,
+        principalId: targetPrincipalId,
+        realm: "platform",
+        scopeRef: "platform:root",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await identityRepo.ensureRoleBindingRecord({
+        roleBindingId: "rb_target_01",
+        sourceRef: `iap_role_binding:${targetPrincipalId}`,
+        membershipId: "mem_target_01",
+        roleCode: "platform_admin",
+        grantedByPrincipalId: null,
+        approvalId: null,
+        validFrom: now,
+        validTo: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
       const session = await identityRepo.createSession({
         sessionId: "ses_target_01",
         sourceRef: "test_ses_01",
         principalId: targetPrincipalId,
         membershipId: "mem_target_01",
-        realm: "tenant",
+        realm: "platform",
         status: "active",
         authTime: now,
         authMethods: ["oidc"],
