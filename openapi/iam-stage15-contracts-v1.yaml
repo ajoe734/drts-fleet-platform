@@ -42,6 +42,23 @@ paths:
           description: Callback session exchanged.
         "403":
           $ref: "#/components/responses/IamPublicAuthDenied"
+  /api/auth/tenant/oidc-session:
+    post:
+      summary: Exchange a verified tenant OIDC ID token for an authenticated session.
+      operationId: exchangeTenantOidcSession
+      tags: [Session]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantOidcSessionExchangeCommand"
+      responses:
+        "201":
+          description: Tenant OIDC session exchanged.
+        "403":
+          $ref: "#/components/responses/IamPublicAuthDenied"
   /api/auth/tenant/bootstrap-session:
     post:
       summary: Bootstrap a tenant-authenticated browser session.
@@ -419,6 +436,16 @@ components:
           type: string
         pkceVerifier:
           type: string
+    TenantOidcSessionExchangeCommand:
+      type: object
+      required:
+        - idToken
+      properties:
+        idToken:
+          type: string
+          description: OIDC ID token from the configured tenant workforce provider.
+        tenantId:
+          type: [string, "null"]
     IamApprovalDecisionCommand:
       type: object
       required:
