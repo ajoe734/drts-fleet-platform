@@ -990,7 +990,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_PARTNER_ID=partner_ead6bf3d-e858-47cc-bfe1-5a3742524118,DRTS_TENANT_ID=tenant-demo-001,DRTS_PARTNER_PROGRAM_ID=program-referral-community,DRTS_PARTNER_ENTRY_SLUG=yuhe-residence" \
             ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \

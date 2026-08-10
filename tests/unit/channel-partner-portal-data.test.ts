@@ -12,7 +12,7 @@ function makeEvidence(
 ): ReferralPortalEvidence {
   return {
     actorType: "partner_api_key",
-    partnerEntrySlug: "referral-demo-community",
+    partnerEntrySlug: "yuhe-residence",
     scopes: ["billing:read"],
     source,
     ...(sourceDetails ? { sourceDetails } : {}),
