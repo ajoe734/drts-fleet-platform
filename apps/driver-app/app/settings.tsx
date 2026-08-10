@@ -25,11 +25,9 @@ import { Tokens } from "@/components/ui/tokens";
 import {
   formatDriverError,
   getDriverClient,
-  getDriverDeviceId,
   getDriverId,
   getProvisionedSession,
   isDriverIdentityProvisioned,
-  rebindDriverDevice,
   recoverDriverSessionFromApiError,
   revokeDriverDeviceBinding,
 } from "@/lib/api-client";
