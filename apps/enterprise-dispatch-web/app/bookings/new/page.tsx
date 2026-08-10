@@ -25,6 +25,9 @@ export default async function NewBookingPage({
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
   const resolvedSearchParams = (await searchParams) ?? {};
+  const bookingId = Array.isArray(resolvedSearchParams.bookingId)
+    ? resolvedSearchParams.bookingId[0]
+    : resolvedSearchParams.bookingId;
   const initialDraft =
     Object.keys(resolvedSearchParams).length > 0
       ? parseEnterpriseBookingDraft(resolvedSearchParams, locale)
@@ -53,6 +56,7 @@ export default async function NewBookingPage({
         passengers={getEnterprisePassengers(locale)}
         addresses={getEnterpriseAddresses(locale)}
         costCenters={getEnterpriseCostCenters(locale)}
+        {...(bookingId ? { bookingId } : {})}
       />
     </>
   );

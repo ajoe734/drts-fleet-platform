@@ -86,6 +86,74 @@ const embedRoutes = [
 ] as const;
 
 test.describe("enterprise dispatch surfaces", () => {
+  test("creates, reads, updates, and cancels one browser booking id", async ({
+    page,
+  }) => {
+    const bookingId = "booking-browser-001";
+    let record = {
+      bookingId,
+      orderId: "order-browser-001",
+      tenantId: enterpriseTenantId,
+      status: "active",
+      orderStatus: "assigned",
+      reservationWindowStart: "2026-08-12T01:40:00.000Z",
+      reservationWindowEnd: "2026-08-12T02:10:00.000Z",
+      modifiableUntil: "2099-08-12T00:40:00.000Z",
+      cancelableUntil: "2099-08-12T00:55:00.000Z",
+      pickup: { address: "Browser pickup", addressName: "Browser pickup" },
+      dropoff: { address: "Browser dropoff", addressName: "Browser dropoff" },
+      passenger: { name: "Browser Passenger", phone: "0912000111" },
+      bookedBy: { name: "Browser Booker", email: "browser@drts.local" },
+      onsiteContact: { name: "Browser Passenger", phone: "0912000111" },
+      costCenter: enterpriseCostCenterCode,
+      vehiclePreference: "business",
+      direction: "pickup",
+      approvalState: "approved",
+    };
+
+    await page.route("**/control-plane-proxy/api/tenant/bookings**", async (route) => {
+      const method = route.request().method();
+      const url = route.request().url();
+      if (method === "POST" && url.endsWith("/bookings")) {
+        await route.fulfill({ json: { data: { bookingId, orderId: record.orderId, status: "accepted" }, meta: {} } });
+        return;
+      }
+      if (method === "PUT") {
+        const update = route.request().postDataJSON() as Record<string, unknown>;
+        record = { ...record, ...update, pickup: update.pickup ?? record.pickup, dropoff: update.dropoff ?? record.dropoff } as typeof record;
+        await route.fulfill({ json: { data: record, meta: {} } });
+        return;
+      }
+      if (method === "POST" && url.endsWith("/cancel")) {
+        record = { ...record, status: "cancelled", orderStatus: "cancelled" };
+        await route.fulfill({ json: { data: record, meta: {} } });
+        return;
+      }
+      await route.fulfill({ json: { data: url.endsWith("/bookings") ? [record] : record, meta: {} } });
+    });
+
+    await page.goto("/bookings/new", { waitUntil: "domcontentloaded" });
+    const inputs = page.locator("input:not([type=radio])");
+    await inputs.nth(0).fill("Browser Passenger");
+    await inputs.nth(1).fill("Browser pickup");
+    await inputs.nth(2).fill("Browser dropoff");
+    await inputs.nth(8).fill("Browser Booker");
+    await inputs.nth(9).fill("0912000111");
+    await page.getByRole("link", { name: /繼續到 review|Continue to review/ }).click();
+    await page.getByTestId("enterprise-booking-submit").click();
+    await expect(page).toHaveURL(new RegExp(`/bookings/submitted\\?.*bookingId=${bookingId}`));
+    await page.goto(`/bookings/${bookingId}`, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(new RegExp(`/bookings/${bookingId}`));
+    await expect(page.locator("main")).toContainText("Browser pickup");
+    await page.getByRole("link", { name: /修改|Edit/ }).click();
+    await page.locator("input:not([type=radio])").nth(1).fill("Updated browser pickup");
+    await page.getByRole("link", { name: /繼續到 review|Continue to review/ }).click();
+    await page.getByTestId("enterprise-booking-submit").click();
+    await expect(page.locator("main")).toContainText("Updated browser pickup");
+    await page.getByTestId("enterprise-booking-cancel").click();
+    await expect(page.locator("main")).toContainText("已取消");
+  });
+
   test("renders website booking routes inside the enterprise shell", async ({
     page,
   }) => {

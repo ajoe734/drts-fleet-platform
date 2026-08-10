@@ -96,7 +96,10 @@ describe("enterprise booking draft", () => {
         notes: "Meet at lobby",
       }),
     );
-    expect(command).not.toHaveProperty("bookedBy");
+    expect(command).toHaveProperty("bookedBy", {
+      name: "Alex Booker",
+      email: "enterprise-dispatch-web@drts.local",
+    });
     expect(command).not.toHaveProperty("flightNo");
     expect(command).not.toHaveProperty("terminal");
     expect(command).not.toHaveProperty("luggageCount");
