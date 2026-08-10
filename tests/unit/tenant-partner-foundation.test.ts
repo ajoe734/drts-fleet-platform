@@ -1447,7 +1447,7 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
         rateType: "percent",
         value: 15,
         currency: "TWD",
-        effectiveFrom: "2026-07-01T00:00:00.000Z",
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
         effectiveUntil: null,
         settlementDirection: "drts_pays_partner",
         channelKey: "partner_referral",

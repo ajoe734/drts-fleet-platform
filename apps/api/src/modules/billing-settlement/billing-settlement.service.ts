@@ -409,7 +409,7 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       rateType: "percent" as const,
       value: 15,
       currency: "TWD",
-      effectiveFrom: "2026-07-01T00:00:00.000Z",
+      effectiveFrom: "2026-06-01T00:00:00.000Z",
       effectiveUntil: null,
       settlementDirection: REFERRAL_STATEMENT_DIRECTION,
       channelKey: REFERRAL_STATEMENT_CHANNEL_KEY,
