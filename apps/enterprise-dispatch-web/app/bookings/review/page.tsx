@@ -51,6 +51,10 @@ export default async function ReviewBookingPage({
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
   const draft = parseEnterpriseBookingDraft((await searchParams) ?? {}, locale);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const bookingId = Array.isArray(resolvedSearchParams.bookingId)
+    ? resolvedSearchParams.bookingId[0]
+    : resolvedSearchParams.bookingId;
   const preview = getEnterpriseBookingPreview(draft, locale);
   const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
   const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(Boolean);
@@ -304,12 +308,12 @@ export default async function ReviewBookingPage({
           </ECard>
           <div style={{ display: "flex", gap: 12 }}>
             <Link
-              href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}`}
+              href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}${bookingId ? `&bookingId=${encodeURIComponent(bookingId)}` : ""}`}
               style={entBtnStyle(t, { variant: "default", block: true })}
             >
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
-            <BookingSubmitButton draft={draft} />
+            <BookingSubmitButton draft={draft} {...(bookingId ? { bookingId } : {})} />
           </div>
         </div>
       </div>

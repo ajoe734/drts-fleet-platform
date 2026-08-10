@@ -1,4 +1,8 @@
-import type { CreateTenantBookingCommand } from "@drts/contracts";
+import type {
+  BookingRecord,
+  CreateTenantBookingCommand,
+  UpdateTenantBookingCommand,
+} from "@drts/contracts";
 import {
   enterpriseBookingDraft,
   getEnterpriseBookingDraft,
@@ -65,6 +69,7 @@ const DISPLAY_BUDGET_TOTAL = 60_000;
 const DISPLAY_BUDGET_AVAILABLE = 31_000;
 const APPROVAL_THRESHOLD = 1_500;
 const DEFAULT_TIMEZONE_OFFSET = "+08:00";
+const DEFAULT_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -140,6 +145,26 @@ function getReservationStart(date: string, time: string, now = new Date()) {
   );
 
   return Number.isNaN(parsed.getTime()) ? now : parsed;
+}
+
+function getReservationWallClockFields(reservationWindowStart: string) {
+  const reservationStart = new Date(reservationWindowStart);
+
+  if (Number.isNaN(reservationStart.getTime())) {
+    return { date: "", time: "" };
+  }
+
+  // Booking commands interpret the form's date/time as +08:00 wall-clock
+  // values. Shift the UTC instant before ISO formatting so an Edit → Update
+  // cycle preserves the original instant rather than applying the offset twice.
+  const localWallClock = new Date(
+    reservationStart.getTime() + DEFAULT_TIMEZONE_OFFSET_MS,
+  ).toISOString();
+
+  return {
+    date: localWallClock.slice(0, 10),
+    time: localWallClock.slice(11, 16),
+  };
 }
 
 export function formatReservationWindowLabel(
@@ -352,6 +377,13 @@ export function buildEnterpriseBookingCommand(
       name: passengerName,
       phone: onsiteContactPhone,
     },
+    bookedBy: {
+      name: draft.bookedBy.trim(),
+      // The enterprise UI only collects the coordinator display name. The
+      // authenticated actor remains authoritative; this address is a stable
+      // command contact required by the tenant contract, not user-entered data.
+      email: "enterprise-dispatch-web@drts.local",
+    },
     onsiteContact: {
       name: passengerName,
       phone: onsiteContactPhone,
@@ -364,6 +396,41 @@ export function buildEnterpriseBookingCommand(
     ...(draft.terminal.trim() ? { terminal: draft.terminal.trim() } : {}),
     ...(!Number.isNaN(luggageCount) ? { luggageCount } : {}),
     ...(draft.notes.trim() ? { notes: draft.notes.trim() } : {}),
+  };
+}
+
+export function buildEnterpriseBookingUpdateCommand(
+  draft: EnterpriseBookingDraftForm,
+  now = new Date(),
+): UpdateTenantBookingCommand {
+  return buildEnterpriseBookingCommand(draft, now);
+}
+
+export function createEnterpriseBookingDraftFromRecord(
+  record: BookingRecord,
+): EnterpriseBookingDraftForm {
+  const { date, time } = getReservationWallClockFields(
+    record.reservationWindowStart,
+  );
+
+  return {
+    passengerMode:
+      record.bookedBy?.name === record.passenger.name ? "self" : "other",
+    passenger: record.passenger.name,
+    bookedBy: record.bookedBy?.name ?? record.passenger.name,
+    pickup: record.pickup.address,
+    dropoff: record.dropoff.address,
+    reservationDate: date,
+    reservationTime: time,
+    onsiteContactPhone: record.onsiteContact?.phone ?? record.passenger.phone,
+    costCenterCode: record.costCenter ?? "",
+    costCenterLabel: record.costCenter ?? "",
+    vehicle: normalizeVehicle(record.vehiclePreference ?? undefined, "business"),
+    notes: record.notes ?? "",
+    airportDirection: record.direction === "dropoff" ? "dropoff" : "pickup",
+    terminal: record.terminal ?? "",
+    flight: record.flightNo ?? "",
+    luggageCount: record.luggageCount?.toString() ?? "",
   };
 }
 

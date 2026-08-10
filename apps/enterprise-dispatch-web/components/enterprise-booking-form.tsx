@@ -232,11 +232,13 @@ export function EnterpriseBookingForm({
   passengers,
   addresses,
   costCenters,
+  bookingId,
 }: {
   initialDraft: EnterpriseBookingDraftForm;
   passengers: string[];
   addresses: string[];
   costCenters: string[];
+  bookingId?: string;
 }) {
   const { locale, t: tr } = useTranslation();
   const [draft, setDraft] = useState(initialDraft);
@@ -244,9 +246,11 @@ export function EnterpriseBookingForm({
     "pickup",
   );
   const preview = getEnterpriseBookingPreview(draft, locale);
-  const reviewHref = `/bookings/review?${serializeEnterpriseBookingDraft(
-    draft,
-  ).toString()}`;
+  const reviewParams = serializeEnterpriseBookingDraft(draft);
+  if (bookingId) {
+    reviewParams.set("bookingId", bookingId);
+  }
+  const reviewHref = `/bookings/review?${reviewParams.toString()}`;
   const canContinue = isEnterpriseDraftComplete(draft);
 
   const costCenterOptions = costCenters.map((label) => ({
