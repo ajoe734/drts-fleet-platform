@@ -36,7 +36,6 @@ import {
   hasDriverDevOverride,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
-  rebindDriverDevice,
   registerDriverDevice,
 } from "@/lib/api-client";
 import {

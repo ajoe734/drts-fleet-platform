@@ -10,10 +10,7 @@ import {
   getProvisionedSession,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
-  rebindDriverDevice,
   recoverDriverSessionFromApiError,
-  registerDriverDevice,
-  revokeDriverDeviceBinding,
   sanitizeLogMessage,
 } from "../../lib/api-client";
 import { driverAuthStrings } from "../../lib/strings";
