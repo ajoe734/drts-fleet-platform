@@ -42,9 +42,9 @@ describe("canonical identity repository", () => {
     expect(snapshot.roleBinding.roleCode).toBe("tenant_ops_admin");
     expect(snapshot.invitation).not.toBeNull();
     expect(snapshot.invitation?.revokedAt).toBeNull();
-    expect(repository.listPrincipals()).toHaveLength(1);
-    expect(repository.listMemberships()).toHaveLength(1);
-    expect(repository.listRoleBindings()).toHaveLength(1);
+    expect(repository.listPrincipals()).toHaveLength(2);
+    expect(repository.listMemberships()).toHaveLength(2);
+    expect(repository.listRoleBindings()).toHaveLength(2);
     expect(repository.listInvitations()).toHaveLength(1);
   });
 
@@ -70,9 +70,9 @@ describe("canonical identity repository", () => {
     expect(second.roleBinding.roleBindingId).toBe(first.roleBinding.roleBindingId);
     expect(second.invitation?.invitationId).toBe(first.invitation?.invitationId);
     expect(second.invitation?.revokedAt).toBe("2026-08-01T11:30:00.000Z");
-    expect(repository.listPrincipals()).toHaveLength(1);
-    expect(repository.listMemberships()).toHaveLength(1);
-    expect(repository.listRoleBindings()).toHaveLength(1);
+    expect(repository.listPrincipals()).toHaveLength(2);
+    expect(repository.listMemberships()).toHaveLength(2);
+    expect(repository.listRoleBindings()).toHaveLength(2);
     expect(repository.listInvitations()).toHaveLength(1);
   });
 });

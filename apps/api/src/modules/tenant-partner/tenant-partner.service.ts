@@ -6591,10 +6591,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ) {
         const getRoleRank = (role: string) => {
           const normalized = role.trim().toLowerCase();
-          if (normalized === "admin" || normalized === "tenant_admin") return 4;
-          if (normalized === "approver" || normalized === "tenant_approver") return 3;
-          if (normalized === "requester" || normalized === "tenant_requester") return 2;
-          if (normalized === "viewer" || normalized === "tenant_viewer") return 1;
+          if (
+            normalized === "admin" ||
+            normalized === "tenant_admin" ||
+            normalized === "tc_admin"
+          ) {
+            return 4;
+          }
+          if (
+            normalized === "approver" ||
+            normalized === "tenant_approver" ||
+            normalized === "tenant_ops_admin" ||
+            normalized === "ops_admin" ||
+            normalized === "operator" ||
+            normalized === "tc_operator" ||
+            normalized === "tenant_finance_admin" ||
+            normalized === "finance_admin" ||
+            normalized === "finance" ||
+            normalized === "tc_finance"
+          ) {
+            return 3;
+          }
+          if (normalized === "requester" || normalized === "tenant_requester") {
+            return 2;
+          }
+          if (
+            normalized === "viewer" ||
+            normalized === "tenant_viewer" ||
+            normalized === "tc_viewer"
+          ) {
+            return 1;
+          }
           return 0;
         };
 

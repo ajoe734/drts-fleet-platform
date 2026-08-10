@@ -237,7 +237,7 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
           tenantId,
           viewerUser.userId,
           { roleCode: "tenant_admin", status: "active" },
-          "req-self-elevate",
+          "req-self-elevate-admin",
           {
             actorType: "tenant_admin",
             actorId: viewerUser.userId,
@@ -245,6 +245,95 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
             authMode: "jwt_bearer",
             roleFamilies: ["tenant"],
             roles: ["tenant_viewer"],
+            scopes: [],
+            tenantId,
+            supportedExecutionModes: ["supervisor_managed_execution"],
+          },
+        ),
+      403,
+      "SELF_ELEVATION_FORBIDDEN",
+    );
+
+    // Attempting self-elevation from tenant_viewer to tenant_ops_admin should also be forbidden
+    await expectApiError(
+      () =>
+        tenantPartnerService.updateTenantUserRole(
+          tenantId,
+          viewerUser.userId,
+          { roleCode: "tenant_ops_admin", status: "active" },
+          "req-self-elevate-ops",
+          {
+            actorType: "tenant_admin",
+            actorId: viewerUser.userId,
+            realm: "tenant",
+            authMode: "jwt_bearer",
+            roleFamilies: ["tenant"],
+            roles: ["tenant_viewer"],
+            scopes: [],
+            tenantId,
+            supportedExecutionModes: ["supervisor_managed_execution"],
+          },
+        ),
+      403,
+      "SELF_ELEVATION_FORBIDDEN",
+    );
+
+    // Attempting self-elevation from tenant_viewer to tenant_finance_admin should also be forbidden
+    await expectApiError(
+      () =>
+        tenantPartnerService.updateTenantUserRole(
+          tenantId,
+          viewerUser.userId,
+          { roleCode: "tenant_finance_admin", status: "active" },
+          "req-self-elevate-finance",
+          {
+            actorType: "tenant_admin",
+            actorId: viewerUser.userId,
+            realm: "tenant",
+            authMode: "jwt_bearer",
+            roleFamilies: ["tenant"],
+            roles: ["tenant_viewer"],
+            scopes: [],
+            tenantId,
+            supportedExecutionModes: ["supervisor_managed_execution"],
+          },
+        ),
+      403,
+      "SELF_ELEVATION_FORBIDDEN",
+    );
+
+    // Setup an ops admin user
+    const opsUser = await tenantPartnerService.createTenantUser(
+      tenantId,
+      {
+        email: "ops@acme.test",
+        displayName: "Ops User",
+        roleCode: "tenant_ops_admin",
+      },
+      "req-user-ops",
+    );
+    await tenantPartnerService.updateTenantUserRole(
+      tenantId,
+      opsUser.userId,
+      { roleCode: "tenant_ops_admin", status: "active" },
+      "req-ops-active",
+    );
+
+    // Attempting self-elevation from tenant_ops_admin to tenant_admin should be forbidden
+    await expectApiError(
+      () =>
+        tenantPartnerService.updateTenantUserRole(
+          tenantId,
+          opsUser.userId,
+          { roleCode: "tenant_admin", status: "active" },
+          "req-ops-self-elevate-admin",
+          {
+            actorType: "tenant_admin",
+            actorId: opsUser.userId,
+            realm: "tenant",
+            authMode: "jwt_bearer",
+            roleFamilies: ["tenant"],
+            roles: ["tenant_ops_admin"],
             scopes: [],
             tenantId,
             supportedExecutionModes: ["supervisor_managed_execution"],
