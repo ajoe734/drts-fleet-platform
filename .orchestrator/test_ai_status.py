@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import io
 import sys
@@ -381,6 +382,50 @@ class GitMergeReconciliationTest(unittest.TestCase):
         )
 
 
+
+
+class CommandArchiveCompletedTests(unittest.TestCase):
+    def test_archives_done_task_and_preserves_body(self) -> None:
+        state = {
+            "tasks": [
+                {"id": "OLD-1", "status": "done", "owner": "Codex", "summary": "historical"},
+                {"id": "DONE-2", "status": "done", "depends_on": ["OLD-1"]},
+            ],
+            "handoffs": [],
+            "blockers": [],
+        }
+        archived_lines: list[str] = []
+        with (
+            mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True),
+            mock.patch.object(
+                ai_status,
+                "_append_jsonl_line",
+                side_effect=lambda _path, line: archived_lines.append(line),
+            ),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            ai_status.command_archive_completed(state, ["OLD-1", "assembled into final release"])
+
+        self.assertNotIn("OLD-1", [task["id"] for task in state["tasks"]])
+        self.assertIn("OLD-1", state["archived_task_ids"])
+        archived = json.loads(archived_lines[0])
+        self.assertEqual(archived["summary"], "historical")
+        self.assertEqual(archived["_archive_reason"], "assembled into final release")
+
+    def test_refuses_non_done_task(self) -> None:
+        state = {"tasks": [{"id": "LIVE-1", "status": "review"}]}
+        with self.assertRaisesRegex(SystemExit, "Only done tasks"):
+            ai_status.command_archive_completed(state, ["LIVE-1"])
+
+    def test_refuses_task_with_active_dependent(self) -> None:
+        state = {
+            "tasks": [
+                {"id": "OLD-1", "status": "done"},
+                {"id": "LIVE-1", "status": "todo", "depends_on": ["OLD-1"]},
+            ]
+        }
+        with self.assertRaisesRegex(SystemExit, "active dependents: LIVE-1"):
+            ai_status.command_archive_completed(state, ["OLD-1"])
 
 
 class CommandShowTests(unittest.TestCase):
