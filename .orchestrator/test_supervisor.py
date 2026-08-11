@@ -4659,13 +4659,10 @@ class ChairmanFlowTests(unittest.TestCase):
     def test_validate_chair_review_context_requires_pending_approval_resolution(self) -> None:
         payload = {
             "version": 1,
-            "decision": "approve_sidecars",
-            "sidecar_approved": False,
+                        "decision": "operational_review",
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "approval remains unsafe",
             "blocked_by": [],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -4866,12 +4863,9 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "blocked task needs repair",
             "blocked_by": [],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -4918,12 +4912,9 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "blocked parent should resume after existing unblock child",
             "blocked_by": [],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -4985,14 +4976,11 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "reassign the failing owner first",
             "blocked_by": [
                 "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
             ],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -5062,14 +5050,11 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "reassign other work but resume the repaired blocked parent",
             "blocked_by": [
                 "ADM-UI-RD-006 remains blocked only because the parent has not been resumed yet."
             ],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -5718,7 +5703,7 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertFalse(changed)
         queue_delivery_event.assert_not_called()
 
-    def test_refresh_chair_review_state_applies_sidecar_window_and_approval_actions(self) -> None:
+    def test_refresh_chair_review_state_applies_approval_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             review_dir = root / "chair-reviews"
@@ -5730,13 +5715,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 1,
-                        "decision": "approve_sidecars",
-                        "sidecar_approved": True,
+                        "decision": "operational_review",
                         "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
                         "reason": "safe and idle",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [
                             {
                                 "approval_id": "apr-1",
@@ -5826,8 +5808,6 @@ class ChairmanFlowTests(unittest.TestCase):
             )
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reviewer"], "Claude")
-            self.assertEqual(state["chair_review"]["max_sidecars"], 2)
-            self.assertIsNotNone(state["chair_review"]["sidecar_approved_until"])
             self.assertNotIn("gemini2", state.get("provider_pauses", {}))
 
     def test_refresh_chair_review_state_classifies_lost_queue_event(self) -> None:
@@ -5889,13 +5869,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 1,
-                        "decision": "approve_sidecars",
-                        "sidecar_approved": True,
+                        "decision": "operational_review",
                         "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
                         "reason": "break owner failure loop",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [
                             {
@@ -6080,12 +6057,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
                         "approval_ttl_minutes": None,
-                        "max_sidecars": None,
                         "reason": "Claude auth lane is degraded; move backlog owner work.",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [
                             {
@@ -6192,12 +6166,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
                         "approval_ttl_minutes": None,
-                        "max_sidecars": None,
                         "reason": "Gemini2 lane is degraded; pause it and move backlog work to a healthy owner.",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [
                             {
@@ -6308,13 +6279,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 1,
-                        "decision": "approve_sidecars",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+                        "decision": "operational_review",
+            "approval_ttl_minutes": 45,
                         "reason": "finalize owner should be woken now",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [
@@ -6426,12 +6394,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "blocked parent needs an unblock task",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [
@@ -6529,14 +6494,11 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "No reassignment improves machine truth.",
                         "blocked_by": [
                             "Shared workspace-baseline blocker keeps the UI-FE wave from typecheck/build completion."
                         ],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [],
@@ -6612,14 +6574,11 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "Move failing owner off Codex and unblock the blocked parent.",
                         "blocked_by": [
                             "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
                         ],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [],
@@ -6759,12 +6718,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "blocked_task_triage",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "existing unblock child is already done",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [

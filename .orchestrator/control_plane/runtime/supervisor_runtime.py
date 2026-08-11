@@ -3614,7 +3614,6 @@ def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
         int(worker_reassignment_settings(config).get("after_attempts", 2)),
     )
     settings.setdefault("default_approval_ttl_minutes", 45)
-    settings.setdefault("default_max_sidecars", 2)
     # Max depth of the auto-generated unblock/repair lineage. 1 = a first-class task
     # may get one unblock child, but that child can never spawn its own repair
     # (no -repair-repair). Raise only if you deliberately want deeper auto-chains.
@@ -7159,13 +7158,10 @@ def build_chair_review_message(
         "JSON 必須完整符合以下 schema：\n"
         "{\n"
         '  "version": 1,\n'
-        '  "decision": "approve_sidecars",\n'
-        '  "sidecar_approved": true,\n'
+        '  "decision": "operational_review",\n'
         '  "approval_ttl_minutes": 45,\n'
-        '  "max_sidecars": 2,\n'
         '  "reason": "why",\n'
         '  "blocked_by": [],\n'
-        '  "blocked_sidecar_parents": [],\n'
         '  "approval_actions": [],\n'
         '  "reassignment_actions": [\n'
         '    {"task_id": "TASK-ID", "role": "owner", "from": "OldAgent", "to": "NewAgent", "reason": "why"}\n'
@@ -7181,7 +7177,7 @@ def build_chair_review_message(
         '  "recommended_focus": []\n'
         "}\n\n"
         "硬規則：\n"
-        "- `approval_ttl_minutes` 與 `max_sidecars` 必須是整數；即使 `sidecar_approved=false` 也不要填 `null`。\n"
+        "- `approval_ttl_minutes` 必須是整數，不要填 `null`。\n"
         "- reassignment_actions 必須使用 `role` 與 `reason`；不要用 `field` / `rationale`。\n"
         "- reviewer 改派只允許 `todo` / `in_progress` / `review` 狀態，用來維持 owner/reviewer 分離或處理 review 交接。\n"
         "- owner 改派只允許 `backlog` / `todo` / `in_progress` / `review_approved`；若是 `backlog` / `todo` / `in_progress`，代表重開成 `todo` 重新派工。\n"
@@ -8682,14 +8678,6 @@ def refresh_chair_review_state(
                 preferred_owner=str(active.get("agent") or "").strip() or None,
             ) or changed
         ttl_minutes = int(payload.get("approval_ttl_minutes") or chair_review_settings(config).get("default_approval_ttl_minutes", 45))
-        if bool(payload.get("sidecar_approved")):
-            chair_state["sidecar_approved_until"] = (
-                datetime.now(timezone.utc) + timedelta(minutes=max(1, ttl_minutes))
-            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        else:
-            chair_state["sidecar_approved_until"] = None
-        chair_state["max_sidecars"] = int(payload.get("max_sidecars") or chair_review_settings(config).get("default_max_sidecars", 2))
-        chair_state["blocked_sidecar_parents"] = list(payload.get("blocked_sidecar_parents", []) or [])
         chair_state["last_review_at"] = now
         chair_state["last_reviewer"] = active.get("agent")
         chair_state["last_reason"] = active.get("reason")

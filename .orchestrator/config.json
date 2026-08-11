@@ -7,7 +7,6 @@
     "state_file": ".orchestrator/state.json",
     "event_queue": ".orchestrator/event-queue.jsonl",
     "approval_queue": ".orchestrator/approval-queue.json",
-    "sidecar_catalog": ".orchestrator/sidecar_catalog.json",
     "github_bus_state": ".orchestrator/github-bus-state.json",
     "github_webhook_events": ".orchestrator/github-webhook-events.jsonl",
     "github_relay_state": ".orchestrator/github-relay-state.json",
@@ -115,8 +114,7 @@
     "enabled": true,
     "cooldown_seconds": 900,
     "failure_streak_threshold": 2,
-    "default_approval_ttl_minutes": 45,
-    "default_max_sidecars": 2
+    "default_approval_ttl_minutes": 45
   },
   "approvals": {
     "stale_pending_seconds": 1800

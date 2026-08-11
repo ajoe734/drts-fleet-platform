@@ -31,13 +31,6 @@ def default_state() -> dict[str, Any]:
         "maintenance": {
             "worker_workspace_cleanup": {},
         },
-        "underutilization": {
-            "below_threshold_since": None,
-            "last_sidecar_wave_at": None,
-            "last_sidecar_wave_reason": None,
-            "last_ratio": None,
-            "last_main_task_wave_at": None,
-        },
         "provider_pauses": {},
         "provider_pause_schema": 2,
         "failure_streaks": {},
@@ -64,9 +57,6 @@ def default_state() -> dict[str, Any]:
             "last_reviewer": None,
             "last_reason": None,
             "last_decision": None,
-            "sidecar_approved_until": None,
-            "max_sidecars": None,
-            "blocked_sidecar_parents": [],
         },
         "supervisor": {
             "pid": None,
@@ -119,12 +109,6 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["approvals"].setdefault("last_reconciled_at", None)
     state.setdefault("maintenance", {})
     state["maintenance"].setdefault("worker_workspace_cleanup", {})
-    state.setdefault("underutilization", {})
-    state["underutilization"].setdefault("below_threshold_since", None)
-    state["underutilization"].setdefault("last_sidecar_wave_at", None)
-    state["underutilization"].setdefault("last_sidecar_wave_reason", None)
-    state["underutilization"].setdefault("last_ratio", None)
-    state["underutilization"].setdefault("last_main_task_wave_at", None)
     state.setdefault("provider_pauses", {})
     if "provider_pause_schema" not in raw:
         state["provider_pause_schema"] = 1 if (raw.get("quota_paused_agents") or raw.get("provider_pauses")) else 2
@@ -153,9 +137,6 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["chair_review"].setdefault("last_reviewer", None)
     state["chair_review"].setdefault("last_reason", None)
     state["chair_review"].setdefault("last_decision", None)
-    state["chair_review"].setdefault("sidecar_approved_until", None)
-    state["chair_review"].setdefault("max_sidecars", None)
-    state["chair_review"].setdefault("blocked_sidecar_parents", [])
     state.setdefault("supervisor", {})
     state["supervisor"].setdefault("pid", None)
     state["supervisor"].setdefault("started_at", None)
@@ -402,7 +383,6 @@ def build_state_digest(state: dict[str, Any]) -> dict[str, Any]:
         "dispatch_pause_history": state.get("dispatch_pause_history", {}),
         "chair_reassignment_guards": state.get("chair_reassignment_guards", {}),
         "chair_review": state.get("chair_review", {}),
-        "underutilization": state.get("underutilization", {}),
         "resource_guard": state.get("resource_guard", {}),
         "supervisor": state.get("supervisor", {}),
         "approvals": state.get("approvals", {}),

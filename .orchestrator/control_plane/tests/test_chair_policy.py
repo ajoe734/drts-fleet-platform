@@ -17,12 +17,9 @@ def valid_payload() -> dict:
         {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": None,
-            "max_sidecars": None,
             "reason": "routine",
             "blocked_by": [],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -63,10 +60,9 @@ class ChairPolicyTests(unittest.TestCase):
     def test_defaults_are_policy_input_not_global_config_reads(self) -> None:
         normalized = normalize_review_defaults(
             valid_payload(),
-            {"default_approval_ttl_minutes": 30, "default_max_sidecars": 1},
+            {"default_approval_ttl_minutes": 30},
         )
         self.assertEqual(normalized["approval_ttl_minutes"], 30)
-        self.assertEqual(normalized["max_sidecars"], 1)
 
     def test_rejects_unsafe_provider_action_shape(self) -> None:
         payload = valid_payload()

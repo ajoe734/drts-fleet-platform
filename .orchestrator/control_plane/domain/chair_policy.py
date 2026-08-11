@@ -7,12 +7,9 @@ CHAIR_REVIEW_OUTPUT_KEYS = frozenset(
     {
         "version",
         "decision",
-        "sidecar_approved",
         "approval_ttl_minutes",
-        "max_sidecars",
         "reason",
         "blocked_by",
-        "blocked_sidecar_parents",
         "approval_actions",
         "reassignment_actions",
         "task_actions",
@@ -64,8 +61,6 @@ def normalize_review_defaults(
         normalized["approval_ttl_minutes"] = int(
             settings.get("default_approval_ttl_minutes", 45)
         )
-    if normalized.get("max_sidecars") is None:
-        normalized["max_sidecars"] = int(settings.get("default_max_sidecars", 2))
     return normalized
 
 
@@ -79,24 +74,13 @@ def validate_review_payload(payload: Any) -> str | None:
         return "version must be 1"
     if not isinstance(payload.get("decision"), str):
         return "decision must be a string"
-    if not isinstance(payload.get("sidecar_approved"), bool):
-        return "sidecar_approved must be a boolean"
     approval_ttl = payload.get("approval_ttl_minutes")
-    max_sidecars = payload.get("max_sidecars")
-    if payload.get("sidecar_approved") and not isinstance(approval_ttl, int):
-        return "approval_ttl_minutes must be an integer when sidecar_approved is true"
     if approval_ttl is not None and not isinstance(approval_ttl, int):
         return "approval_ttl_minutes must be an integer or null"
-    if payload.get("sidecar_approved") and not isinstance(max_sidecars, int):
-        return "max_sidecars must be an integer when sidecar_approved is true"
-    if max_sidecars is not None and not isinstance(max_sidecars, int):
-        return "max_sidecars must be an integer or null"
     if not isinstance(payload.get("reason"), str):
         return "reason must be a string"
     if not validate_string_list(payload.get("blocked_by")):
         return "blocked_by must be a string list"
-    if not validate_string_list(payload.get("blocked_sidecar_parents")):
-        return "blocked_sidecar_parents must be a string list"
     for key in (
         "approval_actions",
         "reassignment_actions",
