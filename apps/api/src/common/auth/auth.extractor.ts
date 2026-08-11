@@ -10,6 +10,12 @@ import {
   AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE,
   AUTH_SCOPE_PRESETS,
 } from "./auth.constants";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
 
 interface ExtractIdentityOptions {
   allowAnonymous: boolean;
@@ -185,5 +191,21 @@ export function extractBootstrapRequestIdentity(
     roles,
     scopes,
     requestId: normalizeHeaderValue(headers["x-request-id"]) || null,
+    authTime:
+      normalizeHeaderValue(headers["x-auth-time"]) ||
+      (isStrictAuthEnvironment() ? null : new Date().toISOString()),
+    amr:
+      splitDelimitedList(headers["x-amr"]).length > 0
+        ? splitDelimitedList(headers["x-amr"])
+        : isStrictAuthEnvironment()
+          ? []
+          : ["tenant_bootstrap_fixture"],
+    sessionId:
+      normalizeHeaderValue(headers["x-session-id"]) ||
+      (isStrictAuthEnvironment()
+        ? null
+        : actorTypeHeader
+          ? `bootstrap:${normalizeHeaderValue(headers["x-actor-id"]) || "anon"}`
+          : null),
   };
 }

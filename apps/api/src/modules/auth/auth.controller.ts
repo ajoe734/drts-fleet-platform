@@ -72,6 +72,32 @@ const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
 const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV = "DRTS_TENANT_BOOTSTRAP_MODE" as const;
 const TENANT_OIDC_SESSION_EXPIRES_IN: JwtExpiresIn = "8h";
 
+function resolveBootstrapTokenAssurance(identity: BootstrapRequestIdentity): {
+  amr?: string[];
+  acr?: string;
+} {
+  switch (identity.actorType) {
+    case "platform_admin":
+    case "ops_user":
+      return {
+        amr: ["verified_iap_workforce"],
+        acr: "aal2",
+      };
+    case "tenant_admin":
+      return {
+        amr: ["tenant_bootstrap_fixture"],
+        acr: "aal1",
+      };
+    case "partner_api_key":
+      return {
+        amr: ["partner_api_key"],
+        acr: "aal1",
+      };
+    default:
+      return {};
+  }
+}
+
 function isStrictAuthEnvironment(): boolean {
   const environment = detectAuthEnvironment(process.env);
   return environment === "production" || environment === "staging";
@@ -401,9 +427,9 @@ export class AuthController {
         membershipId: resolved.membership.membershipId,
         subject: resolved.principal.subject,
         ensurePrincipal: false,
-        authTime: new Date().toISOString(),
-        amr: ["verified_iap_workforce"],
-        acr: "aal2",
+        authTime: resolved.authTime ?? null,
+        amr: resolved.authMethods,
+        acr: resolved.assurance,
         tokenVersion: resolved.tokenVersion,
       });
       return { token: issued.token, expiresIn };
@@ -431,6 +457,7 @@ export class AuthController {
     const expiresIn: JwtExpiresIn =
       identity.actorType === "system" ? "15m" : "8h";
     const issuedAt = new Date().toISOString();
+    const assurance = resolveBootstrapTokenAssurance(identity);
     const issued = await this.issueJwtSession(identity, {
       expiresIn,
       principalId: identity.principalId ?? identity.actorId,
@@ -438,6 +465,8 @@ export class AuthController {
       subject: identity.subject ?? identity.actorId,
       ensurePrincipal: true,
       authTime: issuedAt,
+      ...(assurance.amr ? { amr: assurance.amr } : {}),
+      ...(assurance.acr ? { acr: assurance.acr } : {}),
       tokenVersion: Date.parse(issuedAt),
     });
     return { token: issued.token, expiresIn };

@@ -23,6 +23,7 @@ import type {
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { JwtAuthService } from "./jwt-auth.service";
+import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
 
@@ -160,6 +161,8 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional() private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly stepUpProofService?: StepUpProofService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -300,6 +303,20 @@ export class BootstrapAuthGuard implements CanActivate {
       subject: resolved.principal.subject,
       realm: resolved.membership.realm as "platform" | "ops",
       tenantId: null,
+      principalId: resolved.principal.principalId,
+      membershipId: resolved.membership.membershipId,
+      // The IAP path has no durable session record yet (that lands with the
+      // identity session store), so the membership is the session binding a
+      // step-up proof can be tied to.
+      sessionId: `iap:${resolved.membership.membershipId}`,
+      tokenVersion: resolved.tokenVersion,
+      // Server-owned authentication evidence from the verified IAP assertion.
+      // The step-up policy reads these; a caller cannot supply them. Without
+      // them `verified_iap_workforce` could never satisfy a rule, so the
+      // enforcement below would be unclearable rather than merely strict.
+      authTime: resolved.authTime,
+      amr: resolved.authMethods,
+      acr: resolved.assurance,
       roleFamilies: [resolved.membership.realm as "platform" | "ops"],
       roles: resolved.effectiveRoles,
       scopes: resolved.effectiveScopes,
@@ -311,6 +328,10 @@ export class BootstrapAuthGuard implements CanActivate {
       try {
         this.assertRealmAllowed(identity, policy.allowedRealms, request);
         this.assertScopesAllowed(identity, policy.requiredScopes, request);
+        // Privileged actions are gated on the IAP path too. Without this the
+        // verified-workforce route would be the one way into a privileged
+        // action with no step-up proof.
+        this.stepUpProofService?.assertRequestSatisfied(identity, request);
       } catch (error) {
         this.recordAuthorizationDenialAudit(identity, request, error);
         throw error;
@@ -387,6 +408,10 @@ export class BootstrapAuthGuard implements CanActivate {
                   policy.requiredScopes,
                   request,
                 );
+                this.stepUpProofService?.assertRequestSatisfied(
+                  identity,
+                  request,
+                );
               } catch (error) {
                 this.recordAuthorizationDenialAudit(identity, request, error);
                 throw error;
@@ -455,6 +480,7 @@ export class BootstrapAuthGuard implements CanActivate {
     try {
       this.assertRealmAllowed(identity, policy.allowedRealms, request);
       this.assertScopesAllowed(identity, policy.requiredScopes, request);
+      this.stepUpProofService?.assertRequestSatisfied(identity, request);
     } catch (error) {
       this.recordAuthorizationDenialAudit(identity, request, error);
       throw error;

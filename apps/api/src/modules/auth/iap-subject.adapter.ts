@@ -77,6 +77,11 @@ export interface ResolvedIapWorkforceSubject {
   effectiveScopes: string[];
   tokenVersion: number;
   driftDetected: boolean;
+  /** Server-owned authentication evidence for the MFA / step-up policy. */
+  authMethods: string[];
+  assurance: "aal1" | "aal2" | "aal3";
+  /** Authentication time from the verified assertion, or null when absent. */
+  authTime: string | null;
   driftDetails?: {
     originalRoles: string[];
     effectiveRoles: string[];
@@ -693,6 +698,10 @@ export class IAPSubjectAdapter {
       finalActorContext.actorType,
     );
 
+    const authMethods = this.resolveAssertionAmr(payload);
+    const assurance = this.resolveAssertionAssurance(payload, authMethods);
+    const authTime = this.resolveAssertionAuthTime(payload);
+
     return {
       principal,
       membership: activeMembership,
@@ -700,6 +709,9 @@ export class IAPSubjectAdapter {
       effectiveScopes: Array.from(effectiveScopesSet),
       tokenVersion,
       driftDetected: hasDrift,
+      authMethods,
+      assurance,
+      authTime,
       ...(driftDetails ? { driftDetails } : {}),
     };
   }
@@ -726,6 +738,82 @@ export class IAPSubjectAdapter {
       }
     }
     return null;
+  }
+
+  /**
+   * Authentication time for the step-up freshness window, taken only from the
+   * verified assertion. When the assertion carries no `auth_time`, the result
+   * is null, and the step-up policy fails closed rather than treating `iat` or
+   * request time as login time.
+   */
+  private resolveAssertionAuthTime(payload: IapJwtPayload): string | null {
+    const rawAuthTime = payload["auth_time"];
+    const seconds =
+      typeof rawAuthTime === "number" && Number.isFinite(rawAuthTime)
+        ? rawAuthTime
+        : null;
+
+    return seconds === null ? null : new Date(seconds * 1000).toISOString();
+  }
+
+  /**
+   * Extract authenticating method references (amr) strictly from the verified assertion payload.
+   * Projects trusted MFA/amr methods or `verified_iap_workforce` when present in payload or when ACR indicates silver/AAL2.
+   * Otherwise returns empty array to prevent fabricating false MFA claims.
+   */
+  private resolveAssertionAmr(payload: IapJwtPayload): string[] {
+    const rawAmr = payload["amr"] ?? payload["gcp_ia_gsuite_amr"];
+    if (Array.isArray(rawAmr)) {
+      const filtered = rawAmr.filter(
+        (item): item is string => typeof item === "string" && item.trim().length > 0,
+      );
+      if (filtered.length > 0) {
+        return filtered;
+      }
+    } else if (typeof rawAmr === "string" && rawAmr.trim().length > 0) {
+      return [rawAmr.trim()];
+    }
+
+    const rawAcr = typeof payload["acr"] === "string" ? payload["acr"].trim().toLowerCase() : null;
+    if (rawAcr === "aal2" || rawAcr === "aal3" || rawAcr === "urn:mace:incommon:iap:silver") {
+      return ["verified_iap_workforce"];
+    }
+
+    return [];
+  }
+
+  /**
+   * Extract assurance (acr) level strictly from the verified assertion payload and resolved amr.
+   */
+  private resolveAssertionAssurance(
+    payload: IapJwtPayload,
+    authMethods: string[],
+  ): "aal1" | "aal2" | "aal3" {
+    const rawAcr = typeof payload["acr"] === "string" ? payload["acr"].trim().toLowerCase() : null;
+    if (rawAcr === "aal3" || rawAcr === "3") {
+      return "aal3";
+    }
+    if (rawAcr === "aal2" || rawAcr === "2" || rawAcr === "urn:mace:incommon:iap:silver") {
+      return "aal2";
+    }
+    if (rawAcr === "aal1" || rawAcr === "1" || rawAcr === "urn:mace:incommon:iap:bronze") {
+      return "aal1";
+    }
+
+    const trustedMfaMethods = new Set([
+      "mfa",
+      "otp",
+      "totp",
+      "push",
+      "webauthn",
+      "fido2",
+      "verified_iap_workforce",
+    ]);
+    if (authMethods.some((method) => trustedMfaMethods.has(method.toLowerCase()))) {
+      return "aal2";
+    }
+
+    return "aal1";
   }
 
   private isInactiveStatus(status: CanonicalAccountStatus): boolean {
