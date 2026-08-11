@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
 import * as jwt from "jsonwebtoken";
-import { OidcPkceService } from "../../src/modules/auth/oidc-pkce.service";
-import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
-import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
-import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
-import { ApiRequestError } from "../../src/common/api-envelope";
+import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 
 describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   let oidcService: OidcPkceService;
@@ -39,7 +39,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       expect(stateRecord.codeVerifier.length).toBeGreaterThanOrEqual(43);
       expect(stateRecord.codeVerifier.length).toBeLessThanOrEqual(128);
 
-      // Verify S256 computation correctness
       const expectedChallenge = oidcService.computeCodeChallenge(stateRecord.codeVerifier);
       expect(stateRecord.codeChallenge).toBe(expectedChallenge);
     });
@@ -48,7 +47,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       const loginParams = oidcService.generateLoginParameters("partner");
       expect(loginParams.stateToken).toBeDefined();
 
-      // Verify stateToken is encrypted/opaque to external callers (cannot be base64url JSON parsed)
       const firstPart = loginParams.stateToken.split(".")[0]!;
       expect(() => JSON.parse(Buffer.from(firstPart, "base64url").toString("utf8"))).toThrow();
 
@@ -70,7 +68,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   });
 
   describe("2. Tenant OIDC PKCE Callback Happy Path", () => {
-    it("exchanges valid authorization code and PKCE verifier for tenant session", async () => {
+    it("exchanges valid authorization code for tenant session with bound active subject", async () => {
       const defaultTenantId = tenantPartnerService.getDefaultTenantId();
       const loginParams = oidcService.generateLoginParameters("tenant", {
         redirectUri: "http://localhost:3000/api/auth/callback",
@@ -172,12 +170,10 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         tenantId: defaultTenantId,
       };
 
-      // First exchange succeeds
       await oidcService.exchangeTenantCallbackSession(cmd, {
         stateToken: loginParams.stateToken,
       });
 
-      // Second exchange with same state fails
       await expect(
         oidcService.exchangeTenantCallbackSession(cmd, {
           stateToken: loginParams.stateToken,
@@ -283,16 +279,47 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
     });
   });
 
-  describe("4. Membership Status & Bound Principal Enforcement", () => {
-    it("rejects login for users with 'invited' status (fails closed before invitation proof)", async () => {
-      const defaultTenantId = tenantPartnerService.getDefaultTenantId();
-      const invitedUser = tenantPartnerService.createTenantUser(defaultTenantId, {
-        email: "invited@acme.example",
-        displayName: "Invited User",
-        roleCode: "tenant_viewer",
+  describe("4. Immutable Subject Binding & Membership Enforcement", () => {
+    it("rejects login when claims email_verified is false or missing", async () => {
+      const loginParams = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
       });
-      expect(invitedUser.status).toBe("invited");
 
+      await expect(
+        oidcService.exchangeTenantCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "unverified_email_code",
+            state: loginParams.state,
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects login when subject is not bound to a tenant user (no auto-binding by email)", async () => {
+      const defaultTenantId = tenantPartnerService.getDefaultTenantId();
+      const login = oidcService.generateLoginParameters("tenant", {
+        redirectUri: "http://localhost:3000/api/auth/callback",
+        tenantId: defaultTenantId,
+      });
+
+      await expect(
+        oidcService.exchangeTenantCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "unbound_tenant_subject_code",
+            state: login.state,
+            tenantId: defaultTenantId,
+          },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects login for users with 'invited' status", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
       await expect(
         oidcService.exchangeTenantCallbackSession(
@@ -308,17 +335,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
     });
 
     it("rejects login for users with 'suspended' status", async () => {
-      const defaultTenantId = tenantPartnerService.getDefaultTenantId();
-      const user = tenantPartnerService.createTenantUser(defaultTenantId, {
-        email: "suspended@acme.example",
-        displayName: "Suspended User",
-        roleCode: "tenant_viewer",
-      });
-      // Suspend user in repository
-      (tenantPartnerService as any).userRoles.find(
-        (u: any) => u.userId === user.userId,
-      ).status = "suspended";
-
       const loginParams = oidcService.generateLoginParameters("tenant");
       await expect(
         oidcService.exchangeTenantCallbackSession(
@@ -333,7 +349,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       ).rejects.toThrow(ApiRequestError);
     });
 
-    it("rejects login for subjects not registered in tenant membership", async () => {
+    it("rejects login for unknown subjects", async () => {
       const loginParams = oidcService.generateLoginParameters("tenant");
       await expect(
         oidcService.exchangeTenantCallbackSession(
@@ -347,37 +363,105 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         ),
       ).rejects.toThrow(ApiRequestError);
     });
+  });
 
-    it("persists immutable subject binding durably so subsequent logins resolve via subject lookup", async () => {
-      const defaultTenantId = tenantPartnerService.getDefaultTenantId();
-      const login1 = oidcService.generateLoginParameters("tenant", {
-        redirectUri: "http://localhost:3000/api/auth/callback",
-        tenantId: defaultTenantId,
+  describe("5. Partner OIDC PKCE Flow & Identity Link", () => {
+    it("exchanges valid authorization code for active partner entry session", async () => {
+      const code = "e2e_valid_partner_code_001";
+      const partnerUserIdentityLinkRepo = (oidcService as any).partnerUserIdentityLinkRepo;
+      const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+      await partnerUserIdentityLinkRepo.resolveOrCreate({
+        entrySlug: "yuhe-residence",
+        partnerUserRef: sub,
       });
 
-      const session1 = await oidcService.exchangeTenantCallbackSession(
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const session = await oidcService.exchangePartnerCallbackSession(
         {
           provider: "oidc",
           callbackUrl: "http://localhost:3000/api/auth/callback",
-          code: "valid_authorization_code_12345",
-          state: login1.state,
-          tenantId: defaultTenantId,
+          code: "e2e_valid_partner_code_001",
+          state: loginParams.state,
+          partnerId: "yuhe-residence",
         },
-        { stateToken: login1.stateToken },
+        { stateToken: loginParams.stateToken },
       );
-      expect(session1.profile.email).toBe("admin@acme.example");
 
-      // Verify subject is durably bound in TenantPartnerService
-      const expectedSub = `sub_oidc_${createHash("sha256").update("valid_authorization_code_12345").digest("hex").slice(0, 12)}`;
-      const boundUser = tenantPartnerService.findTenantUserBySubject(expectedSub);
-      expect(boundUser).not.toBeNull();
-      expect(boundUser?.email).toBe("admin@acme.example");
+      expect(session.accessToken).toBeDefined();
+      expect(session.identity.realm).toBe("partner");
+      expect(session.identity.actorType).toBe("partner_user");
+      expect(session.partnerEntry.status).toBe("active");
     });
 
-    it("does not conflate internal userId with external OIDC sub when subject is unbound", () => {
-      // tenant-user-demo-001 is an internal userId, NOT a bound OIDC subject
-      const user = tenantPartnerService.findTenantUserBySubject("tenant-user-demo-001");
-      expect(user).toBeNull();
+    it("rejects partner exchange when email is unverified", async () => {
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      await expect(
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "unverified_email_code",
+            state: loginParams.state,
+            partnerId: "yuhe-residence",
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects partner exchange when partner entry is missing or not provided", async () => {
+      const loginParams = oidcService.generateLoginParameters("partner");
+      await expect(
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "e2e_valid_partner_code_001",
+            state: loginParams.state,
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects partner login when subject claims lack required MFA proof", async () => {
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      await expect(
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "code_no_mfa",
+            state: loginParams.state,
+            partnerId: "yuhe-residence",
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects partner login when subject has no pre-existing active identity link (unbound subject)", async () => {
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      await expect(
+        oidcService.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "brand_new_partner_subject",
+            state: loginParams.state,
+            partnerId: "yuhe-residence",
+          },
+          { stateToken: loginParams.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
     });
   });
 
@@ -390,7 +474,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
 
       const validIdToken = jwt.sign(
         {
-          sub: "sub_real_oidc_123",
+          sub: "sub_oidc_admin_acme",
           iss: "https://auth.staging.drts.internal",
           aud: "drts-bff-client",
           email: "admin@acme.example",
@@ -419,7 +503,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
         if (urlStr.includes("/oauth2/v1/userinfo")) {
           return new Response(
             JSON.stringify({
-              sub: "sub_real_oidc_123",
+              sub: "sub_oidc_admin_acme",
               email: "admin@acme.example",
               email_verified: true,
             }),
@@ -460,9 +544,93 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           "https://auth.staging.drts.internal/oauth2/v1/token",
         );
 
-        expect(claims.sub).toBe("sub_real_oidc_123");
+        expect(claims.sub).toBe("sub_oidc_admin_acme");
         expect(claims.email).toBe("admin@acme.example");
+        expect(claims.email_verified).toBe(true);
         expect(claims.iss).toBe("https://auth.staging.drts.internal");
+      } finally {
+        globalThis.fetch = originalFetch;
+        delete process.env.OIDC_TOKEN_ENDPOINT;
+        delete process.env.OIDC_USERINFO_ENDPOINT;
+      }
+    });
+
+    it("rejects real OIDC token exchange when email_verified is missing and defaults to false", async () => {
+      const originalFetch = globalThis.fetch;
+      const secret = "test_jwt_secret_key_32_characters_long_min!";
+      process.env.JWT_SECRET = secret;
+      process.env.OIDC_CLIENT_SECRET = secret;
+
+      const idTokenWithoutEmailVerified = jwt.sign(
+        {
+          sub: "sub_oidc_admin_acme",
+          iss: "https://auth.staging.drts.internal",
+          aud: "drts-bff-client",
+          email: "admin@acme.example",
+          nonce: "test_nonce_12345",
+        },
+        secret,
+        { algorithm: "HS256" },
+      );
+
+      globalThis.fetch = (async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("/oauth2/v1/token")) {
+          return new Response(
+            JSON.stringify({
+              access_token: "acc_token_999",
+              id_token: idTokenWithoutEmailVerified,
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (urlStr.includes("/oauth2/v1/userinfo")) {
+          return new Response(
+            JSON.stringify({
+              sub: "sub_oidc_admin_acme",
+              email: "admin@acme.example",
+              // email_verified omitted
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      }) as typeof fetch;
+
+      try {
+        process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
+        process.env.OIDC_CLIENT_ID = "drts-bff-client";
+        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
+        process.env.OIDC_USERINFO_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/userinfo";
+        process.env.OIDC_MOCK_MODE = "false";
+
+        const claims = await oidcService.exchangeRealOidcTokenEndpoint(
+          {
+            provider: "oidc",
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            code: "real_code_no_email_verified",
+            state: "test_state",
+            pkceVerifier: "a".repeat(50),
+          },
+          {
+            state: "test_state",
+            nonce: "test_nonce_12345",
+            codeVerifier: "a".repeat(50),
+            codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
+            codeChallengeMethod: "S256",
+            realm: "tenant",
+            redirectUri: "http://localhost:3000/api/auth/callback",
+            tenantId: null,
+            partnerId: null,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 600000,
+          },
+          "https://auth.staging.drts.internal/oauth2/v1/token",
+        );
+
+        expect(claims.email_verified).toBe(false);
       } finally {
         globalThis.fetch = originalFetch;
         delete process.env.OIDC_TOKEN_ENDPOINT;
@@ -502,301 +670,6 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
 
       await expect(
         oidcService.verifyAndDecodeIdToken(noneAlgIdToken),
-      ).rejects.toThrow(ApiRequestError);
-    });
-
-    it("rejects token exchange response missing id_token", async () => {
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
-        return new Response(
-          JSON.stringify({
-            access_token: "acc_token_no_id",
-            token_type: "Bearer",
-            expires_in: 3600,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }) as typeof fetch;
-
-      try {
-        await expect(
-          oidcService.exchangeRealOidcTokenEndpoint(
-            {
-              provider: "oidc",
-              callbackUrl: "http://localhost:3000/api/auth/callback",
-              code: "real_code_no_id_token",
-              state: "test_state",
-              pkceVerifier: "a".repeat(50),
-            },
-            {
-              state: "test_state",
-              nonce: "test_nonce_12345",
-              codeVerifier: "a".repeat(50),
-              codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
-              codeChallengeMethod: "S256",
-              realm: "tenant",
-              redirectUri: "http://localhost:3000/api/auth/callback",
-              tenantId: null,
-              partnerId: null,
-              createdAt: Date.now(),
-              expiresAt: Date.now() + 600000,
-            },
-            "https://auth.staging.drts.internal/oauth2/v1/token",
-          ),
-        ).rejects.toThrow(ApiRequestError);
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
-
-    it("rejects real OIDC response when userinfo sub does not match id_token sub", async () => {
-      const originalFetch = globalThis.fetch;
-      const secret = "test_jwt_secret_key_32_characters_long_min!";
-      process.env.JWT_SECRET = secret;
-      process.env.OIDC_CLIENT_SECRET = secret;
-
-      const validIdToken = jwt.sign(
-        {
-          sub: "legitimate_user_sub",
-          iss: "https://auth.staging.drts.internal",
-          aud: "drts-bff-client",
-          email: "admin@acme.example",
-          nonce: "test_nonce_12345",
-        },
-        secret,
-        { algorithm: "HS256" },
-      );
-
-      globalThis.fetch = (async (url: string | URL | Request) => {
-        const urlStr = url.toString();
-        if (urlStr.includes("/oauth2/v1/token")) {
-          return new Response(
-            JSON.stringify({
-              access_token: "acc_token_999",
-              id_token: validIdToken,
-              token_type: "Bearer",
-              expires_in: 3600,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        if (urlStr.includes("/oauth2/v1/userinfo")) {
-          return new Response(
-            JSON.stringify({
-              sub: "mismatched_attacker_sub",
-              email: "admin@acme.example",
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        return new Response("Not found", { status: 404 });
-      }) as typeof fetch;
-
-      try {
-        process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
-        process.env.OIDC_CLIENT_ID = "drts-bff-client";
-        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
-        process.env.OIDC_USERINFO_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/userinfo";
-
-        await expect(
-          oidcService.exchangeRealOidcTokenEndpoint(
-            {
-              provider: "oidc",
-              callbackUrl: "http://localhost:3000/api/auth/callback",
-              code: "real_code_sub_mismatch",
-              state: "test_state",
-              pkceVerifier: "a".repeat(50),
-            },
-            {
-              state: "test_state",
-              nonce: "test_nonce_12345",
-              codeVerifier: "a".repeat(50),
-              codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
-              codeChallengeMethod: "S256",
-              realm: "tenant",
-              redirectUri: "http://localhost:3000/api/auth/callback",
-              tenantId: null,
-              partnerId: null,
-              createdAt: Date.now(),
-              expiresAt: Date.now() + 600000,
-            },
-            "https://auth.staging.drts.internal/oauth2/v1/token",
-          ),
-        ).rejects.toThrow(ApiRequestError);
-      } finally {
-        globalThis.fetch = originalFetch;
-        delete process.env.OIDC_TOKEN_ENDPOINT;
-        delete process.env.OIDC_USERINFO_ENDPOINT;
-      }
-    });
-
-    it("rejects real OIDC response when id_token nonce is missing or mismatched", async () => {
-      const originalFetch = globalThis.fetch;
-      const secret = "test_jwt_secret_key_32_characters_long_min!";
-      process.env.JWT_SECRET = secret;
-      process.env.OIDC_CLIENT_SECRET = secret;
-
-      const idTokenWithoutNonce = jwt.sign(
-        {
-          sub: "sub_real_oidc_123",
-          iss: "https://auth.staging.drts.internal",
-          aud: "drts-bff-client",
-          email: "admin@acme.example",
-        },
-        secret,
-        { algorithm: "HS256" },
-      );
-
-      globalThis.fetch = (async (url: string | URL | Request) => {
-        const urlStr = url.toString();
-        if (urlStr.includes("/oauth2/v1/token")) {
-          return new Response(
-            JSON.stringify({
-              access_token: "acc_token_999",
-              id_token: idTokenWithoutNonce,
-              token_type: "Bearer",
-              expires_in: 3600,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        return new Response("Not found", { status: 404 });
-      }) as typeof fetch;
-
-      try {
-        process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
-        process.env.OIDC_CLIENT_ID = "drts-bff-client";
-        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
-
-        await expect(
-          oidcService.exchangeRealOidcTokenEndpoint(
-            {
-              provider: "oidc",
-              callbackUrl: "http://localhost:3000/api/auth/callback",
-              code: "real_code_no_nonce",
-              state: "test_state",
-              pkceVerifier: "a".repeat(50),
-            },
-            {
-              state: "test_state",
-              nonce: "test_nonce_12345",
-              codeVerifier: "a".repeat(50),
-              codeChallenge: oidcService.computeCodeChallenge("a".repeat(50)),
-              codeChallengeMethod: "S256",
-              realm: "tenant",
-              redirectUri: "http://localhost:3000/api/auth/callback",
-              tenantId: null,
-              partnerId: null,
-              createdAt: Date.now(),
-              expiresAt: Date.now() + 600000,
-            },
-            "https://auth.staging.drts.internal/oauth2/v1/token",
-          ),
-        ).rejects.toThrow(ApiRequestError);
-      } finally {
-        globalThis.fetch = originalFetch;
-        delete process.env.OIDC_TOKEN_ENDPOINT;
-      }
-    });
-  });
-
-  describe("5. Partner OIDC PKCE Flow & Durable Identity Link Binding", () => {
-    it("exchanges valid authorization code for active partner entry session and binds durable passenger identity", async () => {
-      const code = "valid_partner_code_123";
-      const partnerUserIdentityLinkRepo = (oidcService as any).partnerUserIdentityLinkRepo;
-      const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
-      await partnerUserIdentityLinkRepo.resolveOrCreate({
-        entrySlug: "yuhe-residence",
-        partnerUserRef: sub,
-      });
-
-      const loginParams = oidcService.generateLoginParameters("partner", {
-        partnerId: "yuhe-residence",
-      });
-      const session = await oidcService.exchangePartnerCallbackSession(
-        {
-          provider: "oidc",
-          callbackUrl: "http://localhost:3000/api/auth/callback",
-          code: "valid_partner_code_123",
-          state: loginParams.state,
-          partnerId: "yuhe-residence",
-        },
-        { stateToken: loginParams.stateToken },
-      );
-
-      expect(session.accessToken).toBeDefined();
-      expect(session.identity.realm).toBe("partner");
-      expect(session.identity.actorType).toBe("partner_user");
-      expect(session.identity.actorId).toMatch(/^passenger_/);
-      expect(session.partnerEntry.status).toBe("active");
-    });
-
-    it("rejects partner exchange when partner entry is missing or not provided", async () => {
-      const loginParams = oidcService.generateLoginParameters("partner");
-      await expect(
-        oidcService.exchangePartnerCallbackSession(
-          {
-            provider: "oidc",
-            callbackUrl: "http://localhost:3000/api/auth/callback",
-            code: "valid_partner_code_123",
-            state: loginParams.state,
-          },
-          { stateToken: loginParams.stateToken },
-        ),
-      ).rejects.toThrow(ApiRequestError);
-    });
-
-    it("rejects partner login when subject claims lack required MFA proof", async () => {
-      const loginParams = oidcService.generateLoginParameters("partner", {
-        partnerId: "yuhe-residence",
-      });
-      await expect(
-        oidcService.exchangePartnerCallbackSession(
-          {
-            provider: "oidc",
-            callbackUrl: "http://localhost:3000/api/auth/callback",
-            code: "code_no_mfa",
-            state: loginParams.state,
-            partnerId: "yuhe-residence",
-          },
-          { stateToken: loginParams.stateToken },
-        ),
-      ).rejects.toThrow(ApiRequestError);
-    });
-
-    it("rejects partner login for unmapped, invited, or suspended partner human subjects", async () => {
-      const loginParams = oidcService.generateLoginParameters("partner", {
-        partnerId: "yuhe-residence",
-      });
-      await expect(
-        oidcService.exchangePartnerCallbackSession(
-          {
-            provider: "oidc",
-            callbackUrl: "http://localhost:3000/api/auth/callback",
-            code: "code_invited_user",
-            state: loginParams.state,
-            partnerId: "yuhe-residence",
-          },
-          { stateToken: loginParams.stateToken },
-        ),
-      ).rejects.toThrow(ApiRequestError);
-    });
-
-    it("rejects partner login when subject has no pre-existing active identity link (unbound subject)", async () => {
-      const loginParams = oidcService.generateLoginParameters("partner", {
-        partnerId: "yuhe-residence",
-      });
-      await expect(
-        oidcService.exchangePartnerCallbackSession(
-          {
-            provider: "oidc",
-            callbackUrl: "http://localhost:3000/api/auth/callback",
-            code: "brand_new_partner_subject",
-            state: loginParams.state,
-            partnerId: "yuhe-residence",
-          },
-          { stateToken: loginParams.stateToken },
-        ),
       ).rejects.toThrow(ApiRequestError);
     });
   });

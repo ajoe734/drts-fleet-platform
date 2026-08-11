@@ -24,6 +24,8 @@ export default defineConfig({
       "tests/integration/**/*.test.ts",
       "tests/security/**/*.test.ts",
       "tests/load/**/*.test.ts",
+      "tests/e2e/**/*.spec.ts",
+      "tests/e2e/**/*.test.ts",
     ],
   },
 });

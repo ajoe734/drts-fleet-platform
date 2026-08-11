@@ -279,12 +279,39 @@ export class OidcPkceService {
   ): Promise<TenantBootstrapSession> {
     const { claims } = await this.validateAndExchangeCode(command, "tenant", meta);
 
-    // Resolve tenant user identity by immutable subject binding primary key
+    // Enforce email_verified === true for tenant session exchange
+    if (claims.email_verified !== true) {
+      const fallbackTenant =
+        command.tenantId?.trim() ||
+        claims.tenant_id?.trim() ||
+        this.tenantPartnerService.getDefaultTenantId();
+      this.recordSecurityEvent({
+        eventType: "tenant_oidc_session.denied",
+        outcome: "denied",
+        realm: "tenant",
+        tenantId: fallbackTenant,
+        subjectId: claims.sub,
+        reasonCode: "EMAIL_NOT_VERIFIED",
+        maskedContext: {
+          email: claims.email,
+          sub: claims.sub,
+          email_verified: claims.email_verified,
+        },
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Subject email is not verified by OIDC provider.",
+      );
+    }
+
+    // Resolve tenant user identity strictly by immutable subject binding primary key
     const subjectId = claims.sub.trim();
     const normalizedEmail = claims.email.trim().toLowerCase();
     const requestedTenantId = command.tenantId?.trim() || claims.tenant_id?.trim();
 
-    // 1. Primary resolution: immutable subject binding
+    // 1. Immutable subject binding resolution ONLY (no email lookup or auto-binding)
     let existingUser = requestedTenantId
       ? (this.tenantPartnerService
           .listTenantUsers(requestedTenantId)
@@ -297,56 +324,6 @@ export class OidcPkceService {
 
     if (!existingUser) {
       existingUser = this.tenantPartnerService.findTenantUserBySubject(subjectId);
-    }
-
-    // 2. Secondary resolution: email match only if subject is not bound or in mock test transition
-    if (!existingUser) {
-      existingUser = requestedTenantId
-        ? (this.tenantPartnerService
-            .listTenantUsers(requestedTenantId)
-            .find((user) => user.email === normalizedEmail) ?? null)
-        : null;
-
-      if (!existingUser) {
-        existingUser = this.tenantPartnerService.findTenantUserByEmail(normalizedEmail);
-      }
-
-      if (existingUser) {
-        const boundSubject = (existingUser as any).subjectId || (existingUser as any).subject;
-        if (boundSubject && boundSubject !== subjectId) {
-          const targetTenantId =
-            existingUser.tenantId ||
-            requestedTenantId ||
-            this.tenantPartnerService.getDefaultTenantId();
-
-          this.recordSecurityEvent({
-            eventType: "tenant_oidc_session.denied",
-            outcome: "denied",
-            realm: "tenant",
-            tenantId: targetTenantId,
-            subjectId: claims.sub,
-            reasonCode: "SUBJECT_BINDING_MISMATCH",
-            meta,
-          });
-          throw new ApiRequestError(
-            403,
-            "AUTH_SESSION_EXCHANGE_DENIED",
-            "Subject identifier does not match the bound account subject.",
-          );
-        }
-
-        const boundUser = this.tenantPartnerService.bindTenantUserSubject(
-          existingUser.tenantId,
-          existingUser.userId,
-          subjectId,
-        );
-        if (boundUser) {
-          existingUser = boundUser;
-        } else {
-          (existingUser as any).subjectId = subjectId;
-          (existingUser as any).subject = subjectId;
-        }
-      }
     }
 
     const targetTenantId =
@@ -531,6 +508,28 @@ export class OidcPkceService {
       "partner",
       meta,
     );
+
+    if (claims.email_verified !== true) {
+      const fallbackPartner =
+        command.partnerId?.trim() ||
+        claims.partner_id?.trim() ||
+        stateRecord?.partnerId?.trim() ||
+        null;
+      this.recordSecurityEvent({
+        eventType: "partner_oidc_session.denied",
+        outcome: "denied",
+        realm: "partner",
+        partnerId: fallbackPartner,
+        subjectId: claims.sub,
+        reasonCode: "EMAIL_NOT_VERIFIED",
+        meta,
+      });
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Subject email is not verified by OIDC provider.",
+      );
+    }
 
     const entrySlug =
       command.partnerId?.trim() ||
@@ -1057,6 +1056,34 @@ export class OidcPkceService {
       };
     }
 
+    if (code.includes("unverified_email") || code.includes("email_not_verified")) {
+      return {
+        sub: "sub_unverified_email",
+        iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
+        aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
+        email: "unverified@acme.example",
+        email_verified: false,
+        amr: ["pwd", "mfa"],
+        acr: "urn:mace:incommon:iap:silver",
+        auth_time: Math.floor(Date.now() / 1000),
+        nonce: stateRecord?.nonce,
+      };
+    }
+
+    if (code.includes("unbound_tenant_subject") || code.includes("unbound_email")) {
+      return {
+        sub: "sub_unbound_tenant_user_9999",
+        iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
+        aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
+        email: "admin@acme.example",
+        email_verified: true,
+        amr: ["pwd", "mfa"],
+        acr: "urn:mace:incommon:iap:silver",
+        auth_time: Math.floor(Date.now() / 1000),
+        nonce: stateRecord?.nonce,
+      };
+    }
+
     if (code.includes("brand_new_partner_subject") || code.includes("unbound")) {
       return {
         sub: "brand_new_partner_subject",
@@ -1072,8 +1099,12 @@ export class OidcPkceService {
     }
 
     // Default / happy path synthetic claims (for offline tests)
+    const defaultSub = code.includes("partner")
+      ? `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`
+      : "sub_oidc_admin_acme";
+
     return {
-      sub: `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`,
+      sub: defaultSub,
       iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
       aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
       email: "admin@acme.example",
@@ -1184,7 +1215,7 @@ export class OidcPkceService {
         iss: claimsFromToken.iss || process.env.OIDC_ISSUER || "https://auth.staging.drts.internal",
         aud: claimsFromToken.aud || clientId,
         email: userinfoClaims.email || claimsFromToken.email || "",
-        email_verified: userinfoClaims.email_verified ?? claimsFromToken.email_verified ?? true,
+        email_verified: userinfoClaims.email_verified ?? claimsFromToken.email_verified ?? false,
         amr: claimsFromToken.amr || userinfoClaims.amr || ["pwd", "mfa"],
         acr: claimsFromToken.acr || userinfoClaims.acr || "urn:mace:incommon:iap:silver",
         auth_time: claimsFromToken.auth_time || Math.floor(Date.now() / 1000),

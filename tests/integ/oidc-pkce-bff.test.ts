@@ -254,7 +254,7 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const idTokenPayload = {
-      sub: "sub_real_oidc_12345",
+      sub: "sub_oidc_admin_acme",
       iss: "https://auth.staging.drts.internal",
       aud: "drts-bff-client",
       email: "admin@acme.example",
