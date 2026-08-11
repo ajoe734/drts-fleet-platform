@@ -870,6 +870,12 @@ const surfaces: RuntimeSurface[] = [
         marker: tenantMarker,
       },
       {
+        key: "sessions",
+        path: "/sessions",
+        operation: "tenant session administration",
+        marker: tenantMarker,
+      },
+      {
         key: "notifications",
         path: "/notifications",
         operation: "notification preferences",

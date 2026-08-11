@@ -14,6 +14,12 @@ function sessionStatusLabel(status: TenantSessionInventoryRecord["status"], loca
   return t(`sessions.status.${status}`, locale);
 }
 
+function sessionStatusTone(status: TenantSessionInventoryRecord["status"]) {
+  if (status === "active") return "success" as const;
+  if (status === "compromised") return "danger" as const;
+  return "neutral" as const;
+}
+
 export default async function SessionsPage() {
   const locale = await getServerLocale();
   let sessions: TenantSessionInventoryRecord[] = [];
@@ -58,7 +64,7 @@ export default async function SessionsPage() {
                   <tr key={session.sessionId} style={{ borderTop: `1px solid ${th.border}` }}>
                     <td style={{ padding: "12px 8px" }}>{session.subject ?? session.principalId}</td>
                     <td style={{ padding: "12px 8px" }}>{session.authMethod}</td>
-                    <td style={{ padding: "12px 8px" }}><CanvasPill theme={th} tone={session.status === "active" ? "success" : "neutral"}>{sessionStatusLabel(session.status, locale)}</CanvasPill></td>
+                    <td style={{ padding: "12px 8px" }}><CanvasPill theme={th} tone={sessionStatusTone(session.status)}>{sessionStatusLabel(session.status, locale)}</CanvasPill></td>
                     <td style={{ padding: "12px 8px" }}>{formatDateTime(session.lastSeenAt, locale)}</td>
                     <td style={{ padding: "12px 8px" }}>{formatDateTime(session.expiresAt, locale)}</td>
                     <td style={{ padding: "12px 8px" }}>
