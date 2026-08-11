@@ -210,8 +210,14 @@ export class IdentityRepository implements OnModuleInit {
     try {
       await client.query("BEGIN");
       const principal = await this.upsertPrincipal(client, principalDraft);
-      const membership = await this.upsertMembership(client, membershipDraft);
-      await this.upsertRoleBinding(client, roleBindingDraft);
+      const membership = await this.upsertMembership(client, {
+        ...membershipDraft,
+        principalId: principal.principalId,
+      });
+      await this.upsertRoleBinding(client, {
+        ...roleBindingDraft,
+        membershipId: membership.membershipId,
+      });
       await client.query("COMMIT");
       return { principal, membership };
     } catch (error) {
