@@ -24,6 +24,18 @@ const PRIVILEGED_ROUTE_FIXTURES: Array<{
   },
   {
     method: "POST",
+    path: "/api/v1/platform-admin/tenants",
+    realm: "platform",
+    actionId: "platform:tenants:create",
+  },
+  {
+    method: "POST",
+    path: "/v1/platform-admin/tenants",
+    realm: "platform",
+    actionId: "platform:tenants:create",
+  },
+  {
+    method: "POST",
     path: "/api/platform-admin/tenants/tenant-001/settings",
     realm: "platform",
     actionId: "platform:tenants:settings:update",

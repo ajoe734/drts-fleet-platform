@@ -21,7 +21,9 @@ interface StepUpRouteRule extends StepUpRoutePolicy {
 
 function normalizeRoutePath(url: string): string {
   const withoutQuery = url.split("?", 1)[0] ?? url;
-  const trimmed = withoutQuery.replace(/^\/+/, "").replace(/^api\/+/, "");
+  const trimmed = withoutQuery
+    .replace(/^\/+/, "")
+    .replace(/^(api\/+)?(v[0-9]+\/+)?/, "");
   return trimmed.replace(/\/+$/, "");
 }
 
