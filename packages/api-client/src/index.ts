@@ -265,6 +265,8 @@ import type {
   TenantServiceProgramRecord,
   TenantSlaProfileView,
   TenantUserRoleRecord,
+  TenantSessionInventoryRecord,
+  RevokeTenantSessionCommand,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
   TransferCallToIncidentCommand,
@@ -2790,6 +2792,20 @@ export class ApiClient {
   > {
     return this.get<TenantUsersListEnvelope | TenantUserRoleRecord[]>(
       "/api/tenant/users",
+    );
+  }
+
+  async listTenantSessions(): Promise<TenantSessionInventoryRecord[]> {
+    return this.getList<TenantSessionInventoryRecord>("/api/tenant/sessions");
+  }
+
+  async revokeTenantSession(
+    sessionId: string,
+    command: RevokeTenantSessionCommand = {},
+  ): Promise<TenantSessionInventoryRecord> {
+    return this.post<TenantSessionInventoryRecord>(
+      `/api/tenant/sessions/${encodeURIComponent(sessionId)}/revoke`,
+      { body: command },
     );
   }
 
