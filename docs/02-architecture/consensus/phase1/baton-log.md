@@ -18,5 +18,5 @@ This file is append-only. It records who owned the shared draft in each round an
 - Baton owner: Codex
 - Goal: merge five lane readouts into a cited starter draft and collect review confirmations/refinements
 - Expected reviewers: Qwen, Gemini, Copilot, Claude
-- Status: converged
-- Outcome: promoted to `consensus-packet.md` after review round 1
+- Status: active
+- Outcome: `review-round-1.md` is the active cited synthesis record for baton-owner refinement and supervisor confirmation

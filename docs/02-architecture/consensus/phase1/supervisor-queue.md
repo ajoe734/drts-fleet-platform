@@ -5,11 +5,11 @@ This file is the live routing note for the pre-implementation discussion loop.
 ## Current assignment
 
 - Supervisor: Claude
-- Current baton owner: Claude
-- Active working file: `consensus-packet.md`
+- Current baton owner: Codex
+- Active working file: `review-round-1.md`
 - Next required outputs:
-  - final consensus packet publication
-  - switch to `supervisor_managed_execution`
+  - preserve the converged cited synthesis in `review-round-1.md`
+  - await supervisor confirmation before any promotion back to `consensus-packet.md`
 
 ## Default review order
 
@@ -27,6 +27,6 @@ This file is the live routing note for the pre-implementation discussion loop.
 
 ## Current disposition
 
-- Round 1 converged without material contradiction across lanes
-- unresolved items are recorded in `consensus-packet.md` as explicit human or later-discussion decisions
-- the next action is to switch the supervisor back to execution mode and assign the next approved slices
+- Round 1 is materially converged on hard rules and wave order, with a narrow unresolved set still recorded in the planning artifacts
+- unresolved items remain explicit escalation or later-discussion decisions and must not be silently converted into execution assumptions
+- the next action is supervisor confirmation of the active Round 1 synthesis rather than an automatic execution-mode handoff
