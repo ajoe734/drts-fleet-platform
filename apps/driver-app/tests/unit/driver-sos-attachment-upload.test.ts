@@ -2,6 +2,29 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { DriverSosAttachmentRecord } from "@drts/contracts";
 
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: vi.fn(async () => null),
+  setItemAsync: vi.fn(async () => {}),
+  deleteItemAsync: vi.fn(async () => {}),
+}));
+
+const { formatDriverError } = vi.hoisted(() => ({
+  formatDriverError: vi.fn((err: unknown, fallback: string) => {
+    if (err instanceof Error && err.message) {
+      return err.message
+        .replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
+        .replace(/eyJ[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.?[A-Za-z0-9\-_=]*/g, "[REDACTED_JWT]")
+        .replace(/(["']?(?:accessToken|secret)["']?\s*:\s*["'])([^"']+)(["'])/gi, "$1[REDACTED]$3")
+        .replace(/((?:accessToken|secret)=)([^&\s"']+)/gi, "$1[REDACTED]");
+    }
+    return fallback;
+  }),
+}));
+
+vi.mock("@/lib/api-client", () => ({
+  formatDriverError,
+}));
+
 import {
   syncDriverSosAttachments,
   type DriverSosAttachmentTransport,
@@ -148,5 +171,24 @@ describe("syncDriverSosAttachments", () => {
     );
     expect(fakeTransport.prepare).not.toHaveBeenCalled();
     expect(result.attachments[0]?.scanStatus).toBe("clean");
+  });
+
+  it("sanitizes error messages containing sensitive tokens during upload failure", async () => {
+    const fakeTransport = transport({
+      upload: vi.fn().mockRejectedValue(
+        new Error("Upload failed with Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature and secret=super-secret-123"),
+      ),
+    });
+
+    const result = await syncDriverSosAttachments({
+      sosEventId: "sos-1",
+      attachments: [draft()],
+      transport: fakeTransport,
+    });
+
+    expect(result.failedCount).toBe(1);
+    expect(result.attachments[0]?.lastError).not.toContain("super-secret-123");
+    expect(result.attachments[0]?.lastError).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+    expect(result.attachments[0]?.lastError).toContain("[REDACTED]");
   });
 });

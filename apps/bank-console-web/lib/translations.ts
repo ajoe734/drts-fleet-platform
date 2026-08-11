@@ -407,10 +407,15 @@ const en = {
   "statements.status.paid": "Paid",
   "statements.status.due": "Due",
   "statements.actions.download": "Download",
+  "statements.actions.exportCsv": "Export per-trip CSV",
+  "statements.actions.exportAll": "Export statement list",
   "statements.actions.viewDetail": "View detail",
   "statements.actions.downloadSigned": "Download signed artifact",
   "statements.actions.reportDispute": "Report to DRTS",
   "statements.actions.disputed": "Disputed line",
+  "statements.unauthorized.title": "Role Access Restriction (Ops Viewer)",
+  "statements.unauthorized.description":
+    "The Ops Viewer role is restricted to read-only operational monitoring and cannot export statements or download financial artifacts.",
   "statements.empty": "No statements match the current filters.",
   "statements.detail.eyebrow": "Statement detail",
   "statements.detail.title": "Statement {period}",
@@ -671,6 +676,7 @@ const en = {
   "audit.reason.ACCESS_DENIED": "Access denied",
 
   "common.all": "All",
+  "common.apiDegraded": "API degraded",
 
   "login.eyebrow": "Demo identity",
   "login.title": "Bank console sign-in",
@@ -1088,10 +1094,15 @@ const zh: Record<keyof typeof en, string> = {
   "statements.status.paid": "已付款",
   "statements.status.due": "待付款",
   "statements.actions.download": "下載",
+  "statements.actions.exportCsv": "匯出逐趟 CSV",
+  "statements.actions.exportAll": "匯出對帳單列表",
   "statements.actions.viewDetail": "查看明細",
   "statements.actions.downloadSigned": "下載簽名檔",
   "statements.actions.reportDispute": "向 DRTS 提報",
   "statements.actions.disputed": "已標記爭議",
+  "statements.unauthorized.title": "角色權限限制 (營運檢視)",
+  "statements.unauthorized.description":
+    "營運檢視角色僅能進行營運查看，無權限匯出對帳單或下載金流簽名檔。",
   "statements.empty": "目前篩選沒有符合的對帳單。",
   "statements.detail.eyebrow": "對帳單明細",
   "statements.detail.title": "{period} 對帳單",
@@ -1334,6 +1345,7 @@ const zh: Record<keyof typeof en, string> = {
   "audit.reason.ACCESS_DENIED": "拒絕存取",
 
   "common.all": "全部",
+  "common.apiDegraded": "API 異常降級",
 
   "login.eyebrow": "Demo 身分",
   "login.title": "銀行後台登入",

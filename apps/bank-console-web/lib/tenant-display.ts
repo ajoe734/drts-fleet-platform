@@ -13,6 +13,9 @@ export function tenantDisplayText(
   value: string,
   tenant: BankDemoTenant,
 ): string {
+  if (!value || typeof value !== "string") {
+    return value ?? "";
+  }
   return value
     .replaceAll("中信銀行", getBankTenantName(tenant, "zh"))
     .replaceAll("中信", getBankTenantShortName(tenant, "zh"))

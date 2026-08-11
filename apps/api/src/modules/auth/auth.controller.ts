@@ -1,5 +1,6 @@
 import { Body, Controller, Headers, Optional, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
+import jwt from "jsonwebtoken";
 
 import type {
   CreatePartnerBootstrapSessionCommand,
@@ -11,6 +12,7 @@ import type {
   RegisterDriverDeviceCommand,
   RevokeDriverDeviceBindingCommand,
   TenantBootstrapSession,
+  TenantOidcSessionExchangeCommand,
   TenantPortalProfile,
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
@@ -42,6 +44,12 @@ import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import {
+  extractWorkloadIdentityExchangeNonce,
+  extractRequestedWorkloadTokenAudience,
+  extractWorkloadIdentityAssertion,
+  ServiceWorkloadIdentityAdapter,
+} from "./service-workload-identity.adapter";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -60,6 +68,7 @@ type JwtExpiresIn = NonNullable<
 const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
 const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
 const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV = "DRTS_TENANT_BOOTSTRAP_MODE" as const;
+const TENANT_OIDC_SESSION_EXPIRES_IN: JwtExpiresIn = "8h";
 
 function isStrictAuthEnvironment(): boolean {
   const environment = detectAuthEnvironment(process.env);
@@ -76,19 +85,22 @@ export class AuthController {
     private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
+    @Optional()
+    private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
   ) {}
 
+  @OpenRoute()
   @Post("token")
   async issueToken(@Req() request: TokenRequest): Promise<{
     token: string;
     expiresIn: string;
   }> {
-    // Require internal key to issue tokens
-    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
-
     const strictEnvironment = isStrictAuthEnvironment();
     const isStrictIap =
       process.env.STRICT_IAP_MODE === "true" || strictEnvironment;
+    const rawWorkloadAssertion = extractWorkloadIdentityAssertion(
+      request.headers as Record<string, string | string[] | undefined>,
+    );
     const rawAssertion = extractIapJwtAssertion(request.headers);
     const bootstrapIdentity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
@@ -103,6 +115,72 @@ export class AuthController {
         "Bootstrap identity headers are disabled in strict auth environments.",
       );
     }
+
+    if (rawWorkloadAssertion && bootstrapIdentity) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Bootstrap identity headers are disabled when workload identity proof is provided.",
+      );
+    }
+
+    if (rawWorkloadAssertion) {
+      const requestedTokenAudience = extractRequestedWorkloadTokenAudience(
+        request.headers as Record<string, string | string[] | undefined>,
+      );
+      const exchangeNonce = extractWorkloadIdentityExchangeNonce(
+        request.headers as Record<string, string | string[] | undefined>,
+      );
+      const resolved =
+        await this.serviceWorkloadIdentityAdapter?.resolveSubject(
+          request.headers as Record<string, string | string[] | undefined>,
+          {
+            requestedTokenAudience,
+            exchangeNonce,
+          },
+        );
+      if (!resolved) {
+        throw new ApiRequestError(
+          503,
+          "WORKLOAD_IDENTITY_NOT_CONFIGURED",
+          "Workload identity validation is not configured for this environment.",
+        );
+      }
+
+      const expiresIn: JwtExpiresIn = "15m";
+      const issued = await this.issueJwtSession(
+        {
+          authMode: "jwt_bearer",
+          actorType: "system",
+          actorId: resolved.actorId,
+          principalId: resolved.principalId,
+          subject: resolved.subject,
+          realm: "system",
+          tenantId: null,
+          roleFamilies: [],
+          roles: resolved.roles,
+          scopes: resolved.scopes,
+          requestId:
+            (request.headers["x-request-id"] as string | undefined) ?? null,
+        },
+        {
+          expiresIn,
+          principalId: resolved.principalId,
+          subject: resolved.subject,
+          ensurePrincipal: false,
+          authTime: resolved.authTime,
+          amr: ["workload_identity"],
+          acr: "aal2",
+          tokenVersion: resolved.tokenVersion,
+          audience: [resolved.tokenAudience],
+          workloadExchangeNonceHash: resolved.exchangeNonceHash,
+        },
+      );
+      return { token: issued.token, expiresIn };
+    }
+
+    // Require internal key to issue tokens when workload proof is not used.
+    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
 
     if (rawAssertion && this.iapSubjectAdapter) {
       const expectedAudience =
@@ -179,7 +257,7 @@ export class AuthController {
     }
 
     const expiresIn: JwtExpiresIn =
-      identity.actorType === "system" ? "1h" : "8h";
+      identity.actorType === "system" ? "15m" : "8h";
     const issuedAt = new Date().toISOString();
     const issued = await this.issueJwtSession(identity, {
       expiresIn,
@@ -236,6 +314,232 @@ export class AuthController {
       requestId,
     );
     return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("logout")
+  async logout(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "UNAUTHENTICATED",
+        "Authentication is required to log out.",
+      );
+    }
+    const sessionId = identity.sessionId ?? null;
+    if (sessionId) {
+      await this.jwtAuthService.revokeCurrentSession(
+        sessionId,
+        "user_logout",
+        identity.principalId ?? identity.actorId ?? undefined,
+      );
+    }
+    return toApiSuccessEnvelope({ loggedOut: true, sessionId }, requestId);
+  }
+
+  @Post("logout-all")
+  async logoutAll(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "UNAUTHENTICATED",
+        "Authentication is required to log out all sessions.",
+      );
+    }
+    const principalId = identity.principalId ?? identity.actorId;
+    if (!principalId) {
+      throw new ApiRequestError(
+        400,
+        "IDENTITY_REQUIRED",
+        "Principal identity is required to logout all sessions.",
+      );
+    }
+    const revokedCount = await this.jwtAuthService.revokeAllSessionsForPrincipal(
+      principalId,
+      "user_logout_all",
+      principalId,
+    );
+
+    if (identity.realm === "tenant" && identity.tenantId && identity.actorId) {
+      const user = this.tenantPartnerService.findTenantUser(
+        identity.tenantId,
+        identity.actorId,
+      );
+      if (user) {
+        const identityContext: IdentityContext = {
+          actorType: identity.actorType,
+          actorId: identity.actorId,
+          realm: identity.realm,
+          authMode: identity.authMode,
+          roleFamilies: identity.roleFamilies,
+          roles: identity.roles,
+          scopes: identity.scopes,
+          tenantId: identity.tenantId,
+          supportedExecutionModes: [
+            "discussion_planning",
+            "supervisor_managed_execution",
+          ],
+        };
+        this.tenantPartnerService.updateTenantUserRole(
+          identity.tenantId,
+          user.userId,
+          { roleCode: user.roleCode, status: user.status },
+          requestId,
+          identityContext,
+        );
+      }
+    }
+
+    return toApiSuccessEnvelope(
+      { loggedOutAll: true, revokedCount },
+      requestId,
+    );
+  }
+
+  @Post("sessions/revoke")
+  async revokeSessionSelf(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: { sessionId?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "UNAUTHENTICATED",
+        "Authentication is required to revoke session.",
+      );
+    }
+    const sessionId = command?.sessionId?.trim();
+    if (!sessionId) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "sessionId is required.",
+      );
+    }
+    const callerPrincipalId = identity.principalId ?? identity.actorId;
+    if (!callerPrincipalId) {
+      throw new ApiRequestError(
+        400,
+        "IDENTITY_REQUIRED",
+        "Principal identity is required to revoke session.",
+      );
+    }
+    const result = await this.jwtAuthService.revokeSessionSelf(
+      sessionId,
+      callerPrincipalId,
+      "user_self_revocation",
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/oidc-session")
+  async issueTenantOidcSession(
+    @Body() command: TenantOidcSessionExchangeCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    let tenantId: string | null = null;
+    let email: string | null = null;
+
+    try {
+      const oidcIdentity = this.verifyTenantOidcIdToken(command.idToken);
+      const resolvedEmail = oidcIdentity.email;
+      email = resolvedEmail;
+      const resolvedTenantId =
+        command.tenantId?.trim() || this.tenantPartnerService.getDefaultTenantId();
+      tenantId = resolvedTenantId;
+      const existingUser = this.tenantPartnerService
+        .listTenantUsers(resolvedTenantId)
+        .find((user) => user.email === resolvedEmail) ?? null;
+
+      if (!existingUser || !this.isTenantBootstrapEligibleStatus(existingUser.status)) {
+        throw this.buildTenantBootstrapDeniedError();
+      }
+
+      const roleCode = this.resolveExistingUserRoleCode(
+        this.tenantPartnerService.listTenantRoles(),
+        existingUser,
+      );
+      if (this.isHighPrivilegeTenantRole(roleCode) && !oidcIdentity.hasTrustedMfa) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_MFA_REQUIRED",
+          "A trusted OIDC MFA assertion is required for this tenant role.",
+        );
+      }
+
+      const profile = this.buildTenantPortalProfile(
+        resolvedTenantId,
+        resolvedEmail,
+        existingUser,
+        roleCode,
+      );
+      const identity = this.buildIdentityContext(profile);
+      const issued = await this.issueJwtSession(
+        {
+          authMode: "jwt_bearer",
+          actorType: identity.actorType,
+          actorId: identity.actorId,
+          principalId: identity.actorId,
+          subject: oidcIdentity.subject,
+          realm: identity.realm,
+          tenantId: identity.tenantId,
+          roleFamilies: identity.roleFamilies,
+          roles: identity.roles,
+          scopes: identity.scopes,
+          requestId: requestId ?? null,
+        },
+        {
+          expiresIn: TENANT_OIDC_SESSION_EXPIRES_IN,
+          principalId: identity.actorId,
+          subject: oidcIdentity.subject,
+          ensurePrincipal: true,
+          authTime: oidcIdentity.authTime,
+          amr: oidcIdentity.amr,
+          acr: oidcIdentity.acr,
+          tokenVersion: Date.parse(existingUser.updatedAt),
+        },
+      );
+      const session: TenantBootstrapSession = {
+        accessToken: issued.token,
+        tokenType: "Bearer",
+        expiresIn: TENANT_OIDC_SESSION_EXPIRES_IN,
+        profile,
+        identity,
+      };
+      this.securityEventsService?.recordEvent({
+        actorId: identity.actorId, actorType: identity.actorType, subjectId: oidcIdentity.subject,
+        realm: "tenant", tenantId, partnerId: null, eventType: "tenant_oidc_session.issued",
+        eventFamily: "auth", outcome: "success", severity: "low", targetType: "tenant_portal_session",
+        targetId: profile.id, sessionId: issued.sessionId, tokenId: issued.tokenId,
+        authMethods: issued.amr, sourceIp, userAgent: userAgent ?? null, requestId: requestId ?? null,
+        traceId: null, reasonCode: null, approvalId: null, beforeSummary: null,
+        afterSummary: { actorId: identity.actorId, roleCode, tenantId },
+        maskedContext: { email },
+      });
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      this.securityEventsService?.recordEvent({
+        actorId: null, actorType: "system", subjectId: email, realm: "tenant", tenantId,
+        partnerId: null, eventType: "tenant_oidc_session.denied", eventFamily: "auth",
+        outcome: "denied", severity: "medium", targetType: "tenant_portal_session", targetId: null,
+        sessionId: null, tokenId: null, authMethods: ["oidc"], sourceIp, userAgent: userAgent ?? null,
+        requestId: requestId ?? null, traceId: null, reasonCode: this.extractErrorCode(error), approvalId: null,
+        beforeSummary: null, afterSummary: null, maskedContext: { email, tenantId },
+      });
+      throw toPublicTenantAuthError(error);
+    }
   }
 
   @OpenRoute()
@@ -563,6 +867,46 @@ export class AuthController {
       process.env[TENANT_BOOTSTRAP_FIXTURE_MODE_ENV]?.trim().toLowerCase() ??
       "";
     return mode === TENANT_BOOTSTRAP_FIXTURE_MODE;
+  }
+
+  private verifyTenantOidcIdToken(idToken: string) {
+    const issuer = process.env.TENANT_OIDC_ISSUER?.trim() || process.env.OIDC_ISSUER?.trim();
+    const audience = process.env.TENANT_OIDC_AUDIENCE?.trim() || process.env.OIDC_AUDIENCE?.trim();
+    const key = process.env.TENANT_OIDC_JWT_PUBLIC_KEY?.trim() || process.env.TENANT_OIDC_JWT_SECRET?.trim();
+    if (!issuer || !audience || !key) {
+      throw new ApiRequestError(503, "TENANT_OIDC_NOT_CONFIGURED", "Tenant OIDC validation is not configured.");
+    }
+    if (!idToken?.trim()) {
+      throw new ApiRequestError(400, "FIELD_REQUIRED", "idToken is required.", { field: "idToken" });
+    }
+    const algorithms = (process.env.TENANT_OIDC_ALGORITHMS?.split(/[;,]/).map((value) => value.trim()).filter(Boolean) ??
+      [/BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(key) ? "RS256" : "HS256"]) as jwt.Algorithm[];
+    let payload: jwt.JwtPayload;
+    try {
+      payload = jwt.verify(idToken, key, { issuer, audience, algorithms }) as jwt.JwtPayload;
+    } catch {
+      throw new ApiRequestError(401, "AUTH_CREDENTIALS_INVALID", "OIDC ID token is invalid or expired.");
+    }
+    const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+    const subject = typeof payload.sub === "string" ? payload.sub.trim() : "";
+    if (!email || !subject || payload.email_verified === false) {
+      throw new ApiRequestError(401, "AUTH_CREDENTIALS_INVALID", "OIDC ID token is missing a verified subject or email claim.");
+    }
+    const amr = Array.isArray(payload.amr) ? payload.amr.filter((value): value is string => typeof value === "string") : [];
+    const acr = typeof payload.acr === "string" && payload.acr.trim() ? payload.acr.trim() : "aal1";
+    const hasTrustedMfa = amr.some((method) => ["mfa", "otp", "webauthn", "hwk", "fido2"].includes(method.toLowerCase())) || /(?:aal|urn:.*:aal)[2-9]/i.test(acr);
+    return {
+      email,
+      subject,
+      amr: [...new Set(["oidc", ...amr])],
+      acr,
+      hasTrustedMfa,
+      authTime: typeof payload.auth_time === "number" ? new Date(payload.auth_time * 1000).toISOString() : new Date().toISOString(),
+    };
+  }
+
+  private isHighPrivilegeTenantRole(roleCode: string): boolean {
+    return ["tenant_admin", "tenant_ops_admin"].includes(roleCode);
   }
 
   private buildTenantBootstrapDeniedError() {

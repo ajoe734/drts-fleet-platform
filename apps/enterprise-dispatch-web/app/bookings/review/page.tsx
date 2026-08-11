@@ -13,18 +13,52 @@ import {
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
-  enterpriseDriver,
-  getEnterpriseBookingDraft,
-} from "@/lib/enterprise-fixtures";
+  getEnterpriseBookingPreview,
+  getVehicleLabelFromDraft,
+  parseEnterpriseBookingDraft,
+  serializeEnterpriseBookingDraft,
+} from "@/lib/enterprise-booking-draft";
+import { enterpriseDriver } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
 
-export default async function ReviewBookingPage() {
+type ReviewSearchParams = Record<string, string | string[] | undefined>;
+
+function displayDraftValue(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "—";
+}
+
+function formatLuggageLabel(
+  value: string,
+  tr: (key: TranslationKey, params?: Record<string, string | number>) => string,
+) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "—";
+  }
+
+  return tr("review.luggage.count", { count: trimmed });
+}
+
+export default async function ReviewBookingPage({
+  searchParams,
+}: {
+  searchParams?: Promise<ReviewSearchParams>;
+}) {
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-  const draft = getEnterpriseBookingDraft(locale);
+  const draft = parseEnterpriseBookingDraft((await searchParams) ?? {}, locale);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const bookingId = Array.isArray(resolvedSearchParams.bookingId)
+    ? resolvedSearchParams.bookingId[0]
+    : resolvedSearchParams.bookingId;
+  const preview = getEnterpriseBookingPreview(draft, locale);
+  const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
+  const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(Boolean);
+  const airportLabel = airportParts.length > 0 ? airportParts.join(" · ") : undefined;
 
   return (
     <>
@@ -77,11 +111,11 @@ export default async function ReviewBookingPage() {
               </span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  {draft.costCenter}
+                  {draft.costCenterLabel}
                 </div>
                 <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
                   {tr("review.approval.costNote", {
-                    remain: "NT$ 31,000 / 60,000",
+                    remain: preview.remainingBudgetLabel,
                   })}
                 </div>
               </div>
@@ -92,20 +126,24 @@ export default async function ReviewBookingPage() {
             <ERow
               t={t}
               k={tr("new.check.fare")}
-              v={tr("new.check.fareValue")}
+              v={preview.estimatedFareLabel}
               mono
             />
             <ERow
               t={t}
               k={tr("review.approval.quotaImpact")}
-              v={tr("review.approval.quotaImpactValue")}
+              v={preview.quotaImpactLabel}
             />
             <ERow
               t={t}
               k={tr("new.policy.approval")}
               v={
-                <EPill t={t} tone="warn" dot>
-                  {tr("review.approval.needs")}
+                <EPill
+                  t={t}
+                  tone={preview.approvalRequired ? "warn" : "success"}
+                  dot
+                >
+                  {preview.approvalLabel}
                 </EPill>
               }
               last
@@ -113,10 +151,14 @@ export default async function ReviewBookingPage() {
             <div style={{ marginTop: 12 }}>
               <EBanner
                 t={t}
-                tone="warn"
-                icon="shield"
-                title={tr("review.banner.title")}
-                body={tr("review.banner.body")}
+                tone={preview.bannerTone}
+                icon={preview.approvalRequired ? "shield" : "check"}
+                title={
+                  preview.approvalRequired
+                    ? tr("review.banner.title")
+                    : tr("new.check.title")
+                }
+                body={preview.bannerBody}
               />
             </div>
           </ECard>
@@ -128,22 +170,28 @@ export default async function ReviewBookingPage() {
           >
             <EntParty
               t={t}
-              passenger={draft.passenger}
+              passenger={draft.passengerMode === "self" ? draft.bookedBy : draft.passenger}
               passengerLabel={tr("party.passenger")}
               subline={
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: t.warn,
-                    marginTop: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                  }}
-                >
-                  <EIcon name="users" size={13} />
-                  {tr("party.delegate", { name: draft.bookedBy })}
-                </div>
+                draft.passengerMode === "self" ? (
+                  <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
+                    {tr("party.self")}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: t.warn,
+                      marginTop: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                    }}
+                  >
+                    <EIcon name="users" size={13} />
+                    {tr("party.delegate", { name: draft.bookedBy })}
+                  </div>
+                )
               }
             />
             <div
@@ -168,7 +216,7 @@ export default async function ReviewBookingPage() {
                 <div
                   style={{ fontSize: 13, fontWeight: 600, fontFamily: t.mono }}
                 >
-                  {draft.onsiteContact}
+                  {displayDraftValue(draft.onsiteContactPhone)}
                 </div>
               </div>
               <div
@@ -200,13 +248,22 @@ export default async function ReviewBookingPage() {
               t={t}
               from={draft.pickup}
               to={draft.dropoff}
-              win={draft.reservationWindow}
-              airportLabel={`${draft.flight} · ${draft.terminal}`}
+              win={preview.reservationWindowLabel}
+              airportLabel={airportLabel}
             />
             <div style={{ marginTop: 16 }}>
-              <ERow t={t} k={tr("new.policy.vehicle")} v={draft.vehicle} />
-              <ERow t={t} k={tr("new.airport.luggage")} v={draft.luggage} />
-              <ERow t={t} k={tr("new.field.notes")} v={draft.notes} last />
+              <ERow t={t} k={tr("new.policy.vehicle")} v={vehicleLabel} />
+              <ERow
+                t={t}
+                k={tr("new.airport.luggage")}
+                v={formatLuggageLabel(draft.luggageCount, tr)}
+              />
+              <ERow
+                t={t}
+                k={tr("new.field.notes")}
+                v={displayDraftValue(draft.notes)}
+                last
+              />
             </div>
           </ECard>
           <ECard
@@ -251,12 +308,12 @@ export default async function ReviewBookingPage() {
           </ECard>
           <div style={{ display: "flex", gap: 12 }}>
             <Link
-              href="/bookings/new"
+              href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}${bookingId ? `&bookingId=${encodeURIComponent(bookingId)}` : ""}`}
               style={entBtnStyle(t, { variant: "default", block: true })}
             >
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
-            <BookingSubmitButton />
+            <BookingSubmitButton draft={draft} {...(bookingId ? { bookingId } : {})} />
           </div>
         </div>
       </div>

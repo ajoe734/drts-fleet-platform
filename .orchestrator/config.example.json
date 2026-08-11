@@ -25,7 +25,9 @@
     "heartbeat_warn_after_seconds": 10.0,
     "stall_after_seconds": 300,
     "max_worker_history": 200,
+    "tick_failure_limit": 10,
     "auto_refresh_provider_capabilities": false,
+    "provider_capabilities_refresh_interval_seconds": 900,
     "optional_automation": {
       "governance_automation": {
         "enabled": true

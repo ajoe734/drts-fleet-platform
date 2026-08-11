@@ -8,7 +8,14 @@ const nextConfig: NextConfig = {
   // `content-encoding: gzip` header.
   compress: false,
   outputFileTracingRoot: path.join(__dirname, "../../"),
-  transpilePackages: ["@drts/shared-types", "@drts/ui-tokens", "@drts/ui-web"],
+  transpilePackages: [
+    "@drts/api-client",
+    "@drts/contracts",
+    "@drts/control-plane-auth",
+    "@drts/shared-types",
+    "@drts/ui-tokens",
+    "@drts/ui-web",
+  ],
 };
 
 export default nextConfig;

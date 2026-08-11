@@ -158,7 +158,7 @@ export default async function SubmittedBookingPage({
             <EBtnContent icon="refresh">{tr("submitted.refresh")}</EBtnContent>
           </Link>
           <Link
-            href="/bookings"
+            href={bookingId ? `/bookings/${encodeURIComponent(bookingId)}` : "/bookings"}
             style={entBtnStyle(t, { variant: "primary", block: true })}
           >
             <EBtnContent iconR="arrow">{tr("submitted.bookings")}</EBtnContent>

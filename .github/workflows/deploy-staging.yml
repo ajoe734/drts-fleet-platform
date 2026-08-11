@@ -53,6 +53,8 @@ env:
   OPS_CONSOLE_ORIGIN: ${{ vars.STAGING_OPS_CONSOLE_ORIGIN || 'https://ops.staging.drts-fleet.cctech-support.com' }}
   CONTROL_PLANE_API_ORIGIN_ENV: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
   IAP_CLIENT_ID_ENV: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
+  WORKLOAD_IDENTITY_ISSUER_ENV: ${{ vars.STAGING_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
+  WORKLOAD_IDENTITY_AUDIENCE_ENV: ${{ vars.STAGING_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
 
 jobs:
   # ──────────────────────────────────────────────────────────────
@@ -90,6 +92,8 @@ jobs:
           [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.STAGING_GCP_CLOUDSQL_INSTANCE or vars.GCP_CLOUDSQL_INSTANCE")
           [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.WIF_PROVIDER")
           [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
+          [[ -n "${WORKLOAD_IDENTITY_ISSUER_ENV:-}" ]] || missing+=("vars.STAGING_WORKLOAD_IDENTITY_ISSUER or vars.WORKLOAD_IDENTITY_ISSUER")
+          [[ -n "${WORKLOAD_IDENTITY_AUDIENCE_ENV:-}" ]] || missing+=("vars.STAGING_WORKLOAD_IDENTITY_AUDIENCE or vars.WORKLOAD_IDENTITY_AUDIENCE")
           if [[ -z "${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}" ]]; then
             missing+=("vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or vars.GCP_RUNTIME_SERVICE_ACCOUNT or secrets.GCP_RUNTIME_SERVICE_ACCOUNT")
           fi
@@ -434,12 +438,23 @@ jobs:
           secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
           ops_secret_args="JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
           controlled_download_secret="${SECRET_PREFIX}-controlled-download-signing-secret"
+          workload_key_secret="${SECRET_PREFIX}-workload-identity-jwt-public-key"
+          workload_registry_secret="${SECRET_PREFIX}-workload-identity-service-principals"
 
           if ! gcloud secrets describe "$controlled_download_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
             echo "::error::Required secret ${controlled_download_secret} not found in project ${PROJECT_ID}."
             exit 1
           fi
+          if ! gcloud secrets describe "$workload_key_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "::error::Required secret ${workload_key_secret} not found in project ${PROJECT_ID}."
+            exit 1
+          fi
+          if ! gcloud secrets describe "$workload_registry_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "::error::Required secret ${workload_registry_secret} not found in project ${PROJECT_ID}."
+            exit 1
+          fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
+          secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
 
           if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"
@@ -500,7 +515,7 @@ jobs:
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,APP_ENV=staging,DRTS_ENV=staging,API_PORT=3001,MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
+            --set-env-vars "NODE_ENV=production,APP_ENV=staging,DRTS_ENV=staging,API_PORT=3001,WORKLOAD_IDENTITY_ISSUER=${WORKLOAD_IDENTITY_ISSUER_ENV},WORKLOAD_IDENTITY_AUDIENCE=${WORKLOAD_IDENTITY_AUDIENCE_ENV},MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
             ${{ steps.exposure.outputs.api }} \
             --min-instances 0 \
             --max-instances 3 \

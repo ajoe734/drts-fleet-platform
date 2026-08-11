@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { ReferralEmbedSession } from "@drts/contracts";
 
 import {
   consumeReferralEmbedHandoffArtifact,
+  getPartnerEntry,
   recordReferralEmbedConsent,
 } from "@/lib/embed-api";
 import {
@@ -24,6 +26,11 @@ type SessionAction =
       entrySlug: string;
       entryHost: string;
       returnTo?: string | undefined;
+    }
+  | {
+      action: "demo-bootstrap";
+      entrySlug: string;
+      entryHost: string;
     };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -60,6 +67,14 @@ async function parseAction(request: Request): Promise<SessionAction> {
     };
   }
 
+  if (action === "demo-bootstrap") {
+    return {
+      action,
+      entrySlug: String(formData.get("entrySlug") || ""),
+      entryHost: String(formData.get("entryHost") || ""),
+    };
+  }
+
   return {
     action: "exchange",
     artifact: String(formData.get("artifact") || ""),
@@ -69,9 +84,58 @@ async function parseAction(request: Request): Promise<SessionAction> {
   };
 }
 
+async function buildDemoSession(
+  entrySlug: string,
+  entryHost: string,
+): Promise<ReferralEmbedSession> {
+  if (process.env.REFERRAL_EMBED_DEMO !== "true") {
+    throw new Error("DEMO_BOOTSTRAP_DISABLED");
+  }
+
+  const entry = await getPartnerEntry(entrySlug);
+  const now = new Date().toISOString();
+  const partnerId = entry.partnerId;
+  const tenantId = entry.tenantId;
+  const partnerProgramId = entry.programId;
+  const drtsPassengerId = `referral-demo-${entrySlug}`;
+
+  return {
+    handoffId: `handoff-demo-${entrySlug}`,
+    partnerEntrySlug: entry.entrySlug,
+    entryHost,
+    drtsPassengerId,
+    identityActive: true,
+    consent: {
+      requiredScopes: ["trip.manage", "pii.trip", "identity.bind"],
+      bundleVersion: "referral-embed-demo-consent-v1-2026-08-08",
+      grantedAt: now,
+    },
+    identity: {
+      actorType: "referral_passenger",
+      actorId: drtsPassengerId,
+      realm: "partner",
+      authMode: "jwt_bearer",
+      roleFamilies: ["partner"],
+      roles: ["referral_passenger"],
+      scopes: ["trip.manage", "pii.trip", "identity.bind"],
+      tenantId,
+      partnerId,
+      partnerProgramId,
+      partnerEntrySlug: entry.entrySlug,
+      drtsPassengerId,
+    },
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const action = await parseAction(request);
+    if (action.action === "demo-bootstrap") {
+      const session = await buildDemoSession(action.entrySlug, action.entryHost);
+      await writeReferralEmbedSession(session);
+      return jsonResponse({ ok: true, session });
+    }
+
     if (action.action === "grant-consent") {
       const session = await recordReferralEmbedConsent(
         buildReferralEmbedConsentCommand({

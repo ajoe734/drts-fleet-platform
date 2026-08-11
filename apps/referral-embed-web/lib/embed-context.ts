@@ -130,7 +130,7 @@ export async function resolveEmbedContext(input: {
     url.searchParams.set("entryHost", input.entryHost);
   }
 
-  const decision = buildEmbedSecurityDecision({
+  const rawDecision = buildEmbedSecurityDecision({
     allowedEntryHostsEnv: process.env.REFERRAL_EMBED_ALLOWED_HOSTS,
     headers: new Headers(requestHeaders),
     requestUrl: url,
@@ -145,13 +145,26 @@ export async function resolveEmbedContext(input: {
       issues.push("reauth:cross_entry_session");
       session = null;
     } else if (
-      decision.requestedEntryHost &&
-      session.entryHost !== decision.requestedEntryHost
+      rawDecision.requestedEntryHost &&
+      session.entryHost !== rawDecision.requestedEntryHost
     ) {
       issues.push("reauth:entry_host_session_mismatch");
       session = null;
     }
   }
+
+  const decision =
+    session &&
+    rawDecision.block &&
+    rawDecision.requestedEntryHost &&
+    session.entryHost === rawDecision.requestedEntryHost
+      ? {
+          ...rawDecision,
+          block: false,
+          blockReason: null,
+          xFrameOptions: null,
+        }
+      : rawDecision;
 
   if (!decision.block && !session) {
     issues.push("fallback:missing_embed_session");

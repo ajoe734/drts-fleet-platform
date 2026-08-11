@@ -45,6 +45,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/token" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:token:exchange",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Private token exchange for verified control-plane callers",
+    };
+  }
+
   if (routePath === "notifications") {
     return {
       routeKey: `notifications:${upperMethod}`,
@@ -106,6 +115,51 @@ export function resolveRouteAuthPolicy(
       requiredScopes: [],
       allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
       description: "Authenticated driver-device revoke access",
+    };
+  }
+
+  if (routePath === "auth/logout" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description: "Authenticated session logout for current device",
+    };
+  }
+
+  if (routePath === "auth/logout-all" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout-all",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description: "Authenticated session logout for all active devices",
+    };
+  }
+
+  if (routePath === "auth/sessions/revoke" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:sessions:revoke",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description: "Self-service session revocation endpoint",
     };
   }
 
@@ -332,6 +386,18 @@ export function resolveRouteAuthPolicy(
       requiredScopes: scope,
       allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
       description: readRoute ? "Owned mobility read" : "Owned mobility write",
+    };
+  }
+
+  if (
+    routePath === "passenger/orders/:orderId/cancel" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "passenger:orders:cancel",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(),
+      description: "Passenger order cancellation bridge",
     };
   }
 

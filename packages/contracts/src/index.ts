@@ -1016,23 +1016,63 @@ export interface PartnerEligibilityManualFallbackRecord {
   notes: string | null;
 }
 
+export const INTEGRATION_CREDENTIAL_STATUSES = [
+  "active",
+  "overlap_active",
+  "revoked",
+  "expired",
+  "auto_revoked",
+] as const;
+export type IntegrationCredentialStatus =
+  (typeof INTEGRATION_CREDENTIAL_STATUSES)[number];
+
+export interface IntegrationCredentialSignals {
+  approachingExpiry: boolean;
+  dormant: boolean;
+  expired: boolean;
+  autoRevoked: boolean;
+  evaluatedAt: string;
+}
+
 export interface PartnerIngressCredentialRecord {
   keyId: string;
   entrySlug: string;
   keyPrefix: string;
   maskedSuffix: string;
-  source: "env_bootstrap" | "platform_admin";
+  source: "env_bootstrap" | "platform_admin" | "platform_issued";
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  realm?: "partner";
+  resourceScope?: string | null;
+  scopes?: string[] | undefined;
   createdAt: string;
   lastUsedAt: string | null;
+  lastUsedWorkload?: string | null;
+  expiresAt?: string | null;
+  status?: IntegrationCredentialStatus;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  rotatedFromKeyId?: string | null;
+  supersededByKeyId?: string | null;
   revokedAt: string | null;
   issuedBy: string | null;
   revokedBy: string | null;
   rotationReason: string | null;
   revokeReason: string | null;
+  signals?: IntegrationCredentialSignals | undefined;
 }
 
 export interface IssuePartnerIngressCredentialCommand {
   rotationReason?: string | null;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  scopes?: string[] | undefined;
+  expiresAt?: string | null;
+  overlapDays?: number | null;
 }
 
 export interface RevokePartnerIngressCredentialCommand {
@@ -1043,6 +1083,7 @@ export interface PartnerIngressCredentialIssued {
   credential: PartnerIngressCredentialRecord;
   plaintextKey: string;
   revokedCredentialId: string | null;
+  overlapEndsAt?: string | null;
 }
 
 export interface PartnerChannelEntryRecord {
@@ -1571,6 +1612,19 @@ export interface TenantWebhookSecretRotationRecord {
   rotatedAt: string;
   rotationReason: string | null;
   secretPreview: string;
+  status?: IntegrationCredentialStatus;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  lastUsedWorkload?: string | null;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  supersededByVersion?: number | null;
+  revokedAt?: string | null;
+  signals?: IntegrationCredentialSignals | undefined;
 }
 
 export interface TenantWebhookRuntimeMetadata {
@@ -1597,6 +1651,11 @@ export interface CreateTenantWebhookEndpointCommand {
   url: string;
   secret: string;
   events: string[];
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  expiresAt?: string | null;
 }
 
 export const TENANT_WEBHOOK_ENDPOINT_STATUSES = [
@@ -1613,8 +1672,19 @@ export interface TenantWebhookEndpoint {
   url: string;
   events: string[];
   status: TenantWebhookEndpointStatus;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  resourceScope?: string | null;
   secretVersion: number;
   secretPreview: string;
+  secretExpiresAt?: string | null;
+  secretLastUsedAt?: string | null;
+  secretLastUsedWorkload?: string | null;
+  credentialStatus?: IntegrationCredentialStatus;
+  rotationOverlapEndsAt?: string | null;
+  credentialSignals?: IntegrationCredentialSignals | undefined;
   createdAt: string;
   updatedAt: string;
   availableActions?: ResourceActionDescriptor[];
@@ -2443,7 +2513,7 @@ export interface CanonicalIdentitySessionRecord {
   partnerEntrySlug?: string | null;
   currentTokenId?: string | null;
   roles?: string[];
-  scopes?: string[];
+  scopes?: string[] | undefined;
   policyVersion?: string | null;
   acr?: string | null;
   audience?: string[] | null;
@@ -2543,11 +2613,25 @@ export interface TenantApiKeyRecord {
   keyName: string;
   keyPrefix: string;
   maskedSuffix: string;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  realm?: "tenant";
+  resourceScope?: string | null;
   scopes: string[];
   lastUsedAt: string | null;
+  lastUsedWorkload?: string | null;
   expiresAt: string | null;
+  status?: IntegrationCredentialStatus;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  rotatedFromApiKeyId?: string | null;
+  supersededByApiKeyId?: string | null;
   revokedAt: string | null;
+  revokeReason?: string | null;
   createdAt: string;
+  signals?: IntegrationCredentialSignals | undefined;
 }
 
 export const TENANT_API_KEY_ALLOWED_SCOPES = [
@@ -2569,6 +2653,9 @@ export interface TenantApiKeyGovernancePolicy {
   compatibilityAliases: Record<string, string>;
   defaultLifetimeDays: number;
   maxLifetimeDays: number;
+  rotationOverlapDays: number;
+  approachingExpiryThresholdDays: number;
+  dormantUseThresholdDays: number;
   requireExpiry: boolean;
   breakGlassRequiresPlatformApproval: boolean;
   revokeEffect: "immediate";
@@ -2577,25 +2664,38 @@ export interface TenantApiKeyGovernancePolicy {
 export interface IssueTenantApiKeyCommand {
   keyName: string;
   scopes: string[];
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
   expiresAt?: string | null;
 }
 
 export interface RotateTenantApiKeyCommand {
   keyName?: string;
-  scopes?: string[];
+  scopes?: string[] | undefined;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
   expiresAt?: string | null;
+  overlapDays?: number | null;
 }
 
 export interface TenantApiKeyIssued {
   apiKey: TenantApiKeyRecord;
   plaintextKey: string;
   revokedApiKeyId: string | null;
+  overlapEndsAt?: string | null;
 }
 
 // --- Tenant Webhooks ---
 export interface TenantWebhookGovernancePolicy {
   testEventType: string;
   autoDisableAfterConsecutiveFailures: number;
+  rotationOverlapDays: number;
+  approachingExpiryThresholdDays: number;
+  dormantUseThresholdDays: number;
   revalidationRequiredOnCreate: boolean;
   revalidationRequiredOnEndpointMutation: boolean;
   revalidationRequiredOnSecretRotation: boolean;

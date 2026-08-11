@@ -4,14 +4,22 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { EBtnContent, entBtnStyle } from "@/components/ent-kit";
 import {
-  enterpriseTenant,
-  getEnterpriseBookingCommandFixture,
-} from "@/lib/enterprise-fixtures";
+  buildEnterpriseBookingCommand,
+  buildEnterpriseBookingUpdateCommand,
+  type EnterpriseBookingDraftForm,
+} from "@/lib/enterprise-booking-draft";
+import { enterpriseTenant } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as theme } from "@/lib/enterprise-theme";
 import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 
-export function BookingSubmitButton() {
+export function BookingSubmitButton({
+  draft,
+  bookingId,
+}: {
+  draft: EnterpriseBookingDraftForm;
+  bookingId?: string;
+}) {
   const router = useRouter();
   const { t: tr } = useTranslation();
   const [isHydrated, setIsHydrated] = useState(false);
@@ -27,9 +35,18 @@ export function BookingSubmitButton() {
     setError(null);
 
     try {
-      const result = await getEnterpriseDispatchTenantClient(
-        enterpriseTenant.id,
-      ).createBookingFromFixture(getEnterpriseBookingCommandFixture());
+      const client = getEnterpriseDispatchTenantClient(enterpriseTenant.id);
+      if (bookingId) {
+        await client.updateBooking(
+          bookingId,
+          buildEnterpriseBookingUpdateCommand(draft),
+        );
+        router.push(`/bookings/${encodeURIComponent(bookingId)}`);
+        router.refresh();
+        return;
+      }
+
+      const result = await client.createBooking(buildEnterpriseBookingCommand(draft));
 
       if (!result.bookingId || !result.orderId) {
         throw new Error("Enterprise dispatch API did not return booking proof");

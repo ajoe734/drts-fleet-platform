@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from control_plane.domain.dispatch_policy import (
     DispatchReason,
+    has_external_integration_in_flight,
     ReadyDispatchPolicy,
     build_dispatch_event,
     dependency_signature,
@@ -138,6 +140,109 @@ class DispatchPolicyTests(unittest.TestCase):
 
         self.assertNotIn("event_id", event)
         self.assertNotIn("metadata", event)
+
+
+
+
+
+class IntegrationSelfLockTests(unittest.TestCase):
+    """An in-flight integration must not hold a task forever.
+
+    Nothing in the supervisor refreshes `integration_status` or `ci_status` —
+    only a worker writes them, and this policy is what decides whether a worker
+    is dispatched at all. Two production tasks were held this way, and every
+    remaining task in the plan depended on one of them.
+    """
+
+    POLICY = ReadyDispatchPolicy(
+        owned_statuses=frozenset({"in_progress", "todo", "backlog"}),
+        integration_in_flight_max_age_seconds=6 * 60 * 60,
+    )
+
+    def _task(self, **overrides):
+        task = {
+            "id": "T-1",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "status": "in_progress",
+            "depends_on": [],
+            "pr_url": "https://github.com/o/r/pull/1",
+        }
+        task.update(overrides)
+        return task
+
+    def test_a_failure_written_as_a_sentence_is_still_a_failure(self) -> None:
+        # What a worker actually recorded. The old exact-token comparison did
+        # not match it, so the task waited on a run that had already failed.
+        task = self._task(
+            integration_status="pr_open",
+            ci_status="CI (integration trunk) failed on run 30918215661",
+            integration_recorded_at="2026-08-04T18:30:32Z",
+        )
+
+        self.assertFalse(has_external_integration_in_flight(task))
+        self.assertIsNotNone(resolve_dispatch_target(task, {"T-1": task}, self.POLICY))
+
+    def test_a_stale_in_flight_record_stops_being_believed(self) -> None:
+        task = self._task(
+            integration_status="ci_pending",
+            ci_status="in_progress",
+            integration_recorded_at="2026-08-02T12:09:29Z",
+        )
+        now = datetime(2026, 8, 7, 0, 0, tzinfo=timezone.utc)
+
+        self.assertFalse(
+            has_external_integration_in_flight(
+                task, max_age_seconds=6 * 60 * 60, now=now
+            )
+        )
+
+    def test_a_fresh_in_flight_record_still_holds_the_task(self) -> None:
+        # The rule this function exists for: do not start a second attempt while
+        # the first one is genuinely running.
+        #
+        # `resolve_dispatch_target` takes no clock, so it reads the real one.
+        # A hardcoded `integration_recorded_at` therefore made this test pass or
+        # fail depending on the hour it ran in: it was written and run at 00:30
+        # UTC against a 00:00 stamp, and failed in CI at 11:29 UTC because the
+        # same stamp was by then eleven hours old. Stamp it relative to now.
+        recorded_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        task = self._task(
+            integration_status="ci_pending",
+            ci_status="in_progress",
+            integration_recorded_at=recorded_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+
+        self.assertTrue(
+            has_external_integration_in_flight(task, max_age_seconds=6 * 60 * 60)
+        )
+        self.assertIsNone(resolve_dispatch_target(task, {"T-1": task}, self.POLICY))
+
+    def test_last_update_is_not_what_ages_the_record(self) -> None:
+        # `last_update` is refreshed every tick, so a task frozen since 2 August
+        # still carries a current one. Ageing against it would never fire.
+        task = self._task(
+            integration_status="ci_pending",
+            ci_status="in_progress",
+            integration_recorded_at="2026-08-02T12:09:29Z",
+            last_update="2026-08-07T00:45:24Z",
+        )
+        now = datetime(2026, 8, 7, 0, 46, tzinfo=timezone.utc)
+
+        self.assertFalse(
+            has_external_integration_in_flight(
+                task, max_age_seconds=6 * 60 * 60, now=now
+            )
+        )
+
+    def test_a_record_with_no_timestamp_keeps_its_old_behaviour(self) -> None:
+        # Ageing needs something to measure. Every task carrying an in-flight
+        # integration status in production had `integration_recorded_at` set,
+        # so a missing stamp is not a case worth inventing a verdict for — the
+        # original rule stands.
+        task = self._task(integration_status="ci_pending", ci_status="in_progress")
+
+        self.assertTrue(has_external_integration_in_flight(task))
 
 
 if __name__ == "__main__":

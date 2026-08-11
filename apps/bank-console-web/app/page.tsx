@@ -1,26 +1,17 @@
 import type { ReactNode } from "react";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
-import { getBankConsoleSession, toHomeRole } from "@/lib/session";
-import { tenantDisplayText, tenantIssuerVars } from "@/lib/tenant-display";
+import { loadBankHomeSnapshot } from "@/lib/bank-dev-read-models";
+import { bankConsoleHref, getBankConsoleSession, toHomeRole } from "@/lib/session";
+import { tenantIssuerVars } from "@/lib/tenant-display";
 import { t, type Locale } from "@/lib/translations";
 import {
-  EXCEPTIONS,
-  ON_TIME_SLA,
-  ORDER_TALLIES,
-  PERIOD,
-  QUOTA_ALL,
-  QUOTA_PROGRAMS,
-  SLA_METRICS,
-  STATEMENT,
-  TODAY,
-  UPCOMING_ORDERS,
-  orderStateTone,
   quotaPct,
   roleView,
-  slaMet,
+  type ExceptionKind,
+  type ExceptionTone,
   type QuotaRow,
-  type SlaMetric,
 } from "@/lib/home-data";
+import type { IssuerContractStatusRecord, TenantProgramUsageRecord } from "@drts/contracts";
 
 function Card({
   title,
@@ -122,20 +113,45 @@ function QuotaBar({
   );
 }
 
-function SlaRow({ metric, locale }: { metric: SlaMetric; locale: Locale }) {
-  const ok = slaMet(metric);
+function SlaRow({
+  labelKey,
+  value,
+  target,
+  unit,
+  locale,
+}: {
+  labelKey: "onTime" | "completion" | "response";
+  value: number | null;
+  target: number | null;
+  unit: "%" | "s";
+  locale: Locale;
+}) {
+  if (value === null || target === null) {
+    return (
+      <div className="sla-row">
+        <span className="sla-label">{t(`home.sla.${labelKey}`, locale)}</span>
+        <div className="sla-values">
+          <span className="sla-value">N/A</span>
+          <span className="sla-target">API</span>
+        </div>
+        <span className="pill dot tone-neutral">N/A</span>
+      </div>
+    );
+  }
+
+  const ok = unit === "s" ? value <= target : value >= target;
   return (
     <div className="sla-row">
-      <span className="sla-label">{t(`home.sla.${metric.key}`, locale)}</span>
+      <span className="sla-label">{t(`home.sla.${labelKey}`, locale)}</span>
       <div className="sla-values">
         <span className={ok ? "sla-value" : "sla-value is-breach"}>
-          {metric.value}
-          {metric.unit}
+          {value}
+          {unit}
         </span>
         <span className="sla-target">
           {t("home.sla.target", locale, {
-            target: metric.target,
-            unit: metric.unit,
+            target,
+            unit,
           })}
         </span>
       </div>
@@ -144,6 +160,131 @@ function SlaRow({ metric, locale }: { metric: SlaMetric; locale: Locale }) {
       </span>
     </div>
   );
+}
+
+function formatDateLabel(value: string) {
+  const date = new Date(`${value}T00:00:00Z`);
+  const weekdays = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+  return `${value} (${weekdays[date.getUTCDay()]})`;
+}
+
+function formatCompactMoney(amount: number, locale: Locale) {
+  if (amount >= 1_000_000) {
+    const compact = (amount / 1_000_000).toFixed(amount >= 10_000_000 ? 0 : 2);
+    return locale === "zh" ? `NT$ ${compact}M` : `NT$ ${compact}M`;
+  }
+  return formatMoney(amount, locale);
+}
+
+function formatMoney(amount: number, locale: Locale) {
+  return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    style: "currency",
+    currency: "TWD",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function toneForException(kind: ExceptionKind): ExceptionTone {
+  return kind === "no_supply" ? "danger" : "warning";
+}
+
+function mapExceptionKind(reasonCode: string): ExceptionKind {
+  const normalized = reasonCode.toLowerCase();
+  if (normalized.includes("supply")) return "no_supply";
+  if (normalized.includes("manual") || normalized.includes("review")) {
+    return "manual_review";
+  }
+  return "sla_breach";
+}
+
+function buildHomeExceptions(contracts: IssuerContractStatusRecord[]) {
+  const exceptions = contracts.flatMap((contract) => {
+    const openExceptions = contract.exceptions
+      .filter((item) => item.status === "open")
+      .map((item) => {
+        const kind = mapExceptionKind(item.reasonCode);
+        const entity = kind === "sla_breach" ? contract.contractId : item.orderId;
+        const href =
+          kind === "sla_breach"
+            ? `/contracts/${contract.contractId}`
+            : `/bookings/${item.orderId}`;
+
+        return {
+          kind,
+          tone: toneForException(kind),
+          entity,
+          href,
+        };
+      });
+
+    if (openExceptions.length > 0) {
+      return openExceptions;
+    }
+
+    if (
+      contract.status === "at_risk" ||
+      contract.status === "breached" ||
+      contract.periodAttainment.breachedTargets.length > 0
+    ) {
+      return [
+        {
+          kind: "sla_breach" as const,
+          tone: "warning" as const,
+          entity: contract.contractId,
+          href: `/contracts/${contract.contractId}`,
+        },
+      ];
+    }
+
+    return [];
+  });
+
+  return exceptions.slice(0, 3);
+}
+
+function buildQuotaRows(usage: TenantProgramUsageRecord[]): QuotaRow[] {
+  return usage.map((record) => ({
+    program:
+      record.programCode.toLowerCase().includes("we")
+        ? "worldElite"
+        : "signature",
+    used: record.tripsConsumed,
+    total: record.quotaTotal ?? 0,
+  }));
+}
+
+function buildOverallQuota(rows: QuotaRow[]): QuotaRow {
+  return {
+    program: "all",
+    used: rows.reduce((sum, row) => sum + row.used, 0),
+    total: rows.reduce((sum, row) => sum + row.total, 0),
+  };
+}
+
+function buildSlaSummary(contracts: IssuerContractStatusRecord[]) {
+  const attained = contracts.map((contract) => contract.periodAttainment);
+  const completedTrips = attained.reduce(
+    (sum, record) => sum + record.completedTrips,
+    0,
+  );
+  const totalTrips = attained.reduce((sum, record) => sum + record.totalTrips, 0);
+  const onTimeWeighted = attained.reduce(
+    (sum, record) =>
+      sum + (record.pickupPunctualityPercent ?? 0) * record.completedTrips,
+    0,
+  );
+  const completionWeighted = attained.reduce(
+    (sum, record) =>
+      sum + (record.completionRatePercent ?? 0) * record.totalTrips,
+    0,
+  );
+
+  return {
+    onTimeValue:
+      completedTrips > 0 ? Number((onTimeWeighted / completedTrips).toFixed(1)) : 0,
+    completionValue:
+      totalTrips > 0 ? Number((completionWeighted / totalTrips).toFixed(1)) : 0,
+  };
 }
 
 export default async function HomePage({
@@ -160,18 +301,26 @@ export default async function HomePage({
   const tenant = resolveBankDemoTenant(params.bank);
   const session = getBankConsoleSession(tenant, locale, params.role);
   const view = roleView(toHomeRole(session.role));
-  const onTime = ON_TIME_SLA;
-  const bankQuery = `bank=${tenant.code}&locale=${locale}&role=${session.role}`;
+  const bankQuery = bankConsoleHref("/", tenant, locale, session.role).split("?")[1];
+  const snapshot = await loadBankHomeSnapshot(tenant.tenantId, session.role);
+  const quotaPrograms = buildQuotaRows(snapshot.data.usage);
+  const quotaAll = buildOverallQuota(quotaPrograms);
+  const exceptions = buildHomeExceptions(snapshot.data.contracts);
+  const currentStatement = [...snapshot.data.statements].sort((left, right) =>
+    right.period.localeCompare(left.period),
+  )[0];
+  const sla = buildSlaSummary(snapshot.data.contracts);
+  const upcomingOrders = snapshot.data.orders
+    .filter((order) => order.state === "assigned" || order.state === "en_route")
+    .slice(0, 6);
 
-  const manualN = EXCEPTIONS.filter((e) => e.kind === "manual_review").length;
-  const supplyN = EXCEPTIONS.filter((e) => e.kind === "no_supply").length;
-  const slaN = EXCEPTIONS.filter((e) => e.kind === "sla_breach").length;
-
-  // Finance-only viewers (no order scope) see just the SLA-linked exceptions.
-  const exceptions =
+  const manualN = exceptions.filter((e) => e.kind === "manual_review").length;
+  const supplyN = exceptions.filter((e) => e.kind === "no_supply").length;
+  const slaN = exceptions.filter((e) => e.kind === "sla_breach").length;
+  const exceptionRows =
     view.seeFinance && !view.seeOrders
-      ? EXCEPTIONS.filter((e) => e.kind === "sla_breach")
-      : EXCEPTIONS;
+      ? exceptions.filter((e) => e.kind === "sla_breach")
+      : exceptions;
 
   return (
     <div className="page-shell bank-home" style={tenantIssuerVars(tenant)}>
@@ -182,7 +331,10 @@ export default async function HomePage({
           <span className="issuer-badge">{tenant.issuerCode}</span>
         </h1>
         <p className="bank-home-subtitle">
-          {t("home.subtitle", locale, { date: TODAY, period: PERIOD })}
+          {t("home.subtitle", locale, {
+            date: formatDateLabel(snapshot.data.todayLabel),
+            period: snapshot.data.period,
+          })}
         </p>
         <div className="bank-home-meta">
           <span className="pill tone-issuer">{session.roleLabel}</span>
@@ -192,43 +344,56 @@ export default async function HomePage({
         </div>
       </header>
 
+      {snapshot.degradedMessage ? (
+        <section className="bank-card">
+          <div className="bank-card-body">{snapshot.degradedMessage}</div>
+        </section>
+      ) : null}
+
       <section className="bank-home-kpis">
         <Kpi
           label={t("home.kpi.orders", locale)}
-          value={ORDER_TALLIES.total.toLocaleString()}
+          value={snapshot.data.tallies.total.toLocaleString()}
           sub={t("home.kpi.orders.sub", locale, {
-            reserved: ORDER_TALLIES.reserved,
-            live: ORDER_TALLIES.live,
-            done: ORDER_TALLIES.completed,
-            cancelled: ORDER_TALLIES.cancelled,
+            reserved: snapshot.data.tallies.reserved,
+            live: snapshot.data.tallies.live,
+            done: snapshot.data.tallies.completed,
+            cancelled: snapshot.data.tallies.cancelled,
           })}
         />
         <Kpi
           label={t("home.kpi.quota", locale)}
-          value={`${quotaPct(QUOTA_ALL)}%`}
+          value={`${quotaPct(quotaAll)}%`}
           sub={t("home.kpi.quota.sub", locale, {
-            used: QUOTA_ALL.used.toLocaleString(),
-            total: QUOTA_ALL.total.toLocaleString(),
+            used: quotaAll.used.toLocaleString(),
+            total: quotaAll.total.toLocaleString(),
           })}
         />
         <Kpi
           label={t("home.kpi.onTime", locale)}
-          value={`${onTime.value}%`}
-          delta={t("home.kpi.onTime.delta", locale, { target: onTime.target })}
+          value={`${sla.onTimeValue}%`}
+          delta={t("home.kpi.onTime.delta", locale, { target: 95 })}
         />
         {view.seeFinance ? (
           <Kpi
             label={t("home.kpi.statement", locale)}
-            value={STATEMENT.totalCompact}
-            delta={t("home.kpi.statement.delta", locale, {
-              period: STATEMENT.period,
-              due: STATEMENT.due.slice(5),
-            })}
+            value={formatCompactMoney(
+              currentStatement?.totalIssuerPayableAmount ?? 0,
+              locale,
+            )}
+            {...(currentStatement
+              ? {
+                  delta: t("home.kpi.statement.delta", locale, {
+                    period: currentStatement.period,
+                    due: currentStatement.dueAt.slice(5, 10),
+                  }),
+                }
+              : {})}
           />
         ) : (
           <Kpi
             label={t("home.kpi.exceptions", locale)}
-            value={String(EXCEPTIONS.length)}
+            value={String(exceptions.length)}
             delta={t("home.kpi.exceptions.delta", locale, {
               manual: manualN,
               supply: supplyN,
@@ -244,7 +409,7 @@ export default async function HomePage({
             <Card
               title={t("home.upcoming.title", locale)}
               subtitle={t("home.upcoming.subtitle", locale, {
-                n: UPCOMING_ORDERS.length,
+                n: upcomingOrders.length,
               })}
               actions={
                 <a className="card-link" href={`/bookings?${bankQuery}`}>
@@ -265,28 +430,32 @@ export default async function HomePage({
                     </tr>
                   </thead>
                   <tbody>
-                    {UPCOMING_ORDERS.map((o) => (
-                      <tr key={o.id}>
-                        <td className="bank-id">{o.id}</td>
+                    {upcomingOrders.map((order) => (
+                      <tr key={order.orderId}>
+                        <td className="bank-id">{order.orderNo}</td>
                         <td>
                           <span
                             className={`pill tone-${
-                              o.direction === "outbound" ? "info" : "neutral"
+                              order.direction === "outbound" ? "info" : "neutral"
                             }`}
                           >
-                            {t(`home.direction.${o.direction}`, locale)}
+                            {t(`home.direction.${order.direction}`, locale)}
                           </span>
                         </td>
                         <td className="mono-cell">
-                          {o.flight} · {o.terminal}
+                          {order.flightNo} · {order.terminal}
                         </td>
-                        <td className="mono-cell">{o.window}</td>
-                        <td className="mono-cell muted">{o.cardholderRef}</td>
+                        <td className="mono-cell">
+                          {order.scheduledAt.slice(5, 16).replace("T", " ")}
+                        </td>
+                        <td className="mono-cell muted">
+                          {order.cardholderRefMasked}
+                        </td>
                         <td>
-                          <span
-                            className={`pill dot tone-${orderStateTone(o.state)}`}
-                          >
-                            {t(`home.state.${o.state}`, locale)}
+                          <span className="pill dot tone-accent">
+                            {order.state === "en_route"
+                              ? t("home.state.live", locale)
+                              : t("home.state.reserved", locale)}
                           </span>
                         </td>
                       </tr>
@@ -297,10 +466,10 @@ export default async function HomePage({
             </Card>
           ) : null}
 
-          {!view.seeOrders && view.seeFinance ? (
+          {!view.seeOrders && view.seeFinance && currentStatement ? (
             <Card
               title={t("home.statement.title", locale, {
-                period: STATEMENT.period,
+                period: currentStatement.period,
               })}
               subtitle={t("home.statement.subtitle", locale)}
               actions={
@@ -312,7 +481,7 @@ export default async function HomePage({
               <div className="bank-dl cols-2">
                 <DlItem
                   label={t("home.settlement.period", locale)}
-                  value={STATEMENT.period}
+                  value={currentStatement.period}
                   mono
                 />
                 <DlItem
@@ -326,23 +495,23 @@ export default async function HomePage({
                 <DlItem
                   label={t("home.settlement.trips", locale)}
                   value={t("home.settlement.tripsUnit", locale, {
-                    trips: STATEMENT.trips,
+                    trips: currentStatement.totalTrips,
                   })}
                   mono
                 />
                 <DlItem
                   label={t("home.settlement.total", locale)}
-                  value={STATEMENT.totalFull}
+                  value={formatMoney(currentStatement.totalIssuerPayableAmount, locale)}
                   mono
                 />
                 <DlItem
                   label={t("home.settlement.issued", locale)}
-                  value={STATEMENT.issued}
+                  value={currentStatement.issuedAt.slice(0, 10)}
                   mono
                 />
                 <DlItem
                   label={t("home.settlement.due", locale)}
-                  value={STATEMENT.due}
+                  value={currentStatement.dueAt.slice(0, 10)}
                   mono
                 />
               </div>
@@ -354,31 +523,34 @@ export default async function HomePage({
             subtitle={t("home.exceptions.subtitle", locale)}
             actions={
               <span className="pill tone-warning">
-                {t("home.exceptions.badge", locale, { n: EXCEPTIONS.length })}
+                {t("home.exceptions.badge", locale, { n: exceptions.length })}
               </span>
             }
           >
             <div className="exception-list">
-              {exceptions.map((e, i) => (
+              {exceptionRows.map((exception, index) => (
                 <div
-                  key={`${e.entity}-${i}`}
-                  className={`exception is-${e.tone}`}
+                  key={`${exception.entity}-${index}`}
+                  className={`exception is-${exception.tone}`}
                 >
                   <div className="exception-head">
                     <strong>
-                      {t(`home.ex.${e.kind}.title`, locale, {
-                        entity: tenantDisplayText(e.entity, tenant),
+                      {t(`home.ex.${exception.kind}.title`, locale, {
+                        entity: exception.entity,
                       })}
                     </strong>
-                    <span className="exception-code">{e.kind}</span>
+                    <span className="exception-code">{exception.kind}</span>
                   </div>
                   <p>
-                    {t(`home.ex.${e.kind}.body`, locale, {
-                      entity: tenantDisplayText(e.entity, tenant),
+                    {t(`home.ex.${exception.kind}.body`, locale, {
+                      entity: exception.entity,
                     })}
                   </p>
-                  <a className="card-link" href={`/bookings?${bankQuery}`}>
-                    {tenantDisplayText(e.entity, tenant)} →
+                  <a
+                    className="card-link"
+                    href={`${exception.href}?bank=${tenant.code}&locale=${locale}&role=${session.role}`}
+                  >
+                    {exception.entity} →
                   </a>
                 </div>
               ))}
@@ -394,15 +566,15 @@ export default async function HomePage({
               accent
             >
               <QuotaBar
-                row={QUOTA_ALL}
+                row={quotaAll}
                 label={t("home.program.all", locale)}
                 locale={locale}
               />
-              {QUOTA_PROGRAMS.map((r) => (
+              {quotaPrograms.map((row) => (
                 <QuotaBar
-                  key={r.program}
-                  row={r}
-                  label={t(`home.program.${r.program}`, locale)}
+                  key={`${row.program}-${row.total}`}
+                  row={row}
+                  label={t(`home.program.${row.program}`, locale)}
                   locale={locale}
                 />
               ))}
@@ -414,14 +586,32 @@ export default async function HomePage({
               title={t("home.sla.title", locale)}
               subtitle={t("home.sla.subtitle", locale)}
             >
-              {SLA_METRICS.map((m) => (
-                <SlaRow key={m.key} metric={m} locale={locale} />
-              ))}
+              <SlaRow
+                labelKey="onTime"
+                value={sla.onTimeValue}
+                target={95}
+                unit="%"
+                locale={locale}
+              />
+              <SlaRow
+                labelKey="completion"
+                value={sla.completionValue}
+                target={99}
+                unit="%"
+                locale={locale}
+              />
+              <SlaRow
+                labelKey="response"
+                value={null}
+                target={null}
+                unit="s"
+                locale={locale}
+              />
               <p className="sla-note">{t("home.sla.note", locale)}</p>
             </Card>
           ) : null}
 
-          {view.seeFinance && view.seeOrders ? (
+          {view.seeFinance && view.seeOrders && currentStatement ? (
             <Card
               title={t("home.settlement.title", locale)}
               subtitle={t("home.settlement.subtitle", locale)}
@@ -429,7 +619,7 @@ export default async function HomePage({
               <div className="bank-dl cols-2">
                 <DlItem
                   label={t("home.settlement.period", locale)}
-                  value={STATEMENT.period}
+                  value={currentStatement.period}
                   mono
                 />
                 <DlItem
@@ -442,12 +632,15 @@ export default async function HomePage({
                 />
                 <DlItem
                   label={t("home.settlement.total", locale)}
-                  value={STATEMENT.totalCompact}
+                  value={formatCompactMoney(
+                    currentStatement.totalIssuerPayableAmount,
+                    locale,
+                  )}
                   mono
                 />
                 <DlItem
                   label={t("home.settlement.due", locale)}
-                  value={STATEMENT.due.slice(5)}
+                  value={currentStatement.dueAt.slice(5, 10)}
                   mono
                 />
               </div>

@@ -12,12 +12,12 @@ import {
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
+import { loadBankBookingsData } from "@/lib/bank-dev-read-models";
 import { getBankConsoleSession, bankConsoleHref } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import {
-  bookingPeriods,
-  bookingPrograms,
-  filterBookings,
+  deriveBookingPeriods,
+  filterBookingItems,
   type BookingDirection,
   type BookingState,
 } from "@/lib/bookings";
@@ -92,6 +92,7 @@ export default async function BookingsPage({
     locale,
     resolvedSearchParams.role,
   );
+  const bookingData = await loadBankBookingsData(tenant.tenantId, session.role);
   const issuerBrand = tenant.template;
   const baseQuery = {
     bank: tenant.code,
@@ -112,13 +113,14 @@ export default async function BookingsPage({
     ...(period ? { period } : {}),
     ...(cardholder ? { cardholder } : {}),
   };
-  const bookings = filterBookings(filters);
+  const bookings = filterBookingItems(bookingData.data.bookings, filters);
   const activeCount = bookings.filter(
     (item) => item.state === "assigned" || item.state === "en_route",
   ).length;
   const completedCount = bookings.filter(
     (item) => item.state === "completed",
   ).length;
+  const bookingPeriods = deriveBookingPeriods(bookingData.data.bookings);
   const currentPeriod = filters.period ?? bookingPeriods[0] ?? "2026-06";
 
   // Counts for the state tabs ignore the state filter but keep every other
@@ -129,7 +131,7 @@ export default async function BookingsPage({
     ...(period ? { period } : {}),
     ...(cardholder ? { cardholder } : {}),
   };
-  const scopedBookings = filterBookings(baseFilters);
+  const scopedBookings = filterBookingItems(bookingData.data.bookings, baseFilters);
   const stateTabHref = (tabState?: BookingState) => {
     const params = new URLSearchParams();
     params.set("bank", baseQuery.bank);
@@ -188,6 +190,13 @@ export default async function BookingsPage({
         title={t("bookings.readonlyTitle", locale)}
         description={t("bookings.readonlyBody", locale)}
       />
+      {bookingData.degradedMessage ? (
+        <CalloutPanel
+          title={t("common.apiDegraded", locale)}
+          description={bookingData.degradedMessage}
+          tone="warning"
+        />
+      ) : null}
 
       <nav
         aria-label={t("bookings.filters.state", locale)}
@@ -248,7 +257,7 @@ export default async function BookingsPage({
             <span>{t("bookings.filters.program", locale)}</span>
             <select name="program" defaultValue={filters.programCode ?? ""}>
               <option value="">{t("common.all", locale)}</option>
-              {bookingPrograms.map((program) => (
+              {bookingData.data.programs.map((program) => (
                 <option key={program.code} value={program.code}>
                   {tenantDisplayText(program.label, tenant)}
                 </option>

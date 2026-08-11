@@ -217,7 +217,7 @@ export class BootstrapAuthGuard implements CanActivate {
       routePolicy?.allowedRealms ?? [],
       decoratorRealms,
     );
-    const policy =
+    let policy =
       mergedScopes.length > 0 || mergedRealms.length > 0
         ? {
             requiredScopes: mergedScopes,
@@ -228,6 +228,30 @@ export class BootstrapAuthGuard implements CanActivate {
             routeKey: routePolicy?.routeKey ?? "decorator",
           }
         : null;
+
+    // Every controller route is either explicitly public, covered by a route
+    // policy/decorator, or (outside strict deployments) is an authenticated
+    // fallback. Strict environments deliberately do not have a permissive
+    // fallback: a newly added route must be classified before it can serve.
+    if (!policy) {
+      if (strictEnvironment) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_ROUTE_UNCLASSIFIED",
+          "This route is not classified for strict environment authorization.",
+          {
+            route: request.originalUrl ?? request.url,
+            method: request.method ?? "GET",
+          },
+        );
+      }
+      policy = {
+        requiredScopes: [],
+        allowedRealms: [],
+        description: "Default authenticated controller route",
+        routeKey: "default-authenticated",
+      };
+    }
 
     // IAP workforce subject resolution if IAP assertion is present
     const rawIapAssertion = extractIapJwtAssertion(baseHeaders);

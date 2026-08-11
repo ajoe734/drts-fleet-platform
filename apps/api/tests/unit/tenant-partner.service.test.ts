@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -1173,7 +1174,10 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
     expect(credentialsAfterRotate[1]).toMatchObject({
       keyId: "partner-key-alpha-demo",
-      revokedAt: expect.any(String),
+      status: "overlap_active",
+      revokedAt: null,
+      overlapEndsAt: expect.any(String),
+      supersededByKeyId: issued.credential.keyId,
     });
 
     const resolution = service.authenticatePartnerBootstrap(
@@ -1207,14 +1211,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
         },
         "req-partner-credential-auth-002",
       ),
-    ).toThrowError(
-      expect.objectContaining({
-        response: expect.objectContaining({
-          error: expect.objectContaining({
-            code: "PARTNER_AUTH_NOT_CONFIGURED",
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_REVOKED",
+            }),
           }),
         }),
-      }),
     );
 
     expect(auditNotificationService.listAuditLogs()).toEqual(
@@ -1231,6 +1235,184 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
       ]),
     );
+  });
+
+  it("keeps rotated partner ingress credentials in overlap and fails closed for wrong-entry or auto-revoked keys", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T12:00:00.000Z"));
+      process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+        "pk_test_alpha_ingress_secret";
+      process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT =
+        "pk_test_beta_ingress_secret";
+
+      const service = new TenantPartnerService(new AuditNotificationService());
+      const issued = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-alpha-airport",
+        {
+          rotationReason: "scheduled_rotation",
+          overlapDays: 1,
+        },
+        "req-partner-overlap-001",
+      );
+
+      expect(issued.overlapEndsAt).toBe("2026-08-03T12:00:00.000Z");
+      expect(
+        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            keyId: issued.credential.keyId,
+            status: "active",
+          }),
+          expect.objectContaining({
+            keyId: "partner-key-alpha-demo",
+            status: "overlap_active",
+            overlapEndsAt: "2026-08-03T12:00:00.000Z",
+            supersededByKeyId: issued.credential.keyId,
+          }),
+        ]),
+      );
+
+      const overlapResolution = service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          apiKey: "pk_test_alpha_ingress_secret",
+        },
+        "req-partner-overlap-002",
+      );
+      expect(overlapResolution.identity.actorId).toBe("partner-key-alpha-demo");
+
+      expect(() =>
+        service.authenticatePartnerBootstrap(
+          {
+            entrySlug: "bank-demo-beta-airport",
+            apiKey: "pk_test_alpha_ingress_secret",
+          },
+          "req-partner-overlap-003",
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_INVALID",
+            }),
+          }),
+        }),
+      );
+
+      vi.setSystemTime(new Date("2026-08-04T12:00:00.000Z"));
+
+      expect(() =>
+        service.authenticatePartnerBootstrap(
+          {
+            entrySlug: "bank-demo-alpha-airport",
+            apiKey: "pk_test_alpha_ingress_secret",
+          },
+          "req-partner-overlap-004",
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_REVOKED",
+            }),
+          }),
+        }),
+      );
+
+      expect(
+        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            keyId: "partner-key-alpha-demo",
+            status: "auto_revoked",
+            autoRevokedAt: "2026-08-03T12:00:00.000Z",
+            revokeReason: "rotation_overlap_elapsed",
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects expired partner credentials and records dormant partner credential use", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T08:00:00.000Z"));
+      const auditNotificationService = new AuditNotificationService();
+      const service = new TenantPartnerService(auditNotificationService);
+
+      const expiring = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-alpha-airport",
+        {
+          rotationReason: "short_lived",
+          expiresAt: "2026-08-02T09:00:00.000Z",
+        },
+        "req-partner-expiry-001",
+      );
+
+      vi.setSystemTime(new Date("2026-08-02T10:00:00.000Z"));
+
+      expect(() =>
+        service.authenticatePartnerBootstrap(
+          {
+            entrySlug: "bank-demo-alpha-airport",
+            apiKey: expiring.plaintextKey,
+          },
+          "req-partner-expiry-002",
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "PARTNER_API_KEY_EXPIRED",
+            }),
+          }),
+        }),
+      );
+
+      const dormant = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-beta-airport",
+        {
+          rotationReason: "dormancy_probe",
+        },
+        "req-partner-dormant-001",
+      );
+
+      vi.setSystemTime(new Date("2026-09-05T10:00:00.000Z"));
+
+      const dormantResolution = service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          apiKey: dormant.plaintextKey,
+        },
+        "req-partner-dormant-002",
+      );
+      expect(dormantResolution.identity.actorId).toBe(dormant.credential.keyId);
+      expect(auditNotificationService.listNotifications()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            channel: "ops_notice",
+            title: "Dormant partner credential used",
+          }),
+        ]),
+      );
+      expect(
+        service.listPlatformPartnerIngressCredentials("bank-demo-beta-airport"),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            keyId: dormant.credential.keyId,
+            lastUsedWorkload: "partner_bootstrap",
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("persists partner ingress credential lifecycle changes and reloads them", async () => {
@@ -1266,8 +1448,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
         expect.objectContaining({
           keyId: "partner-key-alpha-demo",
           entrySlug: "bank-demo-alpha-airport",
-          revokedAt: expect.any(String),
-          revokeReason: "scheduled_rotation",
+          revokedAt: null,
+          revokeReason: null,
+          status: "overlap_active",
+          overlapEndsAt: expect.any(String),
+          supersededByKeyId: issued.credential.keyId,
         }),
         expect.objectContaining({
           keyId: issued.credential.keyId,
@@ -1298,8 +1483,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
         expect.objectContaining({
           keyId: "partner-key-alpha-demo",
-          revokedAt: expect.any(String),
-          revokeReason: "scheduled_rotation",
+          revokedAt: null,
+          revokeReason: null,
+          status: "overlap_active",
+          overlapEndsAt: expect.any(String),
+          supersededByKeyId: issued.credential.keyId,
         }),
       ]),
     );
@@ -2021,6 +2209,583 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(governance.baselineWebhookEvents).toContain("dispatch.assigned");
   });
 
+  it("limits tenant API key rotation to dual overlap and auto-revokes elapsed overlaps", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+      const service = new TenantPartnerService(new AuditNotificationService());
+
+      const first = service.issueApiKey("tenant-demo-001", {
+        keyName: "Partner sync key",
+        scopes: ["tenant:write"],
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "partner sync",
+      });
+      expect(first.apiKey).toMatchObject({
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "partner sync",
+        status: "active",
+        signals: expect.objectContaining({
+          approachingExpiry: false,
+          expired: false,
+        }),
+      });
+
+      vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+      const second = service.rotateApiKey(
+        "tenant-demo-001",
+        first.apiKey.apiKeyId,
+        {
+          overlapDays: 2,
+        },
+        "req-api-key-rotate-001",
+      );
+
+      vi.setSystemTime(new Date("2026-08-04T00:00:00.000Z"));
+      const third = service.rotateApiKey(
+        "tenant-demo-001",
+        second.apiKey.apiKeyId,
+        {
+          overlapDays: 2,
+        },
+        "req-api-key-rotate-002",
+      );
+
+      expect(service.listApiKeys("tenant-demo-001")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            apiKeyId: third.apiKey.apiKeyId,
+            status: "active",
+            rotatedFromApiKeyId: second.apiKey.apiKeyId,
+          }),
+          expect.objectContaining({
+            apiKeyId: second.apiKey.apiKeyId,
+            status: "overlap_active",
+            overlapEndsAt: "2026-08-06T00:00:00.000Z",
+            supersededByApiKeyId: third.apiKey.apiKeyId,
+          }),
+          expect.objectContaining({
+            apiKeyId: first.apiKey.apiKeyId,
+            status: "revoked",
+            revokeReason: "credential_rotated",
+            overlapEndsAt: null,
+          }),
+        ]),
+      );
+
+      vi.setSystemTime(new Date("2026-08-07T00:00:00.000Z"));
+
+      expect(service.listApiKeys("tenant-demo-001")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            apiKeyId: second.apiKey.apiKeyId,
+            status: "auto_revoked",
+            autoRevokedAt: "2026-08-06T00:00:00.000Z",
+            revokeReason: "rotation_overlap_elapsed",
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns credential plaintext only on issue and never re-exposes key material", () => {
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_test_alpha_ingress_secret";
+
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const issued = service.issueApiKey("tenant-demo-001", {
+      keyName: "Plaintext once key",
+      scopes: ["tenant:write"],
+    });
+    expect(typeof issued.plaintextKey).toBe("string");
+    expect(issued.plaintextKey.length).toBeGreaterThan(0);
+    expect(issued.apiKey).not.toHaveProperty("plaintextKey");
+    expect(issued.apiKey).not.toHaveProperty("keyHash");
+    expect(issued.apiKey).not.toHaveProperty("keyValue");
+
+    const rotated = service.rotateApiKey(
+      "tenant-demo-001",
+      issued.apiKey.apiKeyId,
+      { overlapDays: 1 },
+      "req-plaintext-once-rotate-001",
+    );
+    expect(rotated.plaintextKey).not.toBe(issued.plaintextKey);
+
+    const listedApiKeys = service.listApiKeys("tenant-demo-001");
+    expect(listedApiKeys.length).toBeGreaterThanOrEqual(2);
+    for (const apiKey of listedApiKeys) {
+      expect(apiKey).not.toHaveProperty("plaintextKey");
+      expect(apiKey).not.toHaveProperty("keyHash");
+      expect(apiKey).not.toHaveProperty("keyValue");
+      expect(JSON.stringify(apiKey)).not.toContain(issued.plaintextKey);
+      expect(JSON.stringify(apiKey)).not.toContain(rotated.plaintextKey);
+    }
+
+    const partnerIssued = service.issuePlatformPartnerIngressCredential(
+      "bank-demo-alpha-airport",
+      { rotationReason: "scheduled_rotation" },
+      "req-plaintext-once-partner-001",
+    );
+    expect(typeof partnerIssued.plaintextKey).toBe("string");
+    expect(partnerIssued.credential).not.toHaveProperty("plaintextKey");
+    expect(partnerIssued.credential).not.toHaveProperty("keyHash");
+
+    const listedCredentials = service.listPlatformPartnerIngressCredentials(
+      "bank-demo-alpha-airport",
+    );
+    expect(listedCredentials.length).toBeGreaterThanOrEqual(2);
+    for (const credential of listedCredentials) {
+      expect(credential).not.toHaveProperty("plaintextKey");
+      expect(credential).not.toHaveProperty("keyHash");
+      expect(JSON.stringify(credential)).not.toContain(
+        partnerIssued.plaintextKey,
+      );
+    }
+  });
+
+  it("keeps raw webhook secret material out of rotation history and endpoint reads", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const created = service.createWebhookEndpoint(
+      "tenant-demo-001",
+      {
+        url: "https://tenant.example/webhooks/secret-hygiene",
+        secret: "whsec_initial_material",
+        events: ["booking.created"],
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "booking fanout",
+      },
+      "req-webhook-secret-hygiene-001",
+    );
+
+    service.rotateWebhookSecret(
+      "tenant-demo-001",
+      {
+        webhookId: created.webhookId,
+        secret: "whsec_rotated_material",
+        rotationReason: "credential_rollover",
+      },
+      "req-webhook-secret-hygiene-002",
+    );
+
+    const [endpoint] = service.listWebhookEndpoints("tenant-demo-001");
+    expect(endpoint.secretHistory.length).toBeGreaterThanOrEqual(2);
+    for (const record of endpoint.secretHistory) {
+      expect(record).not.toHaveProperty("secretValue");
+    }
+    for (const record of endpoint.runtimeMetadata.secretRotation.history ?? []) {
+      expect(record).not.toHaveProperty("secretValue");
+    }
+
+    expect(endpoint.ownerRef).toBe("tenant-admin-001");
+    expect(endpoint.secretExpiresAt).not.toBeNull();
+
+    // The whole read surface must stay clean, not just the history arrays:
+    // list reads, the update response, and the audit trail all serialize the
+    // same webhook response shape.
+    const updated = service.updateWebhookEndpoint(
+      "tenant-demo-001",
+      created.webhookId,
+      { events: ["booking.created", "booking.cancelled"] },
+      "req-webhook-secret-hygiene-003",
+    );
+
+    const webhookAuditLogs = auditNotificationService
+      .listAuditLogs()
+      .filter((log) => log.resourceType === "webhook_endpoint");
+    expect(webhookAuditLogs.length).toBeGreaterThanOrEqual(2);
+
+    const exposedSurfaces = JSON.stringify({
+      listed: endpoint,
+      updated,
+      audit: webhookAuditLogs,
+    });
+    for (const material of [
+      "whsec_initial_material",
+      "whsec_rotated_material",
+    ]) {
+      expect(exposedSurfaces).not.toContain(material);
+    }
+    expect(exposedSurfaces).not.toContain('"secretValue"');
+  });
+
+  it("strips secret material carried by legacy persisted webhook rows on hydrate", async () => {
+    const legacyMaterial = "whsec_legacy_persisted_material";
+    const legacyRotationRecord = {
+      secretVersion: 1,
+      rotatedAt: "2026-01-01T00:00:00.000Z",
+      rotationReason: "initial_secret",
+      secretPreview: "whsec_le",
+      // Written by an older build that persisted raw material into history.
+      secretValue: legacyMaterial,
+    };
+    const persistedState = createEmptyRepositoryState();
+    persistedState.webhookEndpoints = [
+      {
+        webhookId: "wh_legacy_material_001",
+        tenantId: "tenant-demo-001",
+        url: "https://tenant.example/webhooks/legacy-material",
+        events: ["booking.created"],
+        status: "active",
+        secretVersion: 1,
+        secretPreview: "whsec_le",
+        secretValue: legacyMaterial,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        retryPolicy: {
+          maxAttempts: 5,
+          initialBackoffSeconds: 30,
+          backoffMultiplier: 2,
+          maxBackoffSeconds: 900,
+          retryableStatusCodes: [429, 500, 502, 503, 504],
+          // Stray key under retryPolicy must not survive projection either.
+          secretValue: legacyMaterial,
+        },
+        credentialSignals: {
+          approachingExpiry: false,
+          dormant: false,
+          expired: false,
+          autoRevoked: false,
+          evaluatedAt: "2026-01-01T00:00:00.000Z",
+          // Signals ride along on tenant reads, so a stray key must be dropped.
+          secretValue: legacyMaterial,
+        },
+        runtimeMetadata: {
+          deliveryCount: 0,
+          failedDeliveryCount: 0,
+          lastAttemptAt: null,
+          lastDeliveredAt: null,
+          lastValidatedAt: null,
+          nextAttemptAt: null,
+          lastSignaturePreview: null,
+          disabledAt: null,
+          disableReason: null,
+          disableReasonNote: null,
+          // A stray key directly under runtimeMetadata must not survive either.
+          secretValue: legacyMaterial,
+          retryPolicy: {
+            maxAttempts: 5,
+            initialBackoffSeconds: 30,
+            backoffMultiplier: 2,
+            maxBackoffSeconds: 900,
+            retryableStatusCodes: [429, 500, 502, 503, 504],
+            secretValue: legacyMaterial,
+          },
+          secretRotation: {
+            currentVersion: 1,
+            rotatedAt: "2026-01-01T00:00:00.000Z",
+            rotationCount: 1,
+            history: [{ ...legacyRotationRecord }],
+          },
+        },
+        secretHistory: [{ ...legacyRotationRecord }],
+      },
+    ] as unknown as TenantPartnerState["webhookEndpoints"];
+
+    const auditNotificationService = new AuditNotificationService();
+    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    const listed = service
+      .listWebhookEndpoints("tenant-demo-001")
+      .find((value) => value.webhookId === "wh_legacy_material_001");
+    expect(listed).toBeDefined();
+
+    const updated = service.updateWebhookEndpoint(
+      "tenant-demo-001",
+      "wh_legacy_material_001",
+      { events: ["booking.created", "booking.cancelled"] },
+      "req-legacy-webhook-material-001",
+    );
+
+    const webhookAuditLogs = auditNotificationService
+      .listAuditLogs()
+      .filter((log) => log.resourceId === "wh_legacy_material_001");
+    expect(webhookAuditLogs.length).toBeGreaterThanOrEqual(1);
+
+    const exposedSurfaces = JSON.stringify({
+      listed,
+      updated,
+      audit: webhookAuditLogs,
+    });
+    expect(exposedSurfaces).not.toContain(legacyMaterial);
+    expect(exposedSurfaces).not.toContain('"secretValue"');
+
+    // Signing material survives internally, so the endpoint still dispatches.
+    expect(listed?.secretPreview).toBe("whsec_le");
+    expect(listed?.secretVersion).toBe(1);
+
+    // Retry policy is projected, so the status-code array is copied rather than
+    // aliased back onto the persisted row.
+    expect(listed?.retryPolicy.retryableStatusCodes).toEqual([
+      429, 500, 502, 503, 504,
+    ]);
+    listed?.retryPolicy.retryableStatusCodes.push(418);
+    expect(
+      service
+        .listWebhookEndpoints("tenant-demo-001")
+        .find((value) => value.webhookId === "wh_legacy_material_001")
+        ?.retryPolicy.retryableStatusCodes,
+    ).toEqual([429, 500, 502, 503, 504]);
+  });
+
+  it("normalizes partial and missing retry policies carried by legacy persisted webhook rows", async () => {
+    const persistedState = createEmptyRepositoryState();
+    persistedState.webhookEndpoints = [
+      {
+        webhookId: "wh_partial_retry_001",
+        tenantId: "tenant-demo-001",
+        url: "https://tenant.example/webhooks/partial-retry",
+        events: ["booking.created"],
+        status: "active",
+        secretVersion: 1,
+        secretPreview: "whsec_pa",
+        secretValue: "whsec_partial_retry_material",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        // Older rows only persisted the attempt cap.
+        retryPolicy: { maxAttempts: 3 },
+        runtimeMetadata: {
+          deliveryCount: 0,
+          // ...and omitted the runtime copy entirely.
+          secretRotation: {
+            currentVersion: 1,
+            rotatedAt: "2026-01-01T00:00:00.000Z",
+            rotationCount: 0,
+            history: [],
+          },
+        },
+        secretHistory: [],
+      },
+    ] as unknown as TenantPartnerState["webhookEndpoints"];
+
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      createInMemoryTenantPartnerRepository(persistedState) as never,
+    );
+
+    await service.onModuleInit();
+
+    const listed = service
+      .listWebhookEndpoints("tenant-demo-001")
+      .find((value) => value.webhookId === "wh_partial_retry_001");
+
+    // The persisted override survives; every other field falls back to the
+    // platform default instead of projecting `undefined` into a required shape.
+    expect(listed?.retryPolicy).toEqual({
+      maxAttempts: 3,
+      initialBackoffSeconds: 30,
+      backoffMultiplier: 2,
+      maxBackoffSeconds: 900,
+      retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+    });
+    expect(listed?.runtimeMetadata.retryPolicy).toEqual({
+      maxAttempts: 5,
+      initialBackoffSeconds: 30,
+      backoffMultiplier: 2,
+      maxBackoffSeconds: 900,
+      retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+    });
+  });
+
+  it("isolates tenant API key read and lifecycle operations across tenants", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const alpha = service.issueApiKey("tenant-demo-001", {
+      keyName: "Alpha tenant key",
+      scopes: ["tenant:write"],
+    });
+    const beta = service.issueApiKey("tenant-demo-002", {
+      keyName: "Beta tenant key",
+      scopes: ["tenant:write"],
+    });
+
+    const alphaKeyIds = service
+      .listApiKeys("tenant-demo-001")
+      .map((apiKey) => apiKey.apiKeyId);
+    const betaKeyIds = service
+      .listApiKeys("tenant-demo-002")
+      .map((apiKey) => apiKey.apiKeyId);
+    expect(alphaKeyIds).toContain(alpha.apiKey.apiKeyId);
+    expect(alphaKeyIds).not.toContain(beta.apiKey.apiKeyId);
+    expect(betaKeyIds).toContain(beta.apiKey.apiKeyId);
+    expect(betaKeyIds).not.toContain(alpha.apiKey.apiKeyId);
+
+    const expectCrossTenantNotFound = (act: () => unknown) => {
+      expect(act).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "API_KEY_NOT_FOUND",
+            }),
+          }),
+        }),
+      );
+    };
+
+    expectCrossTenantNotFound(() =>
+      service.rotateApiKey(
+        "tenant-demo-002",
+        alpha.apiKey.apiKeyId,
+        { overlapDays: 1 },
+        "req-cross-tenant-rotate-001",
+      ),
+    );
+    expectCrossTenantNotFound(() =>
+      service.revokeApiKey(
+        "tenant-demo-002",
+        alpha.apiKey.apiKeyId,
+        "req-cross-tenant-revoke-001",
+      ),
+    );
+
+    expect(
+      service
+        .listApiKeys("tenant-demo-001")
+        .find((apiKey) => apiKey.apiKeyId === alpha.apiKey.apiKeyId),
+    ).toMatchObject({ status: "active", revokedAt: null });
+  });
+
+  it("audits credential owner, expiry, and last-used across the issue rotate revoke lifecycle", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+      process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT =
+        "pk_test_beta_ingress_secret";
+
+      const auditNotificationService = new AuditNotificationService();
+      const service = new TenantPartnerService(auditNotificationService);
+
+      const issued = service.issueApiKey(
+        "tenant-demo-001",
+        {
+          keyName: "Auditable owner key",
+          scopes: ["tenant:write"],
+          ownerRef: "tenant-admin-001",
+          ownerName: "Tenant Admin",
+          ownerType: "tenant_admin",
+          purpose: "nightly reconciliation",
+        },
+        "req-credential-audit-issue-001",
+      );
+
+      const ownedApiKeySummary = {
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "nightly reconciliation",
+        expiresAt: issued.apiKey.expiresAt,
+        lastUsedAt: null,
+      };
+
+      vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+      const rotated = service.rotateApiKey(
+        "tenant-demo-001",
+        issued.apiKey.apiKeyId,
+        { overlapDays: 2 },
+        "req-credential-audit-rotate-001",
+      );
+
+      service.revokeApiKey(
+        "tenant-demo-001",
+        rotated.apiKey.apiKeyId,
+        "req-credential-audit-revoke-001",
+      );
+
+      const auditLogs = auditNotificationService.listAuditLogs();
+      expect(auditLogs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            actionName: "issue_api_key",
+            resourceType: "tenant_api_key",
+            resourceId: issued.apiKey.apiKeyId,
+            newValuesSummary: expect.objectContaining(ownedApiKeySummary),
+          }),
+          expect.objectContaining({
+            actionName: "rotate_api_key",
+            resourceId: rotated.apiKey.apiKeyId,
+            oldValuesSummary: expect.objectContaining({
+              apiKeyId: issued.apiKey.apiKeyId,
+              ...ownedApiKeySummary,
+            }),
+            newValuesSummary: expect.objectContaining({
+              apiKeyId: rotated.apiKey.apiKeyId,
+              ownerRef: "tenant-admin-001",
+              ownerName: "Tenant Admin",
+              expiresAt: rotated.apiKey.expiresAt,
+            }),
+          }),
+          expect.objectContaining({
+            actionName: "revoke_api_key",
+            resourceId: rotated.apiKey.apiKeyId,
+            newValuesSummary: expect.objectContaining({
+              ownerRef: "tenant-admin-001",
+              revokedAt: "2026-08-03T00:00:00.000Z",
+            }),
+          }),
+        ]),
+      );
+
+      // Partner ingress credentials must carry the same owner/expiry/last-used
+      // evidence, including a last-used timestamp observed from real traffic.
+      const partnerIssued = service.issuePlatformPartnerIngressCredential(
+        "bank-demo-beta-airport",
+        { rotationReason: "scheduled_rotation" },
+        "req-credential-audit-partner-issue-001",
+      );
+      expect(partnerIssued.credential.expiresAt).not.toBeNull();
+
+      vi.setSystemTime(new Date("2026-08-04T00:00:00.000Z"));
+      service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          apiKey: partnerIssued.plaintextKey,
+        },
+        "req-credential-audit-partner-auth-001",
+      );
+
+      service.revokePlatformPartnerIngressCredential(
+        "bank-demo-beta-airport",
+        partnerIssued.credential.keyId,
+        { revokeReason: "compromised" },
+        "req-credential-audit-partner-revoke-001",
+      );
+
+      expect(auditNotificationService.listAuditLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            actionName: "revoke_partner_ingress_credential",
+            resourceId: partnerIssued.credential.keyId,
+            newValuesSummary: expect.objectContaining({
+              ownerName: expect.any(String),
+              expiresAt: partnerIssued.credential.expiresAt,
+              lastUsedAt: "2026-08-04T00:00:00.000Z",
+              lastUsedWorkload: "partner_bootstrap",
+              revokeReason: "compromised",
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back to manual review after retry exhaustion with explicit adapter attempt history", async () => {
     const retryingAdapter: PartnerEligibilityAdapterInterface = {
       adapterCode: "issuer_reference_lookup_v1",
@@ -2534,6 +3299,151 @@ describe("TenantPartnerService sensitive-data governance", () => {
         disableReasonNote: null,
       }),
     });
+  });
+
+  it("retries webhook deliveries with the original secret version during overlap and fails closed after overlap expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-02T09:00:00.000Z"));
+      const fetchImpl = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 410,
+      });
+      const service = new TenantPartnerService(
+        new AuditNotificationService(),
+        undefined,
+        new WebhookDispatchService(fetchImpl as never),
+        [],
+      );
+      const tenantAdminIdentity = {
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roles: ["tc_admin"],
+        scopes: [
+          "tenant:webhooks:read",
+          "tenant:webhooks:write",
+          "tenant:read",
+        ],
+      } as const;
+
+      const created = service.createWebhookEndpoint(
+        "tenant-demo-001",
+        {
+          url: "https://tenant.example/webhooks/overlap-secret",
+          secret: "whsec_overlap_v1",
+          events: ["booking.created"],
+        },
+        "req-webhook-overlap-001",
+      );
+
+      await service.sendTestWebhook(
+        "tenant-demo-001",
+        {
+          webhookId: created.webhookId,
+        },
+        "req-webhook-overlap-002",
+      );
+
+      const [failedDelivery] = service.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        created.webhookId,
+        "req-webhook-overlap-003",
+        tenantAdminIdentity,
+      );
+      expect(failedDelivery).toMatchObject({
+        status: "delivery_failed",
+        secretVersion: 1,
+        signatureVersion: 1,
+      });
+
+      vi.setSystemTime(new Date("2026-08-02T12:00:00.000Z"));
+      const rotated = service.rotateWebhookSecret(
+        "tenant-demo-001",
+        {
+          webhookId: created.webhookId,
+          secret: "whsec_overlap_v2",
+          rotationReason: "scheduled_rotation",
+          overlapDays: 1,
+        },
+        "req-webhook-overlap-004",
+      );
+      expect(rotated).toMatchObject({
+        secretVersion: 2,
+        overlapEndsAt: "2026-08-03T12:00:00.000Z",
+      });
+
+      const retriedDuringOverlap = await service.retryWebhookDelivery(
+        "tenant-demo-001",
+        created.webhookId,
+        failedDelivery.deliveryId,
+        "req-webhook-overlap-005",
+        tenantAdminIdentity,
+      );
+      expect(retriedDuringOverlap).toMatchObject({
+        deliveryId: failedDelivery.deliveryId,
+        status: "delivery_failed",
+        attempt: 2,
+        httpStatus: 410,
+        secretVersion: 1,
+        signatureVersion: 1,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+      const retryInit = fetchImpl.mock.calls[1]?.[1] as
+        | (RequestInit & { headers: Record<string, string> })
+        | undefined;
+      const retryBody = String(retryInit?.body ?? "");
+      const expectedSignature = createHmac("sha256", "whsec_overlap_v1")
+        .update(`2026-08-02T12:00:00.000Z.${retryBody}`)
+        .digest("hex");
+      expect(retryInit?.headers["x-drts-webhook-signature"]).toBe(
+        `v=1;t=2026-08-02T12:00:00.000Z;sig=${expectedSignature}`,
+      );
+
+      vi.setSystemTime(new Date("2026-08-04T12:00:00.000Z"));
+
+      const retriedAfterOverlap = await service.retryWebhookDelivery(
+        "tenant-demo-001",
+        created.webhookId,
+        failedDelivery.deliveryId,
+        "req-webhook-overlap-006",
+        tenantAdminIdentity,
+      );
+      expect(retriedAfterOverlap).toMatchObject({
+        deliveryId: failedDelivery.deliveryId,
+        status: "delivery_failed",
+        attempt: 3,
+        httpStatus: null,
+        secretVersion: 1,
+        signatureVersion: 1,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(service.listWebhookEndpoints("tenant-demo-001")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            webhookId: created.webhookId,
+            secretVersion: 2,
+            credentialStatus: "active",
+            secretHistory: expect.arrayContaining([
+              expect.objectContaining({
+                secretVersion: 1,
+                status: "auto_revoked",
+                autoRevokedAt: "2026-08-03T12:00:00.000Z",
+                supersededByVersion: 2,
+              }),
+              expect.objectContaining({
+                secretVersion: 2,
+                status: "active",
+              }),
+            ]),
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retries failed webhook deliveries through the tenant command surface", async () => {

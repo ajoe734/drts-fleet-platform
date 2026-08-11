@@ -123,6 +123,10 @@ def _include_directories(config: dict, settings: dict, workspace_root: Path) -> 
         path = Path(value).expanduser()
         if not path.is_absolute():
             path = workspace_root / path
+        # A stale --add-dir entry makes agy fail on startup, which surfaces as an
+        # opaque worker death. Drop paths that no longer exist instead.
+        if not path.is_dir():
+            continue
         resolved = str(path)
         if resolved not in seen:
             seen.add(resolved)

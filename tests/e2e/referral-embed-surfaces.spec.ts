@@ -173,4 +173,39 @@ test.describe("referral embed surfaces", () => {
     );
     await expect(page.getByRole("button", { name: "再試一次" })).toBeVisible();
   });
+
+  test("submits the browser-entered referral booking and reload reads back the same trip", async ({
+    page,
+  }) => {
+    test.skip(!usesLocalFixture, "Requires the local controllable authority.");
+
+    const pickupAddress = "御和雲峰 A 棟 1F 迎賓車道";
+    const dropoffAddress = "台北榮民總醫院 第二門診大樓";
+
+    await page.goto(
+      `${configuredEmbedPath("yuhe-residence")}&screen=book&state=handoff`,
+      {
+        waitUntil: "domcontentloaded",
+        referer: `${allowedEmbedOrigin}/mobile`,
+      },
+    );
+    await page.getByLabel("上車地點").fill(pickupAddress);
+    await page.getByLabel("下車地點").fill(dropoffAddress);
+    await page.getByLabel("標準車").check();
+    await page.getByRole("button", { name: "確認叫車" }).click();
+
+    await expect(page).toHaveURL(/screen=trip/);
+    await expect(page.locator("body")).toContainText("RF-0001");
+    await expect(page.locator("body")).toContainText("ord_ref_0001");
+    await expect(page.locator("body")).toContainText(pickupAddress);
+    await expect(page.locator("body")).toContainText(dropoffAddress);
+    await expect(page.locator("body")).toContainText("standard");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+
+    await expect(page.locator("body")).toContainText("RF-0001");
+    await expect(page.locator("body")).toContainText("ord_ref_0001");
+    await expect(page.locator("body")).toContainText(pickupAddress);
+    await expect(page.locator("body")).toContainText(dropoffAddress);
+  });
 });

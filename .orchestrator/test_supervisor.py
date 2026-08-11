@@ -5,6 +5,7 @@ import json
 import signal
 import subprocess
 import tempfile
+import types
 import pathlib
 import time
 from datetime import datetime, timezone
@@ -1011,6 +1012,42 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         record = state["queue"]["events"]["evt-stale"]
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["skip_reason"], "stale_dispatch_event")
+
+    def test_marks_event_without_message_manual_pending_without_crashing(self) -> None:
+        task = {
+            "id": "BUS-VAL-MALFORMED-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "last_update": "2026-04-05T11:45:16Z",
+        }
+        queue_payload = {
+            "event_id": "evt-missing-message",
+            "task_id": task["id"],
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+        }
+        state = {"queue": {"events": {}}, "workers": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_event_queue", return_value=[queue_payload]),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
+            mock.patch.object(
+                supervisor,
+                "start_worker_for_request",
+                side_effect=AssertionError("malformed event must not start a worker"),
+            ),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.process_queue(self.config, state, self.provider_report)
+
+        self.assertTrue(changed)
+        record = state["queue"]["events"]["evt-missing-message"]
+        self.assertEqual(record["status"], "manual_pending")
+        self.assertEqual(record["error"], "invalid_queue_event_missing_message")
+        write_activity_log.assert_called_once()
 
     def test_skips_queued_dispatch_when_external_integration_is_pending(self) -> None:
         task = {
@@ -5511,6 +5548,60 @@ class ChairmanFlowTests(unittest.TestCase):
             )
         )
 
+    def test_provider_report_age_uses_generated_at(self) -> None:
+        now = datetime(2026, 8, 4, 12, 0, 0, tzinfo=timezone.utc)
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"),
+            {"generated_at": "2026-08-04T11:45:00Z"},
+            now=now,
+        )
+        self.assertEqual(age, 900.0)
+
+    def test_provider_report_age_is_infinite_when_undateable(self) -> None:
+        age = supervisor.provider_report_age_seconds(
+            Path("/nonexistent/provider_capabilities.json"), {}
+        )
+        self.assertEqual(age, float("inf"))
+
+    def test_stale_provider_report_is_reprobed(self) -> None:
+        """A cached report that is never refreshed can strand a healthy lane."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            path.write_text(
+                json.dumps({"generated_at": "2026-08-01T00:00:00Z", "providers": {}}),
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            fresh = {"generated_at": "2026-08-04T00:00:00Z", "providers": {"claude": {}}}
+            with (
+                mock.patch.object(supervisor, "build_provider_capabilities", return_value=fresh) as build,
+                mock.patch.object(supervisor, "write_provider_capabilities") as write,
+            ):
+                report = supervisor.load_provider_report(config)
+            build.assert_called_once()
+            write.assert_called_once()
+            self.assertEqual(report, fresh)
+
+    def test_fresh_provider_report_is_not_reprobed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            generated_at = (
+                datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+            cached = {"generated_at": generated_at, "providers": {"claude": {}}}
+            path.write_text(json.dumps(cached), encoding="utf-8")
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+            }
+            with mock.patch.object(supervisor, "build_provider_capabilities") as build:
+                report = supervisor.load_provider_report(config)
+            build.assert_not_called()
+            self.assertEqual(report, cached)
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
@@ -5535,6 +5626,98 @@ class ChairmanFlowTests(unittest.TestCase):
             mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
         ):
             queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_dispatch_pause_review_respects_cooldown_after_recent_review(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"chair_review": {"enabled": True}}
+
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_dispatch_pause_recorded_after_last_review_bypasses_cooldown(self) -> None:
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [
+                {
+                    "provider": "codex2",
+                    "task_id": "IAM-PRT-001",
+                    "failure_kind": "quota/terminal",
+                    "paused_at": "2026-04-30T13:10:00Z",
+                }
+            ],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+
+        self.assertTrue(
+            supervisor.chair_review_needs_immediate_attention(state, {"tasks": []})
+        )
+
+    def test_dependency_ready_blocked_task_does_not_bypass_cooldown(self) -> None:
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-005",
+                    "status": "blocked",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "depends_on": ["DEP-001"],
+                    "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                },
+            ]
+        }
+        state = {
+            "provider_pauses": {},
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"paths": {}, "chair_review": {"enabled": True}}
+
+        # The blocked task is still triage-worthy, so the reason stays set...
+        self.assertEqual(
+            supervisor.chair_review_reason(state, {"pending": []}, status=status, config=config),
+            "blocked_task_triage",
+        )
+
+        # ...but it must not re-queue a review on every tick while the cooldown
+        # is active, because the chair cannot clear the condition itself.
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, status, provider_report={})
 
         self.assertFalse(queued)
         choose_chair_reviewer.assert_not_called()
@@ -5659,6 +5842,54 @@ class ChairmanFlowTests(unittest.TestCase):
             }
 
             chosen = supervisor.choose_chair_reviewer(config, state, status, provider_report)
+
+        self.assertEqual(chosen, ("codex", "Codex"))
+
+
+    def test_urgent_chair_review_can_recover_busy_lane_when_capacity_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            config = {
+                "agents": {
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "ready_dispatcher": {
+                    "active_worker_statuses": ["running"],
+                    "max_tasks_per_agent_by_lane": {"codex": 2},
+                },
+            }
+            state = {
+                "workers": {
+                    "w-codex": {
+                        "agent_id": "codex",
+                        "status": "running",
+                        "queue_event_id": "evt-codex-recover",
+                    }
+                },
+                "queue": {
+                    "events": {
+                        "evt-codex-recover": {
+                            "status": "started",
+                        }
+                    }
+                },
+                "provider_pauses": {},
+                "chair_review": {},
+            }
+
+            chosen = supervisor.choose_chair_reviewer(
+                config,
+                state,
+                {"tasks": []},
+                {},
+                allow_primary_work_fallback=True,
+            )
 
         self.assertEqual(chosen, ("codex", "Codex"))
 
@@ -7450,6 +7681,59 @@ class ChairmanFlowTests(unittest.TestCase):
             )
         )
 
+    def _pause_entry(self, reason: str, *, kind: str, reset_seconds: int | None) -> dict:
+        state: dict[str, object] = {}
+        supervisor.pause_provider(
+            state, "codex2", reason, kind=kind, reset_seconds=reset_seconds
+        )
+        return state["provider_pauses"]["codex2"]
+
+    def test_reset_hint_later_than_caller_default_wins(self) -> None:
+        # Quota pauses hardcode reset_seconds=14400, which used to discard the
+        # provider's own reset time. The lane then woke 4h later, hit the same
+        # quota error and re-paused, on repeat.
+        before = datetime.now(timezone.utc).timestamp()
+        entry = self._pause_entry(
+            "You've hit your usage limit. Resets in 96h.",
+            kind="quota",
+            reset_seconds=14400,
+        )
+
+        self.assertEqual(entry.get("resume_at_source"), "reason_hint")
+        self.assertGreaterEqual(entry["resume_at"], before + 96 * 3600 - 60)
+
+    def test_reset_hint_shorter_than_caller_default_does_not_pull_wakeup_forward(
+        self,
+    ) -> None:
+        before = datetime.now(timezone.utc).timestamp()
+        entry = self._pause_entry(
+            "429 Too Many Requests. Resets in 5m.",
+            kind="capacity",
+            reset_seconds=14400,
+        )
+
+        self.assertEqual(entry.get("resume_at_source"), "reset_seconds")
+        self.assertGreaterEqual(entry["resume_at"], before + 14400 - 60)
+
+    def test_pause_without_reset_hint_keeps_caller_reset_seconds(self) -> None:
+        before = datetime.now(timezone.utc).timestamp()
+        entry = self._pause_entry(
+            "quota_exhausted: no reset time stated",
+            kind="quota",
+            reset_seconds=14400,
+        )
+
+        self.assertEqual(entry.get("resume_at_source"), "reset_seconds")
+        self.assertGreaterEqual(entry["resume_at"], before + 14400 - 60)
+
+    def test_auth_pause_ignores_reset_hint_and_stays_indefinite(self) -> None:
+        entry = self._pause_entry(
+            "invalid api key. Resets in 96h.", kind="auth", reset_seconds=None
+        )
+
+        self.assertIsNone(entry["resume_at"])
+        self.assertNotIn("resume_at_source", entry)
+
 
 class WorkerTreeGuardSettingsTests(unittest.TestCase):
     def test_defaults_off_with_canonical_blocking_globs(self) -> None:
@@ -8172,14 +8456,25 @@ class BreakFullDeadlockTests(unittest.TestCase):
         self.assertFalse(changed)
         probe.assert_not_called()
 
-    def test_noop_when_chair_not_blocked(self):
+    def test_noop_when_chair_not_blocked_and_no_paused_lanes(self):
         state = self._wedged_state()
         state["chair_review"] = {}
+        state["provider_pauses"] = {}
+        state["quota_paused_agents"] = {}
         with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
             changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
         self.assertFalse(changed)
         probe.assert_not_called()
 
+    def test_recovery_runs_when_chair_not_blocked_but_pause_still_blocks(self):
+        state = self._wedged_state()
+        state["chair_review"] = {}
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": True}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log"):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertNotIn("claude2", state["provider_pauses"])
 
 class CodexRevokedTokenClassificationTests(unittest.TestCase):
     """Fix ①: codex CLI revoked/expired-session 401s only surface as runtime
@@ -8636,3 +8931,269 @@ class AntigravityModelRotationTests(unittest.TestCase):
                 self.config, state, {}, self._worker(), {"kind": "auth"}, "401", authorized=True
             )
         )
+
+
+class ChairApprovalBoundaryTests(unittest.TestCase):
+    """What the chairman may wave through.
+
+    An approval only exists because `classify_command` said `defer` — "I cannot
+    tell, ask someone". Gating the chairman on `classify_command(...) == "allow"`
+    therefore let it approve only what would already have run unreviewed, and
+    every gap in the pattern set became a permanent deadlock: 149 of 273
+    recorded denials carry the chairman's own read-only justification.
+    """
+
+    def _bash(self, command: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "risk_class": "needs_review",
+        }
+
+    def test_unrecognised_read_only_commands_are_the_chairs_to_approve(self) -> None:
+        # Exactly the commands that had two workers suspended for 81 minutes.
+        for command in (
+            'git cat-file -t fc426709 2>&1; echo "---"; git branch -a --contains fc426709 | head',
+            "timeout 900 pnpm exec vitest run tests/unit/tenant-partner.service.test.ts 2>&1 | tail -40",
+            "./node_modules/.bin/vitest run tests/unit/x.test.ts",
+        ):
+            self.assertTrue(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_denied_patterns_stay_beyond_the_chairs_reach(self) -> None:
+        for command in (
+            "sudo rm -rf /etc",
+            "git reset --hard HEAD~5",
+            "echo hi && git reset --hard HEAD~5",
+            "rm -rf /",
+        ):
+            self.assertFalse(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_writes_outside_the_workspace_stay_beyond_reach(self) -> None:
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(
+                self._bash("echo pwned > /home/lupin/.bashrc")
+            )
+        )
+
+    def test_backticks_stay_beyond_reach(self) -> None:
+        # Backticks do not nest and are rare in ordinary usage, so they stay
+        # refused. `$(...)` is judged like `$VAR` — see
+        # CommandSubstitutionBoundaryTest in test_provider_permissions.
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(self._bash("echo `rm -rf /tmp/x`"))
+        )
+
+    def test_substitution_is_treated_the_same_as_a_plain_variable(self) -> None:
+        # `rm` is not a denied pattern — it left the safe set, meaning "needs a
+        # decision", not "nobody may permit it". Wrapping it in a substitution
+        # must not change that, in either direction.
+        self.assertEqual(
+            supervisor._approval_is_routine_safe(self._bash("rm -rf /tmp/x")),
+            supervisor._approval_is_routine_safe(self._bash("echo $(rm -rf /tmp/x)")),
+        )
+
+    def test_denied_patterns_inside_a_substitution_stay_beyond_reach(self) -> None:
+        for command in ("echo $(rm -rf /)", "x=$(sudo cat /etc/shadow)"):
+            self.assertFalse(
+                supervisor._approval_is_routine_safe(self._bash(command)), command
+            )
+
+    def test_broad_git_push_stays_beyond_reach(self) -> None:
+        self.assertFalse(
+            supervisor._approval_is_routine_safe(
+                self._bash("git push --force origin main")
+            )
+        )
+
+    def test_ordinary_git_push_remains_approvable(self) -> None:
+        self.assertTrue(
+            supervisor._approval_is_routine_safe(
+                self._bash("git push origin feature-branch")
+            )
+        )
+
+
+class ChairDecisionMalformedJsonTests(unittest.TestCase):
+    """A bad decision packet must fail the review, not the supervisor.
+
+    A chairman wrote shell single-quote escaping straight into a JSON string.
+    `load_json` raises on malformed content by design — right for machine truth,
+    where substituting a default would lose state — but a decision packet is
+    model output. The decoder escaped `refresh_chair_review_state`, killed the
+    process a second after start, and since the file is re-read on every restart
+    systemd burned its restart budget and gave up. The fleet was down nine hours
+    with no alert.
+    """
+
+    # The packet that took the supervisor down: shell single-quote escaping
+    # (backslash-apostrophe) written straight into a JSON string value, which
+    # JSON does not accept as an escape.
+    MALFORMED = (
+        "{\n"
+        '  "version": 1,\n'
+        '  "reason": "Executing ' + chr(92) + chr(39) + 'test_*.py' + chr(92) + chr(39) + ' is read-only."\n'
+        "}\n"
+    )
+
+    def test_load_json_still_raises_for_machine_truth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "state.json"
+            path.write_text(self.MALFORMED, encoding="utf-8")
+            with self.assertRaises(json.JSONDecodeError):
+                supervisor.load_json(path, default={})
+
+    def test_a_malformed_packet_fails_the_review_and_not_the_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260805T150630Z-gemini2.md"
+            json_path = review_dir / "20260805T150630Z-gemini2.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(self.MALFORMED, encoding="utf-8")
+
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "status_field": "status",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "gemini2",
+                        "agent": "Gemini2",
+                        "reason": "approval_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
+            ):
+                changed = supervisor.refresh_chair_review_state(
+                    config, state, provider_report={}
+                )
+
+            # The review is discarded so the chairman can run again, rather than
+            # the packet being re-read into the same crash on every tick.
+            self.assertTrue(changed)
+            self.assertIsNone(state["chair_review"].get("active_review"))
+
+            logged = (root / "activity-log.jsonl").read_text(encoding="utf-8")
+            self.assertIn("not valid JSON", logged)
+class SupervisorTickContainmentTests(unittest.TestCase):
+    """One bad tick must not stop the fleet, and a dead loop must not stay quiet.
+
+    A tick touches every subsystem and reads files written by models, workers and
+    other tools, so letting an exception leave the loop made availability equal
+    to the least robust line on that path. A malformed decision packet stopped
+    dispatch for nine hours: the file was re-read on each restart until systemd
+    exhausted its restart budget and gave up.
+    """
+
+    def _args(self, **overrides):
+        defaults = dict(
+            config=None,
+            poll_interval=0.0,
+            once=False,
+            no_watch=True,
+            replay=False,
+            quiet=True,
+            verbose=False,
+        )
+        defaults.update(overrides)
+        return types.SimpleNamespace(**defaults)
+
+    def _run_main(self, tick_side_effects, *, config=None, max_ticks=None):
+        """Drive main() with run_once replaced, returning (exit_code, call_count)."""
+        calls = {"n": 0}
+
+        def fake_run_once(_config, **_kwargs):
+            calls["n"] += 1
+            if max_ticks is not None and calls["n"] >= max_ticks:
+                raise supervisor.SupervisorShutdown(15)
+            effect = tick_side_effects(calls["n"])
+            if effect is not None:
+                raise effect
+            return False
+
+        cfg = config or {"paths": {}, "supervisor": {}}
+        with (
+            mock.patch.object(supervisor, "parse_args", return_value=self._args()),
+            mock.patch.object(supervisor, "load_config", return_value=cfg),
+            mock.patch.object(supervisor, "run_once", side_effect=fake_run_once),
+            mock.patch.object(supervisor, "terminate_older_supervisors"),
+            mock.patch.object(supervisor, "install_supervisor_signal_handlers"),
+            mock.patch.object(supervisor, "write_supervisor_pid"),
+            mock.patch.object(supervisor, "clear_supervisor_pid"),
+            mock.patch.object(supervisor, "mark_supervisor_stopped"),
+            mock.patch.object(supervisor, "write_activity_log"),
+            mock.patch.object(supervisor, "time") as fake_time,
+        ):
+            fake_time.sleep.return_value = None
+            code = supervisor.main()
+        return code, calls["n"]
+
+    def test_a_failing_tick_does_not_stop_the_loop(self) -> None:
+        # The first tick raises exactly what took the supervisor down.
+        def effects(n):
+            if n == 1:
+                return json.JSONDecodeError("Invalid \\escape", "{}", 0)
+            return None
+
+        code, calls = self._run_main(effects, max_ticks=5)
+
+        self.assertGreater(calls, 1, "the loop stopped on the first failure")
+        self.assertEqual(code, 128 + 15)
+
+    def test_recovery_resets_the_failure_count(self) -> None:
+        # Alternating failures never reach the limit, so the loop keeps running.
+        def effects(n):
+            return RuntimeError("boom") if n % 2 else None
+
+        cfg = {"paths": {}, "supervisor": {"tick_failure_limit": 3}}
+        code, calls = self._run_main(effects, config=cfg, max_ticks=12)
+
+        self.assertEqual(calls, 12)
+        self.assertEqual(code, 128 + 15)
+
+    def test_consecutive_failures_stop_the_loop_deliberately(self) -> None:
+        # Spinning silently forever is not better than stopping; stop with a
+        # reason so the cause is visible rather than inferred from a crash loop.
+        cfg = {"paths": {}, "supervisor": {"tick_failure_limit": 3}}
+        code, calls = self._run_main(lambda n: RuntimeError("always"), config=cfg)
+
+        self.assertEqual(calls, 3)
+        self.assertEqual(code, 1)
+
+    def test_shutdown_signal_is_still_honoured(self) -> None:
+        code, calls = self._run_main(lambda n: None, max_ticks=1)
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(code, 128 + 15)

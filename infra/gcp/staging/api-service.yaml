@@ -48,11 +48,22 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: drts-staging-jwt-secret
-            - name: DRTS_INTERNAL_KEY
+            - name: WORKLOAD_IDENTITY_ISSUER
+              value: WORKLOAD_IDENTITY_ISSUER_PLACEHOLDER
+            - name: WORKLOAD_IDENTITY_AUDIENCE
+              value: WORKLOAD_IDENTITY_AUDIENCE_PLACEHOLDER
+            - name: WORKLOAD_IDENTITY_JWT_ALGORITHMS
+              value: RS256
+            - name: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:
                   key: latest
-                  name: drts-staging-internal-key
+                  name: drts-staging-workload-identity-jwt-public-key
+            - name: WORKLOAD_IDENTITY_SERVICE_PRINCIPALS
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: drts-staging-workload-identity-service-principals
             - name: PLATFORM_ADMIN_ASSISTANT_ENABLED
               value: "false"
             - name: LLM_GATEWAY_PROVIDER

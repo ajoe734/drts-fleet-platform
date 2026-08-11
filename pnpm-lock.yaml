@@ -134,6 +134,9 @@ importers:
       "@drts/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
+      "@drts/control-plane-auth":
+        specifier: workspace:*
+        version: link:../../packages/control-plane-auth
       "@drts/shared-types":
         specifier: workspace:*
         version: link:../../packages/shared-types

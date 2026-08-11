@@ -1,0 +1,768 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import type {
+  PersistTenantPartnerChanges,
+  TenantPartnerState,
+} from "../../src/modules/tenant-partner/tenant-partner.repository";
+import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
+import { TenantPartnerRepository } from "../../src/modules/tenant-partner/tenant-partner.repository";
+import {
+  TenantPartnerService,
+  resolvePartnerIngressCredentialsFromEnv,
+} from "../../src/modules/tenant-partner/tenant-partner.service";
+import { WebhookDispatchService } from "../../src/modules/tenant-partner/webhook-dispatch.service";
+
+const TENANT_A = "tenant-demo-001";
+const TENANT_B = "tenant-demo-002";
+const SECRET_V1 = "whsec_iam_prt_001_leak_probe_v1";
+const SECRET_V2 = "whsec_iam_prt_001_leak_probe_v2";
+const PARTNER_ENTRY_SLUG = "bank-demo-alpha-airport";
+const SEEDED_PARTNER_KEY_ID = "partner-key-alpha-demo";
+const SEEDED_PARTNER_KEY = "pk_test_alpha_ingress_secret";
+
+/**
+ * Hash-only authority means no tenant-facing webhook payload may carry raw
+ * secret material, whatever shape it arrives in. Asserting on the serialized
+ * response covers `secretHistory`, `runtimeMetadata.secretRotation.history`,
+ * and any field a future change adds without thinking about it.
+ */
+function expectNoWebhookSecretMaterial(payload: unknown) {
+  const serialized = JSON.stringify(payload);
+  expect(serialized).not.toContain(SECRET_V1);
+  expect(serialized).not.toContain(SECRET_V2);
+  expect(serialized).not.toContain("secretValue");
+  expect(serialized).not.toContain("secretCredentials");
+}
+
+function cloneState(state: TenantPartnerState): TenantPartnerState {
+  return JSON.parse(JSON.stringify(state)) as TenantPartnerState;
+}
+
+function createEmptyTenantPartnerState(): TenantPartnerState {
+  return {
+    notificationPreferences: [],
+    webhookEndpoints: [],
+    webhookDeliveries: [],
+    slaProfiles: [],
+    partnerEntries: [],
+    partnerIngressCredentials: [],
+    partnerEligibilityVerifications: [],
+    approvalRules: [],
+    approvalRequests: [],
+    approvalDecisions: [],
+    passengers: [],
+    addresses: [],
+    costCenters: [],
+    quotaPolicies: [],
+    quotaLedger: [],
+    quotaMonthlySnapshots: [],
+    userRoles: [],
+    apiKeys: [],
+  };
+}
+
+function mergeByKey<T>(
+  current: readonly T[],
+  incoming: readonly T[] | undefined,
+  keyOf: (value: T) => string,
+) {
+  const merged = new Map(current.map((value) => [keyOf(value), value]));
+  for (const value of incoming ?? []) {
+    merged.set(keyOf(value), value);
+  }
+  return [...merged.values()];
+}
+
+/**
+ * Durable double for the jsonb snapshot tables that back tenant API keys and
+ * webhook endpoints. It survives across service instances so a rotation can be
+ * replayed through an API restart, which is the seam the unit suite cannot
+ * reach.
+ */
+function createDurableTenantPartnerRepository() {
+  let state = createEmptyTenantPartnerState();
+
+  return {
+    isEnabled: vi.fn(() => true),
+    loadState: vi.fn(async () => cloneState(state)),
+    persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
+      state = {
+        ...state,
+        webhookEndpoints: mergeByKey(
+          state.webhookEndpoints,
+          changes.webhookEndpoints,
+          (value) => value.webhookId,
+        ),
+        webhookDeliveries: mergeByKey(
+          state.webhookDeliveries,
+          changes.webhookDeliveries,
+          (value) => value.deliveryId,
+        ),
+        partnerEntries: mergeByKey(
+          state.partnerEntries,
+          changes.partnerEntries,
+          (value) => value.entrySlug,
+        ),
+        partnerIngressCredentials: mergeByKey(
+          state.partnerIngressCredentials,
+          changes.partnerIngressCredentials,
+          (value) => value.keyId,
+        ),
+        apiKeys: mergeByKey(
+          state.apiKeys,
+          changes.apiKeys,
+          (value) => value.apiKeyId,
+        ),
+      };
+    }),
+    reportPersistenceFailure: vi.fn(),
+    getState: () => cloneState(state),
+  };
+}
+
+type DurableRepository = ReturnType<typeof createDurableTenantPartnerRepository>;
+
+async function createCredentialSurface(
+  repository: DurableRepository,
+  fetchImpl?: ReturnType<typeof vi.fn>,
+  partnerIngressCredentialSeeds: readonly unknown[] = [],
+) {
+  const service = new TenantPartnerService(
+    new AuditNotificationService(),
+    repository as never,
+    fetchImpl ? new WebhookDispatchService(fetchImpl as never) : undefined,
+    partnerIngressCredentialSeeds as never,
+  );
+  await service.onModuleInit();
+
+  // Only the credential endpoints are exercised here, so the billing, owned
+  // mobility, and JWT collaborators stay unwired.
+  const controller = new TenantPartnerController(
+    service,
+    undefined as never,
+    undefined as never,
+    undefined as never,
+  );
+
+  return { service, controller };
+}
+
+function expectErrorCode(error: unknown) {
+  return (
+    error as { getResponse: () => { error: { code: string } } }
+  ).getResponse().error.code;
+}
+
+describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
+  });
+
+  it("carries owner expiry and rotation overlap through the tenant control surface and an API restart", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+
+    const repository = createDurableTenantPartnerRepository();
+    const { controller } = await createCredentialSurface(repository);
+
+    const issued = await controller.issueApiKey(
+      {
+        keyName: "Nightly reconciliation",
+        scopes: ["tenant:write"],
+        ownerRef: "tenant-admin-001",
+        ownerName: "Tenant Admin",
+        ownerType: "tenant_admin",
+        purpose: "nightly reconciliation",
+      },
+      null,
+      TENANT_A,
+      "req-iam-prt-001-issue",
+    );
+
+    expect(issued.data.plaintextKey).toEqual(expect.any(String));
+    expect(issued.data.apiKey).toMatchObject({
+      ownerRef: "tenant-admin-001",
+      ownerName: "Tenant Admin",
+      ownerType: "tenant_admin",
+      purpose: "nightly reconciliation",
+      status: "active",
+      lastUsedAt: null,
+    });
+    expect(issued.data.apiKey.expiresAt).toEqual(expect.any(String));
+
+    const plaintextKey = issued.data.plaintextKey;
+    const listed = controller.listApiKeys(TENANT_A, "req-iam-prt-001-list");
+    expect(JSON.stringify(listed)).not.toContain(plaintextKey);
+    expect(JSON.stringify(listed)).not.toContain("keyHash");
+
+    vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+    const rotated = await controller.rotateApiKey(
+      issued.data.apiKey.apiKeyId,
+      { overlapDays: 2 },
+      null,
+      TENANT_A,
+      "req-iam-prt-001-rotate",
+    );
+
+    expect(rotated.data.plaintextKey).not.toBe(plaintextKey);
+    expect(rotated.data.revokedApiKeyId).toBe(issued.data.apiKey.apiKeyId);
+
+    // Restart the API against the persisted snapshot: owner, expiry, and the
+    // rotation overlap must all survive the reload.
+    const restarted = await createCredentialSurface(repository);
+    const afterRestart = restarted.controller.listApiKeys(
+      TENANT_A,
+      "req-iam-prt-001-restart-list",
+    );
+
+    expect(afterRestart.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: rotated.data.apiKey.apiKeyId,
+          status: "active",
+          ownerRef: "tenant-admin-001",
+          purpose: "nightly reconciliation",
+          rotatedFromApiKeyId: issued.data.apiKey.apiKeyId,
+        }),
+        expect.objectContaining({
+          apiKeyId: issued.data.apiKey.apiKeyId,
+          status: "overlap_active",
+          ownerName: "Tenant Admin",
+          expiresAt: issued.data.apiKey.expiresAt,
+          overlapEndsAt: "2026-08-05T00:00:00.000Z",
+          supersededByApiKeyId: rotated.data.apiKey.apiKeyId,
+        }),
+      ]),
+    );
+
+    // The overlap window still elapses on the restarted instance.
+    vi.setSystemTime(new Date("2026-08-06T00:00:00.000Z"));
+    const afterOverlap = restarted.controller.listApiKeys(
+      TENANT_A,
+      "req-iam-prt-001-overlap-list",
+    );
+    expect(afterOverlap.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: issued.data.apiKey.apiKeyId,
+          status: "auto_revoked",
+          autoRevokedAt: "2026-08-05T00:00:00.000Z",
+          revokeReason: "rotation_overlap_elapsed",
+        }),
+      ]),
+    );
+  });
+
+  it("fails closed when a revoked auto-revoked or expired tenant API key is rotated", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+
+    const repository = createDurableTenantPartnerRepository();
+    const { controller } = await createCredentialSurface(repository);
+
+    const manual = await controller.issueApiKey(
+      { keyName: "Manual revoke key", scopes: ["tenant:write"] },
+      null,
+      TENANT_A,
+      "req-iam-prt-001-manual-issue",
+    );
+    await controller.revokeApiKey(
+      manual.data.apiKey.apiKeyId,
+      null,
+      TENANT_A,
+      "req-iam-prt-001-manual-revoke",
+    );
+
+    await expect(
+      controller.rotateApiKey(
+        manual.data.apiKey.apiKeyId,
+        { overlapDays: 2 },
+        null,
+        TENANT_A,
+        "req-iam-prt-001-manual-rotate",
+      ),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "TENANT_API_KEY_NOT_ROTATABLE",
+          }),
+        }),
+      }),
+    );
+
+    expect(
+      controller.listApiKeys(TENANT_A, "req-iam-prt-001-manual-list").data.items,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: manual.data.apiKey.apiKeyId,
+          status: "revoked",
+          revokeReason: "manual_revoke",
+          overlapEndsAt: null,
+          supersededByApiKeyId: null,
+        }),
+      ]),
+    );
+
+    // An auto-revoked key must not be rotated back into a fresh overlap window,
+    // and the failed rotation must not retire the live key as a side effect.
+    const first = await controller.issueApiKey(
+      { keyName: "Overlap key", scopes: ["tenant:write"] },
+      null,
+      TENANT_B,
+      "req-iam-prt-001-auto-issue",
+    );
+    const second = await controller.rotateApiKey(
+      first.data.apiKey.apiKeyId,
+      { overlapDays: 1 },
+      null,
+      TENANT_B,
+      "req-iam-prt-001-auto-rotate",
+    );
+
+    vi.setSystemTime(new Date("2026-08-05T00:00:00.000Z"));
+    await expect(
+      controller.rotateApiKey(
+        first.data.apiKey.apiKeyId,
+        { overlapDays: 2 },
+        null,
+        TENANT_B,
+        "req-iam-prt-001-auto-rerotate",
+      ),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "TENANT_API_KEY_NOT_ROTATABLE",
+          }),
+        }),
+      }),
+    );
+
+    expect(
+      controller.listApiKeys(TENANT_B, "req-iam-prt-001-auto-list").data.items,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: first.data.apiKey.apiKeyId,
+          status: "auto_revoked",
+          revokeReason: "rotation_overlap_elapsed",
+          supersededByApiKeyId: second.data.apiKey.apiKeyId,
+        }),
+        expect.objectContaining({
+          apiKeyId: second.data.apiKey.apiKeyId,
+          status: "active",
+        }),
+      ]),
+    );
+
+    // Expiry is owned by the credential, so an elapsed key is equally unrotatable.
+    const expiring = await controller.issueApiKey(
+      {
+        keyName: "Short lived key",
+        scopes: ["tenant:write"],
+        expiresAt: "2026-08-06T00:00:00.000Z",
+      },
+      null,
+      TENANT_A,
+      "req-iam-prt-001-expiring-issue",
+    );
+
+    vi.setSystemTime(new Date("2026-08-07T00:00:00.000Z"));
+    try {
+      await controller.rotateApiKey(
+        expiring.data.apiKey.apiKeyId,
+        { overlapDays: 2 },
+        null,
+        TENANT_A,
+        "req-iam-prt-001-expiring-rotate",
+      );
+      throw new Error("Expected expired tenant API key rotation to fail.");
+    } catch (error) {
+      expect(expectErrorCode(error)).toBe("TENANT_API_KEY_NOT_ROTATABLE");
+    }
+
+    expect(
+      controller.listApiKeys(TENANT_A, "req-iam-prt-001-expiring-list").data
+        .items,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: expiring.data.apiKey.apiKeyId,
+          status: "expired",
+          overlapEndsAt: null,
+        }),
+      ]),
+    );
+  });
+
+  it("isolates tenant API key reads and lifecycle commands across tenants", async () => {
+    const repository = createDurableTenantPartnerRepository();
+    const { controller } = await createCredentialSurface(repository);
+
+    const tenantAKey = await controller.issueApiKey(
+      { keyName: "Tenant A key", scopes: ["tenant:write"] },
+      null,
+      TENANT_A,
+      "req-iam-prt-001-cross-issue",
+    );
+
+    const tenantBView = controller.listApiKeys(
+      TENANT_B,
+      "req-iam-prt-001-cross-list",
+    );
+    expect(
+      tenantBView.data.items.some(
+        (item) => item.apiKeyId === tenantAKey.data.apiKey.apiKeyId,
+      ),
+    ).toBe(false);
+
+    for (const attempt of [
+      () =>
+        controller.rotateApiKey(
+          tenantAKey.data.apiKey.apiKeyId,
+          { overlapDays: 1 },
+          null,
+          TENANT_B,
+          "req-iam-prt-001-cross-rotate",
+        ),
+      () =>
+        controller.revokeApiKey(
+          tenantAKey.data.apiKey.apiKeyId,
+          null,
+          TENANT_B,
+          "req-iam-prt-001-cross-revoke",
+        ),
+    ]) {
+      await expect(attempt()).rejects.toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({ code: "API_KEY_NOT_FOUND" }),
+          }),
+        }),
+      );
+    }
+
+    expect(
+      controller.listApiKeys(TENANT_A, "req-iam-prt-001-cross-owner-list").data
+        .items,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: tenantAKey.data.apiKey.apiKeyId,
+          status: "active",
+        }),
+      ]),
+    );
+  });
+
+  it("never returns expired webhook secret material to a signing window on rotation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 410 });
+    const repository = createDurableTenantPartnerRepository();
+    const { service } = await createCredentialSurface(repository, fetchImpl);
+
+    const tenantAdminIdentity = {
+      actorType: "tenant_admin",
+      actorId: "tenant-admin-001",
+      realm: "tenant",
+      tenantId: TENANT_A,
+      roles: ["tc_admin"],
+      scopes: ["tenant:webhooks:read", "tenant:webhooks:write", "tenant:read"],
+    } as const;
+
+    const created = service.createWebhookEndpoint(
+      TENANT_A,
+      {
+        url: "https://tenant.example/webhooks/iam-prt-001",
+        secret: "whsec_expiring_v1",
+        events: ["booking.created"],
+        expiresAt: "2026-08-04T00:00:00.000Z",
+      },
+      "req-iam-prt-001-webhook-create",
+    );
+
+    await service.sendTestWebhook(
+      TENANT_A,
+      { webhookId: created.webhookId },
+      "req-iam-prt-001-webhook-test",
+    );
+    const [failedDelivery] = service.listWebhookDeliveriesByWebhook(
+      TENANT_A,
+      created.webhookId,
+      "req-iam-prt-001-webhook-deliveries",
+      tenantAdminIdentity,
+    );
+    expect(failedDelivery).toMatchObject({
+      status: "delivery_failed",
+      secretVersion: 1,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    // v1 expires before the operator gets around to rotating it.
+    vi.setSystemTime(new Date("2026-08-05T00:00:00.000Z"));
+    const rotated = service.rotateWebhookSecret(
+      TENANT_A,
+      {
+        webhookId: created.webhookId,
+        secret: "whsec_expiring_v2",
+        rotationReason: "expired_secret_recovery",
+        overlapDays: 2,
+      },
+      "req-iam-prt-001-webhook-rotate",
+    );
+    expect(rotated).toMatchObject({ secretVersion: 2 });
+
+    const [endpoint] = service
+      .listWebhookEndpoints(TENANT_A)
+      .filter((candidate) => candidate.webhookId === created.webhookId);
+    expect(endpoint.secretHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          secretVersion: 1,
+          overlapEndsAt: null,
+          supersededByVersion: 2,
+        }),
+        expect.objectContaining({ secretVersion: 2, status: "active" }),
+      ]),
+    );
+    const retiredSecret = endpoint.secretHistory?.find(
+      (record) => record.secretVersion === 1,
+    );
+    expect(retiredSecret?.status).not.toBe("active");
+    expect(retiredSecret?.status).not.toBe("overlap_active");
+
+    // A v1 retry must fail closed instead of signing with resurrected material.
+    const retried = await service.retryWebhookDelivery(
+      TENANT_A,
+      created.webhookId,
+      failedDelivery.deliveryId,
+      "req-iam-prt-001-webhook-retry",
+      tenantAdminIdentity,
+    );
+    expect(retried).toMatchObject({
+      deliveryId: failedDelivery.deliveryId,
+      status: "delivery_failed",
+      httpStatus: null,
+      secretVersion: 1,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps webhook secret material out of tenant reads across rotation and a tampered snapshot reload", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+
+    const repository = createDurableTenantPartnerRepository();
+    const { controller } = await createCredentialSurface(repository);
+
+    const tenantAdminIdentity = {
+      actorType: "tenant_admin",
+      actorId: "tenant-admin-001",
+      realm: "tenant",
+      tenantId: TENANT_A,
+      roles: ["tc_admin"],
+      scopes: ["tenant:webhooks:read", "tenant:webhooks:write", "tenant:read"],
+    } as const;
+
+    const created = controller.createWebhookEndpoint(
+      {
+        url: "https://tenant.example/webhooks/iam-prt-001-leak",
+        secret: SECRET_V1,
+        events: ["booking.created"],
+      },
+      TENANT_A,
+      "req-iam-prt-001-leak-create",
+    );
+    expect(JSON.stringify(created)).not.toContain(SECRET_V1);
+
+    vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+    const rotated = controller.rotateWebhookSecret(
+      created.data.webhookId,
+      {
+        webhookId: created.data.webhookId,
+        secret: SECRET_V2,
+        rotationReason: "scheduled_rotation",
+        overlapDays: 2,
+      },
+      TENANT_A,
+      "req-iam-prt-001-leak-rotate",
+    );
+    expect(rotated.data).toMatchObject({ secretVersion: 2 });
+
+    const listed = controller.listWebhookEndpoints(
+      tenantAdminIdentity as never,
+      TENANT_A,
+      "req-iam-prt-001-leak-list",
+    );
+    const endpoint = listed.data.items.find(
+      (item) => item.webhookId === created.data.webhookId,
+    );
+
+    // The read must still be substantive: both versions are published as
+    // previews, so a clean payload is not just an empty payload.
+    expect(endpoint?.secretHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ secretVersion: 1 }),
+        expect.objectContaining({ secretVersion: 2, status: "active" }),
+      ]),
+    );
+    expectNoWebhookSecretMaterial(listed);
+
+    // A snapshot row written before hash-only authority landed can still carry
+    // raw secrets in the outward-facing history shapes. Reload must re-project
+    // them away rather than pass them straight back to the tenant.
+    const persisted = repository.getState();
+    const storedEndpoint = persisted.webhookEndpoints.find(
+      (row) => row.webhookId === created.data.webhookId,
+    );
+    if (!storedEndpoint) {
+      throw new Error("Expected the rotated webhook endpoint to be persisted.");
+    }
+    const tampered = {
+      ...storedEndpoint,
+      secretHistory: storedEndpoint.secretHistory.map((record) => ({
+        ...record,
+        secretValue: record.secretVersion === 1 ? SECRET_V1 : SECRET_V2,
+      })),
+      runtimeMetadata: {
+        ...storedEndpoint.runtimeMetadata,
+        secretRotation: {
+          ...storedEndpoint.runtimeMetadata.secretRotation,
+          history: storedEndpoint.runtimeMetadata.secretRotation.history.map(
+            (record) => ({
+              ...record,
+              secretValue: record.secretVersion === 1 ? SECRET_V1 : SECRET_V2,
+            }),
+          ),
+        },
+      },
+      // Pre-migration rows have no per-version credential table, so hydration
+      // has to rebuild the history from the endpoint's own secret material.
+      secretCredentials: undefined,
+    };
+    await repository.persistChanges({
+      webhookEndpoints: [tampered],
+    } as never);
+
+    const restarted = await createCredentialSurface(repository);
+    const afterReload = restarted.controller.listWebhookEndpoints(
+      tenantAdminIdentity as never,
+      TENANT_A,
+      "req-iam-prt-001-leak-reload-list",
+    );
+    const reloadedEndpoint = afterReload.data.items.find(
+      (item) => item.webhookId === created.data.webhookId,
+    );
+    expect(reloadedEndpoint?.secretHistory?.length ?? 0).toBeGreaterThan(0);
+    expectNoWebhookSecretMaterial(afterReload);
+  });
+
+  it("keeps every credential a repeat rotation retires revoked across a restart", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT = SEEDED_PARTNER_KEY;
+    const seeds = resolvePartnerIngressCredentialsFromEnv();
+
+    const repository = createDurableTenantPartnerRepository();
+    const { service } = await createCredentialSurface(
+      repository,
+      undefined,
+      seeds,
+    );
+
+    // First rotation holds the seeded key open for overlap, so it is still a
+    // live credential going into the second rotation.
+    const firstRotation = service.issuePlatformPartnerIngressCredential(
+      PARTNER_ENTRY_SLUG,
+      { rotationReason: "scheduled_rotation", overlapDays: 7 },
+      "req-iam-prt-001-partner-rotate-1",
+    );
+    expect(firstRotation.revokedCredentialId).toBe(SEEDED_PARTNER_KEY_ID);
+
+    // The second rotation only holds the newest key open. The seeded key is
+    // retired in the same pass and has to reach the snapshot with it.
+    vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+    const secondRotation = service.issuePlatformPartnerIngressCredential(
+      PARTNER_ENTRY_SLUG,
+      { rotationReason: "scheduled_rotation", overlapDays: 7 },
+      "req-iam-prt-001-partner-rotate-2",
+    );
+    expect(secondRotation.revokedCredentialId).toBe(
+      firstRotation.credential.keyId,
+    );
+
+    const storedSeededKey = repository
+      .getState()
+      .partnerIngressCredentials.find(
+        (credential) => credential.keyId === SEEDED_PARTNER_KEY_ID,
+      );
+    expect(storedSeededKey).toMatchObject({
+      status: "revoked",
+      revokeReason: "scheduled_rotation",
+      overlapEndsAt: null,
+    });
+    expect(storedSeededKey?.revokedAt).toEqual(expect.any(String));
+
+    // Still inside the 7-day overlap window the first rotation granted, so a
+    // stale snapshot row would come back as a live credential here.
+    const restarted = await createCredentialSurface(
+      repository,
+      undefined,
+      seeds,
+    );
+    expect(
+      restarted.service.listPlatformPartnerIngressCredentials(
+        PARTNER_ENTRY_SLUG,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyId: SEEDED_PARTNER_KEY_ID,
+          status: "revoked",
+        }),
+      ]),
+    );
+
+    expect(() =>
+      restarted.service.authenticatePartnerBootstrap(
+        { entrySlug: PARTNER_ENTRY_SLUG, apiKey: SEEDED_PARTNER_KEY },
+        "req-iam-prt-001-partner-retired-auth",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({ code: "PARTNER_API_KEY_REVOKED" }),
+        }),
+      }),
+    );
+  });
+
+  it("refuses an identity governance transaction that carries a bucket it cannot write", async () => {
+    const repository = new TenantPartnerRepository(undefined as never);
+    const executor = { query: vi.fn() };
+
+    await expect(
+      repository.persistIdentityGovernanceChanges(executor as never, {
+        // A bucket outside the identity-governance set would otherwise be
+        // audited by the shared transaction and then silently dropped.
+        webhookDeliveries: [],
+      } as never),
+    ).rejects.toThrowError(/webhookDeliveries/);
+    expect(executor.query).not.toHaveBeenCalled();
+
+    await expect(
+      repository.persistIdentityGovernanceChanges(executor as never, {
+        userRoles: [],
+        apiKeys: [],
+        partnerIngressCredentials: [],
+        webhookEndpoints: [],
+      }),
+    ).resolves.toBeUndefined();
+  });
+});

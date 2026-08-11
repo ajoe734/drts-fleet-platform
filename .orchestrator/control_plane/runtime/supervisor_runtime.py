@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -2046,13 +2047,41 @@ def ensure_planning_baton_dispatch(
     return True
 
 
+def provider_report_age_seconds(
+    path: Path, report: dict[str, Any] | None, *, now: datetime | None = None
+) -> float:
+    """Age of a cached capability report; infinite when it cannot be dated."""
+    now = now or datetime.now(timezone.utc)
+    generated_at = _parse_iso_utc(str((report or {}).get("generated_at") or ""))
+    if generated_at is not None:
+        return max(0.0, (now - generated_at).total_seconds())
+    try:
+        return max(0.0, now.timestamp() - path.stat().st_mtime)
+    except OSError:
+        return float("inf")
+
+
 def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
     try:
-        if config.get("supervisor", {}).get("auto_refresh_provider_capabilities", True):
+        supervisor_cfg = config.get("supervisor", {})
+        if supervisor_cfg.get("auto_refresh_provider_capabilities", True):
             report = build_provider_capabilities(config)
             write_provider_capabilities(config, report=report)
             return report
-        return load_json(config_path(config, "provider_capabilities"), default={}) or {}
+        path = config_path(config, "provider_capabilities")
+        report = load_json(path, default={}) or {}
+        # Probing every tick is too expensive, which is why auto-refresh is off.
+        # But a cache that is never refreshed can strand a healthy lane: one
+        # stale or wrong auth_ready=False removes it from dispatch with no
+        # pause, no error and no log line. Re-probe on an interval so the cache
+        # can heal itself; an undateable or missing report refreshes at once.
+        interval = float(
+            supervisor_cfg.get("provider_capabilities_refresh_interval_seconds", 900.0)
+        )
+        if interval > 0 and provider_report_age_seconds(path, report) >= interval:
+            report = build_provider_capabilities(config)
+            write_provider_capabilities(config, report=report)
+        return report
     except KeyError:
         return {}
 
@@ -2415,6 +2444,23 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
                 target_agent=event.get("target_display_name") or event.get("target_agent"),
             ) or changed
             continue
+        if not isinstance(event.get("message"), str) or not event["message"].strip():
+            # Never let a malformed persisted event crash the supervisor or be auto-delivered.
+            record["status"] = "manual_pending"
+            record["processed_at"] = utc_now()
+            record["error"] = "invalid_queue_event_missing_message"
+            write_activity_log(
+                config,
+                {
+                    "type": "wake_manual_pending",
+                    "task_id": event.get("task_id"),
+                    "target_agent": event.get("target_display_name") or event.get("target_agent"),
+                    "message": "Queue event is missing a non-empty delivery message; manual reconciliation required.",
+                    "queue_event_id": event_id,
+                },
+            )
+            changed = True
+            continue
         request = build_request(config, event)
         record["attempt_count"] = int(record.get("attempt_count", 0)) + 1
         record["last_attempt_at"] = utc_now()
@@ -2752,9 +2798,13 @@ def pause_provider(
         else None
     )
     resume_source = "reset_seconds" if reset_seconds is not None else None
-    if resume_at is None and kind in {"quota", "capacity"}:
+    if kind in {"quota", "capacity"}:
         hinted = infer_pause_resume_at(reason)
-        if hinted is not None:
+        # The provider states when the quota actually resets; a caller-supplied
+        # default (quota pauses hardcode 4h) is only a guess. Waking earlier than
+        # the stated reset just burns an attempt and re-pauses, so take whichever
+        # is later.
+        if hinted is not None and (resume_at is None or hinted > resume_at):
             resume_at = hinted
             resume_source = "reason_hint"
     entry = {
@@ -3455,10 +3505,19 @@ def chair_review_needs_immediate_attention(
     state: dict[str, Any],
     status: dict[str, Any] | None = None,
 ) -> bool:
-    if repeated_failure_records(state, status) or actionable_dispatch_pause_records(state, status, limit=1):
+    # Failure streaks carry an awaiting_chair flag that the chair clears, so a
+    # streak that is still awaiting review is always new information.
+    if repeated_failure_records(state, status):
         return True
+    # Dispatch and provider pauses persist until the underlying lane recovers.
+    # Only a pause recorded since the last review is new information; one the
+    # chair has already seen must fall back to the normal review cooldown
+    # instead of re-triggering a review on every tick.
     last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
-    for pause in active_provider_pause_records(state):
+    for pause in (
+        *actionable_dispatch_pause_records(state, status, limit=1),
+        *active_provider_pause_records(state),
+    ):
         paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
         if last_review_at is None or paused_at is None or paused_at > last_review_at:
             return True
@@ -3888,14 +3947,31 @@ def proactive_claim_plan_for_idle_agent(
         }
 
     reviewer_candidates: list[str] = []
-    if reviewer and reviewer != idle_agent_name:
+    if reviewer:
         reviewer_candidates.append(reviewer)
-    if owner and owner != idle_agent_name and owner != reviewer:
+    if owner and owner != reviewer:
         reviewer_candidates.append(owner)
     reviewer_candidates.extend(normalized_mapping_values(reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent))
     if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
         reviewer_candidates.extend(ordered_idle)
-    new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={idle_agent_name}, state=state)
+
+    # Keep the reviewer separate from the claiming lane. Ask for a distinct one
+    # first, every time, and only accept self-review when there is no other
+    # viable reviewer at all — that is the deadlock this fallback exists for:
+    # one healthy lane, an owner that can be reclaimed, and a review that
+    # otherwise can never be reassigned.
+    #
+    # Deciding on idle-lane count instead would give up separation too early. A
+    # lane that is busy running a worker is still a viable reviewer, so with one
+    # idle lane and one busy lane the count says "deadlock" while a perfectly
+    # good reviewer is standing there.
+    new_reviewer = first_viable_agent(
+        config, reviewer_candidates, exclude={idle_agent_name}, state=state
+    )
+    if not new_reviewer:
+        new_reviewer = first_viable_agent(
+            config, reviewer_candidates, exclude=set(), state=state
+        )
     if not new_reviewer:
         return None
     return {
@@ -7082,17 +7158,34 @@ def choose_chair_reviewer(
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
+    active_agent_counts = active_worker_agent_counts(state, active_statuses)
+    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     task_map = task_index_from_status(config, status)
     failing_agents = failing_agents_in_reassignment_loops(state, status)
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
+    active_recovery_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         display_name = task_agent_display_name(config, status, agent_id)
         if not display_name or display_name_is_legacy_alias(display_name) or display_name_is_legacy_alias(configured_display_name):
             continue
         normalized = normalize_agent_id(agent_id)
-        if normalized in active_agents or normalized in pending_agents:
+        if normalized in pending_agents:
+            continue
+        if normalized in active_agents:
+            if not allow_primary_work_fallback:
+                continue
+            if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+                continue
+            if not agent_supports_auto_delivery(config, provider_report, agent_id):
+                continue
+            if display_name in failing_agents:
+                continue
+            lane_capacity = max_tasks_per_agent_for_lane(settings, normalized)
+            lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
+            if lane_load < lane_capacity:
+                active_recovery_candidates.append((normalized, display_name))
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
@@ -7106,7 +7199,7 @@ def choose_chair_reviewer(
             continue
         candidates.append((normalized, display_name))
     if not candidates and allow_primary_work_fallback:
-        candidates = primary_work_candidates
+        candidates = primary_work_candidates or active_recovery_candidates
     if not candidates:
         return None
     rotation_index = int(state.setdefault("chair_review", {}).get("rotation_index", 0) or 0)
@@ -7134,8 +7227,13 @@ def queue_chair_review(
     reason = chair_review_reason(state, approval_state, status=status, config=config)
     if reason is None:
         return False
-    immediate_attention = bool(chair_review_needs_immediate_attention(state, status) or ready_blocked_tasks)
-    bypass_cooldown = bool(pending_approval_items(approval_state) or immediate_attention)
+    needs_immediate_attention = chair_review_needs_immediate_attention(state, status)
+    immediate_attention = bool(needs_immediate_attention or ready_blocked_tasks)
+    # A dependency-ready blocked task stays listed until the parent is actually
+    # unblocked, which the chair's own repair action cannot do on its own. It
+    # therefore raises urgency for reviewer-lane selection but must not bypass
+    # the cooldown, or every tick re-queues the same blocked_task_triage.
+    bypass_cooldown = bool(pending_approval_items(approval_state) or needs_immediate_attention)
     cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
@@ -7401,23 +7499,16 @@ def _approval_is_routine_safe(approval: dict[str, Any]) -> bool:
             return False
         positionals = [token for token in tokens[2:] if not token.startswith("-")]
         return len(positionals) >= 2
+    # The chairman is the escalation path for commands the classifier cannot
+    # judge. Asking the classifier again — "would this have run unreviewed?" —
+    # sends the escalation back to what escalated it, so every gap in the
+    # pattern set became a permanent deadlock rather than a review. Bound the
+    # chairman by what no reviewer may permit instead.
     try:
-        from permission_broker import classify_command
-    except Exception:
-        classify_command = None
-    if classify_command is not None and classify_command(normalized) == "allow":
-        return True
-    verify_prefixes = (
-        "pytest",
-        "python3 -m pytest",
-        "python3 -m unittest",
-        "npm test",
-        "npm run test",
-        "pnpm test",
-        "go test",
-        "cargo test",
-    )
-    return normalized.startswith(verify_prefixes)
+        from permission_broker import command_hard_boundary_reason
+    except Exception:  # noqa: BLE001 - fall back to the conservative answer
+        return False
+    return command_hard_boundary_reason(command) is None
 
 
 def apply_chair_approval_actions(config: dict[str, Any], payload: dict[str, Any]) -> bool:
@@ -8498,7 +8589,19 @@ def refresh_chair_review_state(
         return True
 
     if json_path.exists():
-        payload = load_json(json_path, default=None)
+        # The decision packet is model output, so malformed JSON is an ordinary
+        # bad review — the same thing `validate_chair_review_payload` already
+        # reports — not a reason to take the supervisor down. Letting the
+        # decoder escape here killed the process on startup, and because the
+        # file is read again on every restart, systemd exhausted its restart
+        # budget and the fleet stopped for nine hours.
+        try:
+            payload = load_json(json_path, default=None)
+        except json.JSONDecodeError as exc:
+            payload = None
+            malformed_reason: str | None = f"decision packet is not valid JSON: {exc}"
+        else:
+            malformed_reason = None
         payload = normalize_chair_review_payload_defaults(config, payload)
         payload = normalize_chair_review_payload_for_reason(
             payload,
@@ -8506,7 +8609,7 @@ def refresh_chair_review_state(
             config=config,
             status=load_status(config),
         )
-        error = validate_chair_review_payload(payload)
+        error = malformed_reason or validate_chair_review_payload(payload)
         if not error and isinstance(payload, dict):
             error = validate_chair_review_context(
                 payload,
@@ -9242,19 +9345,44 @@ def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
     return False
 
 
+
+def _has_any_dispatchable_lane(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
+    settings = ready_dispatch_settings(config)
+    report = provider_report or load_provider_report(config)
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        if not configured_display_name or display_name_is_legacy_alias(configured_display_name):
+            continue
+        normalized = normalize_agent_id(agent_id)
+        if is_agent_dispatch_paused(config, state, normalized, provider_report=report):
+            continue
+        if not agent_supports_auto_delivery(config, report, normalized):
+            continue
+        if max_tasks_per_agent_for_lane(settings, normalized) <= 0:
+            continue
+        return True
+    return False
+
+
 def break_full_deadlock(
     config: dict[str, Any],
     state: dict[str, Any],
     status: dict[str, Any],
 ) -> bool:
-    """Last-resort recovery when the orchestrator is fully wedged: zero active
-    workers, an empty queue, the chairman review blocked for lack of a
-    dispatch-capable lane, yet dispatchable backlog remains. Forces a fresh
-    capability probe and clears any paused lane the probe now reports healthy
-    (auth OR an indefinite quota hold whose underlying probe has recovered). If
-    nothing recovers, raises a loud operator-attention escalation instead of
-    sitting silently at zero workers. Rate-limited by a cooldown so genuinely
-    dead lanes are not thrashed."""
+    """Last-resort recovery when the orchestrator is fully wedged, with zero active
+    workers, an empty queue, dispatchable backlog remains, and either
+    - chairman review is blocked for lack of a dispatch-capable lane
+    - provider pauses are present while no dispatch-capable lane is available.
+
+    Forces a fresh recovery probe and clears any paused lane the probe now
+    reports healthy (auth OR an indefinite quota hold whose underlying probe has
+    recovered). If nothing recovers, raises a loud operator-attention
+    escalation instead of sitting silently at zero workers. Rate-limited by a
+    cooldown so genuinely dead lanes are not thrashed."""
     settings = config.get("supervisor", {})
     if not settings.get("deadlock_breaker_enabled", True):
         return False
@@ -9264,8 +9392,15 @@ def break_full_deadlock(
         return False
     if state.get("queue", {}).get("events", {}):
         return False
-    if not state.get("chair_review", {}).get("blocked"):
-        return False
+
+    chair_blocked = bool(state.get("chair_review", {}).get("blocked"))
+    if not chair_blocked:
+        if not active_provider_pause_records(state):
+            return False
+        provider_report = load_provider_report(config)
+        if _has_any_dispatchable_lane(config, state, provider_report=provider_report):
+            return False
+
     if not _has_dispatchable_backlog(status):
         return False
     rec = state.setdefault("deadlock_recovery", {})
@@ -9275,11 +9410,18 @@ def break_full_deadlock(
     if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
         return False
     rec["last_attempt_at"] = utc_now()
-    console_log(
-        "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
-        "blocked, backlog pending) - forcing recovery probe",
-        quiet=False,
-    )
+    if chair_blocked:
+        console_log(
+            "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
+            "blocked, backlog pending) - forcing recovery probe",
+            quiet=False,
+        )
+    else:
+        console_log(
+            "FULL DEADLOCK detected (0 active workers, queue empty, paused lanes present, "
+            "no chair review blocked marker, backlog pending) - forcing recovery probe",
+            quiet=False,
+        )
     fresh_report = _force_recovery_probe(config)
     paused = list(provider_pause_registry(state).keys())
     recovered = [a for a in paused if _lane_probe_healthy(config, fresh_report, a) is True]
@@ -9312,8 +9454,6 @@ def break_full_deadlock(
         "paused": paused,
     })
     return True
-
-
 def supervisor_tick_ports() -> SupervisorTickPorts:
     optional_automation = OptionalAutomation(
         materialize_workspace_baseline_task=materialize_workspace_baseline_task_from_last_decision,
@@ -9363,6 +9503,35 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
     )
 
 
+class SupervisorTickFailureLimit(Exception):
+    """Raised when consecutive ticks fail and the loop should stop deliberately."""
+
+
+def _record_tick_failure(
+    config: dict[str, Any], exc: BaseException, *, consecutive: int, limit: int
+) -> None:
+    """Log a failed tick loudly enough to diagnose without stopping the fleet."""
+    detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    console_log(
+        f"supervisor tick failed ({consecutive}/{limit}): {type(exc).__name__}: {exc}",
+        quiet=False,
+    )
+    console_log(detail.rstrip(), quiet=False)
+    try:
+        write_activity_log(
+            config,
+            {
+                "type": "supervisor_tick_failed",
+                "message": f"{type(exc).__name__}: {exc}",
+                "consecutive_failures": consecutive,
+                "failure_limit": limit,
+                "traceback": detail[-4000:],
+            },
+        )
+    except Exception:  # noqa: BLE001 - logging the failure must not mask it
+        pass
+
+
 def run_once(
     config: dict[str, Any],
     *,
@@ -9403,9 +9572,41 @@ def main() -> int:
         f"starting supervisor pid={os.getpid()} poll_interval={poll_interval:.1f}s config={args.config}",
         quiet=args.quiet,
     )
+    # A tick touches every subsystem and reads files written by models, workers
+    # and other tools. Letting one unexpected exception leave this loop made the
+    # fleet's availability equal to the least robust line on that path: a single
+    # malformed decision packet stopped dispatch for nine hours, because the file
+    # was re-read on each restart until systemd gave up retrying.
+    #
+    # Contain a failed tick and keep going, but do not spin in the dark: if
+    # nothing has succeeded for `tick_failure_limit` ticks in a row, stop on
+    # purpose with a reason, which is diagnosable in a way a crash loop is not.
+    failure_limit = max(
+        1, int(config.get("supervisor", {}).get("tick_failure_limit", 10))
+    )
+    consecutive_failures = 0
+
+    def guarded_tick(**kwargs: Any) -> None:
+        nonlocal consecutive_failures
+        try:
+            run_once(config, **kwargs)
+        except (SupervisorShutdown, KeyboardInterrupt):
+            raise
+        except Exception as exc:  # noqa: BLE001 - one bad tick must not stop the fleet
+            consecutive_failures += 1
+            _record_tick_failure(
+                config, exc, consecutive=consecutive_failures, limit=failure_limit
+            )
+            if consecutive_failures >= failure_limit:
+                raise SupervisorTickFailureLimit(
+                    f"{consecutive_failures} consecutive supervisor ticks failed; "
+                    f"last error: {type(exc).__name__}: {exc}"
+                ) from exc
+        else:
+            consecutive_failures = 0
+
     try:
-        run_once(
-            config,
+        guarded_tick(
             watch=not args.no_watch,
             replay=args.replay,
             quiet=args.quiet,
@@ -9417,8 +9618,7 @@ def main() -> int:
             return 0
         while True:
             time.sleep(poll_interval)
-            run_once(
-                config,
+            guarded_tick(
                 watch=not args.no_watch,
                 replay=False,
                 quiet=args.quiet,
@@ -9430,6 +9630,16 @@ def main() -> int:
         console_log(f"stopping supervisor after {exc.reason}", quiet=args.quiet)
         mark_supervisor_stopped(config, reason=exc.reason, signum=exc.signum, terminate_workers=True)
         return 128 + exc.signum
+    except SupervisorTickFailureLimit as exc:
+        console_log(f"stopping supervisor: {exc}", quiet=False)
+        try:
+            write_activity_log(
+                config,
+                {"type": "supervisor_tick_failure_limit", "message": str(exc)},
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return 1
     finally:
         if manage_pid_file:
             clear_supervisor_pid(config)

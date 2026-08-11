@@ -53,6 +53,8 @@ Required values:
 | `STAGING_WIF_SERVICE_ACCOUNT`         | secret             | GitHub Actions deployer identity                    |
 | `STAGING_CONTROL_PLANE_API_ORIGIN`    | variable           | Protected staging API origin                        |
 | `STAGING_IAP_CLIENT_ID`               | variable           | IAP audience used for post-deploy verification      |
+| `STAGING_WORKLOAD_IDENTITY_ISSUER`    | variable           | Expected issuer for runtime workload proof exchange |
+| `STAGING_WORKLOAD_IDENTITY_AUDIENCE`  | variable           | Expected audience for runtime workload proof exchange |
 
 Optional but recommended:
 
@@ -81,7 +83,16 @@ GCP project:
 - `drts-staging-api-key-salt`
 - `drts-staging-jwt-secret`
 - `drts-staging-controlled-download-signing-secret`
-- `drts-staging-internal-key` (optional)
+- `drts-staging-workload-identity-jwt-public-key`
+- `drts-staging-workload-identity-service-principals`
+- `drts-staging-internal-key` (optional break-glass only)
+
+When `drts-staging-internal-key` is omitted, the API runtime must still receive:
+
+- `WORKLOAD_IDENTITY_ISSUER`
+- `WORKLOAD_IDENTITY_AUDIENCE`
+- `WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY`
+- `WORKLOAD_IDENTITY_SERVICE_PRINCIPALS`
 
 Set `STAGING_SECRET_PREFIX` if your secret names differ.
 

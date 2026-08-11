@@ -6,6 +6,18 @@ export const CONTROL_PLANE_IAP_USER_ID_HEADER = "x-goog-authenticated-user-id";
 export const CONTROL_PLANE_IAP_JWT_HEADER = "x-goog-iap-jwt-assertion";
 export const CONTROL_PLANE_IAP_JWT_HEADER_ALT = "x-goog-authenticated-user-jwt";
 
+/**
+ * Issuer/audience the API validates against when JWT_ISSUER / JWT_AUDIENCE are
+ * unset. They live here, not in the API, because the control-plane web apps
+ * mint the proxy token the API verifies: when the two sides each kept their own
+ * default the minted token carried no `iss`/`aud` while the API had started
+ * requiring them, and every proxied request failed with JWT_INVALID.
+ */
+export const DEFAULT_CONTROL_PLANE_JWT_ISSUER =
+  "https://auth.local.drts.internal";
+export const DEFAULT_CONTROL_PLANE_JWT_AUDIENCE =
+  "https://api.local.drts.internal";
+
 export interface IapJwtPayload {
   sub: string;
   email?: string;
@@ -43,6 +55,68 @@ export const CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST = new Set([
 ]);
 
 export type ControlPlaneActorType = "platform_admin" | "ops_user";
+
+export type ControlPlaneAuthEnvironment =
+  | "production"
+  | "staging"
+  | "local"
+  | "test";
+
+type EnvLike = Record<string, string | undefined>;
+
+/**
+ * Mirrors `detectAuthEnvironment` in the API so the control-plane web apps
+ * classify their deployment the same way the API does. `NODE_ENV` is a build
+ * mode and is always `production` inside a deployed Next.js bundle, so on its
+ * own it can never tell a dev deployment apart from production — the
+ * deployment environment has to come from `DRTS_ENV`/`APP_ENV` first.
+ */
+export function detectControlPlaneAuthEnvironment(
+  env: EnvLike = process.env,
+): ControlPlaneAuthEnvironment {
+  const raw = (env.DRTS_ENV ?? env.APP_ENV ?? env.NODE_ENV)
+    ?.trim()
+    .toLowerCase();
+
+  if (raw === "prod" || raw === "production") {
+    return "production";
+  }
+  if (raw === "stage" || raw === "staging") {
+    return "staging";
+  }
+  if (raw === "test" || raw === "testing" || raw === "ci") {
+    return "test";
+  }
+  if (
+    raw === "dev" ||
+    raw === "development" ||
+    raw === "local" ||
+    raw === "sandbox"
+  ) {
+    return "local";
+  }
+
+  if ((env.CI ?? "").trim().toLowerCase() === "true") {
+    return "test";
+  }
+
+  return "local";
+}
+
+/**
+ * Strict IAP mode is required wherever a real IAP sits in front of the app.
+ * `STRICT_IAP_MODE=true` forces it on anywhere; otherwise it follows the same
+ * production/staging rule the API's bootstrap auth guard uses.
+ */
+export function isStrictControlPlaneIapEnvironment(
+  env: EnvLike = process.env,
+): boolean {
+  if (env.STRICT_IAP_MODE === "true") {
+    return true;
+  }
+  const environment = detectControlPlaneAuthEnvironment(env);
+  return environment === "production" || environment === "staging";
+}
 
 export type HeaderRecord =
   | Headers
@@ -605,12 +679,12 @@ export function issueControlPlaneRequestAuth(options: {
     expiresIn: options.expiresIn ?? "15m",
   };
 
-  if (options.jwtIssuer) {
-    signOptions.issuer = options.jwtIssuer;
-  }
-  if (options.jwtAudience) {
-    signOptions.audience = options.jwtAudience;
-  }
+  // Always stamp iss/aud. The API validates them and falls back to the same
+  // shared defaults, so an unset JWT_ISSUER/JWT_AUDIENCE on the web side must
+  // not produce a token that the API will reject.
+  signOptions.issuer = options.jwtIssuer || DEFAULT_CONTROL_PLANE_JWT_ISSUER;
+  signOptions.audience =
+    options.jwtAudience || DEFAULT_CONTROL_PLANE_JWT_AUDIENCE;
 
   const token = jwt.sign(
     {

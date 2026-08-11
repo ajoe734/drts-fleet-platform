@@ -150,4 +150,48 @@ export const SECURITY_EVENT_MATRIX: readonly SecurityEventMatrixEntry[] = [
     tenantScoped: false,
     requiredOutcomes: ["success"],
   },
+  {
+    eventType: "internal_key.used",
+    eventFamily: "credential",
+    description:
+      "Temporary internal key exception usage recorded with owner, scope, and key state.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "internal_key_drift.detected",
+    eventFamily: "credential",
+    description:
+      "Internal key drift alert triggered by undocumented, expired, revoked, or invalid internal key presentation.",
+    privileged: true,
+    tenantScoped: false,
+    requiredOutcomes: ["denied", "failure", "expired", "revoked"],
+  },
+  {
+    eventType: "access_review.campaign_created",
+    eventFamily: "policy",
+    description: "New privileged access review campaign created.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "access_review.decision_made",
+    eventFamily: "policy",
+    description:
+      "Privileged access review decision (certify, reduce, remove, defer) executed with evidence.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
+  {
+    eventType: "access_review.overdue_alert",
+    eventFamily: "policy",
+    description:
+      "Access review campaign overdue alert triggered and policy remediation applied.",
+    privileged: true,
+    tenantScoped: true,
+    requiredOutcomes: ["success"],
+  },
 ] as const;

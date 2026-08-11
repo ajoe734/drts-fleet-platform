@@ -33,6 +33,53 @@ env:
   CI: true
 
 jobs:
+  # Every other job in this workflow finishes inside six minutes; e2e runs for
+  # twenty. It alone decides how long a PR waits, so it is the only job worth
+  # gating. Roughly two in five recent PRs touch nothing it can exercise —
+  # orchestrator and documentation changes — and pay the twenty minutes anyway.
+  #
+  # The gate skips e2e only when EVERY changed path is provably irrelevant to
+  # it. A deny-list, not an allow-list: a directory nobody has thought about yet
+  # still runs the suite. Anything that is not a pull request runs it too.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        name: Decide whether e2e can exercise anything in this diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request; running e2e"
+            echo "e2e=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          if [ -z "$changed" ]; then
+            echo "empty diff; running e2e"
+            echo "e2e=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed files:"
+          echo "$changed"
+          # Paths e2e demonstrably cannot exercise. Keep this list short and
+          # obvious; when in doubt leave a path off it and run the suite.
+          irrelevant='^(\.orchestrator/|docs/|docs-site/|\.artifacts/|[^/]*\.md$|docs?/.*\.md$)'
+          if echo "$changed" | grep -qvE "$irrelevant"; then
+            echo "at least one changed path is not provably irrelevant; running e2e"
+            echo "e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "every changed path is irrelevant to e2e; skipping it"
+            echo "e2e=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -97,7 +144,28 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run test:unit
+      # Built here rather than inside the test: a cold image build is minutes of
+      # work, and paying for it inside a vitest budget made the suite fail with
+      # "Test timed out" on branches that never touched it. Buildx cache keeps
+      # this near-free on repeat runs, and the failure now names the real cause.
+      # The default docker driver cannot export a cache; the container driver can.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image for the control-plane resolution test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: drts-api:test
+          push: false
+          load: true
+          cache-from: type=gha,scope=api-test-image
+          cache-to: type=gha,scope=api-test-image,mode=max
+      - name: Run unit tests
+        # Only this job builds drts-api:test, so only here is a missing image a
+        # failure. Smoke acceptance runs the same suite without one.
+        env:
+          DRTS_REQUIRE_API_TEST_IMAGE: "1"
+        run: pnpm run test:unit
 
   integration:
     runs-on: ubuntu-latest
@@ -137,6 +205,56 @@ jobs:
         run: pnpm run test:integration
       - name: Run PostgreSQL UAT gates serially
         run: pnpm --filter @drts/api run test:integration:postgres-gates
+
+  iam-negative-matrix:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      API_PORT: "3001"
+      API_HOST: 0.0.0.0
+      E2E_API_URL: http://localhost:3001
+      AUTH_MODE: test
+      JWT_SECRET: ci-e2e-secret
+      JWT_ISSUER: drts-local
+      JWT_AUDIENCE: drts-api
+      CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
+      PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
+      PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm install --frozen-lockfile
+      # The suite asserts denial behaviour against real iam.* tables; without
+      # the schema every case fails with `relation "iam.identity_principals"
+      # does not exist` rather than testing anything.
+      - name: Apply migrations
+        run: pnpm db:migrate
+      - name: Run IAM negative matrix
+        run: pnpm run test:security:iam-negative-matrix
 
   build:
     runs-on: ubuntu-latest
@@ -185,6 +303,8 @@ jobs:
   # (enterprise dispatch, forwarded order, partner airport/booking, tenant
   # governance, driver multi-platform, fleet revenue share, etc.) stay green.
   e2e:
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -253,10 +373,12 @@ jobs:
   ci-integ:
     needs:
       [
+        changes,
         lint,
         typecheck,
         unit,
         integration,
+        iam-negative-matrix,
         build,
         i18n-guard,
         orchestrator-tests,
@@ -267,7 +389,19 @@ jobs:
     steps:
       - name: Aggregate
         run: |
-          for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}' '${{ needs.e2e.result }}'; do
+          # `changes` must succeed on its own: if the gate breaks, e2e reports
+          # "skipped" for the wrong reason, and treating that as a pass would
+          # silently disable the suite.
+          for r in '${{ needs.changes.result }}' '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.iam-negative-matrix.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}'; do
             [ "$r" = "success" ] || { echo "Required check failed: $r"; exit 1; }
           done
+          # e2e is gated by the `changes` job. "skipped" means the gate proved the
+          # diff contains nothing the suite could exercise, so it counts as a pass.
+          # Any other non-success result is a real failure and must still block.
+          e2e='${{ needs.e2e.result }}'
+          case "$e2e" in
+            success) echo "e2e passed." ;;
+            skipped) echo "e2e skipped: no changed path can exercise it." ;;
+            *) echo "Required check failed: e2e: $e2e"; exit 1 ;;
+          esac
           echo "All integration checks passed."

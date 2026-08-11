@@ -377,6 +377,10 @@ body {
   background: rgba(15, 30, 60, 0.68);
   color: rgba(255, 255, 255, 0.84);
   text-decoration: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
 }
 
 .login-bank-card:hover,

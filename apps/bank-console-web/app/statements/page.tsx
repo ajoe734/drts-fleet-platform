@@ -1,4 +1,5 @@
 import { CanvasPill, DataTable, Td, Tr } from "@drts/ui-web";
+import { cookies } from "next/headers";
 import type { CSSProperties } from "react";
 import {
   CalloutPanel,
@@ -10,13 +11,16 @@ import {
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
-import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
-import { tenantDisplayText } from "@/lib/tenant-display";
 import {
-  filterStatements,
-  settlementStatements,
-  type StatementStatus,
-} from "@/lib/statements";
+  BANK_CONSOLE_ROLE_COOKIE,
+  BANK_CONSOLE_SESSION_COOKIE,
+  bankConsoleHref,
+  getBankConsoleSession,
+  resolveServerSessionRole,
+} from "@/lib/session";
+import { tenantDisplayText } from "@/lib/tenant-display";
+import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+import { type StatementStatus } from "@/lib/statements";
 import { t, type Locale } from "@/lib/translations";
 
 const statementStatusTone: Record<
@@ -71,11 +75,23 @@ export default async function StatementsPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const locale = resolveLocale(resolvedSearchParams.locale);
   const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  let cookieRole: string | undefined;
+  try {
+    const cookieStore = await cookies();
+    cookieRole =
+      cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
+      cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
+  } catch {
+    // Fallback for test / non-HTTP contexts
+  }
+  const roleParam = one(resolvedSearchParams.role);
+  const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
   const session = getBankConsoleSession(
     tenant,
     locale,
-    resolvedSearchParams.role,
+    sessionRole,
   );
+  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
   const issuerBrand = tenant.template;
   const baseQuery = {
     bank: tenant.code,
@@ -85,11 +101,13 @@ export default async function StatementsPage({
   const status = one(resolvedSearchParams.status) as
     | StatementStatus
     | undefined;
-  const statements = filterStatements({ ...(status ? { status } : {}) });
-  const publishedCount = settlementStatements.filter(
+  const statements = statementData.data.statements.filter((item) =>
+    status ? item.status === status : true,
+  );
+  const publishedCount = statementData.data.statements.filter(
     (item) => item.status === "published",
   ).length;
-  const dueCount = settlementStatements.filter(
+  const dueCount = statementData.data.statements.filter(
     (item) => item.status === "due",
   ).length;
   const totalIssuerPaid = statements.reduce(
@@ -142,11 +160,25 @@ export default async function StatementsPage({
         </div>
       </section>
 
+      {session.role === "bank_ops_viewer" ? (
+        <CalloutPanel
+          title={t("statements.unauthorized.title", locale)}
+          description={t("statements.unauthorized.description", locale)}
+          tone="warning"
+        />
+      ) : null}
       <CalloutPanel
         title={t("statements.callout.title", locale)}
         description={t("statements.callout.body", locale)}
         tone="warning"
       />
+      {statementData.degradedMessage ? (
+        <CalloutPanel
+          title={t("common.apiDegraded", locale)}
+          description={statementData.degradedMessage}
+          tone="warning"
+        />
+      ) : null}
 
       <section className="surface-card bookings-filter-card">
         <div className="bank-section-head">
@@ -218,6 +250,21 @@ export default async function StatementsPage({
             <h3>{t("statements.list.title", locale)}</h3>
             <p>{t("statements.list.description", locale)}</p>
           </div>
+          {session.role === "bank_ops_viewer" ? (
+            <span
+              className="filters-reset is-disabled"
+              style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+            >
+              {t("statements.actions.exportAll", locale)}
+            </span>
+          ) : (
+            <a
+              className="filters-reset"
+              href={`/api/statements/export?bank=${tenant.code}&locale=${locale}&role=${session.role}`}
+            >
+              {t("statements.actions.exportAll", locale)}
+            </a>
+          )}
         </div>
 
         <DataTable
@@ -259,12 +306,21 @@ export default async function StatementsPage({
               <Td mono>{formatDate(statement.issuedAt)}</Td>
               <Td mono>{formatDate(statement.dueAt)}</Td>
               <Td>
-                <a
-                  className="statement-link"
-                  href={statement.signedArtifactHref}
-                >
-                  {t("statements.actions.download", locale)}
-                </a>
+                {session.role === "bank_ops_viewer" ? (
+                  <span
+                    className="statement-link is-disabled"
+                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                  >
+                    {t("statements.actions.download", locale)}
+                  </span>
+                ) : (
+                  <a
+                    className="statement-link"
+                    href={`${statement.signedArtifactHref}?bank=${tenant.code}&locale=${locale}&role=${session.role}`}
+                  >
+                    {t("statements.actions.download", locale)}
+                  </a>
+                )}
               </Td>
               <Td>
                 <a

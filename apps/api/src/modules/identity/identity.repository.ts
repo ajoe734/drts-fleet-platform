@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 import type { PoolClient } from "pg";
 
 import type {
@@ -59,6 +59,17 @@ type PersistedRefreshFamilyRow = {
   record: unknown;
 };
 
+export interface ConsumeWorkloadIdentityAssertionInput {
+  assertionHash: string;
+  issuer: string;
+  subject: string;
+  exchangeAudience: string;
+  tokenAudience: string;
+  exchangeNonceHash?: string | null;
+  principalId?: string | null;
+  expiresAt: string;
+}
+
 const LEGACY_TENANT_USER_ISSUER = "legacy_tenant_email";
 
 export function hashIdentitySecret(secret: string): string {
@@ -66,7 +77,7 @@ export function hashIdentitySecret(secret: string): string {
 }
 
 @Injectable()
-export class IdentityRepository {
+export class IdentityRepository implements OnModuleInit {
   private readonly logger = new Logger(IdentityRepository.name);
 
   private readonly fallbackPrincipals = new Map<
@@ -104,11 +115,111 @@ export class IdentityRepository {
   >();
 
   private readonly fallbackPreviousTokenHashes = new Map<string, string>();
+  private readonly fallbackConsumedWorkloadAssertions = new Map<
+    string,
+    ConsumeWorkloadIdentityAssertionInput & { consumedAt: string }
+  >();
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {}
+  constructor(@Optional() private readonly databaseService?: DatabaseService) {
+    this.ensureDefaultPlatformAccount().catch(() => {});
+  }
+
+  async onModuleInit() {
+    await this.ensureDefaultPlatformAccount();
+  }
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async ensureDefaultPlatformAccount(): Promise<{
+    principal: CanonicalIdentityPrincipalRecord;
+    membership: CanonicalIdentityMembershipRecord;
+  }> {
+    const existingPrincipal = await this.findPrincipalById(
+      "principal_platform_admin_default",
+    );
+    const existingMemberships = existingPrincipal
+      ? await this.findMembershipsByPrincipalId(
+          "principal_platform_admin_default",
+        )
+      : [];
+    const existingMembership = existingMemberships.find(
+      (m) => m.membershipId === "membership_platform_admin_default",
+    );
+    const existingBindings = existingMembership
+      ? await this.findRoleBindingsByMembershipId(
+          "membership_platform_admin_default",
+        )
+      : [];
+    const existingRoleBinding = existingBindings.find(
+      (b) => b.roleBindingId === "role_binding_platform_admin_default",
+    );
+
+    const now = new Date().toISOString();
+    const principalDraft: CanonicalIdentityPrincipalRecord = {
+      principalId: "principal_platform_admin_default",
+      sourceRef: "platform_admin_default:principal",
+      issuer: "iap_workforce",
+      subject: "platform-admins@platform.drts",
+      principalType: "human",
+      email: "platform-admin@platform.drts",
+      emailVerified: true,
+      displayName: "Platform Admin",
+      status: "active",
+      createdAt: existingPrincipal?.createdAt ?? now,
+      updatedAt: existingPrincipal?.updatedAt ?? now,
+    };
+
+    const membershipDraft: CanonicalIdentityMembershipRecord = {
+      membershipId: "membership_platform_admin_default",
+      sourceRef: "platform_admin_default:membership",
+      principalId: principalDraft.principalId,
+      realm: "platform",
+      scopeRef: "platform:root",
+      tenantId: null,
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: existingMembership?.createdAt ?? now,
+      updatedAt: existingMembership?.updatedAt ?? now,
+    };
+
+    const roleBindingDraft: CanonicalIdentityRoleBindingRecord = {
+      roleBindingId: "role_binding_platform_admin_default",
+      sourceRef: "platform_admin_default:role_binding",
+      membershipId: membershipDraft.membershipId,
+      roleCode: "platform_admin",
+      grantedByPrincipalId: null,
+      approvalId: null,
+      validFrom: existingRoleBinding?.validFrom ?? now,
+      validTo: null,
+      createdAt: existingRoleBinding?.createdAt ?? now,
+      updatedAt: existingRoleBinding?.updatedAt ?? now,
+    };
+
+    if (!this.isEnabled()) {
+      const principal = this.upsertFallbackPrincipal(principalDraft);
+      const membership = this.upsertFallbackMembership(membershipDraft);
+      this.upsertFallbackRoleBinding(roleBindingDraft);
+      return { principal, membership };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const principal = await this.upsertPrincipal(client, principalDraft);
+      const membership = await this.upsertMembership(client, membershipDraft);
+      await this.upsertRoleBinding(client, roleBindingDraft);
+      await client.query("COMMIT");
+      return { principal, membership };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async syncLegacyTenantUserRole(
@@ -331,6 +442,36 @@ export class IdentityRepository {
     }
   }
 
+  async ensureMembershipRecord(
+    membership: CanonicalIdentityMembershipRecord,
+  ): Promise<CanonicalIdentityMembershipRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackMembership(membership);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertMembership(client, membership);
+    } finally {
+      client.release();
+    }
+  }
+
+  async ensureRoleBindingRecord(
+    roleBinding: CanonicalIdentityRoleBindingRecord,
+  ): Promise<CanonicalIdentityRoleBindingRecord> {
+    if (!this.isEnabled()) {
+      return this.upsertFallbackRoleBinding(roleBinding);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      return await this.upsertRoleBinding(client, roleBinding);
+    } finally {
+      client.release();
+    }
+  }
+
   async findPrincipalBySubject(
     issuer: string,
     subject: string,
@@ -370,8 +511,12 @@ export class IdentityRepository {
     principalId: string,
   ): Promise<CanonicalIdentityPrincipalRecord | null> {
     if (!this.isEnabled()) {
-      const principal = this.fallbackPrincipals.get(principalId);
-      return principal ? { ...principal } : null;
+      for (const principal of this.fallbackPrincipals.values()) {
+        if (principal.principalId === principalId || principal.sourceRef === principalId) {
+          return { ...principal };
+        }
+      }
+      return null;
     }
 
     const client = await this.databaseService!.connect();
@@ -802,6 +947,106 @@ export class IdentityRepository {
     }
   }
 
+  async revokeAllSessionsForPrincipal(
+    principalId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ): Promise<number> {
+    const revokedAt = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      let count = 0;
+      for (const [sessionId, session] of this.fallbackSessions.entries()) {
+        if (session.principalId === principalId && session.status === "active") {
+          this.fallbackSessions.set(sessionId, {
+            ...session,
+            status: "revoked",
+            revokedAt,
+            revokedByPrincipalId: revokedByPrincipalId || null,
+            revokeReason: reason,
+            updatedAt: revokedAt,
+          });
+          count++;
+          for (const [familyId, family] of this.fallbackRefreshFamilies.entries()) {
+            if (family.sessionId === sessionId && family.status === "active") {
+              this.fallbackRefreshFamilies.set(familyId, {
+                ...family,
+                status: "revoked",
+                updatedAt: revokedAt,
+              });
+            }
+          }
+        }
+      }
+      return count;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{ session_id: string }>(
+        `
+          UPDATE iam.identity_sessions
+          SET status = 'revoked',
+              revoked_at = $2::timestamptz,
+              revoked_by_principal_id = $3::text,
+              revoke_reason = $4::text,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(
+                    jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                    '{revokedAt}', to_jsonb($2::text)
+                  ),
+                  '{revokedByPrincipalId}', to_jsonb($3::text)
+                ),
+                '{revokeReason}', to_jsonb($4::text)
+              )
+          WHERE principal_id = $1::text AND status = 'active'
+          RETURNING session_id
+        `,
+        [principalId, revokedAt, revokedByPrincipalId || null, reason],
+      );
+
+      const revokedSessionIds = result.rows.map((row) => row.session_id);
+      if (revokedSessionIds.length > 0) {
+        await client.query(
+          `
+            UPDATE iam.identity_refresh_families
+            SET status = 'revoked',
+                updated_at = $2::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                  '{updatedAt}', to_jsonb($2::text)
+                )
+            WHERE session_id = ANY($1::text[]) AND status = 'active'
+          `,
+          [revokedSessionIds, revokedAt],
+        );
+      }
+
+      await client.query("COMMIT");
+      return revokedSessionIds.length;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeSessionsForPrincipal(
+    principalId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ): Promise<number> {
+    return this.revokeAllSessionsForPrincipal(
+      principalId,
+      reason,
+      revokedByPrincipalId,
+    );
+  }
+
   async listSessionsByPrincipal(
     principalId: string,
   ): Promise<CanonicalIdentitySessionRecord[]> {
@@ -983,6 +1228,80 @@ export class IdentityRepository {
       row,
       "iam.identity_refresh_families",
     );
+  }
+
+  async consumeWorkloadIdentityAssertion(
+    input: ConsumeWorkloadIdentityAssertionInput,
+  ): Promise<boolean> {
+    const consumedAt = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      const now = Date.now();
+      for (const [hash, record] of this.fallbackConsumedWorkloadAssertions) {
+        if (Date.parse(record.expiresAt) < now) {
+          this.fallbackConsumedWorkloadAssertions.delete(hash);
+        }
+      }
+
+      if (this.fallbackConsumedWorkloadAssertions.has(input.assertionHash)) {
+        return false;
+      }
+
+      this.fallbackConsumedWorkloadAssertions.set(input.assertionHash, {
+        ...input,
+        consumedAt,
+      });
+      return true;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query(
+        `
+          DELETE FROM iam.workload_identity_assertions
+          WHERE expires_at < NOW()
+        `,
+      );
+
+      const result = await client.query<{ assertion_hash: string }>(
+        `
+          INSERT INTO iam.workload_identity_assertions (
+            assertion_hash,
+            issuer,
+            subject,
+            exchange_audience,
+            token_audience,
+            principal_id,
+            expires_at,
+            consumed_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb
+          )
+          ON CONFLICT (assertion_hash) DO NOTHING
+          RETURNING assertion_hash
+        `,
+        [
+          input.assertionHash,
+          input.issuer,
+          input.subject,
+          input.exchangeAudience,
+          input.tokenAudience,
+          input.principalId ?? null,
+          input.expiresAt,
+          consumedAt,
+          JSON.stringify({
+            ...input,
+            principalId: input.principalId ?? null,
+            consumedAt,
+          }),
+        ],
+      );
+
+      return result.rows.length > 0;
+    } finally {
+      client.release();
+    }
   }
 
   async consumeAndRotateRefreshToken(

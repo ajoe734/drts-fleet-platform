@@ -24,7 +24,11 @@ import {
   isOwnedPlatformCode,
   isShadowOnlyPlatformCode,
 } from "@/components/earnings-by-platform";
-import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
+import {
+  formatDriverError,
+  getDriverClient,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
 import {
   formatAmountNumber,
   formatMoney,
@@ -42,10 +46,7 @@ const PERIOD_OPTIONS = driverEarningsPeriodOptions;
 const DEFAULT_CURRENCY = "TWD";
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return "資料載入失敗，請稍後再試。";
+  return formatDriverError(error, "資料載入失敗，請稍後再試。");
 }
 
 function sumPlatformAmounts(

@@ -1,5 +1,11 @@
 import { createTenantClient, type ApiClient } from "@drts/api-client";
-import type { BookingRecord, CrossAppResourceLink } from "@drts/contracts";
+import type {
+  BookingRecord,
+  CancelOwnedOrderCommand,
+  CreateTenantBookingCommand,
+  CrossAppResourceLink,
+  UpdateTenantBookingCommand,
+} from "@drts/contracts";
 import {
   adaptBookingFixtureToCreateCommand,
   resolveDispatchEmbedDisposition,
@@ -23,16 +29,46 @@ export type EnterpriseDispatchBookingSubmitResult = {
 export class EnterpriseDispatchTenantClient {
   constructor(private readonly client: ApiClient) {}
 
+  async createBooking(
+    command: CreateTenantBookingCommand,
+  ): Promise<EnterpriseDispatchBookingSubmitResult> {
+    return this.client.createTenantBooking(
+      command,
+    ) as Promise<EnterpriseDispatchBookingSubmitResult>;
+  }
+
   async createBookingFromFixture(
     fixture: EnterpriseDispatchBookingFixture,
   ): Promise<EnterpriseDispatchBookingSubmitResult> {
-    return this.client.createTenantBooking(
-      adaptBookingFixtureToCreateCommand(fixture),
-    ) as Promise<EnterpriseDispatchBookingSubmitResult>;
+    return this.createBooking(adaptBookingFixtureToCreateCommand(fixture));
   }
 
   async getBooking(bookingId: string): Promise<BookingRecord> {
     return this.client.getTenantBooking(bookingId) as Promise<BookingRecord>;
+  }
+
+  async listBookings(): Promise<BookingRecord[]> {
+    return this.client.listTenantBookings();
+  }
+
+  async updateBooking(
+    bookingId: string,
+    command: UpdateTenantBookingCommand,
+  ): Promise<BookingRecord> {
+    return this.client.updateTenantBooking(
+      bookingId,
+      command,
+    ) as Promise<BookingRecord>;
+  }
+
+  async cancelBooking(
+    bookingId: string,
+    command: CancelOwnedOrderCommand,
+  ): Promise<BookingRecord> {
+    return this.client.cancelTenantBooking(
+      bookingId,
+      command,
+    ) as Promise<BookingRecord>;
   }
 
   async getBookingGateSnapshot(bookingId: string) {

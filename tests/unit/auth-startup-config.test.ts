@@ -20,6 +20,9 @@ function buildValidProductionEnv(): Record<string, string> {
     JWT_AUDIENCE: "https://api.drts.internal",
     JWT_ALGORITHMS: "HS256",
     JWT_SECRET: VALID_STRONG_SECRET,
+    TENANT_OIDC_ISSUER: "https://tenant-idp.drts.internal",
+    TENANT_OIDC_AUDIENCE: "drts-tenant-workforce",
+    TENANT_OIDC_JWT_SECRET: VALID_STRONG_SECRET,
     COOKIE_SECRET: VALID_STRONG_SECRET,
     CSRF_SECRET: VALID_STRONG_SECRET,
     AUTH_ALLOWED_ORIGINS:

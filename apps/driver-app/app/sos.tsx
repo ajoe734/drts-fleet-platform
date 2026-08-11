@@ -36,9 +36,11 @@ import {
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
 import {
+  formatDriverError,
   getDriverClient,
   recoverDriverSessionFromApiError,
 } from "@/lib/api-client";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
   applyDriverSosAttachmentSyncResult,
   addDriverSosDialRecord,
@@ -272,11 +274,7 @@ function getDriverSosLocationSnapshot(): DriverSosLocationSnapshot | null {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return "SOS 送出失敗，請稍後再試。";
+  return formatDriverError(error, "SOS 送出失敗，請稍後再試。");
 }
 
 function formatAt(value: string | null) {
@@ -759,13 +757,17 @@ export default function DriverSosScreen() {
           : `SOS ${result.receipt.eventNo} 與附件已由伺服器確認。`,
       );
     } catch (error) {
-      await recoverDriverSessionFromApiError(error);
+      if (await recoverDriverSessionFromApiError(error)) {
+        resetDriverAppToOnboarding(router);
+        return;
+      }
+      const sanitizedError = formatDriverError(error, "SOS 送出失敗，請稍後再試。");
       const failedCase = markDriverSosCaseFailed(
         sendingCase,
-        getErrorMessage(error),
+        sanitizedError,
       );
       await persistActiveCase(failedCase);
-      setScreenError(getErrorMessage(error));
+      setScreenError(sanitizedError);
       setUiNotice("SOS 未送達，已保留在本機 outbox。");
     } finally {
       setSubmitting(false);

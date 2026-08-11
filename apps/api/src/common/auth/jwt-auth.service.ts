@@ -4,12 +4,17 @@ import type {
   CanonicalPrincipalType,
   IdentityContext,
 } from "@drts/contracts";
+import {
+  DEFAULT_CONTROL_PLANE_JWT_AUDIENCE,
+  DEFAULT_CONTROL_PLANE_JWT_ISSUER,
+} from "@drts/control-plane-auth";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
 import { IdentityRepository } from "../../modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../modules/tenant-partner/tenant-partner.service";
+import { ApiRequestError } from "../api-envelope";
 import { getTenantRoleScopes } from "./auth.constants";
 import {
   JwtKeyRetiredError,
@@ -48,6 +53,7 @@ export interface JwtIdentityPayload {
   iat?: number | undefined;
   exp?: number | undefined;
   controlPlaneProxy?: boolean | undefined;
+  workloadExchangeNonceHash?: string | undefined;
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
@@ -115,6 +121,7 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   audience?: string[] | null;
   issuedAt?: string | null;
   expiresAt?: string | null;
+  workloadExchangeNonceHash?: string | null;
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
@@ -134,6 +141,8 @@ export interface IssueSessionTokenOptions {
   ensurePrincipal?: boolean;
   idleExpiresAt?: string | null;
   absoluteExpiresAt?: string;
+  audience?: string[] | null;
+  workloadExchangeNonceHash?: string | null;
 }
 
 const SIGN_KEY_REQUIRED_ENV = ["JWT_PRIVATE_KEY", "JWT_SECRET"] as const;
@@ -148,10 +157,13 @@ const VERIFY_KEY_MATERIAL_ERROR_MESSAGE =
   "JWT key material environment variable is not set (neither JWT_PUBLIC_KEY, JWT_PRIVATE_KEY, nor JWT_SECRET)";
 
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
-const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
+const SERVICE_EXPIRES_IN: JwtExpiresIn = "15m";
 const DEFAULT_POLICY_VERSION = "auth.jwt-session.v1";
-const DEFAULT_JWT_ISSUER = "https://auth.local.drts.internal";
-const DEFAULT_JWT_AUDIENCE = "https://api.local.drts.internal";
+// Shared with the control-plane web apps, which mint the proxy token this
+// service verifies. Keeping one copy stops the minted and expected claims from
+// drifting apart.
+const DEFAULT_JWT_ISSUER = DEFAULT_CONTROL_PLANE_JWT_ISSUER;
+const DEFAULT_JWT_AUDIENCE = DEFAULT_CONTROL_PLANE_JWT_AUDIENCE;
 
 const HMAC_ALGORITHMS = new Set<jwt.Algorithm>(["HS256", "HS384", "HS512"]);
 const ASYMMETRIC_ALGORITHMS = new Set<jwt.Algorithm>([
@@ -386,9 +398,14 @@ export class JwtAuthService {
     expiresIn: JwtExpiresIn | undefined,
     jwtId?: string,
     keyInfo?: { algorithm: jwt.Algorithm; kid: string },
+    audienceOverride?: string[] | null,
   ): jwt.SignOptions {
     const issuer = this.getIssuer();
-    const audience = this.getAudienceOption();
+    const overrideAudience = normalizeAudience(audienceOverride);
+    const audience =
+      overrideAudience && overrideAudience.length > 0
+        ? overrideAudience
+        : normalizeAudience(this.getAudienceOption());
     const algorithms = this.getAlgorithms();
     const options: jwt.SignOptions = {
       algorithm: keyInfo?.algorithm ?? algorithms[0],
@@ -402,7 +419,7 @@ export class JwtAuthService {
     if (issuer) {
       options.issuer = issuer;
     }
-    if (audience) {
+    if (audience && audience.length > 0) {
       options.audience = Array.isArray(audience)
         ? ([...audience] as [string, ...string[]])
         : audience;
@@ -531,6 +548,10 @@ export class JwtAuthService {
       exp: payload.exp,
       iss: payload.iss,
       jti: payload.jti,
+      workloadExchangeNonceHash:
+        typeof payload.workloadExchangeNonceHash === "string"
+          ? payload.workloadExchangeNonceHash
+          : undefined,
     };
   }
 
@@ -593,8 +614,19 @@ export class JwtAuthService {
     const principalId =
       options?.principalId ?? identity.principalId ?? identity.actorId;
     const membershipId = options?.membershipId ?? identity.membershipId ?? null;
-    const audience = this.getAudienceList();
+    const optionAudience = normalizeAudience(options?.audience);
+    const identityAudience = normalizeAudience(identity.audience);
+    const audience =
+      optionAudience && optionAudience.length > 0
+        ? optionAudience
+        : identityAudience && identityAudience.length > 0
+          ? identityAudience
+          : this.getAudienceList();
     const issuer = this.getIssuer() ?? null;
+    const workloadExchangeNonceHash =
+      options?.workloadExchangeNonceHash ??
+      identity.workloadExchangeNonceHash ??
+      null;
     const subject =
       options?.subject ??
       identity.subject ??
@@ -659,7 +691,13 @@ export class JwtAuthService {
             ? { deviceId: identity.driverDeviceId }
             : {}),
         },
-        riskSummary: {},
+        riskSummary: {
+          ...(workloadExchangeNonceHash
+            ? {
+                workloadExchangeNonceHash,
+              }
+            : {}),
+        },
         createdAt: issuedAt,
         updatedAt: issuedAt,
       };
@@ -683,6 +721,7 @@ export class JwtAuthService {
         audience,
         issuedAt,
         expiresAt,
+        workloadExchangeNonceHash,
       },
       { expiresIn, jwtId: tokenId },
     );
@@ -698,6 +737,81 @@ export class JwtAuthService {
       policyVersion,
       expiresIn,
       expiresAt,
+    };
+  }
+
+  async revokeCurrentSession(
+    sessionId: string,
+    reason = "user_logout",
+    revokedByPrincipalId?: string,
+  ): Promise<CanonicalIdentitySessionRecord | null> {
+    if (!this.identityRepository || !sessionId) {
+      return null;
+    }
+    return this.identityRepository.revokeSession(
+      sessionId,
+      reason,
+      revokedByPrincipalId,
+    );
+  }
+
+  async revokeAllSessionsForPrincipal(
+    principalId: string,
+    reason = "user_logout_all",
+    revokedByPrincipalId?: string,
+  ): Promise<number> {
+    if (!this.identityRepository || !principalId) {
+      return 0;
+    }
+    return this.identityRepository.revokeAllSessionsForPrincipal(
+      principalId,
+      reason,
+      revokedByPrincipalId,
+    );
+  }
+
+  async revokeSessionSelf(
+    sessionId: string,
+    callerPrincipalId: string,
+    reason = "user_self_revocation",
+  ): Promise<{ revoked: boolean; sessionId: string; status: string }> {
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "IDENTITY_REPOSITORY_UNAVAILABLE",
+        "Identity repository is not available.",
+      );
+    }
+    const session = await this.identityRepository.getSession(sessionId);
+    if (!session) {
+      throw new ApiRequestError(404, "SESSION_NOT_FOUND", "Session not found.");
+    }
+
+    const sessionActorId =
+      session.principalId ||
+      ((session.deviceSummary as { bindingId?: string } | undefined)?.bindingId ?? null);
+
+    if (
+      session.principalId !== callerPrincipalId &&
+      sessionActorId !== callerPrincipalId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "SESSION_REVOCATION_FORBIDDEN",
+        "Self-service session revocation endpoint cannot revoke another user's session.",
+        { sessionId, callerPrincipalId, sessionPrincipalId: session.principalId },
+      );
+    }
+
+    const revoked = await this.identityRepository.revokeSession(
+      sessionId,
+      reason,
+      callerPrincipalId,
+    );
+    return {
+      revoked: true,
+      sessionId,
+      status: revoked?.status ?? "revoked",
     };
   }
 
@@ -724,6 +838,8 @@ export class JwtAuthService {
       amr: unique(identity.amr),
       acr: identity.acr ?? undefined,
       policyVersion: identity.policyVersion ?? undefined,
+      workloadExchangeNonceHash:
+        identity.workloadExchangeNonceHash ?? undefined,
       drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
@@ -743,6 +859,7 @@ export class JwtAuthService {
         expiresIn,
         opts?.jwtId ?? identity.tokenId ?? undefined,
         activeKey,
+        identity.audience,
       ),
     );
   }

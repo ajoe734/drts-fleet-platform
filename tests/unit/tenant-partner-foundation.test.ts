@@ -1308,6 +1308,16 @@ describe("tenant partner foundation service", () => {
             invitedAt: "2026-04-10T00:00:00Z",
             updatedAt: "2026-04-10T00:00:00Z",
           },
+          {
+            userId: "tenant-user-persisted-002",
+            tenantId: "tenant-demo-001",
+            email: "persisted.admin2@example.com",
+            displayName: "Persisted Admin 2",
+            roleCode: "tenant_admin",
+            status: "active",
+            invitedAt: "2026-04-10T00:00:00Z",
+            updatedAt: "2026-04-10T00:00:00Z",
+          },
         ],
         apiKeys: [persistedApiKey],
       })),
@@ -1418,9 +1428,13 @@ describe("tenant partner foundation service", () => {
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         apiKeys: expect.arrayContaining([
+          // Dual rotation keeps the outgoing key signing through the overlap
+          // window instead of revoking it inline; auto-revoke closes it later.
           expect.objectContaining({
             apiKeyId: "tenant-api-key-persisted-001",
-            revokedAt: expect.any(String),
+            status: "overlap_active",
+            revokedAt: null,
+            overlapEndsAt: expect.any(String),
           }),
           expect.objectContaining({
             keyName: "Persisted Tenant Key v2",
@@ -1441,9 +1455,9 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
         partnerEntrySlug: "yuhe-residence",
         rateType: "percent",
-        value: 10,
+        value: 15,
         currency: "TWD",
-        effectiveFrom: "2026-07-01T00:00:00.000Z",
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
         effectiveUntil: null,
         settlementDirection: "drts_pays_partner",
         channelKey: "partner_referral",

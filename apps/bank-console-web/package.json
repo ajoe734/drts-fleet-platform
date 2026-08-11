@@ -14,6 +14,7 @@
   "dependencies": {
     "@drts/api-client": "workspace:*",
     "@drts/contracts": "workspace:*",
+    "@drts/control-plane-auth": "workspace:*",
     "@drts/shared-types": "workspace:*",
     "@drts/ui-tokens": "workspace:*",
     "@drts/ui-web": "workspace:*",

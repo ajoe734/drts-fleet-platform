@@ -116,6 +116,53 @@ def _gemini_selected_auth_type(
     )
 
 
+# Mirrors adapters/antigravity.py: `agy` keeps its OAuth token under the app
+# data dir, and `config_home` maps to the HOME the CLI runs with.
+ANTIGRAVITY_TOKEN_CANDIDATES = (
+    "antigravity-oauth-token",
+    "auth.json",
+    "credentials.json",
+    "token.json",
+    "oauth_creds.json",
+)
+
+
+def _antigravity_app_data_dir(settings: dict[str, Any]) -> Path:
+    explicit = settings.get("app_data_dir")
+    if explicit:
+        return Path(str(explicit)).expanduser()
+    config_home = settings.get("config_home")
+    if config_home:
+        return Path(str(config_home)).expanduser() / ".gemini" / "antigravity-cli"
+    return Path.home() / ".gemini" / "antigravity-cli"
+
+
+def _antigravity_auth_ready(settings: dict[str, Any]) -> bool:
+    if str(settings.get("assume_authed") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+    explicit = settings.get("token_path")
+    if explicit:
+        path = Path(str(explicit)).expanduser()
+        return path.exists() and path.stat().st_size > 0
+    base = _antigravity_app_data_dir(settings)
+    for name in ANTIGRAVITY_TOKEN_CANDIDATES:
+        path = base / name
+        if path.exists() and path.stat().st_size > 0:
+            return True
+    return False
+
+
+def _provider_uses_antigravity(config: dict[str, Any], provider_key: str) -> bool:
+    for agent in (config.get("agents", {}) or {}).values():
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("provider") or "").strip() != provider_key:
+            continue
+        if str(agent.get("adapter") or "").strip() == "antigravity":
+            return True
+    return False
+
+
 def _gemini_auth_ready(
     settings: dict[str, Any],
     *,
@@ -611,7 +658,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     codex_home = _codex_home(codex_profile)
     codex_applied = (
         codex_profile.get("ask_for_approval", "never") == "never"
-        and codex_profile.get("sandbox_mode", "workspace-write") == "workspace-write"
+        and codex_profile.get("sandbox_mode", "workspace-write") in {"workspace-write", "danger-full-access"}
     )
     copilot_applied = (
         _workspace_setting(workspace_settings, "github.copilot.chat.backgroundAgent.enabled")
@@ -1052,6 +1099,51 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             "settings": settings,
             "notes": notes,
         }
+    # Lanes migrated to the Antigravity CLI keep delivery_mode "gemini" for
+    # routing, but their readiness belongs to `agy` and its own OAuth token.
+    # Reporting the retired Gemini CLI here marks the lane auth_ready=False, and
+    # the dispatch gate rejects on that before it ever consults the adapter
+    # capability — which is what silently removed both Antigravity lanes from
+    # the fleet after the migration.
+    for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
+        antigravity_cfg = provider_cfg.get("antigravity")
+        if not isinstance(antigravity_cfg, dict):
+            continue
+        if not _provider_uses_antigravity(config, provider_key):
+            continue
+        antigravity_cli = command_exists(
+            antigravity_cfg.get("cli") or "agy", search_roots=cli_search_roots
+        )
+        antigravity_ready = bool(antigravity_cli) and _antigravity_auth_ready(antigravity_cfg)
+        entry = dict(report["providers"].get(provider_key, {}) or {})
+        paths = dict(entry.get("paths", {}) or {})
+        paths["antigravity_binary"] = antigravity_cli
+        paths["antigravity_app_data"] = str(_antigravity_app_data_dir(antigravity_cfg))
+        entry.update(
+            {
+                "installed": bool(antigravity_cli),
+                "host_layer": "Antigravity CLI",
+                "delivery_mode": provider_cfg.get("delivery_mode", "gemini"),
+                "adapter": "antigravity",
+                "local_cli_worker_supported": antigravity_ready,
+                "supports_auto_approve": antigravity_ready,
+                "default_auto_approve_supported": antigravity_ready,
+                "full_access_supported": antigravity_ready,
+                "per_tool_allow_supported": antigravity_ready,
+                "auth_ready": antigravity_ready,
+                "applied": bool(antigravity_cli),
+                "verified": "verified"
+                if antigravity_ready
+                else ("partial" if antigravity_cli else "unavailable"),
+                "paths": paths,
+                "notes": [
+                    "This lane is driven by the Antigravity CLI (`agy`); the retired Gemini CLI is not probed for it.",
+                    "Readiness is the `agy` binary plus an OAuth token under the lane's antigravity app data dir.",
+                    "Model rotation between the agy default and the configured fallback is owned by antigravity-rotation.json.",
+                ],
+            }
+        )
+        report["providers"][provider_key] = entry
     return report
 
 
