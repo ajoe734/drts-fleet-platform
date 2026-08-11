@@ -4473,10 +4473,17 @@ def prune_completed_dispatch_pauses(
         return bool(paused_at and last_update and last_update > paused_at)
 
     pauses = list(state.get("dispatch_pauses", []) or [])
+    # Run-specific pauses without a task cannot describe a lane's present
+    # health.  Provider pauses own lane/identity availability; discard this
+    # retired schema during normal maintenance.
+    retired_taskless = [pause for pause in pauses if not str(pause.get("task_id") or "").strip()]
+    if retired_taskless:
+        state.setdefault("pause_migration", {})["retired_taskless_dispatch_pauses"] = len(retired_taskless)
     keep = [
         pause
         for pause in pauses
-        if str(task_by_id.get(str(pause.get("task_id") or ""), {}).get("status") or "").strip().lower() not in {"done", "review_approved"}
+        if str(pause.get("task_id") or "").strip()
+        and str(task_by_id.get(str(pause.get("task_id") or ""), {}).get("status") or "").strip().lower() not in {"done", "review_approved"}
         and str(pause.get("task_id") or "") not in active_task_ids
         and not pause_is_stale_for_updated_task(pause)
         and not recovered_taskless_dispatch_pause(config, state, pause, provider_report)
@@ -7140,17 +7147,49 @@ def _integration_commit_reachable(commit: str) -> bool:
     return reachable
 
 
+def integration_evidence_for_tasks(task_map: dict[str, dict[str, Any]]) -> dict[str, bool]:
+    """Resolve Git-backed dependency evidence once for every policy consumer."""
+    evidence: dict[str, bool] = {}
+    for task_id, task in task_map.items():
+        integration = str(task.get("integration_status") or "").strip().lower()
+        if integration not in {"merged_to_dev", "dev_deployed"}:
+            continue
+        merge_commit = str(task.get("merge_commit") or "").strip()
+        evidence[str(task_id)] = bool(merge_commit and _integration_commit_reachable(merge_commit))
+    return evidence
+
+
 def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, Any]], done_statuses: set[str]) -> bool:
-    if not domain_dependencies_satisfied(task, task_map, done_statuses):
-        return False
-    for dependency_id in task.get("depends_on") or []:
-        dependency = task_map.get(str(dependency_id)) or {}
-        integration = str(dependency.get("integration_status") or "").strip().lower()
-        if integration in {"merged_to_dev", "dev_deployed"}:
-            merge_commit = str(dependency.get("merge_commit") or "").strip()
-            if merge_commit and not _integration_commit_reachable(merge_commit):
-                return False
-    return True
+    return domain_dependencies_satisfied(
+        task,
+        task_map,
+        done_statuses,
+        integration_evidence_for_tasks(task_map),
+    )
+
+
+def dispatch_policy_for_config(config: dict[str, Any]) -> ReadyDispatchPolicy:
+    settings = ready_dispatch_settings(config)
+    return ReadyDispatchPolicy(
+        review_statuses=frozenset(str(value).lower() for value in settings.get("review_statuses", ["review"])),
+        finalize_statuses=frozenset(str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])),
+        in_progress_statuses=frozenset(str(value).lower() for value in settings.get("in_progress_statuses", ["in_progress"])),
+        owned_statuses=frozenset(str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])),
+        dependency_done_statuses=frozenset(str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])),
+    )
+
+
+def resolve_current_dispatch_target(
+    config: dict[str, Any],
+    task: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+) -> DomainDispatchDecision | None:
+    return resolve_domain_dispatch_target(
+        task,
+        task_map,
+        dispatch_policy_for_config(config),
+        integration_evidence_for_tasks(task_map),
+    )
 
 
 def task_dependency_signature(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str:
@@ -7384,43 +7423,12 @@ def current_dispatch_event_key(config: dict[str, Any], event: dict[str, Any], ta
     if not task:
         return None
 
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
     target_agent = str(event.get("target_display_name") or display_name_for(config, str(event.get("target_agent") or "")))
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    task_status = str(task.get("status") or "").lower()
-
-    eligible = False
-    if reason == "review_ready_dispatch":
-        eligible = task_status in review_statuses and task.get(reviewer_field) == target_agent
-    elif reason == "owned_finalize_dispatch":
-        eligible = task_status in finalize_statuses and task.get(owner_field) == target_agent
-    elif reason == "owned_in_progress_dispatch":
-        eligible = (
-            task.get(owner_field) == target_agent
-            and dependencies_satisfied(task, task_map, dependency_done_statuses)
-            and (
-                (
-                    task_status == "in_progress"
-                    and not has_external_integration_in_flight(task)
-                )
-                or (
-                    task_status == "blocked"
-                    and ci_status_reports_failure(str(task.get("ci_status") or ""))
-                )
-            )
-        )
-    elif reason == "owned_ready_dispatch":
-        eligible = task_status in {"todo", "backlog"} and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
-
-    if not eligible:
+    decision = resolve_current_dispatch_target(config, task, task_map)
+    if decision is None or decision.target_agent != target_agent or decision.reason.value != reason:
         return None
 
-    return str(build_dispatch_event(task, target_agent, reason, task_map).get("key") or "")
+    return str(build_dispatch_event(task, decision.target_agent, decision.reason.value, task_map).get("key") or "")
 
 
 def dispatch_reason_priority(reason: str | None) -> int | None:
@@ -7432,42 +7440,6 @@ def dispatch_reason_priority(reason: str | None) -> int | None:
         "owned_ready_dispatch": 3,
     }
     return priorities.get(normalized)
-
-
-def dispatch_priority_for_task(
-    config: dict[str, Any],
-    task: dict[str, Any],
-    agent_name: str,
-    *,
-    dependencies_done_statuses: set[str] | None = None,
-) -> int | None:
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = dependencies_done_statuses or {
-        str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])
-    }
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    task_status = str(task.get("status") or "").lower()
-    if task_status in review_statuses and task.get(reviewer_field) == agent_name:
-        return 0
-    if task_status in finalize_statuses and task.get(owner_field) == agent_name:
-        return 1
-    if (
-        task_status == "in_progress"
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 2
-    if (
-        task_status in {"todo", "backlog"}
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 3
-    return None
 
 
 def agent_dispatch_loads(
@@ -8938,28 +8910,6 @@ def create_chair_workspace_baseline_task(
         )
         return False
 
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    task = task_map.get(WORKSPACE_BASELINE_TASK_ID)
-    if task is not None:
-        state.setdefault("watcher", {}).setdefault("task_snapshots", {})[
-            WORKSPACE_BASELINE_TASK_ID
-        ] = snapshot_task(task, config.get("schema", {}))
-        dispatch_plan = chair_dispatch_action_reason(config, task, task_map)
-        if dispatch_plan is not None:
-            target_agent, dispatch_reason = dispatch_plan
-            active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-            active_agent_counts = active_worker_agent_counts(state, active_statuses)
-            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-            lane_id = normalize_agent_id(target_agent)
-            lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
-            lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
-            if lane_load < lane_capacity and not is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
-                _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-                event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
-                if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
-                    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
-
     write_activity_log(
         config,
         {
@@ -9004,45 +8954,10 @@ def ensure_workspace_baseline_task_dispatch(
     state: dict[str, Any],
     provider_report: dict[str, Any],
 ) -> bool:
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    task = task_map.get(WORKSPACE_BASELINE_TASK_ID)
-    if task is None or not _task_is_open(task):
-        return False
-    dispatch_plan = chair_dispatch_action_reason(config, task, task_map)
-    if dispatch_plan is None:
-        return False
-    target_agent, dispatch_reason = dispatch_plan
-    if is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
-        return False
-    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    active_agent_counts = active_worker_agent_counts(state, active_statuses)
-    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-    lane_id = normalize_agent_id(target_agent)
-    lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
-    lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
-    if lane_load >= lane_capacity:
-        return False
-    _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
-    if event["key"] in pending_event_keys:
-        return False
-    if not queue_delivery_event(config, event):
-        return False
-    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
-    write_activity_log(
-        config,
-        {
-            "type": "workspace_baseline_dispatch_queued",
-            "task_id": WORKSPACE_BASELINE_TASK_ID,
-            "target_agent": target_agent,
-            "message": (
-                f"Queued dispatch for {WORKSPACE_BASELINE_TASK_ID} to {target_agent} "
-                f"after chairman materialized the shared baseline repair."
-            ),
-        },
-    )
-    return True
+    # Task materialization is intentionally separate from delivery.  The
+    # ready dispatcher will see the task on its normal pass and is the sole
+    # execution queue producer.
+    return False
 
 
 def escalate_governance_recursion_for_human(
@@ -9204,28 +9119,6 @@ def create_chair_unblock_task(
         )
         return False
 
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    unblock_task = task_map.get(unblock_id)
-    if unblock_task is not None:
-        state.setdefault("watcher", {}).setdefault("task_snapshots", {})[
-            unblock_id
-        ] = snapshot_task(unblock_task, config.get("schema", {}))
-        dispatch_plan = chair_dispatch_action_reason(config, unblock_task, task_map)
-        if dispatch_plan is not None:
-            target_agent, dispatch_reason = dispatch_plan
-            active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-            active_agent_counts = active_worker_agent_counts(state, active_statuses)
-            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-            lane_id = normalize_agent_id(target_agent)
-            lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
-            lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
-            if lane_load < lane_capacity and not is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
-                _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-                event = build_dispatch_event(unblock_task, target_agent, dispatch_reason, task_map)
-                if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
-                    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
-
     write_activity_log(
         config,
         {
@@ -9343,27 +9236,6 @@ def apply_chair_task_action(
         streak_record["chair_cleared_at"] = utc_now()
         streak_record["chair_clear_reason"] = chair_reason
 
-    agent_id = normalize_agent_id(target_agent)
-    if agent_id not in (config.get("agents", {}) or {}):
-        return False
-    if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
-        return False
-
-    _active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    _active_agents, active_task_agents = active_worker_indexes(state, _active_statuses)
-    _pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
-        return False
-    if not task_is_dispatch_eligible_for_agent(task, target_agent):
-        return False
-
-    event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
-    if event["key"] in pending_event_keys:
-        return False
-    if not queue_delivery_event(config, event):
-        return False
-
-    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
     write_activity_log(
         config,
         {
@@ -9372,7 +9244,7 @@ def apply_chair_task_action(
             "action": action_name,
             "dispatch_reason": dispatch_reason,
             "target_agent": target_agent,
-            "message": f"Chairman triggered {dispatch_reason} for {task_id}: {chair_reason}",
+            "message": f"Chairman released {dispatch_reason} for {task_id}; ready dispatcher will deliver it: {chair_reason}",
         },
     )
     return True
@@ -9803,18 +9675,7 @@ def dispatch_ready_tasks(
     task_map = {task.get(task_id_field): task for task in tasks}
     review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
     finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    owned_statuses = [str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])]
     dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    domain_policy = ReadyDispatchPolicy(
-        review_statuses=frozenset(review_statuses),
-        finalize_statuses=frozenset(finalize_statuses),
-        in_progress_statuses=frozenset(
-            str(value).lower()
-            for value in settings.get("in_progress_statuses", ["in_progress"])
-        ),
-        owned_statuses=frozenset(owned_statuses),
-        dependency_done_statuses=frozenset(dependency_done_statuses),
-    )
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     max_dispatches_per_tick = max(1, int(settings.get("max_dispatches_per_tick", 4)))
     provider_report = provider_report or load_provider_report(config)
@@ -9838,13 +9699,11 @@ def dispatch_ready_tasks(
     pending_task_ids = {task_id for task_id, _agent_id in pending_task_agents if task_id}
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
     helper_settings = helper_claim_settings(config)
-    seen = state.setdefault("seen_event_keys", {})
     changed = False
     dispatches = 0
     last_dispatched_agent_id: str | None = None
 
     def record_pending_dispatch(agent_id: str, target_agent: str, task_id: str, reason: str, event_key: str) -> None:
-        seen[event_key] = utc_now()
         pending_event_keys.add(event_key)
         pending_agents.add(agent_id)
         pending_task_agents.add((task_id, agent_id))
@@ -9908,11 +9767,7 @@ def dispatch_ready_tasks(
                     "owner": task_owner,
                     "reviewer": task_reviewer,
                 }
-                decision = resolve_domain_dispatch_target(
-                    normalized_task,
-                    task_map,
-                    domain_policy,
-                )
+                decision = resolve_current_dispatch_target(config, normalized_task, task_map)
                 if decision is not None and decision.target_agent != target_agent:
                     decision = None
                 reason = decision.reason.value if decision is not None else None
@@ -10143,8 +9998,6 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
     candidates.sort(key=lambda item: (int(item.get("priority", 9)), str(item.get("parent_task_id") or ""), str(item.get("kind") or "")))
     active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
     _active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
-    _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    seen = state.setdefault("seen_event_keys", {})
     per_agent_counts = {agent: count_open_sidecars_for_agent(status, agent) for agent in idle_agents}
     created = 0
     max_sidecars = max(
@@ -10218,13 +10071,6 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
         state.setdefault("watcher", {}).setdefault("task_snapshots", {})[
             candidate["sidecar_id"]
         ] = snapshot_task(sidecar_task, config.get("schema", {}))
-
-        event = build_dispatch_event(sidecar_task, selected_owner, "owned_ready_dispatch", task_map)
-        if event["key"] in pending_event_keys:
-            continue
-        if queue_delivery_event(config, event):
-            seen[event["key"]] = utc_now()
-            pending_event_keys.add(event["key"])
 
         per_agent_counts[selected_owner] = per_agent_counts.get(selected_owner, 0) + 1
         existing_signatures.add(f"{candidate['parent_task_id']}:{candidate['kind']}")
@@ -10339,7 +10185,6 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
         tracking["last_main_task_wave_at"] = now
         return False
 
-    seen = state.setdefault("seen_event_keys", {})
     max_per_wave = max(1, int(settings.get("max_new_main_tasks_per_wave", 2)))
     dispatched = 0
     changed = False
@@ -10395,31 +10240,27 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
         task["reviewer"] = plan["new_reviewer"]
         task["last_update"] = now
         task["next"] = msg
-        event = build_dispatch_event(task, plan["claim_agent"], plan["reason"], task_map)
-        if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
-            seen[event["key"]] = now
-            pending_event_keys.add(event["key"])
-            dispatched += 1
-            changed = True
-            active_task_ids.add(task_id)
-            idle_agent_names = [name for name in idle_agent_names if name != plan["claim_agent"]]
-            write_activity_log(
-                config,
-                {
-                    "type": "task_proactive_backfill",
-                    "task_id": task_id,
-                    "message": msg,
-                    "from_owner": old_owner,
-                    "to_owner": plan["new_owner"],
-                    "from_reviewer": old_reviewer,
-                    "to_reviewer": plan["new_reviewer"],
-                    "claim_role": plan["claim_role"],
-                },
-            )
-            console_log(
-                f"proactive backfill: task={task_id} role={plan['claim_role']} to={plan['claim_agent']}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
+        dispatched += 1
+        changed = True
+        active_task_ids.add(task_id)
+        idle_agent_names = [name for name in idle_agent_names if name != plan["claim_agent"]]
+        write_activity_log(
+            config,
+            {
+                "type": "task_proactive_backfill",
+                "task_id": task_id,
+                "message": msg,
+                "from_owner": old_owner,
+                "to_owner": plan["new_owner"],
+                "from_reviewer": old_reviewer,
+                "to_reviewer": plan["new_reviewer"],
+                "claim_role": plan["claim_role"],
+            },
+        )
+        console_log(
+            f"proactive backfill: task={task_id} role={plan['claim_role']} to={plan['claim_agent']}",
+            quiet=SUPERVISOR_LOG_QUIET,
+        )
 
     tracking["last_main_task_wave_at"] = now
     return changed

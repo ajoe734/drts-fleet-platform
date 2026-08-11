@@ -222,6 +222,7 @@ def dependencies_satisfied(
     task: TaskRecord | Mapping[str, Any],
     tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
     done_statuses: set[str] | frozenset[str],
+    integration_evidence: Mapping[str, bool] | None = None,
 ) -> bool:
     record = _task(task)
     index = _tasks(tasks_by_id)
@@ -244,6 +245,12 @@ def dependencies_satisfied(
                     return False
                 if integration == "merged_to_dev" and not str(raw.get("merge_commit") or "").strip():
                     return False
+                # Reachability is resolved by infrastructure before this pure
+                # policy is evaluated.  Every dispatch consumer receives the
+                # same evidence instead of running its own Git check.
+                if integration in {"merged_to_dev", "dev_deployed"} and integration_evidence is not None:
+                    if integration_evidence.get(dependency_id) is not True:
+                        return False
                 if integration == "not_applicable" and raw.get("commit_hash"):
                     return False
     return True
@@ -265,13 +272,19 @@ def resolve_dispatch_target(
     task: TaskRecord | Mapping[str, Any],
     tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
     policy: ReadyDispatchPolicy,
+    integration_evidence: Mapping[str, bool] | None = None,
 ) -> DispatchDecision | None:
     record = _task(task)
     if record.status in policy.review_statuses and record.reviewer:
         return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)
     if record.status in policy.finalize_statuses and record.owner:
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_FINALIZE)
-    if not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses):
+    if not dependencies_satisfied(
+        record,
+        tasks_by_id,
+        policy.dependency_done_statuses,
+        integration_evidence,
+    ):
         return None
     if record.status in policy.in_progress_statuses and record.owner:
         if has_external_integration_in_flight(
@@ -302,7 +315,6 @@ def ready_dispatch_signature(
         "ci_status": record.raw.get("ci_status"),
         "execution_branch": record.raw.get("execution_branch"),
         "integration_status": record.raw.get("integration_status"),
-        "last_update": record.last_update,
         "owner": record.owner or None,
         "reason": str(reason.value if isinstance(reason, DispatchReason) else reason),
         "reviewer": record.reviewer or None,

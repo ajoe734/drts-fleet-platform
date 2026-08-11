@@ -1013,6 +1013,39 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["skip_reason"], "stale_dispatch_event")
 
+    def test_dispatch_and_stale_validation_share_dependency_evidence(self) -> None:
+        dependency = {
+            "id": "DEP-1",
+            "status": "done",
+            "task_class": "implementation",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "abc123",
+        }
+        task = {
+            "id": "BUS-VAL-PARITY-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": ["DEP-1"],
+        }
+        tasks = {"DEP-1": dependency, task["id"]: task}
+        event = {
+            "task_id": task["id"],
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+        }
+
+        with mock.patch.object(supervisor, "integration_evidence_for_tasks", return_value={"DEP-1": True}):
+            decision = supervisor.resolve_current_dispatch_target(self.config, task, tasks)
+            self.assertIsNotNone(decision)
+            queued = supervisor.build_dispatch_event(task, decision.target_agent, decision.reason.value, tasks)
+            self.assertEqual(supervisor.current_dispatch_event_key(self.config, event, tasks), queued["key"])
+
+        with mock.patch.object(supervisor, "integration_evidence_for_tasks", return_value={"DEP-1": False}):
+            self.assertIsNone(supervisor.resolve_current_dispatch_target(self.config, task, tasks))
+            self.assertIsNone(supervisor.current_dispatch_event_key(self.config, event, tasks))
+
     def test_marks_event_without_message_manual_pending_without_crashing(self) -> None:
         task = {
             "id": "BUS-VAL-MALFORMED-001",
@@ -1717,19 +1750,8 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         )
 
         self.assertTrue(changed)
-        self.assertEqual(
-            state["dispatch_pauses"],
-            [
-                {
-                    "provider": "gemini",
-                    "task_id": None,
-                    "worker_run_id": "gemini-quota",
-                    "failure_kind": "quota/terminal",
-                    "summary": "quota/terminal: reason: 'QUOTA_EXHAUSTED'",
-                    "paused_at": "2026-05-17T13:51:45Z",
-                }
-            ],
-        )
+        self.assertEqual(state["dispatch_pauses"], [])
+        self.assertEqual(state["pause_migration"]["retired_taskless_dispatch_pauses"], 2)
 
     def test_starts_current_owned_dispatch_event(self) -> None:
         current_task = {
@@ -2937,11 +2959,7 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
         self.assertEqual(kwargs["helper_parent"], "APP-001")
         self.assertEqual(kwargs["helper_kind"], "bff_handoff_packet")
         self.assertFalse(kwargs["mutates_canonical"])
-        queue_delivery_event.assert_called_once()
-        queued_event = queue_delivery_event.call_args.args[1]
-        self.assertEqual(queued_event["task_id"], "APP-001-SIDECAR-BFF-HANDOFF")
-        self.assertEqual(queued_event["target_agent"], "Gemini")
-        self.assertEqual(queued_event["task"]["task_class"], "sidecar")
+        queue_delivery_event.assert_not_called()
         self.assertEqual(state["underutilization"]["last_sidecar_wave_at"], "2026-04-10T00:16:05Z")
         self.assertIn("created 1 visible sidecar", state["underutilization"]["last_sidecar_wave_reason"])
         self.assertIn(
@@ -3212,10 +3230,7 @@ class UnderutilizationMainTaskDispatchTests(unittest.TestCase):
         self.assertEqual(kwargs["task_id"], "MAIN-101")
         self.assertEqual(kwargs["new_owner"], "Claude")
         self.assertEqual(kwargs["new_reviewer"], "Qwen")
-        queued_event = queue_delivery_event.call_args.args[1]
-        self.assertEqual(queued_event["task_id"], "MAIN-101")
-        self.assertEqual(queued_event["target_agent"], "Qwen")
-        self.assertEqual(queued_event["reason"], "review_ready_dispatch")
+        queue_delivery_event.assert_not_called()
 
 
 class PollWorkersRecoveryTests(unittest.TestCase):
@@ -7137,9 +7152,7 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertTrue(changed)
             self.assertIsNone(state["chair_review"]["active_review"])
             events = [json.loads(line) for line in event_queue_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(len(events), 1)
-            self.assertEqual(events[0]["task_id"], "OPX-CM-003")
-            self.assertEqual(events[0]["reason"], "owned_finalize_dispatch")
+            self.assertEqual(events, [])
 
     def test_refresh_chair_review_state_applies_unblock_task_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -7465,36 +7478,14 @@ class ChairmanFlowTests(unittest.TestCase):
             preferred_owner="Claude",
         )
 
-    def test_ensure_workspace_baseline_task_dispatch_queues_owner_event(self) -> None:
-        task = {
-            "id": "UI-BASELINE-001",
-            "status": "backlog",
-            "owner": "Claude",
-            "reviewer": "Codex",
-        }
-        state = {}
-
-        with (
-            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
-            mock.patch.object(supervisor, "chair_dispatch_action_reason", return_value=("Claude", "owned_ready_dispatch")),
-            mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False),
-            mock.patch.object(supervisor, "ready_dispatch_settings", return_value={"active_worker_statuses": ["running"]}),
-            mock.patch.object(supervisor, "outstanding_delivery_agent_counts", return_value={}),
-            mock.patch.object(supervisor, "outstanding_delivery_indexes", return_value=(set(), {}, set())),
-            mock.patch.object(supervisor, "build_dispatch_event", return_value={"key": "evt-baseline", "task_id": "UI-BASELINE-001"}),
-            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_event,
-            mock.patch.object(supervisor, "write_activity_log") as write_log,
-        ):
-            changed = supervisor.ensure_workspace_baseline_task_dispatch(
+    def test_workspace_baseline_delivery_is_owned_by_ready_dispatcher(self) -> None:
+        self.assertFalse(
+            supervisor.ensure_workspace_baseline_task_dispatch(
                 {"paths": {"status_file": "ai-status.json"}},
-                state,
+                {},
                 provider_report={},
             )
-
-        self.assertTrue(changed)
-        queue_event.assert_called_once()
-        write_log.assert_called_once()
-        self.assertIn("evt-baseline", state["seen_event_keys"])
+        )
 
     def test_refresh_chair_review_state_applies_resume_parent_task_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

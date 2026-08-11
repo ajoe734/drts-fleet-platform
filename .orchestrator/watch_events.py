@@ -56,10 +56,6 @@ def handoff_key(handoff: dict[str, Any]) -> str:
     return "|".join(parts)
 
 
-def enqueue_runtime_events_enabled(config: dict[str, Any]) -> bool:
-    return bool(config.get("events", {}).get("enqueue_runtime_events", False))
-
-
 def build_snapshot(config: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
     schema = config["schema"]
     tasks_path = schema["tasks_path"]
@@ -525,11 +521,8 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
 
 
 def trim_seen_events(state: dict[str, Any], max_entries: int) -> None:
-    seen = state.get("seen_event_keys", {})
-    if len(seen) <= max_entries:
-        return
-    ordered = sorted(seen.items(), key=lambda item: item[1])
-    state["seen_event_keys"] = dict(ordered[-max_entries:])
+    """Retire the watcher-era dedupe cache; durable queue records own dedupe."""
+    state.pop("seen_event_keys", None)
 
 
 def run_scan(config: dict[str, Any], state: dict[str, Any], replay: bool, provider_capabilities: dict[str, Any]) -> bool:
@@ -554,25 +547,15 @@ def run_scan(config: dict[str, Any], state: dict[str, Any], replay: bool, provid
             merged_events[event["key"]] = event
         events = list(merged_events.values())
 
-    seen = state.setdefault("seen_event_keys", {})
-    changed = False
-    if enqueue_runtime_events_enabled(config):
-        for event in events:
-            if event["key"] in seen and not replay:
-                continue
-            queued = queue_delivery_event(config, event)
-            if queued:
-                seen[event["key"]] = utc_now()
-                changed = True
-    elif events:
-        changed = True
+    # The watcher observes task and handoff changes only.  The supervisor's
+    # ready dispatcher is the sole producer of execution queue records.
+    changed = bool(events)
 
     state["initialized_at"] = state.get("initialized_at") or utc_now()
     state["last_scan_at"] = utc_now()
     state.setdefault("watcher", {})["task_snapshots"] = snapshot["tasks"]
     state.pop("tasks", None)
     state["pending_handoff_keys"] = snapshot["pending_handoff_keys"]
-    trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))
     save_runtime_state(config, state)
     return changed
 

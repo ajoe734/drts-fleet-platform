@@ -596,7 +596,7 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         self.assertEqual(task["status"], "in_progress")
         self.assertNotIn("integration_status", task)
 
-    def test_reconciler_advances_green_pr_to_review(self) -> None:
+    def test_reconciler_records_green_pr_without_advancing_to_review(self) -> None:
         task = {
             "id": "TASK-PR-READY-001",
             "owner": "Codex",
@@ -616,7 +616,7 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
             ai_status.command_progress(state, [task["id"], "PR checks passed."])
 
-        self.assertEqual(task["status"], "review")
+        self.assertEqual(task["status"], "in_progress")
 
     def test_reconciler_does_not_clear_product_blocker_for_green_pr(self) -> None:
         task = {

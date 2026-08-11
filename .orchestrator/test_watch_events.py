@@ -11,7 +11,7 @@ import watch_events
 
 
 class WatcherBookkeepingTests(unittest.TestCase):
-    def test_run_scan_updates_snapshot_without_queueing_when_runtime_enqueue_disabled(self) -> None:
+    def test_run_scan_updates_snapshot_without_queueing(self) -> None:
         config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -22,7 +22,6 @@ class WatcherBookkeepingTests(unittest.TestCase):
                 "handoffs_path": "handoffs",
             },
             "events": {
-                "enqueue_runtime_events": False,
                 "review_statuses": ["review"],
                 "pending_handoff_statuses": ["pending"],
             },

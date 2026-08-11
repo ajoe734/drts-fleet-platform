@@ -76,7 +76,7 @@ class GitHubBusCommandTests(unittest.TestCase):
         self.assertEqual(run_ai_status.call_args.kwargs["integration_env"]["INTEGRATION_STATUS"], "pr_open")
         self.assertEqual(self.bus_state["tasks"]["IAM-UI-DRV-001"]["integration_head_sha"], "abc123456789")
 
-    def test_green_pr_advances_in_progress_task_to_review(self) -> None:
+    def test_green_pr_preserves_owner_lifecycle_until_owner_handoff(self) -> None:
         status = {"tasks": [{
             "id": "IAM-UI-TEN-001",
             "status": "in_progress",
@@ -109,10 +109,43 @@ class GitHubBusCommandTests(unittest.TestCase):
             )
 
         self.assertTrue(changed)
-        self.assertEqual(
-            run_ai_status.call_args.kwargs["integration_env"]["RECONCILER_REVIEW_READY"],
-            "1",
-        )
+        env = run_ai_status.call_args.kwargs["integration_env"]
+        self.assertNotIn("RECONCILER_REVIEW_READY", env)
+        self.assertEqual(env["EXECUTION_BRANCH"], "codex/iam-ui-ten-001")
+
+    def test_replacement_pr_branch_is_reconciled_not_reported_as_ci_failure(self) -> None:
+        status = {"tasks": [{
+            "id": "IAM-ACC-003",
+            "status": "in_progress",
+            "owner": "Codex",
+            "execution_branch": "codex/iam-acc-003-old",
+            "pr_url": "https://github.com/ajoe734/pantheon/pull/1375",
+            "integration_status": "ci_failed",
+            "ci_status": "integration_invalid_branch",
+        }]}
+        pr = {
+            "state": "OPEN",
+            "headRefName": "codex/iam-acc-003-reintegration",
+            "headRefOid": "abc123456789",
+            "baseRefName": "dev",
+            "mergeCommit": None,
+            "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+            "url": status["tasks"][0]["pr_url"],
+            "reviewDecision": "",
+            "mergeStateStatus": "CLEAN",
+        }
+        with (
+            mock.patch.object(github_bus, "discover_task_prs", return_value={}),
+            mock.patch.object(github_bus, "gh_json", return_value=pr),
+            mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            github_bus.reconcile_task_integrations(self.config, self.bus_state, status, "ajoe734/pantheon")
+
+        env = run_ai_status.call_args.kwargs["integration_env"]
+        self.assertEqual(env["INTEGRATION_STATUS"], "pr_open")
+        self.assertEqual(env["CI_STATUS"], "success")
+        self.assertEqual(env["EXECUTION_BRANCH"], "codex/iam-acc-003-reintegration")
 
     def test_green_pr_does_not_override_product_blocker(self) -> None:
         status = {"tasks": [{
@@ -146,10 +179,7 @@ class GitHubBusCommandTests(unittest.TestCase):
                 self.config, {"tasks": {}}, status, "ajoe734/pantheon"
             )
 
-        self.assertNotIn(
-            "RECONCILER_REVIEW_READY",
-            run_ai_status.call_args.kwargs["integration_env"],
-        )
+        self.assertNotIn("RECONCILER_REVIEW_READY", run_ai_status.call_args.kwargs["integration_env"])
 
     def test_apply_bus_command_review_approve_uses_reviewer_actor(self) -> None:
         status = {

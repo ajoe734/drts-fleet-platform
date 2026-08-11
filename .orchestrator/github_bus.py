@@ -843,17 +843,14 @@ def reconcile_task_integrations(
             integration_status, ci_status, ci_run_url = _integration_check_state(pr)
             head_sha = str(pr.get("headRefOid") or "").strip()
             branch = str(pr.get("headRefName") or "").strip()
-            expected_branch = str(task.get("execution_branch") or "").strip()
-            if expected_branch and branch and expected_branch != branch:
-                integration_status = "ci_failed"
-                ci_status = "integration_invalid_branch"
-                ci_run_url = pr_url
             entry = bus_state.setdefault("tasks", {}).setdefault(task_id, {})
             same_observation = (
                 entry.get("integration_head_sha") == head_sha
+                and entry.get("integration_branch") == branch
                 and str(task.get("integration_status") or "") == integration_status
                 and str(task.get("ci_status") or "") == ci_status
                 and str(task.get("ci_run_url") or "") == str(ci_run_url or "")
+                and (not branch or str(task.get("execution_branch") or "") == branch)
             )
             entry["integration_head_sha"] = head_sha
             entry["integration_branch"] = branch
@@ -864,10 +861,6 @@ def reconcile_task_integrations(
             terminal_status_missing = integration_status == "merged_to_dev" and task.get("status") != "done"
             task_status = str(task.get("status") or "").lower()
             lifecycle_transition_pending = (
-                integration_status == "pr_open"
-                and ci_status == "success"
-                and task_status == "in_progress"
-            ) or (
                 integration_status == "ci_failed"
                 and task_status in {"review", "review_approved"}
             )
@@ -879,12 +872,8 @@ def reconcile_task_integrations(
                 "PR_URL": pr_url,
                 "CI_STATUS": ci_status,
             }
-            if (
-                integration_status == "pr_open"
-                and ci_status == "success"
-                and task_status == "in_progress"
-            ):
-                env["RECONCILER_REVIEW_READY"] = "1"
+            if branch:
+                env["EXECUTION_BRANCH"] = branch
             if ci_run_url:
                 env["CI_RUN_URL"] = str(ci_run_url)
             merge_commit = ((pr.get("mergeCommit") or {}).get("oid") or "").strip()

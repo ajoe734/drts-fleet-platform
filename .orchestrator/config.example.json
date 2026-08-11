@@ -190,7 +190,6 @@
     "last_update_field": "last_update"
   },
   "events": {
-    "enqueue_runtime_events": false,
     "review_statuses": ["review"],
     "status_targets": {
       "needs_reply": "owner",

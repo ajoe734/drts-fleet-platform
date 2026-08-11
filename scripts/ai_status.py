@@ -2067,11 +2067,7 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
     timestamp = iso_now()
     ci_failed = os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "ci_failed"
-    review_ready = os.environ.get("RECONCILER_REVIEW_READY", "").strip() == "1"
-    if review_ready and task["status"] == "in_progress":
-        task["status"] = "review"
-        task.pop("waiting_for", None)
-    elif task["status"] in {"backlog", "todo"} or (
+    if task["status"] in {"backlog", "todo"} or (
         ci_failed and task["status"] in {"review", "review_approved"}
     ):
         task["status"] = "in_progress"
@@ -2096,11 +2092,14 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         mark_handoffs_done(state, task_id)
     if reconciler:
         push_branch = os.environ.get("PUSH_BRANCH", "").strip()
+        execution_branch = os.environ.get("EXECUTION_BRANCH", "").strip()
         commit_hash = os.environ.get("COMMIT_HASH", "").strip()
         if push_branch:
             task["push_branch"] = push_branch
         if commit_hash:
             task["commit_hash"] = commit_hash
+        if execution_branch:
+            task["execution_branch"] = execution_branch
     mark_handoffs_done_for_actor(state, task_id, actor)
     append_log({"ts": timestamp, "agent": actor, "type": "progress", "task_id": task_id, "message": message})
 

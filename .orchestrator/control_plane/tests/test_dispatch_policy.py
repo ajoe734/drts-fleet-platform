@@ -150,6 +150,31 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertEqual(first["metadata"], {"source": "test", "mode": "execution"})
         self.assertEqual(first["task"]["execution_branch"], "codex/task-1-existing-pr")
 
+    def test_event_signature_ignores_observation_timestamp(self) -> None:
+        decision = resolve_dispatch_target(self.tasks["TASK-1"], self.tasks, self.policy)
+        first = build_dispatch_event(self.tasks["TASK-1"], decision, self.tasks)
+        changed = {**self.tasks["TASK-1"].raw, "last_update": "2026-08-11T08:00:00Z"}
+        second = build_dispatch_event(changed, decision, self.tasks)
+
+        self.assertEqual(first["key"], second["key"])
+
+    def test_dependency_requires_verified_merge_evidence_when_provided(self) -> None:
+        tasks = task_index(
+            [
+                {
+                    "id": "DEP-1",
+                    "status": "done",
+                    "task_class": "implementation",
+                    "integration_status": "merged_to_dev",
+                    "merge_commit": "abc123",
+                },
+                {"id": "TASK-1", "status": "todo", "owner": "Codex", "depends_on": ["DEP-1"]},
+            ]
+        )
+
+        self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy, {"DEP-1": False}))
+        self.assertIsNotNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy, {"DEP-1": True}))
+
 
     def test_runtime_event_omits_external_envelope_fields(self) -> None:
         decision = resolve_dispatch_target(self.tasks["TASK-1"], self.tasks, self.policy)
