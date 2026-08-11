@@ -552,6 +552,22 @@ describe("bootstrap auth guard", () => {
     delete process.env.APP_ENV;
   });
 
+  it("fails closed for an unclassified controller route in a strict environment", () => {
+    process.env.APP_ENV = "staging";
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {},
+      method: "GET",
+      originalUrl: "/api/future-unclassified-route",
+    };
+
+    expect(() =>
+      guard.canActivate(createExecutionContext(request)),
+    ).toThrowError(ApiRequestError);
+
+    delete process.env.APP_ENV;
+  });
+
   it("rejects tenant bootstrap identities on call-center order creation", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
@@ -1399,6 +1415,76 @@ describe("internal key middleware", () => {
 });
 
 describe("tenant bootstrap-session auth controller", () => {
+  it("exchanges a verified tenant OIDC login with trusted MFA for a DRTS session", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.TENANT_OIDC_ISSUER = "https://tenant-idp.tests";
+    process.env.TENANT_OIDC_AUDIENCE = "tenant-portal-tests";
+    process.env.TENANT_OIDC_JWT_SECRET = "tenant-oidc-test-secret";
+    const { controller } = createAuthFixture();
+    const idToken = jwt.sign(
+      {
+        sub: "oidc-user-001",
+        email: "admin@acme.example",
+        email_verified: true,
+        amr: ["pwd", "webauthn"],
+        acr: "aal2",
+      },
+      process.env.TENANT_OIDC_JWT_SECRET,
+      {
+        algorithm: "HS256",
+        issuer: process.env.TENANT_OIDC_ISSUER,
+        audience: process.env.TENANT_OIDC_AUDIENCE,
+        expiresIn: "5m",
+      },
+    );
+
+    const response = await controller.issueTenantOidcSession(
+      { idToken },
+      undefined,
+      undefined,
+      undefined,
+      "req-tenant-oidc-001",
+    );
+
+    expect(response.data).toMatchObject({
+      tokenType: "Bearer",
+      profile: { email: "admin@acme.example", roleCode: "tenant_admin" },
+    });
+    const decoded = jwt.decode(response.data.accessToken) as jwt.JwtPayload;
+    expect(decoded.amr).toEqual(expect.arrayContaining(["oidc", "webauthn"]));
+    expect(decoded.acr).toBe("aal2");
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+    delete process.env.TENANT_OIDC_ISSUER;
+    delete process.env.TENANT_OIDC_AUDIENCE;
+    delete process.env.TENANT_OIDC_JWT_SECRET;
+  });
+
+  it("rejects tenant-admin OIDC login without a trusted MFA assertion", async () => {
+    process.env.TENANT_OIDC_ISSUER = "https://tenant-idp.tests";
+    process.env.TENANT_OIDC_AUDIENCE = "tenant-portal-tests";
+    process.env.TENANT_OIDC_JWT_SECRET = "tenant-oidc-test-secret";
+    const { controller } = createAuthFixture();
+    const idToken = jwt.sign(
+      { sub: "oidc-user-002", email: "admin@acme.example", email_verified: true, amr: ["pwd"] },
+      process.env.TENANT_OIDC_JWT_SECRET,
+      { issuer: process.env.TENANT_OIDC_ISSUER, audience: process.env.TENANT_OIDC_AUDIENCE, expiresIn: "5m" },
+    );
+
+    await expectApiRequestError(
+      () => controller.issueTenantOidcSession({ idToken }),
+      (apiError) => expect(apiError.getStatus()).toBe(403),
+    );
+
+    delete process.env.TENANT_OIDC_ISSUER;
+    delete process.env.TENANT_OIDC_AUDIENCE;
+    delete process.env.TENANT_OIDC_JWT_SECRET;
+  });
+
   it("issues a bearer session envelope for tenant portal login", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";

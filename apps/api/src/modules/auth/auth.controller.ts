@@ -1,5 +1,6 @@
 import { Body, Controller, Headers, Optional, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
+import jwt from "jsonwebtoken";
 
 import type {
   CreatePartnerBootstrapSessionCommand,
@@ -11,6 +12,7 @@ import type {
   RegisterDriverDeviceCommand,
   RevokeDriverDeviceBindingCommand,
   TenantBootstrapSession,
+  TenantOidcSessionExchangeCommand,
   TenantPortalProfile,
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
@@ -66,6 +68,7 @@ type JwtExpiresIn = NonNullable<
 const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
 const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
 const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV = "DRTS_TENANT_BOOTSTRAP_MODE" as const;
+const TENANT_OIDC_SESSION_EXPIRES_IN: JwtExpiresIn = "8h";
 
 function isStrictAuthEnvironment(): boolean {
   const environment = detectAuthEnvironment(process.env);
@@ -311,6 +314,110 @@ export class AuthController {
       requestId,
     );
     return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/oidc-session")
+  async issueTenantOidcSession(
+    @Body() command: TenantOidcSessionExchangeCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    let tenantId: string | null = null;
+    let email: string | null = null;
+
+    try {
+      const oidcIdentity = this.verifyTenantOidcIdToken(command.idToken);
+      const resolvedEmail = oidcIdentity.email;
+      email = resolvedEmail;
+      const resolvedTenantId =
+        command.tenantId?.trim() || this.tenantPartnerService.getDefaultTenantId();
+      tenantId = resolvedTenantId;
+      const existingUser = this.tenantPartnerService
+        .listTenantUsers(resolvedTenantId)
+        .find((user) => user.email === resolvedEmail) ?? null;
+
+      if (!existingUser || !this.isTenantBootstrapEligibleStatus(existingUser.status)) {
+        throw this.buildTenantBootstrapDeniedError();
+      }
+
+      const roleCode = this.resolveExistingUserRoleCode(
+        this.tenantPartnerService.listTenantRoles(),
+        existingUser,
+      );
+      if (this.isHighPrivilegeTenantRole(roleCode) && !oidcIdentity.hasTrustedMfa) {
+        throw new ApiRequestError(
+          403,
+          "AUTH_MFA_REQUIRED",
+          "A trusted OIDC MFA assertion is required for this tenant role.",
+        );
+      }
+
+      const profile = this.buildTenantPortalProfile(
+        resolvedTenantId,
+        resolvedEmail,
+        existingUser,
+        roleCode,
+      );
+      const identity = this.buildIdentityContext(profile);
+      const issued = await this.issueJwtSession(
+        {
+          authMode: "jwt_bearer",
+          actorType: identity.actorType,
+          actorId: identity.actorId,
+          principalId: identity.actorId,
+          subject: oidcIdentity.subject,
+          realm: identity.realm,
+          tenantId: identity.tenantId,
+          roleFamilies: identity.roleFamilies,
+          roles: identity.roles,
+          scopes: identity.scopes,
+          requestId: requestId ?? null,
+        },
+        {
+          expiresIn: TENANT_OIDC_SESSION_EXPIRES_IN,
+          principalId: identity.actorId,
+          subject: oidcIdentity.subject,
+          ensurePrincipal: true,
+          authTime: oidcIdentity.authTime,
+          amr: oidcIdentity.amr,
+          acr: oidcIdentity.acr,
+          tokenVersion: Date.parse(existingUser.updatedAt),
+        },
+      );
+      const session: TenantBootstrapSession = {
+        accessToken: issued.token,
+        tokenType: "Bearer",
+        expiresIn: TENANT_OIDC_SESSION_EXPIRES_IN,
+        profile,
+        identity,
+      };
+      this.securityEventsService?.recordEvent({
+        actorId: identity.actorId, actorType: identity.actorType, subjectId: oidcIdentity.subject,
+        realm: "tenant", tenantId, partnerId: null, eventType: "tenant_oidc_session.issued",
+        eventFamily: "auth", outcome: "success", severity: "low", targetType: "tenant_portal_session",
+        targetId: profile.id, sessionId: issued.sessionId, tokenId: issued.tokenId,
+        authMethods: issued.amr, sourceIp, userAgent: userAgent ?? null, requestId: requestId ?? null,
+        traceId: null, reasonCode: null, approvalId: null, beforeSummary: null,
+        afterSummary: { actorId: identity.actorId, roleCode, tenantId },
+        maskedContext: { email },
+      });
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      this.securityEventsService?.recordEvent({
+        actorId: null, actorType: "system", subjectId: email, realm: "tenant", tenantId,
+        partnerId: null, eventType: "tenant_oidc_session.denied", eventFamily: "auth",
+        outcome: "denied", severity: "medium", targetType: "tenant_portal_session", targetId: null,
+        sessionId: null, tokenId: null, authMethods: ["oidc"], sourceIp, userAgent: userAgent ?? null,
+        requestId: requestId ?? null, traceId: null, reasonCode: this.extractErrorCode(error), approvalId: null,
+        beforeSummary: null, afterSummary: null, maskedContext: { email, tenantId },
+      });
+      throw toPublicTenantAuthError(error);
+    }
   }
 
   @OpenRoute()
@@ -638,6 +745,46 @@ export class AuthController {
       process.env[TENANT_BOOTSTRAP_FIXTURE_MODE_ENV]?.trim().toLowerCase() ??
       "";
     return mode === TENANT_BOOTSTRAP_FIXTURE_MODE;
+  }
+
+  private verifyTenantOidcIdToken(idToken: string) {
+    const issuer = process.env.TENANT_OIDC_ISSUER?.trim() || process.env.OIDC_ISSUER?.trim();
+    const audience = process.env.TENANT_OIDC_AUDIENCE?.trim() || process.env.OIDC_AUDIENCE?.trim();
+    const key = process.env.TENANT_OIDC_JWT_PUBLIC_KEY?.trim() || process.env.TENANT_OIDC_JWT_SECRET?.trim();
+    if (!issuer || !audience || !key) {
+      throw new ApiRequestError(503, "TENANT_OIDC_NOT_CONFIGURED", "Tenant OIDC validation is not configured.");
+    }
+    if (!idToken?.trim()) {
+      throw new ApiRequestError(400, "FIELD_REQUIRED", "idToken is required.", { field: "idToken" });
+    }
+    const algorithms = (process.env.TENANT_OIDC_ALGORITHMS?.split(/[;,]/).map((value) => value.trim()).filter(Boolean) ??
+      [/BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(key) ? "RS256" : "HS256"]) as jwt.Algorithm[];
+    let payload: jwt.JwtPayload;
+    try {
+      payload = jwt.verify(idToken, key, { issuer, audience, algorithms }) as jwt.JwtPayload;
+    } catch {
+      throw new ApiRequestError(401, "AUTH_CREDENTIALS_INVALID", "OIDC ID token is invalid or expired.");
+    }
+    const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+    const subject = typeof payload.sub === "string" ? payload.sub.trim() : "";
+    if (!email || !subject || payload.email_verified === false) {
+      throw new ApiRequestError(401, "AUTH_CREDENTIALS_INVALID", "OIDC ID token is missing a verified subject or email claim.");
+    }
+    const amr = Array.isArray(payload.amr) ? payload.amr.filter((value): value is string => typeof value === "string") : [];
+    const acr = typeof payload.acr === "string" && payload.acr.trim() ? payload.acr.trim() : "aal1";
+    const hasTrustedMfa = amr.some((method) => ["mfa", "otp", "webauthn", "hwk", "fido2"].includes(method.toLowerCase())) || /(?:aal|urn:.*:aal)[2-9]/i.test(acr);
+    return {
+      email,
+      subject,
+      amr: [...new Set(["oidc", ...amr])],
+      acr,
+      hasTrustedMfa,
+      authTime: typeof payload.auth_time === "number" ? new Date(payload.auth_time * 1000).toISOString() : new Date().toISOString(),
+    };
+  }
+
+  private isHighPrivilegeTenantRole(roleCode: string): boolean {
+    return ["tenant_admin", "tenant_ops_admin"].includes(roleCode);
   }
 
   private buildTenantBootstrapDeniedError() {

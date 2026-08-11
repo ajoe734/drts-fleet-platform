@@ -28,6 +28,7 @@ const HEALTH_PATHS = new Set(["/health", "/api/health"]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
   "GET tenant/roles",
+  "POST auth/tenant/oidc-session",
   "POST auth/tenant/bootstrap-session",
   "POST auth/partner/bootstrap-session",
 ]);
