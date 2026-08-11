@@ -1452,9 +1452,100 @@ describe("IAPSubjectAdapter", () => {
     expect(caught).not.toBeNull();
     expect(caught?.getStatus()).toBe(403);
     expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
-    const resp = caught?.getResponse() as any;
-    expect(resp?.error?.message).toBe(
+    expect(caught?.getResponse() as any).toHaveProperty("error.message");
+    expect((caught?.getResponse() as any).error.message).toBe(
       "Workforce user has no active durable role bindings.",
     );
+  });
+
+  it("projects null authTime, empty amr, and aal1 assurance when assertion has fresh iat but lacks auth_time, amr, and acr", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const token = signTestIapToken({
+      sub: "accounts.google.com:1001",
+      email: "admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+      iat: Math.floor(Date.now() / 1000), // fresh iat (now)
+      // auth_time, amr, acr intentionally omitted
+    });
+
+    const result = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+        autoProvision: true,
+      },
+    );
+
+    expect(result.authTime).toBeNull();
+    expect(result.authMethods).toEqual([]);
+    expect(result.assurance).toBe("aal1");
+  });
+
+  it("resolves authTime strictly from auth_time claim and does not fall back to fresh iat", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const staleAuthTimeSeconds = nowSeconds - 7200; // 2 hours ago
+
+    const token = signTestIapToken({
+      sub: "accounts.google.com:1001",
+      email: "admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+      iat: nowSeconds, // fresh iat
+      auth_time: staleAuthTimeSeconds, // stale auth_time
+      amr: ["mfa", "totp"],
+      acr: "aal2",
+    });
+
+    const result = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+        autoProvision: true,
+      },
+    );
+
+    expect(result.authTime).toBe(new Date(staleAuthTimeSeconds * 1000).toISOString());
+    expect(result.authTime).not.toBe(new Date(nowSeconds * 1000).toISOString());
+    expect(result.authMethods).toEqual(["mfa", "totp"]);
+    expect(result.assurance).toBe("aal2");
+  });
+
+  it("projects trusted upstream amr and silver acr correctly from verified assertion", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    const token = signTestIapToken({
+      sub: "accounts.google.com:1001",
+      email: "admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+      iat: nowSeconds,
+      auth_time: nowSeconds - 60,
+      amr: ["fido2"],
+      acr: "urn:mace:incommon:iap:silver",
+    });
+
+    const result = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+        autoProvision: true,
+      },
+    );
+
+    expect(result.authTime).toBe(new Date((nowSeconds - 60) * 1000).toISOString());
+    expect(result.authMethods).toEqual(["fido2"]);
+    expect(result.assurance).toBe("aal2");
   });
 });

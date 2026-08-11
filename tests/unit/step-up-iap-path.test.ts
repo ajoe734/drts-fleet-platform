@@ -177,4 +177,66 @@ describe("IAM-MFA-001 IAP workforce step-up gate", () => {
       }),
     ).not.toThrow();
   });
+
+  it("cannot mint proof when fresh iat request lacks upstream auth_time", () => {
+    const service = new StepUpProofService();
+    // Fresh request iat but authTime is null
+    const identityWithMissingAuthTime = iapWorkforceIdentity({
+      authTime: null,
+      amr: ["verified_iap_workforce"],
+      acr: "aal2",
+    });
+
+    expectApiError(
+      () =>
+        service.createProof(identityWithMissingAuthTime, {
+          actionId: TENANT_CREATE_ACTION,
+        }),
+      "MFA_REQUIRED",
+    );
+  });
+
+  it("cannot mint proof when fresh iat request carries stale upstream auth_time outside policy window", () => {
+    const service = new StepUpProofService();
+    // Fresh request iat but authTime was 2 hours ago (outside 10 min window)
+    const staleAuthTime = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const identityWithStaleAuthTime = iapWorkforceIdentity({
+      authTime: staleAuthTime,
+      amr: ["mfa", "totp"],
+      acr: "aal2",
+    });
+
+    expectApiError(
+      () =>
+        service.createProof(identityWithStaleAuthTime, {
+          actionId: TENANT_CREATE_ACTION,
+        }),
+      "STEP_UP_REQUIRED",
+    );
+  });
+
+  it("succeeds in minting proof when request has fresh upstream auth_time inside policy window", () => {
+    const service = new StepUpProofService();
+    // Upstream MFA performed 1 minute ago (inside 10 min window)
+    const freshAuthTime = new Date(Date.now() - 60 * 1000).toISOString();
+    const identityWithFreshAuthTime = iapWorkforceIdentity({
+      authTime: freshAuthTime,
+      amr: ["mfa", "totp"],
+      acr: "aal2",
+    });
+
+    const proof = service.createProof(identityWithFreshAuthTime, {
+      actionId: TENANT_CREATE_ACTION,
+    });
+
+    expect(proof.required).toBe(true);
+    expect(proof.stepUpReference).toBeTruthy();
+
+    expect(() =>
+      service.assertRequestSatisfied(
+        identityWithFreshAuthTime,
+        privilegedRequest(proof.stepUpReference),
+      ),
+    ).not.toThrow();
+  });
 });

@@ -427,9 +427,9 @@ export class AuthController {
         membershipId: resolved.membership.membershipId,
         subject: resolved.principal.subject,
         ensurePrincipal: false,
-        authTime: new Date().toISOString(),
-        amr: ["verified_iap_workforce"],
-        acr: "aal2",
+        authTime: resolved.authTime ?? undefined,
+        amr: resolved.authMethods,
+        acr: resolved.assurance,
         tokenVersion: resolved.tokenVersion,
       });
       return { token: issued.token, expiresIn };
