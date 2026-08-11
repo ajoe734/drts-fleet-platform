@@ -136,7 +136,7 @@ export interface IssueSessionTokenOptions {
   principalId?: string | null;
   membershipId?: string | null;
   subject?: string | null;
-  authTime?: string;
+  authTime?: string | null;
   amr?: string[];
   acr?: string;
   policyVersion?: string | null;

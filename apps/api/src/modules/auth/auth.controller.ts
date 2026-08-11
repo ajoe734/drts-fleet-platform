@@ -427,7 +427,7 @@ export class AuthController {
         membershipId: resolved.membership.membershipId,
         subject: resolved.principal.subject,
         ensurePrincipal: false,
-        authTime: resolved.authTime ?? undefined,
+        authTime: resolved.authTime ?? null,
         amr: resolved.authMethods,
         acr: resolved.assurance,
         tokenVersion: resolved.tokenVersion,
