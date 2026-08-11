@@ -124,7 +124,6 @@ paths:
       responses:
         "200":
           description: Session revoked and cookies cleared.
->>>>>>> 7b504b2d6 (IAM-IDP-001: tenant and partner OIDC PKCE BFF login)
   /api/auth/tenant/bootstrap-session:
     post:
       summary: Bootstrap a tenant-authenticated browser session.
