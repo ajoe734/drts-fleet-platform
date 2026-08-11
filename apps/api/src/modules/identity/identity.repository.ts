@@ -870,13 +870,16 @@ export class IdentityRepository {
   ): Promise<CanonicalIdentitySessionRecord[]> {
     if (!this.isEnabled()) {
       return Array.from(this.fallbackSessions.values())
-        .filter((session) => session.tenantId === tenantId)
+        .filter(
+          (session) =>
+            session.tenantId === tenantId && session.realm === "tenant",
+        )
         .map((session) => ({ ...session }));
     }
 
     const result = await this.databaseService!.query<PersistedSessionRow>(
       `SELECT * FROM iam.identity_sessions
-       WHERE record->>'tenantId' = $1
+       WHERE record->>'tenantId' = $1 AND realm = 'tenant'
        ORDER BY updated_at DESC`,
       [tenantId],
     );

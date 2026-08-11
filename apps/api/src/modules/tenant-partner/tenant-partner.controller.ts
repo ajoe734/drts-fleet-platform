@@ -1471,7 +1471,11 @@ export class TenantPartnerController {
     this.requireTenantSessionAdmin(identity);
     const normalizedTenantId = this.requireTenantId(tenantId);
     const session = await this.identityRepository!.getSession(sessionId);
-    if (!session || session.tenantId !== normalizedTenantId) {
+    if (
+      !session ||
+      session.tenantId !== normalizedTenantId ||
+      session.realm !== "tenant"
+    ) {
       throw new ApiRequestError(404, "TENANT_SESSION_NOT_FOUND", "Tenant session was not found.");
     }
     const revoked = await this.identityRepository!.revokeSession(
