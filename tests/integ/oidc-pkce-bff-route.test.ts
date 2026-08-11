@@ -102,6 +102,74 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE Route Handler Integrat
     expect(stateCookie?.value === "" || stateCookie?.maxAge === 0 || !stateCookie).toBe(true);
   });
 
+  it("rejects a protocol-relative returnUrl on Tenant Web App BFF callback and falls back to same-origin root", async () => {
+    const login = oidcService.generateLoginParameters("tenant", {
+      redirectUri: "http://localhost:3000/api/auth/callback",
+    });
+
+    const req = new NextRequest(`http://localhost:3000/api/auth/callback?code=e2e_valid_code_002&state=${login.state}`);
+    const cookiePayload = JSON.stringify({
+      stateToken: login.stateToken,
+      returnUrl: "//attacker.example",
+    });
+    req.cookies.set("drts_oidc_state", cookiePayload);
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (url.toString().includes("/api/auth/tenant/callback-session")) {
+        const command = JSON.parse((init?.body as string) || "{}");
+        const stateToken = (init?.headers as any)?.["x-oidc-state-token"];
+        const session = await oidcService.exchangeTenantCallbackSession(command, { stateToken });
+        return new Response(JSON.stringify({ data: session }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const context = { params: Promise.resolve({ auth: ["callback"] }) };
+    const res = await tenantAuthGet(req, context);
+
+    expect(res.status).toBe(307);
+    const location = res.headers.get("location");
+    expect(location).toBe("http://localhost:3000/");
+    expect(location).not.toContain("attacker.example");
+  });
+
+  it("rejects a backslash returnUrl on Tenant Web App BFF callback and falls back to same-origin root", async () => {
+    const login = oidcService.generateLoginParameters("tenant", {
+      redirectUri: "http://localhost:3000/api/auth/callback",
+    });
+
+    const req = new NextRequest(`http://localhost:3000/api/auth/callback?code=e2e_valid_code_003&state=${login.state}`);
+    const cookiePayload = JSON.stringify({
+      stateToken: login.stateToken,
+      returnUrl: "/\\attacker.example",
+    });
+    req.cookies.set("drts_oidc_state", cookiePayload);
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (url.toString().includes("/api/auth/tenant/callback-session")) {
+        const command = JSON.parse((init?.body as string) || "{}");
+        const stateToken = (init?.headers as any)?.["x-oidc-state-token"];
+        const session = await oidcService.exchangeTenantCallbackSession(command, { stateToken });
+        return new Response(JSON.stringify({ data: session }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const context = { params: Promise.resolve({ auth: ["callback"] }) };
+    const res = await tenantAuthGet(req, context);
+
+    expect(res.status).toBe(307);
+    const location = res.headers.get("location");
+    expect(location).toBe("http://localhost:3000/");
+    expect(location).not.toContain("attacker.example");
+  });
+
   it("exercises Fleet Partner Web App BFF login and callback flows", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       if (url.toString().includes("/api/auth/partner/login")) {
@@ -162,6 +230,48 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE Route Handler Integrat
     const sessionCookie = callbackRes.cookies.get("drts_session");
     expect(sessionCookie).toBeDefined();
     expect(sessionCookie?.httpOnly).toBe(true);
+  });
+
+  it("rejects a protocol-relative returnUrl on Fleet Partner Web App BFF callback and falls back to same-origin root", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (url.toString().includes("/api/auth/partner/callback-session")) {
+        const command = JSON.parse((init?.body as string) || "{}");
+        const stateToken = (init?.headers as any)?.["x-oidc-state-token"];
+        const session = await oidcService.exchangePartnerCallbackSession(command, { stateToken });
+        return new Response(JSON.stringify({ data: session }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const partnerUserIdentityLinkRepo = (oidcService as any).partnerUserIdentityLinkRepo;
+    const code = "e2e_valid_partner_code_002";
+    const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+    await partnerUserIdentityLinkRepo.resolveOrCreate({
+      entrySlug: "yuhe-residence",
+      partnerUserRef: sub,
+    });
+
+    const loginParams = oidcService.generateLoginParameters("partner", {
+      partnerId: "yuhe-residence",
+      redirectUri: "http://localhost:3001/api/auth/callback",
+    });
+
+    const callbackReq = new NextRequest(`http://localhost:3001/api/auth/callback?code=${code}&state=${loginParams.state}`);
+    callbackReq.cookies.set("drts_oidc_state", JSON.stringify({
+      stateToken: loginParams.stateToken,
+      returnUrl: "//attacker.example",
+    }));
+
+    const callbackContext = { params: Promise.resolve({ auth: ["callback"] }) };
+    const callbackRes = await partnerAuthGet(callbackReq, callbackContext);
+
+    expect(callbackRes.status).toBe(307);
+    const location = callbackRes.headers.get("location");
+    expect(location).toBe("http://localhost:3001/");
+    expect(location).not.toContain("attacker.example");
   });
 
   it("exercises logout flow and deletes HttpOnly session cookies", async () => {

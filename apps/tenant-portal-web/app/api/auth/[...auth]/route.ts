@@ -12,6 +12,29 @@ function isSecureEnvironment(req: NextRequest): boolean {
   );
 }
 
+function sanitizeReturnPath(rawReturnUrl: string, origin: string): string {
+  if (typeof rawReturnUrl !== "string" || rawReturnUrl.length === 0) {
+    return "/";
+  }
+  if (
+    !rawReturnUrl.startsWith("/") ||
+    rawReturnUrl.startsWith("//") ||
+    rawReturnUrl.includes("\\")
+  ) {
+    return "/";
+  }
+
+  try {
+    const resolved = new URL(rawReturnUrl, origin);
+    if (resolved.origin !== origin) {
+      return "/";
+    }
+    return `${resolved.pathname}${resolved.search}${resolved.hash}` || "/";
+  } catch {
+    return "/";
+  }
+}
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ auth: string[] }> },
@@ -110,7 +133,7 @@ export async function GET(
 
     const session = data.data;
     const csrfToken = randomBytes(32).toString("base64url");
-    const targetRedirect = returnUrl.startsWith("/") ? returnUrl : "/";
+    const targetRedirect = sanitizeReturnPath(returnUrl, request.nextUrl.origin);
     const response = NextResponse.redirect(new URL(targetRedirect, request.nextUrl.origin));
 
     response.cookies.set(SESSION_COOKIE_NAME, session.accessToken, {
