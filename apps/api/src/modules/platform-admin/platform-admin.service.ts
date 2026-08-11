@@ -4,6 +4,10 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  CanonicalAccountStatus,
+  CanonicalIdentityMembershipRecord,
+  CanonicalIdentityPrincipalRecord,
+  CanonicalIdentityRoleBindingRecord,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
@@ -11,6 +15,8 @@ import type {
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
   PlatformAdminUserRecord,
+  PlatformAdminUserRole,
+  PlatformAdminUserStatus,
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
   PlatformPricingRuleRecord,
@@ -35,6 +41,7 @@ import {
 } from "../../common/controlled-download";
 import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { IdentityRepository } from "../identity/identity.repository";
 import {
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
@@ -148,6 +155,24 @@ const PLATFORM_PRICING_RULES_SEED: PlatformPricingRuleRecord[] = [
   },
 ];
 
+const CONTROL_PLANE_SCOPE_REF = "platform:control_plane";
+const CONTROL_PLANE_REALMS = ["platform", "ops"] as const;
+const PLATFORM_ADMIN_PLACEHOLDER_ISSUER = "platform_admin_email";
+
+type ControlPlaneRealm = (typeof CONTROL_PLANE_REALMS)[number];
+type InternalPlatformUserRoleCode =
+  | PlatformAdminUserRole
+  | "platform_admin"
+  | "ops_user";
+
+type PlatformAdminUserSnapshot = {
+  principal: CanonicalIdentityPrincipalRecord;
+  membership: CanonicalIdentityMembershipRecord;
+  roleBinding: CanonicalIdentityRoleBindingRecord;
+  roleCode: PlatformAdminUserRole;
+  status: PlatformAdminUserStatus;
+};
+
 @Injectable()
 export class PlatformAdminService implements OnModuleInit {
   private publicInfoVersions = PUBLIC_INFO_SEED.map((version) =>
@@ -157,9 +182,6 @@ export class PlatformAdminService implements OnModuleInit {
   private placardVersions = PLACARD_SEED.map((placard) =>
     this.clonePlacardVersion(placard),
   );
-
-  private platformAdminUsers: PlatformAdminUserRecord[] =
-    PLATFORM_ADMIN_USERS_SEED.map((u) => ({ ...u }));
 
   private platformNotices: PlatformNoticeRecord[] = PLATFORM_NOTICES_SEED.map(
     (n) => ({ ...n }),
@@ -193,46 +215,47 @@ export class PlatformAdminService implements OnModuleInit {
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     private readonly platformAdminRepository?: PlatformAdminRepository,
+    @Optional()
+    private readonly identityRepository: IdentityRepository = new IdentityRepository(),
   ) {}
 
   async onModuleInit() {
-    if (!this.platformAdminRepository) {
-      return;
-    }
+    if (this.platformAdminRepository) {
+      try {
+        const persistedState = await this.platformAdminRepository.loadState();
+        const hasPersistedState =
+          persistedState.publicInfoVersions.length > 0 ||
+          persistedState.placardVersions.length > 0;
 
-    try {
-      const persistedState = await this.platformAdminRepository.loadState();
-      const hasPersistedState =
-        persistedState.publicInfoVersions.length > 0 ||
-        persistedState.placardVersions.length > 0;
-
-      if (!hasPersistedState) {
-        this.persistChanges(
-          {
-            publicInfoVersions: this.publicInfoVersions.map((version) =>
-              this.clonePublicInfoVersion(version),
-            ),
-            placardVersions: this.placardVersions.map((placard) =>
-              this.clonePlacardVersion(placard),
-            ),
-          },
-          "module init bootstrap",
+        if (!hasPersistedState) {
+          this.persistChanges(
+            {
+              publicInfoVersions: this.publicInfoVersions.map((version) =>
+                this.clonePublicInfoVersion(version),
+              ),
+              placardVersions: this.placardVersions.map((placard) =>
+                this.clonePlacardVersion(placard),
+              ),
+            },
+            "module init bootstrap",
+          );
+        } else {
+          this.publicInfoVersions = persistedState.publicInfoVersions.map(
+            (version) => this.clonePublicInfoVersion(version),
+          );
+          this.placardVersions = persistedState.placardVersions.map((placard) =>
+            this.clonePlacardVersion(placard),
+          );
+        }
+      } catch (error) {
+        this.platformAdminRepository.reportPersistenceFailure(
+          error,
+          "module init",
         );
-        return;
       }
-
-      this.publicInfoVersions = persistedState.publicInfoVersions.map(
-        (version) => this.clonePublicInfoVersion(version),
-      );
-      this.placardVersions = persistedState.placardVersions.map((placard) =>
-        this.clonePlacardVersion(placard),
-      );
-    } catch (error) {
-      this.platformAdminRepository.reportPersistenceFailure(
-        error,
-        "module init",
-      );
     }
+
+    await this.bootstrapSeedPlatformAdminUsers();
   }
 
   listPublicInfoVersions() {
@@ -576,61 +599,139 @@ export class PlatformAdminService implements OnModuleInit {
 
   // ── Platform Admin Users ──────────────────────────────────────────────────
 
-  listPlatformAdminUsers(): PlatformAdminUserRecord[] {
-    return this.platformAdminUsers.map((u) => ({ ...u }));
+  async listPlatformAdminUsers(): Promise<PlatformAdminUserRecord[]> {
+    const snapshots = await this.listPlatformAdminUserSnapshots();
+    return snapshots.map((snapshot) =>
+      this.toPlatformAdminUserRecord(snapshot),
+    );
   }
 
-  createPlatformAdminUser(
+  async createPlatformAdminUser(
     command: CreatePlatformAdminUserCommand,
     requestId?: string,
-  ): PlatformAdminUserRecord {
+    actorId?: string | null,
+  ): Promise<PlatformAdminUserRecord> {
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
-    const existing = this.platformAdminUsers.find(
-      (u) => u.email.toLowerCase() === command.email.trim().toLowerCase(),
+    const reason = this.requireNonBlank(command.reason, "reason");
+    const auditActorId = this.requirePlatformAdminActorId(
+      actorId,
+      "create platform admin users",
     );
-    if (existing) {
+    const normalizedEmail = command.email.trim().toLowerCase();
+    const realm = this.resolveRealmForPlatformAdminRole(command.roleCode);
+    const existingPrincipal =
+      await this.findControlPlanePrincipalByEmail(normalizedEmail);
+    if (existingPrincipal?.status === "suspended") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
-        "PLATFORM_USER_EMAIL_CONFLICT",
-        "A platform admin user with this email already exists.",
+        "PLATFORM_USER_SUSPENDED",
+        "This workforce principal is suspended and must be reactivated instead of reinvited.",
         { email: command.email },
       );
     }
+
+    const principal =
+      existingPrincipal ??
+      this.buildPlatformAdminPrincipal({
+        email: normalizedEmail,
+        displayName: command.displayName.trim(),
+        status: "invited",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    const existingMemberships =
+      await this.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const duplicateMembership = existingMemberships.find(
+      (membership) =>
+        membership.scopeRef === CONTROL_PLANE_SCOPE_REF &&
+        membership.realm === realm,
+    );
+    if (duplicateMembership) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLATFORM_USER_EMAIL_CONFLICT",
+        "A platform admin user with this email already exists for this control-plane realm.",
+        { email: command.email, realm },
+      );
+    }
+
     const now = new Date().toISOString();
-    const user: PlatformAdminUserRecord = {
-      userId: `pa_${randomUUID()}`,
-      email: command.email.trim().toLowerCase(),
-      displayName: command.displayName.trim(),
-      roleCode: command.roleCode,
+    const membership = this.buildPlatformAdminMembership({
+      principalId: principal.principalId,
+      email: normalizedEmail,
+      realm,
       status: "invited",
+      invitedByPrincipalId: auditActorId,
       createdAt: now,
       updatedAt: now,
-    };
-    this.platformAdminUsers.push({ ...user });
+    });
+    const roleBinding = this.buildPlatformAdminRoleBinding({
+      email: normalizedEmail,
+      realm,
+      membershipId: membership.membershipId,
+      roleCode: command.roleCode,
+      actorPrincipalId: auditActorId,
+      createdAt: now,
+      updatedAt: now,
+      validFrom: now,
+    });
+    const persisted = await this.identityRepository.upsertWorkforceIdentity(
+      existingPrincipal
+        ? {
+            ...principal,
+            displayName: principal.displayName || command.displayName.trim(),
+          }
+        : principal,
+      membership,
+      [roleBinding],
+    );
+    const snapshot = this.createPlatformAdminSnapshot(
+      persisted.principal,
+      persisted.membership,
+      persisted.roleBindings[0]!,
+    );
+    const user = this.toPlatformAdminUserRecord(snapshot);
     this.recordAudit(
       {
-        actorId: null,
+        actorId: auditActorId,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
         actionName: "create_platform_admin_user",
         resourceType: "platform_admin_user",
         resourceId: user.userId,
-        newValuesSummary: { email: user.email, roleCode: user.roleCode },
+        newValuesSummary: {
+          ...user,
+          realm,
+          reason,
+          principalId: persisted.principal.principalId,
+        },
       },
       requestId,
     );
-    return { ...user };
+    return user;
   }
 
-  updatePlatformAdminUserRole(
+  async updatePlatformAdminUserRole(
     userId: string,
     command: UpdatePlatformAdminUserRoleCommand,
     requestId?: string,
-  ): PlatformAdminUserRecord {
-    const user = this.platformAdminUsers.find((u) => u.userId === userId);
-    if (!user) {
+    actorId?: string | null,
+  ): Promise<PlatformAdminUserRecord> {
+    const reason = this.requireNonBlank(command.reason, "reason");
+    const auditActorId = this.requirePlatformAdminActorId(
+      actorId,
+      "update platform admin users",
+    );
+    const membership = await this.identityRepository.findMembershipById(userId);
+    if (
+      !membership ||
+      membership.scopeRef !== CONTROL_PLANE_SCOPE_REF ||
+      !CONTROL_PLANE_REALMS.includes(membership.realm as ControlPlaneRealm)
+    ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "PLATFORM_USER_NOT_FOUND",
@@ -638,27 +739,117 @@ export class PlatformAdminService implements OnModuleInit {
         { userId },
       );
     }
-    const oldRole = user.roleCode;
-    user.roleCode = command.roleCode;
-    if (command.status) {
-      user.status = command.status;
+
+    const principal = await this.identityRepository.findPrincipalById(
+      membership.principalId,
+    );
+    if (!principal) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PLATFORM_USER_NOT_FOUND",
+        "Platform admin user principal could not be found.",
+        { userId, principalId: membership.principalId },
+      );
     }
-    user.updatedAt = new Date().toISOString();
+
+    const roleBindings =
+      await this.identityRepository.findRoleBindingsByMembershipId(
+        membership.membershipId,
+      );
+    const currentRoleBinding = this.selectCurrentRoleBinding(roleBindings);
+    if (!currentRoleBinding) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLATFORM_USER_ROLE_BINDING_MISSING",
+        "Platform admin user has no active durable role binding.",
+        { userId, membershipId: membership.membershipId },
+      );
+    }
+
+    const beforeSnapshot = this.createPlatformAdminSnapshot(
+      principal,
+      membership,
+      currentRoleBinding,
+    );
+    const now = new Date().toISOString();
+    const targetMembershipStatus = this.toCanonicalAccountStatus(
+      command.status ?? beforeSnapshot.status,
+    );
+    const controlPlaneMemberships =
+      await this.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const updatedPrincipalStatus = this.resolvePrincipalStatusAfterMutation(
+      principal.status,
+      controlPlaneMemberships,
+      membership.membershipId,
+      targetMembershipStatus,
+    );
+    const updatedPrincipal: CanonicalIdentityPrincipalRecord = {
+      ...principal,
+      status: updatedPrincipalStatus,
+      updatedAt:
+        updatedPrincipalStatus === principal.status ? principal.updatedAt : now,
+    };
+    const updatedMembership: CanonicalIdentityMembershipRecord = {
+      ...membership,
+      status: targetMembershipStatus,
+      updatedAt: now,
+    };
+    const updatedRoleBinding: CanonicalIdentityRoleBindingRecord = {
+      ...currentRoleBinding,
+      roleCode: this.toInternalRoleCode(command.roleCode),
+      grantedByPrincipalId: auditActorId,
+      validFrom:
+        currentRoleBinding.roleCode ===
+        this.toInternalRoleCode(command.roleCode)
+          ? currentRoleBinding.validFrom
+          : now,
+      updatedAt: now,
+    };
+    const persisted = await this.identityRepository.upsertWorkforceIdentity(
+      updatedPrincipal,
+      updatedMembership,
+      [updatedRoleBinding],
+    );
+    const revokedSessionIds = await this.revokePlatformAdminSessions({
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      revokeReason: reason,
+      revokedByPrincipalId: auditActorId,
+      revokeAllMemberships: updatedPrincipalStatus !== "active",
+    });
+    const snapshot = this.createPlatformAdminSnapshot(
+      persisted.principal,
+      persisted.membership,
+      persisted.roleBindings[0]!,
+    );
+    const user = this.toPlatformAdminUserRecord(snapshot);
     this.recordAudit(
       {
-        actorId: null,
+        actorId: auditActorId,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
         actionName: "update_platform_admin_user_role",
         resourceType: "platform_admin_user",
-        resourceId: userId,
-        oldValuesSummary: { roleCode: oldRole },
-        newValuesSummary: { roleCode: command.roleCode },
+        resourceId: user.userId,
+        oldValuesSummary: {
+          ...this.toPlatformAdminUserRecord(beforeSnapshot),
+          principalId: principal.principalId,
+          canonicalStatus: membership.status,
+        },
+        newValuesSummary: {
+          ...user,
+          principalId: persisted.principal.principalId,
+          canonicalStatus: persisted.membership.status,
+          reason,
+          revokedSessionIds,
+        },
       },
       requestId,
     );
-    return { ...user };
+    return user;
   }
 
   // ── Platform Notices ──────────────────────────────────────────────────────
@@ -963,6 +1154,456 @@ export class PlatformAdminService implements OnModuleInit {
         updatedAt: now,
       },
     ];
+  }
+
+  private async bootstrapSeedPlatformAdminUsers() {
+    for (const seedUser of PLATFORM_ADMIN_USERS_SEED) {
+      const normalizedEmail = seedUser.email.trim().toLowerCase();
+      const realm = this.resolveRealmForPlatformAdminRole(seedUser.roleCode);
+      const existingMembership =
+        await this.identityRepository.findMembershipById(
+          this.createStableId(
+            "membership_platform_user",
+            `${normalizedEmail}:${realm}`,
+          ),
+        );
+      if (existingMembership) {
+        continue;
+      }
+      const canonicalStatus =
+        seedUser.status === "active"
+          ? "migration_pending"
+          : this.toCanonicalAccountStatus(seedUser.status);
+      const existingPrincipal =
+        await this.findControlPlanePrincipalByEmail(normalizedEmail);
+      const principal =
+        existingPrincipal ??
+        this.buildPlatformAdminPrincipal({
+          email: normalizedEmail,
+          displayName: seedUser.displayName,
+          status: canonicalStatus,
+          createdAt: seedUser.createdAt,
+          updatedAt: seedUser.updatedAt,
+        });
+      const membership = this.buildPlatformAdminMembership({
+        principalId: principal.principalId,
+        email: normalizedEmail,
+        realm,
+        status: canonicalStatus,
+        invitedByPrincipalId: null,
+        createdAt: seedUser.createdAt,
+        updatedAt: seedUser.updatedAt,
+      });
+      const roleBinding = this.buildPlatformAdminRoleBinding({
+        email: normalizedEmail,
+        realm,
+        membershipId: membership.membershipId,
+        roleCode: seedUser.roleCode,
+        actorPrincipalId: null,
+        createdAt: seedUser.createdAt,
+        updatedAt: seedUser.updatedAt,
+        validFrom: seedUser.createdAt,
+      });
+
+      await this.identityRepository.upsertWorkforceIdentity(
+        principal,
+        membership,
+        [roleBinding],
+      );
+    }
+  }
+
+  private async findControlPlanePrincipalByEmail(email: string) {
+    const principals =
+      await this.identityRepository.findPrincipalsByEmail(email);
+    for (const principal of principals) {
+      const memberships =
+        await this.identityRepository.findMembershipsByPrincipalId(
+          principal.principalId,
+        );
+      if (
+        memberships.some((membership) =>
+          this.isControlPlaneMembership(membership),
+        )
+      ) {
+        return principal;
+      }
+    }
+    return null;
+  }
+
+  private async listPlatformAdminUserSnapshots(): Promise<
+    PlatformAdminUserSnapshot[]
+  > {
+    const memberships = await this.identityRepository.listMembershipsByScope(
+      CONTROL_PLANE_SCOPE_REF,
+      CONTROL_PLANE_REALMS,
+    );
+    const snapshots: PlatformAdminUserSnapshot[] = [];
+
+    for (const membership of memberships) {
+      const principal = await this.identityRepository.findPrincipalById(
+        membership.principalId,
+      );
+      if (!principal) {
+        continue;
+      }
+      const roleBindings =
+        await this.identityRepository.findRoleBindingsByMembershipId(
+          membership.membershipId,
+        );
+      const currentRoleBinding = this.selectCurrentRoleBinding(roleBindings);
+      if (!currentRoleBinding) {
+        continue;
+      }
+      snapshots.push(
+        this.createPlatformAdminSnapshot(
+          principal,
+          membership,
+          currentRoleBinding,
+        ),
+      );
+    }
+
+    return snapshots.sort((left, right) =>
+      this.toPlatformAdminUserRecord(right).updatedAt.localeCompare(
+        this.toPlatformAdminUserRecord(left).updatedAt,
+      ),
+    );
+  }
+
+  private createPlatformAdminSnapshot(
+    principal: CanonicalIdentityPrincipalRecord,
+    membership: CanonicalIdentityMembershipRecord,
+    roleBinding: CanonicalIdentityRoleBindingRecord,
+  ): PlatformAdminUserSnapshot {
+    const roleCode = this.toExternalRoleCode(roleBinding.roleCode);
+    if (!roleCode) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLATFORM_USER_ROLE_UNSUPPORTED",
+        "Platform admin user uses an unsupported durable role binding.",
+        {
+          principalId: principal.principalId,
+          membershipId: membership.membershipId,
+          roleCode: roleBinding.roleCode,
+        },
+      );
+    }
+    const effectiveStatus =
+      principal.status === "active" ? membership.status : principal.status;
+
+    return {
+      principal,
+      membership,
+      roleBinding,
+      roleCode,
+      status: this.toPlatformAdminUserStatus(effectiveStatus),
+    };
+  }
+
+  private toPlatformAdminUserRecord(
+    snapshot: PlatformAdminUserSnapshot,
+  ): PlatformAdminUserRecord {
+    return {
+      userId: snapshot.membership.membershipId,
+      email:
+        snapshot.principal.email?.trim().toLowerCase() ??
+        snapshot.principal.subject,
+      displayName:
+        snapshot.principal.displayName?.trim() ||
+        snapshot.principal.email?.trim().toLowerCase() ||
+        snapshot.principal.subject,
+      roleCode: snapshot.roleCode,
+      status: snapshot.status,
+      createdAt: snapshot.membership.createdAt,
+      updatedAt: this.maxTimestamp(
+        snapshot.principal.updatedAt,
+        snapshot.membership.updatedAt,
+        snapshot.roleBinding.updatedAt,
+      ),
+    };
+  }
+
+  private buildPlatformAdminPrincipal(input: {
+    email: string;
+    displayName: string;
+    status: CanonicalAccountStatus;
+    createdAt: string;
+    updatedAt: string;
+  }): CanonicalIdentityPrincipalRecord {
+    return {
+      principalId: this.createStableId("principal_platform_user", input.email),
+      sourceRef: this.buildPlatformAdminPrincipalSourceRef(input.email),
+      issuer: PLATFORM_ADMIN_PLACEHOLDER_ISSUER,
+      subject: this.buildPlatformAdminPlaceholderSubject(input.email),
+      principalType: "human",
+      email: input.email,
+      emailVerified: false,
+      displayName: input.displayName,
+      status: input.status,
+      createdAt: input.createdAt,
+      updatedAt: input.updatedAt,
+    };
+  }
+
+  private buildPlatformAdminMembership(input: {
+    principalId: string;
+    email: string;
+    realm: ControlPlaneRealm;
+    status: CanonicalAccountStatus;
+    invitedByPrincipalId: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }): CanonicalIdentityMembershipRecord {
+    return {
+      membershipId: this.createStableId(
+        "membership_platform_user",
+        `${input.email}:${input.realm}`,
+      ),
+      sourceRef: this.buildPlatformAdminMembershipSourceRef(
+        input.email,
+        input.realm,
+      ),
+      principalId: input.principalId,
+      realm: input.realm,
+      scopeRef: CONTROL_PLANE_SCOPE_REF,
+      tenantId: null,
+      partnerId: null,
+      status: input.status,
+      invitedByPrincipalId: input.invitedByPrincipalId,
+      invitationId: null,
+      createdAt: input.createdAt,
+      updatedAt: input.updatedAt,
+    };
+  }
+
+  private buildPlatformAdminRoleBinding(input: {
+    email: string;
+    realm: ControlPlaneRealm;
+    membershipId: string;
+    roleCode: PlatformAdminUserRole;
+    actorPrincipalId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    validFrom: string;
+  }): CanonicalIdentityRoleBindingRecord {
+    return {
+      roleBindingId: this.createStableId(
+        "role_binding_platform_user",
+        `${input.email}:${input.realm}`,
+      ),
+      sourceRef: this.buildPlatformAdminRoleBindingSourceRef(
+        input.email,
+        input.realm,
+      ),
+      membershipId: input.membershipId,
+      roleCode: this.toInternalRoleCode(input.roleCode),
+      grantedByPrincipalId: input.actorPrincipalId,
+      approvalId: null,
+      validFrom: input.validFrom,
+      validTo: null,
+      createdAt: input.createdAt,
+      updatedAt: input.updatedAt,
+    };
+  }
+
+  private resolveRealmForPlatformAdminRole(
+    roleCode: PlatformAdminUserRole | InternalPlatformUserRoleCode,
+  ): ControlPlaneRealm {
+    return roleCode === "operator" || roleCode === "ops_user"
+      ? "ops"
+      : "platform";
+  }
+
+  private toInternalRoleCode(
+    roleCode: PlatformAdminUserRole,
+  ): InternalPlatformUserRoleCode {
+    return roleCode;
+  }
+
+  private toExternalRoleCode(roleCode: string): PlatformAdminUserRole | null {
+    switch (roleCode) {
+      case "superadmin":
+      case "admin":
+      case "operator":
+      case "viewer":
+        return roleCode;
+      case "platform_admin":
+        return "admin";
+      case "ops_user":
+        return "operator";
+      default:
+        return null;
+    }
+  }
+
+  private toCanonicalAccountStatus(
+    status: PlatformAdminUserStatus,
+  ): CanonicalAccountStatus {
+    switch (status) {
+      case "active":
+        return "active";
+      case "suspended":
+        return "suspended";
+      case "invited":
+      default:
+        return "invited";
+    }
+  }
+
+  private toPlatformAdminUserStatus(
+    status: CanonicalAccountStatus,
+  ): PlatformAdminUserStatus {
+    switch (status) {
+      case "active":
+        return "active";
+      case "suspended":
+        return "suspended";
+      case "invited":
+      case "migration_pending":
+      default:
+        return "invited";
+    }
+  }
+
+  private selectCurrentRoleBinding(
+    roleBindings: CanonicalIdentityRoleBindingRecord[],
+  ) {
+    const now = Date.now();
+    return roleBindings
+      .filter((binding) => {
+        const validFromMs = Date.parse(binding.validFrom);
+        const validToMs = binding.validTo ? Date.parse(binding.validTo) : null;
+        if (!Number.isNaN(validFromMs) && validFromMs > now) {
+          return false;
+        }
+        if (
+          validToMs !== null &&
+          !Number.isNaN(validToMs) &&
+          validToMs <= now
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  }
+
+  private resolvePrincipalStatusAfterMutation(
+    currentStatus: CanonicalAccountStatus,
+    memberships: CanonicalIdentityMembershipRecord[],
+    membershipId: string,
+    nextMembershipStatus: CanonicalAccountStatus,
+  ): CanonicalAccountStatus {
+    const statuses = memberships
+      .filter((membership) => this.isControlPlaneMembership(membership))
+      .map((membership) =>
+        membership.membershipId === membershipId
+          ? nextMembershipStatus
+          : membership.status,
+      );
+
+    if (statuses.includes("active")) {
+      return "active";
+    }
+    if (statuses.includes("invited")) {
+      return "invited";
+    }
+    if (statuses.includes("migration_pending")) {
+      return "migration_pending";
+    }
+    if (statuses.includes("suspended")) {
+      return "suspended";
+    }
+    return currentStatus;
+  }
+
+  private async revokePlatformAdminSessions(input: {
+    principalId: string;
+    membershipId: string;
+    revokeReason: string;
+    revokedByPrincipalId: string;
+    revokeAllMemberships: boolean;
+  }) {
+    const sessions = await this.identityRepository.listSessionsByPrincipal(
+      input.principalId,
+    );
+    const revokedSessionIds: string[] = [];
+    for (const session of sessions) {
+      if (session.status !== "active") {
+        continue;
+      }
+      if (
+        !input.revokeAllMemberships &&
+        session.membershipId !== input.membershipId
+      ) {
+        continue;
+      }
+      const revoked = await this.identityRepository.revokeSession(
+        session.sessionId,
+        input.revokeReason,
+        input.revokedByPrincipalId,
+      );
+      if (revoked) {
+        revokedSessionIds.push(revoked.sessionId);
+      }
+    }
+    return revokedSessionIds;
+  }
+
+  private isControlPlaneMembership(
+    membership: CanonicalIdentityMembershipRecord,
+  ) {
+    return (
+      membership.scopeRef === CONTROL_PLANE_SCOPE_REF &&
+      CONTROL_PLANE_REALMS.includes(membership.realm as ControlPlaneRealm)
+    );
+  }
+
+  private buildPlatformAdminPrincipalSourceRef(email: string) {
+    return `platform_admin_user:${email}:principal`;
+  }
+
+  private buildPlatformAdminMembershipSourceRef(
+    email: string,
+    realm: ControlPlaneRealm,
+  ) {
+    return `platform_admin_user:${email}:${realm}:membership`;
+  }
+
+  private buildPlatformAdminRoleBindingSourceRef(
+    email: string,
+    realm: ControlPlaneRealm,
+  ) {
+    return `platform_admin_user:${email}:${realm}:role_binding`;
+  }
+
+  private buildPlatformAdminPlaceholderSubject(email: string) {
+    return `platform_user_email:${email}`;
+  }
+
+  private createStableId(prefix: string, seed: string) {
+    return `${prefix}_${createHash("sha256").update(seed).digest("hex").slice(0, 24)}`;
+  }
+
+  private maxTimestamp(...timestamps: string[]) {
+    return timestamps
+      .filter((timestamp) => timestamp.trim().length > 0)
+      .sort((left, right) => right.localeCompare(left))[0]!;
+  }
+
+  private requireNonBlank(value: string | null | undefined, field: string) {
+    const normalized = value?.trim();
+    if (!normalized) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PLATFORM_ADMIN_INVALID_INPUT",
+        `The ${field} field is required.`,
+        { field },
+      );
+    }
+    return normalized;
   }
 
   private requirePublicInfoVersion(versionId: string) {

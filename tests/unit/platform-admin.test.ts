@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
+import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { PlatformAdminController } from "../../apps/api/src/modules/platform-admin/platform-admin.controller";
 import { PlatformAdminRepository } from "../../apps/api/src/modules/platform-admin/platform-admin.repository";
 import { PlatformAdminService } from "../../apps/api/src/modules/platform-admin/platform-admin.service";
@@ -396,5 +397,308 @@ describe("platform admin service", () => {
     expect(placard?.downloadMetadata?.manifestHash).toBe(
       placard?.artifactManifestHash,
     );
+  });
+
+  it("persists durable platform users across restart and records actor reasons", async () => {
+    const auditService = new AuditNotificationService();
+    const identityRepository = new IdentityRepository();
+    const firstService = new PlatformAdminService(
+      auditService,
+      undefined,
+      identityRepository,
+    );
+
+    await firstService.onModuleInit();
+
+    const created = await firstService.createPlatformAdminUser(
+      {
+        email: "durable-admin@platform.drts",
+        displayName: "Durable Admin",
+        roleCode: "admin",
+        reason: "bootstrap durable platform invite",
+      },
+      "platform-user-create-request",
+      "principal_platform_supervisor",
+    );
+
+    expect(created).toEqual(
+      expect.objectContaining({
+        email: "durable-admin@platform.drts",
+        displayName: "Durable Admin",
+        roleCode: "admin",
+        status: "invited",
+      }),
+    );
+
+    const createAudit = auditService
+      .listAuditLogs()
+      .find(
+        (entry) =>
+          entry.actionName === "create_platform_admin_user" &&
+          entry.resourceId === created.userId,
+      );
+    expect(createAudit).toEqual(
+      expect.objectContaining({
+        actorId: "principal_platform_supervisor",
+      }),
+    );
+    expect(createAudit?.newValuesSummary).toEqual(
+      expect.objectContaining({
+        roleCode: "admin",
+        reason: "bootstrap durable platform invite",
+      }),
+    );
+    const createdMembership = await identityRepository.findMembershipById(
+      created.userId,
+    );
+    expect(createdMembership?.invitedByPrincipalId).toBe(
+      "principal_platform_supervisor",
+    );
+
+    const reloadedService = new PlatformAdminService(
+      new AuditNotificationService(),
+      undefined,
+      identityRepository,
+    );
+    await reloadedService.onModuleInit();
+
+    const reloadedUsers = await reloadedService.listPlatformAdminUsers();
+    expect(reloadedUsers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userId: created.userId,
+          email: "durable-admin@platform.drts",
+          roleCode: "admin",
+          status: "invited",
+        }),
+      ]),
+    );
+  });
+
+  it("revokes only the targeted membership sessions and audits before-after reason", async () => {
+    const auditService = new AuditNotificationService();
+    const identityRepository = new IdentityRepository();
+    const service = new PlatformAdminService(
+      auditService,
+      undefined,
+      identityRepository,
+    );
+
+    await service.onModuleInit();
+
+    const platformUser = await service.createPlatformAdminUser(
+      {
+        email: "shared-operator@platform.drts",
+        displayName: "Shared Operator",
+        roleCode: "admin",
+        reason: "platform realm invite",
+      },
+      "platform-user-create-platform",
+      "principal_platform_supervisor",
+    );
+    const opsUser = await service.createPlatformAdminUser(
+      {
+        email: "shared-operator@platform.drts",
+        displayName: "Shared Operator",
+        roleCode: "operator",
+        reason: "ops realm invite",
+      },
+      "platform-user-create-ops",
+      "principal_platform_supervisor",
+    );
+
+    await service.updatePlatformAdminUserRole(
+      platformUser.userId,
+      {
+        roleCode: "admin",
+        status: "active",
+        reason: "activate platform realm",
+      },
+      "platform-user-activate-platform",
+      "principal_platform_supervisor",
+    );
+    await service.updatePlatformAdminUserRole(
+      opsUser.userId,
+      {
+        roleCode: "operator",
+        status: "active",
+        reason: "activate ops realm",
+      },
+      "platform-user-activate-ops",
+      "principal_platform_supervisor",
+    );
+
+    const [principal] = await identityRepository.findPrincipalsByEmail(
+      "shared-operator@platform.drts",
+    );
+    expect(principal).toBeDefined();
+
+    const platformSession = await identityRepository.createSession({
+      sessionId: "platform_membership_session_001",
+      sourceRef: "platform_membership_session_source_001",
+      principalId: principal!.principalId,
+      membershipId: platformUser.userId,
+      realm: "platform",
+      status: "active",
+      authTime: "2026-08-02T11:00:00.000Z",
+      authMethods: ["verified_iap_workforce"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt: "2026-08-02T19:00:00.000Z",
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: {},
+      riskSummary: {},
+      createdAt: "2026-08-02T11:00:00.000Z",
+      updatedAt: "2026-08-02T11:00:00.000Z",
+    });
+    const opsSession = await identityRepository.createSession({
+      sessionId: "ops_membership_session_001",
+      sourceRef: "ops_membership_session_source_001",
+      principalId: principal!.principalId,
+      membershipId: opsUser.userId,
+      realm: "ops",
+      status: "active",
+      authTime: "2026-08-02T11:05:00.000Z",
+      authMethods: ["verified_iap_workforce"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt: "2026-08-02T19:05:00.000Z",
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: {},
+      riskSummary: {},
+      createdAt: "2026-08-02T11:05:00.000Z",
+      updatedAt: "2026-08-02T11:05:00.000Z",
+    });
+
+    const updated = await service.updatePlatformAdminUserRole(
+      platformUser.userId,
+      {
+        roleCode: "superadmin",
+        status: "suspended",
+        reason: "offboarding shared platform access",
+      },
+      "platform-user-suspend-platform",
+      "principal_platform_supervisor",
+    );
+
+    expect(updated).toEqual(
+      expect.objectContaining({
+        userId: platformUser.userId,
+        roleCode: "superadmin",
+        status: "suspended",
+      }),
+    );
+
+    const revokedPlatformSession = await identityRepository.getSession(
+      platformSession.sessionId,
+    );
+    const survivingOpsSession = await identityRepository.getSession(
+      opsSession.sessionId,
+    );
+    expect(revokedPlatformSession?.status).toBe("revoked");
+    expect(revokedPlatformSession?.revokeReason).toBe(
+      "offboarding shared platform access",
+    );
+    expect(survivingOpsSession?.status).toBe("active");
+
+    const updateAudit = auditService
+      .listAuditLogs()
+      .find(
+        (entry) =>
+          entry.actionName === "update_platform_admin_user_role" &&
+          entry.resourceId === platformUser.userId,
+      );
+    expect(updateAudit?.oldValuesSummary).toEqual(
+      expect.objectContaining({
+        roleCode: "admin",
+        status: "active",
+      }),
+    );
+    expect(updateAudit?.newValuesSummary).toEqual(
+      expect.objectContaining({
+        roleCode: "superadmin",
+        status: "suspended",
+        reason: "offboarding shared platform access",
+        revokedSessionIds: [platformSession.sessionId],
+      }),
+    );
+  });
+
+  it("backfills missing seed memberships without skipping durable partial migrations", async () => {
+    const identityRepository = new IdentityRepository();
+    const existingNow = "2026-08-02T11:15:00.000Z";
+    await identityRepository.upsertWorkforceIdentity(
+      {
+        principalId: "principal_existing_seed_ops",
+        sourceRef: "iap_subject:seed_ops_existing",
+        issuer: "google_iap",
+        subject: "seed_ops_existing",
+        principalType: "human",
+        email: "ops@platform.drts",
+        emailVerified: true,
+        displayName: "Ops Operator",
+        status: "active",
+        createdAt: "2026-02-01T00:00:00.000Z",
+        updatedAt: existingNow,
+      },
+      {
+        membershipId: "membership_platform_user_7958fb382ce1a114494dbb92",
+        sourceRef: "platform_admin_user:ops@platform.drts:ops:membership",
+        principalId: "principal_existing_seed_ops",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: "2026-02-01T00:00:00.000Z",
+        updatedAt: existingNow,
+      },
+      [
+        {
+          roleBindingId: "role_binding_platform_user_7958fb382ce1a114494dbb92",
+          sourceRef: "platform_admin_user:ops@platform.drts:ops:role_binding",
+          membershipId: "membership_platform_user_7958fb382ce1a114494dbb92",
+          roleCode: "ops_user",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: "2026-02-01T00:00:00.000Z",
+          validTo: null,
+          createdAt: "2026-02-01T00:00:00.000Z",
+          updatedAt: existingNow,
+        },
+      ],
+    );
+
+    const service = new PlatformAdminService(
+      new AuditNotificationService(),
+      undefined,
+      identityRepository,
+    );
+    await service.onModuleInit();
+
+    const users = await service.listPlatformAdminUsers();
+    expect(users).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          email: "admin@platform.drts",
+          roleCode: "superadmin",
+          status: "invited",
+        }),
+        expect.objectContaining({
+          email: "ops@platform.drts",
+          roleCode: "operator",
+          status: "active",
+        }),
+      ]),
+    );
+    expect(
+      users.filter((user) => user.email === "ops@platform.drts"),
+    ).toHaveLength(1);
   });
 });
