@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -108,7 +109,7 @@ export async function GET(
     }
 
     const session = data.data;
-    const csrfToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const csrfToken = randomBytes(32).toString("base64url");
     const targetRedirect = returnUrl.startsWith("/") ? returnUrl : "/";
     const response = NextResponse.redirect(new URL(targetRedirect, request.nextUrl.origin));
 

@@ -612,58 +612,6 @@ export class OidcPkceService {
       );
     }
 
-    // Bound subject status validation (active partner human membership check)
-    if (claims.sub.includes("invited") || claims.email?.includes("invited")) {
-      this.recordSecurityEvent({
-        eventType: "partner_oidc_session.denied",
-        outcome: "denied",
-        realm: "partner",
-        partnerId: matchedEntry.entrySlug,
-        subjectId: claims.sub,
-        reasonCode: "IAM_MEMBERSHIP_NOT_ACTIVE",
-        meta,
-      });
-      throw new ApiRequestError(
-        403,
-        "IAM_MEMBERSHIP_NOT_ACTIVE",
-        `Partner user membership for subject '${claims.sub}' is not active.`,
-      );
-    }
-
-    if (claims.sub.includes("suspended") || claims.email?.includes("suspended")) {
-      this.recordSecurityEvent({
-        eventType: "partner_oidc_session.denied",
-        outcome: "denied",
-        realm: "partner",
-        partnerId: matchedEntry.entrySlug,
-        subjectId: claims.sub,
-        reasonCode: "IAM_MEMBERSHIP_NOT_ACTIVE",
-        meta,
-      });
-      throw new ApiRequestError(
-        403,
-        "IAM_MEMBERSHIP_NOT_ACTIVE",
-        `Partner user membership for subject '${claims.sub}' is suspended.`,
-      );
-    }
-
-    if (claims.sub.includes("unknown") || claims.email?.includes("nonexistent")) {
-      this.recordSecurityEvent({
-        eventType: "partner_oidc_session.denied",
-        outcome: "denied",
-        realm: "partner",
-        partnerId: matchedEntry.entrySlug,
-        subjectId: claims.sub,
-        reasonCode: "USER_NOT_FOUND",
-        meta,
-      });
-      throw new ApiRequestError(
-        403,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        `Subject '${claims.sub}' does not correspond to a registered partner user.`,
-      );
-    }
-
     // Require pre-existing active partner-human identity link (deny unbound subjects)
     const linkRecord = await this.partnerUserIdentityLinkRepo.find(
       matchedEntry.entrySlug,
