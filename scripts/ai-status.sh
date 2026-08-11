@@ -9,7 +9,7 @@ else
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
-CANONICAL_SCRIPT="$ROOT_DIR/scripts/ai_status.py"
+CANONICAL_SCRIPT="${AI_STATUS_RUNTIME_SCRIPT:-$ROOT_DIR/scripts/ai_status.py}"
 if [[ ! -f "$CANONICAL_SCRIPT" ]]; then
   echo "Error: Canonical status script not found at $CANONICAL_SCRIPT" >&2
   exit 1
