@@ -130,7 +130,7 @@ class ApprovalQueuePruneTests(unittest.TestCase):
                         "run_id": "claude-resume",
                         "task_id": "LP-004",
                         "provider": "claude",
-                        "status": "waiting_approval",
+                        "status": "running",
                         "pid": 999999,
                         "session_id": "sess-123",
                     }

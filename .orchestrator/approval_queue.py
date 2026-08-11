@@ -93,11 +93,10 @@ def _orphaned_worker_note(item: dict[str, Any], workers: dict[str, Any]) -> str 
         return "Auto-pruned orphaned approval after its worker state disappeared."
     if (
         worker.get("provider") == "claude"
-        and worker.get("status") in {"waiting_approval", "suspended_approval"}
         and (worker.get("session_id") or worker.get("resume_token"))
     ):
-        # Claude can resume from session state after approval even if the original
-        # worker process exited, so keep the approval entry live.
+        # Permission hooks can persist the approval before the supervisor observes
+        # the print process exit. Session state is sufficient for a later resume.
         return None
     if not _pid_is_alive(worker.get("pid")):
         return "Auto-pruned approval because the worker exited before approval could be applied."
