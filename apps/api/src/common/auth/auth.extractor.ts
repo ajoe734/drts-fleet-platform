@@ -193,7 +193,7 @@ export function extractBootstrapRequestIdentity(
     requestId: normalizeHeaderValue(headers["x-request-id"]) || null,
     authTime:
       normalizeHeaderValue(headers["x-auth-time"]) ||
-      (isStrictAuthEnvironment() ? undefined : new Date().toISOString()),
+      (isStrictAuthEnvironment() ? null : new Date().toISOString()),
     amr:
       splitDelimitedList(headers["x-amr"]).length > 0
         ? splitDelimitedList(headers["x-amr"])
@@ -203,9 +203,9 @@ export function extractBootstrapRequestIdentity(
     sessionId:
       normalizeHeaderValue(headers["x-session-id"]) ||
       (isStrictAuthEnvironment()
-        ? undefined
+        ? null
         : actorTypeHeader
           ? `bootstrap:${normalizeHeaderValue(headers["x-actor-id"]) || "anon"}`
-          : undefined),
+          : null),
   };
 }

@@ -331,8 +331,8 @@ http_call() {
     curl_args+=(-H "x-drts-authorization: Bearer ${E2E_REQUEST_BEARER_TOKEN}")
   fi
 
-  if [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
-    if runtime_step_up_enabled && [[ -z "$application_bearer" ]]; then
+  if runtime_step_up_enabled && [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
+    if [[ -z "$application_bearer" ]]; then
       application_bearer=$(mint_runtime_bearer_token || true)
     fi
     step_up_reference=$(resolve_step_up_reference "$application_bearer" "$method" "$path" || true)
