@@ -547,6 +547,7 @@ def run_ai_status(
     reconciler: bool = False,
 ) -> None:
     env = os.environ.copy()
+    env["AI_STATUS_RUNTIME_POLICY"] = "1"
     if actor:
         env["AI_NAME"] = actor
     if integration_env:

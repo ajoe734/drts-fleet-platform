@@ -37,6 +37,7 @@ def ensure_canonical_delegation(argv: list[str] | None = None) -> None:
         ROOT != _LOCAL_ROOT
         and not os.environ.get("_AI_STATUS_DELEGATED")
         and os.environ.get("AI_STATUS_LOCAL_EXECUTION") != "github_bus"
+        and os.environ.get("AI_STATUS_RUNTIME_POLICY") != "1"
     ):
         canonical_script = (ROOT / "scripts" / "ai_status.py").resolve()
         if canonical_script.exists() and canonical_script != Path(__file__).resolve():

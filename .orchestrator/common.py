@@ -453,6 +453,10 @@ def apply_orchestrator_runtime_env(
         {
             "ORCH_STATUS_ROOT": str(canonical_root),
             "AI_STATUS_ROOT": str(canonical_root),
+            # The canonical shell wrapper remains the stable worker entrypoint,
+            # but its implementation must match the running supervisor bundle.
+            "AI_STATUS_RUNTIME_SCRIPT": str((ROOT / "scripts" / "ai_status.py").resolve()),
+            "AI_STATUS_RUNTIME_POLICY": "1",
             "ORCH_CANONICAL_ROOT": str(canonical_root),
             "ORCH_WORKSPACE_ROOT": str(workspace_root),
         }
