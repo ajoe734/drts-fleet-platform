@@ -21,6 +21,7 @@ from common import (
     command_exists,
     run_command,
     runtime_env_overrides,
+    runtime_claude_mcp_config_path,
 )
 
 
@@ -166,7 +167,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
         mcp_config = runtime.get("mcp_config")
         if mcp_config:
-            command.extend(["--mcp-config", str(config_path(self.config, "claude_mcp_config"))])
+            command.extend(["--mcp-config", str(runtime_claude_mcp_config_path(self.config))])
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)

@@ -107,6 +107,7 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git show(\s|$)"),
     re.compile(r"^git log(\s|$)"),
     re.compile(r"^git branch(\s|$)"),
+    re.compile(r"^git merge-base(\s|$)"),
     # Read-only git queries. Kept separate from the mutating subcommands
     # below so the read set can grow without widening write access.
     re.compile(r"^git worktree list(\s|$)"),

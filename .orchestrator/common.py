@@ -71,6 +71,32 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     tmp_path.replace(path)
 
 
+def runtime_claude_mcp_config_path(config: dict[str, Any]) -> Path:
+    """Write the Claude broker config from the running supervisor bundle.
+
+    The canonical checkout owns mutable state, while this runtime bundle owns
+    executable policy.  Keeping the broker pointed at the bundle prevents a
+    dirty or older canonical checkout from silently changing worker policy.
+    """
+    state_root = config_path(config, "state_file").parent
+    path = state_root / "generated" / "claude-approval-broker.runtime.json"
+    payload = {
+        "mcpServers": {
+            "orchestrator_approval_broker": {
+                "command": "python3",
+                "args": [
+                    str((ORCHESTRATOR_DIR / "claude_permission_prompt_mcp.py").resolve()),
+                    "--config",
+                    str((state_root / "config.json").resolve()),
+                ],
+                "env": {"PYTHONUNBUFFERED": "1"},
+            }
+        }
+    }
+    atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    return path
+
+
 def _jsonl_lock_path(path: Path) -> Path:
     return path.with_name(f".{path.name}.lock")
 

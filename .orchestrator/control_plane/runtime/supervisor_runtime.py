@@ -118,6 +118,7 @@ from common import (
     normalize_agent_id,
     relpath,
     runtime_env_overrides,
+    runtime_claude_mcp_config_path,
     selected_shared_files,
     shell_quote,
     snapshot_task,
@@ -5674,7 +5675,7 @@ def resume_claude_worker(
         command.extend(["--permission-mode", runtime.get("permission_mode", "acceptEdits")])
     mcp_config = runtime.get("mcp_config")
     if mcp_config:
-        command.extend(["--mcp-config", str(config_path(config, "claude_mcp_config"))])
+        command.extend(["--mcp-config", str(runtime_claude_mcp_config_path(config))])
     log_path = config_path(config, "state_file").parent / "logs" / f"{new_runtime_id(f'{provider_key}-resume')}.log"
     env = os.environ.copy()
     runtime_overrides = runtime_env_overrides(runtime)

@@ -222,6 +222,18 @@ class PipeIntoInterpreterTests(unittest.TestCase):
         ):
             self.assert_allowed(command)
 
+    def test_read_only_git_evidence_bundle_passes_without_chair_review(self) -> None:
+        command = (
+            'git merge-base --is-ancestor 523dedc3c HEAD && echo "ancestor=yes" || echo "ancestor=no"\n'
+            'git log --oneline c95a9d1c7^..HEAD -- docs/05-ui/drts-design-canvas\n'
+            'echo ---\n'
+            'git branch --contains 523dedc3c | head'
+        )
+        self.assert_allowed(command)
+
+    def test_destructive_git_commands_remain_denied(self) -> None:
+        self.assertEqual(permission_broker.classify_command("git reset --hard"), "deny")
+
     def test_a_program_given_on_the_command_line_stays_visible(self) -> None:
         # `-c` and a script path both put the program somewhere inspectable, so
         # the pipe only carries data and the command keeps its old verdict.
