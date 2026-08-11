@@ -7,13 +7,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IdentityContext, OwnedOrderRecord } from "@drts/contracts";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { getTenantRoleScopes } from "../../src/common/auth/auth.constants";
+import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
+import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import { BankCardInlineEligibilityAdapter } from "../../src/modules/tenant-partner/bank-card-inline-eligibility.adapter";
 import {
   PartnerEligibilityAdapterError,
   type PartnerEligibilityAdapterInterface,
 } from "../../src/modules/tenant-partner/partner-eligibility-adapter.interface";
+import { TenantInvitationDeliveryService } from "../../src/modules/tenant-partner/tenant-invitation-delivery.service";
 import type {
   PersistTenantPartnerChanges,
   StoredPartnerIngressCredentialRecord,
@@ -4669,6 +4673,320 @@ describe("TenantPartnerService approval rules", () => {
         "2026-05-13T10:00:00.000Z",
       ).usage.pendingReservedBookingCount,
     ).toBe(1);
+  });
+
+  it("stores tenant invitation proofs hash-only, rotates them on resend, and rejects revoked or expired proofs", async () => {
+    const identityRepository = new IdentityRepository();
+    const invitationDelivery = new TenantInvitationDeliveryService();
+    const sendSpy = vi.spyOn(invitationDelivery, "send");
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+      invitationDelivery,
+    );
+    const tenantAdminIdentity: IdentityContext = {
+      authMode: "bootstrap_headers",
+      actorType: "tenant_admin",
+      actorId: "tenant-user-demo-001",
+      realm: "tenant",
+      tenantId: "tenant-demo-001",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:read", "tenant:write"],
+      requestId: "req-tenant-invite-admin-001",
+    };
+
+    const created = await service.createTenantUser(
+      "tenant-demo-001",
+      {
+        email: "new.invitee@example.com",
+        displayName: "New Invitee",
+        roleCode: "tenant_viewer",
+      },
+      "req-tenant-invite-create-001",
+      tenantAdminIdentity,
+    );
+
+    const firstToken = sendSpy.mock.calls[0]?.[0].rawToken;
+    expect(created.status).toBe("invited");
+    expect(firstToken).toMatch(/^ti_/);
+
+    const [firstInvitation] = identityRepository
+      .listInvitations()
+      .filter((candidate) => candidate.email === "new.invitee@example.com");
+    expect(firstInvitation).toBeDefined();
+    expect(firstInvitation?.tokenHash).toHaveLength(64);
+    expect(firstInvitation?.tokenHash).not.toBe(firstToken);
+    expect(JSON.stringify(firstInvitation)).not.toContain(firstToken ?? "");
+
+    const resent = await service.resendTenantInvitation(
+      "tenant-demo-001",
+      created.userId,
+      "req-tenant-invite-resend-001",
+      tenantAdminIdentity,
+    );
+    const secondToken = sendSpy.mock.calls[1]?.[0].rawToken;
+    expect(resent.revokedAt).toBeNull();
+    expect(secondToken).toMatch(/^ti_/);
+    expect(secondToken).not.toBe(firstToken);
+
+    const invitationHistory = identityRepository
+      .listInvitations()
+      .filter((candidate) => candidate.email === "new.invitee@example.com");
+    expect(invitationHistory).toHaveLength(2);
+    expect(
+      invitationHistory.filter((candidate) => candidate.revokedAt === null),
+    ).toHaveLength(1);
+    expect(
+      invitationHistory.filter((candidate) => candidate.revokedAt !== null),
+    ).toHaveLength(1);
+
+    await expect(
+      service.acceptTenantInvitation(
+        { invitationToken: firstToken ?? "" },
+        "req-tenant-invite-accept-revoked-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        },
+      },
+    });
+
+    const revoked = await service.revokeTenantInvitation(
+      "tenant-demo-001",
+      created.userId,
+      "req-tenant-invite-revoke-001",
+      tenantAdminIdentity,
+    );
+    expect(revoked.revokedAt).toEqual(expect.any(String));
+
+    await expect(
+      service.acceptTenantInvitation(
+        { invitationToken: secondToken ?? "" },
+        "req-tenant-invite-accept-revoked-002",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        },
+      },
+    });
+
+    const reissued = await service.resendTenantInvitation(
+      "tenant-demo-001",
+      created.userId,
+      "req-tenant-invite-resend-002",
+      tenantAdminIdentity,
+    );
+    expect(reissued.revokedAt).toBeNull();
+    const thirdToken = sendSpy.mock.calls[2]?.[0].rawToken;
+    const activeInvitation = identityRepository
+      .listInvitations()
+      .find(
+        (candidate) =>
+          candidate.email === "new.invitee@example.com" &&
+          candidate.revokedAt === null,
+      );
+    expect(activeInvitation).not.toBeNull();
+    if (!activeInvitation) {
+      throw new Error("expected an active invitation");
+    }
+
+    await identityRepository.upsertInvitationRecord({
+      ...activeInvitation,
+      expiresAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await expect(
+      service.acceptTenantInvitation(
+        { invitationToken: thirdToken ?? "" },
+        "req-tenant-invite-accept-expired-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        },
+      },
+    });
+  });
+
+  it("blocks tenant self-escalation and last-admin removal when identity authority is active", async () => {
+    const identityRepository = new IdentityRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+    );
+    const tenantUsers = service.listTenantUsers("tenant-demo-001");
+    const activeAdmin = tenantUsers.find(
+      (candidate) =>
+        candidate.roleCode === "tenant_admin" && candidate.status === "active",
+    );
+    expect(activeAdmin).toBeDefined();
+    if (!activeAdmin) {
+      throw new Error("expected a seeded active tenant admin");
+    }
+
+    try {
+      service.updateTenantUserRole(
+        "tenant-demo-001",
+        activeAdmin.userId,
+        {
+          roleCode: "tenant_viewer",
+        },
+        "req-tenant-self-role-001",
+        {
+          authMode: "bootstrap_headers",
+          actorType: "tenant_admin",
+          actorId: activeAdmin.userId,
+          realm: "tenant",
+          tenantId: "tenant-demo-001",
+          roleFamilies: ["tenant"],
+          roles: ["tenant_admin"],
+          scopes: ["tenant:read", "tenant:write"],
+          requestId: "req-tenant-self-role-001",
+        },
+      );
+      expect.unreachable("expected tenant self-escalation guard to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "TENANT_SELF_ROLE_CHANGE_DENIED",
+        },
+      });
+    }
+
+    try {
+      service.updateTenantUserRole(
+        "tenant-demo-001",
+        activeAdmin.userId,
+        {
+          roleCode: "tenant_viewer",
+        },
+        "req-tenant-last-admin-001",
+        {
+          authMode: "bootstrap_headers",
+          actorType: "tenant_admin",
+          actorId: "tenant-admin-operator-002",
+          realm: "tenant",
+          tenantId: "tenant-demo-001",
+          roleFamilies: ["tenant"],
+          roles: ["tenant_admin"],
+          scopes: ["tenant:read", "tenant:write"],
+          requestId: "req-tenant-last-admin-001",
+        },
+      );
+      expect.unreachable("expected last-admin guard to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "TENANT_LAST_ADMIN_REQUIRED",
+        },
+      });
+    }
+  });
+
+  it("revokes tenant access sessions immediately when account status changes", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const identityRepository = new IdentityRepository();
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+    );
+    const jwtAuthService = new JwtAuthService(identityRepository, service);
+    const activeUser = service.listTenantUsers("tenant-demo-001").find(
+      (candidate) =>
+        candidate.status === "active" && candidate.roleCode !== "tenant_admin",
+    );
+    expect(activeUser).toBeDefined();
+    if (!activeUser) {
+      throw new Error("expected a seeded active tenant user");
+    }
+
+    const snapshot = await identityRepository.syncLegacyTenantUserRole(activeUser);
+    const scopes = getTenantRoleScopes(activeUser.roleCode);
+    expect(scopes).toBeDefined();
+    if (!scopes) {
+      throw new Error("expected tenant scopes");
+    }
+
+    const issued = await jwtAuthService.issueSessionToken({
+      authMode: "jwt_bearer",
+      actorType: "tenant_admin",
+      actorId: activeUser.userId,
+      principalId: snapshot.principal.principalId,
+      membershipId: snapshot.membership.membershipId,
+      subject: activeUser.userId,
+      realm: "tenant",
+      tenantId: activeUser.tenantId,
+      roleFamilies: ["tenant"],
+      roles: [activeUser.roleCode],
+      scopes,
+      tokenVersion: Date.parse(activeUser.updatedAt),
+      requestId: "req-tenant-session-issue-001",
+    });
+
+    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.not.toBeNull();
+
+    const updated = await service.updateTenantUserRole(
+      activeUser.tenantId,
+      activeUser.userId,
+      {
+        roleCode: activeUser.roleCode,
+        status: "suspended",
+      },
+      "req-tenant-session-suspend-001",
+      {
+        authMode: "bootstrap_headers",
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-operator-003",
+        realm: "tenant",
+        tenantId: activeUser.tenantId,
+        roleFamilies: ["tenant"],
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read", "tenant:write"],
+        requestId: "req-tenant-session-suspend-001",
+      },
+    );
+
+    expect(updated.status).toBe("suspended");
+    const revokedSession = await identityRepository.getSession(issued.sessionId);
+    expect(revokedSession).toMatchObject({
+      status: "revoked",
+      revokeReason: "TENANT_ACCOUNT_STATUS_CHANGED",
+    });
+    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.toBeNull();
   });
 
   it("ships a tenant governance dashboard with the required panels and metric bindings", () => {
