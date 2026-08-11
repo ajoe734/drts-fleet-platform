@@ -568,6 +568,24 @@ class IntegrationGateUnitTest(unittest.TestCase):
 
 
 class ProgressIntegrationMetadataTest(unittest.TestCase):
+    def test_premerge_repair_is_owner_only_and_metadata_scoped(self) -> None:
+        task = {
+            "id": "TASK-PR-REPAIR-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "blocked",
+            "integration_status": "ci_failed",
+            "ci_status": "failure",
+            "pr_url": "https://github.com/example/repo/pull/42",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_premerge_repair(state, [task["id"], "Repair commit trailer only."])
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["premerge_repair"]["scope"], "metadata_only")
+
     def test_progress_records_explicit_integration_metadata_without_completing_task(self) -> None:
         task = {"id": "TASK-PR-001", "owner": "Codex", "reviewer": "Claude", "status": "in_progress"}
         state = {"tasks": [task], "blockers": [], "handoffs": []}

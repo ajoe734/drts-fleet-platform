@@ -296,13 +296,36 @@ def resolve_dispatch_target(
     if record.status in policy.review_statuses and record.reviewer:
         return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)
     if record.status in policy.finalize_statuses and record.owner:
-        return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_FINALIZE)
-    if not dependencies_satisfied(
+        if dependencies_satisfied(
+            record,
+            tasks_by_id,
+            policy.dependency_done_statuses,
+            integration_evidence,
+        ) and not has_external_integration_in_flight(
+            record, max_age_seconds=policy.integration_in_flight_max_age_seconds
+        ):
+            return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_FINALIZE)
+        return None
+    dependencies_ready = dependencies_satisfied(
         record,
         tasks_by_id,
         policy.dependency_done_statuses,
         integration_evidence,
-    ):
+    )
+    if not dependencies_ready:
+        # A task may repair a known pre-merge metadata failure while its feature
+        # dependencies are still integrating. This narrow mode cannot start
+        # new implementation or finalize the PR; it only lets the owner repair
+        # an existing failed PR (for example, an invalid commit trailer).
+        premerge_repair = record.raw.get("premerge_repair")
+        if (
+            isinstance(premerge_repair, Mapping)
+            and premerge_repair.get("scope") == "metadata_only"
+            and record.owner
+            and str(record.raw.get("pr_url") or "").strip()
+            and ci_status_reports_failure(str(record.raw.get("ci_status") or ""))
+        ):
+            return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
         return None
     if record.status in policy.in_progress_statuses and record.owner:
         if has_external_integration_in_flight(

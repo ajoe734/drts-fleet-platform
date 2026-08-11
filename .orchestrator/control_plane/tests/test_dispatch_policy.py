@@ -55,24 +55,55 @@ class DispatchPolicyTests(unittest.TestCase):
 
         self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy))
 
-    def test_review_and_finalize_do_not_wait_on_dependencies(self) -> None:
-        for status, expected_agent, expected_reason in (
-            ("review", "Claude", DispatchReason.REVIEW_READY),
-            ("review_approved", "Codex", DispatchReason.OWNED_FINALIZE),
-        ):
-            task = {
-                "id": "TASK-1",
-                "status": status,
-                "owner": "Codex",
-                "reviewer": "Claude",
-                "depends_on": ["BLOCKED-DEP"],
-            }
-            tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
+    def test_review_does_not_wait_on_dependencies(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "review",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": ["BLOCKED-DEP"],
+        }
+        tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
 
-            decision = resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy)
+        decision = resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy)
 
-            self.assertEqual(decision.target_agent, expected_agent)
-            self.assertEqual(decision.reason, expected_reason)
+        self.assertEqual(decision.target_agent, "Claude")
+        self.assertEqual(decision.reason, DispatchReason.REVIEW_READY)
+
+    def test_finalize_waits_on_dependencies_and_pending_ci(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "review_approved",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": ["BLOCKED-DEP"],
+        }
+        tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
+        self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy))
+
+        task["depends_on"] = []
+        task["pr_url"] = "https://github.com/example/repo/pull/1"
+        task["integration_status"] = "ci_pending"
+        task["ci_status"] = "pending"
+        task["integration_recorded_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy))
+
+    def test_metadata_only_premerge_repair_can_run_before_dependencies(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "blocked",
+            "owner": "Codex",
+            "depends_on": ["BLOCKED-DEP"],
+            "pr_url": "https://github.com/example/repo/pull/1",
+            "ci_status": "failure",
+            "premerge_repair": {"scope": "metadata_only"},
+        }
+        tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
+
+        decision = resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy)
+
+        self.assertEqual(decision.target_agent, "Codex")
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
 
     def test_holds_in_progress_task_while_external_ci_is_pending(self) -> None:
         task = {

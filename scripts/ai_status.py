@@ -2175,6 +2175,33 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "reopen", "task_id": task_id, "message": message})
 
 
+def command_premerge_repair(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: premerge-repair <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("owner") != actor:
+        raise SystemExit(f"Only the owner ({task.get('owner')}) can prepare {task_id} for repair")
+    if not str(task.get("pr_url") or "").strip() or str(task.get("integration_status") or "").lower() != "ci_failed":
+        raise SystemExit(f"{task_id} must have an existing failed PR for pre-merge repair")
+    timestamp = iso_now()
+    task["status"] = "in_progress"
+    task["last_update"] = timestamp
+    task["next"] = message
+    task["premerge_repair"] = {
+        "scope": "metadata_only",
+        "requested_at": timestamp,
+        "message": message,
+    }
+    task.pop("waiting_for", None)
+    mark_blockers_resolved(state, task_id)
+    mark_handoffs_done(state, task_id)
+    append_log({"ts": timestamp, "agent": actor, "type": "premerge_repair", "task_id": task_id, "message": message})
+
+
 def command_archive_completed(state: dict[str, Any], args: list[str]) -> None:
     if not args:
         raise SystemExit("Usage: archive-completed <task-id> [reason]")
@@ -2555,6 +2582,7 @@ def main(argv: list[str]) -> int:
         "progress": command_progress,
         "note": command_note,
         "reopen": command_reopen,
+        "premerge-repair": command_premerge_repair,
         "archive-completed": command_archive_completed,
         "handoff": command_handoff,
         "blocker": command_blocker,
