@@ -155,25 +155,12 @@ def rework_supersedes_integration(record: TaskRecord | Mapping[str, Any]) -> boo
     the reviewer explicitly requested.
     """
     raw = _task(record).raw
-    rework_at = raw.get("rework_required_at")
-    if not rework_at:
-        return False
-    try:
-        rework_time = datetime.fromisoformat(str(rework_at).replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    if rework_time.tzinfo is None:
-        rework_time = rework_time.replace(tzinfo=timezone.utc)
-    integration_at = raw.get("integration_recorded_at")
-    if not integration_at:
-        return True
-    try:
-        integration_time = datetime.fromisoformat(str(integration_at).replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    if integration_time.tzinfo is None:
-        integration_time = integration_time.replace(tzinfo=timezone.utc)
-    return rework_time >= integration_time
+    # This is a lifecycle latch, not a comparison between two observations.
+    # GitHub reconciliation refreshes integration_recorded_at on every poll;
+    # letting that refresh clear a reviewer rejection would strand the task in
+    # ci_pending even though its owner must make the requested repair. The
+    # owner clears the latch by reporting fresh progress or handing off again.
+    return bool(raw.get("rework_required_at"))
 
 
 def has_external_integration_in_flight(

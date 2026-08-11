@@ -105,7 +105,7 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
 
-    def test_reviewer_rework_overrides_fresh_ci_pending_evidence(self) -> None:
+    def test_reviewer_rework_overrides_reconciled_ci_pending_evidence(self) -> None:
         task = {
             "id": "TASK-1",
             "status": "in_progress",
@@ -114,7 +114,9 @@ class DispatchPolicyTests(unittest.TestCase):
             "depends_on": [],
             "integration_status": "ci_pending",
             "ci_status": "pending",
-            "integration_recorded_at": "2026-08-11T10:00:00Z",
+            # A reconciler can observe CI after the reviewer rejected it. That
+            # newer observation must not clear the rework lifecycle latch.
+            "integration_recorded_at": "2026-08-11T10:02:00Z",
             "rework_required_at": "2026-08-11T10:01:00Z",
         }
 
