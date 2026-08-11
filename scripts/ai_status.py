@@ -842,6 +842,21 @@ def atomic_write_text(path: Path, content: str) -> None:
     tmp_path.replace(path)
 
 
+@contextmanager
+def task_board_transaction():
+    lock_path = STATUS_FILE.with_name(f".{STATUS_FILE.name}.control-plane.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def _retention_keeps() -> dict[str, int]:
     """Resolve status-file retention keep counts from orchestrator config.
 
@@ -2195,11 +2210,11 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "reopen", "task_id": task_id, "message": message})
 
 
-def command_observe_integration(state: dict[str, Any], args: list[str]) -> None:
+def command_reconcile_integration(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
-        raise SystemExit("Usage: observe-integration <task-id> <message>")
+        raise SystemExit("Usage: reconcile-integration <task-id> <message>")
     if current_actor() != "Supervisor" or os.environ.get("AI_STATUS_RECONCILER") != "github_bus":
-        raise SystemExit("observe-integration is restricted to the GitHub reconciler")
+        raise SystemExit("reconcile-integration is restricted to the GitHub reconciler")
     task_id, message = args[0], args[1]
     task = get_task(state, task_id)
     if task is None:
@@ -2226,20 +2241,6 @@ def command_observe_integration(state: dict[str, Any], args: list[str]) -> None:
         intent = task.get("work_intent")
         if isinstance(intent, dict) and intent.get("kind") == "integration_repair":
             task.pop("work_intent", None)
-    task["last_update"] = timestamp
-    append_log({"ts": timestamp, "agent": "Supervisor", "type": "integration_observed", "task_id": task_id, "message": message})
-
-
-def command_reduce_integration(state: dict[str, Any], args: list[str]) -> None:
-    if len(args) < 2:
-        raise SystemExit("Usage: reduce-integration <task-id> <message>")
-    if current_actor() != "Supervisor" or os.environ.get("AI_STATUS_RECONCILER") != "github_bus":
-        raise SystemExit("reduce-integration is restricted to the GitHub reconciler")
-    task_id, message = args[0], args[1]
-    task = get_task(state, task_id)
-    if task is None:
-        raise SystemExit(f"Unknown task: {task_id}")
-    timestamp = iso_now()
     integration_status = str(task.get("integration_status") or "").lower()
     task_status = str(task.get("status") or "").lower()
     if integration_status == "merged_to_dev" and task.get("merge_commit"):
@@ -2257,11 +2258,13 @@ def command_reduce_integration(state: dict[str, Any], args: list[str]) -> None:
             "requested_at": timestamp,
             "message": message,
         }
-    else:
-        return
+    elif integration_status == "pr_open" and str(task.get("ci_status") or "").lower() == "success" and task_status == "in_progress":
+        task["status"] = "review"
+        task.pop("waiting_for", None)
+        mark_blockers_resolved(state, task_id)
     task["last_update"] = timestamp
     task["next"] = message
-    append_log({"ts": timestamp, "agent": "Supervisor", "type": "integration_reduced", "task_id": task_id, "message": message})
+    append_log({"ts": timestamp, "agent": "Supervisor", "type": "integration_reconciled", "task_id": task_id, "message": message})
 
 
 def command_handoff(state: dict[str, Any], args: list[str]) -> None:
@@ -2624,18 +2627,19 @@ def command_sync(state: dict[str, Any], _args: list[str]) -> None:
     return None
 
 
-def command_reconcile_from_git(state: dict[str, Any], args: list[str]) -> None:
+def command_reconcile_from_git(state: dict[str, Any], args: list[str]) -> list[dict[str, Any]]:
     ref = args[0].strip() if args else os.environ.get("RECONCILE_REF", "").strip() or "origin/dev"
     reconciled = apply_git_merge_reconciliation(state, ref=ref)
     if not reconciled:
         print(f"reconcile-from-git: no drift found against {ref}")
-        return
+        return []
     print(f"reconcile-from-git: finalized {len(reconciled)} task(s) against {ref}")
     for entry in reconciled:
         print(
             f"  {entry['task_id']}: {entry['prior_status']} -> done "
             f"(commit {entry['sha'][:12]})"
         )
+    return reconciled
 
 
 def command_prompt(state: dict[str, Any], _args: list[str]) -> None:
@@ -2720,8 +2724,7 @@ def command_handlers() -> tuple[dict[str, Any], dict[str, Any]]:
         "progress": command_progress,
         "note": command_note,
         "reopen": command_reopen,
-        "observe-integration": command_observe_integration,
-        "reduce-integration": command_reduce_integration,
+        "reconcile-integration": command_reconcile_integration,
         "handoff": command_handoff,
         "blocker": command_blocker,
         "system-reassign": command_system_reassign,
@@ -2737,26 +2740,28 @@ def command_handlers() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def execute_command(command: str, args: list[str]) -> Any:
-    orchestrator_dir = _LOCAL_ROOT / ".orchestrator"
-    if str(orchestrator_dir) not in sys.path:
-        sys.path.insert(0, str(orchestrator_dir))
-    from control_plane.usecases.task_board_commands import (  # type: ignore
-        TaskBoardCommandExecutor,
-        TaskBoardCommandRuntime,
-    )
-
     read_only_commands, mutation_commands = command_handlers()
-    runtime = TaskBoardCommandRuntime(
-        status_file=STATUS_FILE,
-        load_state=load_state,
-        save_state=save_state,
-        sync_all=sync_all,
-        read_only_commands=read_only_commands,
-        mutation_commands=mutation_commands,
-        prepare_mutation=prepare_task_transitions,
-        commit_mutation=commit_task_transitions,
-    )
-    return TaskBoardCommandExecutor(runtime).execute_with_result(command, args)
+    with task_board_transaction():
+        handler = read_only_commands.get(command)
+        if handler is not None:
+            return handler(load_state(), args)
+
+        handler = mutation_commands.get(command)
+        if handler is None:
+            raise SystemExit(f"Unknown command: {command}")
+
+        state = load_state()
+        state_before = deepcopy(state)
+        result = handler(state, args)
+        prepared: Any = None
+        try:
+            prepared = prepare_task_transitions(state_before, state, command, args)
+            sync_all(state)
+        except Exception:
+            save_state(state_before)
+            raise
+        commit_task_transitions(prepared)
+        return result
 
 
 def main(argv: list[str]) -> int:
@@ -2764,7 +2769,9 @@ def main(argv: list[str]) -> int:
     command = argv[1] if len(argv) > 1 else "sync"
     args = argv[2:]
 
-    execute_command(command, args)
+    result = execute_command(command, args)
+    if os.environ.get("AI_STATUS_PRINT_RESULT") == "1":
+        print(f"AI_STATUS_RESULT={json.dumps(result, ensure_ascii=False)}")
     return 0
 
 

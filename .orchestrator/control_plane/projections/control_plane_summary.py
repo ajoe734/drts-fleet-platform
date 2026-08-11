@@ -5,11 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from common import canonical_artifact_path, load_status, utc_now, write_json
-from control_plane.domain.dispatch_policy import (
-    ReadyDispatchPolicy,
-    dispatch_preview,
-    task_index,
-)
+from control_plane.domain.dispatch_policy import task_index
 from control_plane.infra.approval_repo import load_approval_state
 from control_plane.infra.queue_repo import load_event_queue
 from control_plane.domain.lane_health import worker_capacity_counts
@@ -44,18 +40,6 @@ def build_control_plane_summary(
     provider_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tasks = task_index(status.get("tasks", []))
-    policy = ReadyDispatchPolicy.from_config(config)
-    previews: dict[str, Any] = {}
-    for task_id, task in tasks.items():
-        preview = dispatch_preview(
-            task,
-            tasks,
-            policy,
-            source="control-plane-summary",
-        )
-        if preview is not None:
-            previews[task_id] = preview["decision"]
-
     workers = runtime.get("workers") or {}
     active_workers = [
         {
@@ -235,7 +219,6 @@ def build_control_plane_summary(
         "tasks": {
             "total": len(tasks),
             "by_status": dict(sorted(task_status_counts.items())),
-            "dispatch_previews": previews,
         },
         "runtime": {
             "active_workers": active_workers,

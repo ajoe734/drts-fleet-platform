@@ -49,15 +49,15 @@ def _block_payload(*, log_only: bool = False) -> dict:
     return {
         "offenders": [
             {"path": ".orchestrator/skills/foo.md", "glob": ".orchestrator/skills/**"},
-            {"path": ".orchestrator/supervisor.py", "glob": ".orchestrator/supervisor.py"},
+            {"path": ".orchestrator/control_plane/runtime/supervisor_runtime.py", "glob": ".orchestrator/control_plane/runtime/supervisor_runtime.py"},
         ],
         "dirty_paths": [
             ".orchestrator/skills/foo.md",
-            ".orchestrator/supervisor.py",
+            ".orchestrator/control_plane/runtime/supervisor_runtime.py",
         ],
         "matched_globs": [
             ".orchestrator/skills/**",
-            ".orchestrator/supervisor.py",
+            ".orchestrator/control_plane/runtime/supervisor_runtime.py",
         ],
         "log_only": log_only,
     }

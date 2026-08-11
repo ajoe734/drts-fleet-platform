@@ -270,6 +270,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     # Runtime code may live in an isolated worktree while the operational
     # config belongs to the canonical checkout. Keep relative paths anchored to
     # the latter so a deployment cannot silently write a second state tree.
+    config["_runtime_config_file"] = str(config_file.resolve())
     config["_runtime_config_root"] = str(config_file.parent.parent.resolve())
     return config
 

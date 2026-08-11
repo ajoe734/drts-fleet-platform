@@ -820,7 +820,7 @@ def reconcile_task_integrations(
                 if recovered_commit:
                     env["COMMIT_HASH"] = recovered_commit
                 run_ai_status(
-                    "observe-integration",
+                    "reconcile-integration",
                     task_id,
                     f"Recovered pushed branch evidence from worker result: {recovered_branch}",
                     actor="Supervisor",
@@ -871,13 +871,13 @@ def reconcile_task_integrations(
             # worker-closeout gap left lifecycle status blocked. Re-run that
             # terminal reconciliation once; otherwise identical observations
             # remain idempotent.
-            terminal_status_missing = integration_status == "merged_to_dev" and task.get("status") != "done"
             task_status = str(task.get("status") or "").lower()
             lifecycle_transition_pending = (
-                integration_status == "ci_failed"
-                and task_status in {"review", "review_approved"}
+                (integration_status == "merged_to_dev" and task_status != "done")
+                or (integration_status == "ci_failed" and task_status in {"review", "review_approved"})
+                or (integration_status == "pr_open" and ci_status == "success" and task_status == "in_progress")
             )
-            if same_observation and not terminal_status_missing and not lifecycle_transition_pending:
+            if same_observation and not lifecycle_transition_pending:
                 changed = maybe_request_auto_merge(config, bus_state, task, pr, repo) or changed
                 continue
             env = {
@@ -895,7 +895,7 @@ def reconcile_task_integrations(
                 env["MERGED_REF"] = str(pr.get("baseRefName") or "")
             message = f"Supervisor reconciled PR #{number}: {integration_status}/{ci_status} at {head_sha[:12]}"
             run_ai_status(
-                "observe-integration",
+                "reconcile-integration",
                 task_id,
                 message,
                 actor="Supervisor",
@@ -907,16 +907,12 @@ def reconcile_task_integrations(
                 config,
                 {"type": "github_integration_reconciled", "task_id": task_id, "message": message},
             )
-            if terminal_status_missing or lifecycle_transition_pending:
-                run_ai_status(
-                    "reduce-integration",
-                    task_id,
-                    message,
-                    actor="Supervisor",
-                    status_root=str(config_path(config, "status_file").parent),
-                    reconciler=True,
-                )
-            changed = maybe_request_auto_merge(config, bus_state, task, pr, repo) or changed
+            fresh_status = load_status(config)
+            fresh_task = next(
+                (item for item in fresh_status.get("tasks", []) if item.get("id") == task_id),
+                task,
+            )
+            changed = maybe_request_auto_merge(config, bus_state, fresh_task, pr, repo) or changed
             changed = True
         except (GitHubBusError, ValueError, TypeError) as exc:
             write_activity_log(
@@ -1462,4 +1458,4 @@ def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bo
 
 
 if __name__ == "__main__":
-    raise SystemExit("Use sync_github_bus() from .orchestrator/supervisor.py")
+    raise SystemExit("Use sync_github_bus() from the supervisor runtime")

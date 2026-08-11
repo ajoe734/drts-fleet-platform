@@ -442,7 +442,7 @@ def build_branch_protocol_block(
         f"elif git show-ref --verify --quiet refs/heads/{branch}; then git switch {branch}; "
         f"else git switch -c {branch} origin/{base_branch}; fi\n"
         "  ```\n"
-        "- working tree 不是暫存區。改動觸及 fragile surface（`.orchestrator/supervisor.py`、"
+        "- working tree 不是暫存區。改動觸及 fragile surface（`.orchestrator/control_plane/runtime/supervisor_runtime.py`、"
         "`.orchestrator/control_plane/**`、"
         "`.orchestrator/skills/**`、`.orchestrator/templates/*`、`docs/**`、`.github/workflows/**`、"
         "`.husky/*`、`config*.json`），或跨檔案、預計跨 supervisor cycle、即將 yield 時，"

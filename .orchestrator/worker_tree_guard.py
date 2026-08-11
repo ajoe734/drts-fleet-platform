@@ -1,7 +1,7 @@
 """Tree-guard primitives shared by supervisor dispatch and the chatbox hook.
 
 The guard refuses to proceed when the working tree has uncommitted edits on
-fragile-surface paths (supervisor.py, docs, skills, workflow yml, etc.). It
+fragile-surface paths (supervisor runtime, docs, skills, workflow yml, etc.). It
 was originally added in OPS-GIT-WORKFLOW-006 as a dispatch gate; this module
 extracts the primitives so the Claude Code PreToolUse hook can apply the
 same protection to chatbox-driven edits without importing the supervisor's
@@ -28,7 +28,7 @@ from typing import Any
 THIS_DIR = Path(__file__).resolve().parent
 
 DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS = [
-    ".orchestrator/supervisor.py",
+    ".orchestrator/control_plane/runtime/supervisor_runtime.py",
     ".orchestrator/control_plane/**",
     ".orchestrator/skills/**",
     ".orchestrator/templates/*",

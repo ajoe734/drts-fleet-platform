@@ -5,7 +5,7 @@
 # auto-restarts on crash, gets resource limits, and surfaces in journald.
 #
 # Replaces the legacy launch pattern:
-#   nohup python3 .orchestrator/supervisor.py --config ... &
+#   nohup python3 .orchestrator/control_plane/runtime/supervisor_runtime.py --config ... &
 #
 # which produced PPID=1 orphans with no restart-on-failure and required
 # manual rescue every time the supervisor was OOM-killed or SIGSEGV'd.
@@ -20,7 +20,7 @@
 # - Reloads the systemd --user daemon.
 # - Enables + starts the service. The previous orphan supervisor is NOT
 #   touched here; stop it manually after verifying the systemd service is
-#   healthy: `kill -TERM $(pgrep -f 'supervisor.py')`.
+#   healthy: `kill -TERM $(pgrep -f 'supervisor_runtime.py')`.
 
 set -euo pipefail
 
@@ -77,6 +77,6 @@ echo "Next step:"
 echo "  - Confirm the systemd-managed supervisor is healthy:"
 echo "      journalctl --user -u drts-supervisor -f"
 echo "  - When confident, stop any legacy orphan supervisor:"
-echo "      kill -TERM \$(pgrep -f 'supervisor.py' | grep -v \$(systemctl --user show -p MainPID --value drts-supervisor))"
-echo "  - Add a follow-up sd_notify call inside supervisor.py to make the"
+echo "      kill -TERM \$(pgrep -f 'supervisor_runtime.py' | grep -v \$(systemctl --user show -p MainPID --value drts-supervisor))"
+echo "  - Add a follow-up sd_notify call inside supervisor_runtime.py to make the"
 echo "    WatchdogSec=900s in the unit actually fire on hangs."

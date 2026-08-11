@@ -451,23 +451,3 @@ def build_dispatch_event(
         event["event_id"] = f"evt-{record.id.lower()}-{reason}"
         event["metadata"] = {"source": source, "mode": "execution"}
     return event
-
-
-def dispatch_preview(
-    task: TaskRecord | Mapping[str, Any],
-    tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
-    policy: ReadyDispatchPolicy,
-    *,
-    source: str,
-) -> dict[str, Any] | None:
-    decision = resolve_dispatch_target(task, tasks_by_id, policy)
-    if decision is None:
-        return None
-    return {
-        "decision": {
-            "task_id": decision.task_id,
-            "target_agent": decision.target_agent,
-            "reason": decision.reason.value,
-        },
-        "queue_event": build_dispatch_event(task, decision, tasks_by_id, source=source),
-    }

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import time
 import base64
 from pathlib import Path
@@ -499,9 +500,12 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _verified_claude_hooks() -> dict[str, Any]:
+def _verified_claude_hooks(config: dict[str, Any]) -> dict[str, Any]:
     broker_path = ROOT / ".orchestrator" / "permission_broker.py"
-    command = f"python3 {broker_path} hook"
+    config_file = str(config.get("_runtime_config_file") or "").strip()
+    if not config_file:
+        raise ValueError("Loaded orchestrator config is missing _runtime_config_file")
+    command = shlex.join(["python3", str(broker_path), "--config", config_file, "hook"])
     hook = lambda event: [{"hooks": [{"type": "command", "command": f"{command} {event}", "shell": "bash"}]}]
     return {
         "PreToolUse": hook("PreToolUse"),
@@ -554,7 +558,7 @@ def desired_claude_local_settings(config: dict[str, Any], current: dict[str, Any
         next_permissions["disableBypassPermissionsMode"] = verified_policy["disableBypassPermissionsMode"]
     hooks = existing.get("hooks", {})
     merged_hooks = {**hooks}
-    for event, hook_entries in _verified_claude_hooks().items():
+    for event, hook_entries in _verified_claude_hooks(config).items():
         existing_entries = [
             entry
             for entry in hooks.get(event, [])

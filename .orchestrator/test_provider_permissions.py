@@ -26,12 +26,17 @@ from provider_permissions import (
 
 
 class ProviderPermissionsTest(unittest.TestCase):
+    config = {
+        "_runtime_config_file": "/canonical/.orchestrator/config.json",
+    }
+
     def test_verified_claude_hooks_use_absolute_broker_path(self) -> None:
         expected = str(Path(ROOT) / ".orchestrator" / "permission_broker.py")
-        hooks = _verified_claude_hooks()
+        hooks = _verified_claude_hooks(self.config)
         for entries in hooks.values():
             command = entries[0]["hooks"][0]["command"]
             self.assertIn(expected, command)
+            self.assertIn("--config /canonical/.orchestrator/config.json", command)
             self.assertTrue(command.startswith("python3 /"))
 
     def test_claude_settings_replace_managed_broker_hooks(self) -> None:
@@ -46,7 +51,7 @@ class ProviderPermissionsTest(unittest.TestCase):
         }
 
         settings = desired_claude_local_settings(
-            {}, {"hooks": {"PreToolUse": [third_party, stale]}}
+            self.config, {"hooks": {"PreToolUse": [third_party, stale]}}
         )
 
         entries = settings["hooks"]["PreToolUse"]
@@ -54,7 +59,7 @@ class ProviderPermissionsTest(unittest.TestCase):
         broker_entries = [
             entry for entry in entries if "permission_broker.py" in json.dumps(entry)
         ]
-        self.assertEqual(broker_entries, _verified_claude_hooks()["PreToolUse"])
+        self.assertEqual(broker_entries, _verified_claude_hooks(self.config)["PreToolUse"])
 
     def test_toolsearch_is_auto_allowed(self) -> None:
         evaluation = permission_broker.evaluate_tool_request("ToolSearch", {}, {})
@@ -318,6 +323,7 @@ class ProviderPermissionsTest(unittest.TestCase):
             codex2_home.mkdir()
             (codex2_home / "auth.json").write_text("{}", encoding="utf-8")
             config = {
+                "_runtime_config_file": str(tmp_path / ".orchestrator" / "config.json"),
                 "paths": {
                     "status_file": str(status_file),
                     "activity_log": str(activity_log),

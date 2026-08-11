@@ -33,7 +33,7 @@ RestartSec=10
 MemoryMax=4G
 MemoryHigh=3G
 
-# Watchdog: 1800s (30 min). supervisor.py now calls _sd_notify("WATCHDOG=1")
+# Watchdog: 1800s (30 min). The supervisor runtime calls _sd_notify("WATCHDOG=1")
 # on every run_once tick (OPS-SUPERVISOR-SD-NOTIFY-001), so systemd correctly
 # detects a hung tick loop (no heartbeat for 30 min) and SIGKILL-restarts the
 # supervisor. Healthy supervisors heartbeat well under the deadline, so this

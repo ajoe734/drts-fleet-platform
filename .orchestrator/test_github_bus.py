@@ -83,7 +83,7 @@ class GitHubBusCommandTests(unittest.TestCase):
         self.assertEqual(run_ai_status.call_args.kwargs["integration_env"]["INTEGRATION_STATUS"], "pr_open")
         self.assertEqual(self.bus_state["tasks"]["IAM-UI-DRV-001"]["integration_head_sha"], "abc123456789")
 
-    def test_green_pr_preserves_owner_lifecycle_until_owner_handoff(self) -> None:
+    def test_green_pr_reconciles_owner_lifecycle_to_review(self) -> None:
         status = {"tasks": [{
             "id": "IAM-UI-TEN-001",
             "status": "in_progress",
@@ -116,6 +116,7 @@ class GitHubBusCommandTests(unittest.TestCase):
             )
 
         self.assertTrue(changed)
+        self.assertEqual(run_ai_status.call_args.args[0], "reconcile-integration")
         env = run_ai_status.call_args.kwargs["integration_env"]
         self.assertNotIn("RECONCILER_REVIEW_READY", env)
         self.assertEqual(env["EXECUTION_BRANCH"], "codex/iam-ui-ten-001")

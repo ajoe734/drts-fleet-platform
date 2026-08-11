@@ -14,7 +14,8 @@ import os
 from pathlib import Path
 from unittest import mock
 
-import supervisor
+from control_plane.runtime import supervisor_runtime as supervisor
+import worker_tree_guard
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -4039,7 +4040,7 @@ class SingleSupervisorGuardTests(unittest.TestCase):
 
         self.assertTrue(
             supervisor.supervisor_cmdline_matches_current_script(
-                ["/usr/bin/python3", ".orchestrator/supervisor.py", "--config", "config.json"],
+                ["/usr/bin/python3", ".orchestrator/control_plane/runtime/supervisor_runtime.py", "--config", "config.json"],
                 repo_root,
             )
         )
@@ -4049,7 +4050,7 @@ class SingleSupervisorGuardTests(unittest.TestCase):
 
         self.assertFalse(
             supervisor.supervisor_cmdline_matches_current_script(
-                ["timeout", "15", "/usr/bin/python3", ".orchestrator/supervisor.py", "--verbose"],
+                ["timeout", "15", "/usr/bin/python3", ".orchestrator/control_plane/runtime/supervisor_runtime.py", "--verbose"],
                 repo_root,
             )
         )
@@ -4059,7 +4060,7 @@ class SingleSupervisorGuardTests(unittest.TestCase):
 
         self.assertFalse(
             supervisor.supervisor_cmdline_matches_current_script(
-                ["/bin/bash", "-lc", "python3 .orchestrator/supervisor.py --verbose"],
+                ["/bin/bash", "-lc", "python3 .orchestrator/control_plane/runtime/supervisor_runtime.py --verbose"],
                 repo_root,
             )
         )
@@ -7236,12 +7237,12 @@ class ChairmanFlowTests(unittest.TestCase):
 
 class WorkerTreeGuardSettingsTests(unittest.TestCase):
     def test_defaults_off_with_canonical_blocking_globs(self) -> None:
-        settings = supervisor.worker_tree_guard_settings({})
+        settings = worker_tree_guard.worker_tree_guard_settings({})
         self.assertFalse(settings["enabled"])
         self.assertFalse(settings["log_only"])
         # All fragile surfaces from branch-strategy.md §11.1.
         for needed in [
-            ".orchestrator/supervisor.py",
+            ".orchestrator/control_plane/runtime/supervisor_runtime.py",
             ".orchestrator/control_plane/**",
             ".orchestrator/skills/**",
             ".orchestrator/templates/*",
@@ -7262,19 +7263,19 @@ class WorkerTreeGuardSettingsTests(unittest.TestCase):
                 }
             }
         }
-        settings = supervisor.worker_tree_guard_settings(config)
+        settings = worker_tree_guard.worker_tree_guard_settings(config)
         self.assertTrue(settings["enabled"])
         self.assertEqual(settings["blocking_globs"], ["my-special-file.txt"])
 
     def test_empty_globs_list_falls_back_to_defaults(self) -> None:
         config = {"branch_strategy": {"worker_tree_guard": {"blocking_globs": []}}}
-        settings = supervisor.worker_tree_guard_settings(config)
-        self.assertIn(".orchestrator/supervisor.py", settings["blocking_globs"])
+        settings = worker_tree_guard.worker_tree_guard_settings(config)
+        self.assertIn(".orchestrator/control_plane/runtime/supervisor_runtime.py", settings["blocking_globs"])
 
 
 class WorkerTreeGuardMatchingTests(unittest.TestCase):
     GLOBS = [
-        ".orchestrator/supervisor.py",
+        ".orchestrator/control_plane/runtime/supervisor_runtime.py",
         ".orchestrator/skills/**",
         ".orchestrator/templates/*",
         ".orchestrator/config*.json",
@@ -7284,25 +7285,25 @@ class WorkerTreeGuardMatchingTests(unittest.TestCase):
 
     def test_exact_file_matches(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches(".orchestrator/supervisor.py", self.GLOBS),
-            ".orchestrator/supervisor.py",
+            worker_tree_guard._worker_tree_guard_matches(".orchestrator/control_plane/runtime/supervisor_runtime.py", self.GLOBS),
+            ".orchestrator/control_plane/runtime/supervisor_runtime.py",
         )
 
     def test_double_star_matches_direct_child(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches(".orchestrator/skills/task-closeout.md", self.GLOBS),
+            worker_tree_guard._worker_tree_guard_matches(".orchestrator/skills/task-closeout.md", self.GLOBS),
             ".orchestrator/skills/**",
         )
 
     def test_double_star_matches_nested_child(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
+            worker_tree_guard._worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
             "docs/**",
         )
 
     def test_single_star_matches_one_level_only(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches(".orchestrator/templates/wakeup.txt", self.GLOBS),
+            worker_tree_guard._worker_tree_guard_matches(".orchestrator/templates/wakeup.txt", self.GLOBS),
             ".orchestrator/templates/*",
         )
 
@@ -7312,12 +7313,12 @@ class WorkerTreeGuardMatchingTests(unittest.TestCase):
                 # docs-site is outside the docs/** blocking pattern when
                 # treated as a separate top-level directory.
                 self.assertIsNone(
-                    supervisor._worker_tree_guard_matches(path, self.GLOBS)
+                    worker_tree_guard._worker_tree_guard_matches(path, self.GLOBS)
                 )
 
     def test_unrelated_paths_do_not_match(self) -> None:
         self.assertIsNone(
-            supervisor._worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
+            worker_tree_guard._worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
         )
 
 
@@ -7329,7 +7330,7 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
                     "enabled": True,
                     "log_only": log_only,
                     "blocking_globs": [
-                        ".orchestrator/supervisor.py",
+                        ".orchestrator/control_plane/runtime/supervisor_runtime.py",
                         ".orchestrator/skills/**",
                         "docs/**",
                     ],
@@ -7345,23 +7346,23 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         return proc
 
     def test_disabled_returns_none(self) -> None:
-        result = supervisor.check_worker_tree_guard({}, reason="owned_in_progress_dispatch")
+        result = worker_tree_guard.check_worker_tree_guard({}, reason="owned_in_progress_dispatch")
         self.assertIsNone(result)
 
     def test_skip_reason_owned_finalize_dispatch_returns_none(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/supervisor.py"])
+            worker_tree_guard.subprocess, "run", return_value=self._porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"])
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_finalize_dispatch"
             )
         self.assertIsNone(result)
 
     def test_dirty_fragile_surface_returns_block_payload(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/skills/foo.md"])
+            worker_tree_guard.subprocess, "run", return_value=self._porcelain([".orchestrator/skills/foo.md"])
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNotNone(result)
@@ -7371,22 +7372,22 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
 
     def test_dirty_only_runtime_state_returns_none(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess,
+            worker_tree_guard.subprocess,
             "run",
             return_value=self._porcelain(["ai-status.json", "current-work.md"]),
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNone(result)
 
     def test_log_only_mode_carries_flag_through(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess,
+            worker_tree_guard.subprocess,
             "run",
-            return_value=self._porcelain([".orchestrator/supervisor.py"]),
+            return_value=self._porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"]),
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(log_only=True), reason="owned_in_progress_dispatch"
             )
         self.assertIsNotNone(result)
@@ -7397,8 +7398,8 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         proc.returncode = 128
         proc.stdout = ""
         proc.stderr = "fatal: not a git repository"
-        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
-            result = supervisor.check_worker_tree_guard(
+        with mock.patch.object(worker_tree_guard.subprocess, "run", return_value=proc):
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNone(result, "guard must not block on its own diagnostic failure")
@@ -7408,8 +7409,8 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         proc.returncode = 0
         proc.stdout = "R  old/path.md -> .orchestrator/skills/renamed.md"
         proc.stderr = ""
-        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
-            result = supervisor.check_worker_tree_guard(
+        with mock.patch.object(worker_tree_guard.subprocess, "run", return_value=proc):
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNotNone(result)

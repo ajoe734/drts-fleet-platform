@@ -51,10 +51,7 @@ class ControlPlaneSummaryTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["tasks"]["by_status"], {"backlog": 1})
-        self.assertEqual(
-            summary["tasks"]["dispatch_previews"]["TASK-1"]["target_agent"],
-            "Codex",
-        )
+        self.assertNotIn("dispatch_previews", summary["tasks"])
         self.assertEqual(summary["runtime"]["active_worker_count"], 1)
         self.assertNotIn(
             "request_snapshot", summary["runtime"]["active_workers"][0]

@@ -18,13 +18,14 @@ import sys
 import tempfile
 import time
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 THIS_DIR = Path(__file__).resolve().parents[2]
-SUPERVISOR_ENTRYPOINT = THIS_DIR / "supervisor.py"
+SUPERVISOR_ENTRYPOINT = Path(__file__).resolve()
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
@@ -83,7 +84,7 @@ from control_plane.usecases.supervisor_tick import (
     SupervisorTickPorts,
     SupervisorTickRunner,
 )
-from control_plane.usecases.task_board_commands import run_task_board_command
+from worker_tree_guard import check_worker_tree_guard
 from common import (
     AI_GUIDE_PATH,
     ROTATION_FALLBACK_SLOT,
@@ -1139,13 +1140,13 @@ def _supervisor_script_arg_matches(
 def supervisor_cmdline_matches_current_script(parts: list[str], proc_cwd: str) -> bool:
     current_script = str(SUPERVISOR_ENTRYPOINT.resolve())
     current_script_name = SUPERVISOR_ENTRYPOINT.name
-    current_script_rel = ".orchestrator/supervisor.py"
+    current_script_rel = ".orchestrator/control_plane/runtime/supervisor_runtime.py"
     current_repo_root = str(THIS_DIR.parent.resolve())
     if proc_cwd != current_repo_root or not parts:
         return False
 
     # Only match the actual supervisor process, not a parent wrapper such as
-    # `timeout ... python3 .orchestrator/supervisor.py` or a shell/nohup launcher.
+    # `timeout ... python3 <runtime>` or a shell/nohup launcher.
     executable = Path(parts[0]).name
     if _supervisor_script_arg_matches(
         parts[0],
@@ -3556,22 +3557,6 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
-# Tree-guard primitives are defined in worker_tree_guard.py so the chatbox
-# PreToolUse hook (permission_broker.py) can share them without pulling
-# supervisor's heavy import graph. Re-exported here so historical
-# `supervisor.X` references — including the unit-test mock
-# `mock.patch.object(supervisor.subprocess, "run", ...)` — keep working.
-from worker_tree_guard import (  # noqa: E402
-    DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS,
-    WORKER_TREE_GUARD_SKIP_REASONS,
-    _worker_tree_guard_matches,
-    _worker_tree_guard_porcelain,
-    check_chatbox_tree_guard,
-    check_worker_tree_guard,
-    worker_tree_guard_settings,
-)
-
-
 def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("chair_review", {}) or {})
     settings.setdefault("enabled", False)
@@ -4417,18 +4402,58 @@ def execute_task_board_command(
     *,
     environ: dict[str, str] | None = None,
 ):
-    command_env = {
+    status_root = config_path(config, "status_file").parent
+    command_env = os.environ.copy()
+    command_env.update({
         "AI_NAME": "Supervisor",
         "AI_STATUS_PRODUCER": "supervisor_runtime",
+        "AI_STATUS_ROOT": str(status_root),
+        "ORCH_STATUS_ROOT": str(status_root),
+        "AI_STATUS_RUNTIME_POLICY": "1",
+        "AI_STATUS_PRINT_RESULT": "1",
         **(environ or {}),
-    }
-    return run_task_board_command(
-        config,
-        command,
-        args,
-        environ=command_env,
-        command_script=TASK_BOARD_COMMAND_SCRIPT,
+    })
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(TASK_BOARD_COMMAND_SCRIPT), command, *map(str, args)],
+            cwd=str(THIS_DIR.parent),
+            env=command_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return TaskBoardCommandResult(124, stderr=f"Task-board command timed out: {command}")
+    payload: Any = None
+    for line in reversed((completed.stdout or "").splitlines()):
+        if line.startswith("AI_STATUS_RESULT="):
+            try:
+                payload = json.loads(line.removeprefix("AI_STATUS_RESULT="))
+            except json.JSONDecodeError:
+                payload = None
+            break
+    return TaskBoardCommandResult(
+        completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        payload=payload,
     )
+
+
+@dataclass(frozen=True)
+class TaskBoardCommandResult:
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+    payload: Any = None
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+    @property
+    def error(self) -> str:
+        return self.stderr.strip() or self.stdout.strip() or "unknown error"
 
 
 # Module-level registry of in-flight reconcile jobs, keyed by canonical

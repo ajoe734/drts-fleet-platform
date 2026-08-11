@@ -304,6 +304,7 @@ def _matches_workspace_script(path_token: str, relative_path: str) -> bool:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Deterministic permission broker for Claude hooks and local approval broker flows.")
+    parser.add_argument("--config", required=True, help="Canonical orchestrator config path.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     classify = subparsers.add_parser("classify", help="Classify a shell command as allow/defer/deny.")
@@ -1786,7 +1787,7 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
 
 def main() -> int:
     args = parse_args()
-    config = load_config()
+    config = load_config(args.config)
 
     if args.command == "classify":
         print(classify_command(args.shell_command))

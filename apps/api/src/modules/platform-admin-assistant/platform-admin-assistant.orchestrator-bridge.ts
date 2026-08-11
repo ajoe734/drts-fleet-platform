@@ -104,7 +104,7 @@ const DEFAULT_BRANCH_STRATEGY = {
 };
 
 const DEFAULT_TREE_GUARD_GLOBS = [
-  ".orchestrator/supervisor.py",
+  ".orchestrator/control_plane/runtime/supervisor_runtime.py",
   ".orchestrator/skills/**",
   ".orchestrator/templates/*",
   ".orchestrator/config*.json",

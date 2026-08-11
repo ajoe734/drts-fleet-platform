@@ -52,7 +52,7 @@ def main() -> int:
     }
     enqueue_event(config, event)
     if args.dispatch_now:
-        from supervisor import run_once
+        from control_plane.runtime.supervisor_runtime import run_once
 
         run_once(config, watch=False, replay=False)
     print(event)

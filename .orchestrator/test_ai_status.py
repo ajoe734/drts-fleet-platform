@@ -619,14 +619,14 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_observe_integration(state, [task["id"], "Replacement PR is authoritative."])
+            ai_status.command_reconcile_integration(state, [task["id"], "Replacement PR is authoritative."])
 
         self.assertEqual(task["integration_status"], "pr_open")
         self.assertEqual(task["execution_branch"], "codex/replacement")
         self.assertNotIn("merge_commit", task)
         self.assertNotIn("merged_ref", task)
 
-    def test_reconciler_records_green_pr_without_advancing_to_review(self) -> None:
+    def test_reconciler_advances_green_pr_to_review(self) -> None:
         task = {
             "id": "TASK-PR-READY-001",
             "owner": "Codex",
@@ -637,16 +637,15 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         env = {
             "AI_NAME": "Supervisor",
             "AI_STATUS_RECONCILER": "github_bus",
-            "RECONCILER_REVIEW_READY": "1",
             "INTEGRATION_STATUS": "pr_open",
             "PR_URL": "https://github.com/example/repo/pull/42",
             "CI_STATUS": "success",
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_observe_integration(state, [task["id"], "PR checks passed."])
+            ai_status.command_reconcile_integration(state, [task["id"], "PR checks passed."])
 
-        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["status"], "review")
         self.assertNotIn("ci_run_url", task)
 
     def test_observation_replaces_stale_ci_url(self) -> None:
@@ -667,7 +666,7 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_observe_integration(state, [task["id"], "Checks passed."])
+            ai_status.command_reconcile_integration(state, [task["id"], "Checks passed."])
 
         self.assertNotIn("ci_run_url", task)
 
@@ -683,14 +682,13 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         env = {
             "AI_NAME": "Supervisor",
             "AI_STATUS_RECONCILER": "github_bus",
-            "RECONCILER_REVIEW_READY": "1",
             "INTEGRATION_STATUS": "pr_open",
             "PR_URL": "https://github.com/example/repo/pull/43",
             "CI_STATUS": "success",
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_observe_integration(state, [task["id"], "PR checks passed."])
+            ai_status.command_reconcile_integration(state, [task["id"], "PR checks passed."])
 
         self.assertEqual(task["status"], "blocked")
         self.assertEqual(task["waiting_for"], "Missing product contract")
@@ -712,8 +710,7 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_observe_integration(state, [task["id"], "PR checks failed."])
-            ai_status.command_reduce_integration(state, [task["id"], "PR checks failed."])
+            ai_status.command_reconcile_integration(state, [task["id"], "PR checks failed."])
 
         self.assertEqual(task["status"], "in_progress")
 
@@ -737,8 +734,7 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_observe_integration(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
-            ai_status.command_reduce_integration(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
+            ai_status.command_reconcile_integration(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
 
         self.assertEqual(task["status"], "done")
         self.assertEqual(task["integration_status"], "merged_to_dev")
