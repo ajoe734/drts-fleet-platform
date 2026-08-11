@@ -427,6 +427,58 @@ describe("bootstrap auth guard", () => {
     ).resolves.toBeNull();
   });
 
+  it("rejects tenant bearer sessions for invited users until invitation proof is consumed", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const fixture = createAuthFixture();
+    const invitedUser = await fixture.tenantPartnerService.createTenantUser(
+      "tenant-demo-001",
+      {
+        email: "proof.pending@example.com",
+        displayName: "Proof Pending",
+        roleCode: "tenant_viewer",
+      },
+      "req-proof-pending-create-001",
+      {
+        authMode: "bootstrap_headers",
+        actorType: "tenant_admin",
+        actorId: "tenant-user-demo-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roleFamilies: ["tenant"],
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read", "tenant:write"],
+        requestId: "req-proof-pending-create-001",
+      },
+    );
+    const invitedSnapshot =
+      await fixture.identityRepository.syncLegacyTenantUserRole(invitedUser);
+
+    const invitedToken = await issueDurableBearerToken(
+      fixture.jwtAuthService,
+      {
+        authMode: "jwt_bearer",
+        actorType: "tenant_admin",
+        actorId: invitedUser.userId,
+        principalId: invitedSnapshot.principal.principalId,
+        membershipId: invitedSnapshot.membership.membershipId,
+        subject: invitedUser.userId,
+        realm: "tenant",
+        tenantId: invitedUser.tenantId,
+        roleFamilies: ["tenant"],
+        roles: [invitedUser.roleCode],
+        scopes: ["tenant:read"],
+        requestId: "req-proof-pending-token-001",
+      },
+    );
+
+    await expect(
+      fixture.jwtAuthService.verifyAccessToken(invitedToken),
+    ).resolves.toBeNull();
+  });
+
   it("honors OpenRoute metadata for public endpoints", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {
